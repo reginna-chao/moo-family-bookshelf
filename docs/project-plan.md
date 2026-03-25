@@ -459,52 +459,72 @@ jobs:
 
 ## 十、開發路線圖 (Roadmap)
 
-### Phase 1：MVP — 核心功能
+### Phase 0：專案基礎建設 ✅ 已完成
 
-- [ ] 專案架構初始化（Vite + React + TypeScript）
-- [ ] Chrome Extension Manifest v3 設定
-- [ ] Content Script：讀墨書單爬取功能
-- [ ] Content Script：在讀墨頁面注入「家庭書櫃」入口按鈕
-- [ ] Dialog UI：個人書櫃管理（逐本開放/關閉開關）
-- [ ] Dialog UI：家庭開放書櫃瀏覽
-- [ ] Dialog UI：家庭同步碼建立/加入
-- [ ] Cloudflare Workers API 開發（個人開放設定 CRUD、家庭群組管理、家庭書櫃聚合查詢）
-- [ ] Cloudflare KV 資料存取
-- [ ] 基礎 E2EE 加密實作
-- [ ] 儲存變更後才同步機制
-- [ ] 前端測試環境建置（Vitest + React Testing Library）
-- [ ] 後端測試環境建置（Vitest + Miniflare）
-- [ ] Crypto 模組 unit tests
-- [ ] Worker API unit + integration tests
-- [ ] GitHub Actions CI 設定（lint / typecheck / test / build）
+- [x] 專案架構初始化（Vite + React + TypeScript）
+- [x] Chrome Extension Manifest V3 設定
+- [x] Content Script：在讀墨頁面注入「家庭書櫃」入口按鈕 + Dialog 框架
+- [x] Dialog UI：狀態機骨架（引導畫面 → 主畫面分頁切換）
+- [x] E2EE 加密模組（AES-256-GCM encrypt/decrypt + Base62 encoding）
+- [x] 同步碼 encode/decode（含 `@host` 自訂端點支援）
+- [x] API Client（可切換 endpoint）
+- [x] Background Service Worker（chrome.storage messaging）
+- [x] Cloudflare Workers API 骨架（Hono + KV）
+  - [x] 個人開放設定 CRUD（`GET/PUT /api/user/:id/books`）
+  - [x] 家庭群組管理（`POST /api/family`、join、leave、members）
+  - [x] 家庭書櫃聚合查詢（`GET /api/family/:id/bookshelf`）
+- [x] KV schema 定義（`user:`, `family:`, `member:` key patterns）
+- [x] 前端測試環境建置（Vitest + React Testing Library + chrome mock）
+- [x] 後端測試環境建置（Vitest + mock KV）
+- [x] Crypto / Sync Code unit tests（11 tests passing）
+- [x] Worker API unit + integration tests（15 tests passing）
+- [x] GitHub Actions CI 設定（extension-check + worker-check）
+- [x] GitHub Actions CD 設定（Worker deploy、GitHub Pages、Extension release）
+- [x] README.md（繁體中文）+ LICENSE（MIT）+ .gitignore
+- [x] AGENTS.md + CLAUDE.md
+- [x] .claude/rules（4 個）+ .claude/skills（10 個，含完整 frontmatter）
+- [x] GitHub Pages 說明頁面（`site/index.html`）
+- [x] 自建後端部署教學（`worker/DEPLOY.md`）
 
-### Phase 2：安全性強化
+### Phase 1：MVP — 功能完善
 
-- [ ] 完整 E2EE 端對端加密
-- [ ] 家庭解綁/重新綁定流程處理
-- [ ] Rate Limiting（防濫用）
-- [ ] 隱私政策頁面
-- [ ] Dialog 元件測試（React Testing Library）
-- [ ] E2E 測試建置（Playwright + Extension）
-- [ ] Worker CD 設定（merge to main → auto deploy）
+> 前提：需先完成 GitHub repo 建立 + Cloudflare 環境設定
+
+- [ ] Content Script：實際讀墨書單爬取邏輯（解析頁面 DOM 取得書籍資料）
+- [ ] Dialog UI：個人書櫃管理功能完善（從爬取結果載入書單、逐本開關、儲存變更）
+- [ ] Dialog UI：家庭開放書櫃功能完善（從 API 載入聚合書單、按成員分組顯示）
+- [ ] Dialog UI：家庭同步碼建立/加入（串接 API、同步碼顯示/複製/輸入）
+- [ ] Dialog UI：家庭設定頁完善（成員列表、離開家庭、同步碼再次查看）
+- [ ] E2EE 整合：個人書單加密後儲存 / 聚合書單解密後顯示
+- [ ] 儲存變更後才同步機制（dirty state tracking + 明確儲存按鈕）
+- [ ] 新書預設不開放邏輯（合併爬取結果 vs 已儲存設定）
+- [ ] Cloudflare KV namespace 建立 + wrangler.toml 更新
+- [ ] Worker 部署至 Cloudflare（首次 `wrangler deploy`）
+
+### Phase 2：安全性強化與測試補齊
+
+- [ ] 完整 E2EE 端對端加密流程驗證
+- [ ] 家庭解綁/重新綁定流程處理（chrome.storage 清理 + 重新引導）
+- [ ] Rate Limiting 中介層（防濫用）
+- [ ] 隱私政策頁面（靜態頁 or Dialog 內）
+- [ ] Dialog 元件測試補齊（React Testing Library）
+- [ ] E2E 測試建置（Playwright + Chrome Extension 載入）
+- [ ] Crypto 模組完整覆蓋率達 ≥ 90%
 
 ### Phase 3：行動端支援與自訂後端
 
 - [ ] PWA 行動端家庭書櫃查看器
 - [ ] PWA 加入家庭（同步碼輸入）
 - [ ] 響應式 UI 設計
-- [ ] Extension / PWA 設定頁：自訂 API 端點
+- [ ] Extension / PWA 設定頁：自訂 API 端點 UI
 - [ ] 同步碼中編碼 API 端點資訊（自建使用者友善）
-- [ ] 自建 Worker 部署教學文件
-- [ ] PWA CI/CD 設定
-- [ ] Extension release CD（git tag → GitHub Release）
+- [ ] PWA CI/CD 設定（Cloudflare Pages or Vercel）
+- [ ] Extension release CD 驗證（git tag → GitHub Release .zip）
 
 ### Phase 4：開源與社群
 
-- [ ] GitHub 開源
-- [ ] README 撰寫
 - [ ] Contributing Guide
-- [ ] GitHub Pages 說明頁面上線（`site/`）
+- [ ] GitHub Pages 說明頁面上線驗證
 - [ ] Chrome Web Store 上架
 
 ---
