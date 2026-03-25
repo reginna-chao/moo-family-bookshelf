@@ -1,10 +1,16 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ApiClient } from "../api/client";
-import { generateKey, exportKey, importKey } from "../crypto/encrypt";
+import { generateKey, exportKey, importKey, sha256Hex } from "../crypto/encrypt";
 import { encodeSyncCode, decodeSyncCode, SyncCodeError } from "../crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 
-type OnboardingState = "idle" | "creating" | "created" | "joining" | "error";
+type OnboardingState =
+  | "need-email"
+  | "idle"
+  | "creating"
+  | "created"
+  | "joining"
+  | "error";
 
 export interface OnboardingProps {
   onFamilyJoined: (familyId: string, userId: string) => void;
@@ -12,7 +18,8 @@ export interface OnboardingProps {
 }
 
 export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
-  const [state, setState] = useState<OnboardingState>("idle");
+  const [state, setState] = useState<OnboardingState>("need-email");
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [syncCodeInput, setSyncCodeInput] = useState("");
   const [generatedSyncCode, setGeneratedSyncCode] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -20,12 +27,35 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   const [createdUserId, setCreatedUserId] = useState("");
   const [copied, setCopied] = useState(false);
 
+  useEffect(() => {
+    // Check if email is already cached
+    chrome.storage.local.get(["userEmail"], (result) => {
+      if (result.userEmail) {
+        setUserEmail(result.userEmail as string);
+        setState("idle");
+      } else {
+        setState("need-email");
+      }
+    });
+  }, []);
+
+  const handleRefreshEmail = () => {
+    chrome.storage.local.get(["userEmail"], (result) => {
+      if (result.userEmail) {
+        setUserEmail(result.userEmail as string);
+        setState("idle");
+      }
+    });
+  };
+
   const handleCreate = async () => {
+    if (!userEmail) return;
     setState("creating");
     setErrorMessage("");
 
     try {
-      const response = await apiClient.createFamily();
+      const userId = await sha256Hex(userEmail);
+      const response = await apiClient.createFamily(userId);
       if (response.error) {
         setErrorMessage(response.error.message);
         setState("error");
@@ -43,17 +73,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         apiHost: isCustomEndpoint ? apiClient.getEndpoint() : undefined,
       });
 
-      const userId = crypto.randomUUID();
-      const joinResponse = await apiClient.joinFamily(familyId, userId);
-      if (joinResponse.error) {
-        setErrorMessage(joinResponse.error.message);
-        setState("error");
-        return;
-      }
-
-      // Store familyId via background script
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId });
-      // Store userId and encryption key directly
       await chrome.storage.local.set({ userId, encryptionKey: keyString });
 
       setGeneratedSyncCode(syncCode);
@@ -67,6 +87,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   };
 
   const handleJoin = async () => {
+    if (!userEmail) return;
     setState("joining");
     setErrorMessage("");
 
@@ -82,7 +103,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       }
 
       await importKey(decoded.encryptionKey);
-      const userId = crypto.randomUUID();
+      const userId = await sha256Hex(userEmail);
 
       const response = await apiClient.joinFamily(decoded.familyId, userId);
       if (response.error) {
@@ -115,9 +136,61 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   };
 
   const handleRetry = () => {
-    setState("idle");
+    setState(userEmail ? "idle" : "need-email");
     setErrorMessage("");
   };
+
+  if (state === "need-email") {
+    return (
+      <div style={{ padding: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+          歡迎使用家庭書櫃
+        </h2>
+        <p style={{ color: "#64748b", marginBottom: 16, fontSize: 14 }}>
+          首次使用需要先確認你的讀墨帳號。請先前往「個人帳戶」頁面，再回來點擊下方按鈕。
+        </p>
+        <a
+          href="https://read.readmoo.com/#/me"
+          target="_self"
+          style={{
+            display: "block",
+            width: "100%",
+            padding: 12,
+            marginBottom: 12,
+            border: "none",
+            borderRadius: 8,
+            background: "#2563eb",
+            color: "white",
+            fontWeight: 600,
+            cursor: "pointer",
+            textAlign: "center",
+            textDecoration: "none",
+            boxSizing: "border-box",
+          }}
+        >
+          前往個人帳戶頁面
+        </a>
+        <button
+          onClick={handleRefreshEmail}
+          style={{
+            width: "100%",
+            padding: 12,
+            border: "1px solid #2563eb",
+            borderRadius: 8,
+            background: "transparent",
+            color: "#2563eb",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          已前往，重新偵測
+        </button>
+        <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 12 }}>
+          我們僅讀取你的帳號信箱用於生成匿名識別碼，信箱不會上傳至伺服器。
+        </p>
+      </div>
+    );
+  }
 
   if (state === "created") {
     return (

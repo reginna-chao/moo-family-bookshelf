@@ -121,6 +121,39 @@ async function scrapeItem(item: Element): Promise<ScrapedBook | null> {
 }
 
 /**
+ * Scrape user email from the Readmoo profile panel (#/me page).
+ * The email sits inside `.me-panel` as a div with gray text below
+ * the display name.
+ */
+export function scrapeUserEmail(): string | null {
+  const panel = document.querySelector(".me-panel");
+  if (!panel) return null;
+
+  // Email is the element with font-size 14px and gray color under the name
+  const candidates = panel.querySelectorAll<HTMLElement>("div[style]");
+  for (const el of candidates) {
+    const text = el.textContent?.trim() ?? "";
+    if (text.includes("@") && text.includes(".")) {
+      return text;
+    }
+  }
+  return null;
+}
+
+/**
+ * Scrape display name from the Readmoo profile panel (#/me page).
+ */
+export function scrapeDisplayName(): string | null {
+  const panel = document.querySelector(".me-panel");
+  if (!panel) return null;
+
+  const nameEl = panel.querySelector<HTMLElement>(
+    "div[style*='font-size: 16px']",
+  );
+  return nameEl?.textContent?.trim() || null;
+}
+
+/**
  * Scrape all books from the current Readmoo library page.
  *
  * Iterates over every `.library-item`, triggers a hover to

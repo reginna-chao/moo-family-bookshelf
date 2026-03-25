@@ -90,9 +90,34 @@ function toggleDialog(): void {
   });
 }
 
+/**
+ * Opportunistically scrape user email when on the #/me page
+ * and cache it in chrome.storage.local for later use.
+ */
+function tryScrapeAndCacheEmail(): void {
+  if (!location.hash.includes("/me")) return;
+
+  // Delay slightly to let React render the profile panel
+  setTimeout(async () => {
+    const { scrapeUserEmail, scrapeDisplayName } = await import("./scraper");
+    const email = scrapeUserEmail();
+    if (!email) return;
+
+    const displayName = scrapeDisplayName() ?? "";
+    chrome.storage.local.set({ userEmail: email, displayName });
+  }, 1000);
+}
+
 // Run on page load
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", injectFamilyBookshelfButton);
+  document.addEventListener("DOMContentLoaded", () => {
+    injectFamilyBookshelfButton();
+    tryScrapeAndCacheEmail();
+  });
 } else {
   injectFamilyBookshelfButton();
+  tryScrapeAndCacheEmail();
 }
+
+// Also listen for hash changes (SPA navigation)
+window.addEventListener("hashchange", tryScrapeAndCacheEmail);

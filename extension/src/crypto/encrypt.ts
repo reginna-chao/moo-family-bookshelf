@@ -103,6 +103,19 @@ export function base62ToBuffer(str: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+/**
+ * SHA-256 hash a string and return the hex digest.
+ * Used to derive a deterministic, privacy-preserving userId from email.
+ */
+export async function sha256Hex(input: string): Promise<string> {
+  const encoded = new TextEncoder().encode(input.toLowerCase().trim());
+  const hash = await crypto.subtle.digest("SHA-256", encoded);
+  const bytes = new Uint8Array(hash);
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function bufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = "";

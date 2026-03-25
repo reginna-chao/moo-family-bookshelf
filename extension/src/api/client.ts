@@ -76,8 +76,11 @@ export class ApiClient {
 
   // --- Family Group ---
 
-  async createFamily(): Promise<ApiResponse<FamilyGroup>> {
-    return this.request("/api/family", { method: "POST" });
+  async createFamily(userId: string): Promise<ApiResponse<FamilyGroup>> {
+    return this.request("/api/family", {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    });
   }
 
   async joinFamily(
