@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MooFamily Bookshelf — 家庭開放書櫃</title>
+  <meta name="description" content="讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍，隱私優先、開源免費。">
+  <style>
+    :root {
+      --color-primary: #2563eb;
+      --color-primary-dark: #1d4ed8;
+      --color-bg: #ffffff;
+      --color-bg-alt: #f8fafc;
+      --color-text: #1e293b;
+      --color-text-secondary: #64748b;
+      --color-border: #e2e8f0;
+      --color-accent: #f59e0b;
+      --max-width: 800px;
+      --radius: 8px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+      color: var(--color-text);
+      background: var(--color-bg);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      padding: 80px 24px 60px;
+      background: linear-gradient(135deg, #eff6ff 0%, #fefce8 100%);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+    }
+
+    .header .tagline {
+      font-size: 1.15rem;
+      color: var(--color-text-secondary);
+      max-width: 520px;
+      margin: 0 auto 32px;
+    }
+
+    .header .badges {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      color: var(--color-text-secondary);
+    }
+
+    /* Main content */
+    .content {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    section {
+      padding: 56px 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    section:last-of-type { border-bottom: none; }
+
+    section h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 24px;
+      letter-spacing: -0.01em;
+    }
+
+    section p {
+      margin-bottom: 16px;
+      color: var(--color-text);
+    }
+
+    /* Feature grid */
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 24px;
+    }
+
+    .feature-card {
+      padding: 24px;
+      border-radius: var(--radius);
+      border: 1px solid var(--color-border);
+      background: var(--color-bg-alt);
+    }
+
+    .feature-card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .feature-card p {
+      font-size: 0.9rem;
+      color: var(--color-text-secondary);
+      margin-bottom: 0;
+    }
+
+    /* Flow diagram */
+    .flow {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin-top: 24px;
+    }
+
+    .flow-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .flow-indicator {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+      width: 32px;
+    }
+
+    .flow-dot {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--color-primary);
+      color: white;
+      font-size: 0.85rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .flow-line {
+      width: 2px;
+      height: 32px;
+      background: var(--color-border);
+    }
+
+    .flow-body {
+      padding-bottom: 24px;
+    }
+
+    .flow-body h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+      line-height: 32px;
+    }
+
+    .flow-body p {
+      font-size: 0.9rem;
+      color: var(--color-text-secondary);
+      margin-bottom: 0;
+    }
+
+    /* Privacy list */
+    .privacy-list {
+      list-style: none;
+      margin-top: 16px;
+    }
+
+    .privacy-list li {
+      padding: 12px 0;
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+    }
+
+    .privacy-list li:last-child { border-bottom: none; }
+
+    .privacy-icon {
+      flex-shrink: 0;
+      font-size: 1.1rem;
+    }
+
+    /* Self-host section */
+    .steps {
+      counter-reset: step;
+      list-style: none;
+      margin-top: 16px;
+    }
+
+    .steps li {
+      counter-increment: step;
+      padding: 12px 0;
+      padding-left: 36px;
+      position: relative;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .steps li:last-child { border-bottom: none; }
+
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--color-bg-alt);
+      border: 1px solid var(--color-border);
+      font-size: 0.8rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-text-secondary);
+    }
+
+    code {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 0.88em;
+      background: var(--color-bg-alt);
+      border: 1px solid var(--color-border);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    pre {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 20px;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      margin: 16px 0;
+      font-size: 0.88rem;
+      line-height: 1.6;
+    }
+
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: inherit;
+    }
+
+    /* Callout */
+    .callout {
+      padding: 16px 20px;
+      border-radius: var(--radius);
+      border-left: 4px solid var(--color-primary);
+      background: #eff6ff;
+      margin: 20px 0;
+      font-size: 0.92rem;
+    }
+
+    .callout.warning {
+      border-left-color: var(--color-accent);
+      background: #fffbeb;
+    }
+
+    /* Buttons */
+    .btn-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: var(--radius);
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--color-primary);
+      color: white;
+    }
+
+    .btn-primary:hover { background: var(--color-primary-dark); }
+
+    .btn-secondary {
+      background: var(--color-bg);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+
+    .btn-secondary:hover { background: var(--color-bg-alt); }
+
+    /* Architecture table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    th {
+      font-weight: 600;
+      background: var(--color-bg-alt);
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 40px 24px;
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .footer a { color: var(--color-primary); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .header { padding: 56px 20px 44px; }
+      .header h1 { font-size: 1.7rem; }
+      .features { grid-template-columns: 1fr; }
+      section { padding: 40px 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <h1>MooFamily Bookshelf</h1>
+    <p class="tagline">讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍。隱私優先、開源免費。</p>
+    <div class="badges">
+      <span class="badge">Chrome Extension</span>
+      <span class="badge">PWA 行動端</span>
+      <span class="badge">E2EE 端對端加密</span>
+      <span class="badge">MIT License</span>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <!-- What is this -->
+    <section>
+      <h2>這是什麼？</h2>
+      <p>
+        MooFamily Bookshelf 是一個 Chrome 擴充功能，直接在
+        <strong>讀墨 (Readmoo) 網頁</strong>中開啟 Dialog，讓家庭帳號成員可以瀏覽彼此選擇開放的書籍。
+      </p>
+      <p>
+        你可以決定哪些書要分享給家人看，哪些不要。所有書籍預設不開放，完全由你掌控。
+      </p>
+
+      <div class="features">
+        <div class="feature-card">
+          <h3>隱私優先</h3>
+          <p>所有書籍預設不開放。你主動選擇要分享的書，儲存後才同步。</p>
+        </div>
+        <div class="feature-card">
+          <h3>端對端加密</h3>
+          <p>資料在瀏覽器中加密後才上傳，伺服器只存密文，開發者無法讀取。</p>
+        </div>
+        <div class="feature-card">
+          <h3>跨家庭保留設定</h3>
+          <p>解綁家庭帳號後，你的開放偏好不會消失。換家庭不用重新設定。</p>
+        </div>
+        <div class="feature-card">
+          <h3>可自建後端</h3>
+          <p>不想用預設伺服器？部署自己的 Cloudflare Worker，完全掌控資料。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section>
+      <h2>使用流程</h2>
+
+      <div class="flow">
+        <div class="flow-step">
+          <div class="flow-indicator">
+            <div class="flow-dot">1</div>
+            <div class="flow-line"></div>
+          </div>
+          <div class="flow-body">
+            <h3>安裝擴充功能</h3>
+            <p>從 Chrome Web Store 安裝 MooFamily Bookshelf。</p>
+          </div>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-indicator">
+            <div class="flow-dot">2</div>
+            <div class="flow-line"></div>
+          </div>
+          <div class="flow-body">
+            <h3>建立或加入家庭</h3>
+            <p>開啟讀墨網頁，點擊「家庭書櫃」按鈕。第一位家人建立家庭取得同步碼，其他人輸入同步碼加入。</p>
+          </div>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-indicator">
+            <div class="flow-dot">3</div>
+            <div class="flow-line"></div>
+          </div>
+          <div class="flow-body">
+            <h3>選擇要開放的書</h3>
+            <p>在「個人書櫃管理」中，逐本切換開放 / 關閉，儲存後才同步。</p>
+          </div>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-indicator">
+            <div class="flow-dot">4</div>
+          </div>
+          <div class="flow-body">
+            <h3>瀏覽家庭書櫃</h3>
+            <p>在「家庭開放書櫃」中看到所有家人選擇分享的書籍。手機上也可以透過 PWA 網頁瀏覽。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>家庭帳號是前提</strong> — 此功能需要先建立或加入家庭後才能使用。尚未設定家庭時，Dialog 會引導你完成設定。
+      </div>
+    </section>
+
+    <!-- Privacy -->
+    <section>
+      <h2>隱私與安全</h2>
+      <ul class="privacy-list">
+        <li>
+          <span class="privacy-icon">&#x1f512;</span>
+          <span><strong>端對端加密 (E2EE)</strong> — 資料在你的瀏覽器中加密後才上傳，伺服器只存亂碼，開發者無法解密。</span>
+        </li>
+        <li>
+          <span class="privacy-icon">&#x1f6ab;</span>
+          <span><strong>不收集個資</strong> — 不需要額外帳號、不記錄 Email、不追蹤你是誰。</span>
+        </li>
+        <li>
+          <span class="privacy-icon">&#x1f510;</span>
+          <span><strong>預設不公開</strong> — 所有書籍預設關閉分享。你主動開放的書才會出現在家庭書櫃。</span>
+        </li>
+        <li>
+          <span class="privacy-icon">&#x1f4be;</span>
+          <span><strong>解綁即隔離</strong> — 離開家庭後，其他成員立刻無法看到你的書。但你的偏好設定保留，換家庭不用重設。</span>
+        </li>
+        <li>
+          <span class="privacy-icon">&#x1f4e6;</span>
+          <span><strong>程式碼完全公開</strong> — 開源專案，任何人可以審查程式碼。不信任預設伺服器？你可以自建。</span>
+        </li>
+      </ul>
+    </section>
+
+    <!-- Architecture -->
+    <section>
+      <h2>技術架構</h2>
+
+      <table>
+        <thead>
+          <tr><th>層級</th><th>技術</th><th>說明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>前端</td>
+            <td>Chrome Extension (React + Vite)</td>
+            <td>Content Script 注入 Dialog 至讀墨頁面</td>
+          </tr>
+          <tr>
+            <td>行動端</td>
+            <td>PWA</td>
+            <td>行動網頁，與 Extension 共用同一後端</td>
+          </tr>
+          <tr>
+            <td>後端</td>
+            <td>Cloudflare Workers</td>
+            <td>Serverless API，可自建部署</td>
+          </tr>
+          <tr>
+            <td>儲存</td>
+            <td>Cloudflare KV</td>
+            <td>個人開放設定 (per user) + 家庭群組 (per family)</td>
+          </tr>
+          <tr>
+            <td>加密</td>
+            <td>Web Crypto API (AES-256-GCM)</td>
+            <td>端對端加密，伺服器零知識</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>資料歸屬設計</strong> — 個人開放設定歸屬個人帳號，不隨家庭綁定 / 解綁而變動。家庭書櫃是動態聚合查詢，不獨立儲存。
+      </div>
+    </section>
+
+    <!-- Self-hosting -->
+    <section>
+      <h2>自建後端 (BYO Backend)</h2>
+      <p>
+        不想將資料存在本專案預設的伺服器？你可以部署自己的 Cloudflare Worker，完全掌控資料。免費額度即可運行。
+      </p>
+
+      <ol class="steps">
+        <li>Fork 本專案的 <code>worker/</code> 目錄</li>
+        <li>安裝 Wrangler CLI：<code>npm install -g wrangler</code></li>
+        <li>
+          部署至你的 Cloudflare 帳號：
+          <pre><code>cd worker
+wrangler deploy</code></pre>
+        </li>
+        <li>在 Extension 或 PWA 設定中填入你的 Worker URL</li>
+        <li>將同步碼分享給家人 — 同步碼會自動帶入你的 API 端點，家人無需額外設定</li>
+      </ol>
+
+      <div class="callout warning">
+        <strong>注意</strong> — 同一家庭的所有成員必須使用相同的 API 端點。同步碼格式 <code>moo-{id}-{key}@{host}</code> 會自動處理這件事。
+      </div>
+    </section>
+
+    <!-- PWA -->
+    <section>
+      <h2>行動端 (PWA)</h2>
+      <p>
+        手機上無法安裝 Chrome Extension，但你可以透過 PWA 行動網頁瀏覽家庭開放書櫃。
+      </p>
+
+      <table>
+        <thead>
+          <tr><th>功能</th><th>Extension</th><th>PWA</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>瀏覽家庭開放書櫃</td><td>&#10003;</td><td>&#10003;</td></tr>
+          <tr><td>建立 / 加入家庭</td><td>&#10003;</td><td>&#10003;</td></tr>
+          <tr><td>個人書櫃開放設定</td><td>&#10003;</td><td>&#10003; (已同步的書)</td></tr>
+          <tr><td>爬取讀墨書單</td><td>&#10003;</td><td>&#10007;</td></tr>
+          <tr><td>自訂 API 端點</td><td>&#10003;</td><td>&#10003;</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        PWA 無法直接爬取讀墨網頁書單。個人書櫃需先在桌面端 Extension 完成至少一次同步，之後即可在 PWA 調整開放設定。
+      </div>
+    </section>
+
+    <!-- Download / Links -->
+    <section>
+      <h2>開始使用</h2>
+      <p>專案目前開發中，以下連結將在各階段完成後啟用。</p>
+      <div class="btn-group">
+        <a href="#" class="btn btn-primary">Chrome Web Store (coming soon)</a>
+        <a href="#" class="btn btn-secondary">PWA 行動版 (coming soon)</a>
+        <a href="https://github.com/user/moo-family-bookshelf" class="btn btn-secondary">GitHub 原始碼</a>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>
+      MooFamily Bookshelf — 以 <a href="https://opensource.org/licenses/MIT">MIT License</a> 開源
+    </p>
+    <p>
+      本專案與 Readmoo 讀墨無官方關聯。
+    </p>
+  </footer>
+
+</body>
+</html>
