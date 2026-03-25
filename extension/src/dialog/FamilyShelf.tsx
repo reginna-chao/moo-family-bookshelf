@@ -14,28 +14,34 @@ interface MemberBooks {
   books: BookEntry[];
 }
 
+/** Raw member shape returned by the bookshelf API */
+interface RawMember {
+  userId: string;
+  payload: string | null;
+  lastUpdated: string | null;
+}
+
 type LoadState = "loading" | "ready" | "error";
 
-async function decryptMemberBooks(
-  rawBooks: BookEntry[],
+/**
+ * Decrypt a member's encrypted payload into BookEntry[].
+ * The payload is an AES-256-GCM encrypted JSON string containing
+ * { userId, displayName, books, lastUpdated }.
+ */
+async function decryptPayload(
+  payload: string,
   encryptionKey: string,
-): Promise<BookEntry[]> {
-  try {
-    const key = await importKey(encryptionKey);
-    const results: BookEntry[] = [];
-    for (const book of rawBooks) {
-      try {
-        const decrypted = await decrypt(book.title, key);
-        const parsed = JSON.parse(decrypted) as BookEntry;
-        results.push(parsed);
-      } catch {
-        results.push(book);
-      }
-    }
-    return results;
-  } catch {
-    return rawBooks;
-  }
+): Promise<{ displayName: string; books: BookEntry[] }> {
+  const key = await importKey(encryptionKey);
+  const decrypted = await decrypt(payload, key);
+  const parsed = JSON.parse(decrypted) as {
+    displayName?: string;
+    books?: BookEntry[];
+  };
+  return {
+    displayName: parsed.displayName ?? "",
+    books: parsed.books ?? [],
+  };
 }
 
 function toBookWithMember(member: MemberBooks): BookWithMember[] {
@@ -52,32 +58,63 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
   const loadBookshelf = useCallback(async () => {
     setState("loading");
     setErrorMessage("");
+    try {
+      const response = await apiClient.getFamilyBookshelf(familyId);
+      if (response.error) {
+        setErrorMessage(response.error.message);
+        setState("error");
+        return;
+      }
 
-    const response = await apiClient.getFamilyBookshelf(familyId);
-    if (response.error) {
-      setErrorMessage(response.error.message);
+      const data = response.data as unknown as {
+        familyId: string;
+        members: RawMember[];
+      };
+      if (!data) {
+        setState("ready");
+        return;
+      }
+
+      const storageResult = await chrome.storage.local.get(["encryptionKey"]);
+      const encKey = storageResult.encryptionKey as string | undefined;
+
+      const decryptedMembers: MemberBooks[] = [];
+      for (const member of data.members) {
+        if (!member.payload || !encKey) {
+          decryptedMembers.push({
+            userId: member.userId,
+            displayName: member.userId.slice(0, 8),
+            books: [],
+          });
+          continue;
+        }
+
+        try {
+          const { displayName, books } = await decryptPayload(
+            member.payload,
+            encKey,
+          );
+          decryptedMembers.push({
+            userId: member.userId,
+            displayName: displayName || member.userId.slice(0, 8),
+            books: books.filter((b) => b.isShared),
+          });
+        } catch {
+          // Decryption failed — skip this member's books
+          decryptedMembers.push({
+            userId: member.userId,
+            displayName: member.userId.slice(0, 8),
+            books: [],
+          });
+        }
+      }
+
+      setMembers(decryptedMembers);
+      setState("ready");
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "載入失敗");
       setState("error");
-      return;
     }
-
-    const data = response.data!;
-    const storageResult = await chrome.storage.local.get(["encryptionKey"]);
-    const encKey = storageResult.encryptionKey as string | undefined;
-
-    const decryptedMembers: MemberBooks[] = [];
-    for (const member of data.members) {
-      const books = encKey
-        ? await decryptMemberBooks(member.books, encKey)
-        : member.books;
-      decryptedMembers.push({
-        userId: member.userId,
-        displayName: member.displayName,
-        books: books.filter((b) => b.isShared),
-      });
-    }
-
-    setMembers(decryptedMembers);
-    setState("ready");
   }, [familyId, apiClient]);
 
   useEffect(() => {
@@ -86,7 +123,7 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
 
   if (state === "loading") {
     return (
-      <div style={{ padding: 24, textAlign: "center", color: "#94a3b8" }}>
+      <div style={{ padding: 16, textAlign: "center", color: "#64748b" }}>
         載入家庭書櫃中...
       </div>
     );
@@ -94,15 +131,20 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
 
   if (state === "error") {
     return (
-      <div style={{ padding: 24, textAlign: "center" }}>
-        <p style={{ color: "#ef4444", marginBottom: 16, fontSize: 14 }}>
+      <div style={{ padding: 16 }}>
+        <p style={{ color: "#ef4444", fontSize: 14, marginBottom: 12 }}>
           {errorMessage}
         </p>
         <button
           onClick={() => void loadBookshelf()}
           style={{
-            padding: "8px 24px", border: "none", borderRadius: 8,
-            background: "#2563eb", color: "white", fontWeight: 600, cursor: "pointer",
+            padding: "8px 16px",
+            border: "1px solid #2563eb",
+            borderRadius: 8,
+            background: "transparent",
+            color: "#2563eb",
+            fontWeight: 600,
+            cursor: "pointer",
           }}
         >
           重試
@@ -111,16 +153,14 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
     );
   }
 
-  const allBooks = members.flatMap(toBookWithMember);
-  const totalCount = allBooks.length;
+  const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
-  if (totalCount === 0) {
+  if (totalBooks === 0) {
     return (
-      <div style={{ padding: 24, textAlign: "center" }}>
-        <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>家庭開放書櫃</h3>
-        <p style={{ color: "#94a3b8", fontSize: 14 }}>尚無家人分享書籍</p>
+      <div style={{ padding: 16, textAlign: "center" }}>
+        <p style={{ color: "#94a3b8", marginTop: 16 }}>尚無家人分享書籍</p>
         <p style={{ color: "#cbd5e1", fontSize: 13, marginTop: 8 }}>
-          家人可在個人書櫃中開啟分享功能，分享的書籍將會顯示在這裡。
+          家庭成員需在「個人書櫃」中開放書籍後才會出現在這裡
         </p>
       </div>
     );
@@ -128,28 +168,60 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
 
   const visibleBooks = filterMember
     ? members.filter((m) => m.userId === filterMember).flatMap(toBookWithMember)
-    : allBooks;
+    : members.flatMap(toBookWithMember);
 
   return (
     <div>
-      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>家庭開放書櫃</h3>
-      <p style={{ color: "#94a3b8", fontSize: 13, marginBottom: 12 }}>
-        共 {totalCount} 本分享書籍
-      </p>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-        <FilterButton label="全部" active={filterMember === null} onClick={() => setFilterMember(null)} />
-        {members.filter((m) => m.books.length > 0).map((m) => (
+      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
+        家庭開放書櫃
+        <span
+          style={{
+            fontWeight: 400,
+            color: "#94a3b8",
+            marginLeft: 8,
+            fontSize: 13,
+          }}
+        >
+          ({totalBooks} 本)
+        </span>
+      </h3>
+
+      {members.filter((m) => m.books.length > 0).length > 1 && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            marginBottom: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <FilterButton
-            key={m.userId}
-            label={m.displayName || m.userId.slice(0, 8)}
-            active={filterMember === m.userId}
-            onClick={() => setFilterMember(m.userId)}
+            label="全部"
+            active={filterMember === null}
+            onClick={() => setFilterMember(null)}
           />
-        ))}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 }}>
+          {members
+            .filter((m) => m.books.length > 0)
+            .map((m) => (
+              <FilterButton
+                key={m.userId}
+                label={m.displayName || m.userId.slice(0, 8)}
+                active={filterMember === m.userId}
+                onClick={() => setFilterMember(m.userId)}
+              />
+            ))}
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
+          gap: 12,
+        }}
+      >
         {visibleBooks.map((book) => (
-          <BookCard key={`${book.bookId}-${book.memberName}`} book={book} />
+          <BookCard key={`${book.memberName}-${book.bookId}`} book={book} />
         ))}
       </div>
     </div>

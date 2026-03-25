@@ -41,27 +41,45 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
     async function load() {
       try {
+        console.log("[PersonalShelf] Starting load...");
         const storageResult = await chrome.storage.local.get(["encryptionKey"]);
         const encKeyString = storageResult.encryptionKey as string | undefined;
+        console.log("[PersonalShelf] encryptionKey exists:", !!encKeyString);
 
-        const [scrapedBooks, apiResponse] = await Promise.all([
-          scrapeBooks(),
-          apiClient.getPersonalBooks(userId),
-        ]);
+        console.log("[PersonalShelf] Scraping books...");
+        const scrapedBooks = await scrapeBooks();
+        console.log("[PersonalShelf] Scraped books:", scrapedBooks.length, scrapedBooks);
+
+        console.log("[PersonalShelf] Fetching saved books from API...");
+        const apiResponse = await apiClient.getPersonalBooks(userId);
+        console.log("[PersonalShelf] API response:", apiResponse);
+
         if (cancelled) return;
 
         let savedBooks: BookEntry[] = [];
         if (apiResponse.data && encKeyString) {
-          savedBooks = await loadSavedBooks(
-            apiResponse.data as unknown as Record<string, unknown>,
-            encKeyString,
-          );
+          console.log("[PersonalShelf] Decrypting saved books...");
+          try {
+            savedBooks = await loadSavedBooks(
+              apiResponse.data as unknown as Record<string, unknown>,
+              encKeyString,
+            );
+            console.log("[PersonalShelf] Saved books:", savedBooks.length);
+          } catch (decryptErr) {
+            // Decryption failed — likely key mismatch from reinstall.
+            // Treat as no saved data; user can re-save with current key.
+            console.warn("[PersonalShelf] Decrypt failed, ignoring saved data:", decryptErr);
+            savedBooks = [];
+          }
         }
         if (cancelled) return;
 
-        setBooks(mergeBooks(scrapedBooks, savedBooks));
+        const merged = mergeBooks(scrapedBooks, savedBooks);
+        console.log("[PersonalShelf] Merged books:", merged.length);
+        setBooks(merged);
         setStatus("ready");
       } catch (err) {
+        console.error("[PersonalShelf] Error:", err);
         if (cancelled) return;
         setErrorMessage(err instanceof Error ? err.message : "載入失敗");
         setStatus("error");
