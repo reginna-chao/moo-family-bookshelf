@@ -72,8 +72,6 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         setLeaveState("idle");
         return;
       }
-      chrome.runtime.sendMessage({ type: "CLEAR_FAMILY_ID" });
-      await chrome.storage.local.remove(["userId", "encryptionKey"]);
       onLeave();
     } catch (err) {
       setLeaveError(err instanceof Error ? err.message : "發生未知錯誤");

@@ -44,6 +44,7 @@ export function App() {
   const handleLeaveFamily = () => {
     chrome.runtime.sendMessage({ type: "CLEAR_FAMILY_ID" });
     setFamilyId(null);
+    setActiveTab("family-shelf");
     setView("onboarding");
   };
 

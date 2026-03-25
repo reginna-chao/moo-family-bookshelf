@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { rateLimit } from "./middleware/rateLimit";
 import { userRoutes } from "./routes/user";
 import { familyRoutes } from "./routes/family";
 import { bookshelfRoutes } from "./routes/bookshelf";
@@ -12,6 +13,9 @@ const app = new Hono<{ Bindings: Env }>();
 
 // CORS for Extension and PWA
 app.use("*", cors());
+
+// Rate limiting for API routes
+app.use("/api/*", rateLimit);
 
 // Health check
 app.get("/", (c) => c.json({ status: "ok", service: "moo-family-bookshelf" }));
