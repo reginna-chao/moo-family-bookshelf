@@ -100,7 +100,10 @@ export function base62ToBuffer(str: string): ArrayBuffer {
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(paddedHex.slice(i * 2, i * 2 + 2), 16);
   }
-  return bytes.buffer;
+  // .slice() creates a clean ArrayBuffer copy — needed because
+  // bytes.buffer may reference a shared underlying buffer in Node.js,
+  // which crypto.subtle.importKey rejects.
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
 /**
