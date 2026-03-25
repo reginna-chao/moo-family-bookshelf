@@ -1,3 +1,15 @@
+---
+name: be-review
+description: >
+  Structured code review for Cloudflare Worker TypeScript backend code across 8 dimensions.
+  Read-only analysis; does NOT modify code.
+  TRIGGER when: user explicitly invokes /be-review, or asks to review backend code changes.
+  DO NOT TRIGGER when: user wants code written or tests added.
+argument-hint: <file paths, PR number, or description of changes to review>
+allowed-tools: Read, Grep, Glob, Bash(git diff*), Bash(git log*), Bash(git show*)
+model: claude-sonnet-4-6
+---
+
 # Backend Code Review
 
 ## Role

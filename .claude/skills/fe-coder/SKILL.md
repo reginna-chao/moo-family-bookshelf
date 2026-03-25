@@ -1,3 +1,14 @@
+---
+name: fe-coder
+description: >
+  Write or modify React/TypeScript production code following project conventions. Does NOT touch test files.
+  TRIGGER when: user explicitly invokes /fe-coder, or asks to write/modify/fix frontend React production code.
+  DO NOT TRIGGER when: user is discussing requirements, reviewing code, writing tests, or asking questions about existing code.
+argument-hint: <requirement description or file paths to modify>
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cd extension*), Bash(pnpm typecheck*), Bash(pnpm lint*), Bash(pnpm build*), Bash(git diff*), Bash(git log*), Bash(git show*), Agent
+model: claude-sonnet-4-6
+---
+
 # Frontend Coder
 
 ## Role

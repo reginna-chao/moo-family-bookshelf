@@ -1,3 +1,15 @@
+---
+name: project-init
+description: >
+  Meta-skill: reads project architecture docs and plan, then adapts all base .claude/skills/ and .claude/rules/
+  templates to fit the specific project's tech stack, structure, and conventions.
+  TRIGGER when: user explicitly invokes /project-init, or asks to customize/adapt skills for a new project.
+  DO NOT TRIGGER when: user is working on features, writing code, or reviewing — this is a one-time setup tool.
+argument-hint: (no arguments needed, reads project context automatically)
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cat*), Bash(ls*)
+model: claude-opus-4-6
+---
+
 # Project Init — Adapt Skills & Rules to a New Project
 
 ## Role

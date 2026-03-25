@@ -1,3 +1,15 @@
+---
+name: be-coder
+description: >
+  Write or modify TypeScript production code for the Cloudflare Worker backend (Hono + KV).
+  Does NOT touch test files.
+  TRIGGER when: user explicitly invokes /be-coder, or asks to write/modify/fix backend Worker code.
+  DO NOT TRIGGER when: user is discussing requirements, reviewing code, writing tests, or asking questions about existing code.
+argument-hint: <requirement description or endpoint/module to modify>
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cd worker*), Bash(pnpm typecheck*), Bash(pnpm lint*), Bash(pnpm build*), Bash(git diff*), Bash(git log*), Bash(git show*), Agent
+model: claude-sonnet-4-6
+---
+
 # Backend Coder
 
 ## Role

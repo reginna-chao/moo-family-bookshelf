@@ -1,3 +1,15 @@
+---
+name: fe-review
+description: >
+  Structured code review for React/TypeScript frontend code across 8 dimensions.
+  Read-only analysis; does NOT modify code.
+  TRIGGER when: user explicitly invokes /fe-review, or asks to review frontend code changes.
+  DO NOT TRIGGER when: user wants code written or tests added.
+argument-hint: <file paths, PR number, or description of changes to review>
+allowed-tools: Read, Grep, Glob, Bash(git diff*), Bash(git log*), Bash(git show*)
+model: claude-sonnet-4-6
+---
+
 # Frontend Code Review
 
 ## Role

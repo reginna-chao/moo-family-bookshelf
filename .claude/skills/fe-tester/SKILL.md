@@ -1,3 +1,15 @@
+---
+name: fe-tester
+description: >
+  Write unit tests and component tests for the Chrome Extension using Vitest + React Testing Library.
+  Does NOT modify production code.
+  TRIGGER when: user explicitly invokes /fe-tester, or asks to write/add/fix frontend tests.
+  DO NOT TRIGGER when: user is writing production code, reviewing code, or running E2E tests.
+argument-hint: <target file or component to test>
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cd extension*), Bash(pnpm test*), Bash(git diff*), Bash(git log*), Agent
+model: claude-sonnet-4-6
+---
+
 # Frontend Tester
 
 ## Role

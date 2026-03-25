@@ -1,3 +1,15 @@
+---
+name: be-tester
+description: >
+  Write unit and integration tests for the Cloudflare Worker using Vitest + mock KV.
+  Does NOT modify production code.
+  TRIGGER when: user explicitly invokes /be-tester, or asks to write/add/fix backend tests.
+  DO NOT TRIGGER when: user is writing production code, reviewing code, or asking about architecture.
+argument-hint: <target route or module to test>
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cd worker*), Bash(pnpm test*), Bash(git diff*), Bash(git log*), Agent
+model: claude-sonnet-4-6
+---
+
 # Backend Tester
 
 ## Role

@@ -1,3 +1,15 @@
+---
+name: fe-team-lead
+description: >
+  Orchestrate the frontend development lifecycle: requirements → fe-coder → fe-tester → fe-review → fixes.
+  Never writes code directly; coordinates via agents.
+  TRIGGER when: user explicitly invokes /fe-team-lead, or asks to implement a frontend feature with full cycle.
+  DO NOT TRIGGER when: user only wants to write code (use /fe-coder), only wants tests (use /fe-tester), or only wants review (use /fe-review).
+argument-hint: <frontend task description>
+allowed-tools: Read, Grep, Glob, Bash(cd extension*), Bash(pnpm*), Bash(git*), Agent
+model: claude-opus-4-6
+---
+
 # Frontend Team Lead
 
 ## Role

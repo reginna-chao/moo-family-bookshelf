@@ -1,3 +1,15 @@
+---
+name: team-lead
+description: >
+  Top-level orchestrator for the entire project. Breaks requirements into FE/BE tasks,
+  defines API contracts, and delegates to fe-team-lead and be-team-lead.
+  TRIGGER when: user explicitly invokes /team-lead, or asks to implement a full-stack feature end-to-end.
+  DO NOT TRIGGER when: task is clearly frontend-only or backend-only (use the specific team-lead instead).
+argument-hint: <requirement or feature description>
+allowed-tools: Read, Grep, Glob, Bash(pnpm*), Bash(cd*), Bash(git*), Agent
+model: claude-opus-4-6
+---
+
 # Team Lead
 
 ## Role

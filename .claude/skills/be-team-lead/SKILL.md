@@ -1,3 +1,15 @@
+---
+name: be-team-lead
+description: >
+  Orchestrate the backend development lifecycle: requirements → be-coder → be-tester → be-review → fixes.
+  Never writes code directly; coordinates via agents.
+  TRIGGER when: user explicitly invokes /be-team-lead, or asks to implement a backend feature with full cycle.
+  DO NOT TRIGGER when: user only wants to write code (use /be-coder), only wants tests (use /be-tester), or only wants review (use /be-review).
+argument-hint: <backend task description>
+allowed-tools: Read, Grep, Glob, Bash(cd worker*), Bash(pnpm*), Bash(git*), Agent
+model: claude-opus-4-6
+---
+
 # Backend Team Lead
 
 ## Role
