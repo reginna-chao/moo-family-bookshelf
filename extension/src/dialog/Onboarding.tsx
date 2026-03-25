@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { ApiClient } from "../api/client";
 import { generateKey, exportKey, importKey } from "../crypto/encrypt";
 import { encodeSyncCode, decodeSyncCode, SyncCodeError } from "../crypto/syncCode";
+import { DEFAULT_API_ENDPOINT } from "../constants";
 
 type OnboardingState = "idle" | "creating" | "created" | "joining" | "error";
 
@@ -9,8 +10,6 @@ export interface OnboardingProps {
   onFamilyJoined: (familyId: string, userId: string) => void;
   apiClient: ApiClient;
 }
-
-const DEFAULT_ENDPOINT = "https://moo-family-bookshelf.workers.dev";
 
 export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   const [state, setState] = useState<OnboardingState>("idle");
@@ -37,7 +36,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       const key = await generateKey();
       const keyString = await exportKey(key);
 
-      const isCustomEndpoint = apiClient.getEndpoint() !== DEFAULT_ENDPOINT;
+      const isCustomEndpoint = apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
       const syncCode = encodeSyncCode({
         familyId,
         encryptionKey: keyString,

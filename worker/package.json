@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "deploy:local": "bash -c 'source .env && sed \"s/placeholder-kv-id/$KV_NAMESPACE_ID/;s/placeholder-preview-id/$KV_PREVIEW_NAMESPACE_ID/\" wrangler.toml > wrangler.local.toml && wrangler deploy -c wrangler.local.toml && rm wrangler.local.toml'"
   },
   "dependencies": {
     "hono": "^4.6.14"

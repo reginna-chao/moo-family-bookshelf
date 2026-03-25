@@ -3,7 +3,7 @@
  * Supports configurable endpoint for self-hosted backends.
  */
 
-const DEFAULT_API_URL = "https://moo-family-bookshelf.workers.dev";
+import { DEFAULT_API_ENDPOINT } from "../constants";
 
 export interface ApiResponse<T> {
   data?: T;
@@ -45,7 +45,7 @@ export class ApiClient {
   private baseUrl: string;
 
   constructor(apiUrl?: string) {
-    this.baseUrl = (apiUrl ?? DEFAULT_API_URL).replace(/\/+$/, "");
+    this.baseUrl = (apiUrl ?? DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
   }
 
   setEndpoint(url: string): void {

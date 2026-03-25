@@ -23,6 +23,7 @@ Thumbs.db
 
 # Cloudflare
 .wrangler/
+wrangler.local.toml
 
 # Test
 coverage/

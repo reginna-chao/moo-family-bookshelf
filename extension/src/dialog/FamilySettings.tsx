@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { ApiClient } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 
-const DEFAULT_ENDPOINT = "https://moo-family-bookshelf.workers.dev";
+import { DEFAULT_API_ENDPOINT } from "../constants";
 export interface FamilySettingsProps {
   familyId: string;
   userId: string;
@@ -24,7 +24,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     chrome.storage.local.get(["encryptionKey"], (result) => {
       const encryptionKey = result.encryptionKey as string | undefined;
       if (!encryptionKey) return;
-      const isCustom = apiClient.getEndpoint() !== DEFAULT_ENDPOINT;
+      const isCustom = apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
       const code = encodeSyncCode({
         familyId,
         encryptionKey,
