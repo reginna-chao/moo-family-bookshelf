@@ -2,6 +2,9 @@ name = "moo-family-bookshelf"
 main = "src/index.ts"
 compatibility_date = "2024-12-30"
 
+# KV namespace IDs — replaced by CD pipeline from GitHub Variables.
+# For local dev: wrangler dev --kv KV=<your-kv-id>
+# To create your own: wrangler kv namespace create KV
 [[kv_namespaces]]
 binding = "KV"
 id = "placeholder-kv-id"
