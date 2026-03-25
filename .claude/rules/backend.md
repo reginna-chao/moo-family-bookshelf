@@ -1,0 +1,59 @@
+## Backend Architecture Rules
+
+Applies to: `worker/src/`
+
+### Tech Stack
+
+- Cloudflare Workers (TypeScript)
+- Cloudflare KV for storage
+- Hono (lightweight web framework for Workers)
+- Vitest + Miniflare for testing
+
+### Project Structure
+
+```
+worker/src/
+├── index.ts          # Worker entry point + Hono app
+├── routes/
+│   ├── user.ts       # Personal settings API
+│   ├── family.ts     # Family group API
+│   └── bookshelf.ts  # Family bookshelf aggregation API
+├── middleware/
+│   ├── auth.ts       # Request authentication
+│   └── rateLimit.ts  # Rate limiting
+├── kv/
+│   └── schema.ts     # KV key patterns and type definitions
+└── utils/
+    └── validation.ts # Input validation helpers
+```
+
+### API Design
+
+- RESTful JSON API. All responses wrapped in `{ data, error }` envelope.
+- Prefix: `/api/`
+- Authentication: token-based (derived from sync code encryption key).
+- All data stored encrypted in KV; Worker never sees plaintext book data.
+
+### KV Key Patterns
+
+| Key | Value | TTL |
+|-----|-------|-----|
+| `user:{user_id}` | Encrypted personal book list + sharing settings | None (persistent) |
+| `family:{family_id}` | Family member list | Configurable |
+| `member:{user_id}` | `family_id` (reverse lookup) | Follows family TTL |
+
+### Coding Conventions
+
+- No `any` type. Strict TypeScript.
+- Keep handler functions thin — extract business logic into helpers.
+- Validate all inputs at the handler level before processing.
+- Return proper HTTP status codes (400, 401, 403, 404, 429, 500).
+- Error responses include machine-readable `code` field.
+
+### Commands
+
+- `pnpm dev` — `wrangler dev` (local dev with Miniflare)
+- `pnpm build` — `wrangler deploy --dry-run`
+- `pnpm typecheck` — `tsc --noEmit`
+- `pnpm lint` — ESLint
+- `pnpm test` — Vitest + Miniflare
