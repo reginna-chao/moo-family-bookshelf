@@ -84,7 +84,10 @@ function toggleDialog(): void {
   document.body.appendChild(backdrop);
   document.body.appendChild(dialog);
 
-  // TODO: Mount React Dialog app into mountPoint
+  // Dynamically import and mount the React Dialog into the container
+  import("../dialog/main").then(({ mountDialog }) => {
+    mountDialog(mountPoint);
+  });
 }
 
 // Run on page load

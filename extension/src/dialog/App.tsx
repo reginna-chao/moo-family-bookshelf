@@ -1,4 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { ApiClient } from "../api/client";
+import { Onboarding } from "./Onboarding";
+import { PersonalShelf } from "./PersonalShelf";
+import { FamilyShelf } from "./FamilyShelf";
+import { FamilySettings } from "./FamilySettings";
 
 type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "settings";
@@ -7,21 +12,32 @@ export function App() {
   const [view, setView] = useState<View>("loading");
   const [activeTab, setActiveTab] = useState<Tab>("family-shelf");
   const [familyId, setFamilyId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const apiClientRef = useRef(new ApiClient());
 
   useEffect(() => {
-    // Check if user has a family
-    chrome.runtime.sendMessage({ type: "GET_FAMILY_ID" }, (response) => {
-      if (response?.familyId) {
-        setFamilyId(response.familyId);
-        setView("main");
-      } else {
-        setView("onboarding");
-      }
+    // Load familyId, userId, and custom API endpoint on mount
+    chrome.runtime.sendMessage({ type: "GET_FAMILY_ID" }, (familyResponse) => {
+      chrome.storage.local.get(["userId"], (storageResult) => {
+        chrome.runtime.sendMessage({ type: "GET_API_ENDPOINT" }, (apiResponse) => {
+          if (apiResponse?.apiEndpoint) {
+            apiClientRef.current.setEndpoint(apiResponse.apiEndpoint);
+          }
+          if (familyResponse?.familyId && storageResult.userId) {
+            setFamilyId(familyResponse.familyId);
+            setUserId(storageResult.userId as string);
+            setView("main");
+          } else {
+            setView("onboarding");
+          }
+        });
+      });
     });
   }, []);
 
-  const handleFamilyJoined = (id: string) => {
+  const handleFamilyJoined = (id: string, newUserId: string) => {
     setFamilyId(id);
+    setUserId(newUserId);
     setView("main");
   };
 
@@ -36,7 +52,12 @@ export function App() {
   }
 
   if (view === "onboarding") {
-    return <Onboarding onFamilyJoined={handleFamilyJoined} />;
+    return (
+      <Onboarding
+        onFamilyJoined={handleFamilyJoined}
+        apiClient={apiClientRef.current}
+      />
+    );
   }
 
   return (
@@ -71,12 +92,16 @@ export function App() {
       </nav>
       <div style={{ padding: 16, overflowY: "auto", maxHeight: "60vh" }}>
         {activeTab === "family-shelf" && (
-          <FamilyShelf familyId={familyId!} />
+          <FamilyShelf familyId={familyId!} apiClient={apiClientRef.current} />
         )}
-        {activeTab === "personal-shelf" && <PersonalShelf />}
+        {activeTab === "personal-shelf" && (
+          <PersonalShelf userId={userId!} apiClient={apiClientRef.current} />
+        )}
         {activeTab === "settings" && (
           <FamilySettings
             familyId={familyId!}
+            userId={userId!}
+            apiClient={apiClientRef.current}
             onLeave={handleLeaveFamily}
           />
         )}
@@ -85,144 +110,3 @@ export function App() {
   );
 }
 
-// --- Placeholder components (to be expanded) ---
-
-function Onboarding({
-  onFamilyJoined,
-}: {
-  onFamilyJoined: (id: string) => void;
-}) {
-  const [syncCode, setSyncCode] = useState("");
-
-  return (
-    <div style={{ padding: 24 }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-        歡迎使用家庭書櫃
-      </h2>
-      <p style={{ color: "#64748b", marginBottom: 24, fontSize: 14 }}>
-        此功能需要先建立或加入家庭才能使用。
-      </p>
-      <button
-        onClick={() => onFamilyJoined("new-family-" + Date.now())}
-        style={{
-          width: "100%",
-          padding: 12,
-          marginBottom: 12,
-          border: "none",
-          borderRadius: 8,
-          background: "#2563eb",
-          color: "white",
-          fontWeight: 600,
-          cursor: "pointer",
-        }}
-      >
-        建立新家庭
-      </button>
-      <div style={{ textAlign: "center", margin: "12px 0", color: "#94a3b8" }}>
-        或
-      </div>
-      <input
-        type="text"
-        placeholder="輸入家庭同步碼"
-        value={syncCode}
-        onChange={(e) => setSyncCode(e.target.value)}
-        style={{
-          width: "100%",
-          padding: 12,
-          border: "1px solid #e2e8f0",
-          borderRadius: 8,
-          marginBottom: 12,
-          boxSizing: "border-box",
-          fontSize: 14,
-        }}
-      />
-      <button
-        onClick={() => {
-          if (syncCode.trim()) {
-            onFamilyJoined(syncCode.trim());
-          }
-        }}
-        disabled={!syncCode.trim()}
-        style={{
-          width: "100%",
-          padding: 12,
-          border: "1px solid #2563eb",
-          borderRadius: 8,
-          background: "transparent",
-          color: "#2563eb",
-          fontWeight: 600,
-          cursor: syncCode.trim() ? "pointer" : "not-allowed",
-          opacity: syncCode.trim() ? 1 : 0.5,
-        }}
-      >
-        加入家庭
-      </button>
-    </div>
-  );
-}
-
-function FamilyShelf({ familyId }: { familyId: string }) {
-  return (
-    <div>
-      <p style={{ color: "#64748b", fontSize: 14 }}>
-        家庭 ID: {familyId}
-      </p>
-      <p style={{ color: "#94a3b8", marginTop: 16, textAlign: "center" }}>
-        尚無家人分享書籍
-      </p>
-    </div>
-  );
-}
-
-function PersonalShelf() {
-  return (
-    <div>
-      <p style={{ color: "#94a3b8", textAlign: "center" }}>
-        載入個人書單中...
-      </p>
-    </div>
-  );
-}
-
-function FamilySettings({
-  familyId,
-  onLeave,
-}: {
-  familyId: string;
-  onLeave: () => void;
-}) {
-  return (
-    <div>
-      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
-        家庭設定
-      </h3>
-      <div
-        style={{
-          padding: 12,
-          background: "#f8fafc",
-          borderRadius: 8,
-          marginBottom: 16,
-          fontSize: 14,
-        }}
-      >
-        <div style={{ color: "#64748b", marginBottom: 4 }}>同步碼</div>
-        <code style={{ fontSize: 13 }}>{familyId}</code>
-      </div>
-      <button
-        onClick={onLeave}
-        style={{
-          width: "100%",
-          padding: 12,
-          border: "1px solid #ef4444",
-          borderRadius: 8,
-          background: "transparent",
-          color: "#ef4444",
-          fontWeight: 600,
-          cursor: "pointer",
-        }}
-      >
-        離開家庭
-      </button>
-    </div>
-  );
-}

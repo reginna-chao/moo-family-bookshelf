@@ -16,6 +16,12 @@
       "css": ["assets/style.css"]
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["chunks/*", "src/*"],
+      "matches": ["https://readmoo.com/*", "https://*.readmoo.com/*"]
+    }
+  ],
   "icons": {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
