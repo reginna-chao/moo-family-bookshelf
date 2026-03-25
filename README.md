@@ -42,12 +42,21 @@
 pnpm install
 ```
 
+### 開發模式 vs 正式環境
+
+| 模式 | 指令 | API 端點 | KV |
+|------|------|---------|-----|
+| 開發 | `cd worker && pnpm dev` + `cd extension && pnpm dev` | `localhost:8787` | preview-kv |
+| 正式 | `cd extension && pnpm build` | prod Worker | prod-kv |
+
+開發時請同時在兩個 terminal 分別啟動 Worker 和 Extension，資料會寫入 preview-kv，不會污染正式環境。
+
 ### Extension 開發
 
 ```bash
 cd extension
-pnpm dev        # 開發模式
-pnpm build      # 建置
+pnpm dev        # 開發模式（API 指向 localhost:8787）
+pnpm build      # 正式建置（API 指向 prod Worker）
 pnpm typecheck  # 型別檢查
 pnpm lint       # Lint
 pnpm test       # 測試
@@ -57,7 +66,7 @@ pnpm test       # 測試
 
 ```bash
 cd worker
-pnpm dev        # 本地開發 (Miniflare)
+pnpm dev        # 本地開發 (Miniflare + preview-kv)
 pnpm build      # 建置
 pnpm test       # 測試 (Vitest + Miniflare)
 ```
