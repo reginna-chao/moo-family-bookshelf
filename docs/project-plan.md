@@ -486,20 +486,23 @@ jobs:
 - [x] GitHub Pages 說明頁面（`site/index.html`）
 - [x] 自建後端部署教學（`worker/DEPLOY.md`）
 
-### Phase 1：MVP — 功能完善
+### Phase 1：MVP — 功能完善 ✅ 已完成
 
 > 前提：需先完成 GitHub repo 建立 + Cloudflare 環境設定
 
-- [ ] Content Script：實際讀墨書單爬取邏輯（解析頁面 DOM 取得書籍資料）
-- [ ] Dialog UI：個人書櫃管理功能完善（從爬取結果載入書單、逐本開關、儲存變更）
-- [ ] Dialog UI：家庭開放書櫃功能完善（從 API 載入聚合書單、按成員分組顯示）
-- [ ] Dialog UI：家庭同步碼建立/加入（串接 API、同步碼顯示/複製/輸入）
-- [ ] Dialog UI：家庭設定頁完善（成員列表、離開家庭、同步碼再次查看）
-- [ ] E2EE 整合：個人書單加密後儲存 / 聚合書單解密後顯示
-- [ ] 儲存變更後才同步機制（dirty state tracking + 明確儲存按鈕）
-- [ ] 新書預設不開放邏輯（合併爬取結果 vs 已儲存設定）
-- [ ] Cloudflare KV namespace 建立 + wrangler.toml 更新
-- [ ] Worker 部署至 Cloudflare（首次 `wrangler deploy`）
+- [x] Content Script：實際讀墨書單爬取邏輯（解析頁面 DOM 取得書籍資料）
+- [x] Dialog UI：個人書櫃管理功能完善（從爬取結果載入書單、逐本開關、儲存變更）
+- [x] Dialog UI：家庭開放書櫃功能完善（從 API 載入聚合書單、按成員分組顯示）
+- [x] Dialog UI：家庭同步碼建立/加入（串接 API、同步碼顯示/複製/輸入）
+- [x] Dialog UI：家庭設定頁完善（成員列表、離開家庭、同步碼再次查看）
+- [x] E2EE 整合：個人書單加密後儲存 / 聚合書單解密後顯示
+- [x] 儲存變更後才同步機制（dirty state tracking + 明確儲存按鈕）
+- [x] 新書預設不開放邏輯（合併爬取結果 vs 已儲存設定）
+- [x] Cloudflare KV namespace 建立 + wrangler.toml 更新
+- [x] Worker 部署至 Cloudflare（首次 `wrangler deploy`）
+- [x] 使用者識別：SHA-256(email) 作為 deterministic userId
+- [x] 借入書籍過濾（不爬取他人借出的書）
+- [x] 開發/正式環境分離（Vite env vars + preview-kv / prod-kv）
 
 ### Phase 2：安全性強化與測試補齊
 

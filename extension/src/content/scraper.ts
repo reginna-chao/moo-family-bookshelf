@@ -82,7 +82,17 @@ function extractCoverUrl(item: Element): string {
  * Scrape a single library item. Returns null if essential data
  * (title) is missing.
  */
+/**
+ * Check if the book is borrowed (借入) — these belong to someone else
+ * and should not be included in the user's personal bookshelf.
+ */
+function isBorrowed(item: Element): boolean {
+  return item.querySelector('[type="borrowed"]') !== null;
+}
+
 async function scrapeItem(item: Element): Promise<ScrapedBook | null> {
+  if (isBorrowed(item)) return null;
+
   const title = extractTitle(item);
   if (!title) return null;
 
