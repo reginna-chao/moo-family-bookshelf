@@ -22,7 +22,19 @@ export async function exportKey(key: CryptoKey): Promise<string> {
 
 export async function importKey(encoded: string): Promise<CryptoKey> {
   const raw = base62ToBuffer(encoded);
-  return crypto.subtle.importKey("raw", raw, { name: ALGORITHM }, true, [
+  const rawBytes = new Uint8Array(raw);
+  const keyLengthBytes = KEY_LENGTH / 8;
+  
+  // Base62 encoding (via BigInt) drops leading zeros. Pad it back to exactly 32 bytes.
+  const paddedBytes = new Uint8Array(keyLengthBytes);
+  const offset = keyLengthBytes - rawBytes.length;
+  if (offset < 0) {
+    throw new Error("Encoded key is longer than expected");
+  }
+  paddedBytes.set(rawBytes, offset);
+
+  // Pass Uint8Array instead of ArrayBuffer to avoid JSDOM cross-realm instanceof issues
+  return crypto.subtle.importKey("raw", paddedBytes, { name: ALGORITHM }, true, [
     "encrypt",
     "decrypt",
   ]);

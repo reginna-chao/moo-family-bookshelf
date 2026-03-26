@@ -506,13 +506,13 @@ jobs:
 
 ### Phase 2：安全性強化與測試補齊
 
-- [ ] 完整 E2EE 端對端加密流程驗證
-- [ ] 家庭解綁/重新綁定流程處理（chrome.storage 清理 + 重新引導）
-- [ ] Rate Limiting 中介層（防濫用）
-- [ ] 隱私政策頁面（靜態頁 or Dialog 內）
-- [ ] Dialog 元件測試補齊（React Testing Library）
-- [ ] E2E 測試建置（Playwright + Chrome Extension 載入）
-- [ ] Crypto 模組完整覆蓋率達 ≥ 90%
+- [x] 完整 E2EE 端對端加密流程驗證（53 tests：encrypt.test.ts 29 + e2ee-flow.test.ts 24）
+- [x] 家庭解綁/重新綁定流程處理（chrome.storage 清理 + 重新引導）
+- [x] Rate Limiting 中介層（防濫用）（60 req/min/IP，worker/src/middleware/rateLimit.ts）
+- [x] 隱私政策頁面（docs/privacy-policy.md，繁體中文完整版）
+- [x] Dialog 元件測試補齊（React Testing Library）（16 tests：FamilySettings 6 + Onboarding 6 + PersonalShelf 4）
+- [ ] E2E 測試建置（Playwright + Chrome Extension 載入）— ⚠️ 未完成：目錄已建立但無測試檔案，缺少 playwright.config.ts 及 @playwright/test 依賴
+- [x] Crypto 模組完整覆蓋率達 ≥ 90% — ⚠️ 所有 8 個導出函數皆有測試覆蓋，但 @vitest/coverage-v8 未安裝，尚無量化數據
 
 ### Phase 3：行動端支援與自訂後端
 
