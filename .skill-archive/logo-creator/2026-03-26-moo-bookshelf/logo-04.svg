@@ -1,0 +1,29 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>MooFamily Bookshelf — Window Bookshelf</title>
+  <!-- Concept: A cozy window/arch frame with books on a shelf, warm library feel -->
+  <rect width="512" height="512" rx="64" fill="#F5EDE3"/>
+  <!-- Arch window frame -->
+  <path d="M156,380 L156,200 Q156,120 256,120 Q356,120 356,200 L356,380Z" fill="#6B4C3B"/>
+  <!-- Inner window (lighter) -->
+  <path d="M172,380 L172,208 Q172,138 256,138 Q340,138 340,208 L340,380Z" fill="#FAF6F1"/>
+  <!-- Shelf -->
+  <rect x="172" y="290" width="168" height="10" fill="#A67B5B"/>
+  <!-- Books on shelf -->
+  <rect x="185" y="215" width="22" height="75" rx="2" fill="#D4836A"/>
+  <rect x="212" y="230" width="18" height="60" rx="2" fill="#C4956A"/>
+  <rect x="234" y="220" width="20" height="70" rx="2" fill="#D4A574"/>
+  <rect x="258" y="225" width="24" height="65" rx="2" fill="#B8906A"/>
+  <rect x="286" y="232" width="18" height="58" rx="2" fill="#E8C9A8"/>
+  <rect x="308" y="218" width="20" height="72" rx="2" fill="#C4956A"/>
+  <!-- Books below shelf -->
+  <rect x="185" y="310" width="26" height="70" rx="2" fill="#E8C9A8"/>
+  <rect x="215" y="320" width="20" height="60" rx="2" fill="#D4836A"/>
+  <rect x="239" y="305" width="22" height="75" rx="2" fill="#B8906A"/>
+  <rect x="265" y="315" width="20" height="65" rx="2" fill="#D4A574"/>
+  <rect x="290" y="310" width="24" height="70" rx="2" fill="#C4956A"/>
+  <!-- Warm glow from window -->
+  <ellipse cx="256" cy="180" rx="45" ry="30" fill="#F5D4A0" opacity="0.3"/>
+  <!-- Text below -->
+  <text x="256" y="440" text-anchor="middle" font-family="sans-serif" font-size="32" font-weight="600" fill="#6B4C3B" letter-spacing="1">MooFamily</text>
+  <text x="256" y="470" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="400" fill="#A68B7B" letter-spacing="3">BOOKSHELF</text>
+</svg>

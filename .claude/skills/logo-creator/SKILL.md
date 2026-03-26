@@ -6,7 +6,7 @@ description: >
   TRIGGER when: user wants to create a logo, favicon, app icon, touch icon, brand mark, mascot, emblem, or design a logo.
   DO NOT TRIGGER when: user wants UI icons for interface (use icon-creator), banners/headers (use banner-creator), or OG images (use banner-creator).
 argument-hint: <project name or brand description>
-allowed-tools: Read, Write, Edit, Bash(open *), Bash(start *), Bash(ls *), Bash(mkdir *), Bash(cp *), Glob, Grep
+allowed-tools: Read, Write, Edit, Bash(open *), Bash(start *), Bash(ls *), Bash(mkdir *), Bash(cp *), Bash(npx sharp-cli *), Bash(node *), Glob, Grep
 ---
 
 # Logo Creator Skill
@@ -291,8 +291,8 @@ cp logo-{chosen}.svg final/logo.svg
 
 | Asset | File | Spec |
 |-------|------|------|
-| Favicon SVG | `final/favicon.svg` | Simplified, works at 16px |
-| Maskable icon | `final/logo-maskable.svg` | Content in inner 80% circle, solid bg |
+| Favicon SVG | `final/favicon.svg` | Simplified, icon-only (no text), works at 16px |
+| Maskable icon | `final/logo-maskable.svg` | Icon-only (no text), content in inner 80% circle, solid bg |
 | Adaptive foreground | `final/logo-foreground.svg` | 108×108dp viewBox, content in 66dp safe zone |
 | Adaptive background | `final/logo-background.svg` | 108×108dp viewBox, background only |
 
@@ -326,6 +326,30 @@ cp logo-{chosen}.svg final/logo.svg
   }
 }
 ```
+
+### Step 5e: SVG → PNG Conversion
+
+Automatically convert SVG assets to PNG for platforms that require raster images.
+Do NOT ask the user — just run the conversion as part of the finalize step.
+
+Use `npx sharp-cli` (available via npx, no install needed):
+
+```bash
+# Extension icons (from favicon.svg)
+npx sharp-cli -i final/favicon.svg -o final/icon-16.png -- resize 16 16
+npx sharp-cli -i final/favicon.svg -o final/icon-48.png -- resize 48 48
+npx sharp-cli -i final/favicon.svg -o final/icon-128.png -- resize 128 128
+
+# Apple Touch Icon (180×180)
+npx sharp-cli -i final/favicon.svg -o final/apple-touch-icon.png -- resize 180 180
+
+# PWA icons
+npx sharp-cli -i final/favicon.svg -o final/icon-192.png -- resize 192 192
+npx sharp-cli -i final/favicon.svg -o final/icon-512.png -- resize 512 512
+npx sharp-cli -i final/logo-maskable.svg -o final/icon-maskable-512.png -- resize 512 512
+```
+
+If `sharp-cli` is not available, write a small Node script using `sharp` or `@resvg/resvg-js`.
 
 ### Step 6: Deliver Summary
 
@@ -429,7 +453,8 @@ Reference: [Google Play Icon Design Specifications](https://developer.android.co
 | Size | 180 × 180 px |
 | Format | PNG (no alpha for home screen) |
 | Corner radius | ~17.5% — **applied by iOS, do NOT include** |
-| Padding | Keep content within inner 80% (~144×144 centered) |
+| Padding | Keep content within inner ~75% (~135×135 centered) |
+| Text | **No text** — icon-only, no brand name or labels |
 
 ### Favicon
 
@@ -440,6 +465,7 @@ Reference: [Google Play Icon Design Specifications](https://developer.android.co
 | PNG 32×32 | 32×32 | Fallback |
 
 **Favicon SVG should be simplified:**
+- **No text** — favicon and touch icon must be icon-only, never include brand name or text labels
 - Remove fine details that disappear at 16px
 - Use bold strokes and shapes
 - Test readability at 16×16 display size

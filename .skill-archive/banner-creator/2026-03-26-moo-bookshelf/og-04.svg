@@ -1,0 +1,46 @@
+<svg viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>MooFamily Bookshelf — OG Image</title>
+  <!-- Layout: Full-width arch window as background frame, text centered inside -->
+  <rect width="1200" height="630" fill="#6B4C3B"/>
+  <!-- Large arch window filling most of the canvas -->
+  <path d="M120,600 L120,280 Q120,60 600,60 Q1080,60 1080,280 L1080,600Z" fill="#FBF7F2"/>
+  <!-- Warm glow at top of arch -->
+  <ellipse cx="600" cy="180" rx="200" ry="80" fill="#F5D4A0" opacity="0.2"/>
+  <!-- Centered text inside the arch -->
+  <text x="600" y="260" text-anchor="middle" font-family="sans-serif" font-size="68" font-weight="700" fill="#6B4C3B">MooFamily Bookshelf</text>
+  <text x="600" y="315" text-anchor="middle" font-family="sans-serif" font-size="28" font-weight="400" fill="#A68B7B">與家人分享你的書架</text>
+  <!-- Accent line -->
+  <rect x="560" y="340" width="80" height="4" rx="2" fill="#D4836A"/>
+  <!-- Shelf spanning inside the arch -->
+  <rect x="180" y="480" width="840" height="12" rx="2" fill="#A67B5B"/>
+  <!-- Books on shelf inside arch -->
+  <rect x="210" y="385" width="32" height="95" rx="4" fill="#D4836A"/>
+  <rect x="248" y="395" width="28" height="85" rx="4" fill="#C4956A"/>
+  <rect x="282" y="382" width="30" height="98" rx="4" fill="#D4A574"/>
+  <rect x="318" y="392" width="26" height="88" rx="4" fill="#B8906A"/>
+  <rect x="350" y="385" width="32" height="95" rx="4" fill="#E8C9A8"/>
+  <rect x="388" y="398" width="28" height="82" rx="4" fill="#C4956A"/>
+  <rect x="422" y="380" width="30" height="100" rx="4" fill="#D4836A"/>
+  <!-- Plant -->
+  <g transform="translate(470, 475)">
+    <rect x="-7" y="-10" width="14" height="10" rx="3" fill="#A67B5B"/>
+    <ellipse cx="0" cy="-18" rx="10" ry="9" fill="#8B9E6B" opacity="0.8"/>
+    <ellipse cx="-7" cy="-23" rx="7" ry="6" fill="#8B9E6B" opacity="0.6"/>
+    <ellipse cx="7" cy="-22" rx="7" ry="6" fill="#9BAF7B" opacity="0.7"/>
+  </g>
+  <!-- More books -->
+  <rect x="498" y="388" width="28" height="92" rx="4" fill="#D4A574"/>
+  <rect x="532" y="380" width="32" height="100" rx="4" fill="#B8906A"/>
+  <rect x="570" y="392" width="26" height="88" rx="4" fill="#E8C9A8"/>
+  <rect x="602" y="385" width="30" height="95" rx="4" fill="#D4836A"/>
+  <rect x="638" y="395" width="28" height="85" rx="4" fill="#C4956A"/>
+  <rect x="672" y="382" width="32" height="98" rx="4" fill="#D4A574"/>
+  <rect x="710" y="390" width="26" height="90" rx="4" fill="#B8906A"/>
+  <rect x="742" y="378" width="30" height="102" rx="4" fill="#E8C9A8"/>
+  <rect x="778" y="392" width="28" height="88" rx="4" fill="#C4956A"/>
+  <rect x="812" y="385" width="32" height="95" rx="4" fill="#D4836A"/>
+  <rect x="850" y="395" width="28" height="85" rx="4" fill="#D4A574"/>
+  <rect x="884" y="380" width="30" height="100" rx="4" fill="#B8906A"/>
+  <rect x="920" y="390" width="26" height="90" rx="4" fill="#E8C9A8"/>
+  <rect x="952" y="385" width="32" height="95" rx="4" fill="#C4956A"/>
+</svg>

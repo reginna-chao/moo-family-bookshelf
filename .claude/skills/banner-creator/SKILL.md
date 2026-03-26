@@ -6,7 +6,7 @@ description: >
   TRIGGER when: user wants to create a banner, header, hero image, cover image, GitHub banner, Twitter header, Open Graph image, OG image, or README banner.
   DO NOT TRIGGER when: user wants logos/app icons (use logo-creator), UI icons (use icon-creator), or is editing existing design files.
 argument-hint: <project name or banner description>
-allowed-tools: Read, Write, Edit, Bash(open *), Bash(start *), Bash(ls *), Bash(mkdir *), Bash(cp *), Glob, Grep
+allowed-tools: Read, Write, Edit, Bash(open *), Bash(start *), Bash(ls *), Bash(mkdir *), Bash(cp *), Bash(npx sharp-cli *), Bash(node *), Glob, Grep
 ---
 
 # Banner Creator Skill
@@ -312,11 +312,24 @@ cp banner-{chosen}.svg final/og-image.svg
 <meta name="twitter:image" content="https://{domain}/og-image.png">
 ```
 
-**5f. Copy to project (if requested):**
+**5f. SVG → PNG Conversion:**
+
+Automatically convert OG image SVG to PNG for social media crawlers.
+Do NOT ask the user — just run the conversion as part of the finalize step.
+
+```bash
+# OG image (social crawlers require PNG/JPG, not SVG)
+npx sharp-cli -i final/og-image.svg -o final/og-image.png -- resize 1200 630
+```
+
+If `sharp-cli` is not available, write a small Node script using `sharp` or `@resvg/resvg-js`.
+
+**5g. Copy to project (if requested):**
 ```bash
 mkdir -p assets
 cp final/banner.svg assets/banner.svg
 cp final/og-image.svg assets/og-image.svg
+cp final/og-image.png assets/og-image.png
 ```
 
 ### Step 6: Deliver Summary

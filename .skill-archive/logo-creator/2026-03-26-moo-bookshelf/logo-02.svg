@@ -1,0 +1,28 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>MooFamily Bookshelf — Stacked Books</title>
+  <!-- Concept: Minimalist stacked books in warm tones, representing a shared shelf -->
+  <rect width="512" height="512" rx="64" fill="#FAF6F1"/>
+  <g transform="translate(256, 230)">
+    <!-- Bottom book (widest) -->
+    <rect x="-100" y="20" width="200" height="35" rx="4" fill="#C4956A"/>
+    <rect x="-100" y="20" width="12" height="35" rx="2" fill="#A67B5B"/>
+    <!-- Middle book -->
+    <rect x="-80" y="-20" width="160" height="35" rx="4" fill="#D4A574"/>
+    <rect x="-80" y="-20" width="12" height="35" rx="2" fill="#B8906A"/>
+    <!-- Top book (narrowest) -->
+    <rect x="-70" y="-60" width="140" height="35" rx="4" fill="#E8C9A8"/>
+    <rect x="-70" y="-60" width="12" height="35" rx="2" fill="#C4A882"/>
+    <!-- Bookmark ribbon on top book -->
+    <path d="M40,-60 L40,-85 L48,-75 L56,-85 L56,-60" fill="#D4836A"/>
+    <!-- Small people silhouettes on top -->
+    <circle cx="-20" cy="-82" r="8" fill="#8B6F5E"/>
+    <path d="M-20,-73 Q-20,-60 -20,-56 Q-28,-56 -28,-64 Q-28,-73 -20,-73Z" fill="#8B6F5E"/>
+    <path d="M-20,-73 Q-20,-60 -20,-56 Q-12,-56 -12,-64 Q-12,-73 -20,-73Z" fill="#8B6F5E"/>
+    <circle cx="10" cy="-78" r="7" fill="#A68B7B"/>
+    <path d="M10,-70 Q10,-58 10,-55 Q3,-55 3,-62 Q3,-70 10,-70Z" fill="#A68B7B"/>
+    <path d="M10,-70 Q10,-58 10,-55 Q17,-55 17,-62 Q17,-70 10,-70Z" fill="#A68B7B"/>
+  </g>
+  <!-- Text -->
+  <text x="256" y="370" text-anchor="middle" font-family="sans-serif" font-size="36" font-weight="600" fill="#6B4C3B" letter-spacing="2">MooFamily</text>
+  <text x="256" y="405" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="400" fill="#A68B7B" letter-spacing="4">BOOKSHELF</text>
+</svg>

@@ -1,0 +1,37 @@
+<svg viewBox="0 0 108 108" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>MooFamily Bookshelf — Adaptive Icon Foreground</title>
+  <!-- Adaptive icon foreground layer (108×108dp, safe zone: 21..87) -->
+  <g transform="translate(54, 54) scale(0.12)">
+    <!-- Arch window frame -->
+    <path d="M-148,176 L-148,-34 Q-148,-164 0,-164 Q148,-164 148,-34 L148,176Z" fill="#6B4C3B"/>
+    <!-- Inner window -->
+    <path d="M-126,176 L-126,-24 Q-126,-140 0,-140 Q126,-140 126,-24 L126,176Z" fill="#FBF7F2"/>
+    <!-- Warm glow -->
+    <ellipse cx="0" cy="-79" rx="65" ry="40" fill="#F5D4A0" opacity="0.25"/>
+    <!-- Upper shelf -->
+    <rect x="-126" y="26" width="252" height="12" rx="1" fill="#A67B5B"/>
+    <!-- Books upper -->
+    <rect x="-108" y="-69" width="30" height="95" rx="4" fill="#D4836A"/>
+    <rect x="-73" y="-49" width="26" height="75" rx="4" fill="#C4956A"/>
+    <rect x="-42" y="-62" width="28" height="88" rx="4" fill="#D4A574"/>
+    <rect x="-8" y="-54" width="32" height="80" rx="4" fill="#B8906A"/>
+    <rect x="30" y="-64" width="26" height="90" rx="4" fill="#E8C9A8"/>
+    <rect x="61" y="-49" width="28" height="75" rx="4" fill="#C4956A"/>
+    <!-- Plant -->
+    <g transform="translate(102, 21)">
+      <rect x="-7" y="-10" width="14" height="10" rx="3" fill="#A67B5B"/>
+      <ellipse cx="0" cy="-18" rx="10" ry="9" fill="#8B9E6B" opacity="0.8"/>
+      <ellipse cx="-7" cy="-23" rx="7" ry="6" fill="#8B9E6B" opacity="0.6"/>
+      <ellipse cx="7" cy="-22" rx="7" ry="6" fill="#9BAF7B" opacity="0.7"/>
+    </g>
+    <!-- Lower shelf -->
+    <rect x="-126" y="146" width="252" height="12" rx="1" fill="#A67B5B"/>
+    <!-- Books lower -->
+    <rect x="-108" y="48" width="32" height="98" rx="4" fill="#E8C9A8"/>
+    <rect x="-71" y="61" width="28" height="85" rx="4" fill="#D4836A"/>
+    <rect x="-38" y="44" width="30" height="102" rx="4" fill="#B8906A"/>
+    <rect x="-2" y="56" width="26" height="90" rx="4" fill="#D4A574"/>
+    <rect x="29" y="48" width="30" height="98" rx="4" fill="#C4956A"/>
+    <rect x="64" y="64" width="26" height="82" rx="4" fill="#E8C9A8"/>
+  </g>
+</svg>

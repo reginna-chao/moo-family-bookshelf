@@ -1,0 +1,21 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>MooFamily Bookshelf — Book Monogram M</title>
+  <!-- Concept: Letter M formed by two open books leaning against each other -->
+  <rect width="512" height="512" rx="64" fill="#6B4C3B"/>
+  <g transform="translate(256, 256)">
+    <!-- Left book forming left stroke of M -->
+    <path d="M-95,80 L-95,-50 Q-95,-65 -80,-70 L-20,-90 Q-10,-93 -10,-80 L-10,60 Q-10,70 -20,73 L-80,90 Q-95,95 -95,80Z" fill="#D4A574"/>
+    <!-- Right book forming right stroke of M -->
+    <path d="M95,80 L95,-50 Q95,-65 80,-70 L20,-90 Q10,-93 10,-80 L10,60 Q10,70 20,73 L80,90 Q95,95 95,80Z" fill="#C4956A"/>
+    <!-- Center V shape connecting the M -->
+    <path d="M-10,-80 L0,-55 L10,-80" fill="none" stroke="#E8C9A8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Page lines on left book -->
+    <line x1="-75" y1="-30" x2="-25" y2="-45" stroke="#E8D5C0" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <line x1="-75" y1="-5" x2="-25" y2="-20" stroke="#E8D5C0" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <line x1="-75" y1="20" x2="-25" y2="5" stroke="#E8D5C0" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <!-- Page lines on right book -->
+    <line x1="75" y1="-30" x2="25" y2="-45" stroke="#E8D5C0" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <line x1="75" y1="-5" x2="25" y2="-20" stroke="#E8D5C0" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <line x1="75" y1="20" x2="25" y2="5" stroke="#E8D5C0" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+  </g>
+</svg>
