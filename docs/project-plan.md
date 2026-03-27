@@ -561,51 +561,51 @@ jobs:
 - [ ] E2E 測試建置（Playwright + Chrome Extension 載入）— ⚠️ 未完成：目錄已建立但無測試檔案，缺少 playwright.config.ts 及 @playwright/test 依賴
 - [x] Crypto 模組完整覆蓋率達 ≥ 90% — ⚠️ 所有 8 個導出函數皆有測試覆蓋，但 @vitest/coverage-v8 未安裝，尚無量化數據
 
-### Phase 2.5：桌面版 UX 改善（v1.0 前必要）
+### Phase 2.5：桌面版 UX 改善（v1.0 前必要）✅ 已完成
 
 > 在進入 PWA 行動端之前，先完善桌面版 Chrome Extension 的使用體驗。
 
 #### 初次使用流程簡化
-- [ ] 「開始使用」一鍵引導（取代多步驟 Onboarding）
-- [ ] Loading 遮罩 UI（半透明背景 + 進度提示文字）
-- [ ] 自動導航抓取帳號資料（`#/me` 頁面 `.me-nickname` + email）
-- [ ] 自動導航到書櫃頁面同步書單（`#/library`）
-- [ ] 完成後自動導航回原始頁面
+- [x] 「開始使用」一鍵引導（取代多步驟 Onboarding）— `useAutoSetup` hook + `LoadingOverlay` 元件
+- [x] Loading 遮罩 UI（半透明背景 + 進度提示文字）
+- [x] 自動導航抓取帳號資料（`#/me` 頁面 `.me-nickname` + email）
+- [x] 自動導航到書櫃頁面同步書單（`#/library`）
+- [x] 完成後自動導航回原始頁面
 
 #### 多裝置同步
-- [ ] `chrome.storage.sync` 支援（自動同步 familyId + encryptionKey）
-- [ ] 保留 Sync Code 作為備用恢復方式
+- [x] `chrome.storage.sync` 支援（自動同步 familyId + encryptionKey）— 寫入 sync + local，讀取 sync 優先
+- [x] 保留 Sync Code 作為備用恢復方式
 
 #### 顯示名稱
-- [ ] 可編輯顯示名稱（Settings 頁面）
-- [ ] 初次使用時預設抓取讀墨使用者名稱（`.me-nickname`）
-- [ ] UI 標註「此名稱僅用於家庭書櫃，不影響讀墨帳號」
+- [x] 可編輯顯示名稱（Settings 頁面）— `DisplayNameEditor` + `useDisplayName` hook
+- [x] 初次使用時預設抓取讀墨使用者名稱（`.me-nickname`）
+- [x] UI 標註「此名稱僅用於家庭書櫃，不影響讀墨帳號」
 
 #### 家庭管理
-- [ ] 家庭人數上限 2 人（後端驗證 + 前端提示）
-- [ ] Owner 角色（建立者 = 管理者）
-- [ ] Owner 可移除其他成員
-- [ ] Owner 離開前須轉移管理權
+- [x] 家庭人數上限 2 人（後端驗證 + 前端提示）— 後端已於 Phase 2 完成
+- [x] Owner 角色（建立者 = 管理者）— `MemberList` 元件顯示 Owner 標記
+- [x] Owner 可移除其他成員 — `removeMember` API + 確認對話框
+- [x] Owner 離開前須轉移管理權 — `transferOwnership` API + 確認對話框
 
 #### 搜尋功能（純前端，不呼叫 API）
-- [ ] 家庭書櫃：搜尋書名 + 作者（即時過濾，debounce 300ms）
-- [ ] 個人書櫃：搜尋書名 + 作者（即時過濾，debounce 300ms）
+- [x] 家庭書櫃：搜尋書名 + 作者（即時過濾，debounce 300ms）— `SearchBar` + `useSearch` hook
+- [x] 個人書櫃：搜尋書名 + 作者（即時過濾，debounce 300ms）
 
 #### 篩選功能
-- [ ] 家庭書櫃：Dropdown 篩選成員（預設顯示其他成員）
-- [ ] 個人書櫃：Filter 切換 全部/開放/不開放
+- [x] 家庭書櫃：Dropdown 篩選成員（預設顯示其他成員）— `MemberDropdown` 元件
+- [x] 個人書櫃：Filter 切換 全部/開放/不開放 — `StatusFilterBar` 元件
 
 #### Dialog UI 補充
-- [ ] Footer 標註「本功能由第三方開發，非 Readmoo 官方提供」
-- [ ] Footer 顯示版本號（`v0.x.x`）
-- [ ] 問題回報連結（GitHub / Plurk / Discord icons）— JSON 配置檔管理
+- [x] Footer 標註「本功能由第三方開發，非 Readmoo 官方提供」— `DialogFooter` 元件
+- [x] Footer 顯示版本號（`v0.x.x`）
+- [x] 問題回報連結（GitHub / Plurk / Discord icons）— `config/links.ts` 配置檔管理
 
 #### 版本管理
-- [ ] 版本格式：Semantic Versioning（MAJOR.MINOR.PATCH）
-- [ ] Single Source of Truth：`extension/package.json` 的 `version` 欄位
-- [ ] Build 時注入 `__APP_VERSION__` 環境變數（Vite `define`）
-- [ ] `manifest.json` 的 `version` 在 build script 中從 `package.json` 同步
-- [ ] Dialog footer 顯示版本號
+- [x] 版本格式：Semantic Versioning（MAJOR.MINOR.PATCH）
+- [x] Single Source of Truth：`extension/package.json` 的 `version` 欄位
+- [x] Build 時注入 `__APP_VERSION__` 環境變數（Vite `define`）
+- [x] `manifest.json` 的 `version` 在 build script 中從 `package.json` 同步 — `scripts/sync-version.ts`
+- [x] Dialog footer 顯示版本號
 
 ### Phase 3：行動端支援與自訂後端
 
