@@ -9,3 +9,7 @@ compatibility_date = "2024-12-30"
 binding = "KV"
 id = "placeholder-kv-id"
 preview_id = "placeholder-preview-id"
+
+# DEV_MODE is NOT set in production.
+# For local dev, create .dev.vars with DEV_MODE=1 to enable localhost CORS.
+# See: https://developers.cloudflare.com/workers/configuration/environment-variables/

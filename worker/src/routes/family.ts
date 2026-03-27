@@ -222,16 +222,21 @@ familyRoutes.get("/:id/members", async (c) => {
     );
   }
 
-  // Verify caller is a member of this family
+  // Verify caller is authenticated and a member of this family
   const userId = getAuthenticatedUserId(c);
-  if (userId) {
-    const memberFamily = await c.env.KV.get(kvKeys.member(userId));
-    if (memberFamily !== familyId) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Not a family member" } },
-        403,
-      );
-    }
+  if (!userId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
+  const memberFamily = await c.env.KV.get(kvKeys.member(userId));
+  if (memberFamily !== familyId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "Not a family member" } },
+      403,
+    );
   }
 
   const raw = await c.env.KV.get<RawFamilyRecord>(
@@ -262,7 +267,15 @@ familyRoutes.put("/:id/transfer", async (c) => {
     );
   }
 
-  let body: { userId: string; newOwnerId: string } | null;
+  const callerUserId = getAuthenticatedUserId(c);
+  if (!callerUserId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
+  let body: { newOwnerId: string; userId?: string } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -272,25 +285,17 @@ familyRoutes.put("/:id/transfer", async (c) => {
     );
   }
 
-  if (!body?.userId || !body?.newOwnerId) {
+  if (!body?.newOwnerId) {
     return c.json(
-      { error: { code: "MISSING_FIELDS", message: "userId and newOwnerId are required" } },
+      { error: { code: "MISSING_FIELDS", message: "newOwnerId is required" } },
       400,
     );
   }
 
-  if (!isValidUserId(body.userId) || !isValidUserId(body.newOwnerId)) {
+  if (!isValidUserId(body.newOwnerId)) {
     return c.json(
       { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
       400,
-    );
-  }
-
-  const callerUserId = getAuthenticatedUserId(c);
-  if (!callerUserId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
     );
   }
 
@@ -315,7 +320,8 @@ familyRoutes.put("/:id/transfer", async (c) => {
     );
   }
 
-  if (body.newOwnerId === body.userId) {
+  // Use authenticated caller ID, not body.userId (which is kept for backwards compat)
+  if (body.newOwnerId === callerUserId) {
     return c.json(
       { error: { code: "SAME_OWNER", message: "不能轉移給自己" } },
       400,

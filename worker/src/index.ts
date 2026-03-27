@@ -8,23 +8,25 @@ import { bookshelfRoutes } from "./routes/bookshelf";
 
 export interface Env {
   KV: KVNamespace;
+  DEV_MODE?: string;
 }
 
 /** Max request body size: 256KB */
 const MAX_BODY_SIZE = 262144;
 
 /** Check if the origin is allowed for CORS */
-export function isAllowedOrigin(origin: string): boolean {
+export function isAllowedOrigin(origin: string, devMode?: boolean): boolean {
   // Readmoo domains (exact + subdomains)
   if (origin === "https://readmoo.com") return true;
   if (origin === "https://read.readmoo.com") return true;
   if (/^https:\/\/[a-zA-Z0-9-]+\.readmoo\.com$/.test(origin)) return true;
 
-  // PWA on Cloudflare Pages
+  // PWA on Cloudflare Pages (production + preview deploys)
   if (origin === "https://moo-family-bookshelf-pwa.pages.dev") return true;
+  if (/^https:\/\/[a-z0-9]+\.moo-family-bookshelf-pwa\.pages\.dev$/.test(origin)) return true;
 
-  // localhost (any port, dev only)
-  if (/^http:\/\/localhost(:\d+)?$/.test(origin)) return true;
+  // localhost (any port, dev only — gated behind DEV_MODE binding)
+  if (devMode && /^http:\/\/localhost(:\d+)?$/.test(origin)) return true;
 
   // Chrome Extension
   if (/^chrome-extension:\/\/[a-z]{32}$/.test(origin)) return true;
@@ -47,15 +49,16 @@ app.use("*", async (c, next) => {
 });
 
 // CORS with dynamic origin validation
-app.use(
-  "*",
-  cors({
-    origin: (origin) => (isAllowedOrigin(origin) ? origin : ""),
+app.use("*", async (c, next) => {
+  const devMode = c.env.DEV_MODE === "1";
+  const middleware = cors({
+    origin: (origin) => (isAllowedOrigin(origin, devMode) ? origin : ""),
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
     maxAge: 86400,
-  }),
-);
+  });
+  return middleware(c, next);
+});
 
 // Request body size limit for API routes
 app.use("/api/*", async (c, next) => {
@@ -74,9 +77,10 @@ app.use("/api/*", async (c, next) => {
       );
     }
   } else if (c.req.method !== "GET" && c.req.method !== "DELETE") {
-    // No Content-Length: read the body to verify size
-    const body = await c.req.raw.clone().arrayBuffer();
-    if (body.byteLength > MAX_BODY_SIZE) {
+    // No Content-Length: read body to verify size.
+    // Cloudflare edge enforces its own body limit (~100MB) as a backstop.
+    const buf = await c.req.raw.clone().arrayBuffer();
+    if (buf.byteLength > MAX_BODY_SIZE) {
       return c.json(
         {
           error: {

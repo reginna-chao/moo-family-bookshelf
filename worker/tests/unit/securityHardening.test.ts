@@ -34,14 +34,12 @@ beforeEach(() => {
 // ===========================================================================
 
 describe("isAllowedOrigin", () => {
-  const allowed = [
+  const alwaysAllowed = [
     "https://read.readmoo.com",
     "https://readmoo.com",
     "https://store.readmoo.com",
     "https://moo-family-bookshelf-pwa.pages.dev",
-    "http://localhost",
-    "http://localhost:3000",
-    "http://localhost:5173",
+    "https://abc123.moo-family-bookshelf-pwa.pages.dev",
     "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
   ];
 
@@ -58,12 +56,24 @@ describe("isAllowedOrigin", () => {
     "null",
   ];
 
-  it.each(allowed)("should allow origin: %s", (origin) => {
+  it.each(alwaysAllowed)("should allow origin: %s", (origin) => {
     expect(isAllowedOrigin(origin)).toBe(true);
   });
 
   it.each(disallowed)("should deny origin: %s", (origin) => {
     expect(isAllowedOrigin(origin)).toBe(false);
+  });
+
+  it("should deny localhost in production (devMode=false)", () => {
+    expect(isAllowedOrigin("http://localhost")).toBe(false);
+    expect(isAllowedOrigin("http://localhost:3000")).toBe(false);
+    expect(isAllowedOrigin("http://localhost:5173")).toBe(false);
+  });
+
+  it("should allow localhost in dev mode (devMode=true)", () => {
+    expect(isAllowedOrigin("http://localhost", true)).toBe(true);
+    expect(isAllowedOrigin("http://localhost:3000", true)).toBe(true);
+    expect(isAllowedOrigin("http://localhost:5173", true)).toBe(true);
   });
 });
 

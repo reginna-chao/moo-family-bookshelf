@@ -17,16 +17,21 @@ bookshelfRoutes.get("/family/:id/bookshelf", async (c) => {
     );
   }
 
-  // Verify caller is a member of this family
+  // Verify caller is authenticated and a member of this family
   const userId = getAuthenticatedUserId(c);
-  if (userId) {
-    const memberFamily = await c.env.KV.get(kvKeys.member(userId));
-    if (memberFamily !== familyId) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Not a family member" } },
-        403,
-      );
-    }
+  if (!userId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
+  const memberFamily = await c.env.KV.get(kvKeys.member(userId));
+  if (memberFamily !== familyId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "Not a family member" } },
+      403,
+    );
   }
 
   // Get family members

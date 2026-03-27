@@ -411,6 +411,7 @@ describe("PUT /api/family/:id/transfer", () => {
   it("should return 400 when required fields are missing", async () => {
     const { familyId, token1 } = await createFamilyWithTwoMembers();
 
+    // Only userId, no newOwnerId → 400
     const res1 = await request(
       "PUT",
       `/api/family/${familyId}/transfer`,
@@ -419,21 +420,14 @@ describe("PUT /api/family/:id/transfer", () => {
     );
     expect(res1.status).toBe(400);
 
+    // Empty body → 400
     const res2 = await request(
-      "PUT",
-      `/api/family/${familyId}/transfer`,
-      { newOwnerId: "user2" },
-      token1,
-    );
-    expect(res2.status).toBe(400);
-
-    const res3 = await request(
       "PUT",
       `/api/family/${familyId}/transfer`,
       {},
       token1,
     );
-    expect(res3.status).toBe(400);
+    expect(res2.status).toBe(400);
   });
 
   it("should return 404 for non-existent family", async () => {

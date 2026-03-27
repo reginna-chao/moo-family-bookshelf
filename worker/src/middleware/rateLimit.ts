@@ -12,10 +12,8 @@ const TTL_SECONDS = 120;
 
 export const rateLimit = createMiddleware<{ Bindings: Env }>(
   async (c, next) => {
-    const ip =
-      c.req.header("cf-connecting-ip") ??
-      c.req.header("x-forwarded-for") ??
-      "unknown";
+    // Only trust cf-connecting-ip (set by Cloudflare edge, not spoofable)
+    const ip = c.req.header("cf-connecting-ip") ?? "unknown";
 
     const minuteBucket = Math.floor(Date.now() / 60000);
     const isPublic = isPublicRoute(c.req.method, c.req.path);
