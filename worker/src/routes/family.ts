@@ -1,13 +1,26 @@
+// TODO: Replace client-supplied userId with auth-middleware-verified identity
 import { Hono } from "hono";
 import type { Env } from "../index";
-import { kvKeys, type FamilyRecord } from "../kv/schema";
+import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord } from "../kv/schema";
+import { isValidUserId } from "../utils/validation";
+
+// Business logic is kept inline for simplicity; extract to services/ if handlers grow further
 
 export const familyRoutes = new Hono<{ Bindings: Env }>();
 
 // POST /api/family — create new family
 familyRoutes.post("/", async (c) => {
   const familyId = generateFamilyId();
-  const body = await c.req.json<{ userId: string }>().catch(() => null);
+
+  let body: { userId: string } | null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
+      400,
+    );
+  }
 
   if (!body?.userId) {
     return c.json(
@@ -16,14 +29,25 @@ familyRoutes.post("/", async (c) => {
     );
   }
 
-  const record: FamilyRecord = {
+  if (!isValidUserId(body.userId)) {
+    return c.json(
+      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  const record = {
     familyId,
+    ownerId: body.userId,
     members: [body.userId],
+    maxMembers: 2,
     createdAt: new Date().toISOString(),
   };
 
-  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
-  await c.env.KV.put(kvKeys.member(body.userId), familyId);
+  await Promise.all([
+    c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
+    c.env.KV.put(kvKeys.member(body.userId), familyId),
+  ]);
 
   return c.json({ data: record }, 201);
 });
@@ -31,7 +55,16 @@ familyRoutes.post("/", async (c) => {
 // POST /api/family/:id/join
 familyRoutes.post("/:id/join", async (c) => {
   const familyId = c.req.param("id");
-  const body = await c.req.json<{ userId: string }>().catch(() => null);
+
+  let body: { userId: string } | null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
+      400,
+    );
+  }
 
   if (!body?.userId) {
     return c.json(
@@ -40,76 +73,221 @@ familyRoutes.post("/:id/join", async (c) => {
     );
   }
 
-  const record = await c.env.KV.get<FamilyRecord>(
+  if (!isValidUserId(body.userId)) {
+    return c.json(
+      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  // Finding #5: Check if user already belongs to a different family
+  const existingFamily = await c.env.KV.get(kvKeys.member(body.userId));
+  if (existingFamily && existingFamily !== familyId) {
+    return c.json(
+      { error: { code: "ALREADY_IN_FAMILY", message: "請先離開目前的家庭再加入新家庭" } },
+      409,
+    );
+  }
+
+  const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),
     "json",
   );
 
-  if (!record) {
+  if (!raw) {
     return c.json(
       { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
       404,
     );
   }
 
+  const record = normalizeFamilyRecord(raw);
+
   if (!record.members.includes(body.userId)) {
+    // NOTE: No atomic compare-and-swap in KV. Concurrent joins could bypass
+    // maxMembers limit. Acceptable for 2-person families with low concurrency.
+    if (record.members.length >= record.maxMembers) {
+      return c.json(
+        { error: { code: "FAMILY_FULL", message: "家庭成員已達上限" } },
+        409,
+      );
+    }
     record.members.push(body.userId);
-    await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
   }
 
-  await c.env.KV.put(kvKeys.member(body.userId), familyId);
+  await Promise.all([
+    c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
+    c.env.KV.put(kvKeys.member(body.userId), familyId),
+  ]);
 
-  return c.json({ data: { ok: true } });
+  return c.json({ data: record });
 });
 
 // DELETE /api/family/:id/member/:uid
 familyRoutes.delete("/:id/member/:uid", async (c) => {
   const familyId = c.req.param("id");
-  const userId = c.req.param("uid");
+  const targetUserId = c.req.param("uid");
+  const callerId = c.req.query("userId");
 
-  const record = await c.env.KV.get<FamilyRecord>(
+  if (!callerId) {
+    return c.json(
+      { error: { code: "MISSING_USER_ID", message: "userId query parameter is required" } },
+      400,
+    );
+  }
+
+  if (!isValidUserId(callerId) || !isValidUserId(targetUserId)) {
+    return c.json(
+      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),
     "json",
   );
 
-  if (!record) {
+  if (!raw) {
     return c.json(
       { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
       404,
     );
   }
 
-  record.members = record.members.filter((m) => m !== userId);
-  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
-  await c.env.KV.delete(kvKeys.member(userId));
+  const record = normalizeFamilyRecord(raw);
 
-  return c.json({ data: { ok: true } });
+  // Owner cannot leave (must transfer first)
+  if (callerId === record.ownerId && targetUserId === callerId) {
+    return c.json(
+      { error: { code: "OWNER_CANNOT_LEAVE", message: "請先轉移管理權後再離開" } },
+      403,
+    );
+  }
+
+  // Non-owner cannot remove others
+  if (callerId !== record.ownerId && targetUserId !== callerId) {
+    return c.json(
+      { error: { code: "NOT_OWNER", message: "只有管理者可以移除其他成員" } },
+      403,
+    );
+  }
+
+  // Finding #6: Check if target is actually a member
+  if (!record.members.includes(targetUserId)) {
+    return c.json(
+      { error: { code: "MEMBER_NOT_FOUND", message: "目標使用者不是家庭成員" } },
+      404,
+    );
+  }
+
+  record.members = record.members.filter((m) => m !== targetUserId);
+
+  await Promise.all([
+    c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
+    c.env.KV.delete(kvKeys.member(targetUserId)),
+  ]);
+
+  return c.json({ data: record });
 });
 
 // GET /api/family/:id/members
 familyRoutes.get("/:id/members", async (c) => {
   const familyId = c.req.param("id");
-  const record = await c.env.KV.get<FamilyRecord>(
+  const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),
     "json",
   );
 
-  if (!record) {
+  if (!raw) {
     return c.json(
       { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
       404,
     );
   }
+
+  const record = normalizeFamilyRecord(raw);
+
+  return c.json({ data: record });
+});
+
+// PUT /api/family/:id/transfer — transfer ownership
+familyRoutes.put("/:id/transfer", async (c) => {
+  const familyId = c.req.param("id");
+
+  let body: { userId: string; newOwnerId: string } | null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
+      400,
+    );
+  }
+
+  if (!body?.userId || !body?.newOwnerId) {
+    return c.json(
+      { error: { code: "MISSING_FIELDS", message: "userId and newOwnerId are required" } },
+      400,
+    );
+  }
+
+  if (!isValidUserId(body.userId) || !isValidUserId(body.newOwnerId)) {
+    return c.json(
+      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  const raw = await c.env.KV.get<RawFamilyRecord>(
+    kvKeys.family(familyId),
+    "json",
+  );
+
+  if (!raw) {
+    return c.json(
+      { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
+      404,
+    );
+  }
+
+  const record = normalizeFamilyRecord(raw);
+
+  if (body.userId !== record.ownerId) {
+    return c.json(
+      { error: { code: "NOT_OWNER", message: "只有管理者可以轉移管理權" } },
+      403,
+    );
+  }
+
+  if (body.newOwnerId === body.userId) {
+    return c.json(
+      { error: { code: "SAME_OWNER", message: "不能轉移給自己" } },
+      400,
+    );
+  }
+
+  if (!record.members.includes(body.newOwnerId)) {
+    return c.json(
+      { error: { code: "INVALID_MEMBER", message: "目標使用者不是家庭成員" } },
+      400,
+    );
+  }
+
+  record.ownerId = body.newOwnerId;
+  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
 
   return c.json({ data: record });
 });
 
 function generateFamilyId(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const segments = [4, 4].map(() => {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  const segments = [0, 4].map((start) => {
     let s = "";
-    for (let i = 0; i < 4; i++) {
-      s += chars[Math.floor(Math.random() * chars.length)];
+    for (let i = start; i < start + 4; i++) {
+      s += chars[bytes[i] % chars.length];
     }
     return s;
   });

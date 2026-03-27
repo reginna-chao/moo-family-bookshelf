@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
-import { kvKeys, type FamilyRecord, type UserBooksRecord } from "../kv/schema";
+import { kvKeys, type RawFamilyRecord, type UserBooksRecord, normalizeFamilyRecord } from "../kv/schema";
 
 export const bookshelfRoutes = new Hono<{ Bindings: Env }>();
 
@@ -9,17 +9,19 @@ bookshelfRoutes.get("/family/:id/bookshelf", async (c) => {
   const familyId = c.req.param("id");
 
   // Get family members
-  const family = await c.env.KV.get<FamilyRecord>(
+  const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),
     "json",
   );
 
-  if (!family) {
+  if (!raw) {
     return c.json(
       { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
       404,
     );
   }
+
+  const family = normalizeFamilyRecord(raw);
 
   // Fetch all members' book data in parallel
   const memberBooks = await Promise.all(
