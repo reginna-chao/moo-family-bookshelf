@@ -386,6 +386,47 @@ moo-{family_id_short}-{encryption_key_encoded}@{api_host_encoded}
         同一組 Cloudflare Workers API
 ```
 
+### PWA 認證方式
+
+PWA 無法爬取讀墨頁面，因此無法自動取得 email。提供兩種認證入口：
+
+#### 主要入口：QR Code（推薦）
+
+```
+Extension 設定頁 → 「連結手機」按鈕
+       ↓
+  產生 QR Code，內容為 PWA URL + query params：
+  https://pwa.example.com/?code=moo-{familyId}-{encKey}&uid={userId}[@host]
+       ↓
+  手機掃碼 → PWA 自動解析 → 儲存至 localStorage → 完成
+```
+
+- 零手動輸入，UX 最佳
+- QR Code 包含 userId，不需額外步驟
+
+#### 備用入口：手動輸入
+
+```
+PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
+       ↓
+  同步碼 → familyId + encryptionKey
+  Email → 前端 SHA-256 → userId（不上傳伺服器）
+       ↓
+  儲存至 localStorage → 完成
+```
+
+- 適用於只有手機、無法掃碼的情境
+
+### PWA 功能範圍
+
+| 功能 | PWA 支援 | 備註 |
+|------|---------|------|
+| 瀏覽家庭書櫃 | ✅ | 核心功能 |
+| 個人書櫃開關 | ✅ | 書籍須先由 Extension 同步過一次 |
+| 加入/建立家庭 | ✅ | |
+| 新增書籍 | ❌ | 無法爬取讀墨頁面 |
+| 借閱功能（未來）| ✅ | 發送/接收借閱請求 |
+
 ### PWA 特有限制
 
 - 無法直接爬取讀墨網頁書單（沒有 Content Script 權限）

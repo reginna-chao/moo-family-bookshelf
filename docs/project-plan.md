@@ -609,11 +609,24 @@ jobs:
 
 ### Phase 3：行動端支援與自訂後端
 
-- [ ] PWA 行動端家庭書櫃查看器
-- [ ] PWA 加入家庭（同步碼輸入）
-- [ ] 響應式 UI 設計
-- [ ] Extension / PWA 設定頁：自訂 API 端點 UI
-- [ ] 同步碼中編碼 API 端點資訊（自建使用者友善）
+#### PWA 認證設計
+- [ ] Extension 設定頁：「連結手機」按鈕，產生 QR Code（PWA URL + familyId + encKey + userId + apiHost）
+- [ ] PWA Landing Page：掃碼自動解析 URL params → 儲存至 localStorage
+- [ ] PWA 備用入口：手動輸入同步碼 + 讀墨 Email（前端 SHA-256 → userId，不上傳）
+
+#### PWA 核心功能
+- [ ] PWA 專案建置（React + TypeScript + Vite，共用 crypto/ 和 api/ 模組）
+- [ ] PWA 家庭書櫃瀏覽（解密 + 成員篩選 + 搜尋）
+- [ ] PWA 個人書櫃管理（開關已同步書籍的開放狀態，無法新增書籍）
+- [ ] PWA 家庭設定（成員列表、Owner 管理、離開家庭）
+- [ ] 響應式 UI 設計（手機優先）
+
+#### 自訂後端
+- [ ] Extension 設定頁：自訂 API 端點 UI
+- [ ] PWA 設定頁：自訂 API 端點 UI
+- [ ] 同步碼中編碼 API 端點資訊（自建使用者友善）— 已於 Phase 0 實作 encode/decode
+
+#### 部署與發布
 - [ ] PWA CI/CD 設定（Cloudflare Pages or Vercel）
 - [ ] Extension release CD 驗證（git tag → GitHub Release .zip）
 
