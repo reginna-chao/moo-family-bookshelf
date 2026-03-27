@@ -20,11 +20,17 @@ export interface BookEntry {
   isShared: 0 | 1;
 }
 
+/** Decrypted view (used by UI after decryption) */
 export interface PersonalBooks {
   userId: string;
   displayName: string;
   books: BookEntry[];
   lastUpdated: string;
+}
+
+/** Raw server response — encrypted payload */
+export interface RawPersonalBooks {
+  payload: string | null;
 }
 
 export interface FamilyGroup {
@@ -73,7 +79,7 @@ export class ApiClient {
 
   async getPersonalBooks(
     userId: string,
-  ): Promise<ApiResponse<PersonalBooks>> {
+  ): Promise<ApiResponse<RawPersonalBooks>> {
     this.validateHexId(userId, "userId");
     return this.request(`/api/user/${userId}/books`);
   }

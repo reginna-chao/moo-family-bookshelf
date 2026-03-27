@@ -35,15 +35,14 @@ export function PersonalShelfPage({
         return;
       }
 
-      const raw = response.data as unknown as { payload?: string };
-      if (!raw?.payload) {
+      if (!response.data?.payload) {
         setBooks([]);
         setState("ready");
         return;
       }
 
       const key = await importKey(encryptionKey);
-      const decrypted = await decrypt(raw.payload, key);
+      const decrypted = await decrypt(response.data.payload, key);
       const parsed: unknown = JSON.parse(decrypted);
 
       if (typeof parsed !== "object" || parsed === null) {
