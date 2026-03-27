@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { ApiClient } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
-
+import { useDisplayName } from "./useDisplayName";
+import { DisplayNameEditor } from "./DisplayNameEditor";
 import { DEFAULT_API_ENDPOINT } from "../constants";
+
 export interface FamilySettingsProps {
   familyId: string;
   userId: string;
@@ -19,6 +21,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [copied, setCopied] = useState(false);
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
   const [leaveError, setLeaveError] = useState("");
+  const displayNameState = useDisplayName();
 
   useEffect(() => {
     chrome.storage.local.get(["encryptionKey"], (result) => {
@@ -57,10 +60,9 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const dangerBtnBase: React.CSSProperties = {
-    width: "100%", padding: 12, border: "1px solid #ef4444", borderRadius: 8,
-    background: "transparent", color: "#ef4444", fontWeight: 600, fontSize: 14,
-  };
+  const dangerBtnBase: React.CSSProperties = { width: "100%", padding: 12,
+    border: "1px solid #ef4444", borderRadius: 8, background: "transparent",
+    color: "#ef4444", fontWeight: 600, fontSize: 14 };
 
   const handleLeaveConfirm = async () => {
     setLeaveState("leaving");
@@ -82,6 +84,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   return (
     <div>
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>家庭設定</h3>
+      <DisplayNameEditor {...displayNameState} />
       <div style={{ marginBottom: 20 }}>
         <div style={{ color: "#64748b", fontSize: 13, marginBottom: 6 }}>家庭同步碼</div>
         <div style={{
@@ -137,7 +140,9 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
                 padding: "10px 12px", fontSize: 14, borderBottom: "1px solid #e2e8f0",
                 display: "flex", justifyContent: "space-between", alignItems: "center",
               }}>
-                <span style={{ fontFamily: "monospace", fontSize: 13 }}>{memberId.slice(0, 8)}</span>
+                <span style={{ fontFamily: "monospace", fontSize: 13 }}>{memberId === userId
+                  && displayNameState.savedDisplayName ? displayNameState.savedDisplayName
+                  : memberId.slice(0, 8)}</span>
                 {memberId === userId && (
                   <span style={{ color: "#2563eb", fontSize: 12, fontWeight: 600 }}>(你)</span>
                 )}

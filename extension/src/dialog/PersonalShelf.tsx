@@ -101,14 +101,15 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     setStatus("saving");
     setErrorMessage("");
     try {
-      const storageResult = await chrome.storage.local.get(["encryptionKey"]);
+      const storageResult = await chrome.storage.local.get(["encryptionKey", "displayName"]);
       const encKeyString = storageResult.encryptionKey as string | undefined;
       if (!encKeyString) throw new Error("找不到加密金鑰");
+      const storedDisplayName = (storageResult.displayName as string | undefined) ?? "";
 
       const key = await importKey(encKeyString);
       const payload = JSON.stringify({
         userId,
-        displayName: "",
+        displayName: storedDisplayName,
         books,
         lastUpdated: new Date().toISOString(),
       });

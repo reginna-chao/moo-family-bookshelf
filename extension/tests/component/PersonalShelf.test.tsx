@@ -53,7 +53,7 @@ describe("PersonalShelf", () => {
     // as well as the callback form. Mock to support both patterns.
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-        const result = { encryptionKey: "fake-enc-key-abc" };
+        const result = { encryptionKey: "fake-enc-key-abc", displayName: "小明" };
         if (typeof callback === "function") {
           callback(result);
         }
