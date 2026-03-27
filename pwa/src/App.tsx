@@ -53,7 +53,7 @@ export default function App() {
           />
         )}
         {currentPage === "personal-shelf" && (
-          <PersonalShelfPage userId={auth.userId} apiClient={apiClient} />
+          <PersonalShelfPage userId={auth.userId} apiClient={apiClient} encryptionKey={auth.encryptionKey} />
         )}
         {currentPage === "settings" && (
           <SettingsPage
