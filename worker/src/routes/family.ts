@@ -222,7 +222,7 @@ familyRoutes.get("/:id/members", async (c) => {
     );
   }
 
-  // If authenticated, verify family membership
+  // Verify caller is a member of this family
   const userId = getAuthenticatedUserId(c);
   if (userId) {
     const memberFamily = await c.env.KV.get(kvKeys.member(userId));
@@ -233,7 +233,6 @@ familyRoutes.get("/:id/members", async (c) => {
       );
     }
   }
-  // If no auth (fallback mode), allow access (backward compat)
 
   const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),

@@ -50,6 +50,15 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(
     }
 
     const token = match[1];
+
+    // Validate token format (64-char hex)
+    if (!/^[a-f0-9]{64}$/.test(token)) {
+      return c.json(
+        { error: { code: "UNAUTHORIZED", message: "Invalid or expired token" } },
+        401,
+      );
+    }
+
     const userId = await c.env.KV.get(kvKeys.authToken(token));
 
     if (!userId) {

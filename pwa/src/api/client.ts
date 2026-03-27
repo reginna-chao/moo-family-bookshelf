@@ -134,12 +134,10 @@ export class ApiClient {
   async removeMember(
     familyId: string,
     targetUserId: string,
-    callerId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(targetUserId, "targetUserId");
-    this.validateHexId(callerId, "callerId");
     return this.request(
-      `/api/family/${familyId}/member/${targetUserId}?userId=${encodeURIComponent(callerId)}`,
+      `/api/family/${familyId}/member/${targetUserId}`,
       { method: "DELETE" },
     );
   }

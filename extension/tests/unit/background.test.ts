@@ -133,7 +133,7 @@ describe("background service worker", () => {
   });
 
   describe("CLEAR_FAMILY_ID", () => {
-    it("removes familyId from sync and familyId+encryptionKey from local", async () => {
+    it("removes familyId from sync and familyId+encryptionKey+authToken from local", async () => {
       const response = await sendMessage({ type: "CLEAR_FAMILY_ID" });
 
       expect(response).toEqual({ ok: true });
@@ -142,7 +142,7 @@ describe("background service worker", () => {
         expect.any(Function),
       );
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        ["familyId", "encryptionKey"],
+        ["familyId", "encryptionKey", "authToken"],
         expect.any(Function),
       );
     });

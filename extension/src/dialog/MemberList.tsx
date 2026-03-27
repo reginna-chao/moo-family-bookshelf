@@ -34,7 +34,7 @@ export function MemberList({
     setActionLoading(true);
     setActionError("");
     try {
-      const response = await apiClient.removeMember(familyId, targetId, userId);
+      const response = await apiClient.removeMember(familyId, targetId);
       if (response.error) {
         setActionError(response.error.message);
       } else {

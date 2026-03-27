@@ -17,7 +17,7 @@ bookshelfRoutes.get("/family/:id/bookshelf", async (c) => {
     );
   }
 
-  // If authenticated, verify family membership
+  // Verify caller is a member of this family
   const userId = getAuthenticatedUserId(c);
   if (userId) {
     const memberFamily = await c.env.KV.get(kvKeys.member(userId));
@@ -28,7 +28,6 @@ bookshelfRoutes.get("/family/:id/bookshelf", async (c) => {
       );
     }
   }
-  // If no auth (fallback mode), allow access (backward compat)
 
   // Get family members
   const raw = await c.env.KV.get<RawFamilyRecord>(

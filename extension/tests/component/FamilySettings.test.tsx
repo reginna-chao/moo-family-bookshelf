@@ -268,7 +268,7 @@ describe("FamilySettings", () => {
 
     await waitFor(() => {
       expect(apiClient.removeMember).toHaveBeenCalledWith(
-        "fam-123", "user-def67890", "user-abc12345",
+        "fam-123", "user-def67890",
       );
     });
 

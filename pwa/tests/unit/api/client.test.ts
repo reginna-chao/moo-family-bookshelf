@@ -9,7 +9,6 @@ vi.stubGlobal("fetch", mockFetch);
 const USER_1 = "a".repeat(64);
 const USER_2 = "b".repeat(64);
 const USER_TARGET = "c".repeat(64);
-const USER_CALLER = "d".repeat(64);
 
 function jsonResponse(data: unknown, status = 200) {
   return {
@@ -157,16 +156,16 @@ describe("ApiClient", () => {
   });
 
   describe("removeMember", () => {
-    it("should call DELETE with caller userId as query param", async () => {
+    it("should call DELETE /api/family/:id/member/:uid", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({ data: { ok: true } }),
       );
 
-      await client.removeMember("fam-1", USER_TARGET, USER_CALLER);
+      await client.removeMember("fam-1", USER_TARGET);
 
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toBe(
-        `https://api.example.com/api/family/fam-1/member/${USER_TARGET}?userId=${USER_CALLER}`,
+        `https://api.example.com/api/family/fam-1/member/${USER_TARGET}`,
       );
       expect(init.method).toBe("DELETE");
     });

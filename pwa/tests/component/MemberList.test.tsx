@@ -101,7 +101,6 @@ describe("MemberList", () => {
       expect(mockRemoveMember).toHaveBeenCalledWith(
         defaultProps.familyId,
         USER_ID,
-        OWNER_ID,
       );
     });
     await waitFor(() => {

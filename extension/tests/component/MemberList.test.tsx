@@ -89,7 +89,7 @@ describe("MemberList", () => {
 
     await waitFor(() => {
       expect(apiClient.removeMember).toHaveBeenCalledWith(
-        "fam-123", "user-member456", "user-owner123",
+        "fam-123", "user-member456",
       );
       expect(onMembersChanged).toHaveBeenCalled();
     });

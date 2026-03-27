@@ -40,7 +40,6 @@ export function MemberList({
         const res = await apiClient.removeMember(
           familyId,
           confirmAction.targetId,
-          userId,
         );
         if (res.error) {
           setError(res.error.message);
