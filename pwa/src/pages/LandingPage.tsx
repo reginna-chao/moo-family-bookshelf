@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
-import { sha256Hex } from "@/crypto/encrypt";
+import type { ApiClient } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
+  apiClient: ApiClient;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function LandingPage({ onAuth }: LandingPageProps) {
+export function LandingPage({ onAuth, apiClient }: LandingPageProps) {
   const [syncCode, setSyncCode] = useState("");
   const [email, setEmail] = useState("");
   const [syncCodeError, setSyncCodeError] = useState("");
@@ -50,7 +51,13 @@ export function LandingPage({ onAuth }: LandingPageProps) {
     setIsSubmitting(true);
 
     try {
-      const userId = await sha256Hex(trimmedEmail);
+      const hashRes = await apiClient.hashEmail(trimmedEmail);
+      if (hashRes.error) {
+        setGeneralError("無法驗證帳號，請重試。");
+        setIsSubmitting(false);
+        return;
+      }
+      const userId = hashRes.data?.userId ?? "";
       onAuth({
         userId,
         familyId: decoded.familyId,

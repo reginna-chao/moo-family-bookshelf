@@ -5,6 +5,7 @@ import { authMiddleware } from "./middleware/auth";
 import { userRoutes } from "./routes/user";
 import { familyRoutes } from "./routes/family";
 import { bookshelfRoutes } from "./routes/bookshelf";
+import { authRoutes } from "./routes/auth";
 
 export interface Env {
   KV: KVNamespace;
@@ -25,8 +26,18 @@ export function isAllowedOrigin(origin: string, devMode?: boolean): boolean {
   if (origin === "https://moo-family-bookshelf-pwa.pages.dev") return true;
   if (/^https:\/\/[a-z0-9]+\.moo-family-bookshelf-pwa\.pages\.dev$/.test(origin)) return true;
 
-  // localhost (any port, dev only — gated behind DEV_MODE binding)
-  if (devMode && /^http:\/\/localhost(:\d+)?$/.test(origin)) return true;
+  // localhost (any port, http or https, dev only — gated behind DEV_MODE binding)
+  if (devMode && /^https?:\/\/localhost(:\d+)?$/.test(origin)) return true;
+
+  // RFC 1918 private IPs (dev only — for LAN testing, e.g. PWA on mobile)
+  // 10.x.x.x, 172.16.x.x–172.31.x.x, 192.168.x.x
+  if (
+    devMode &&
+    /^https?:\/\/(10(\.\d{1,3}){3}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|192\.168(\.\d{1,3}){2})(:\d+)?$/.test(
+      origin,
+    )
+  )
+    return true;
 
   // Chrome Extension
   if (/^chrome-extension:\/\/[a-z]{32}$/.test(origin)) return true;
@@ -107,6 +118,7 @@ app.get("/", (c) => c.json({ status: "ok", service: "moo-family-bookshelf" }));
 // Routes
 app.route("/api/user", userRoutes);
 app.route("/api/family", familyRoutes);
+app.route("/api/auth", authRoutes);
 app.route("/api", bookshelfRoutes);
 
 // 404 fallback

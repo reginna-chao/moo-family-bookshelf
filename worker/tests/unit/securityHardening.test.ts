@@ -75,6 +75,51 @@ describe("isAllowedOrigin", () => {
     expect(isAllowedOrigin("http://localhost:3000", true)).toBe(true);
     expect(isAllowedOrigin("http://localhost:5173", true)).toBe(true);
   });
+
+  it("should deny private IPs when devMode is false", () => {
+    expect(isAllowedOrigin("http://192.168.1.100:5173")).toBe(false);
+    expect(isAllowedOrigin("http://10.0.0.1:8787")).toBe(false);
+    expect(isAllowedOrigin("http://172.16.0.1:3000")).toBe(false);
+    expect(isAllowedOrigin("http://192.168.1.100:5173", false)).toBe(false);
+  });
+
+  it("should allow 192.168.x.x (Class C) in dev mode", () => {
+    expect(isAllowedOrigin("http://192.168.1.100:5173", true)).toBe(true);
+    expect(isAllowedOrigin("http://192.168.0.1:8787", true)).toBe(true);
+    expect(isAllowedOrigin("http://192.168.255.255", true)).toBe(true);
+    expect(isAllowedOrigin("https://192.168.1.100:5173", true)).toBe(true);
+  });
+
+  it("should allow 10.x.x.x (Class A) in dev mode", () => {
+    expect(isAllowedOrigin("http://10.0.0.1:5173", true)).toBe(true);
+    expect(isAllowedOrigin("http://10.255.255.255:8787", true)).toBe(true);
+    expect(isAllowedOrigin("http://10.1.2.3", true)).toBe(true);
+    expect(isAllowedOrigin("https://10.0.0.1:3000", true)).toBe(true);
+  });
+
+  it("should allow 172.16.x.x–172.31.x.x (Class B) in dev mode", () => {
+    expect(isAllowedOrigin("http://172.16.0.1:5173", true)).toBe(true);
+    expect(isAllowedOrigin("http://172.31.255.255:8787", true)).toBe(true);
+    expect(isAllowedOrigin("http://172.20.10.5", true)).toBe(true);
+    expect(isAllowedOrigin("https://172.24.0.1:3000", true)).toBe(true);
+  });
+
+  it("should deny 172.x.x.x outside 16–31 range even in dev mode", () => {
+    expect(isAllowedOrigin("http://172.15.0.1:5173", true)).toBe(false);
+    expect(isAllowedOrigin("http://172.32.0.1:5173", true)).toBe(false);
+  });
+
+  it("should allow private IPs without port in dev mode", () => {
+    expect(isAllowedOrigin("http://192.168.1.1", true)).toBe(true);
+    expect(isAllowedOrigin("http://10.0.0.1", true)).toBe(true);
+    expect(isAllowedOrigin("http://172.16.0.1", true)).toBe(true);
+  });
+
+  it("should allow https private IPs in dev mode (self-signed certs)", () => {
+    expect(isAllowedOrigin("https://192.168.1.100:5173", true)).toBe(true);
+    expect(isAllowedOrigin("https://10.0.0.1:8787", true)).toBe(true);
+    expect(isAllowedOrigin("https://172.16.0.1:3000", true)).toBe(true);
+  });
 });
 
 describe("CORS headers on responses", () => {

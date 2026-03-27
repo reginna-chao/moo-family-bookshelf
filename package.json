@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n ext,worker -c blue,green \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev\"",
+    "dev": "concurrently -n ext,worker,pwa -c blue,green,magenta \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev\" \"pnpm --filter moo-family-bookshelf-pwa dev\"",
     "dev:extension": "pnpm --filter moo-family-bookshelf-extension dev",
     "dev:worker": "pnpm --filter moo-family-bookshelf-worker dev",
+    "dev:pwa": "pnpm --filter moo-family-bookshelf-pwa dev",
     "build": "pnpm --filter moo-family-bookshelf-extension build && pnpm --filter moo-family-bookshelf-worker build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",

@@ -139,9 +139,12 @@ export function scrapeUserEmail(): string | null {
   const panel = document.querySelector(".me-panel");
   if (!panel) return null;
 
-  // Email is the element with font-size 14px and gray color under the name
+  // Email is a leaf div (no child elements) containing "@".
+  // Using childElementCount === 0 ensures we get the exact text node,
+  // not a parent whose textContent concatenates children.
   const candidates = panel.querySelectorAll<HTMLElement>("div[style]");
   for (const el of candidates) {
+    if (el.childElementCount > 0) continue;
     const text = el.textContent?.trim() ?? "";
     if (text.includes("@") && text.includes(".")) {
       return text;

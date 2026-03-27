@@ -21,6 +21,7 @@ vi.mock("@/content/scraper", () => ({
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
+    hashEmail: vi.fn().mockResolvedValue({ data: { userId: "a".repeat(64) } }),
     createFamily: vi.fn().mockResolvedValue({
       data: { familyId: "fam-123", members: ["user-1"], createdAt: "2026-01-01" },
     }),

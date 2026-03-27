@@ -63,9 +63,16 @@ export interface RawFamilyBookshelf {
 export class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
+  private refreshToken: (() => Promise<string | null>) | null = null;
+  private refreshing: Promise<string | null> | null = null;
 
   constructor(apiUrl?: string) {
     this.baseUrl = (apiUrl ?? DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
+  }
+
+  /** Register a callback that re-acquires a token on 401. */
+  setTokenRefresher(fn: () => Promise<string | null>): void {
+    this.refreshToken = fn;
   }
 
   setEndpoint(url: string): void {
@@ -78,6 +85,17 @@ export class ApiClient {
 
   setAuthToken(token: string | null): void {
     this.authToken = token;
+  }
+
+  // --- Auth ---
+
+  async hashEmail(
+    email: string,
+  ): Promise<ApiResponse<{ userId: string }>> {
+    return this.request("/api/auth/hash", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
   }
 
   // --- Personal Settings ---
@@ -180,6 +198,7 @@ export class ApiClient {
   private async request<T>(
     path: string,
     init?: RequestInit,
+    isRetry = false,
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
@@ -194,6 +213,21 @@ export class ApiClient {
     try {
       const response = await fetch(url, { ...init, headers });
       const json = (await response.json()) as ApiResponse<T>;
+
+      // On 401, try to refresh token once
+      if (response.status === 401 && !isRetry && this.refreshToken) {
+        // Deduplicate concurrent refresh calls
+        if (!this.refreshing) {
+          this.refreshing = this.refreshToken().finally(() => {
+            this.refreshing = null;
+          });
+        }
+        const newToken = await this.refreshing;
+        if (newToken) {
+          this.authToken = newToken;
+          return this.request(path, init, true);
+        }
+      }
 
       if (!response.ok) {
         return {

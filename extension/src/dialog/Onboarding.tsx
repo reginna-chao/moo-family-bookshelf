@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { ApiClient, FamilyGroup } from "../api/client";
-import { generateKey, exportKey, importKey, sha256Hex } from "../crypto/encrypt";
+import { generateKey, exportKey, importKey } from "../crypto/encrypt";
 import { encodeSyncCode, decodeSyncCode, SyncCodeError } from "../crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { LoadingOverlay } from "./LoadingOverlay";
@@ -49,7 +49,13 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
     setErrorMessage("");
 
     try {
-      const userId = await sha256Hex(userEmail);
+      const hashRes = await apiClient.hashEmail(userEmail);
+      if (hashRes.error) {
+        setErrorMessage("無法驗證帳號，請重試。");
+        setState("error");
+        return;
+      }
+      const userId = hashRes.data?.userId ?? "";
       const response = await apiClient.createFamily(userId);
       if (response.error) {
         setErrorMessage(response.error.message);
@@ -123,7 +129,13 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       }
 
       await importKey(decoded.encryptionKey);
-      const userId = await sha256Hex(userEmail);
+      const hashRes = await apiClient.hashEmail(userEmail);
+      if (hashRes.error) {
+        setErrorMessage("無法驗證帳號，請重試。");
+        setState("error");
+        return;
+      }
+      const userId = hashRes.data?.userId ?? "";
 
       const response = await apiClient.joinFamily(decoded.familyId, userId);
       if (response.error) {

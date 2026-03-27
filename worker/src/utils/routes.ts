@@ -10,5 +10,7 @@ export function isPublicRoute(method: string, path: string): boolean {
   // POST /api/family/:id/join — join family
   if (method === "POST" && /^\/api\/family\/[^/]+\/join\/?$/.test(path))
     return true;
+  // POST /api/auth/hash — derive userId from email
+  if (method === "POST" && /^\/api\/auth\/hash\/?$/.test(path)) return true;
   return false;
 }

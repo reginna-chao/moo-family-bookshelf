@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
 import { LandingPage } from "./pages/LandingPage";
@@ -24,35 +24,49 @@ export default function App() {
   const { auth, isLoading, login, logout } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>("family-shelf");
 
+  // Re-join family to get a fresh token, used both on init and on 401 refresh
+  const authRef = useRef(auth);
+  authRef.current = auth;
+
+  const acquireNewToken = useCallback(async (): Promise<string | null> => {
+    const current = authRef.current;
+    if (!current) return null;
+    const tempClient = new ApiClient(current.apiHost);
+    const res = await tempClient.joinFamily(current.familyId, current.userId);
+    if (res.data) {
+      const data = res.data as unknown as { authToken?: string };
+      if (data.authToken) {
+        login({ ...current, authToken: data.authToken });
+        return data.authToken;
+      }
+    }
+    return null;
+  }, [login]);
+
   const apiClient = useMemo(() => {
     const client = new ApiClient(auth?.apiHost);
     if (auth?.authToken) {
       client.setAuthToken(auth.authToken);
     }
+    client.setTokenRefresher(acquireNewToken);
     return client;
-  }, [auth?.apiHost, auth?.authToken]);
+  }, [auth?.apiHost, auth?.authToken, acquireNewToken]);
 
   // Auto-acquire auth token if missing (e.g., QR code entry)
+  const [acquiringToken, setAcquiringToken] = useState(false);
   const tokenAcquired = useRef(false);
   useEffect(() => {
     if (!auth || auth.authToken || tokenAcquired.current) return;
     tokenAcquired.current = true;
+    setAcquiringToken(true);
 
-    const acquireToken = async () => {
-      // Re-join the family to get a token (server handles idempotent re-join)
-      const tempClient = new ApiClient(auth.apiHost);
-      const res = await tempClient.joinFamily(auth.familyId, auth.userId);
-      if (res.data) {
-        const data = res.data as unknown as { authToken?: string };
-        if (data.authToken) {
-          login({ ...auth, authToken: data.authToken });
-        }
-      }
-    };
-    void acquireToken();
-  }, [auth, login]);
+    void acquireNewToken().finally(() => setAcquiringToken(false));
+  }, [auth, acquireNewToken]);
 
-  if (isLoading) {
+  // Unauthenticated client for LandingPage (email hash endpoint)
+  const baseApiClient = useMemo(() => new ApiClient(), []);
+
+  if (isLoading || acquiringToken) {
     return (
       <div className="max-w-md mx-auto min-h-screen flex items-center justify-center">
         <p className="text-gray-500">載入中...</p>
@@ -61,7 +75,7 @@ export default function App() {
   }
 
   if (!auth) {
-    return <LandingPage onAuth={login} />;
+    return <LandingPage onAuth={login} apiClient={baseApiClient} />;
   }
 
   return (

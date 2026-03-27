@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { LandingPage } from "@/pages/LandingPage";
+import type { ApiClient, ApiResponse } from "@/api/client";
 
 // Mock crypto modules
 vi.mock("@/crypto/syncCode", () => ({
@@ -14,15 +15,11 @@ vi.mock("@/crypto/syncCode", () => ({
   },
 }));
 
-vi.mock("@/crypto/encrypt", () => ({
-  sha256Hex: vi.fn(),
-}));
-
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
-import { sha256Hex } from "@/crypto/encrypt";
 
 const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
-const mockSha256Hex = vi.mocked(sha256Hex);
+const mockHashEmail = vi.fn<(email: string) => Promise<ApiResponse<{ userId: string }>>>();
+const mockApiClient = { hashEmail: mockHashEmail } as unknown as ApiClient;
 
 function fillInput(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), {
@@ -44,7 +41,7 @@ describe("LandingPage", () => {
   beforeEach(() => {
     mockOnAuth.mockReset();
     mockDecodeSyncCode.mockReset();
-    mockSha256Hex.mockReset();
+    mockHashEmail.mockReset();
   });
 
   afterEach(() => {
@@ -53,7 +50,7 @@ describe("LandingPage", () => {
 
   describe("renders form", () => {
     it("should show sync code input, email input, and submit button", () => {
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
       expect(screen.getByLabelText("讀墨帳號 Email")).toBeInTheDocument();
@@ -63,7 +60,7 @@ describe("LandingPage", () => {
     });
 
     it("should show placeholders", () => {
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       expect(screen.getByPlaceholderText("moo-familyId-encryptionKey")).toBeInTheDocument();
       expect(
@@ -78,7 +75,7 @@ describe("LandingPage", () => {
         throw new SyncCodeError("Invalid sync code format");
       });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       submitForm();
 
@@ -96,7 +93,7 @@ describe("LandingPage", () => {
         encryptionKey: "key-1",
       });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       fillInput("同步碼", "moo-fam1-key1");
       submitForm();
@@ -114,7 +111,7 @@ describe("LandingPage", () => {
         throw new SyncCodeError("Invalid sync code");
       });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       fillInput("同步碼", "bad-code");
       submitForm();
@@ -131,7 +128,7 @@ describe("LandingPage", () => {
         throw new Error("Unexpected error");
       });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       fillInput("同步碼", "bad-code");
       submitForm();
@@ -148,7 +145,7 @@ describe("LandingPage", () => {
         throw new SyncCodeError("Invalid sync code");
       });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       submitForm();
 
@@ -174,7 +171,7 @@ describe("LandingPage", () => {
         encryptionKey: "key-1",
       });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "not-an-email");
@@ -194,7 +191,7 @@ describe("LandingPage", () => {
         encryptionKey: "key-1",
       });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "bad");
@@ -220,9 +217,9 @@ describe("LandingPage", () => {
         encryptionKey: "key-1",
         apiHost: "custom.api.com",
       });
-      mockSha256Hex.mockResolvedValue("abc123hash");
+      mockHashEmail.mockResolvedValue({ data: { userId: "abc123hash" } });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       fillInput("同步碼", "moo-fam1-key1@custom.api.com");
       fillInput("讀墨帳號 Email", "user@example.com");
@@ -237,7 +234,7 @@ describe("LandingPage", () => {
         });
       });
 
-      expect(mockSha256Hex).toHaveBeenCalledWith("user@example.com");
+      expect(mockHashEmail).toHaveBeenCalledWith("user@example.com");
     });
 
     it("should call onAuth without apiHost when not present", async () => {
@@ -245,9 +242,9 @@ describe("LandingPage", () => {
         familyId: "fam-1",
         encryptionKey: "key-1",
       });
-      mockSha256Hex.mockResolvedValue("def456hash");
+      mockHashEmail.mockResolvedValue({ data: { userId: "def456hash" } });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "test@test.com");
@@ -271,14 +268,14 @@ describe("LandingPage", () => {
         encryptionKey: "key-1",
       });
       // Create a promise that we control to keep the submission pending
-      let resolveHash!: (value: string) => void;
-      mockSha256Hex.mockReturnValue(
-        new Promise<string>((resolve) => {
+      let resolveHash!: (value: ApiResponse<{ userId: string }>) => void;
+      mockHashEmail.mockReturnValue(
+        new Promise<ApiResponse<{ userId: string }>>((resolve) => {
           resolveHash = resolve;
         }),
       );
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
@@ -292,21 +289,46 @@ describe("LandingPage", () => {
       });
 
       // Resolve to clean up
-      resolveHash("hash123");
+      resolveHash({ data: { userId: "hash123" } });
 
       await waitFor(() => {
         expect(mockOnAuth).toHaveBeenCalled();
       });
     });
 
-    it("should re-enable button when sha256Hex throws", async () => {
+    it("should re-enable button when hashEmail returns an error", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
         encryptionKey: "key-1",
       });
-      mockSha256Hex.mockRejectedValue(new Error("hash failed"));
+      mockHashEmail.mockResolvedValue({
+        error: { code: "HASH_FAILED", message: "hash failed" },
+      });
 
-      render(<LandingPage onAuth={mockOnAuth} />);
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByText("無法驗證帳號，請重試。")).toBeInTheDocument();
+      });
+
+      // Button should be re-enabled
+      const button = screen.getByRole("button", { name: "開始使用" });
+      expect(button).not.toBeDisabled();
+      expect(mockOnAuth).not.toHaveBeenCalled();
+    });
+
+    it("should re-enable button when hashEmail throws", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+      mockHashEmail.mockRejectedValue(new Error("network error"));
+
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
 
       fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");

@@ -63,6 +63,15 @@ export class ApiClient {
     this.authToken = token;
   }
 
+  // --- Auth ---
+
+  async hashEmail(email: string): Promise<ApiResponse<{ userId: string }>> {
+    return this.request("/api/auth/hash", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
   // --- Personal Settings ---
 
   async getPersonalBooks(
