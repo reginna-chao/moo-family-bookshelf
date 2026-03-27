@@ -102,9 +102,9 @@ After both teams complete, **present ALL review findings to the user**:
 
 ### Phase 6: Security Scan
 
-After Phase 5, run a targeted security scan on the changed code to prevent technical debt accumulation.
+Run **once** after the entire feature is complete (all sub-tasks committed), not after each individual sub-task. This prevents redundant scanning and wasted tokens when multiple sub-tasks modify related code.
 
-1. Determine which dimensions are relevant based on the changed files:
+1. Determine which dimensions are relevant based on **all** changed files since the feature began:
    - `extension/src/crypto/` changed → run `crypto` scope
    - `worker/src/` changed → run `api` scope
    - `extension/src/` changed → run `code` + `extension` scope
@@ -115,7 +115,6 @@ After Phase 5, run a targeted security scan on the changed code to prevent techn
 2. Spawn **`/security-audit <scope>`** as an Agent.
 3. Present findings to user alongside the final summary.
 4. If any **CRITICAL** findings are detected:
-   - **Block the commit** if not yet committed.
    - Flag to user with clear remediation steps.
    - Recommend fixing before merging.
 5. **WARNING** findings are reported but do not block.
