@@ -4,6 +4,7 @@ import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { scrapeBooks } from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
 import { BookRow } from "./BookRow";
+import { StatusFilterBar, StatusFilter } from "./StatusFilterBar";
 import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
 
@@ -37,6 +38,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const [status, setStatus] = useState<Status>("scraping");
   const [errorMessage, setErrorMessage] = useState("");
   const [isDirty, setIsDirty] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -131,8 +133,14 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     }
   }, [books, userId, apiClient]);
 
+  const statusFilteredBooks = (() => {
+    if (statusFilter === "shared") return books.filter((b) => b.isShared);
+    if (statusFilter === "not-shared") return books.filter((b) => !b.isShared);
+    return books;
+  })();
+
   const { searchTerm, setSearchTerm, filteredItems: displayedBooks, isFiltering } =
-    useSearch(books);
+    useSearch(statusFilteredBooks);
 
   if (status === "scraping") {
     return (
@@ -177,13 +185,17 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
       </h3>
 
       {books.length > 0 && (
-        <SearchBar
-          value={searchTerm}
-          onChange={setSearchTerm}
-          totalCount={books.length}
-          filteredCount={displayedBooks.length}
-          isFiltering={isFiltering}
-        />
+        <>
+          <StatusFilterBar value={statusFilter} onChange={setStatusFilter} />
+
+          <SearchBar
+            value={searchTerm}
+            onChange={setSearchTerm}
+            totalCount={statusFilteredBooks.length}
+            filteredCount={displayedBooks.length}
+            isFiltering={isFiltering}
+          />
+        </>
       )}
 
       {books.length === 0 && (

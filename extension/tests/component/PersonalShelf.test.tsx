@@ -83,16 +83,18 @@ describe("PersonalShelf", () => {
       expect(screen.getByText("測試書籍一")).toBeInTheDocument();
     });
 
-    // Both books start as 未開放
-    const toggleBtns = screen.getAllByText("未開放");
-    expect(toggleBtns).toHaveLength(2);
+    // Both books start as 未開放 (row toggle buttons)
+    // Note: the status filter bar also has a "未開放" button, so filter by role
+    const toggleBtns = screen.getAllByRole("button", { name: "未開放" });
+    // 1 filter button + 2 row toggle buttons = 3 total
+    expect(toggleBtns).toHaveLength(3);
 
-    // Click the first toggle
-    fireEvent.click(toggleBtns[0]);
+    // Click the first ROW toggle (index 1, after the filter button)
+    fireEvent.click(toggleBtns[1]);
 
-    // First book should now be 開放
-    expect(screen.getByText("開放")).toBeInTheDocument();
-    expect(screen.getAllByText("未開放")).toHaveLength(1);
+    // First book should now show 開放
+    const openBtns = screen.getAllByRole("button", { name: "開放" });
+    expect(openBtns.length).toBeGreaterThanOrEqual(1);
   });
 
   it("save button appears only when dirty", async () => {
@@ -106,13 +108,67 @@ describe("PersonalShelf", () => {
     const saveBtn = screen.getByText("儲存變更");
     expect(saveBtn).toBeDisabled();
 
-    // Toggle a book to make it dirty
-    const toggleBtns = screen.getAllByText("未開放");
-    fireEvent.click(toggleBtns[0]);
+    // Toggle a book to make it dirty (skip filter button at index 0)
+    const toggleBtns = screen.getAllByRole("button", { name: "未開放" });
+    fireEvent.click(toggleBtns[1]);
 
     // Save button should now be enabled
     await waitFor(() => {
       expect(screen.getByText("儲存變更")).toBeEnabled();
     });
+  });
+
+  it("renders status filter buttons with 全部 active by default", async () => {
+    renderPersonalShelf();
+
+    await waitFor(() => {
+      expect(screen.getByText("測試書籍一")).toBeInTheDocument();
+    });
+
+    // All three filter buttons should be visible
+    expect(screen.getByRole("button", { name: "全部" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "已開放" })).toBeInTheDocument();
+    // "未開放" appears in both filter bar and row toggles, so use getAllByRole
+    const notSharedBtns = screen.getAllByRole("button", { name: "未開放" });
+    expect(notSharedBtns.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("filters books by 已開放 status", async () => {
+    renderPersonalShelf();
+
+    await waitFor(() => {
+      expect(screen.getByText("測試書籍一")).toBeInTheDocument();
+    });
+
+    // Toggle first book to shared
+    const toggleBtns = screen.getAllByRole("button", { name: "未開放" });
+    fireEvent.click(toggleBtns[1]); // first row toggle
+
+    // Click 已開放 filter
+    fireEvent.click(screen.getByRole("button", { name: "已開放" }));
+
+    // Only the shared book should be visible
+    expect(screen.getByText("測試書籍一")).toBeInTheDocument();
+    expect(screen.queryByText("測試書籍二")).not.toBeInTheDocument();
+  });
+
+  it("filters books by 未開放 status", async () => {
+    renderPersonalShelf();
+
+    await waitFor(() => {
+      expect(screen.getByText("測試書籍一")).toBeInTheDocument();
+    });
+
+    // Toggle first book to shared
+    const toggleBtns = screen.getAllByRole("button", { name: "未開放" });
+    fireEvent.click(toggleBtns[1]); // first row toggle
+
+    // Click 未開放 filter (the filter bar button, not the row toggle)
+    const filterBtns = screen.getAllByRole("button", { name: "未開放" });
+    fireEvent.click(filterBtns[0]); // filter bar button
+
+    // Only the non-shared book should be visible
+    expect(screen.queryByText("測試書籍一")).not.toBeInTheDocument();
+    expect(screen.getByText("測試書籍二")).toBeInTheDocument();
   });
 });

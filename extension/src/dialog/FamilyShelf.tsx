@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { ApiClient, BookEntry } from "../api/client";
 import { importKey, decrypt } from "../crypto/encrypt";
-import { BookCard, BookWithMember, FilterButton } from "./BookCard";
+import { BookCard, BookWithMember } from "./BookCard";
+import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
 import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
 
 export interface FamilyShelfProps {
   familyId: string;
+  userId: string;
   apiClient: ApiClient;
 }
 
@@ -51,11 +53,11 @@ function toBookWithMember(member: MemberBooks): BookWithMember[] {
   return member.books.map((b) => ({ ...b, memberName: name }));
 }
 
-export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
+export function FamilyShelf({ familyId, userId, apiClient }: FamilyShelfProps) {
   const [members, setMembers] = useState<MemberBooks[]>([]);
   const [state, setState] = useState<LoadState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
-  const [filterMember, setFilterMember] = useState<string | null>(null);
+  const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
 
   const loadBookshelf = useCallback(async () => {
     setState("loading");
@@ -125,9 +127,15 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
 
   const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
-  const memberFilteredBooks = filterMember
-    ? members.filter((m) => m.userId === filterMember).flatMap(toBookWithMember)
-    : members.flatMap(toBookWithMember);
+  const memberFilteredBooks = (() => {
+    if (filterMember === "all") {
+      return members.flatMap(toBookWithMember);
+    }
+    if (filterMember === "all-except-self") {
+      return members.filter((m) => m.userId !== userId).flatMap(toBookWithMember);
+    }
+    return members.filter((m) => m.userId === filterMember).flatMap(toBookWithMember);
+  })();
 
   const { searchTerm, setSearchTerm, filteredItems: visibleBooks, isFiltering } =
     useSearch(memberFilteredBooks);
@@ -199,32 +207,11 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
         isFiltering={isFiltering}
       />
 
-      {members.filter((m) => m.books.length > 0).length > 1 && (
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            marginBottom: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <FilterButton
-            label="全部"
-            active={filterMember === null}
-            onClick={() => setFilterMember(null)}
-          />
-          {members
-            .filter((m) => m.books.length > 0)
-            .map((m) => (
-              <FilterButton
-                key={m.userId}
-                label={m.displayName || m.userId.slice(0, 8)}
-                active={filterMember === m.userId}
-                onClick={() => setFilterMember(m.userId)}
-              />
-            ))}
-        </div>
-      )}
+      <MemberDropdown
+        members={members}
+        value={filterMember}
+        onChange={setFilterMember}
+      />
 
       <div
         style={{

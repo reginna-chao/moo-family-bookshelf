@@ -98,7 +98,7 @@ export function App() {
       </nav>
       <div style={{ padding: 16, overflowY: "auto", maxHeight: "60vh" }}>
         {activeTab === "family-shelf" && (
-          <FamilyShelf familyId={familyId} apiClient={apiClientRef.current} />
+          <FamilyShelf familyId={familyId} userId={userId} apiClient={apiClientRef.current} />
         )}
         {activeTab === "personal-shelf" && (
           <PersonalShelf userId={userId} apiClient={apiClientRef.current} />
