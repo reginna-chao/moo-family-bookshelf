@@ -12,7 +12,7 @@ export const DEFAULT_API_ENDPOINT =
 
 export const DEFAULT_PWA_URL =
   import.meta.env.VITE_PWA_URL as string ??
-  "https://moo-family-bookshelf.pages.dev";
+  "https://moo-family-bookshelf-pwa.pages.dev";
 
 /**
  * Build PWA URL with auth data in the fragment (never sent to server).

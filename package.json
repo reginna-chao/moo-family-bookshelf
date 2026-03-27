@@ -14,8 +14,9 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "extension/src/**/*.{ts,tsx}": ["eslint --fix"],
-    "worker/src/**/*.{ts,tsx}": ["eslint --fix"]
+    "extension/src/**/*.{ts,tsx}": ["pnpm --filter moo-family-bookshelf-extension exec eslint --fix"],
+    "worker/src/**/*.{ts,tsx}": ["pnpm --filter moo-family-bookshelf-worker exec eslint --fix"],
+    "pwa/src/**/*.{ts,tsx}": ["pnpm --filter moo-family-bookshelf-pwa exec eslint --fix"]
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
