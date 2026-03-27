@@ -146,17 +146,16 @@ familyRoutes.delete("/:id/member/:uid", async (c) => {
     );
   }
 
-  const fallbackCallerId = c.req.query("userId");
-  const callerId = getAuthenticatedUserId(c, fallbackCallerId ?? undefined);
+  const callerId = getAuthenticatedUserId(c);
 
   if (!callerId) {
     return c.json(
-      { error: { code: "MISSING_USER_ID", message: "userId query parameter is required" } },
-      400,
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
     );
   }
 
-  if (!isValidUserId(callerId) || !isValidUserId(targetUserId)) {
+  if (!isValidUserId(targetUserId)) {
     return c.json(
       { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
       400,
@@ -288,7 +287,13 @@ familyRoutes.put("/:id/transfer", async (c) => {
     );
   }
 
-  const callerUserId = getAuthenticatedUserId(c, body.userId);
+  const callerUserId = getAuthenticatedUserId(c);
+  if (!callerUserId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
 
   const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),

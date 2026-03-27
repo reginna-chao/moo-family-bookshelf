@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ApiClient } from "../api/client";
+import { ApiClient, FamilyGroup } from "../api/client";
 import { generateKey, exportKey, importKey, sha256Hex } from "../crypto/encrypt";
 import { encodeSyncCode, decodeSyncCode, SyncCodeError } from "../crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "../constants";
@@ -62,7 +62,8 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         setState("error");
         return;
       }
-      const familyId = response.data.familyId;
+      const data = response.data as FamilyGroup & { authToken?: string };
+      const familyId = data.familyId;
       const key = await generateKey();
       const keyString = await exportKey(key);
 
@@ -74,7 +75,11 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       });
 
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId });
-      await chrome.storage.local.set({ userId, encryptionKey: keyString });
+      await chrome.storage.local.set({ userId, encryptionKey: keyString, authToken: data.authToken });
+
+      if (data.authToken) {
+        apiClient.setAuthToken(data.authToken);
+      }
 
       setGeneratedSyncCode(syncCode);
       setCreatedFamilyId(familyId);
@@ -127,11 +132,18 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         return;
       }
 
+      const joinData = response.data as { ok: boolean; authToken?: string } | undefined;
+
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: decoded.familyId });
       await chrome.storage.local.set({
         userId,
         encryptionKey: decoded.encryptionKey,
+        authToken: joinData?.authToken,
       });
+
+      if (joinData?.authToken) {
+        apiClient.setAuthToken(joinData.authToken);
+      }
 
       // Auto-sync books after joining
       setState("syncing-books");

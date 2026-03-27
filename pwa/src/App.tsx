@@ -24,10 +24,13 @@ export default function App() {
   const { auth, isLoading, login, logout } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>("family-shelf");
 
-  const apiClient = useMemo(
-    () => new ApiClient(auth?.apiHost),
-    [auth?.apiHost],
-  );
+  const apiClient = useMemo(() => {
+    const client = new ApiClient(auth?.apiHost);
+    if (auth?.authToken) {
+      client.setAuthToken(auth.authToken);
+    }
+    return client;
+  }, [auth?.apiHost, auth?.authToken]);
 
   if (isLoading) {
     return (

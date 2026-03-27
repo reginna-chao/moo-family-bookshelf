@@ -62,6 +62,7 @@ export interface RawFamilyBookshelf {
 
 export class ApiClient {
   private baseUrl: string;
+  private authToken: string | null = null;
 
   constructor(apiUrl?: string) {
     this.baseUrl = (apiUrl ?? DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
@@ -73,6 +74,10 @@ export class ApiClient {
 
   getEndpoint(): string {
     return this.baseUrl;
+  }
+
+  setAuthToken(token: string | null): void {
+    this.authToken = token;
   }
 
   // --- Personal Settings ---
@@ -183,6 +188,10 @@ export class ApiClient {
       "Content-Type": "application/json",
       ...(init?.headers as Record<string, string>),
     };
+
+    if (this.authToken) {
+      headers["Authorization"] = `Bearer ${this.authToken}`;
+    }
 
     try {
       const response = await fetch(url, { ...init, headers });

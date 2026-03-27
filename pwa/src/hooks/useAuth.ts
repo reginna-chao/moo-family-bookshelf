@@ -6,6 +6,7 @@ export interface AuthState {
   familyId: string;
   encryptionKey: string;
   apiHost?: string;
+  authToken?: string;
 }
 
 export interface UseAuthReturn {
@@ -20,6 +21,7 @@ const STORAGE_KEYS = {
   familyId: "moo:familyId",
   encryptionKey: "moo:encryptionKey",
   apiHost: "moo:apiHost",
+  authToken: "moo:authToken",
 } as const;
 
 /**
@@ -38,6 +40,11 @@ function saveToStorage(data: AuthState): void {
   } else {
     localStorage.removeItem(STORAGE_KEYS.apiHost);
   }
+  if (data.authToken) {
+    localStorage.setItem(STORAGE_KEYS.authToken, data.authToken);
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.authToken);
+  }
 }
 
 function loadFromStorage(): AuthState | null {
@@ -45,6 +52,7 @@ function loadFromStorage(): AuthState | null {
   const familyId = localStorage.getItem(STORAGE_KEYS.familyId);
   const encryptionKey = localStorage.getItem(STORAGE_KEYS.encryptionKey);
   const apiHost = localStorage.getItem(STORAGE_KEYS.apiHost);
+  const authToken = localStorage.getItem(STORAGE_KEYS.authToken);
 
   if (!userId || !familyId || !encryptionKey) {
     return null;
@@ -55,6 +63,7 @@ function loadFromStorage(): AuthState | null {
     familyId,
     encryptionKey,
     ...(apiHost ? { apiHost } : {}),
+    ...(authToken ? { authToken } : {}),
   };
 }
 
@@ -63,6 +72,7 @@ function clearStorage(): void {
   localStorage.removeItem(STORAGE_KEYS.familyId);
   localStorage.removeItem(STORAGE_KEYS.encryptionKey);
   localStorage.removeItem(STORAGE_KEYS.apiHost);
+  localStorage.removeItem(STORAGE_KEYS.authToken);
 }
 
 function clearUrlParams(): void {

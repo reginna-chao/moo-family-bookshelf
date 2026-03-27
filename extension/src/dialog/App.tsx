@@ -20,10 +20,13 @@ export function App() {
     // Load familyId, userId, and custom API endpoint on mount.
     // GET_FAMILY_ID checks sync first, falling back to local (handled in background).
     chrome.runtime.sendMessage({ type: "GET_FAMILY_ID" }, (familyResponse) => {
-      chrome.storage.local.get(["userId"], (storageResult) => {
+      chrome.storage.local.get(["userId", "authToken"], (storageResult) => {
         chrome.runtime.sendMessage({ type: "GET_API_ENDPOINT" }, (apiResponse) => {
           if (apiResponse?.apiEndpoint) {
             apiClientRef.current.setEndpoint(apiResponse.apiEndpoint);
+          }
+          if (storageResult.authToken) {
+            apiClientRef.current.setAuthToken(storageResult.authToken as string);
           }
           if (familyResponse?.familyId && storageResult.userId) {
             setFamilyId(familyResponse.familyId);

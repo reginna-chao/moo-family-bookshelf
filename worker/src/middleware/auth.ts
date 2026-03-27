@@ -10,19 +10,35 @@ declare module "hono" {
   }
 }
 
+/** Routes that don't require authentication */
+function isPublicRoute(method: string, path: string): boolean {
+  // POST /api/family — create family
+  if (method === "POST" && /^\/api\/family\/?$/.test(path)) return true;
+  // POST /api/family/:id/join — join family
+  if (method === "POST" && /^\/api\/family\/[^/]+\/join\/?$/.test(path)) return true;
+  return false;
+}
+
 /**
  * Auth middleware: checks Authorization header.
- * If present, validates Bearer token against KV.
- * If absent, sets authUserId = null (fallback mode for backward compat).
+ * Requires valid Bearer token for all protected routes.
+ * Public routes (create/join family) are skipped.
  */
 export const authMiddleware = createMiddleware<{ Bindings: Env }>(
   async (c, next) => {
-    const authHeader = c.req.header("Authorization");
-
-    if (!authHeader) {
+    if (isPublicRoute(c.req.method, c.req.path)) {
       c.set("authUserId", null);
       await next();
       return;
+    }
+
+    const authHeader = c.req.header("Authorization");
+
+    if (!authHeader) {
+      return c.json(
+        { error: { code: "UNAUTHORIZED", message: "Authorization header required" } },
+        401,
+      );
     }
 
     const match = authHeader.match(/^Bearer\s+(.+)$/);
@@ -49,16 +65,11 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(
 );
 
 /**
- * Returns the authenticated userId from context if available,
- * otherwise returns the fallback userId. Returns null if neither exists.
+ * Returns the authenticated userId from context.
+ * Returns null if not authenticated (should not happen on protected routes).
  */
-export function getAuthenticatedUserId(
-  c: Context,
-  fallbackUserId?: string,
-): string | null {
-  const authUserId = c.get("authUserId") as string | null;
-  if (authUserId) return authUserId;
-  return fallbackUserId ?? null;
+export function getAuthenticatedUserId(c: Context): string | null {
+  return c.get("authUserId") as string | null;
 }
 
 /**
