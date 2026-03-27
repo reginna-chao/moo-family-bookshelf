@@ -18,7 +18,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["chunks/*", "src/*"],
+      "resources": ["chunks/*"],
       "matches": ["https://readmoo.com/*", "https://*.readmoo.com/*"]
     }
   ],

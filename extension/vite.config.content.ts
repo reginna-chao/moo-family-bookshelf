@@ -18,17 +18,17 @@ export default defineConfig({
     },
   },
   build: {
-    emptyOutDir: true,
+    emptyOutDir: false,
     outDir: "dist",
     rollupOptions: {
       input: {
-        popup: resolve(__dirname, "src/dialog/index.html"),
-        background: resolve(__dirname, "src/background/index.ts"),
+        content: resolve(__dirname, "src/content/index.ts"),
       },
       output: {
-        entryFileNames: "[name].js",
-        chunkFileNames: "chunks/[name].[hash].js",
-        assetFileNames: "assets/[name].[ext]",
+        format: "iife",
+        inlineDynamicImports: true,
+        entryFileNames: "content.js",
+        assetFileNames: "assets/content-[name].[ext]",
       },
     },
   },
