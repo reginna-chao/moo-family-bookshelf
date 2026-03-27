@@ -114,19 +114,45 @@ Verify the end-to-end encryption module follows cryptographic best practices.
 
 ### Dimension 6: API & Worker Security
 
-Review backend API for security vulnerabilities.
+Review backend API for security vulnerabilities. Go beyond "does it exist" — check **implementation quality**.
 
-**Checks:**
-- **Authentication**: all protected endpoints verify auth token?
-- **Authorization**: family membership checked before returning family data?
-- **Input validation**: all user inputs validated and sanitized at handler level?
-- **KV key injection**: user-controlled values used directly in KV key construction without sanitization?
-- **Rate limiting**: implemented on sensitive endpoints (create family, join family)?
-- **CORS**: properly configured, not `Access-Control-Allow-Origin: *` in production?
-- **Error messages**: no internal details leaked in error responses (stack traces, KV keys, etc.)?
-- **HTTP headers**: security headers set (e.g., `X-Content-Type-Options`, `X-Frame-Options`)?
-- **Zero-knowledge**: Worker never accesses plaintext book data — only stores/retrieves ciphertext?
-- **Enumeration**: family IDs or user IDs not easily enumerable?
+**6A. Authentication — verify every protected endpoint is guarded:**
+- All non-public endpoints require a valid auth token (Bearer header).
+- **Authorization bypass patterns**: look for `if (userId) { /* check */ }` instead of `if (!userId) return 401`. A conditional guard that silently skips when null is a regression hazard — any change to public route list could expose data.
+- Verify the public route list (`isPublicRoute`) is minimal and cannot be expanded without review.
+
+**6B. Authorization — verify identity source and access control:**
+- **IDOR (Insecure Direct Object Reference)**: when a handler receives a user ID in both the request body AND the auth token, the authenticated identity (`callerUserId`) must be the sole source of truth. Body-supplied identity fields should be ignored or validated against the token. Flag any `body.userId` used for permission checks instead of the authenticated caller.
+- Family membership verified before returning any family data.
+- Owner-only actions (remove member, transfer ownership) check `callerUserId === record.ownerId`.
+
+**6C. Input validation:**
+- All user inputs validated and sanitized at handler level.
+- KV key injection: user-controlled values used directly in KV key construction without sanitization?
+- **Request body size**: middleware enforces a max body size. Check if the limit can be bypassed (e.g., by omitting `Content-Length` header).
+
+**6D. Rate limiting — check implementation quality, not just existence:**
+- Implemented on sensitive endpoints (create family, join family).
+- **IP source trustworthiness**: rate limiter must use a non-spoofable IP header. `cf-connecting-ip` (Cloudflare edge) is safe; `x-forwarded-for` is client-controllable and must NOT be the sole/primary source. Check the fallback chain.
+- **Counter atomicity**: KV read-then-write is not atomic. Document whether concurrent requests can exceed the configured limit and assess impact.
+- **Tier separation**: public routes (unauthenticated) should have stricter limits than authenticated routes. Verify separate counters (different KV key prefixes) so exhausting one tier doesn't affect the other.
+
+**6E. CORS — check origin validation depth:**
+- Not `Access-Control-Allow-Origin: *` in production.
+- **Origin allowlist review**: list every allowed origin pattern and verify each is necessary.
+- **Localhost in production**: `http://localhost` must be gated behind a dev-mode flag, not unconditionally allowed. A locally-running malicious page can exploit this.
+- **Subdomain spoofing**: if using regex for subdomain matching (e.g., `*.readmoo.com`), verify the regex is anchored (`^...$`) and uses restrictive character classes. Test against payloads like `readmoo.com.evil.com`.
+- **Regex ReDoS**: origin-matching regex must not contain nested quantifiers or ambiguous alternations.
+- **Preview/staging origins**: if using Cloudflare Pages or similar, preview deploy URLs (e.g., `abc123.project.pages.dev`) should be explicitly allowed or denied.
+
+**6F. Response security:**
+- Error messages: no internal details leaked (stack traces, KV keys, etc.).
+- HTTP headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Strict-Transport-Security`, `X-XSS-Protection: 0` set on all responses.
+- Zero-knowledge: Worker never accesses plaintext book data — only stores/retrieves ciphertext.
+
+**6G. Enumeration & abuse:**
+- Family IDs or user IDs not easily enumerable.
+- Public endpoints (create/join) cannot be used to spam KV with garbage data without rate limiting.
 
 ### Dimension 7: Pre-Publish Readiness
 
