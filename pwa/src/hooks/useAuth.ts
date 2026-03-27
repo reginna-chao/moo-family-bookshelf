@@ -66,14 +66,17 @@ function clearStorage(): void {
 }
 
 function clearUrlParams(): void {
-  const params = new URLSearchParams(window.location.search);
-  if (params.has("code") || params.has("uid")) {
+  // Clear both fragment and query params to handle either format
+  if (window.location.hash || window.location.search) {
     window.history.replaceState({}, "", window.location.pathname);
   }
 }
 
 function tryParseQrParams(): AuthState | null {
-  const params = new URLSearchParams(window.location.search);
+  // Read from URL fragment (#) — fragments are never sent to the server,
+  // keeping the encryption key out of access logs and referrer headers.
+  const hash = window.location.hash.slice(1); // remove leading #
+  const params = new URLSearchParams(hash);
   const code = params.get("code");
   const uid = params.get("uid");
 

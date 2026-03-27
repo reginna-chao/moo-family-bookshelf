@@ -5,6 +5,7 @@ import { useDisplayName } from "./useDisplayName";
 import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
 import { DEFAULT_API_ENDPOINT } from "../constants";
+import { QrCodeLink } from "./QrCodeLink";
 
 export interface FamilySettingsProps {
   familyId: string;
@@ -115,6 +116,9 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           將此代碼分享給家人即可加入書櫃
         </div>
       </div>
+      {syncCode && (
+        <QrCodeLink syncCode={syncCode} userId={userId} />
+      )}
       <div style={{ marginBottom: 20 }}>
         <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>
           家庭成員{!membersLoading && !membersError ? ` (${members.length})` : ""}

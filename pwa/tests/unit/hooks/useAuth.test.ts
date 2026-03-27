@@ -38,6 +38,7 @@ describe("useAuth", () => {
     replaceStateSpy = vi.fn();
     vi.stubGlobal("location", {
       search: "",
+      hash: "",
       pathname: "/",
       href: "http://localhost/",
     });
@@ -123,11 +124,12 @@ describe("useAuth", () => {
   });
 
   describe("QR Code URL parsing", () => {
-    it("should parse auth from URL params and set auth", () => {
+    it("should parse auth from URL fragment and set auth", () => {
       vi.stubGlobal("location", {
-        search: "?code=moo-fam99-secretKey&uid=user-abc",
+        search: "",
+        hash: "#code=moo-fam99-secretKey&uid=user-abc",
         pathname: "/app",
-        href: "http://localhost/app?code=moo-fam99-secretKey&uid=user-abc",
+        href: "http://localhost/app#code=moo-fam99-secretKey&uid=user-abc",
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
@@ -146,11 +148,12 @@ describe("useAuth", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    it("should parse auth with apiHost from URL params", () => {
+    it("should parse auth with apiHost from URL fragment", () => {
       vi.stubGlobal("location", {
-        search: "?code=moo-fam99-secretKey@custom.host&uid=user-abc",
+        search: "",
+        hash: "#code=moo-fam99-secretKey%40custom.host&uid=user-abc",
         pathname: "/app",
-        href: "http://localhost/app?code=moo-fam99-secretKey@custom.host&uid=user-abc",
+        href: "http://localhost/app#code=moo-fam99-secretKey%40custom.host&uid=user-abc",
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
@@ -170,9 +173,10 @@ describe("useAuth", () => {
 
     it("should save parsed QR data to localStorage", () => {
       vi.stubGlobal("location", {
-        search: "?code=moo-fam99-secretKey&uid=user-abc",
+        search: "",
+        hash: "#code=moo-fam99-secretKey&uid=user-abc",
         pathname: "/app",
-        href: "http://localhost/app?code=moo-fam99-secretKey&uid=user-abc",
+        href: "http://localhost/app#code=moo-fam99-secretKey&uid=user-abc",
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
@@ -186,11 +190,12 @@ describe("useAuth", () => {
       expect(localStorage.getItem("moo:encryptionKey")).toBe("secretKey");
     });
 
-    it("should clear URL params via replaceState after parsing", () => {
+    it("should clear URL fragment via replaceState after parsing", () => {
       vi.stubGlobal("location", {
-        search: "?code=moo-fam99-secretKey&uid=user-abc",
+        search: "",
+        hash: "#code=moo-fam99-secretKey&uid=user-abc",
         pathname: "/app",
-        href: "http://localhost/app?code=moo-fam99-secretKey&uid=user-abc",
+        href: "http://localhost/app#code=moo-fam99-secretKey&uid=user-abc",
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
@@ -206,9 +211,10 @@ describe("useAuth", () => {
   describe("QR Code invalid code", () => {
     it("should not crash and auth stays null when sync code is invalid", () => {
       vi.stubGlobal("location", {
-        search: "?code=invalid-code&uid=user-abc",
+        search: "",
+        hash: "#code=invalid-code&uid=user-abc",
         pathname: "/app",
-        href: "http://localhost/app?code=invalid-code&uid=user-abc",
+        href: "http://localhost/app#code=invalid-code&uid=user-abc",
       });
       mockDecodeSyncCode.mockImplementation(() => {
         throw new SyncCodeError("Invalid sync code format");
@@ -222,9 +228,10 @@ describe("useAuth", () => {
 
     it("should not crash when code param is missing", () => {
       vi.stubGlobal("location", {
-        search: "?uid=user-abc",
+        search: "",
+        hash: "#uid=user-abc",
         pathname: "/app",
-        href: "http://localhost/app?uid=user-abc",
+        href: "http://localhost/app#uid=user-abc",
       });
 
       const { result } = renderHook(() => useAuth());
@@ -234,9 +241,10 @@ describe("useAuth", () => {
 
     it("should not crash when uid param is missing", () => {
       vi.stubGlobal("location", {
-        search: "?code=moo-fam99-key",
+        search: "",
+        hash: "#code=moo-fam99-key",
         pathname: "/app",
-        href: "http://localhost/app?code=moo-fam99-key",
+        href: "http://localhost/app#code=moo-fam99-key",
       });
 
       const { result } = renderHook(() => useAuth());
