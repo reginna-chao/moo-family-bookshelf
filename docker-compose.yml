@@ -1,0 +1,24 @@
+services:
+  extension:
+    build:
+      context: .
+      target: extension-dev
+    volumes:
+      # Source code mount (hot reload)
+      - ./extension/src:/app/extension/src
+      # Build output → host, so Chrome can load it
+      - ./extension/dist:/app/extension/dist
+    environment:
+      - NODE_ENV=development
+
+  worker:
+    build:
+      context: .
+      target: worker-dev
+    ports:
+      # Wrangler dev server
+      - "8787:8787"
+    volumes:
+      - ./worker/src:/app/worker/src
+    environment:
+      - NODE_ENV=development

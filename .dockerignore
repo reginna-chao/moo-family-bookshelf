@@ -1,0 +1,15 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.git/
+.wrangler/
+coverage/
+playwright-report/
+test-results/
+*.zip
+.env
+.env.local
+.dev.vars
+.DS_Store
+Thumbs.db

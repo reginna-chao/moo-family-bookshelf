@@ -1,0 +1,17 @@
+{
+  "name": "moo-family-bookshelf",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n ext,worker -c blue,green \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev\"",
+    "dev:extension": "pnpm --filter moo-family-bookshelf-extension dev",
+    "dev:worker": "pnpm --filter moo-family-bookshelf-worker dev",
+    "build": "pnpm --filter moo-family-bookshelf-extension build && pnpm --filter moo-family-bookshelf-worker build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
