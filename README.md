@@ -42,6 +42,21 @@
 pnpm install
 ```
 
+### 環境變數設定
+
+各子專案提供 `.env.example` 範本，請複製後依需求修改：
+
+```bash
+cp extension/.env.example extension/.env.production
+cp extension/.env.example extension/.env.development
+cp pwa/.env.example pwa/.env.production
+cp pwa/.env.example pwa/.env.development
+```
+
+- `.env.development` — 開發模式，通常改為 `http://localhost:8787`
+- `.env.production` — 正式建置，使用預設或自建 Worker URL
+- 自建後端請將 `VITE_API_ENDPOINT` 改為你的 Worker URL
+
 ### 開發模式 vs 正式環境
 
 | 模式 | 指令 | API 端點 | KV |
