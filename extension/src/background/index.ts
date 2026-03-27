@@ -3,14 +3,17 @@
  * Handles messaging between content script and extension internals.
  *
  * Storage strategy:
- * - familyId + encryptionKey: written to BOTH chrome.storage.sync and chrome.storage.local.
+ * - familyId: written to BOTH chrome.storage.sync and chrome.storage.local.
  *   Read from sync first, falling back to local. This enables multi-device sync
  *   for users signed into the same Google account.
+ * - encryptionKey: local ONLY. Never synced to Google Cloud to prevent key
+ *   exposure if the Google account is compromised. Cross-device setup uses
+ *   the sync code mechanism instead.
  * - apiEndpoint: local only (different devices may use different endpoints).
  */
 
 /** Keys that are synced across devices via chrome.storage.sync */
-const SYNCED_KEYS = ["familyId", "encryptionKey"] as const;
+const SYNCED_KEYS = ["familyId"] as const;
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("MooFamily Bookshelf installed");
@@ -54,7 +57,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "CLEAR_FAMILY_ID") {
     chrome.storage.sync.remove(SYNCED_KEYS as unknown as string[], () => {
-      chrome.storage.local.remove([...SYNCED_KEYS], () => {
+      chrome.storage.local.remove([...SYNCED_KEYS, "encryptionKey"], () => {
         sendResponse({ ok: true });
       });
     });

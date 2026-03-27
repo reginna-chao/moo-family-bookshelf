@@ -45,41 +45,32 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
     async function load() {
       try {
-        console.log("[PersonalShelf] Starting load...");
         const storageResult = await chrome.storage.local.get(["encryptionKey"]);
         const encKeyString = storageResult.encryptionKey as string | undefined;
-        console.log("[PersonalShelf] encryptionKey exists:", !!encKeyString);
 
-        console.log("[PersonalShelf] Scraping books...");
         const scrapedBooks = await scrapeBooks();
-        console.log("[PersonalShelf] Scraped books:", scrapedBooks.length, scrapedBooks);
 
-        console.log("[PersonalShelf] Fetching saved books from API...");
         const apiResponse = await apiClient.getPersonalBooks(userId);
-        console.log("[PersonalShelf] API response:", apiResponse);
 
         if (cancelled) return;
 
         let savedBooks: BookEntry[] = [];
         if (apiResponse.data && encKeyString) {
-          console.log("[PersonalShelf] Decrypting saved books...");
           try {
             savedBooks = await loadSavedBooks(
               apiResponse.data as unknown as Record<string, unknown>,
               encKeyString,
             );
-            console.log("[PersonalShelf] Saved books:", savedBooks.length);
-          } catch (decryptErr) {
+          } catch {
             // Decryption failed — likely key mismatch from reinstall.
             // Treat as no saved data; user can re-save with current key.
-            console.warn("[PersonalShelf] Decrypt failed, ignoring saved data:", decryptErr);
+            console.warn("[PersonalShelf] Decrypt failed, ignoring saved data");
             savedBooks = [];
           }
         }
         if (cancelled) return;
 
         const merged = mergeBooks(scrapedBooks, savedBooks);
-        console.log("[PersonalShelf] Merged books:", merged.length);
         setBooks(merged);
         setStatus("ready");
       } catch (err) {

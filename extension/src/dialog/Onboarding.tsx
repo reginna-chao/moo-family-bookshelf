@@ -74,7 +74,6 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       });
 
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId });
-      await chrome.storage.sync.set({ encryptionKey: keyString });
       await chrome.storage.local.set({ userId, encryptionKey: keyString });
 
       setGeneratedSyncCode(syncCode);
@@ -129,7 +128,6 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       }
 
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: decoded.familyId });
-      await chrome.storage.sync.set({ encryptionKey: decoded.encryptionKey });
       await chrome.storage.local.set({
         userId,
         encryptionKey: decoded.encryptionKey,
