@@ -4,6 +4,7 @@ import { Onboarding } from "./Onboarding";
 import { PersonalShelf } from "./PersonalShelf";
 import { FamilyShelf } from "./FamilyShelf";
 import { FamilySettings } from "./FamilySettings";
+import { DialogFooter } from "./DialogFooter";
 
 type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "settings";
@@ -55,10 +56,13 @@ export function App() {
 
   if (view === "onboarding") {
     return (
-      <Onboarding
-        onFamilyJoined={handleFamilyJoined}
-        apiClient={apiClientRef.current}
-      />
+      <div>
+        <Onboarding
+          onFamilyJoined={handleFamilyJoined}
+          apiClient={apiClientRef.current}
+        />
+        <DialogFooter minimal />
+      </div>
     );
   }
 
@@ -112,6 +116,7 @@ export function App() {
           />
         )}
       </div>
+      <DialogFooter />
     </div>
   );
 }
