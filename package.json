@@ -9,9 +9,11 @@
     "build": "pnpm --filter moo-family-bookshelf-extension build && pnpm --filter moo-family-bookshelf-worker build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "clean:kv": "rimraf worker/.wrangler/state"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "rimraf": "^6.1.3"
   }
 }
