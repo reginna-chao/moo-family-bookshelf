@@ -3,14 +3,13 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ApiEndpointEditor } from "@/components/ApiEndpointEditor";
 import type { ApiClient } from "@/api/client";
+import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 
 vi.mock("@/constants", () => ({
-  DEFAULT_API_ENDPOINT:
-    "https://moo-family-bookshelf.rcworkadd.workers.dev",
+  DEFAULT_API_ENDPOINT: "https://default-api.example.com",
 }));
 
-const DEFAULT_ENDPOINT =
-  "https://moo-family-bookshelf.rcworkadd.workers.dev";
+const DEFAULT_ENDPOINT = DEFAULT_API_ENDPOINT;
 
 function createMockApiClient(endpoint = "https://custom.api.com") {
   return {

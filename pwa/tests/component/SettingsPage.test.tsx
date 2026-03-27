@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SettingsPage } from "@/pages/SettingsPage";
 import type { ApiClient } from "@/api/client";
+import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 
 // Mock syncCode module
 vi.mock("@/crypto/syncCode", () => ({
@@ -11,8 +12,7 @@ vi.mock("@/crypto/syncCode", () => ({
 
 // Mock constants to match the default endpoint used in the mock
 vi.mock("@/constants", () => ({
-  DEFAULT_API_ENDPOINT:
-    "https://moo-family-bookshelf.rcworkadd.workers.dev",
+  DEFAULT_API_ENDPOINT: "https://default-api.example.com",
 }));
 
 const mockGetFamilyMembers = vi.fn();
@@ -22,9 +22,7 @@ const mockApiClient = {
   leaveFamily: mockLeaveFamily,
   getEndpoint: vi
     .fn()
-    .mockReturnValue(
-      "https://moo-family-bookshelf.rcworkadd.workers.dev",
-    ),
+    .mockReturnValue(DEFAULT_API_ENDPOINT),
 } as unknown as ApiClient;
 
 const defaultProps = {
