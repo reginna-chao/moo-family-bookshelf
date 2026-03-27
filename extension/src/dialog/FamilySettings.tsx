@@ -3,6 +3,7 @@ import { ApiClient } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
 import { DisplayNameEditor } from "./DisplayNameEditor";
+import { MemberList } from "./MemberList";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 
 export interface FamilySettingsProps {
@@ -16,6 +17,7 @@ type LeaveState = "idle" | "confirming" | "leaving";
 export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilySettingsProps) {
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [members, setMembers] = useState<string[]>([]);
+  const [ownerId, setOwnerId] = useState("");
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersError, setMembersError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -45,6 +47,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
       setMembersError(response.error.message);
     } else if (response.data) {
       setMembers(response.data.members);
+      setOwnerId(response.data.ownerId);
     }
     setMembersLoading(false);
   }, [familyId, apiClient]);
@@ -70,7 +73,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     try {
       const response = await apiClient.leaveFamily(familyId, userId);
       if (response.error) {
-        setLeaveError(response.error.message);
+        const msg = response.error.code === "OWNER_CANNOT_LEAVE"
+          ? "管理者必須先轉移管理權才能離開家庭"
+          : response.error.message;
+        setLeaveError(msg);
         setLeaveState("idle");
         return;
       }
@@ -134,21 +140,15 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           </div>
         )}
         {!membersLoading && !membersError && (
-          <div style={{ background: "#f8fafc", borderRadius: 8, overflow: "hidden" }}>
-            {members.map((memberId) => (
-              <div key={memberId} style={{
-                padding: "10px 12px", fontSize: 14, borderBottom: "1px solid #e2e8f0",
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-              }}>
-                <span style={{ fontFamily: "monospace", fontSize: 13 }}>{memberId === userId
-                  && displayNameState.savedDisplayName ? displayNameState.savedDisplayName
-                  : memberId.slice(0, 8)}</span>
-                {memberId === userId && (
-                  <span style={{ color: "#2563eb", fontSize: 12, fontWeight: 600 }}>(你)</span>
-                )}
-              </div>
-            ))}
-          </div>
+          <MemberList
+            members={members}
+            ownerId={ownerId}
+            userId={userId}
+            familyId={familyId}
+            apiClient={apiClient}
+            savedDisplayName={displayNameState.savedDisplayName}
+            onMembersChanged={() => void fetchMembers()}
+          />
         )}
       </div>
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>

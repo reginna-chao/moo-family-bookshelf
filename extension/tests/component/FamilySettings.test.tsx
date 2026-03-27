@@ -9,12 +9,16 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     createFamily: vi.fn(),
     joinFamily: vi.fn(),
     leaveFamily: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    removeMember: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    transferOwnership: vi.fn().mockResolvedValue({ data: { ok: true } }),
     getPersonalBooks: vi.fn(),
     updatePersonalBooks: vi.fn(),
     getFamilyMembers: vi.fn().mockResolvedValue({
       data: {
         familyId: "fam-123",
+        ownerId: "user-abc12345",
         members: ["user-abc12345", "user-def67890"],
+        maxMembers: 6,
         createdAt: "2026-01-01",
       },
     }),
@@ -188,6 +192,199 @@ describe("FamilySettings", () => {
     await waitFor(() => {
       expect(screen.getByText("離開家庭")).toBeInTheDocument();
       expect(screen.queryByText("確定離開")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows (Owner) badge next to the owner in member list", async () => {
+    renderFamilySettings();
+
+    await waitFor(() => {
+      expect(screen.getByText("(Owner)")).toBeInTheDocument();
+    });
+  });
+
+  it("owner sees remove and transfer buttons for other members", async () => {
+    renderFamilySettings();
+
+    await waitFor(() => {
+      expect(screen.getByText("移除")).toBeInTheDocument();
+      expect(screen.getByText("轉移管理權")).toBeInTheDocument();
+    });
+  });
+
+  it("non-owner does not see remove or transfer buttons", async () => {
+    const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: {
+          familyId: "fam-123",
+          ownerId: "user-def67890",
+          members: ["user-abc12345", "user-def67890"],
+          maxMembers: 6,
+          createdAt: "2026-01-01",
+        },
+      }),
+    });
+
+    renderFamilySettings({ apiClient });
+
+    await waitFor(() => {
+      expect(screen.getByText("user-def")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("移除")).not.toBeInTheDocument();
+    expect(screen.queryByText("轉移管理權")).not.toBeInTheDocument();
+  });
+
+  it("shows confirmation when clicking remove button", async () => {
+    renderFamilySettings();
+
+    await waitFor(() => {
+      expect(screen.getByText("移除")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("移除"));
+
+    await waitFor(() => {
+      expect(screen.getByText("確定要移除此成員？")).toBeInTheDocument();
+      expect(screen.getByText("確定")).toBeInTheDocument();
+    });
+  });
+
+  it("calls removeMember API and refreshes on confirm", async () => {
+    const apiClient = createMockApiClient();
+    renderFamilySettings({ apiClient });
+
+    await waitFor(() => {
+      expect(screen.getByText("移除")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("移除"));
+
+    await waitFor(() => {
+      expect(screen.getByText("確定")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("確定"));
+
+    await waitFor(() => {
+      expect(apiClient.removeMember).toHaveBeenCalledWith(
+        "fam-123", "user-def67890", "user-abc12345",
+      );
+    });
+
+    // fetchMembers should be called again (initial + refresh)
+    await waitFor(() => {
+      expect(apiClient.getFamilyMembers).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("shows confirmation when clicking transfer button", async () => {
+    renderFamilySettings();
+
+    await waitFor(() => {
+      expect(screen.getByText("轉移管理權")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("轉移管理權"));
+
+    await waitFor(() => {
+      expect(screen.getByText("確定要將管理權轉移給此成員？轉移後你將無法移除其他成員。")).toBeInTheDocument();
+      expect(screen.getByText("確定")).toBeInTheDocument();
+    });
+  });
+
+  it("calls transferOwnership API and refreshes on confirm", async () => {
+    const apiClient = createMockApiClient();
+    renderFamilySettings({ apiClient });
+
+    await waitFor(() => {
+      expect(screen.getByText("轉移管理權")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("轉移管理權"));
+
+    await waitFor(() => {
+      expect(screen.getByText("確定")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("確定"));
+
+    await waitFor(() => {
+      expect(apiClient.transferOwnership).toHaveBeenCalledWith(
+        "fam-123", "user-abc12345", "user-def67890",
+      );
+    });
+
+    await waitFor(() => {
+      expect(apiClient.getFamilyMembers).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("shows owner-specific error when owner tries to leave", async () => {
+    const apiClient = createMockApiClient({
+      leaveFamily: vi.fn().mockResolvedValue({
+        error: { code: "OWNER_CANNOT_LEAVE", message: "Owner cannot leave" },
+      }),
+    });
+    renderFamilySettings({ apiClient });
+
+    fireEvent.click(screen.getByText("離開家庭"));
+
+    await waitFor(() => {
+      expect(screen.getByText("確定離開")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("確定離開"));
+
+    await waitFor(() => {
+      expect(screen.getByText("管理者必須先轉移管理權才能離開家庭")).toBeInTheDocument();
+    });
+  });
+
+  it("cancel confirmation hides confirm dialog in member list", async () => {
+    renderFamilySettings();
+
+    await waitFor(() => {
+      expect(screen.getByText("移除")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("移除"));
+
+    await waitFor(() => {
+      expect(screen.getByText("確定要移除此成員？")).toBeInTheDocument();
+    });
+
+    // Find the cancel button inside the MemberList confirmation (not the leave cancel)
+    const cancelButtons = screen.getAllByText("取消");
+    fireEvent.click(cancelButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByText("確定要移除此成員？")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows error when removeMember API fails", async () => {
+    const apiClient = createMockApiClient({
+      removeMember: vi.fn().mockResolvedValue({
+        error: { code: "FORBIDDEN", message: "權限不足" },
+      }),
+    });
+    renderFamilySettings({ apiClient });
+
+    await waitFor(() => {
+      expect(screen.getByText("移除")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("移除"));
+
+    await waitFor(() => {
+      expect(screen.getByText("確定")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("確定"));
+
+    await waitFor(() => {
+      expect(screen.getByText("權限不足")).toBeInTheDocument();
     });
   });
 });

@@ -29,7 +29,9 @@ export interface PersonalBooks {
 
 export interface FamilyGroup {
   familyId: string;
+  ownerId: string;
   members: string[];
+  maxMembers: number;
   createdAt: string;
 }
 
@@ -99,6 +101,28 @@ export class ApiClient {
   ): Promise<ApiResponse<{ ok: boolean }>> {
     return this.request(`/api/family/${familyId}/member/${userId}`, {
       method: "DELETE",
+    });
+  }
+
+  async removeMember(
+    familyId: string,
+    targetUserId: string,
+    callerId: string,
+  ): Promise<ApiResponse<{ ok: boolean }>> {
+    return this.request(
+      `/api/family/${familyId}/member/${targetUserId}?userId=${encodeURIComponent(callerId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async transferOwnership(
+    familyId: string,
+    userId: string,
+    newOwnerId: string,
+  ): Promise<ApiResponse<{ ok: boolean }>> {
+    return this.request(`/api/family/${familyId}/transfer`, {
+      method: "PUT",
+      body: JSON.stringify({ userId, newOwnerId }),
     });
   }
 
