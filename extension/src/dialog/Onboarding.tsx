@@ -62,7 +62,12 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         return;
       }
 
-      const familyId = response.data!.familyId;
+      if (!response.data) {
+        setErrorMessage("伺服器未回傳資料");
+        setState("error");
+        return;
+      }
+      const familyId = response.data.familyId;
       const key = await generateKey();
       const keyString = await exportKey(key);
 

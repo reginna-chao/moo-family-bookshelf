@@ -61,6 +61,10 @@ export function App() {
     );
   }
 
+  if (!familyId || !userId) {
+    return null;
+  }
+
   return (
     <div>
       <nav style={{ display: "flex", borderBottom: "1px solid #e2e8f0" }}>
@@ -93,15 +97,15 @@ export function App() {
       </nav>
       <div style={{ padding: 16, overflowY: "auto", maxHeight: "60vh" }}>
         {activeTab === "family-shelf" && (
-          <FamilyShelf familyId={familyId!} apiClient={apiClientRef.current} />
+          <FamilyShelf familyId={familyId} apiClient={apiClientRef.current} />
         )}
         {activeTab === "personal-shelf" && (
-          <PersonalShelf userId={userId!} apiClient={apiClientRef.current} />
+          <PersonalShelf userId={userId} apiClient={apiClientRef.current} />
         )}
         {activeTab === "settings" && (
           <FamilySettings
-            familyId={familyId!}
-            userId={userId!}
+            familyId={familyId}
+            userId={userId}
             apiClient={apiClientRef.current}
             onLeave={handleLeaveFamily}
           />

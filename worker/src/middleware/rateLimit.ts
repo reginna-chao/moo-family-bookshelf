@@ -2,7 +2,6 @@ import { createMiddleware } from "hono/factory";
 import type { Env } from "../index";
 
 const RATE_LIMIT = 60;
-const WINDOW_SECONDS = 60;
 const TTL_SECONDS = 120;
 
 export const rateLimit = createMiddleware<{ Bindings: Env }>(
