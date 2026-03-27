@@ -1,8 +1,9 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { Onboarding, OnboardingProps } from "@/dialog/Onboarding";
 import type { ApiClient } from "@/api/client";
+import { scrapeUserEmail } from "@/content/scraper";
 
 import { webcrypto } from "node:crypto";
 
@@ -12,6 +13,13 @@ beforeAll(() => {
   }
 });
 
+// Mock the scraper module
+vi.mock("@/content/scraper", () => ({
+  scrapeUserEmail: vi.fn().mockReturnValue("test@example.com"),
+  scrapeDisplayName: vi.fn().mockReturnValue("Test User"),
+  scrapeBooks: vi.fn().mockResolvedValue([]),
+}));
+
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     createFamily: vi.fn().mockResolvedValue({
@@ -20,7 +28,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     joinFamily: vi.fn().mockResolvedValue({ data: { ok: true } }),
     leaveFamily: vi.fn(),
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
-    updatePersonalBooks: vi.fn(),
+    updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
     getFamilyMembers: vi.fn().mockResolvedValue({
       data: { familyId: "fam-123", members: ["user-1"], createdAt: "2026-01-01" },
     }),
@@ -39,49 +47,100 @@ function renderOnboarding(props: Partial<OnboardingProps> = {}) {
   return render(<Onboarding {...defaultProps} {...props} />);
 }
 
+/** Flush microtask queue */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+    vi.advanceTimersByTime(0);
+  });
+}
+
 describe("Onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset chrome.storage.local.get to return empty by default (no email cached)
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    // Restore default scraper mock
+    vi.mocked(scrapeUserEmail).mockReturnValue("test@example.com");
+
+    // Reset chrome.storage.local mock
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
         callback({});
       },
     );
+    vi.mocked(chrome.storage.local.set).mockImplementation(
+      (_items: Record<string, unknown>, _callback?: () => void) => {
+        return Promise.resolve();
+      },
+    );
   });
 
-  it("renders need-email state when no email cached", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * Click the start button and advance timers enough to complete
+   * the navigateAndRun flow (1500ms timeout + microtask flushing).
+   */
+  async function clickStartAndWait() {
+    // Fire click — this starts the async handleStart flow
+    fireEvent.click(screen.getByText("開始使用"));
+
+    // The handleStart calls scrapeProfile which calls navigateAndRun
+    // which sets location.hash then calls wait(1500).
+    // We need to let the microtask chain progress and advance timers.
+    for (let i = 0; i < 5; i++) {
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+        await flushMicrotasks();
+      });
+    }
+  }
+
+  it("renders welcome state with '開始使用' button on first load", () => {
     renderOnboarding();
 
-    await waitFor(() => {
-      expect(screen.getByText("歡迎使用家庭書櫃")).toBeInTheDocument();
-    });
+    expect(screen.getByText("歡迎使用家庭書櫃")).toBeInTheDocument();
+    expect(screen.getByText("開始使用")).toBeInTheDocument();
     expect(
-      screen.getByText(/首次使用需要先確認你的讀墨帳號/),
+      screen.getByText(/一鍵開始，自動同步你的讀墨帳號與書單/),
     ).toBeInTheDocument();
   });
 
-  it("shows '前往個人帳戶頁面' link in need-email state", async () => {
+  it("does not show the old '前往個人帳戶頁面' link", () => {
     renderOnboarding();
 
-    await waitFor(() => {
-      const link = screen.getByText("前往個人帳戶頁面");
-      expect(link).toBeInTheDocument();
-      expect(link.closest("a")).toHaveAttribute(
-        "href",
-        "https://read.readmoo.com/#/me",
-      );
-    });
+    expect(screen.queryByText("前往個人帳戶頁面")).not.toBeInTheDocument();
   });
 
-  it("transitions to idle state when email is found in chrome.storage", async () => {
-    vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-        callback({ userEmail: "test@example.com" });
-      },
-    );
-
+  it("shows loading overlay when '開始使用' is clicked", async () => {
     renderOnboarding();
+
+    // Click start — overlay should appear before timer advances
+    await act(async () => {
+      fireEvent.click(screen.getByText("開始使用"));
+      // Let the setPhase("scraping-profile") microtask run
+      await flushMicrotasks();
+    });
+
+    expect(screen.getByTestId("loading-overlay")).toBeInTheDocument();
+    expect(screen.getByText("正在取得帳號資訊...")).toBeInTheDocument();
+
+    // Clean up by completing the flow
+    for (let i = 0; i < 5; i++) {
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+        await flushMicrotasks();
+      });
+    }
+  });
+
+  it("transitions to idle state after successful profile scrape", async () => {
+    renderOnboarding();
+
+    await clickStartAndWait();
 
     await waitFor(() => {
       expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
@@ -89,29 +148,25 @@ describe("Onboarding", () => {
     });
   });
 
-  it("shows create and join buttons in idle state", async () => {
-    vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-        callback({ userEmail: "user@readmoo.com" });
-      },
-    );
+  it("shows error when profile scrape fails to find email", async () => {
+    vi.mocked(scrapeUserEmail).mockReturnValue(null);
 
     renderOnboarding();
 
+    await clickStartAndWait();
+
     await waitFor(() => {
-      expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
-      expect(screen.getByText("加入家庭公開書櫃")).toBeInTheDocument();
+      expect(screen.getByText("發生錯誤")).toBeInTheDocument();
+      expect(
+        screen.getByText(/無法取得帳號信箱/),
+      ).toBeInTheDocument();
     });
   });
 
   it("join button is disabled when sync code input is empty", async () => {
-    vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-        callback({ userEmail: "user@readmoo.com" });
-      },
-    );
-
     renderOnboarding();
+
+    await clickStartAndWait();
 
     await waitFor(() => {
       const joinBtn = screen.getByText("加入家庭公開書櫃");
@@ -120,12 +175,6 @@ describe("Onboarding", () => {
   });
 
   it("shows error state on API failure during create", async () => {
-    vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-        callback({ userEmail: "user@readmoo.com" });
-      },
-    );
-
     const mockApi = createMockApiClient({
       createFamily: vi.fn().mockResolvedValue({
         error: { code: "INTERNAL_ERROR", message: "伺服器錯誤" },
@@ -133,6 +182,8 @@ describe("Onboarding", () => {
     });
 
     renderOnboarding({ apiClient: mockApi });
+
+    await clickStartAndWait();
 
     await waitFor(() => {
       expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
@@ -146,5 +197,23 @@ describe("Onboarding", () => {
       expect(screen.getByText("發生錯誤")).toBeInTheDocument();
       expect(screen.getByText("伺服器錯誤")).toBeInTheDocument();
     });
+  });
+
+  it("retry from error returns to welcome if no email", async () => {
+    vi.mocked(scrapeUserEmail).mockReturnValue(null);
+
+    renderOnboarding();
+
+    await clickStartAndWait();
+
+    await waitFor(() => {
+      expect(screen.getByText("發生錯誤")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("重試"));
+    });
+
+    expect(screen.getByText("開始使用")).toBeInTheDocument();
   });
 });
