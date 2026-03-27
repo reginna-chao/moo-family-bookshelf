@@ -100,6 +100,28 @@ After both teams complete, **present ALL review findings to the user**:
 3. `git add` changed files.
 4. Ask user about committing.
 
+### Phase 6: Security Scan
+
+After Phase 5, run a targeted security scan on the changed code to prevent technical debt accumulation.
+
+1. Determine which dimensions are relevant based on the changed files:
+   - `extension/src/crypto/` changed → run `crypto` scope
+   - `worker/src/` changed → run `api` scope
+   - `extension/src/` changed → run `code` + `extension` scope
+   - `pwa/src/` changed → run `code` scope
+   - `.env*`, `wrangler.toml`, CI/CD changed → run `secrets` scope
+   - Dependencies changed → run `deps` scope
+   - If multiple areas changed, run `full` scope
+2. Spawn **`/security-audit <scope>`** as an Agent.
+3. Present findings to user alongside the final summary.
+4. If any **CRITICAL** findings are detected:
+   - **Block the commit** if not yet committed.
+   - Flag to user with clear remediation steps.
+   - Recommend fixing before merging.
+5. **WARNING** findings are reported but do not block.
+
+**Note:** This phase runs automatically — no user confirmation needed to start, but CRITICAL findings require user acknowledgement.
+
 ## Rules
 
 - Always read project docs before breaking down tasks.

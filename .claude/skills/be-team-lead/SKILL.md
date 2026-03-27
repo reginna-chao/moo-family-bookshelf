@@ -99,6 +99,23 @@ Present **ALL review findings** to the user:
 3. `git add` changed files.
 4. Ask user about committing.
 
+### Phase 6: Security Scan
+
+After Phase 5, run a targeted security scan on the changed backend code.
+
+1. Determine relevant scope based on changed files:
+   - `worker/src/routes/`, `worker/src/middleware/` → `api`
+   - `worker/src/kv/` → `api`
+   - `wrangler.toml`, `.dev.vars` → `secrets`
+   - Dependencies changed → `deps`
+   - Multiple areas → `full`
+2. Spawn **`/security-audit <scope>`** as an Agent.
+3. Present findings to user alongside the final summary.
+4. **CRITICAL** findings → block commit, flag remediation steps.
+5. **WARNING** findings → report but do not block.
+
+This phase runs automatically — no user confirmation needed to start, but CRITICAL findings require user acknowledgement.
+
 ## Rules
 
 - Never write production or test code directly.
