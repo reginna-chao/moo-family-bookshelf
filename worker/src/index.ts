@@ -10,10 +10,86 @@ export interface Env {
   KV: KVNamespace;
 }
 
+/** Max request body size: 256KB */
+const MAX_BODY_SIZE = 262144;
+
+/** Check if the origin is allowed for CORS */
+export function isAllowedOrigin(origin: string): boolean {
+  // Readmoo domains (exact + subdomains)
+  if (origin === "https://readmoo.com") return true;
+  if (origin === "https://read.readmoo.com") return true;
+  if (/^https:\/\/[a-zA-Z0-9-]+\.readmoo\.com$/.test(origin)) return true;
+
+  // PWA on Cloudflare Pages
+  if (origin === "https://moo-family-bookshelf-pwa.pages.dev") return true;
+
+  // localhost (any port, dev only)
+  if (/^http:\/\/localhost(:\d+)?$/.test(origin)) return true;
+
+  // Chrome Extension
+  if (/^chrome-extension:\/\/[a-z]{32}$/.test(origin)) return true;
+
+  return false;
+}
+
 const app = new Hono<{ Bindings: Env }>();
 
-// CORS for Extension and PWA
-app.use("*", cors());
+// Security headers on ALL responses
+app.use("*", async (c, next) => {
+  await next();
+  c.res.headers.set("X-Content-Type-Options", "nosniff");
+  c.res.headers.set("X-Frame-Options", "DENY");
+  c.res.headers.set(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains",
+  );
+  c.res.headers.set("X-XSS-Protection", "0");
+});
+
+// CORS with dynamic origin validation
+app.use(
+  "*",
+  cors({
+    origin: (origin) => (isAllowedOrigin(origin) ? origin : ""),
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    maxAge: 86400,
+  }),
+);
+
+// Request body size limit for API routes
+app.use("/api/*", async (c, next) => {
+  const contentLength = c.req.header("Content-Length");
+  if (contentLength) {
+    const size = parseInt(contentLength, 10);
+    if (!Number.isNaN(size) && size > MAX_BODY_SIZE) {
+      return c.json(
+        {
+          error: {
+            code: "PAYLOAD_TOO_LARGE",
+            message: "Request body exceeds 256KB limit",
+          },
+        },
+        413,
+      );
+    }
+  } else if (c.req.method !== "GET" && c.req.method !== "DELETE") {
+    // No Content-Length: read the body to verify size
+    const body = await c.req.raw.clone().arrayBuffer();
+    if (body.byteLength > MAX_BODY_SIZE) {
+      return c.json(
+        {
+          error: {
+            code: "PAYLOAD_TOO_LARGE",
+            message: "Request body exceeds 256KB limit",
+          },
+        },
+        413,
+      );
+    }
+  }
+  await next();
+});
 
 // Rate limiting for API routes
 app.use("/api/*", rateLimit);

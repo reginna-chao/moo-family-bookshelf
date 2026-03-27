@@ -2,21 +2,13 @@ import { createMiddleware } from "hono/factory";
 import type { Context } from "hono";
 import type { Env } from "../index";
 import { kvKeys, type AuthRecord } from "../kv/schema";
+import { isPublicRoute } from "../utils/routes";
 
 // Extend Hono Variables to carry authenticated userId
 declare module "hono" {
   interface ContextVariableMap {
     authUserId: string | null; // null = no auth header (fallback mode)
   }
-}
-
-/** Routes that don't require authentication */
-function isPublicRoute(method: string, path: string): boolean {
-  // POST /api/family — create family
-  if (method === "POST" && /^\/api\/family\/?$/.test(path)) return true;
-  // POST /api/family/:id/join — join family
-  if (method === "POST" && /^\/api\/family\/[^/]+\/join\/?$/.test(path)) return true;
-  return false;
 }
 
 /**
