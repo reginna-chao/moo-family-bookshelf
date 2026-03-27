@@ -4,7 +4,6 @@ import React from "react";
 import { Onboarding, OnboardingProps } from "@/dialog/Onboarding";
 import type { ApiClient } from "@/api/client";
 
-// @ts-expect-error — node:crypto types
 import { webcrypto } from "node:crypto";
 
 beforeAll(() => {

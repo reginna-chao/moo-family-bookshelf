@@ -1,4 +1,3 @@
-// @ts-expect-error — node:crypto types not available in browser tsconfig
 import { webcrypto } from "node:crypto";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
