@@ -1,4 +1,16 @@
-export function FamilyShelfPage() {
+import type { ApiClient } from "@/api/client";
+
+interface FamilyShelfPageProps {
+  familyId: string;
+  userId: string;
+  apiClient: ApiClient;
+}
+
+export function FamilyShelfPage({
+  familyId: _familyId,
+  userId: _userId,
+  apiClient: _apiClient,
+}: FamilyShelfPageProps) {
   return (
     <div className="p-4">
       <h2 className="text-xl font-bold text-gray-900 mb-4">家庭書櫃</h2>

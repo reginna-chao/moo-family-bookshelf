@@ -119,6 +119,18 @@ export function base62ToBuffer(str: string): ArrayBuffer {
 }
 
 /**
+ * Derive a userId from email with an app-specific salt.
+ * Prevents rainbow table attacks against plain SHA-256 of email.
+ *
+ * TODO: Enabling this requires migrating existing KV entries from
+ * unsalted sha256Hex(email) to deriveUserId(email). Until migration
+ * is done, callers should use sha256Hex() for backward compatibility.
+ */
+export async function deriveUserId(email: string): Promise<string> {
+  return sha256Hex(`moo:${email}`);
+}
+
+/**
  * SHA-256 hash a string and return the hex digest.
  * Used to derive a deterministic, privacy-preserving userId from email.
  */

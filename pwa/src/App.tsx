@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useAuth } from "./hooks/useAuth";
+import { ApiClient } from "./api/client";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
-type Page = "landing" | "family-shelf" | "personal-shelf" | "settings";
+type Page = "family-shelf" | "personal-shelf" | "settings";
 
 interface NavItem {
   page: Page;
@@ -19,25 +21,53 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentPage, setCurrentPage] = useState<Page>("landing");
+  const { auth, isLoading, login, logout } = useAuth();
+  const [currentPage, setCurrentPage] = useState<Page>("family-shelf");
 
-  if (!isAuthenticated) {
-    return <LandingPage onAuth={() => {
-      setIsAuthenticated(true);
-      setCurrentPage("family-shelf");
-    }} />;
+  const apiClient = useMemo(
+    () => new ApiClient(auth?.apiHost),
+    [auth?.apiHost],
+  );
+
+  if (isLoading) {
+    return (
+      <div className="max-w-md mx-auto min-h-screen flex items-center justify-center">
+        <p className="text-gray-500">載入中...</p>
+      </div>
+    );
+  }
+
+  if (!auth) {
+    return <LandingPage onAuth={login} />;
   }
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50">
       <main className="flex-1 overflow-y-auto pb-16">
-        {currentPage === "family-shelf" && <FamilyShelfPage />}
-        {currentPage === "personal-shelf" && <PersonalShelfPage />}
-        {currentPage === "settings" && <SettingsPage />}
+        {currentPage === "family-shelf" && (
+          <FamilyShelfPage
+            familyId={auth.familyId}
+            userId={auth.userId}
+            apiClient={apiClient}
+          />
+        )}
+        {currentPage === "personal-shelf" && (
+          <PersonalShelfPage userId={auth.userId} apiClient={apiClient} />
+        )}
+        {currentPage === "settings" && (
+          <SettingsPage
+            familyId={auth.familyId}
+            userId={auth.userId}
+            apiClient={apiClient}
+            onLogout={logout}
+          />
+        )}
       </main>
 
-      <nav aria-label="主要導覽" className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200">
+      <nav
+        aria-label="主要導覽"
+        className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200"
+      >
         <div className="max-w-md mx-auto flex">
           {NAV_ITEMS.map((item) => (
             <button
@@ -50,7 +80,9 @@ export default function App() {
                   : "text-gray-500"
               }`}
             >
-              <span aria-hidden="true" className="text-xl mb-0.5">{item.icon}</span>
+              <span aria-hidden="true" className="text-xl mb-0.5">
+                {item.icon}
+              </span>
               <span>{item.label}</span>
             </button>
           ))}
