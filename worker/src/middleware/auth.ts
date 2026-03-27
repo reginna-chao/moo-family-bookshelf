@@ -81,15 +81,26 @@ export function getAuthenticatedUserId(c: Context): string | null {
   return c.get("authUserId") as string | null;
 }
 
+/** Token TTL: 90 days in seconds */
+const TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
+
 /**
  * Generate a new auth token for a user and store both directions in KV.
+ * Serialized: delete old token first, then write new one to avoid
+ * orphaned token entries from concurrent requests.
  * Returns the token string.
  */
 export async function generateAuthToken(
   kv: KVNamespace,
   userId: string,
 ): Promise<string> {
-  // Generate 64-char hex token (32 random bytes → 64 hex chars)
+  // 1. Delete any existing token first (serialized to avoid orphans)
+  const existingAuth = await kv.get<AuthRecord>(kvKeys.auth(userId), "json");
+  if (existingAuth?.token) {
+    await kv.delete(kvKeys.authToken(existingAuth.token));
+  }
+
+  // 2. Generate new token
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes)
@@ -101,17 +112,14 @@ export async function generateAuthToken(
     createdAt: new Date().toISOString(),
   };
 
-  // Delete any existing token for this user first
-  const existingAuth = await kv.get<AuthRecord>(kvKeys.auth(userId), "json");
-  const deleteOps: Promise<void>[] = [];
-  if (existingAuth?.token) {
-    deleteOps.push(kv.delete(kvKeys.authToken(existingAuth.token)));
-  }
-
+  // 3. Write both directions with TTL
   await Promise.all([
-    ...deleteOps,
-    kv.put(kvKeys.auth(userId), JSON.stringify(authRecord)),
-    kv.put(kvKeys.authToken(token), userId),
+    kv.put(kvKeys.auth(userId), JSON.stringify(authRecord), {
+      expirationTtl: TOKEN_TTL_SECONDS,
+    }),
+    kv.put(kvKeys.authToken(token), userId, {
+      expirationTtl: TOKEN_TTL_SECONDS,
+    }),
   ]);
 
   return token;

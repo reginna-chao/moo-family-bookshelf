@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useAuth } from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
 import { LandingPage } from "./pages/LandingPage";
@@ -31,6 +31,26 @@ export default function App() {
     }
     return client;
   }, [auth?.apiHost, auth?.authToken]);
+
+  // Auto-acquire auth token if missing (e.g., QR code entry)
+  const tokenAcquired = useRef(false);
+  useEffect(() => {
+    if (!auth || auth.authToken || tokenAcquired.current) return;
+    tokenAcquired.current = true;
+
+    const acquireToken = async () => {
+      // Re-join the family to get a token (server handles idempotent re-join)
+      const tempClient = new ApiClient(auth.apiHost);
+      const res = await tempClient.joinFamily(auth.familyId, auth.userId);
+      if (res.data) {
+        const data = res.data as unknown as { authToken?: string };
+        if (data.authToken) {
+          login({ ...auth, authToken: data.authToken });
+        }
+      }
+    };
+    void acquireToken();
+  }, [auth, login]);
 
   if (isLoading) {
     return (
