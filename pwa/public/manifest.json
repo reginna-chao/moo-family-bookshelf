@@ -1,0 +1,13 @@
+{
+  "name": "牧家書櫃",
+  "short_name": "牧家書櫃",
+  "description": "MooFamily Bookshelf — 家庭共享書櫃",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "lang": "zh-Hant",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": []
+}
