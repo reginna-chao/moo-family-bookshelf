@@ -16,7 +16,8 @@ export function App() {
   const apiClientRef = useRef(new ApiClient());
 
   useEffect(() => {
-    // Load familyId, userId, and custom API endpoint on mount
+    // Load familyId, userId, and custom API endpoint on mount.
+    // GET_FAMILY_ID checks sync first, falling back to local (handled in background).
     chrome.runtime.sendMessage({ type: "GET_FAMILY_ID" }, (familyResponse) => {
       chrome.storage.local.get(["userId"], (storageResult) => {
         chrome.runtime.sendMessage({ type: "GET_API_ENDPOINT" }, (apiResponse) => {
