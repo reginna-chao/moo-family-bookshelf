@@ -6,6 +6,7 @@ import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { QrCodeLink } from "./QrCodeLink";
+import { ApiEndpointEditor } from "./ApiEndpointEditor";
 
 export interface FamilySettingsProps {
   familyId: string;
@@ -155,6 +156,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           />
         )}
       </div>
+      <ApiEndpointEditor apiClient={apiClient} />
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
         {leaveError && (
           <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{leaveError}</div>

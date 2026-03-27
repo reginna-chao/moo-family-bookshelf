@@ -3,6 +3,7 @@ import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
 import { MemberList } from "@/components/MemberList";
+import { ApiEndpointEditor } from "@/components/ApiEndpointEditor";
 
 interface SettingsPageProps {
   familyId: string;
@@ -168,6 +169,9 @@ export function SettingsPage({
           />
         )}
       </section>
+
+      {/* API Endpoint */}
+      <ApiEndpointEditor apiClient={apiClient} />
 
       {/* Leave family */}
       <section className="mb-6 pt-6 border-t border-gray-200">
