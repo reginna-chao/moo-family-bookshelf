@@ -1,8 +1,8 @@
-// TODO: Replace client-supplied userId with auth-middleware-verified identity
 import { Hono } from "hono";
 import type { Env } from "../index";
 import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord } from "../kv/schema";
-import { isValidUserId } from "../utils/validation";
+import { isValidUserId, isValidFamilyId } from "../utils/validation";
+import { generateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
 
@@ -49,12 +49,21 @@ familyRoutes.post("/", async (c) => {
     c.env.KV.put(kvKeys.member(body.userId), familyId),
   ]);
 
-  return c.json({ data: record }, 201);
+  const authToken = await generateAuthToken(c.env.KV, body.userId);
+
+  return c.json({ data: { ...record, authToken } }, 201);
 });
 
 // POST /api/family/:id/join
 familyRoutes.post("/:id/join", async (c) => {
   const familyId = c.req.param("id");
+
+  if (!isValidFamilyId(familyId)) {
+    return c.json(
+      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
+      400,
+    );
+  }
 
   let body: { userId: string } | null;
   try {
@@ -120,14 +129,25 @@ familyRoutes.post("/:id/join", async (c) => {
     c.env.KV.put(kvKeys.member(body.userId), familyId),
   ]);
 
-  return c.json({ data: record });
+  const authToken = await generateAuthToken(c.env.KV, body.userId);
+
+  return c.json({ data: { ...record, authToken } });
 });
 
 // DELETE /api/family/:id/member/:uid
 familyRoutes.delete("/:id/member/:uid", async (c) => {
   const familyId = c.req.param("id");
   const targetUserId = c.req.param("uid");
-  const callerId = c.req.query("userId");
+
+  if (!isValidFamilyId(familyId)) {
+    return c.json(
+      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
+      400,
+    );
+  }
+
+  const fallbackCallerId = c.req.query("userId");
+  const callerId = getAuthenticatedUserId(c, fallbackCallerId ?? undefined);
 
   if (!callerId) {
     return c.json(
@@ -186,6 +206,7 @@ familyRoutes.delete("/:id/member/:uid", async (c) => {
   await Promise.all([
     c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
     c.env.KV.delete(kvKeys.member(targetUserId)),
+    deleteAuthToken(c.env.KV, targetUserId),
   ]);
 
   return c.json({ data: record });
@@ -194,6 +215,27 @@ familyRoutes.delete("/:id/member/:uid", async (c) => {
 // GET /api/family/:id/members
 familyRoutes.get("/:id/members", async (c) => {
   const familyId = c.req.param("id");
+
+  if (!isValidFamilyId(familyId)) {
+    return c.json(
+      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
+      400,
+    );
+  }
+
+  // If authenticated, verify family membership
+  const userId = getAuthenticatedUserId(c);
+  if (userId) {
+    const memberFamily = await c.env.KV.get(kvKeys.member(userId));
+    if (memberFamily !== familyId) {
+      return c.json(
+        { error: { code: "FORBIDDEN", message: "Not a family member" } },
+        403,
+      );
+    }
+  }
+  // If no auth (fallback mode), allow access (backward compat)
+
   const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),
     "json",
@@ -214,6 +256,13 @@ familyRoutes.get("/:id/members", async (c) => {
 // PUT /api/family/:id/transfer — transfer ownership
 familyRoutes.put("/:id/transfer", async (c) => {
   const familyId = c.req.param("id");
+
+  if (!isValidFamilyId(familyId)) {
+    return c.json(
+      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
+      400,
+    );
+  }
 
   let body: { userId: string; newOwnerId: string } | null;
   try {
@@ -239,6 +288,8 @@ familyRoutes.put("/:id/transfer", async (c) => {
     );
   }
 
+  const callerUserId = getAuthenticatedUserId(c, body.userId);
+
   const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),
     "json",
@@ -253,7 +304,7 @@ familyRoutes.put("/:id/transfer", async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  if (body.userId !== record.ownerId) {
+  if (callerUserId !== record.ownerId) {
     return c.json(
       { error: { code: "NOT_OWNER", message: "只有管理者可以轉移管理權" } },
       403,

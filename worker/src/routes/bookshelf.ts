@@ -1,12 +1,34 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
 import { kvKeys, type RawFamilyRecord, type UserBooksRecord, normalizeFamilyRecord } from "../kv/schema";
+import { isValidFamilyId } from "../utils/validation";
+import { getAuthenticatedUserId } from "../middleware/auth";
 
 export const bookshelfRoutes = new Hono<{ Bindings: Env }>();
 
 // GET /api/family/:id/bookshelf
 bookshelfRoutes.get("/family/:id/bookshelf", async (c) => {
   const familyId = c.req.param("id");
+
+  if (!isValidFamilyId(familyId)) {
+    return c.json(
+      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
+      400,
+    );
+  }
+
+  // If authenticated, verify family membership
+  const userId = getAuthenticatedUserId(c);
+  if (userId) {
+    const memberFamily = await c.env.KV.get(kvKeys.member(userId));
+    if (memberFamily !== familyId) {
+      return c.json(
+        { error: { code: "FORBIDDEN", message: "Not a family member" } },
+        403,
+      );
+    }
+  }
+  // If no auth (fallback mode), allow access (backward compat)
 
   // Get family members
   const raw = await c.env.KV.get<RawFamilyRecord>(

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../index";
 import { kvKeys, type UserBooksRecord } from "../kv/schema";
 import { isValidUserId } from "../utils/validation";
+import { getAuthenticatedUserId } from "../middleware/auth";
 
 export const userRoutes = new Hono<{ Bindings: Env }>();
 
@@ -13,6 +14,15 @@ userRoutes.get("/:id/books", async (c) => {
     return c.json(
       { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
       400,
+    );
+  }
+
+  // If authenticated, only allow access to own data
+  const authUserId = getAuthenticatedUserId(c);
+  if (authUserId && authUserId !== userId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "Cannot access another user's data" } },
+      403,
     );
   }
 
@@ -34,6 +44,15 @@ userRoutes.put("/:id/books", async (c) => {
     return c.json(
       { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
       400,
+    );
+  }
+
+  // If authenticated, only allow modifying own data
+  const authUserId = getAuthenticatedUserId(c);
+  if (authUserId && authUserId !== userId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "Cannot modify another user's data" } },
+      403,
     );
   }
 

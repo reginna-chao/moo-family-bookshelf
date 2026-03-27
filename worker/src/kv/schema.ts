@@ -11,6 +11,8 @@ export const kvKeys = {
   user: (userId: string) => `user:${userId}`,
   family: (familyId: string) => `family:${familyId}`,
   member: (userId: string) => `member:${userId}`,
+  auth: (userId: string) => `auth:${userId}`,
+  authToken: (token: string) => `token:${token}`,
 } as const;
 
 export interface FamilyRecord {
@@ -38,4 +40,9 @@ export function normalizeFamilyRecord(record: RawFamilyRecord): FamilyRecord {
 export interface UserBooksRecord {
   payload: string; // encrypted
   lastUpdated: string;
+}
+
+export interface AuthRecord {
+  token: string;
+  createdAt: string;
 }

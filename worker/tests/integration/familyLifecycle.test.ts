@@ -108,7 +108,7 @@ describe("Family Lifecycle", () => {
   });
 
   it("should return 404 for joining non-existent family", async () => {
-    const res = await request("POST", "/api/family/nonexistent/join", {
+    const res = await request("POST", "/api/family/aaaa-zzzz/join", {
       userId: "user1",
     });
     expect(res.status).toBe(404);
@@ -374,7 +374,7 @@ describe("PUT /api/family/:id/transfer", () => {
   });
 
   it("should return 404 for non-existent family", async () => {
-    const res = await request("PUT", "/api/family/nonexistent/transfer", {
+    const res = await request("PUT", "/api/family/aaaa-zzzz/transfer", {
       userId: "user1",
       newOwnerId: "user2",
     });
@@ -426,13 +426,13 @@ describe("GET /api/family/:id/members response", () => {
   it("should normalize legacy record without ownerId/maxMembers", async () => {
     // Manually insert a legacy record that lacks ownerId and maxMembers
     const legacyRecord = {
-      familyId: "legacy-01",
+      familyId: "abcd-ef01",
       members: ["alice", "bob"],
       createdAt: "2025-01-01T00:00:00.000Z",
     };
-    await kv.put(kvKeys.family("legacy-01"), JSON.stringify(legacyRecord));
+    await kv.put(kvKeys.family("abcd-ef01"), JSON.stringify(legacyRecord));
 
-    const res = await request("GET", "/api/family/legacy-01/members");
+    const res = await request("GET", "/api/family/abcd-ef01/members");
     expect(res.status).toBe(200);
     const data = ((await res.json()) as Json).data;
     // ownerId defaults to first member
@@ -552,7 +552,7 @@ describe("Family Bookshelf Aggregation", () => {
   });
 
   it("should return 404 for non-existent family bookshelf", async () => {
-    const res = await request("GET", "/api/family/nope/bookshelf");
+    const res = await request("GET", "/api/family/aaaa-zzzz/bookshelf");
     expect(res.status).toBe(404);
   });
 
