@@ -127,7 +127,7 @@ describe("Sync code carries encryption key correctly", () => {
     const exported = await exportKey(key);
 
     const syncCode = encodeSyncCode({
-      familyId: "fam123",
+      familyId: "fa12-bc34",
       encryptionKey: exported,
     });
     const decoded = decodeSyncCode(syncCode);
@@ -143,7 +143,7 @@ describe("Sync code carries encryption key correctly", () => {
   it("should preserve familyId through sync code roundtrip", async () => {
     const key = await generateKey();
     const exported = await exportKey(key);
-    const familyId = "myfamily2024";
+    const familyId = "my20-fa24";
 
     const syncCode = encodeSyncCode({
       familyId,
@@ -159,14 +159,14 @@ describe("Sync code carries encryption key correctly", () => {
     const exported = await exportKey(key);
 
     const syncCode = encodeSyncCode({
-      familyId: "fam456",
+      familyId: "fa45-bc56",
       encryptionKey: exported,
       apiHost: "api.example.com",
     });
     const decoded = decodeSyncCode(syncCode);
 
     expect(decoded.apiHost).toBe("api.example.com");
-    expect(decoded.familyId).toBe("fam456");
+    expect(decoded.familyId).toBe("fa45-bc56");
 
     // Key still works for crypto
     const reimportedKey = await importKey(decoded.encryptionKey);
@@ -183,7 +183,7 @@ describe("Cross-user simulation", () => {
     // User A: generate key + encrypt book list
     const keyA = await generateKey();
     const exportedA = await exportKey(keyA);
-    const familyId = "familyabc";
+    const familyId = "fmly-ab01";
 
     const userABooks: BookEntry[] = [
       makeBookEntry({ bookId: "a1", title: "Alice's Book", isShared: true }),
@@ -217,7 +217,7 @@ describe("Cross-user simulation", () => {
     const originalKey = await generateKey();
     const exported = await exportKey(originalKey);
     const syncCode = encodeSyncCode({
-      familyId: "sharedfamily",
+      familyId: "sh4r-edfa",
       encryptionKey: exported,
     });
 
@@ -503,7 +503,7 @@ describe("Edge cases", () => {
     expect(exported).not.toContain("@");
 
     const syncCode = encodeSyncCode({
-      familyId: "famtest",
+      familyId: "fa0t-es01",
       encryptionKey: exported,
     });
     const decoded = decodeSyncCode(syncCode);

@@ -104,11 +104,12 @@ export function useAuth(): UseAuthReturn {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Always clear URL params first to avoid leaving encryption key in address bar
+    // 1. Parse QR params BEFORE clearing — clearUrlParams removes the hash
+    const qrAuth = tryParseQrParams();
+
+    // Always clear URL params to avoid leaving encryption key in address bar
     clearUrlParams();
 
-    // 1. Check URL query params (QR Code entry)
-    const qrAuth = tryParseQrParams();
     if (qrAuth) {
       saveToStorage(qrAuth);
       setAuth(qrAuth);

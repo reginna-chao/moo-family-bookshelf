@@ -40,15 +40,19 @@ export function decodeSyncCode(code: string): SyncCodeData {
     main = trimmed;
   }
 
+  // Format: moo-{xxxx}-{xxxx}-{encryptionKey}
+  // familyId contains a dash (xxxx-xxxx), so we parse positionally:
+  // prefix = parts[0], familyId = parts[1]-parts[2], key = parts[3..]
   const parts = main.split("-");
-  if (parts.length < 3) {
+  if (parts.length < 4) {
     throw new SyncCodeError(
       "Invalid sync code format: expected moo-{familyId}-{key}",
     );
   }
 
-  const [prefix, familyId, ...keyParts] = parts;
-  const encryptionKey = keyParts.join("-");
+  const prefix = parts[0];
+  const familyId = `${parts[1]}-${parts[2]}`;
+  const encryptionKey = parts.slice(3).join("-");
 
   if (prefix !== SYNC_CODE_PREFIX) {
     throw new SyncCodeError(
@@ -56,7 +60,7 @@ export function decodeSyncCode(code: string): SyncCodeData {
     );
   }
 
-  if (!familyId) {
+  if (!parts[1] || !parts[2]) {
     throw new SyncCodeError("Family ID is empty");
   }
 
