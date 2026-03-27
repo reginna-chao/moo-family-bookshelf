@@ -35,11 +35,22 @@ export interface FamilyGroup {
   createdAt: string;
 }
 
+/** Decrypted view (used by UI after decryption) */
 export interface FamilyBookshelf {
   members: Array<{
     userId: string;
     displayName: string;
     books: BookEntry[];
+  }>;
+}
+
+/** Raw server response — members have encrypted payloads */
+export interface RawFamilyBookshelf {
+  familyId: string;
+  members: Array<{
+    userId: string;
+    payload: string | null;
+    lastUpdated: string | null;
   }>;
 }
 
@@ -145,7 +156,7 @@ export class ApiClient {
 
   async getFamilyBookshelf(
     familyId: string,
-  ): Promise<ApiResponse<FamilyBookshelf>> {
+  ): Promise<ApiResponse<RawFamilyBookshelf>> {
     return this.request(`/api/family/${familyId}/bookshelf`);
   }
 

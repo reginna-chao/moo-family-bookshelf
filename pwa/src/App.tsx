@@ -49,6 +49,7 @@ export default function App() {
             familyId={auth.familyId}
             userId={auth.userId}
             apiClient={apiClient}
+            encryptionKey={auth.encryptionKey}
           />
         )}
         {currentPage === "personal-shelf" && (

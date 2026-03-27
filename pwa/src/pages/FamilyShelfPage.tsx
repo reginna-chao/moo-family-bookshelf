@@ -1,22 +1,257 @@
-import type { ApiClient } from "@/api/client";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import type { ApiClient, BookEntry } from "@/api/client";
+import { importKey, decrypt } from "@/crypto/encrypt";
+import { useSearch } from "@/hooks/useSearch";
 
-interface FamilyShelfPageProps {
+export interface FamilyShelfPageProps {
   familyId: string;
   userId: string;
   apiClient: ApiClient;
+  encryptionKey: string;
+}
+
+interface MemberBooks {
+  userId: string;
+  displayName: string;
+  books: BookEntry[];
+}
+
+interface BookWithMember extends BookEntry {
+  memberName: string;
+}
+
+type MemberFilterValue = "all" | "all-except-self" | string;
+type LoadState = "loading" | "ready" | "error";
+
+async function decryptPayload(
+  payload: string,
+  encKey: string,
+): Promise<{ displayName: string; books: BookEntry[] }> {
+  const key = await importKey(encKey);
+  const decrypted = await decrypt(payload, key);
+  const parsed: unknown = JSON.parse(decrypted);
+  if (typeof parsed !== "object" || parsed === null) {
+    return { displayName: "", books: [] };
+  }
+  const obj = parsed as Record<string, unknown>;
+  return {
+    displayName: typeof obj.displayName === "string" ? obj.displayName : "",
+    books: Array.isArray(obj.books) ? (obj.books as BookEntry[]) : [],
+  };
+}
+
+function toBookWithMember(member: MemberBooks): BookWithMember[] {
+  const name = member.displayName || member.userId.slice(0, 8);
+  return member.books.map((b) => ({ ...b, memberName: name }));
 }
 
 export function FamilyShelfPage({
-  familyId: _familyId,
-  userId: _userId,
-  apiClient: _apiClient,
+  familyId,
+  userId,
+  apiClient,
+  encryptionKey,
 }: FamilyShelfPageProps) {
+  const [members, setMembers] = useState<MemberBooks[]>([]);
+  const [state, setState] = useState<LoadState>("loading");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [filterMember, setFilterMember] =
+    useState<MemberFilterValue>("all-except-self");
+
+  const loadBookshelf = useCallback(async () => {
+    setState("loading");
+    setErrorMessage("");
+    try {
+      const response = await apiClient.getFamilyBookshelf(familyId);
+      if (response.error) {
+        setErrorMessage(response.error.message);
+        setState("error");
+        return;
+      }
+
+      if (!response.data) {
+        setState("ready");
+        return;
+      }
+
+      const decryptedMembers: MemberBooks[] = [];
+      for (const member of response.data.members) {
+        if (!member.payload || !encryptionKey) {
+          decryptedMembers.push({
+            userId: member.userId,
+            displayName: member.userId.slice(0, 8),
+            books: [],
+          });
+          continue;
+        }
+
+        try {
+          const { displayName, books } = await decryptPayload(
+            member.payload,
+            encryptionKey,
+          );
+          decryptedMembers.push({
+            userId: member.userId,
+            displayName: displayName || member.userId.slice(0, 8),
+            books: books.filter((b) => b.isShared === 1),
+          });
+        } catch {
+          decryptedMembers.push({
+            userId: member.userId,
+            displayName: member.userId.slice(0, 8),
+            books: [],
+          });
+        }
+      }
+
+      setMembers(decryptedMembers);
+      setState("ready");
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "載入失敗");
+      setState("error");
+    }
+  }, [familyId, apiClient, encryptionKey]);
+
+  useEffect(() => {
+    void loadBookshelf();
+  }, [loadBookshelf]);
+
+  const totalBooks = useMemo(
+    () => members.reduce((sum, m) => sum + m.books.length, 0),
+    [members],
+  );
+
+  const memberFilteredBooks = useMemo(() => {
+    if (filterMember === "all") {
+      return members.flatMap(toBookWithMember);
+    }
+    if (filterMember === "all-except-self") {
+      return members
+        .filter((m) => m.userId !== userId)
+        .flatMap(toBookWithMember);
+    }
+    return members
+      .filter((m) => m.userId === filterMember)
+      .flatMap(toBookWithMember);
+  }, [members, filterMember, userId]);
+
+  const {
+    searchTerm,
+    setSearchTerm,
+    filteredItems: visibleBooks,
+    isFiltering,
+  } = useSearch(memberFilteredBooks);
+
+  if (state === "loading") {
+    return (
+      <div className="p-4 text-center" role="status" aria-label="載入中">
+        <div className="h-8 w-8 mx-auto animate-spin rounded-full border-4 border-gray-200 border-t-blue-600" />
+        <p className="text-gray-500 text-sm mt-3">載入家庭書櫃中...</p>
+      </div>
+    );
+  }
+
+  if (state === "error") {
+    return (
+      <div className="p-4">
+        <p className="text-red-500 text-sm mb-3">{errorMessage}</p>
+        <button
+          onClick={() => void loadBookshelf()}
+          className="px-4 py-2 text-sm font-semibold text-blue-600 border border-blue-600 rounded-lg"
+        >
+          重試
+        </button>
+      </div>
+    );
+  }
+
+  if (totalBooks === 0) {
+    return (
+      <div className="p-4 text-center">
+        <p className="text-gray-400 mt-4">尚無家人分享書籍</p>
+        <p className="text-gray-300 text-sm mt-2">
+          家庭成員需在「個人書櫃」中開放書籍後才會出現在這裡
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4">
-      <h2 className="text-xl font-bold text-gray-900 mb-4">家庭書櫃</h2>
-      <p className="text-gray-500 text-sm">
-        家庭成員分享的書籍將顯示在這裡。
-      </p>
+      <h2 className="text-xl font-bold text-gray-900 mb-3">
+        家庭開放書櫃
+        <span className="text-gray-400 text-sm font-normal ml-2">
+          ({totalBooks} 本)
+        </span>
+      </h2>
+
+      <input
+        type="text"
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        placeholder="搜尋書名或作者"
+        aria-label="搜尋書名或作者"
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-3 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+      />
+
+      <select
+        value={filterMember}
+        onChange={(e) => setFilterMember(e.target.value as MemberFilterValue)}
+        aria-label="篩選成員"
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-4 bg-white focus:border-blue-500 outline-none"
+      >
+        <option value="all-except-self">其他家人的書</option>
+        <option value="all">所有人</option>
+        {members.map((m) => (
+          <option key={m.userId} value={m.userId}>
+            {m.displayName}
+          </option>
+        ))}
+      </select>
+
+      {isFiltering && (
+        <p className="text-gray-400 text-xs mb-2">
+          找到 {visibleBooks.length} 本
+        </p>
+      )}
+
+      {visibleBooks.length === 0 ? (
+        <p className="text-gray-400 text-sm text-center mt-4">
+          {isFiltering ? "找不到符合的書籍" : "目前篩選條件下沒有書籍"}
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {visibleBooks.map((book) => (
+            <a
+              key={`${book.memberName}-${book.bookId}`}
+              href={book.readmooUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded-lg bg-white shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
+            >
+              {book.coverUrl ? (
+                <img
+                  src={book.coverUrl}
+                  alt={book.title}
+                  className="w-full aspect-[3/4] object-cover"
+                />
+              ) : (
+                <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center">
+                  <span className="text-gray-300 text-3xl" aria-hidden="true">📖</span>
+                </div>
+              )}
+              <div className="p-2">
+                <p className="text-sm font-medium text-gray-900 truncate">
+                  {book.title}
+                </p>
+                <p className="text-xs text-gray-500 truncate">{book.author}</p>
+                <p className="text-xs text-blue-500 mt-1 truncate">
+                  {book.memberName}
+                </p>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
