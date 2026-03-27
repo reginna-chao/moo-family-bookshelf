@@ -573,7 +573,8 @@ jobs:
 - [x] 完成後自動導航回原始頁面
 
 #### 多裝置同步
-- [x] `chrome.storage.sync` 支援（自動同步 familyId + encryptionKey）— 寫入 sync + local，讀取 sync 優先
+- [x] `chrome.storage.sync` 支援（自動同步 familyId）— 寫入 sync + local，讀取 sync 優先
+- [x] 加密金鑰僅存 `chrome.storage.local`（Phase 3 安全修復：不再同步到 Google Cloud）
 - [x] 保留 Sync Code 作為備用恢復方式
 
 #### 顯示名稱
@@ -607,24 +608,36 @@ jobs:
 - [x] `manifest.json` 的 `version` 在 build script 中從 `package.json` 同步 — `scripts/sync-version.ts`
 - [x] Dialog footer 顯示版本號
 
-### Phase 3：行動端支援與自訂後端
+### Phase 3：行動端支援與自訂後端 ✅ 已完成
 
 #### PWA 認證設計
-- [ ] Extension 設定頁：「連結手機」按鈕，產生 QR Code（PWA URL + familyId + encKey + userId + apiHost）
-- [ ] PWA Landing Page：掃碼自動解析 URL params → 儲存至 localStorage
-- [ ] PWA 備用入口：手動輸入同步碼 + 讀墨 Email（前端 SHA-256 → userId，不上傳）
+- [x] Extension 設定頁：「連結手機」按鈕，產生 QR Code（PWA URL + familyId + encKey + userId，使用 URL fragment 保護金鑰）
+- [x] PWA Landing Page：掃碼自動解析 URL fragment → 儲存至 localStorage → 自動 join 取得 auth token
+- [x] PWA 備用入口：手動輸入同步碼 + 讀墨 Email（前端 SHA-256 → userId，不上傳）
 
 #### PWA 核心功能
-- [ ] PWA 專案建置（React + TypeScript + Vite，共用 crypto/ 和 api/ 模組）
-- [ ] PWA 家庭書櫃瀏覽（解密 + 成員篩選 + 搜尋）
-- [ ] PWA 個人書櫃管理（開關已同步書籍的開放狀態，無法新增書籍）
-- [ ] PWA 家庭設定（成員列表、Owner 管理、離開家庭）
-- [ ] 響應式 UI 設計（手機優先）
+- [x] PWA 專案建置（React + TypeScript + Vite + Tailwind，複製 crypto/ 和 api/ 模組）
+- [x] PWA 家庭書櫃瀏覽（解密 + 成員篩選 + debounce 搜尋 + 2 欄書籍卡片）
+- [x] PWA 個人書櫃管理（開關已同步書籍的開放狀態 + 加密儲存，無法新增書籍）
+- [x] PWA 家庭設定（成員列表、Owner 管理（轉移/移除）、離開家庭、同步碼複製）
+- [x] 響應式 UI 設計（手機優先，底部導覽列，Tailwind CSS）
 
 #### 自訂後端
-- [ ] Extension 設定頁：自訂 API 端點 UI
-- [ ] PWA 設定頁：自訂 API 端點 UI
-- [ ] 同步碼中編碼 API 端點資訊（自建使用者友善）— 已於 Phase 0 實作 encode/decode
+- [x] Extension 設定頁：自訂 API 端點 UI（可展開「進階設定」，URL 驗證 + 儲存/重設）
+- [x] PWA 設定頁：自訂 API 端點 UI（同上，使用 localStorage）
+- [x] 同步碼中編碼 API 端點資訊（自建使用者友善）— 已於 Phase 0 實作 encode/decode
+
+#### 安全性強化（Security Audit 修復）
+- [x] API 認證 middleware（Bearer token，建立/加入家庭時產生 token）
+- [x] familyId 路徑參數驗證（`^[a-z0-9]{4}-[a-z0-9]{4}$`）
+- [x] 家庭成員授權檢查（非成員回傳 403）
+- [x] 加密金鑰從 chrome.storage.sync 移至 .local（不再同步到 Google Cloud）
+- [x] .env 檔案從 git 移除 + .gitignore 修正
+- [x] Sync code 解析器修復（正確處理含 dash 的 familyId）
+- [x] Auth token 端對端整合（Extension + PWA + Worker）
+- [x] Token TTL 90 天 + 格式驗證 + 離開時清除
+- [x] QR Code URL 使用 fragment（#）避免金鑰洩漏到伺服器 log
+- [x] 移除 production console.log 中的敏感資料
 
 #### 部署與發布
 - [ ] PWA CI/CD 設定（Cloudflare Pages or Vercel）
