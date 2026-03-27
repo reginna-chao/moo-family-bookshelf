@@ -1,6 +1,5 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import React from "react";
 import { ApiEndpointEditor } from "@/dialog/ApiEndpointEditor";
 import type { ApiClient } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "../../src/constants";

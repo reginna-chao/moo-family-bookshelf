@@ -1,6 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import React from "react";
 import { QrCodeLink } from "@/dialog/QrCodeLink";
 import { buildPwaUrl } from "@/constants";
 

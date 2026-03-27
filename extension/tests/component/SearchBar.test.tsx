@@ -1,6 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import React from "react";
 import { SearchBar, SearchBarProps } from "@/dialog/SearchBar";
 
 function renderSearchBar(overrides: Partial<SearchBarProps> = {}) {

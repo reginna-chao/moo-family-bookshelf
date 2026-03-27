@@ -1,6 +1,5 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import React from "react";
 import { Onboarding, OnboardingProps } from "@/dialog/Onboarding";
 import type { ApiClient } from "@/api/client";
 import { scrapeUserEmail } from "@/content/scraper";
