@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { ApiClient, BookEntry } from "../api/client";
 import { importKey, decrypt } from "../crypto/encrypt";
 import { BookCard, BookWithMember, FilterButton } from "./BookCard";
+import { SearchBar } from "./SearchBar";
+import { useSearch } from "./useSearch";
 
 export interface FamilyShelfProps {
   familyId: string;
@@ -121,6 +123,15 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
     void loadBookshelf();
   }, [loadBookshelf]);
 
+  const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
+
+  const memberFilteredBooks = filterMember
+    ? members.filter((m) => m.userId === filterMember).flatMap(toBookWithMember)
+    : members.flatMap(toBookWithMember);
+
+  const { searchTerm, setSearchTerm, filteredItems: visibleBooks, isFiltering } =
+    useSearch(memberFilteredBooks);
+
   if (state === "loading") {
     return (
       <div style={{ padding: 16, textAlign: "center", color: "#64748b" }}>
@@ -153,8 +164,6 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
     );
   }
 
-  const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
-
   if (totalBooks === 0) {
     return (
       <div style={{ padding: 16, textAlign: "center" }}>
@@ -165,10 +174,6 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
       </div>
     );
   }
-
-  const visibleBooks = filterMember
-    ? members.filter((m) => m.userId === filterMember).flatMap(toBookWithMember)
-    : members.flatMap(toBookWithMember);
 
   return (
     <div>
@@ -185,6 +190,14 @@ export function FamilyShelf({ familyId, apiClient }: FamilyShelfProps) {
           ({totalBooks} 本)
         </span>
       </h3>
+
+      <SearchBar
+        value={searchTerm}
+        onChange={setSearchTerm}
+        totalCount={memberFilteredBooks.length}
+        filteredCount={visibleBooks.length}
+        isFiltering={isFiltering}
+      />
 
       {members.filter((m) => m.books.length > 0).length > 1 && (
         <div

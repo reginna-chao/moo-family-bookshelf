@@ -4,6 +4,8 @@ import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { scrapeBooks } from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
 import { BookRow } from "./BookRow";
+import { SearchBar } from "./SearchBar";
+import { useSearch } from "./useSearch";
 
 export interface PersonalShelfProps {
   userId: string;
@@ -129,6 +131,9 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     }
   }, [books, userId, apiClient]);
 
+  const { searchTerm, setSearchTerm, filteredItems: displayedBooks, isFiltering } =
+    useSearch(books);
+
   if (status === "scraping") {
     return (
       <div style={{ padding: 16, textAlign: "center", color: "#64748b" }}>
@@ -171,12 +176,22 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         </span>
       </h3>
 
+      {books.length > 0 && (
+        <SearchBar
+          value={searchTerm}
+          onChange={setSearchTerm}
+          totalCount={books.length}
+          filteredCount={displayedBooks.length}
+          isFiltering={isFiltering}
+        />
+      )}
+
       {books.length === 0 && (
         <p style={{ color: "#94a3b8", textAlign: "center", marginTop: 24 }}>尚無書籍</p>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {books.map((book) => (
+        {displayedBooks.map((book) => (
           <BookRow key={book.bookId} book={book} onToggle={handleToggle} />
         ))}
       </div>
