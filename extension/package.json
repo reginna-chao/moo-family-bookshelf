@@ -8,7 +8,7 @@
     "dev:content": "vite build --watch --mode development --config vite.config.content.ts",
     "dev": "concurrently pnpm:dev:*",
     "sync-version": "tsx scripts/sync-version.ts",
-    "build": "tsx scripts/sync-version.ts && tsc --noEmit && vite build && vite build --config vite.config.content.ts",
+    "build": "tsx scripts/sync-version.ts && tsc --noEmit && vite build && vite build --config vite.config.content.ts && tsx scripts/verify-build.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",

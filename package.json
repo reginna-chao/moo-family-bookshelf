@@ -10,10 +10,17 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
-    "clean:kv": "rimraf worker/.wrangler/state"
+    "clean:kv": "rimraf worker/.wrangler/state",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "extension/src/**/*.{ts,tsx}": ["eslint --fix"],
+    "worker/src/**/*.{ts,tsx}": ["eslint --fix"]
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "rimraf": "^6.1.3"
   }
 }
