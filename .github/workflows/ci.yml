@@ -65,3 +65,34 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  pwa-check:
+    name: PWA — Lint, Typecheck, Test, Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter moo-family-bookshelf-pwa typecheck
+
+      - name: Lint
+        run: pnpm --filter moo-family-bookshelf-pwa lint
+
+      - name: Test
+        run: pnpm --filter moo-family-bookshelf-pwa test
+
+      - name: Build
+        run: pnpm --filter moo-family-bookshelf-pwa build

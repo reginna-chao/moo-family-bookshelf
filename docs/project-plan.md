@@ -640,8 +640,9 @@ jobs:
 - [x] 移除 production console.log 中的敏感資料
 
 #### 部署與發布
-- [ ] PWA CI/CD 設定（Cloudflare Pages or Vercel）
-- [ ] Extension release CD 驗證（git tag → GitHub Release .zip）
+- [x] PWA CI 設定（pwa-check job：lint + typecheck + test + build）
+- [x] PWA CD 設定（Cloudflare Pages，merge to main 自動部署）
+- [x] Extension release CD 已設定（git tag `v*` → build → zip → GitHub Release）
 
 ### Phase 4：開源與社群
 
