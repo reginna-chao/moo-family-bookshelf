@@ -253,8 +253,8 @@ export class ApiClient {
         return true;
       }
 
-      // Handle NOT_FAMILY_MEMBER — user was removed from family
-      if (result.error?.code === "NOT_FAMILY_MEMBER") {
+      // Handle refresh failure — user may have been removed from family
+      if (result.error?.code === "REFRESH_FAILED") {
         await chrome.storage.local.remove([
           "familyId",
           "encryptionKey",

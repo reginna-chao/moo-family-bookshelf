@@ -156,27 +156,27 @@ describe("POST /api/auth/refresh", () => {
     expect(json.error.code).toBe("INVALID_JSON");
   });
 
-  it("should return 403 when userId is not a member of any family", async () => {
+  it("should return generic 401 when userId is not a member of any family", async () => {
     // No member entry seeded
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
     });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("NOT_FAMILY_MEMBER");
+    expect(json.error.code).toBe("REFRESH_FAILED");
   });
 
-  it("should return 403 when userId belongs to a different family", async () => {
+  it("should return generic 401 when userId belongs to a different family", async () => {
     await seedMember(VALID_USER_ID, "wxyz-9876"); // different family
 
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
     });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("NOT_FAMILY_MEMBER");
+    expect(json.error.code).toBe("REFRESH_FAILED");
   });
 
   it("should work when there is no existing auth token", async () => {

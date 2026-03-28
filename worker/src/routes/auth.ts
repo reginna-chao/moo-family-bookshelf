@@ -92,11 +92,12 @@ authRoutes.post("/refresh", async (c) => {
   }
 
   // Verify user is a member of the requested family
+  // Return generic 401 (not 403) to avoid leaking membership info
   const storedFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
   if (!storedFamilyId || storedFamilyId !== body.familyId) {
     return c.json(
-      { error: { code: "NOT_FAMILY_MEMBER", message: "User is not a member of this family" } },
-      403,
+      { error: { code: "REFRESH_FAILED", message: "Token refresh failed" } },
+      401,
     );
   }
 
