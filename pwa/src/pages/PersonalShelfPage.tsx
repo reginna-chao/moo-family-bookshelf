@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { ApiClient, BookEntry } from "@/api/client";
 import { importKey, encrypt, decrypt } from "@/crypto/encrypt";
 import { useSearch } from "@/hooks/useSearch";
+import { FloatingActionBar } from "@/components/FloatingActionBar";
 
 interface PersonalShelfPageProps {
   userId: string;
@@ -23,6 +24,8 @@ export function PersonalShelfPage({
   const [errorMessage, setErrorMessage] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const originalBooksRef = useRef<BookEntry[]>([]);
 
   const loadBooks = useCallback(async () => {
     setState("loading");
@@ -55,8 +58,11 @@ export function PersonalShelfPage({
       setDisplayName(typeof obj.displayName === "string" ? obj.displayName : "");
       const rawBooks = Array.isArray(obj.books) ? (obj.books as BookEntry[]) : [];
       // Normalize isShared: Extension stores boolean, PWA uses 0|1
-      setBooks(rawBooks.map((b) => ({ ...b, isShared: b.isShared ? (1 as const) : (0 as const) })));
+      const normalized = rawBooks.map((b) => ({ ...b, isShared: b.isShared ? (1 as const) : (0 as const) }));
+      setBooks(normalized);
+      originalBooksRef.current = normalized;
       setIsDirty(false);
+      setSelectedIds(new Set());
       setState("ready");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "載入失敗");
@@ -67,16 +73,6 @@ export function PersonalShelfPage({
   useEffect(() => {
     void loadBooks();
   }, [loadBooks]);
-
-  const handleToggle = useCallback((bookId: string) => {
-    setBooks((prev) =>
-      prev.map((b) =>
-        b.bookId === bookId ? { ...b, isShared: b.isShared === 1 ? (0 as const) : (1 as const) } : b,
-      ),
-    );
-    setIsDirty(true);
-    setState("ready");
-  }, []);
 
   const handleSave = useCallback(async () => {
     setState("saving");
@@ -95,6 +91,7 @@ export function PersonalShelfPage({
         setState("error");
         return;
       }
+      originalBooksRef.current = books;
       setIsDirty(false);
       setState("saved");
       setTimeout(() => setState("ready"), 1500);
@@ -103,6 +100,34 @@ export function PersonalShelfPage({
       setState("error");
     }
   }, [encryptionKey, userId, displayName, books, apiClient]);
+
+  const handleCancelChanges = useCallback(() => {
+    setBooks(originalBooksRef.current);
+    setIsDirty(false);
+    setSelectedIds(new Set());
+    setState("ready");
+  }, []);
+
+  const handleBatchShare = useCallback(() => {
+    setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: 1 as const } : b));
+    setSelectedIds(new Set());
+    setIsDirty(true);
+  }, [selectedIds]);
+
+  const handleBatchHide = useCallback(() => {
+    setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: 0 as const } : b));
+    setSelectedIds(new Set());
+    setIsDirty(true);
+  }, [selectedIds]);
+
+  const toggleSelect = useCallback((bookId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(bookId)) next.delete(bookId);
+      else next.add(bookId);
+      return next;
+    });
+  }, []);
 
   const statusFilteredBooks = useMemo(() => {
     if (statusFilter === "shared") return books.filter((b) => b.isShared === 1);
@@ -116,6 +141,17 @@ export function PersonalShelfPage({
     filteredItems: visibleBooks,
     isFiltering,
   } = useSearch(statusFilteredBooks);
+
+  const handleSelectAll = useCallback(() => {
+    const allVisible = visibleBooks.every(b => selectedIds.has(b.bookId));
+    if (allVisible && visibleBooks.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(visibleBooks.map(b => b.bookId)));
+    }
+  }, [visibleBooks, selectedIds]);
+
+  const allVisibleSelected = visibleBooks.length > 0 && visibleBooks.every(b => selectedIds.has(b.bookId));
 
   if (state === "loading") {
     return (
@@ -150,89 +186,106 @@ export function PersonalShelfPage({
   }
 
   return (
-    <div className="p-4">
-      <h2 className="text-xl font-bold text-gray-900 mb-3">
-        個人書櫃
-        <span className="text-gray-400 text-sm font-normal ml-2">({books.length} 本)</span>
-      </h2>
+    <div className="flex flex-col min-h-0">
+      <div className="p-4 flex-1">
+        <h2 className="text-xl font-bold text-gray-900 mb-3">
+          個人書櫃
+          <span className="text-gray-400 text-sm font-normal ml-2">({books.length} 本)</span>
+        </h2>
 
-      <div className="flex gap-2 mb-3">
-        {(["all", "shared", "not-shared"] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setStatusFilter(f)}
-            aria-pressed={statusFilter === f}
-            className={`px-3 py-1.5 text-xs rounded-full ${
-              statusFilter === f ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"
-            }`}
-          >
-            {f === "all" ? "全部" : f === "shared" ? "已開放" : "未開放"}
-          </button>
-        ))}
-      </div>
-
-      <input
-        type="text"
-        value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
-        placeholder="搜尋書名或作者"
-        aria-label="搜尋書名或作者"
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-3 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-      />
-
-      {isFiltering && (
-        <p className="text-gray-400 text-xs mb-2">找到 {visibleBooks.length} 本</p>
-      )}
-
-      {visibleBooks.length === 0 ? (
-        <p className="text-gray-400 text-sm text-center mt-4">
-          {isFiltering ? "找不到符合的書籍" : "目前篩選條件下沒有書籍"}
-        </p>
-      ) : (
-        <div>
-          {visibleBooks.map((book) => (
-            <div key={book.bookId} className="flex items-center gap-3 py-3 border-b border-gray-100">
-              {book.coverUrl ? (
-                <img src={book.coverUrl} alt="" className="w-10 h-[54px] rounded object-cover flex-shrink-0" />
-              ) : (
-                <div className="w-10 h-[54px] rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                  <span className="text-gray-300 text-lg" aria-hidden="true">📖</span>
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
-                <p className="text-xs text-gray-500 truncate">{book.author}</p>
-              </div>
-              <button
-                onClick={() => handleToggle(book.bookId)}
-                aria-pressed={book.isShared === 1}
-                aria-label={`${book.title} ${book.isShared === 1 ? "已開放分享" : "未開放分享"}`}
-                className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 ${
-                  book.isShared === 1
-                    ? "bg-blue-100 text-blue-700"
-                    : "bg-gray-100 text-gray-500"
-                }`}
-              >
-                {book.isShared === 1 ? "開放" : "未開放"}
-              </button>
-            </div>
+        <div className="flex gap-2 mb-3">
+          {(["all", "shared", "not-shared"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              aria-pressed={statusFilter === f}
+              className={`px-3 py-1.5 text-xs rounded-full ${
+                statusFilter === f ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"
+              }`}
+            >
+              {f === "all" ? "全部" : f === "shared" ? "已開放" : "未開放"}
+            </button>
           ))}
         </div>
-      )}
 
-      <button
-        onClick={() => void handleSave()}
-        disabled={!isDirty || state === "saving"}
-        className={`w-full mt-4 py-3 rounded-lg font-semibold text-sm transition-colors ${
-          !isDirty
-            ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-            : state === "saving"
-              ? "bg-blue-400 text-white cursor-not-allowed"
-              : "bg-blue-600 text-white hover:bg-blue-700"
-        }`}
-      >
-        {state === "saving" ? "儲存中..." : state === "saved" ? "已儲存" : "儲存變更"}
-      </button>
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="搜尋書名或作者"
+          aria-label="搜尋書名或作者"
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-3 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+        />
+
+        {visibleBooks.length > 0 && (
+          <div className="flex items-center justify-between mb-2">
+            {isFiltering && (
+              <p className="text-gray-400 text-xs">找到 {visibleBooks.length} 本</p>
+            )}
+            <button
+              onClick={handleSelectAll}
+              className="text-xs text-blue-600 hover:text-blue-800 ml-auto"
+            >
+              {allVisibleSelected ? "取消全選" : "全選"}
+            </button>
+          </div>
+        )}
+
+        {isFiltering && visibleBooks.length === 0 && (
+          <p className="text-gray-400 text-xs mb-2">找到 {visibleBooks.length} 本</p>
+        )}
+
+        {visibleBooks.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center mt-4">
+            {isFiltering ? "找不到符合的書籍" : "目前篩選條件下沒有書籍"}
+          </p>
+        ) : (
+          <div>
+            {visibleBooks.map((book) => (
+              <div key={book.bookId} className="flex items-center gap-3 py-3 border-b border-gray-100">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(book.bookId)}
+                  onChange={() => toggleSelect(book.bookId)}
+                  aria-label={`選取 ${book.title}`}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
+                />
+                {book.coverUrl ? (
+                  <img src={book.coverUrl} alt="" className="w-10 h-[54px] rounded object-cover flex-shrink-0" />
+                ) : (
+                  <div className="w-10 h-[54px] rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-gray-300 text-lg" aria-hidden="true">📖</span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
+                  <p className="text-xs text-gray-500 truncate">{book.author}</p>
+                </div>
+                <span
+                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 ${
+                    book.isShared === 1
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-gray-100 text-gray-500"
+                  }`}
+                >
+                  {book.isShared === 1 ? "開放" : "未開放"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <FloatingActionBar
+        selectedCount={selectedIds.size}
+        isDirty={isDirty}
+        isSaving={state === "saving"}
+        isSaved={state === "saved"}
+        onBatchShare={handleBatchShare}
+        onBatchHide={handleBatchHide}
+        onCancelChanges={handleCancelChanges}
+        onSave={() => void handleSave()}
+      />
     </div>
   );
 }

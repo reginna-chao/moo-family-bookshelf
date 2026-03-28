@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient, BookEntry } from "../api/client";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { scrapeBooks } from "../content/scraper";
@@ -37,6 +37,7 @@ async function loadSavedBooks(
 
 export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const [books, setBooks] = useState<BookEntry[]>([]);
+  const originalBooks = useRef<BookEntry[]>([]);
   const [status, setStatus] = useState<Status>("scraping");
   const [errorMessage, setErrorMessage] = useState("");
   const [isDirty, setIsDirty] = useState(false);
@@ -78,6 +79,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         if (cancelled) return;
 
         const merged = mergeBooks(scrapedBooks, savedBooks);
+        originalBooks.current = merged;
         setBooks(merged);
         setStatus("ready");
       } catch (err) {
@@ -156,6 +158,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         setStatus("error");
         return;
       }
+      originalBooks.current = books;
       setIsDirty(false);
       setStatus("saved");
       setTimeout(() => setStatus("ready"), 1500);
@@ -164,6 +167,12 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
       setStatus("error");
     }
   }, [books, userId, apiClient]);
+
+  const handleCancel = useCallback(() => {
+    setBooks(originalBooks.current);
+    setIsDirty(false);
+    setSelectedIds(new Set());
+  }, []);
 
   const statusFilteredBooks = (() => {
     if (statusFilter === "shared") return books.filter((b) => b.isShared);
@@ -303,6 +312,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         isSaved={status === "saved"}
         onBatchShare={handleBatchShare}
         onBatchHide={handleBatchHide}
+        onCancel={handleCancel}
         onSave={handleSave}
       />
     </div>

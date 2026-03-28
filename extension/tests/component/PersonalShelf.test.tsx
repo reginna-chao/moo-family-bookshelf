@@ -322,6 +322,62 @@ describe("PersonalShelf", () => {
     });
   });
 
+  describe("cancel changes", () => {
+    it("cancel button appears only when dirty", async () => {
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      // Not dirty — cancel button should not exist
+      expect(screen.queryByRole("button", { name: "取消變更" })).not.toBeInTheDocument();
+
+      // Select a book (no dirty yet)
+      const checkboxes = screen.getAllByRole("checkbox");
+      fireEvent.click(checkboxes[0]);
+      expect(screen.queryByRole("button", { name: "取消變更" })).not.toBeInTheDocument();
+
+      // Make dirty via batch share
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+      expect(screen.getByRole("button", { name: "取消變更" })).toBeInTheDocument();
+    });
+
+    it("cancel restores original book states and clears dirty and selection", async () => {
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      // All books start as 未開放 — verify via badges
+      const initialHiddenBadges = screen.getAllByText("未開放");
+      const initialBadgeCount = initialHiddenBadges.length;
+
+      // Share first book
+      const checkboxes = screen.getAllByRole("checkbox");
+      fireEvent.click(checkboxes[0]);
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+
+      // Verify it changed
+      expect(screen.getAllByText("開放").length).toBeGreaterThanOrEqual(1);
+
+      // Select another book before cancelling
+      const updatedCheckboxes = screen.getAllByRole("checkbox");
+      fireEvent.click(updatedCheckboxes[1]);
+      expect(updatedCheckboxes[1]).toBeChecked();
+
+      // Click cancel
+      fireEvent.click(screen.getByRole("button", { name: "取消變更" }));
+
+      // Should restore original state — all 未開放 again
+      const restoredHiddenBadges = screen.getAllByText("未開放");
+      expect(restoredHiddenBadges.length).toBe(initialBadgeCount);
+
+      // isDirty should be false — no save or cancel button
+      expect(screen.queryByRole("button", { name: "儲存變更" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "取消變更" })).not.toBeInTheDocument();
+
+      // Selection should be cleared
+      const finalCheckboxes = screen.getAllByRole("checkbox");
+      finalCheckboxes.forEach((cb) => expect(cb).not.toBeChecked());
+    });
+  });
+
   describe("save via floating bar", () => {
     it("save button in floating bar triggers save", async () => {
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });

@@ -7,6 +7,7 @@ export interface FloatingActionBarProps {
   isSaved: boolean;
   onBatchShare: () => void;
   onBatchHide: () => void;
+  onCancel: () => void;
   onSave: () => void;
 }
 
@@ -17,6 +18,7 @@ export function FloatingActionBar({
   isSaved,
   onBatchShare,
   onBatchHide,
+  onCancel,
   onSave,
 }: FloatingActionBarProps) {
   const hasSelection = selectedCount > 0;
@@ -80,10 +82,28 @@ export function FloatingActionBar({
       )}
       {isDirty && (
         <button
+          onClick={onCancel}
+          disabled={isSaving}
+          style={{
+            marginLeft: hasSelection ? "auto" : 0,
+            padding: "6px 14px",
+            border: "1px solid #94a3b8",
+            borderRadius: 6,
+            background: "transparent",
+            color: isSaving ? "#94a3b8" : "#475569",
+            fontWeight: 600,
+            fontSize: 13,
+            cursor: isSaving ? "not-allowed" : "pointer",
+          }}
+        >
+          取消變更
+        </button>
+      )}
+      {isDirty && (
+        <button
           onClick={onSave}
           disabled={saveDisabled}
           style={{
-            marginLeft: hasSelection ? "auto" : 0,
             padding: "6px 14px",
             border: "none",
             borderRadius: 6,

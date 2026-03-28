@@ -60,6 +60,20 @@ function createProps() {
   };
 }
 
+async function renderWithBooks(
+  books: Array<{ bookId: string; title: string; author: string; isShared: 0 | 1 }>,
+  displayName = "TestUser",
+) {
+  mockDecrypt.mockResolvedValue(makePayload(displayName, books));
+  mockGetPersonalBooks.mockResolvedValue({
+    data: { payload: "encrypted-string" },
+  });
+  render(<PersonalShelfPage {...createProps()} />);
+  await waitFor(() => {
+    expect(screen.getByText(books[0].title)).toBeInTheDocument();
+  });
+}
+
 describe("PersonalShelfPage", () => {
   let defaultProps: ReturnType<typeof createProps>;
 
@@ -158,171 +172,145 @@ describe("PersonalShelfPage", () => {
     });
   });
 
-  it("renders books with titles, authors, and toggle buttons", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-        { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
+  it("renders books with titles, authors, and share status badges", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+    ]);
 
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("書籍一")).toBeInTheDocument();
-    });
     expect(screen.getByText("作者A")).toBeInTheDocument();
     expect(screen.getByText("書籍二")).toBeInTheDocument();
     expect(screen.getByText("作者B")).toBeInTheDocument();
-    // "開放" appears as book toggle; "未開放" appears as both filter button and book toggle
+    // Share status badges (read-only spans, not buttons)
     expect(screen.getByText("開放")).toBeInTheDocument();
-    // Use getAllByText since "未開放" is on both filter button and book toggle
+    // "未開放" appears on filter button and badge
     const allUnshared = screen.getAllByText("未開放");
-    expect(allUnshared.length).toBeGreaterThanOrEqual(2); // filter + book toggle
+    expect(allUnshared.length).toBeGreaterThanOrEqual(2);
   });
 
   it("shows total book count in header", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-        { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+    ]);
 
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("(2 本)")).toBeInTheDocument();
-    });
+    expect(screen.getByText("(2 本)")).toBeInTheDocument();
   });
 
-  it("toggle changes button text from '未開放' to '開放'", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
+  it("shows checkboxes for each book", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+    ]);
 
-    render(<PersonalShelfPage {...defaultProps} />);
+    expect(screen.getByLabelText("選取 書籍一")).toBeInTheDocument();
+    expect(screen.getByLabelText("選取 書籍二")).toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      // "未開放" appears as both filter button and book toggle
-      expect(screen.getAllByText("未開放").length).toBeGreaterThanOrEqual(2);
-    });
+  it("selecting a book shows floating action bar with count", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+    ]);
 
-    // The book toggle button has font-medium class; click the last "未開放" (book toggle)
-    const toggleButtons = screen.getAllByText("未開放");
-    const bookToggle = toggleButtons[toggleButtons.length - 1];
-    fireEvent.click(bookToggle);
+    // No toolbar initially
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+
+    expect(screen.getByRole("toolbar")).toBeInTheDocument();
+    expect(screen.getByText("已選 1 本")).toBeInTheDocument();
+    expect(screen.getByText("設為開放")).toBeInTheDocument();
+    expect(screen.getByText("設為隱藏")).toBeInTheDocument();
+  });
+
+  it("batch share sets selected books to shared", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+    ]);
+
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+    fireEvent.click(screen.getByLabelText("選取 書籍二"));
+    expect(screen.getByText("已選 2 本")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("設為開放"));
+
+    // Both badges should now show "開放"
+    const sharedBadges = screen.getAllByText("開放");
+    expect(sharedBadges.length).toBe(2);
+    // Selection should be cleared
+    expect(screen.queryByText("已選")).not.toBeInTheDocument();
+    // Should be dirty — show save button
+    expect(screen.getByText("儲存變更")).toBeInTheDocument();
+  });
+
+  it("batch hide sets selected books to not shared", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 1 },
+    ]);
+
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+    fireEvent.click(screen.getByText("設為隱藏"));
+
+    // 書籍一 badge should now show "未開放"
+    // Filter button "未開放" + book badge "未開放" for 書籍一
+    const unsharedTexts = screen.getAllByText("未開放");
+    expect(unsharedTexts.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("select all / deselect all toggles all visible books", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+    ]);
+
+    fireEvent.click(screen.getByText("全選"));
+    expect(screen.getByText("已選 2 本")).toBeInTheDocument();
+    expect(screen.getByText("取消全選")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("取消全選"));
+    expect(screen.queryByText("已選")).not.toBeInTheDocument();
+    expect(screen.getByText("全選")).toBeInTheDocument();
+  });
+
+  it("cancel changes restores original books", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
+    ]);
+
+    // Batch share to make dirty
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+    fireEvent.click(screen.getByText("設為開放"));
+
+    // Now dirty, badge shows "開放"
     expect(screen.getByText("開放")).toBeInTheDocument();
-    // Only the filter "未開放" remains, book toggle is now "開放"
-    expect(screen.getAllByText("未開放")).toHaveLength(1);
-  });
+    expect(screen.getByText("取消變更")).toBeInTheDocument();
 
-  it("toggle changes button text from '開放' to '未開放'", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
+    fireEvent.click(screen.getByText("取消變更"));
 
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("開放")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText("開放"));
-
-    // After toggle, "未開放" appears on both filter button and book toggle
-    const allUnshared = screen.getAllByText("未開放");
-    expect(allUnshared.length).toBe(2);
-    // "開放" should no longer appear as a book toggle (only "已開放" filter remains)
-    expect(screen.queryByText("開放")).not.toBeInTheDocument();
-  });
-
-  it("save button is disabled when no changes have been made", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
-
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("書籍一")).toBeInTheDocument();
-    });
-
-    const saveButton = screen.getByText("儲存變更");
-    expect(saveButton).toBeDisabled();
-  });
-
-  it("save button becomes enabled after toggling a book", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
-
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getAllByText("未開放").length).toBeGreaterThanOrEqual(2);
-    });
-
-    const saveButton = screen.getByText("儲存變更");
-    expect(saveButton).toBeDisabled();
-
-    // Click the book toggle (last "未開放"), not the filter button
-    const toggleButtons = screen.getAllByText("未開放");
-    fireEvent.click(toggleButtons[toggleButtons.length - 1]);
-
-    expect(saveButton).not.toBeDisabled();
+    // Should restore to original state — badge back to "未開放"
+    // "未開放" appears as filter button + badge
+    const unsharedTexts = screen.getAllByText("未開放");
+    expect(unsharedTexts.length).toBeGreaterThanOrEqual(2);
+    // Floating bar should be hidden (no selection, not dirty)
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
   it("save flow calls encrypt then updatePersonalBooks", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
+    ]);
+
     mockEncrypt.mockResolvedValue("new-encrypted-payload");
     mockUpdatePersonalBooks.mockResolvedValue({ data: { ok: true } });
 
-    render(<PersonalShelfPage {...defaultProps} />);
+    // Batch share to make dirty
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+    fireEvent.click(screen.getByText("設為開放"));
 
-    await waitFor(() => {
-      expect(screen.getAllByText("未開放").length).toBeGreaterThanOrEqual(2);
-    });
-
-    // Toggle to make dirty (click book toggle, not filter button)
-    const toggleButtons = screen.getAllByText("未開放");
-    fireEvent.click(toggleButtons[toggleButtons.length - 1]);
-
-    // Click save
+    // Click save in floating bar
     fireEvent.click(screen.getByText("儲存變更"));
 
     await waitFor(() => {
@@ -333,61 +321,27 @@ describe("PersonalShelfPage", () => {
       "new-encrypted-payload",
     );
 
-    // After save, button shows "已儲存"
     await waitFor(() => {
       expect(screen.getByText("已儲存")).toBeInTheDocument();
     });
   });
 
-  it("save button is disabled again after successful save", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
-    mockEncrypt.mockResolvedValue("new-encrypted-payload");
-    mockUpdatePersonalBooks.mockResolvedValue({ data: { ok: true } });
+  it("floating action bar hidden when not dirty and no selection", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+    ]);
 
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getAllByText("未開放").length).toBeGreaterThanOrEqual(2);
-    });
-
-    const toggleButtons = screen.getAllByText("未開放");
-    fireEvent.click(toggleButtons[toggleButtons.length - 1]);
-    fireEvent.click(screen.getByText("儲存變更"));
-
-    await waitFor(() => {
-      expect(screen.getByText("已儲存")).toBeInTheDocument();
-    });
-
-    // Save button should be disabled after successful save (isDirty reset to false)
-    expect(screen.getByText("已儲存")).toBeDisabled();
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
   it("status filter '已開放' shows only shared books", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-        { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+    ]);
 
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("書籍一")).toBeInTheDocument();
-    });
     expect(screen.getByText("書籍二")).toBeInTheDocument();
 
-    // Click "已開放" filter
     fireEvent.click(screen.getByText("已開放"));
 
     expect(screen.getByText("書籍一")).toBeInTheDocument();
@@ -395,23 +349,12 @@ describe("PersonalShelfPage", () => {
   });
 
   it("status filter '未開放' shows only unshared books", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-        { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+    ]);
 
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("書籍一")).toBeInTheDocument();
-    });
-
-    // Click "未開放" filter button (first match), not the book toggle (last match)
+    // Click "未開放" filter button (first match)
     const filterButtons = screen.getAllByText("未開放");
     fireEvent.click(filterButtons[0]);
 
@@ -422,21 +365,10 @@ describe("PersonalShelfPage", () => {
   });
 
   it("'全部' filter shows all books", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-        { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
-
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("書籍一")).toBeInTheDocument();
-    });
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+    ]);
 
     // Filter to "已開放" first
     fireEvent.click(screen.getByText("已開放"));
@@ -449,24 +381,13 @@ describe("PersonalShelfPage", () => {
   });
 
   it("search filters books by title", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "React 入門", author: "作者A", isShared: 1 },
-        { bookId: "b2", title: "Vue 入門", author: "作者B", isShared: 1 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
+    await renderWithBooks([
+      { bookId: "b1", title: "React 入門", author: "作者A", isShared: 1 },
+      { bookId: "b2", title: "Vue 入門", author: "作者B", isShared: 1 },
+    ]);
 
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("React 入門")).toBeInTheDocument();
-    });
     expect(screen.getByText("Vue 入門")).toBeInTheDocument();
 
-    // Switch to fake timers to control debounce
     vi.useFakeTimers();
 
     fireEvent.change(screen.getByPlaceholderText("搜尋書名或作者"), {
@@ -476,7 +397,6 @@ describe("PersonalShelfPage", () => {
     // Before debounce, both books still visible
     expect(screen.getByText("Vue 入門")).toBeInTheDocument();
 
-    // Advance debounce timer and flush React updates
     await act(async () => {
       vi.advanceTimersByTime(300);
     });
@@ -486,21 +406,10 @@ describe("PersonalShelfPage", () => {
   });
 
   it("search filters books by author", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "張三", isShared: 1 },
-        { bookId: "b2", title: "書籍二", author: "李四", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
-
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("書籍一")).toBeInTheDocument();
-    });
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "張三", isShared: 1 },
+      { bookId: "b2", title: "書籍二", author: "李四", isShared: 0 },
+    ]);
 
     vi.useFakeTimers();
 
@@ -517,25 +426,16 @@ describe("PersonalShelfPage", () => {
   });
 
   it("shows save error when updatePersonalBooks fails", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
-      ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
-    });
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
+    ]);
+
     mockEncrypt.mockResolvedValue("encrypted");
     mockUpdatePersonalBooks.mockRejectedValue(new Error("儲存失敗"));
 
-    render(<PersonalShelfPage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getAllByText("未開放").length).toBeGreaterThanOrEqual(2);
-    });
-
-    const toggleButtons = screen.getAllByText("未開放");
-    fireEvent.click(toggleButtons[toggleButtons.length - 1]);
+    // Batch share to make dirty
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+    fireEvent.click(screen.getByText("設為開放"));
     fireEvent.click(screen.getByText("儲存變更"));
 
     await waitFor(() => {
