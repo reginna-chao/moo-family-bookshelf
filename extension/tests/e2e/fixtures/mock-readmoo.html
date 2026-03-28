@@ -116,13 +116,21 @@
       <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 8px;">
         測試使用者
       </div>
-      <div style="font-size: 14px; color: #94a3b8;">
+      <div id="mock-email" style="font-size: 14px; color: #94a3b8;">
         test-user@readmoo.com
       </div>
     </div>
   </div>
 
   <script>
+    // Randomize email per page load to avoid KV collisions between test runs
+    (function() {
+      var emailEl = document.getElementById("mock-email");
+      if (emailEl) {
+        emailEl.textContent = "test-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6) + "@readmoo.com";
+      }
+    })();
+
     // SPA 路由：根據 hash 顯示對應頁面
     function showCurrentView() {
       var hash = location.hash || "#/library";

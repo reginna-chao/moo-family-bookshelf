@@ -47,6 +47,8 @@ test.describe("Family Lifecycle", () => {
     extensionId,
   }) => {
     test.setTimeout(120_000);
+    // Multi-browser-context test is inherently flaky (idle page + shared Worker)
+    test.info().annotations.push({ type: "flaky", description: "two browser contexts" });
 
     // --- User 1: Create family ---
 
@@ -124,17 +126,18 @@ test.describe("Family Lifecycle", () => {
       // Navigate to mock page
       await page2.goto(MOCK_READMOO_URL);
 
-      // Change mock email so user 2 gets a different userId (SHA-256)
-      // Both users scrape the same mock page — without this they'd have the same identity
-      await page2.evaluate(() => {
+      // Change mock email so user 2 gets a unique userId (SHA-256)
+      // Use timestamp to avoid KV collisions with previous test runs
+      const uniqueEmail = `test-user2-${Date.now()}@readmoo.com`;
+      await page2.evaluate((email) => {
         const meView = document.getElementById("me-view");
         if (meView) {
           const emailDiv = meView.querySelector('div[style*="14px"]');
-          if (emailDiv) emailDiv.textContent = "test-user2@readmoo.com";
+          if (emailDiv) emailDiv.textContent = email;
           const nameDiv = meView.querySelector('div[style*="16px"]');
           if (nameDiv) nameDiv.textContent = "測試使用者 2";
         }
-      });
+      }, uniqueEmail);
 
       // Open dialog — should show onboarding
       await openDialog(page2);
@@ -163,8 +166,8 @@ test.describe("Family Lifecycle", () => {
       await page2.close();
 
       // --- Switch back to User 1: verify member count is 2 ---
-      // Close and reopen dialog to refresh member list
-      await closeDialog(page1);
+      // Reload the page to get a fresh state, then reopen dialog
+      await page1.goto(MOCK_READMOO_URL);
       await openDialog(page1);
       await waitForMainView(page1);
       await navigateToTab(page1, "設定");

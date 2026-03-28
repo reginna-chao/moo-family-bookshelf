@@ -150,3 +150,52 @@ jobs:
           name: playwright-report
           path: extension/test-results/
           retention-days: 7
+
+  pwa-e2e:
+    name: PWA E2E — Playwright Tests
+    needs: [pwa-check, worker-check]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            worker/pnpm-lock.yaml
+
+      - name: Install PWA dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install worker dependencies
+        working-directory: worker
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck E2E tests
+        working-directory: pwa
+        run: npx tsc --noEmit --project tests/e2e/tsconfig.json
+
+      - name: Install Playwright browsers
+        working-directory: pwa
+        run: npx playwright install chromium --with-deps
+
+      - name: Run PWA E2E tests
+        working-directory: pwa
+        run: pnpm test:e2e
+        env:
+          CI: true
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: pwa-playwright-report
+          path: pwa/test-results/
+          retention-days: 7
