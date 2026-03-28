@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>Readmoo 讀墨電子書</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+    .desktop-top-nav-btn { display: inline-flex; align-items: center; padding: 8px 16px; cursor: pointer; border: 1px solid #ddd; border-radius: 4px; background: white; margin-right: 8px; }
+    .desktop-top-nav-btn i { margin-right: 4px; }
+    .library-item { display: flex; gap: 12px; background: white; padding: 16px; margin-bottom: 12px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative; }
+    .library-item .cover-img { width: 80px; height: 110px; object-fit: cover; border-radius: 4px; }
+    .library-item .info { flex: 1; }
+    .library-item .info .title { font-size: 16px; font-weight: 600; color: #333; display: block; margin-bottom: 4px; }
+    .library-item .openbook { display: none; position: absolute; top: 0; right: 0; padding: 8px; }
+    .library-item:hover .openbook { display: block; }
+    .library-item .privacy { display: none; }
+    .nav-bar { display: flex; align-items: center; padding: 12px 0; margin-bottom: 16px; border-bottom: 1px solid #eee; }
+    .me-panel { max-width: 400px; margin: 40px auto; background: white; border-radius: 12px; padding: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); text-align: center; }
+    .me-panel .avatar { width: 80px; height: 80px; border-radius: 50%; background: #e2e8f0; margin: 0 auto 16px; }
+    #library-view, #me-view { display: none; }
+  </style>
+</head>
+<body>
+  <!-- 書庫頁面 (#/library) -->
+  <div id="library-view">
+    <div class="nav-bar">
+      <button class="desktop-top-nav-btn">
+        <i class="mo-filter"></i> 篩選
+      </button>
+    </div>
+
+    <!-- 書籍 1：正常書籍 -->
+    <div class="library-item" data-testid="book-1">
+      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book1" alt="cover" />
+      <div class="info">
+        <span class="title" title="被討厭的勇氣">被討厭的勇氣</span>
+        <span class="author">岸見一郎、古賀史健</span>
+      </div>
+      <div class="openbook">
+        <a class="reader-link" href="https://readmoo.com/api/reader/210439468000101">閱讀</a>
+      </div>
+      <div class="privacy" id="privacy-210439468000101"></div>
+    </div>
+
+    <!-- 書籍 2：正常書籍 -->
+    <div class="library-item" data-testid="book-2">
+      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book2" alt="cover" />
+      <div class="info">
+        <span class="title" title="原子習慣">原子習慣</span>
+        <span class="author">James Clear</span>
+      </div>
+      <div class="openbook">
+        <a class="reader-link" href="https://readmoo.com/api/reader/210439468000102">閱讀</a>
+      </div>
+      <div class="privacy" id="privacy-210439468000102"></div>
+    </div>
+
+    <!-- 書籍 3：正常書籍 -->
+    <div class="library-item" data-testid="book-3">
+      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book3" alt="cover" />
+      <div class="info">
+        <span class="title" title="人類大歷史">人類大歷史</span>
+        <span class="author">哈拉瑞</span>
+      </div>
+      <div class="openbook">
+        <a class="reader-link" href="https://readmoo.com/api/reader/210439468000103">閱讀</a>
+      </div>
+      <div class="privacy" id="privacy-210439468000103"></div>
+    </div>
+
+    <!-- 書籍 4：正常書籍（僅有 fallback ID，無 reader-link） -->
+    <div class="library-item" data-testid="book-4">
+      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book4" alt="cover" />
+      <div class="info">
+        <span class="title" title="薩提爾的對話練習">薩提爾的對話練習</span>
+        <span class="author">李崇建</span>
+      </div>
+      <div class="openbook">
+        <!-- 無 reader-link，使用 privacy fallback -->
+      </div>
+      <div class="privacy" id="privacy-210439468000104"></div>
+    </div>
+
+    <!-- 書籍 5：正常書籍 -->
+    <div class="library-item" data-testid="book-5">
+      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book5" alt="cover" />
+      <div class="info">
+        <span class="title" title="刻意練習">刻意練習</span>
+        <span class="author">Anders Ericsson</span>
+      </div>
+      <div class="openbook">
+        <a class="reader-link" href="https://readmoo.com/api/reader/210439468000105">閱讀</a>
+      </div>
+      <div class="privacy" id="privacy-210439468000105"></div>
+    </div>
+
+    <!-- 書籍 6：借入書籍（應被排除） -->
+    <div class="library-item" data-testid="book-borrowed">
+      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Borrowed" alt="cover" />
+      <div class="info">
+        <span class="title" title="借入的書">借入的書</span>
+        <span class="author">某作者</span>
+      </div>
+      <div type="borrowed"></div>
+      <div class="openbook">
+        <a class="reader-link" href="https://readmoo.com/api/reader/999999999999999">閱讀</a>
+      </div>
+      <div class="privacy" id="privacy-999999999999999"></div>
+    </div>
+  </div>
+
+  <!-- 個人資料頁面 (#/me) -->
+  <div id="me-view">
+    <div class="me-panel">
+      <div class="avatar"></div>
+      <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 8px;">
+        測試使用者
+      </div>
+      <div style="font-size: 14px; color: #94a3b8;">
+        test-user@readmoo.com
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // SPA 路由：根據 hash 顯示對應頁面
+    function showCurrentView() {
+      var hash = location.hash || "#/library";
+      var libraryView = document.getElementById("library-view");
+      var meView = document.getElementById("me-view");
+
+      if (hash.indexOf("/me") !== -1) {
+        libraryView.style.display = "none";
+        meView.style.display = "block";
+      } else {
+        libraryView.style.display = "block";
+        meView.style.display = "none";
+      }
+    }
+
+    // 初始化：預設顯示書庫
+    if (!location.hash) {
+      location.hash = "#/library";
+    }
+    showCurrentView();
+
+    // 監聽 hash 變更（SPA 導航）
+    window.addEventListener("hashchange", showCurrentView);
+
+    // 模擬 hover 觸發 openbook 顯示（Content Script 會 dispatch mouseenter）
+    document.querySelectorAll(".library-item").forEach(function(item) {
+      item.addEventListener("mouseenter", function() {
+        var openbook = item.querySelector(".openbook");
+        if (openbook) {
+          openbook.style.display = "block";
+        }
+      });
+    });
+  </script>
+</body>
+</html>

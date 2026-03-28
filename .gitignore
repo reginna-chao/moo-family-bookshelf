@@ -30,6 +30,7 @@ wrangler.local.toml
 coverage/
 playwright-report/
 test-results/
+.verify-selectors-profile/
 
 # Claude
 .claude/settings.json

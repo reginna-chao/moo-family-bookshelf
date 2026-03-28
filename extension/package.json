@@ -15,7 +15,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:e2e": "tsx scripts/build-e2e.ts",
+    "e2e:verify:selectors": "tsx scripts/verify-selectors.ts",
+    "e2e:verify:selectors:update": "tsx scripts/verify-selectors.ts --update-mock"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
@@ -42,6 +45,8 @@
     "typescript-eslint": "^8.57.2",
     "tsx": "^4.19.0",
     "vite": "^6.0.5",
+    "@playwright/test": "^1.49.0",
+    "serve": "^14.2.4",
     "vitest": "^2.1.8"
   }
 }

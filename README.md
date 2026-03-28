@@ -86,6 +86,40 @@ pnpm build      # 建置
 pnpm test       # 測試 (Vitest + Miniflare)
 ```
 
+### E2E 測試
+
+使用 Playwright 載入已建置的 Chrome Extension，在模擬的讀墨頁面上執行完整流程測試。
+
+```bash
+pnpm test:e2e   # 自動 build Extension + 啟動本地 Worker + 執行所有 E2E 測試
+```
+
+首次執行前需安裝 Playwright 瀏覽器：
+
+```bash
+cd extension && npx playwright install chromium
+```
+
+#### 測試場景
+
+| Spec 檔案 | 測試內容 |
+|-----------|---------|
+| `family-lifecycle.spec.ts` | 建立家庭 → 同步碼 → 第二使用者加入 → 驗證成員 |
+| `book-sharing.spec.ts` | 書籍預設未分享 → 切換開放 → 儲存 → 家庭書櫃可見 |
+| `dialog-state-machine.spec.ts` | 無家庭 → 引導 → 建立後主畫面 → 關閉重開持久化 |
+| `custom-endpoint.spec.ts` | 自訂 API 端點 → 同步碼含 @host → 格式驗證 |
+
+#### 選擇器驗證
+
+E2E 測試依賴模擬讀墨 DOM 結構的 mock HTML。當讀墨改版時，可用以下指令驗證 `scraper.ts` 的選擇器是否仍然有效：
+
+```bash
+pnpm e2e:verify:selectors          # 連到真實讀墨頁面，檢查所有選擇器
+pnpm e2e:verify:selectors:update   # 檢查 + 從真實 DOM 自動產生新的 mock HTML
+```
+
+首次執行會開啟 Chromium，需在其中手動登入讀墨。登入狀態會保留，後續執行不需再次登入。
+
 ## 自建後端
 
 不想使用預設伺服器？你可以部署自己的 Cloudflare Worker：

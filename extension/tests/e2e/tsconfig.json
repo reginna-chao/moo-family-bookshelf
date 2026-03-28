@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["chrome"],
+    "paths": {
+      "@/*": ["../../src/*"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "../../src/**/*.ts",
+    "../../src/**/*.tsx"
+  ]
+}
