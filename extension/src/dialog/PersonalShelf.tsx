@@ -8,6 +8,7 @@ import { StatusFilterBar, StatusFilter } from "./StatusFilterBar";
 import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
 import { useBookSync } from "./useBookSync";
+import { FloatingActionBar } from "./FloatingActionBar";
 
 export interface PersonalShelfProps {
   userId: string;
@@ -39,6 +40,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const [status, setStatus] = useState<Status>("scraping");
   const [errorMessage, setErrorMessage] = useState("");
   const [isDirty, setIsDirty] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const { syncStatus, syncError, triggerManualSync, lastSyncBooks } = useBookSync({
     userId,
@@ -106,12 +108,30 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     }
   }, [lastSyncBooks, status]);
 
-  const handleToggle = useCallback((bookId: string) => {
-    setBooks((prev) =>
-      prev.map((b) => (b.bookId === bookId ? { ...b, isShared: !b.isShared } : b)),
-    );
-    setIsDirty(true);
+  const handleSelect = useCallback((bookId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(bookId)) next.delete(bookId);
+      else next.add(bookId);
+      return next;
+    });
   }, []);
+
+  const handleBatchShare = useCallback(() => {
+    setBooks((prev) =>
+      prev.map((b) => (selectedIds.has(b.bookId) ? { ...b, isShared: true } : b)),
+    );
+    setSelectedIds(new Set());
+    setIsDirty(true);
+  }, [selectedIds]);
+
+  const handleBatchHide = useCallback(() => {
+    setBooks((prev) =>
+      prev.map((b) => (selectedIds.has(b.bookId) ? { ...b, isShared: false } : b)),
+    );
+    setSelectedIds(new Set());
+    setIsDirty(true);
+  }, [selectedIds]);
 
   const handleSave = useCallback(async () => {
     setStatus("saving");
@@ -184,14 +204,22 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     );
   }
 
-  const saveBackground = !isDirty ? "#e2e8f0" : status === "saving" ? "#93c5fd" : "#2563eb";
-  const saveLabel = status === "saving" ? "儲存中..." : status === "saved" ? "已儲存" : "儲存變更";
-
   const isSyncing = syncStatus === "syncing";
   const syncLabel = isSyncing ? "同步中..." : syncStatus === "done" ? "同步完成" : "同步書櫃";
 
+  const allVisibleSelected =
+    displayedBooks.length > 0 && displayedBooks.every((b) => selectedIds.has(b.bookId));
+
+  const handleSelectAll = () => {
+    if (allVisibleSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(displayedBooks.map((b) => b.bookId)));
+    }
+  };
+
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>
           個人書櫃管理
@@ -232,6 +260,24 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
             filteredCount={displayedBooks.length}
             isFiltering={isFiltering}
           />
+
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+            <button
+              onClick={handleSelectAll}
+              style={{
+                padding: "4px 10px",
+                border: "1px solid #cbd5e1",
+                borderRadius: 6,
+                background: "transparent",
+                color: "#475569",
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              {allVisibleSelected ? "取消全選" : "全選"}
+            </button>
+          </div>
         </>
       )}
 
@@ -241,29 +287,24 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {displayedBooks.map((book) => (
-          <BookRow key={book.bookId} book={book} onToggle={handleToggle} />
+          <BookRow
+            key={book.bookId}
+            book={book}
+            selected={selectedIds.has(book.bookId)}
+            onSelect={handleSelect}
+          />
         ))}
       </div>
 
-      {books.length > 0 && (
-        <button
-          onClick={handleSave}
-          disabled={!isDirty || status === "saving"}
-          style={{
-            width: "100%",
-            marginTop: 16,
-            padding: 12,
-            border: "none",
-            borderRadius: 8,
-            background: saveBackground,
-            color: !isDirty ? "#94a3b8" : "white",
-            fontWeight: 600,
-            cursor: !isDirty || status === "saving" ? "not-allowed" : "pointer",
-          }}
-        >
-          {saveLabel}
-        </button>
-      )}
+      <FloatingActionBar
+        selectedCount={selectedIds.size}
+        isDirty={isDirty}
+        isSaving={status === "saving"}
+        isSaved={status === "saved"}
+        onBatchShare={handleBatchShare}
+        onBatchHide={handleBatchHide}
+        onSave={handleSave}
+      />
     </div>
   );
 }

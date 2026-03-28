@@ -3,10 +3,11 @@ import { BookEntry } from "../api/client";
 
 interface BookRowProps {
   book: BookEntry;
-  onToggle: (bookId: string) => void;
+  selected: boolean;
+  onSelect: (bookId: string) => void;
 }
 
-export const BookRow = React.memo(function BookRow({ book, onToggle }: BookRowProps) {
+export const BookRow = React.memo(function BookRow({ book, selected, onSelect }: BookRowProps) {
   const isOn = book.isShared;
 
   return (
@@ -17,9 +18,16 @@ export const BookRow = React.memo(function BookRow({ book, onToggle }: BookRowPr
         gap: 10,
         padding: 8,
         borderRadius: 8,
-        background: "#f8fafc",
+        background: selected ? "#eff6ff" : "#f8fafc",
       }}
     >
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={() => onSelect(book.bookId)}
+        aria-label={`選取 ${book.title}`}
+        style={{ flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
+      />
       {book.coverUrl ? (
         <img
           src={book.coverUrl}
@@ -42,22 +50,19 @@ export const BookRow = React.memo(function BookRow({ book, onToggle }: BookRowPr
           {book.title}
         </div>
       </div>
-      <button
-        onClick={() => onToggle(book.bookId)}
+      <span
         style={{
           flexShrink: 0,
-          padding: "4px 10px",
-          border: "none",
-          borderRadius: 12,
-          fontSize: 12,
+          padding: "2px 8px",
+          borderRadius: 10,
+          fontSize: 11,
           fontWeight: 600,
-          cursor: "pointer",
           background: isOn ? "#dcfce7" : "#f1f5f9",
           color: isOn ? "#16a34a" : "#94a3b8",
         }}
       >
         {isOn ? "開放" : "未開放"}
-      </button>
+      </span>
     </div>
   );
 });
