@@ -38,13 +38,15 @@ function rawRequest(method: string, path: string, rawBody: string) {
   );
 }
 
-async function createFamily(userId = "user1") {
-  const res = await request("POST", "/api/family", { userId });
+async function createFamily(userId = "user1", displayName?: string) {
+  const body: Record<string, string> = { userId };
+  if (displayName !== undefined) body.displayName = displayName;
+  const res = await request("POST", "/api/family", body);
   const json = (await res.json()) as Json;
   return {
     familyId: json.data.familyId as string,
     ownerId: json.data.ownerId as string,
-    members: json.data.members as string[],
+    members: json.data.members as { userId: string; displayName: string }[],
     maxMembers: json.data.maxMembers as number,
     authToken: json.data.authToken as string,
   };
@@ -73,15 +75,22 @@ beforeEach(() => {
 // ===========================================================================
 
 describe("Family Lifecycle", () => {
-  it("should create a family", async () => {
+  it("should create a family with default empty displayName", async () => {
     const res = await request("POST", "/api/family", { userId: "user1" });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.familyId).toBeDefined();
     expect(json.data.ownerId).toBe("user1");
-    expect(json.data.members).toEqual(["user1"]);
+    expect(json.data.members).toEqual([{ userId: "user1", displayName: "" }]);
     expect(json.data.maxMembers).toBe(2);
     expect(json.data.authToken).toBeDefined();
+  });
+
+  it("should create a family with a custom displayName", async () => {
+    const res = await request("POST", "/api/family", { userId: "user1", displayName: "Alice" });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as Json;
+    expect(json.data.members).toEqual([{ userId: "user1", displayName: "Alice" }]);
   });
 
   it("should reject create without userId", async () => {
@@ -97,13 +106,16 @@ describe("Family Lifecycle", () => {
     const joinRes = await request(
       "POST",
       `/api/family/${familyId}/join`,
-      { userId: "user2" },
+      { userId: "user2", displayName: "Bob" },
     );
     expect(joinRes.status).toBe(200);
     const joinJson = (await joinRes.json()) as Json;
     // Mutation returns updated FamilyRecord
     expect(joinJson.data.familyId).toBe(familyId);
-    expect(joinJson.data.members).toEqual(["user1", "user2"]);
+    expect(joinJson.data.members).toEqual([
+      { userId: "user1", displayName: "" },
+      { userId: "user2", displayName: "Bob" },
+    ]);
     expect(joinJson.data.ownerId).toBe("user1");
     expect(joinJson.data.authToken).toBeDefined();
 
@@ -115,7 +127,10 @@ describe("Family Lifecycle", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data;
-    expect(members.members).toEqual(["user1", "user2"]);
+    expect(members.members).toEqual([
+      { userId: "user1", displayName: "" },
+      { userId: "user2", displayName: "Bob" },
+    ]);
   });
 
   it("should return 404 for joining non-existent family", async () => {
@@ -144,7 +159,7 @@ describe("Family Lifecycle", () => {
       newToken,
     );
     const members = ((await membersRes.json()) as Json).data;
-    expect(members.members).toEqual(["user1"]);
+    expect(members.members).toEqual([{ userId: "user1", displayName: "" }]);
   });
 
   it("should allow leaving a family and return updated record", async () => {
@@ -159,7 +174,7 @@ describe("Family Lifecycle", () => {
     expect(leaveRes.status).toBe(200);
     const leaveJson = (await leaveRes.json()) as Json;
     // Mutation returns updated FamilyRecord
-    expect(leaveJson.data.members).toEqual(["user1"]);
+    expect(leaveJson.data.members).toEqual([{ userId: "user1", displayName: "" }]);
 
     // Verify via GET /members
     const membersRes = await request(
@@ -169,7 +184,7 @@ describe("Family Lifecycle", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data;
-    expect(members.members).toEqual(["user1"]);
+    expect(members.members).toEqual([{ userId: "user1", displayName: "" }]);
   });
 });
 
@@ -237,7 +252,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.members).toEqual(["user1"]);
+    expect(json.data.members).toEqual([{ userId: "user1", displayName: "" }]);
 
     const membersRes = await request(
       "GET",
@@ -246,7 +261,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data.members;
-    expect(members).toEqual(["user1"]);
+    expect(members).toEqual([{ userId: "user1", displayName: "" }]);
   });
 
   it("should reject owner trying to remove self with OWNER_CANNOT_LEAVE", async () => {
@@ -274,7 +289,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.members).toEqual(["user1"]);
+    expect(json.data.members).toEqual([{ userId: "user1", displayName: "" }]);
 
     const membersRes = await request(
       "GET",
@@ -283,7 +298,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data.members;
-    expect(members).toEqual(["user1"]);
+    expect(members).toEqual([{ userId: "user1", displayName: "" }]);
   });
 
   it("should reject non-owner trying to remove other member with NOT_OWNER", async () => {
@@ -353,7 +368,10 @@ describe("PUT /api/family/:id/transfer", () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.ownerId).toBe("user2");
-    expect(json.data.members).toEqual(["user1", "user2"]);
+    expect(json.data.members).toEqual([
+      { userId: "user1", displayName: "" },
+      { userId: "user2", displayName: "" },
+    ]);
 
     // Verify via GET /members
     const membersRes = await request(
@@ -466,7 +484,7 @@ describe("PUT /api/family/:id/transfer", () => {
     );
     expect(leaveRes.status).toBe(200);
     const leaveJson = (await leaveRes.json()) as Json;
-    expect(leaveJson.data.members).toEqual(["user2"]);
+    expect(leaveJson.data.members).toEqual([{ userId: "user2", displayName: "" }]);
     expect(leaveJson.data.ownerId).toBe("user2");
   });
 });
@@ -490,11 +508,28 @@ describe("GET /api/family/:id/members response", () => {
     expect(data.ownerId).toBe("user1");
   });
 
+  it("should return members as { userId, displayName }[]", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1", "Alice");
+
+    const membersRes = await request(
+      "GET",
+      `/api/family/${familyId}/members`,
+      undefined,
+      token1,
+    );
+    expect(membersRes.status).toBe(200);
+    const data = ((await membersRes.json()) as Json).data;
+    expect(data.members).toEqual([{ userId: "user1", displayName: "Alice" }]);
+  });
+
   it("should normalize legacy record without ownerId/maxMembers", async () => {
     // Manually insert a legacy record that lacks ownerId and maxMembers
     const legacyRecord = {
       familyId: "abcd-ef01",
-      members: ["alice", "bob"],
+      members: [
+        { userId: "alice", displayName: "Alice" },
+        { userId: "bob", displayName: "Bob" },
+      ],
       createdAt: "2025-01-01T00:00:00.000Z",
     };
     await kv.put(kvKeys.family("abcd-ef01"), JSON.stringify(legacyRecord));
@@ -513,11 +548,14 @@ describe("GET /api/family/:id/members response", () => {
     );
     expect(res.status).toBe(200);
     const data = ((await res.json()) as Json).data;
-    // ownerId defaults to first member
+    // ownerId defaults to first member's userId
     expect(data.ownerId).toBe("alice");
     // maxMembers defaults to 2
     expect(data.maxMembers).toBe(2);
-    expect(data.members).toEqual(["alice", "bob"]);
+    expect(data.members).toEqual([
+      { userId: "alice", displayName: "Alice" },
+      { userId: "bob", displayName: "Bob" },
+    ]);
   });
 
   it("should return 401 for unauthenticated GET /api/family/:id/members", async () => {
@@ -573,6 +611,37 @@ describe("Input validation", () => {
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_USER_ID");
+  });
+
+  it("should reject displayName exceeding 20 characters on create", async () => {
+    const res = await request("POST", "/api/family", {
+      userId: "user1",
+      displayName: "a".repeat(21),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("INVALID_DISPLAY_NAME");
+  });
+
+  it("should reject displayName exceeding 20 characters on join", async () => {
+    const { familyId } = await createFamily("user1");
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user2",
+      displayName: "a".repeat(21),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("INVALID_DISPLAY_NAME");
+  });
+
+  it("should trim whitespace from displayName", async () => {
+    const res = await request("POST", "/api/family", {
+      userId: "user1",
+      displayName: "  Alice  ",
+    });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as Json;
+    expect(json.data.members[0].displayName).toBe("Alice");
   });
 });
 
@@ -656,6 +725,30 @@ describe("Family Bookshelf Aggregation", () => {
     expect(json.data.members[1].payload).toBe("user2-encrypted");
   });
 
+  it("should include displayName in bookshelf response", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1", "Alice");
+
+    // Join with displayName
+    const joinRes = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user2",
+      displayName: "Bob",
+    });
+    const token2 = ((await joinRes.json()) as Json).data.authToken;
+
+    await request("PUT", "/api/user/user1/books", { payload: "data1" }, token1);
+    await request("PUT", "/api/user/user2/books", { payload: "data2" }, token2);
+
+    const res = await request(
+      "GET",
+      `/api/family/${familyId}/bookshelf`,
+      undefined,
+      token1,
+    );
+    const json = (await res.json()) as Json;
+    expect(json.data.members[0].displayName).toBe("Alice");
+    expect(json.data.members[1].displayName).toBe("Bob");
+  });
+
   it("should return 403 for authenticated user accessing another family's bookshelf", async () => {
     // user1 is in their own family, so accessing a different family returns 403
     const { authToken: token1 } = await createFamily("user1");
@@ -703,5 +796,196 @@ describe("Family Bookshelf Aggregation", () => {
     const json = (await res.json()) as Json;
     expect(json.data.members).toHaveLength(1);
     expect(json.data.members[0].userId).toBe("user1");
+  });
+});
+
+// ===========================================================================
+// PUT /api/family/:id/member/:uid/displayName
+// ===========================================================================
+
+describe("PUT /api/family/:id/member/:uid/displayName", () => {
+  it("should update own display name", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1");
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user1/displayName`,
+      { displayName: "Alice" },
+      token1,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data).toEqual({ userId: "user1", displayName: "Alice" });
+
+    // Verify via GET /members
+    const membersRes = await request(
+      "GET",
+      `/api/family/${familyId}/members`,
+      undefined,
+      token1,
+    );
+    const data = ((await membersRes.json()) as Json).data;
+    expect(data.members[0].displayName).toBe("Alice");
+  });
+
+  it("should allow setting display name to empty string", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1", "OldName");
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user1/displayName`,
+      { displayName: "" },
+      token1,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.displayName).toBe("");
+  });
+
+  it("should trim whitespace from display name", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1");
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user1/displayName`,
+      { displayName: "  Alice  " },
+      token1,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.displayName).toBe("Alice");
+  });
+
+  it("should reject display name exceeding 20 characters", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1");
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user1/displayName`,
+      { displayName: "a".repeat(21) },
+      token1,
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("INVALID_DISPLAY_NAME");
+  });
+
+  it("should allow display name of exactly 20 characters", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1");
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user1/displayName`,
+      { displayName: "a".repeat(20) },
+      token1,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.displayName).toBe("a".repeat(20));
+  });
+
+  it("should reject missing displayName field", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1");
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user1/displayName`,
+      {},
+      token1,
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("MISSING_DISPLAY_NAME");
+  });
+
+  it("should reject non-string displayName", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1");
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user1/displayName`,
+      { displayName: 123 },
+      token1,
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("INVALID_DISPLAY_NAME");
+  });
+
+  it("should return 401 without auth token", async () => {
+    const { familyId } = await createFamily("user1");
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user1/displayName`,
+      { displayName: "Alice" },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("should return 403 when trying to update another user's display name", async () => {
+    const { familyId, token1 } = await createFamilyWithTwoMembers();
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user2/displayName`,
+      { displayName: "Hacked" },
+      token1,
+    );
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("FORBIDDEN");
+  });
+
+  it("should return 404 when user is not a member of the family", async () => {
+    const { familyId } = await createFamily("user1");
+    // Create a separate family for user2 to get a valid token
+    const { authToken: token2 } = await createFamily("user2");
+
+    const res = await request(
+      "PUT",
+      `/api/family/${familyId}/member/user2/displayName`,
+      { displayName: "Test" },
+      token2,
+    );
+    // user2 != user2 would be caught as FORBIDDEN first since callerId != targetUserId
+    // Actually user2 is trying to update user2 (self) but not in this family
+    // Wait — callerId is user2, targetUserId is user2, so it passes the self-check
+    // Then it loads the family and checks membership — user2 is NOT in familyId
+    expect(res.status).toBe(404);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("MEMBER_NOT_FOUND");
+  });
+
+  it("should return 404 for non-existent family", async () => {
+    const { authToken: token1 } = await createFamily("user1");
+
+    const res = await request(
+      "PUT",
+      "/api/family/aaaa-zzzz/member/user1/displayName",
+      { displayName: "Test" },
+      token1,
+    );
+    expect(res.status).toBe(404);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("FAMILY_NOT_FOUND");
+  });
+
+  it("should return 400 for invalid JSON body", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1");
+
+    const res = app.request(
+      `/api/family/${familyId}/member/user1/displayName`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token1}`,
+        },
+        body: "{invalid json}",
+      },
+      { KV: kv },
+    );
+    expect((await res).status).toBe(400);
   });
 });

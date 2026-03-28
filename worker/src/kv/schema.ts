@@ -15,10 +15,15 @@ export const kvKeys = {
   authToken: (token: string) => `token:${token}`,
 } as const;
 
+export interface FamilyMember {
+  userId: string;
+  displayName: string;
+}
+
 export interface FamilyRecord {
   familyId: string;
   ownerId: string;
-  members: string[];
+  members: FamilyMember[];
   maxMembers: number;
   createdAt: string;
 }
@@ -26,13 +31,25 @@ export interface FamilyRecord {
 /** Raw family record from KV — may lack fields added after initial release. */
 export type RawFamilyRecord = Partial<FamilyRecord> & Pick<FamilyRecord, 'familyId' | 'members' | 'createdAt'>;
 
+/** Find a member by userId in the members array. */
+export function findMember(members: FamilyMember[], userId: string): FamilyMember | undefined {
+  return members.find((m) => m.userId === userId);
+}
+
+/** Check if a userId exists in the members array. */
+export function hasMember(members: FamilyMember[], userId: string): boolean {
+  return members.some((m) => m.userId === userId);
+}
+
 export function normalizeFamilyRecord(record: RawFamilyRecord): FamilyRecord {
   if (record.members.length === 0) {
     throw new Error("Corrupted family record: members array is empty");
   }
+  const firstMember = record.members[0];
+  const ownerId = record.ownerId ?? (typeof firstMember === 'string' ? firstMember : firstMember.userId);
   return {
     ...record,
-    ownerId: record.ownerId ?? record.members[0],
+    ownerId,
     maxMembers: record.maxMembers ?? 2,
   };
 }

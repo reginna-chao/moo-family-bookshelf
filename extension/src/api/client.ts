@@ -27,10 +27,15 @@ export interface PersonalBooks {
   lastUpdated: string;
 }
 
+export interface FamilyMember {
+  userId: string;
+  displayName: string;
+}
+
 export interface FamilyGroup {
   familyId: string;
   ownerId: string;
-  members: string[];
+  members: FamilyMember[];
   maxMembers: number;
   createdAt: string;
 }
@@ -94,20 +99,32 @@ export class ApiClient {
 
   // --- Family Group ---
 
-  async createFamily(userId: string): Promise<ApiResponse<FamilyGroup>> {
+  async createFamily(userId: string, displayName?: string): Promise<ApiResponse<FamilyGroup>> {
     return this.request("/api/family", {
       method: "POST",
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, displayName: displayName ?? "" }),
     });
   }
 
   async joinFamily(
     familyId: string,
     userId: string,
-  ): Promise<ApiResponse<{ ok: boolean }>> {
+    displayName?: string,
+  ): Promise<ApiResponse<FamilyGroup>> {
     return this.request(`/api/family/${familyId}/join`, {
       method: "POST",
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, displayName: displayName ?? "" }),
+    });
+  }
+
+  async updateDisplayName(
+    familyId: string,
+    userId: string,
+    displayName: string,
+  ): Promise<ApiResponse<{ userId: string; displayName: string }>> {
+    return this.request(`/api/family/${familyId}/member/${userId}/displayName`, {
+      method: "PUT",
+      body: JSON.stringify({ displayName }),
     });
   }
 

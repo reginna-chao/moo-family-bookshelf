@@ -7,6 +7,7 @@ describe("DisplayNameEditor", () => {
     displayName: "小明",
     savedDisplayName: "小明",
     nameSaveState: "idle" as const,
+    nameSaveError: "",
     setDisplayName: vi.fn(),
     handleSaveDisplayName: vi.fn().mockResolvedValue(undefined),
   };
@@ -23,6 +24,13 @@ describe("DisplayNameEditor", () => {
 
     const input = screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement;
     expect(input.value).toBe("小明");
+  });
+
+  it("input has maxLength of 20", () => {
+    render(<DisplayNameEditor {...baseProps} />);
+
+    const input = screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement;
+    expect(input.maxLength).toBe(20);
   });
 
   it("save button disabled when name unchanged", () => {
@@ -71,5 +79,18 @@ describe("DisplayNameEditor", () => {
     render(<DisplayNameEditor {...baseProps} nameSaveState="saved" />);
 
     expect(screen.getByText("已儲存")).toBeInTheDocument();
+  });
+
+  it("shows error state and message", () => {
+    render(
+      <DisplayNameEditor
+        {...baseProps}
+        nameSaveState="error"
+        nameSaveError="名稱過長"
+      />,
+    );
+
+    expect(screen.getByText("儲存失敗")).toBeInTheDocument();
+    expect(screen.getByText("名稱過長")).toBeInTheDocument();
   });
 });

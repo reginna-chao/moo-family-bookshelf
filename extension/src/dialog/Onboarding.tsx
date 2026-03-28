@@ -24,6 +24,7 @@ export interface OnboardingProps {
 export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   const [state, setState] = useState<OnboardingState>("welcome");
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userDisplayName, setUserDisplayName] = useState("");
   const [syncCodeInput, setSyncCodeInput] = useState("");
   const [generatedSyncCode, setGeneratedSyncCode] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -40,6 +41,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
     if (!result) return;
 
     setUserEmail(result.email);
+    setUserDisplayName(result.displayName);
     setState("idle");
   };
 
@@ -56,7 +58,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         return;
       }
       const userId = hashRes.data?.userId ?? "";
-      const response = await apiClient.createFamily(userId);
+      const response = await apiClient.createFamily(userId, userDisplayName);
       if (response.error) {
         setErrorMessage(response.error.message);
         setState("error");
@@ -137,14 +139,14 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       }
       const userId = hashRes.data?.userId ?? "";
 
-      const response = await apiClient.joinFamily(decoded.familyId, userId);
+      const response = await apiClient.joinFamily(decoded.familyId, userId, userDisplayName);
       if (response.error) {
         setErrorMessage(response.error.message);
         setState("error");
         return;
       }
 
-      const joinData = response.data as { ok: boolean; authToken?: string } | undefined;
+      const joinData = response.data as (FamilyGroup & { authToken?: string }) | undefined;
 
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: decoded.familyId });
       await chrome.storage.local.set({

@@ -12,11 +12,17 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     transferOwnership: vi.fn().mockResolvedValue({ data: { ok: true } }),
     getPersonalBooks: vi.fn(),
     updatePersonalBooks: vi.fn(),
+    updateDisplayName: vi.fn().mockResolvedValue({
+      data: { userId: "user-abc12345", displayName: "" },
+    }),
     getFamilyMembers: vi.fn().mockResolvedValue({
       data: {
         familyId: "fam-123",
         ownerId: "user-abc12345",
-        members: ["user-abc12345", "user-def67890"],
+        members: [
+          { userId: "user-abc12345", displayName: "小明" },
+          { userId: "user-def67890", displayName: "" },
+        ],
         maxMembers: 6,
         createdAt: "2026-01-01",
       },
@@ -89,8 +95,9 @@ describe("FamilySettings", () => {
     expect(screen.getByText("儲存")).toBeEnabled();
   });
 
-  it("saves display name to local and sync storage", async () => {
-    renderFamilySettings();
+  it("saves display name via API and to local/sync storage", async () => {
+    const apiClient = createMockApiClient();
+    renderFamilySettings({ apiClient });
 
     await waitFor(() => {
       expect((screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement).value).toBe("小明");
@@ -100,6 +107,9 @@ describe("FamilySettings", () => {
     fireEvent.click(screen.getByText("儲存"));
 
     await waitFor(() => {
+      expect(apiClient.updateDisplayName).toHaveBeenCalledWith(
+        "fam-123", "user-abc12345", "大明",
+      );
       expect(chrome.storage.local.set).toHaveBeenCalledWith({ displayName: "大明" });
       expect(chrome.storage.sync.set).toHaveBeenCalledWith({ displayName: "大明" });
     });
@@ -110,13 +120,13 @@ describe("FamilySettings", () => {
     });
   });
 
-  it("shows current user display name in member list", async () => {
+  it("shows API displayName for all members in member list", async () => {
     renderFamilySettings();
 
     await waitFor(() => {
-      // Current user should show display name instead of userId slice
+      // Owner has displayName "小明" from API
       expect(screen.getByText("小明")).toBeInTheDocument();
-      // Other member still shows userId slice
+      // Other member has empty displayName, falls back to userId slice
       expect(screen.getByText("user-def")).toBeInTheDocument();
     });
   });
@@ -131,10 +141,15 @@ describe("FamilySettings", () => {
     });
   });
 
-  it("shows copy sync code button", () => {
+  it("shows copy sync code button", async () => {
     renderFamilySettings();
 
     expect(screen.getByText("複製同步碼")).toBeInTheDocument();
+
+    // Wait for async member fetch to complete to avoid act() warning
+    await waitFor(() => {
+      expect(screen.getByText("小明")).toBeInTheDocument();
+    });
   });
 
   it("shows member list after loading", async () => {
@@ -142,7 +157,6 @@ describe("FamilySettings", () => {
 
     // Wait for member loading to complete
     await waitFor(() => {
-      // Current user shows display name, other member shows userId slice
       expect(screen.getByText("小明")).toBeInTheDocument();
       expect(screen.getByText("user-def")).toBeInTheDocument();
     });
@@ -151,10 +165,15 @@ describe("FamilySettings", () => {
     expect(screen.getByText("(你)")).toBeInTheDocument();
   });
 
-  it("shows leave family button", () => {
+  it("shows leave family button", async () => {
     renderFamilySettings();
 
     expect(screen.getByText("離開家庭")).toBeInTheDocument();
+
+    // Wait for async member fetch to complete to avoid act() warning
+    await waitFor(() => {
+      expect(screen.getByText("小明")).toBeInTheDocument();
+    });
   });
 
   it("two-step confirmation: clicking leave shows confirm and cancel", async () => {
@@ -217,7 +236,10 @@ describe("FamilySettings", () => {
         data: {
           familyId: "fam-123",
           ownerId: "user-def67890",
-          members: ["user-abc12345", "user-def67890"],
+          members: [
+            { userId: "user-abc12345", displayName: "小明" },
+            { userId: "user-def67890", displayName: "大明" },
+          ],
           maxMembers: 6,
           createdAt: "2026-01-01",
         },
@@ -227,7 +249,7 @@ describe("FamilySettings", () => {
     renderFamilySettings({ apiClient });
 
     await waitFor(() => {
-      expect(screen.getByText("user-def")).toBeInTheDocument();
+      expect(screen.getByText("大明")).toBeInTheDocument();
     });
 
     expect(screen.queryByText("移除")).not.toBeInTheDocument();
@@ -384,6 +406,27 @@ describe("FamilySettings", () => {
 
     await waitFor(() => {
       expect(screen.getByText("權限不足")).toBeInTheDocument();
+    });
+  });
+
+  it("shows error when updateDisplayName API fails", async () => {
+    const apiClient = createMockApiClient({
+      updateDisplayName: vi.fn().mockResolvedValue({
+        error: { code: "VALIDATION_ERROR", message: "名稱過長" },
+      }),
+    });
+    renderFamilySettings({ apiClient });
+
+    await waitFor(() => {
+      expect((screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement).value).toBe("小明");
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), { target: { value: "新名稱" } });
+    fireEvent.click(screen.getByText("儲存"));
+
+    await waitFor(() => {
+      expect(screen.getByText("名稱過長")).toBeInTheDocument();
+      expect(screen.getByText("儲存失敗")).toBeInTheDocument();
     });
   });
 });

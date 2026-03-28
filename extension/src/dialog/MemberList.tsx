@@ -1,13 +1,12 @@
 import React, { useState } from "react";
-import { ApiClient } from "../api/client";
+import { ApiClient, FamilyMember } from "../api/client";
 
 export interface MemberListProps {
-  members: string[];
+  members: FamilyMember[];
   ownerId: string;
   userId: string;
   familyId: string;
   apiClient: ApiClient;
-  savedDisplayName: string;
   onMembersChanged: () => void;
 }
 
@@ -15,13 +14,16 @@ type ConfirmAction =
   | { type: "remove"; targetId: string }
   | { type: "transfer"; targetId: string };
 
+function getMemberLabel(member: FamilyMember): string {
+  return member.displayName || member.userId.slice(0, 8);
+}
+
 export function MemberList({
   members,
   ownerId,
   userId,
   familyId,
   apiClient,
-  savedDisplayName,
   onMembersChanged,
 }: MemberListProps) {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
@@ -122,36 +124,34 @@ export function MemberList({
         </div>
       )}
       <div style={{ background: "#f8fafc", borderRadius: 8, overflow: "hidden" }}>
-        {members.map((memberId) => (
-          <div key={memberId} style={{
+        {members.map((member) => (
+          <div key={member.userId} style={{
             padding: "10px 12px", fontSize: 14, borderBottom: "1px solid #e2e8f0",
             display: "flex", justifyContent: "space-between", alignItems: "center",
           }}>
             <span style={{ fontFamily: "monospace", fontSize: 13 }}>
-              {memberId === userId && savedDisplayName
-                ? savedDisplayName
-                : memberId.slice(0, 8)}
-              {memberId === ownerId && (
+              {getMemberLabel(member)}
+              {member.userId === ownerId && (
                 <span style={{ color: "#f59e0b", fontSize: 12, fontWeight: 600, marginLeft: 4 }}>
                   (Owner)
                 </span>
               )}
-              {memberId === userId && (
+              {member.userId === userId && (
                 <span style={{ color: "#2563eb", fontSize: 12, fontWeight: 600, marginLeft: 4 }}>
                   (你)
                 </span>
               )}
             </span>
-            {isOwner && memberId !== userId && !confirmAction && (
+            {isOwner && member.userId !== userId && !confirmAction && (
               <span>
                 <button
-                  onClick={() => setConfirmAction({ type: "transfer", targetId: memberId })}
+                  onClick={() => setConfirmAction({ type: "transfer", targetId: member.userId })}
                   style={{ ...smallBtnBase, borderColor: "#2563eb", color: "#2563eb" }}
                 >
                   轉移管理權
                 </button>
                 <button
-                  onClick={() => setConfirmAction({ type: "remove", targetId: memberId })}
+                  onClick={() => setConfirmAction({ type: "remove", targetId: member.userId })}
                   style={{ ...smallBtnBase, borderColor: "#ef4444", color: "#ef4444" }}
                 >
                   移除

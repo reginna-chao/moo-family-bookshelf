@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
-import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord } from "../kv/schema";
-import { isValidUserId, isValidFamilyId } from "../utils/validation";
+import { kvKeys, type FamilyMember, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember } from "../kv/schema";
+import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName } from "../utils/validation";
 import { generateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
@@ -12,7 +12,7 @@ export const familyRoutes = new Hono<{ Bindings: Env }>();
 familyRoutes.post("/", async (c) => {
   const familyId = generateFamilyId();
 
-  let body: { userId: string } | null;
+  let body: { userId: string; displayName?: string } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -36,10 +36,20 @@ familyRoutes.post("/", async (c) => {
     );
   }
 
+  const displayName = sanitizeDisplayName(body.displayName);
+  if (displayName === null) {
+    return c.json(
+      { error: { code: "INVALID_DISPLAY_NAME", message: "displayName must be a string of 20 characters or fewer" } },
+      400,
+    );
+  }
+
+  const member: FamilyMember = { userId: body.userId, displayName };
+
   const record = {
     familyId,
     ownerId: body.userId,
-    members: [body.userId],
+    members: [member],
     maxMembers: 2,
     createdAt: new Date().toISOString(),
   };
@@ -65,7 +75,7 @@ familyRoutes.post("/:id/join", async (c) => {
     );
   }
 
-  let body: { userId: string } | null;
+  let body: { userId: string; displayName?: string } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -85,6 +95,14 @@ familyRoutes.post("/:id/join", async (c) => {
   if (!isValidUserId(body.userId)) {
     return c.json(
       { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  const displayName = sanitizeDisplayName(body.displayName);
+  if (displayName === null) {
+    return c.json(
+      { error: { code: "INVALID_DISPLAY_NAME", message: "displayName must be a string of 20 characters or fewer" } },
       400,
     );
   }
@@ -112,7 +130,7 @@ familyRoutes.post("/:id/join", async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  if (!record.members.includes(body.userId)) {
+  if (!hasMember(record.members, body.userId)) {
     // NOTE: No atomic compare-and-swap in KV. Concurrent joins could bypass
     // maxMembers limit. Acceptable for 2-person families with low concurrency.
     if (record.members.length >= record.maxMembers) {
@@ -121,7 +139,7 @@ familyRoutes.post("/:id/join", async (c) => {
         409,
       );
     }
-    record.members.push(body.userId);
+    record.members.push({ userId: body.userId, displayName });
   }
 
   await Promise.all([
@@ -193,14 +211,14 @@ familyRoutes.delete("/:id/member/:uid", async (c) => {
   }
 
   // Finding #6: Check if target is actually a member
-  if (!record.members.includes(targetUserId)) {
+  if (!hasMember(record.members, targetUserId)) {
     return c.json(
       { error: { code: "MEMBER_NOT_FOUND", message: "目標使用者不是家庭成員" } },
       404,
     );
   }
 
-  record.members = record.members.filter((m) => m !== targetUserId);
+  record.members = record.members.filter((m) => m.userId !== targetUserId);
 
   await Promise.all([
     c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
@@ -254,6 +272,95 @@ familyRoutes.get("/:id/members", async (c) => {
   const record = normalizeFamilyRecord(raw);
 
   return c.json({ data: record });
+});
+
+// PUT /api/family/:id/member/:uid/displayName — update display name
+familyRoutes.put("/:id/member/:uid/displayName", async (c) => {
+  const familyId = c.req.param("id");
+  const targetUserId = c.req.param("uid");
+
+  if (!isValidFamilyId(familyId)) {
+    return c.json(
+      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
+      400,
+    );
+  }
+
+  if (!isValidUserId(targetUserId)) {
+    return c.json(
+      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  const callerId = getAuthenticatedUserId(c);
+  if (!callerId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
+  // Only the user themselves can update their display name
+  if (callerId !== targetUserId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "只能修改自己的顯示名稱" } },
+      403,
+    );
+  }
+
+  let body: { displayName?: unknown } | null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
+      400,
+    );
+  }
+
+  if (!body || !("displayName" in body)) {
+    return c.json(
+      { error: { code: "MISSING_DISPLAY_NAME", message: "displayName is required" } },
+      400,
+    );
+  }
+
+  const displayName = validateDisplayName(body.displayName);
+  if (displayName === null) {
+    return c.json(
+      { error: { code: "INVALID_DISPLAY_NAME", message: "displayName must be a string of 20 characters or fewer" } },
+      400,
+    );
+  }
+
+  const raw = await c.env.KV.get<RawFamilyRecord>(
+    kvKeys.family(familyId),
+    "json",
+  );
+
+  if (!raw) {
+    return c.json(
+      { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
+      404,
+    );
+  }
+
+  const record = normalizeFamilyRecord(raw);
+
+  const member = findMember(record.members, targetUserId);
+  if (!member) {
+    return c.json(
+      { error: { code: "MEMBER_NOT_FOUND", message: "不是此家庭的成員" } },
+      404,
+    );
+  }
+
+  member.displayName = displayName;
+
+  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+
+  return c.json({ data: { userId: targetUserId, displayName } });
 });
 
 // PUT /api/family/:id/transfer — transfer ownership
@@ -328,7 +435,7 @@ familyRoutes.put("/:id/transfer", async (c) => {
     );
   }
 
-  if (!record.members.includes(body.newOwnerId)) {
+  if (!hasMember(record.members, body.newOwnerId)) {
     return c.json(
       { error: { code: "INVALID_MEMBER", message: "目標使用者不是家庭成員" } },
       400,

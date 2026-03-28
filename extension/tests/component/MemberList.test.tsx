@@ -13,22 +13,25 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
 
 function renderMemberList(props: Partial<MemberListProps> = {}) {
   const defaultProps: MemberListProps = {
-    members: ["user-owner123", "user-member456"],
+    members: [
+      { userId: "user-owner123", displayName: "小明" },
+      { userId: "user-member456", displayName: "" },
+    ],
     ownerId: "user-owner123",
     userId: "user-owner123",
     familyId: "fam-123",
     apiClient: createMockApiClient(),
-    savedDisplayName: "小明",
     onMembersChanged: vi.fn(),
   };
   return render(<MemberList {...defaultProps} {...props} />);
 }
 
 describe("MemberList", () => {
-  it("renders all members", () => {
+  it("renders all members with displayName from API", () => {
     renderMemberList();
 
     expect(screen.getByText("小明")).toBeInTheDocument();
+    // user-member456 has empty displayName, falls back to userId slice
     expect(screen.getByText("user-mem")).toBeInTheDocument();
   });
 
@@ -152,15 +155,27 @@ describe("MemberList", () => {
     });
   });
 
-  it("uses savedDisplayName for current user", () => {
-    renderMemberList({ savedDisplayName: "我的名字" });
+  it("uses API displayName for all members", () => {
+    renderMemberList({
+      members: [
+        { userId: "user-owner123", displayName: "Alice" },
+        { userId: "user-member456", displayName: "Bob" },
+      ],
+    });
 
-    expect(screen.getByText("我的名字")).toBeInTheDocument();
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
   });
 
-  it("uses userId slice when no savedDisplayName for current user", () => {
-    renderMemberList({ savedDisplayName: "" });
+  it("uses userId slice when displayName is empty", () => {
+    renderMemberList({
+      members: [
+        { userId: "user-owner123", displayName: "" },
+        { userId: "user-member456", displayName: "" },
+      ],
+    });
 
     expect(screen.getByText("user-own")).toBeInTheDocument();
+    expect(screen.getByText("user-mem")).toBeInTheDocument();
   });
 });

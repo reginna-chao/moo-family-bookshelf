@@ -6,11 +6,12 @@ export type DisplayNameEditorProps = UseDisplayNameResult;
 function getSaveLabel(state: UseDisplayNameResult["nameSaveState"]): string {
   if (state === "saving") return "儲存中...";
   if (state === "saved") return "已儲存";
+  if (state === "error") return "儲存失敗";
   return "儲存";
 }
 
 export function DisplayNameEditor({
-  displayName, savedDisplayName, nameSaveState,
+  displayName, savedDisplayName, nameSaveState, nameSaveError,
   setDisplayName, handleSaveDisplayName,
 }: DisplayNameEditorProps) {
   const isUnchanged = displayName === savedDisplayName;
@@ -26,18 +27,24 @@ export function DisplayNameEditor({
         type="text"
         value={displayName}
         onChange={(e) => setDisplayName(e.target.value)}
+        maxLength={20}
         placeholder="輸入顯示名稱"
         style={{
           width: "100%", padding: 10, border: "1px solid #e2e8f0", borderRadius: 8,
           fontSize: 14, boxSizing: "border-box", marginBottom: 8,
         }}
       />
+      {nameSaveError && (
+        <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 6 }}>
+          {nameSaveError}
+        </div>
+      )}
       <button
         onClick={() => void handleSaveDisplayName()}
         disabled={isDisabled}
         style={{
           width: "100%", padding: 10, border: "none", borderRadius: 8,
-          background: isUnchanged ? "#e2e8f0" : "#2563eb",
+          background: isUnchanged ? "#e2e8f0" : nameSaveState === "error" ? "#ef4444" : "#2563eb",
           color: isUnchanged ? "#94a3b8" : "white",
           fontWeight: 600, fontSize: 14,
           cursor: isDisabled ? "not-allowed" : "pointer",

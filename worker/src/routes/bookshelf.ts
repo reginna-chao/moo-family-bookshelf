@@ -51,13 +51,14 @@ bookshelfRoutes.get("/family/:id/bookshelf", async (c) => {
 
   // Fetch all members' book data in parallel
   const memberBooks = await Promise.all(
-    family.members.map(async (userId) => {
+    family.members.map(async (member) => {
       const books = await c.env.KV.get<UserBooksRecord>(
-        kvKeys.user(userId),
+        kvKeys.user(member.userId),
         "json",
       );
       return {
-        userId,
+        userId: member.userId,
+        displayName: member.displayName,
         payload: books?.payload ?? null,
         lastUpdated: books?.lastUpdated ?? null,
       };

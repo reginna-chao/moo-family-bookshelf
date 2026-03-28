@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { ApiClient } from "../api/client";
+import { ApiClient, FamilyMember } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
 import { DisplayNameEditor } from "./DisplayNameEditor";
@@ -18,14 +18,14 @@ type LeaveState = "idle" | "confirming" | "leaving";
 
 export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilySettingsProps) {
   const [syncCode, setSyncCode] = useState<string | null>(null);
-  const [members, setMembers] = useState<string[]>([]);
+  const [members, setMembers] = useState<FamilyMember[]>([]);
   const [ownerId, setOwnerId] = useState("");
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersError, setMembersError] = useState("");
   const [copied, setCopied] = useState(false);
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
   const [leaveError, setLeaveError] = useState("");
-  const displayNameState = useDisplayName();
+  const displayNameState = useDisplayName({ apiClient, familyId, userId });
 
   useEffect(() => {
     chrome.storage.local.get(["encryptionKey"], (result) => {
@@ -151,7 +151,6 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             userId={userId}
             familyId={familyId}
             apiClient={apiClient}
-            savedDisplayName={displayNameState.savedDisplayName}
             onMembersChanged={() => void fetchMembers()}
           />
         )}

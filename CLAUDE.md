@@ -206,7 +206,7 @@ Family membership is the gate for all features. Without a family, only onboardin
 
 ## Security & Privacy Rules
 
-- **E2EE**: all data encrypted in browser before upload. Server is zero-knowledge.
+- **E2EE**: all data encrypted in browser before upload. Server is zero-knowledge. Exception: display names are stored in plaintext in the family record so members can see each other's names.
 - **Default closed**: every book defaults to not-shared. Never auto-share.
 - **Save to sync**: changes only upload after explicit save action.
 - **Unbind isolation**: leaving a family immediately removes user from member list; other members can no longer see their books.
