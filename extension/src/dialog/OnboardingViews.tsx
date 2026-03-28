@@ -1,4 +1,5 @@
 import React from "react";
+import { Lock } from "lucide-react";
 
 // --- WelcomeView ---
 
@@ -222,7 +223,8 @@ export function IdleView({
         {state === "joining" ? "加入中..." : "加入家庭公開書櫃"}
       </button>
       <p style={{ color: "#94a3b8", fontSize: 11, marginTop: 16, textAlign: "center" }}>
-        {"🔒 本工具採端對端加密，伺服器無法讀取你的資料。"}
+        <Lock size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+        本工具採端對端加密，伺服器無法讀取你的資料。
       </p>
     </div>
   );

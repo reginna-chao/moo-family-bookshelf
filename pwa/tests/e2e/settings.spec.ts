@@ -69,8 +69,9 @@ test.describe("Settings page", () => {
       timeout: 10_000,
     });
 
-    // Check that both members are listed
-    await expect(page.locator("text=測試使用者")).toBeVisible();
+    // Check that both members are listed in the member list
+    const memberSection = page.locator("text=成員 (2)").locator("..");
+    await expect(memberSection.locator("text=測試使用者").first()).toBeVisible();
     await expect(page.locator("text=家人A")).toBeVisible();
 
     // Owner badge should be shown for the current user

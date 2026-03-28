@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { BookOpen } from "lucide-react";
 import type { ApiClient, BookEntry } from "@/api/client";
 import { importKey, encrypt, decrypt } from "@/crypto/encrypt";
 import { useSearch } from "@/hooks/useSearch";
@@ -303,7 +304,7 @@ export function PersonalShelfPage({
                   <img src={book.coverUrl} alt="" className="w-10 h-[54px] rounded object-cover flex-shrink-0" />
                 ) : (
                   <div className="w-10 h-[54px] rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                    <span className="text-gray-300 text-lg" aria-hidden="true">📖</span>
+                    <BookOpen size={18} className="text-gray-300" aria-hidden="true" />
                   </div>
                 )}
                 <div className="flex-1 min-w-0">

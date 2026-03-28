@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { ApiClient } from "../api/client";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 
@@ -55,7 +56,7 @@ export function ApiEndpointEditor({ apiClient }: ApiEndpointEditorProps) {
         onClick={() => setExpanded(!expanded)}
         style={{ color: "#64748b", fontSize: 13, cursor: "pointer", userSelect: "none" }}
       >
-        {expanded ? "▼" : "▶"} 進階設定
+        {expanded ? <ChevronDown size={14} style={{ display: "inline", verticalAlign: "middle" }} /> : <ChevronRight size={14} style={{ display: "inline", verticalAlign: "middle" }} />} 進階設定
       </div>
       {expanded && (
         <div style={{ marginTop: 8 }}>

@@ -239,6 +239,136 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("hashEmail", () => {
+    it("should call POST /api/auth/hash with email", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { userId: USER_1 } }),
+      );
+
+      const result = await client.hashEmail("test@example.com");
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe("https://api.example.com/api/auth/hash");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body)).toEqual({ email: "test@example.com" });
+      expect(result.data).toEqual({ userId: USER_1 });
+    });
+  });
+
+  describe("updateDisplayName", () => {
+    it("should call PUT /api/family/:id/member/:uid/displayName", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { ok: true } }),
+      );
+
+      const result = await client.updateDisplayName("fam-1", USER_1, "New Name");
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(
+        `https://api.example.com/api/family/fam-1/member/${USER_1}/displayName`,
+      );
+      expect(init.method).toBe("PUT");
+      expect(JSON.parse(init.body)).toEqual({ displayName: "New Name" });
+      expect(result.data).toEqual({ ok: true });
+    });
+
+    it("should reject invalid userId", async () => {
+      await expect(
+        client.updateDisplayName("fam-1", "invalid", "Name"),
+      ).rejects.toThrow("Invalid userId");
+    });
+  });
+
+  describe("auth token management", () => {
+    it("should include Authorization header when auth token is set", async () => {
+      client.setAuthToken("test-token-123");
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: {} }));
+
+      await client.getPersonalBooks(USER_1);
+
+      const [, init] = mockFetch.mock.calls[0];
+      expect(init.headers["Authorization"]).toBe("Bearer test-token-123");
+    });
+
+    it("should not include Authorization header when no token set", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: {} }));
+
+      await client.getPersonalBooks(USER_1);
+
+      const [, init] = mockFetch.mock.calls[0];
+      expect(init.headers["Authorization"]).toBeUndefined();
+    });
+
+    it("should retry with new token on 401 when refresher is set", async () => {
+      client.setAuthToken("old-token");
+      client.setTokenRefresher(async () => "new-token");
+
+      // First call returns 401
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ error: { code: "UNAUTHORIZED", message: "expired" } }, 401),
+      );
+      // Retry with new token succeeds
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { payload: "encrypted" } }),
+      );
+
+      const result = await client.getPersonalBooks(USER_1);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      // Second call should use new token
+      const [, retryInit] = mockFetch.mock.calls[1];
+      expect(retryInit.headers["Authorization"]).toBe("Bearer new-token");
+      expect(result.data).toEqual({ payload: "encrypted" });
+    });
+
+    it("should not retry on 401 when no refresher is set", async () => {
+      client.setAuthToken("old-token");
+      // No refresher set
+
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ error: { code: "UNAUTHORIZED", message: "expired" } }, 401),
+      );
+
+      const result = await client.getPersonalBooks(USER_1);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result.error?.code).toBe("UNAUTHORIZED");
+    });
+
+    it("should not retry more than once on 401", async () => {
+      client.setAuthToken("old-token");
+      client.setTokenRefresher(async () => "new-token");
+
+      // Both calls return 401
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ error: { code: "UNAUTHORIZED", message: "expired" } }, 401),
+      );
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ error: { code: "UNAUTHORIZED", message: "still expired" } }, 401),
+      );
+
+      const result = await client.getPersonalBooks(USER_1);
+
+      // Should only retry once
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result.error?.code).toBe("UNAUTHORIZED");
+    });
+
+    it("should return error when token refresh returns null", async () => {
+      client.setAuthToken("old-token");
+      client.setTokenRefresher(async () => null);
+
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ error: { code: "UNAUTHORIZED", message: "expired" } }, 401),
+      );
+
+      const result = await client.getPersonalBooks(USER_1);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result.error?.code).toBe("UNAUTHORIZED");
+    });
+  });
+
   describe("error handling", () => {
     it("should return error for non-OK HTTP response", async () => {
       mockFetch.mockResolvedValueOnce(

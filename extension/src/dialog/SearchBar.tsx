@@ -1,4 +1,5 @@
 import React from "react";
+import { Search } from "lucide-react";
 
 export interface SearchBarProps {
   value: string;
@@ -30,7 +31,7 @@ export function SearchBar({
           }}
           aria-hidden="true"
         >
-          🔍
+          <Search size={14} />
         </span>
         <input
           type="text"

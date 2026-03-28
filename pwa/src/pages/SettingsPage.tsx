@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { Pencil, Check, X } from "lucide-react";
 import type { ApiClient, FamilyMember } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
@@ -98,6 +99,45 @@ export function SettingsPage({
     void loadMembers();
   }, [loadMembers]);
 
+  // --- Display name ---
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [currentName, setCurrentName] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const self = members.find(m => m.userId === userId);
+    if (self) {
+      setCurrentName(self.displayName || "");
+    }
+  }, [members, userId]);
+
+  const handleSaveName = useCallback(async () => {
+    const trimmed = nameInput.trim();
+    if (!trimmed || trimmed === currentName) {
+      setEditingName(false);
+      return;
+    }
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      const res = await apiClient.updateDisplayName(familyId, userId, trimmed);
+      if (res.error) {
+        setNameError(res.error.message);
+        setNameSaving(false);
+        return;
+      }
+      setCurrentName(trimmed);
+      setEditingName(false);
+      void loadMembers();
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : "更新失敗");
+    } finally {
+      setNameSaving(false);
+    }
+  }, [nameInput, currentName, apiClient, familyId, userId, loadMembers]);
+
   // --- Leave family ---
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
   const [leaveError, setLeaveError] = useState<string | null>(null);
@@ -141,6 +181,58 @@ export function SettingsPage({
       {/* Personal settings */}
       <section className="mb-6">
         <h3 className="text-sm font-medium text-gray-500 mb-3">個人設定</h3>
+
+        <div className="mb-4">
+          <p className="text-xs text-gray-500 mb-1">顯示名稱</p>
+          {editingName ? (
+            <div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  maxLength={20}
+                  placeholder="輸入顯示名稱"
+                  aria-label="顯示名稱"
+                  className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                />
+                <button
+                  onClick={() => void handleSaveName()}
+                  disabled={nameSaving}
+                  aria-label="確認修改名稱"
+                  className="p-1.5 text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                >
+                  <Check size={16} />
+                </button>
+                <button
+                  onClick={() => { setEditingName(false); setNameError(null); }}
+                  disabled={nameSaving}
+                  aria-label="取消修改名稱"
+                  className="p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {nameError && (
+                <p role="alert" className="text-red-500 text-xs mt-1">{nameError}</p>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-700">
+                {currentName || userId.slice(0, 8)}
+              </span>
+              <button
+                onClick={() => { setNameInput(currentName); setEditingName(true); }}
+                aria-label="編輯顯示名稱"
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
+                <Pencil size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+
         <button
           role="switch"
           aria-checked={syncArchived === 1}
@@ -289,6 +381,16 @@ export function SettingsPage({
             登出
           </button>
         )}
+      </section>
+
+      {/* About */}
+      <section className="pt-6 mt-6 border-t border-gray-200 text-center">
+        <p className="text-xs text-gray-400">
+          牧家書櫃 v{__APP_VERSION__}
+        </p>
+        <p className="text-[10px] text-gray-300 mt-1">
+          本程式為第三方開發，非 Readmoo 讀墨官方提供。
+        </p>
       </section>
     </div>
   );

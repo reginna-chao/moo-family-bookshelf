@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Library } from "lucide-react";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 import type { ApiClient } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
@@ -72,6 +73,9 @@ export function LandingPage({ onAuth, apiClient }: LandingPageProps) {
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
+      <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center mb-4">
+        <Library size={36} className="text-white" />
+      </div>
       <h1 className="text-3xl font-bold text-gray-900 mb-2">牧家書櫃</h1>
       <p className="text-gray-500 mb-8 text-center">
         家庭共享書櫃 — 與家人分享你的讀墨藏書
@@ -150,6 +154,9 @@ export function LandingPage({ onAuth, apiClient }: LandingPageProps) {
 
       <p className="text-xs text-gray-400 mt-6 text-center">
         建議使用桌面版 Chrome 擴充功能掃描 QR Code，更快完成設定。
+      </p>
+      <p className="text-[10px] text-gray-300 mt-4 text-center">
+        本程式為第三方開發，非 Readmoo 讀墨官方提供。
       </p>
     </div>
   );

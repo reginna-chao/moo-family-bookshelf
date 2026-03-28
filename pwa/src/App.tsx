@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { Library, BookOpen, Settings, type LucideIcon } from "lucide-react";
 import { useAuth } from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
 import { LandingPage } from "./pages/LandingPage";
@@ -11,13 +12,13 @@ type Page = "family-shelf" | "personal-shelf" | "settings";
 interface NavItem {
   page: Page;
   label: string;
-  icon: string;
+  icon: LucideIcon;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { page: "family-shelf", label: "家庭書櫃", icon: "📚" },
-  { page: "personal-shelf", label: "個人書櫃", icon: "📖" },
-  { page: "settings", label: "設定", icon: "⚙️" },
+  { page: "family-shelf", label: "家庭書櫃", icon: Library },
+  { page: "personal-shelf", label: "個人書櫃", icon: BookOpen },
+  { page: "settings", label: "設定", icon: Settings },
 ];
 
 export default function App() {
@@ -119,9 +120,7 @@ export default function App() {
                   : "text-gray-500"
               }`}
             >
-              <span aria-hidden="true" className="text-xl mb-0.5">
-                {item.icon}
-              </span>
+              <item.icon size={20} aria-hidden="true" className="mb-0.5" />
               <span>{item.label}</span>
             </button>
           ))}

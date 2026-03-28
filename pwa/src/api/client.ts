@@ -185,6 +185,21 @@ export class ApiClient {
     return this.request(`/api/family/${familyId}/members`);
   }
 
+  async updateDisplayName(
+    familyId: string,
+    userId: string,
+    displayName: string,
+  ): Promise<ApiResponse<{ ok: boolean }>> {
+    this.validateHexId(userId, "userId");
+    return this.request(
+      `/api/family/${familyId}/member/${userId}/displayName`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ displayName }),
+      },
+    );
+  }
+
   // --- Family Bookshelf ---
 
   async getFamilyBookshelf(

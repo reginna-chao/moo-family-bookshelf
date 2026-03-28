@@ -17,9 +17,11 @@ vi.mock("@/constants", () => ({
 
 const mockGetFamilyMembers = vi.fn();
 const mockLeaveFamily = vi.fn();
+const mockUpdateDisplayName = vi.fn();
 const mockApiClient = {
   getFamilyMembers: mockGetFamilyMembers,
   leaveFamily: mockLeaveFamily,
+  updateDisplayName: mockUpdateDisplayName,
   getEndpoint: vi
     .fn()
     .mockReturnValue(DEFAULT_API_ENDPOINT),
@@ -226,5 +228,178 @@ describe("SettingsPage", () => {
       screen.queryByRole("button", { name: "確定登出" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登出" })).toBeInTheDocument();
+  });
+
+  // --- Display name editing ---
+
+  it("shows display name from members and allows editing", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: {
+        members: [{ userId: defaultProps.userId, displayName: "Alice" }],
+        ownerId: defaultProps.userId,
+      },
+    });
+    render(<SettingsPage {...defaultProps} />);
+
+    // Wait for members to load and name to be set
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    // Click edit button
+    fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+    const input = screen.getByRole("textbox", { name: "顯示名稱" });
+    expect(input).toBeInTheDocument();
+  });
+
+  it("saves updated display name via API", async () => {
+    mockUpdateDisplayName.mockResolvedValue({ data: { ok: true } });
+    mockGetFamilyMembers.mockResolvedValue({
+      data: {
+        members: [{ userId: defaultProps.userId, displayName: "Alice" }],
+        ownerId: defaultProps.userId,
+      },
+    });
+    render(<SettingsPage {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Alice")).toBeInTheDocument();
+    });
+
+    // Edit name
+    fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+    const input = screen.getByRole("textbox", { name: "顯示名稱" });
+    fireEvent.change(input, { target: { value: "Bob" } });
+    fireEvent.click(screen.getByRole("button", { name: "確認修改名稱" }));
+
+    await waitFor(() => {
+      expect(mockUpdateDisplayName).toHaveBeenCalledWith(
+        defaultProps.familyId,
+        defaultProps.userId,
+        "Bob",
+      );
+    });
+  });
+
+  it("shows error when display name update fails", async () => {
+    mockUpdateDisplayName.mockResolvedValue({
+      error: { code: "INVALID", message: "名稱格式不正確" },
+    });
+    mockGetFamilyMembers.mockResolvedValue({
+      data: {
+        members: [{ userId: defaultProps.userId, displayName: "Alice" }],
+        ownerId: defaultProps.userId,
+      },
+    });
+    render(<SettingsPage {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Alice")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+    const input = screen.getByRole("textbox", { name: "顯示名稱" });
+    fireEvent.change(input, { target: { value: "Bad" } });
+    fireEvent.click(screen.getByRole("button", { name: "確認修改名稱" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("名稱格式不正確")).toBeInTheDocument();
+    });
+  });
+
+  it("cancels display name editing", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: {
+        members: [{ userId: defaultProps.userId, displayName: "Alice" }],
+        ownerId: defaultProps.userId,
+      },
+    });
+    render(<SettingsPage {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "編輯顯示名稱" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+    // Input should be visible
+    expect(screen.getByRole("textbox", { name: "顯示名稱" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "取消修改名稱" }));
+
+    // Should return to display mode — input gone
+    expect(screen.queryByRole("textbox", { name: "顯示名稱" })).not.toBeInTheDocument();
+  });
+
+  // --- Sync archived toggle ---
+
+  it("toggles sync archived setting", async () => {
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    const toggle = screen.getByRole("switch", { name: "顯示封存書籍" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(localStorage.getItem("moo:syncArchived")).toBe("1");
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(localStorage.getItem("moo:syncArchived")).toBe("0");
+  });
+
+  // --- Version & disclaimer ---
+
+  it("shows version and third-party disclaimer", async () => {
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/牧家書櫃 v/)).toBeInTheDocument();
+    expect(screen.getByText("本程式為第三方開發，非 Readmoo 讀墨官方提供。")).toBeInTheDocument();
+  });
+
+  // --- Leave family cancel ---
+
+  it("cancel leave family returns to idle state", async () => {
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    expect(screen.getByRole("button", { name: "確定離開" })).toBeInTheDocument();
+
+    // Click cancel in the leave section
+    const cancelButtons = screen.getAllByRole("button", { name: "取消" });
+    // Leave cancel is the first 取消 button
+    fireEvent.click(cancelButtons[0]);
+
+    expect(screen.getByRole("button", { name: "離開家庭" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "確定離開" })).not.toBeInTheDocument();
+  });
+
+  // --- Leave family generic error ---
+
+  it("shows generic error when leave family throws", async () => {
+    mockLeaveFamily.mockRejectedValue(new Error("Network fail"));
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Network fail")).toBeInTheDocument();
+    });
   });
 });

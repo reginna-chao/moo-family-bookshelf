@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { BookOpen } from "lucide-react";
 import type { ApiClient, BookEntry } from "@/api/client";
 import { importKey, decrypt } from "@/crypto/encrypt";
 import { useSearch } from "@/hooks/useSearch";
@@ -236,7 +237,7 @@ export function FamilyShelfPage({
                 />
               ) : (
                 <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center">
-                  <span className="text-gray-300 text-3xl" aria-hidden="true">📖</span>
+                  <BookOpen size={32} className="text-gray-300" aria-hidden="true" />
                 </div>
               )}
               <div className="p-2">

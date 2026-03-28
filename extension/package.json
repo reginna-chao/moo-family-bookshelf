@@ -21,6 +21,7 @@
     "e2e:verify:selectors:update": "tsx scripts/verify-selectors.ts --update-mock"
   },
   "dependencies": {
+    "lucide-react": "^1.7.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
