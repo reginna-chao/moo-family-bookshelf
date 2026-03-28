@@ -5,9 +5,10 @@ interface BookRowProps {
   book: BookEntry;
   selected: boolean;
   onSelect: (bookId: string) => void;
+  onToggle: (bookId: string) => void;
 }
 
-export const BookRow = React.memo(function BookRow({ book, selected, onSelect }: BookRowProps) {
+export const BookRow = React.memo(function BookRow({ book, selected, onSelect, onToggle }: BookRowProps) {
   const isOn = book.isShared;
 
   return (
@@ -50,19 +51,22 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect }:
           {book.title}
         </div>
       </div>
-      <span
+      <button
+        onClick={() => onToggle(book.bookId)}
         style={{
           flexShrink: 0,
           padding: "2px 8px",
           borderRadius: 10,
+          border: "none",
           fontSize: 11,
           fontWeight: 600,
           background: isOn ? "#dcfce7" : "#f1f5f9",
           color: isOn ? "#16a34a" : "#94a3b8",
+          cursor: "pointer",
         }}
       >
         {isOn ? "開放" : "未開放"}
-      </span>
+      </button>
     </div>
   );
 });

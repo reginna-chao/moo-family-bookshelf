@@ -110,6 +110,13 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     }
   }, [lastSyncBooks, status]);
 
+  const handleToggle = useCallback((bookId: string) => {
+    setBooks((prev) =>
+      prev.map((b) => (b.bookId === bookId ? { ...b, isShared: !b.isShared } : b)),
+    );
+    setIsDirty(true);
+  }, []);
+
   const handleSelect = useCallback((bookId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -301,6 +308,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
             book={book}
             selected={selectedIds.has(book.bookId)}
             onSelect={handleSelect}
+            onToggle={handleToggle}
           />
         ))}
       </div>

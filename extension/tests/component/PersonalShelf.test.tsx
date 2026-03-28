@@ -426,8 +426,8 @@ describe("PersonalShelf", () => {
       fireEvent.click(checkboxes[0]);
       fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
 
-      // Click 未開放 filter button
-      fireEvent.click(screen.getByRole("button", { name: "未開放" }));
+      // Click 未開放 filter button (first match is the filter bar, others are per-book toggles)
+      fireEvent.click(screen.getAllByRole("button", { name: "未開放" })[0]);
 
       expect(screen.queryByText("測試書籍一")).not.toBeInTheDocument();
       expect(screen.getByText("測試書籍二")).toBeInTheDocument();

@@ -120,6 +120,15 @@ export function PersonalShelfPage({
     setIsDirty(true);
   }, [selectedIds]);
 
+  const handleToggle = useCallback((bookId: string) => {
+    setBooks((prev) =>
+      prev.map((b) =>
+        b.bookId === bookId ? { ...b, isShared: b.isShared === 1 ? (0 as const) : (1 as const) } : b,
+      ),
+    );
+    setIsDirty(true);
+  }, []);
+
   const toggleSelect = useCallback((bookId: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -261,7 +270,10 @@ export function PersonalShelfPage({
                   <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
                   <p className="text-xs text-gray-500 truncate">{book.author}</p>
                 </div>
-                <span
+                <button
+                  onClick={() => handleToggle(book.bookId)}
+                  aria-pressed={book.isShared === 1}
+                  aria-label={`${book.title} ${book.isShared === 1 ? "已開放分享" : "未開放分享"}`}
                   className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 ${
                     book.isShared === 1
                       ? "bg-blue-100 text-blue-700"
@@ -269,7 +281,7 @@ export function PersonalShelfPage({
                   }`}
                 >
                   {book.isShared === 1 ? "開放" : "未開放"}
-                </span>
+                </button>
               </div>
             ))}
           </div>
