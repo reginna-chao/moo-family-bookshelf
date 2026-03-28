@@ -12,6 +12,7 @@ export interface ScrapedBook {
   author: string;
   coverUrl: string;
   readmooUrl: string;
+  isArchived?: 0 | 1;
 }
 
 const HOVER_SETTLE_MS = 120;
@@ -127,6 +128,7 @@ async function scrapeItem(item: Element): Promise<ScrapedBook | null> {
     author: "",
     coverUrl,
     readmooUrl: `${READMOO_BOOK_BASE}${bookId}`,
+    isArchived: 0,
   };
 }
 
@@ -184,4 +186,122 @@ export async function scrapeBooks(): Promise<ScrapedBook[]> {
   }
 
   return books;
+}
+
+/**
+ * Poll for an element matching the selector, returning null on timeout.
+ */
+function waitForElement(selector: string, timeoutMs: number): Promise<Element | null> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      const el = document.querySelector(selector);
+      if (el) {
+        clearInterval(interval);
+        resolve(el);
+      } else if (Date.now() - start >= timeoutMs) {
+        clearInterval(interval);
+        resolve(null);
+      }
+    }, 200);
+  });
+}
+
+/**
+ * Find and click an element by selector. Returns true if successful.
+ */
+function clickElement(selector: string): boolean {
+  const el = document.querySelector<HTMLElement>(selector);
+  if (el) {
+    el.click();
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Find the filter button in the Readmoo nav bar.
+ */
+function findFilterButton(): HTMLElement | null {
+  const btns = document.querySelectorAll<HTMLElement>(".desktop-top-nav-btn");
+  for (const btn of btns) {
+    if (btn.querySelector("i.mo-filter")) return btn;
+  }
+  return null;
+}
+
+/**
+ * Scrape archived books by manipulating Readmoo's filter dialog.
+ * Steps:
+ * 1. Click the filter button in the nav bar
+ * 2. Wait for filter dialog to appear
+ * 3. Click "已封存書籍" option
+ * 4. Click "確定" to apply filter
+ * 5. Wait for library items to reload
+ * 6. Scrape all visible books (these are archived)
+ * 7. Clear filter: reopen dialog → click "清除篩選" → click "確定"
+ *
+ * MUST use try/finally to ensure filter is always cleared.
+ * Returns empty array on failure (silent fallback).
+ */
+export async function scrapeArchivedBooks(): Promise<ScrapedBook[]> {
+  try {
+    // Step 1: Find and click the filter button
+    const filterBtn = findFilterButton();
+    if (!filterBtn) return [];
+    filterBtn.click();
+
+    // Step 2: Wait for filter modal
+    const modal = await waitForElement(".filter-modal.modal.show", 3000);
+    if (!modal) return [];
+
+    // Step 3: Click "已封存書籍" option
+    if (!clickElement('[data-key="archive"][data-value="true"]')) return [];
+
+    // Step 4: Click "確定" button
+    if (!clickElement(".filter-modal .modal-footer .btn-primary")) return [];
+
+    // Step 5: Wait for library to reload — poll for DOM change
+    const itemCountBefore = document.querySelectorAll(".library-item").length;
+    const reloadStart = Date.now();
+    while (Date.now() - reloadStart < 5000) {
+      await wait(300);
+      const currentCount = document.querySelectorAll(".library-item").length;
+      if (currentCount !== itemCountBefore) break;
+    }
+    // Extra settle time for React to finish rendering
+    await wait(500);
+
+    // Step 6: Scrape books and mark as archived
+    const books = await scrapeBooks();
+    return books.map((b) => ({ ...b, isArchived: 1 }));
+  } catch {
+    return [];
+  } finally {
+    // Step 7: Clear filter — must restore normal library view
+    try {
+      const clearBtn = findFilterButton();
+      if (clearBtn) {
+        clearBtn.click();
+        const modal = await waitForElement(".filter-modal.modal.show", 3000);
+        if (modal) {
+          clickElement(".filter-modal .modal-footer .btn-outline-primary");
+          clickElement(".filter-modal .modal-footer .btn-primary");
+          await wait(1000);
+        } else {
+          // Modal didn't appear — force page reload as fallback
+          window.location.hash = "#/library";
+          await wait(1500);
+        }
+      } else {
+        // Filter button not found — force page reload as fallback
+        window.location.hash = "#/library";
+        await wait(1500);
+      }
+    } catch {
+      // Last resort: force reload the library page
+      window.location.hash = "#/library";
+      await wait(1500);
+    }
+  }
 }

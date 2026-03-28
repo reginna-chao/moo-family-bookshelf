@@ -6,7 +6,7 @@
  */
 
 import { ApiClient, BookEntry } from "../api/client";
-import { ScrapedBook, scrapeBooks } from "../content/scraper";
+import { ScrapedBook, scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { mergeBooks } from "./mergeBooks";
 
@@ -96,6 +96,22 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     // Step 3: Scrape books
     const scrapedBooks: ScrapedBook[] = await scrapeBooks();
 
+    // Step 3b: Optionally scrape archived books
+    let syncArchived = 0;
+    try {
+      const archiveResult = await chrome.storage.local.get(["syncArchived"]);
+      syncArchived = (archiveResult.syncArchived as number | undefined) ?? 0;
+    } catch {
+      // Archive setting unavailable — skip archive sync
+    }
+
+    let allScrapedBooks: ScrapedBook[] = [...scrapedBooks];
+
+    if (syncArchived === 1) {
+      const archivedBooks = await scrapeArchivedBooks();
+      allScrapedBooks = [...allScrapedBooks, ...archivedBooks];
+    }
+
     // Step 4: Fetch existing saved books for merge
     const storageResult = await chrome.storage.local.get(["encryptionKey", "displayName"]);
     const encKeyString = storageResult.encryptionKey as string | undefined;
@@ -118,7 +134,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
       }
     }
 
-    const merged = mergeBooks(scrapedBooks, savedBooks);
+    const merged = mergeBooks(allScrapedBooks, savedBooks);
 
     // Step 5: Encrypt and upload
     const key = await importKey(encKeyString);

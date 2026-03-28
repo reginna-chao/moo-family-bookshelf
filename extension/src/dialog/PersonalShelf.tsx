@@ -43,10 +43,26 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const [isDirty, setIsDirty] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
+  const [syncArchived, setSyncArchived] = useState<number>(0);
   const { syncStatus, syncError, triggerManualSync, lastSyncBooks } = useBookSync({
     userId,
     apiClient,
   });
+
+  useEffect(() => {
+    chrome.runtime.sendMessage({ type: "GET_SYNC_ARCHIVED" }, (response) => {
+      if (response?.syncArchived !== undefined) {
+        setSyncArchived(response.syncArchived);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (syncArchived === 0) {
+      setArchiveView("active");
+    }
+  }, [syncArchived]);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +120,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
           author: b.author,
           coverUrl: b.coverUrl,
           readmooUrl: b.readmooUrl,
+          isArchived: b.isArchived ?? 0,
         })),
         prev,
       ));
@@ -181,10 +198,28 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     setSelectedIds(new Set());
   }, []);
 
+  const handleToggleSyncArchived = useCallback(() => {
+    const newValue = syncArchived === 1 ? 0 : 1;
+    setSyncArchived(newValue);
+    chrome.runtime.sendMessage(
+      { type: "SET_SYNC_ARCHIVED", syncArchived: newValue },
+      (response) => {
+        if (!response?.ok) {
+          // Revert on failure
+          setSyncArchived(syncArchived);
+        }
+      },
+    );
+  }, [syncArchived]);
+
+  const activeBooks = books.filter(b => b.isArchived !== 1);
+  const archivedBooks = books.filter(b => b.isArchived === 1);
+  const currentViewBooks = archiveView === "active" ? activeBooks : archivedBooks;
+
   const statusFilteredBooks = (() => {
-    if (statusFilter === "shared") return books.filter((b) => b.isShared);
-    if (statusFilter === "not-shared") return books.filter((b) => !b.isShared);
-    return books;
+    if (statusFilter === "shared") return currentViewBooks.filter((b) => b.isShared);
+    if (statusFilter === "not-shared") return currentViewBooks.filter((b) => !b.isShared);
+    return currentViewBooks;
   })();
 
   const { searchTerm, setSearchTerm, filteredItems: displayedBooks, isFiltering } =
@@ -240,7 +275,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>
           個人書櫃管理
           <span style={{ fontWeight: 400, color: "#94a3b8", marginLeft: 8, fontSize: 13 }}>
-            ({books.length} 本)
+            ({currentViewBooks.length} 本)
           </span>
         </h3>
         <button
@@ -261,11 +296,95 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
           {syncLabel}
         </button>
       </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <button
+          role="switch"
+          aria-checked={syncArchived === 1}
+          aria-label="同步封存書籍"
+          onClick={handleToggleSyncArchived}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            color: "#475569",
+            cursor: "pointer",
+            background: "transparent",
+            border: "none",
+            padding: 0,
+          }}
+        >
+          <span style={{
+            display: "inline-block",
+            width: 28,
+            height: 16,
+            borderRadius: 8,
+            background: syncArchived === 1 ? "#2563eb" : "#cbd5e1",
+            position: "relative",
+            transition: "background 0.2s",
+          }}>
+            <span style={{
+              display: "block",
+              width: 12,
+              height: 12,
+              borderRadius: 6,
+              background: "#fff",
+              position: "absolute",
+              top: 2,
+              left: syncArchived === 1 ? 14 : 2,
+              transition: "left 0.2s",
+            }} />
+          </span>
+          同步封存書籍
+        </button>
+      </div>
+
       {syncStatus === "error" && syncError && (
         <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{syncError}</p>
       )}
 
-      {books.length > 0 && (
+      {syncArchived === 1 && (
+        <div role="tablist" style={{ display: "flex", gap: 0, marginBottom: 8, borderBottom: "1px solid #e2e8f0" }}>
+          <button
+            role="tab"
+            aria-selected={archiveView === "active"}
+            onClick={() => setArchiveView("active")}
+            style={{
+              flex: 1,
+              padding: "8px 0",
+              border: "none",
+              background: "transparent",
+              fontWeight: archiveView === "active" ? 600 : 400,
+              color: archiveView === "active" ? "#2563eb" : "#64748b",
+              fontSize: 13,
+              cursor: "pointer",
+              borderBottom: archiveView === "active" ? "2px solid #2563eb" : "2px solid transparent",
+            }}
+          >
+            未封存 ({activeBooks.length})
+          </button>
+          <button
+            role="tab"
+            aria-selected={archiveView === "archived"}
+            onClick={() => setArchiveView("archived")}
+            style={{
+              flex: 1,
+              padding: "8px 0",
+              border: "none",
+              background: "transparent",
+              fontWeight: archiveView === "archived" ? 600 : 400,
+              color: archiveView === "archived" ? "#2563eb" : "#64748b",
+              fontSize: 13,
+              cursor: "pointer",
+              borderBottom: archiveView === "archived" ? "2px solid #2563eb" : "2px solid transparent",
+            }}
+          >
+            封存 ({archivedBooks.length})
+          </button>
+        </div>
+      )}
+
+      {currentViewBooks.length > 0 && (
         <>
           <StatusFilterBar value={statusFilter} onChange={setStatusFilter} />
 
@@ -297,7 +416,11 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         </>
       )}
 
-      {books.length === 0 && (
+      {currentViewBooks.length === 0 && archiveView === "archived" && (
+        <p style={{ color: "#94a3b8", textAlign: "center", marginTop: 24 }}>尚無封存書籍</p>
+      )}
+
+      {currentViewBooks.length === 0 && archiveView === "active" && (
         <p style={{ color: "#94a3b8", textAlign: "center", marginTop: 24 }}>尚無書籍</p>
       )}
 

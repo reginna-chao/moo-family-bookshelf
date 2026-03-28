@@ -434,4 +434,204 @@ describe("PersonalShelf", () => {
       expect(screen.getByText("測試書籍三")).toBeInTheDocument();
     });
   });
+
+  describe("archive features", () => {
+    it("shows '同步封存書籍' toggle switch", async () => {
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      expect(screen.getByRole("switch", { name: "同步封存書籍" })).toBeInTheDocument();
+    });
+
+    it("archive view tabs appear when syncArchived is enabled and there are archived books", async () => {
+      // Mock scrapeBooks to include an archived book
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce([
+        {
+          bookId: "book-1",
+          title: "測試書籍一",
+          author: "作者A",
+          coverUrl: "https://example.com/cover1.jpg",
+          readmooUrl: "https://mooink.readmoo.com/book/book-1",
+          isArchived: 0,
+        },
+        {
+          bookId: "book-archived",
+          title: "封存書籍一",
+          author: "作者D",
+          coverUrl: "https://example.com/cover-a.jpg",
+          readmooUrl: "https://mooink.readmoo.com/book/book-archived",
+          isArchived: 1,
+        },
+      ]);
+
+      // Mock GET_SYNC_ARCHIVED to return 1
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
+        (message: unknown, callback?: (response: unknown) => void) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
+            callback({ syncArchived: 1 });
+          }
+          return undefined as unknown as Promise<unknown>;
+        },
+      );
+
+      renderPersonalShelf();
+      await waitFor(() => {
+        expect(screen.getByText("測試書籍一")).toBeInTheDocument();
+      });
+
+      // Archive tabs should be visible — use exact match with function
+      expect(screen.getByText((_content, el) =>
+        el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
+      )).toBeInTheDocument();
+      expect(screen.getByText((_content, el) =>
+        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+      )).toBeInTheDocument();
+    });
+
+    it("archive view tabs do NOT appear when syncArchived is 0", async () => {
+      // Default sendMessage mock doesn't call back, so syncArchived stays 0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
+        (message: unknown, callback?: (response: unknown) => void) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
+            callback({ syncArchived: 0 });
+          }
+          return undefined as unknown as Promise<unknown>;
+        },
+      );
+
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      expect(screen.queryByText((_content, el) =>
+        el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
+      )).not.toBeInTheDocument();
+      expect(screen.queryByText((_content, el) =>
+        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+      )).not.toBeInTheDocument();
+    });
+
+    it("clicking '未封存' tab shows only active books", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce([
+        {
+          bookId: "book-1",
+          title: "活躍書籍",
+          author: "作者A",
+          coverUrl: "",
+          readmooUrl: "https://mooink.readmoo.com/book/book-1",
+          isArchived: 0,
+        },
+        {
+          bookId: "book-2",
+          title: "已封存書",
+          author: "作者B",
+          coverUrl: "",
+          readmooUrl: "https://mooink.readmoo.com/book/book-2",
+          isArchived: 1,
+        },
+      ]);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
+        (message: unknown, callback?: (response: unknown) => void) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
+            callback({ syncArchived: 1 });
+          }
+          return undefined as unknown as Promise<unknown>;
+        },
+      );
+
+      renderPersonalShelf();
+      await waitFor(() => {
+        expect(screen.getByText("活躍書籍")).toBeInTheDocument();
+      });
+
+      // Default view is "active" tab — click it to be explicit
+      const activeTab = screen.getByText((_content, el) =>
+        el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
+      );
+      fireEvent.click(activeTab);
+
+      expect(screen.getByText("活躍書籍")).toBeInTheDocument();
+      expect(screen.queryByText("已封存書")).not.toBeInTheDocument();
+    });
+
+    it("clicking '封存' tab shows only archived books", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce([
+        {
+          bookId: "book-1",
+          title: "活躍書籍",
+          author: "作者A",
+          coverUrl: "",
+          readmooUrl: "https://mooink.readmoo.com/book/book-1",
+          isArchived: 0,
+        },
+        {
+          bookId: "book-2",
+          title: "已封存書",
+          author: "作者B",
+          coverUrl: "",
+          readmooUrl: "https://mooink.readmoo.com/book/book-2",
+          isArchived: 1,
+        },
+      ]);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
+        (message: unknown, callback?: (response: unknown) => void) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
+            callback({ syncArchived: 1 });
+          }
+          return undefined as unknown as Promise<unknown>;
+        },
+      );
+
+      renderPersonalShelf();
+      await waitFor(() => {
+        expect(screen.getByText("活躍書籍")).toBeInTheDocument();
+      });
+
+      // Click the "封存" tab (starts with 封存, not 未封存)
+      const archivedTab = screen.getByText((_content, el) =>
+        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+      );
+      fireEvent.click(archivedTab);
+
+      expect(screen.queryByText("活躍書籍")).not.toBeInTheDocument();
+      expect(screen.getByText("已封存書")).toBeInTheDocument();
+    });
+
+    it("shows '尚無封存書籍' when archived view has no books", async () => {
+      // All books are active, none archived
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
+        (message: unknown, callback?: (response: unknown) => void) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
+            callback({ syncArchived: 1 });
+          }
+          return undefined as unknown as Promise<unknown>;
+        },
+      );
+
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      // Click the "封存" tab — there are 0 archived books
+      const archivedTab = screen.getByText((_content, el) =>
+        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+      );
+      fireEvent.click(archivedTab);
+
+      expect(screen.getByText("尚無封存書籍")).toBeInTheDocument();
+    });
+  });
 });

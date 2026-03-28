@@ -24,6 +24,7 @@ export function mergeBooks(
       coverUrl: book.coverUrl || existing?.coverUrl || "",
       readmooUrl: book.readmooUrl,
       isShared: existing?.isShared ?? false,
+      isArchived: book.isArchived ?? existing?.isArchived ?? 0,
     });
   }
 

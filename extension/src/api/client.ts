@@ -18,6 +18,7 @@ export interface BookEntry {
   coverUrl: string;
   readmooUrl: string;
   isShared: boolean;
+  isArchived?: 0 | 1;  // 0 = active (default), 1 = archived
 }
 
 export interface PersonalBooks {

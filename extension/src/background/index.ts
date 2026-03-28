@@ -108,6 +108,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "GET_SYNC_ARCHIVED") {
+    chrome.storage.local.get(["syncArchived"], (result) => {
+      sendResponse({ syncArchived: result.syncArchived ?? 0 });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_SYNC_ARCHIVED") {
+    const value = message.syncArchived;
+    if (value !== 0 && value !== 1) {
+      sendResponse({ ok: false, error: "syncArchived must be 0 or 1" });
+      return true;
+    }
+    chrome.storage.local.set({ syncArchived: value }, () => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
   if (message.type === "GET_API_ENDPOINT") {
     chrome.storage.local.get(["apiEndpoint"], (result) => {
       sendResponse({ apiEndpoint: result.apiEndpoint ?? null });

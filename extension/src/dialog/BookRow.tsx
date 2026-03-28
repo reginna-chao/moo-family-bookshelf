@@ -39,16 +39,30 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
         <div style={{ width: 40, height: 60, background: "#e2e8f0", borderRadius: 4 }} />
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{
             fontSize: 14,
             fontWeight: 500,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-          }}
-        >
-          {book.title}
+            minWidth: 0,
+          }}>
+            {book.title}
+          </span>
+          {book.isArchived === 1 && (
+            <span style={{
+              fontSize: 10,
+              padding: "1px 5px",
+              borderRadius: 4,
+              background: "#fef3c7",
+              color: "#92400e",
+              fontWeight: 500,
+              flexShrink: 0,
+            }}>
+              封存
+            </span>
+          )}
         </div>
       </div>
       <button
