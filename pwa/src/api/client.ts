@@ -18,6 +18,7 @@ export interface BookEntry {
   coverUrl: string;
   readmooUrl: string;
   isShared: 0 | 1;
+  isArchived?: 0 | 1;
 }
 
 /** Decrypted view (used by UI after decryption) */

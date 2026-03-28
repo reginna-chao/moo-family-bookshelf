@@ -25,6 +25,7 @@ export function PersonalShelfPage({
   const [isDirty, setIsDirty] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const originalBooksRef = useRef<BookEntry[]>([]);
 
   const loadBooks = useCallback(async () => {
@@ -138,11 +139,16 @@ export function PersonalShelfPage({
     });
   }, []);
 
+  const activeBooks = useMemo(() => books.filter(b => b.isArchived !== 1), [books]);
+  const archivedBooks = useMemo(() => books.filter(b => b.isArchived === 1), [books]);
+  const hasArchivedBooks = archivedBooks.length > 0;
+  const currentViewBooks = archiveView === "active" ? activeBooks : archivedBooks;
+
   const statusFilteredBooks = useMemo(() => {
-    if (statusFilter === "shared") return books.filter((b) => b.isShared === 1);
-    if (statusFilter === "not-shared") return books.filter((b) => b.isShared === 0);
-    return books;
-  }, [books, statusFilter]);
+    if (statusFilter === "shared") return currentViewBooks.filter((b) => b.isShared === 1);
+    if (statusFilter === "not-shared") return currentViewBooks.filter((b) => b.isShared === 0);
+    return currentViewBooks;
+  }, [currentViewBooks, statusFilter]);
 
   const {
     searchTerm,
@@ -199,8 +205,37 @@ export function PersonalShelfPage({
       <div className="p-4 flex-1">
         <h2 className="text-xl font-bold text-gray-900 mb-3">
           個人書櫃
-          <span className="text-gray-400 text-sm font-normal ml-2">({books.length} 本)</span>
+          <span className="text-gray-400 text-sm font-normal ml-2">({currentViewBooks.length} 本)</span>
         </h2>
+
+        {hasArchivedBooks && (
+          <div role="tablist" className="flex border-b border-gray-200 mb-3">
+            <button
+              role="tab"
+              aria-selected={archiveView === "active"}
+              onClick={() => setArchiveView("active")}
+              className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
+                archiveView === "active"
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-gray-500"
+              }`}
+            >
+              未封存 ({activeBooks.length})
+            </button>
+            <button
+              role="tab"
+              aria-selected={archiveView === "archived"}
+              onClick={() => setArchiveView("archived")}
+              className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
+                archiveView === "archived"
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-gray-500"
+              }`}
+            >
+              封存 ({archivedBooks.length})
+            </button>
+          </div>
+        )}
 
         <div className="flex gap-2 mb-3">
           {(["all", "shared", "not-shared"] as const).map((f) => (
@@ -267,7 +302,14 @@ export function PersonalShelfPage({
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
+                  <div className="flex items-center gap-1">
+                    <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
+                    {book.isArchived === 1 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium flex-shrink-0">
+                        封存
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-gray-500 truncate">{book.author}</p>
                 </div>
                 <button
