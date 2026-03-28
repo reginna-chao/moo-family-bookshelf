@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient, BookEntry } from "../api/client";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
-import { scrapeBooks } from "../content/scraper";
+import { scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
 import { BookRow } from "./BookRow";
 import { StatusFilterBar, StatusFilter } from "./StatusFilterBar";
@@ -74,6 +74,15 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
         const scrapedBooks = await scrapeBooks();
 
+        // Conditionally scrape archived books
+        const archiveResult = await chrome.storage.local.get(["syncArchived"]);
+        const syncArchivedSetting = (archiveResult.syncArchived as number | undefined) ?? 0;
+        let allScrapedBooks = [...scrapedBooks];
+        if (syncArchivedSetting === 1) {
+          const archivedBooks = await scrapeArchivedBooks();
+          allScrapedBooks = [...scrapedBooks, ...archivedBooks];
+        }
+
         const apiResponse = await apiClient.getPersonalBooks(userId);
 
         if (cancelled) return;
@@ -94,7 +103,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         }
         if (cancelled) return;
 
-        const merged = mergeBooks(scrapedBooks, savedBooks);
+        const merged = mergeBooks(allScrapedBooks, savedBooks);
         originalBooks.current = merged;
         setBooks(merged);
         setStatus("ready");
