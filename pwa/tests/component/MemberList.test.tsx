@@ -19,7 +19,11 @@ const OTHER_ID =
   "aabbccdd11223344556677889900aabbccddeeff11223344556677889900aabb";
 
 const defaultProps = {
-  members: [OWNER_ID, USER_ID, OTHER_ID],
+  members: [
+    { userId: OWNER_ID, displayName: "" },
+    { userId: USER_ID, displayName: "小明" },
+    { userId: OTHER_ID, displayName: "" },
+  ],
   ownerId: OWNER_ID,
   userId: USER_ID,
   familyId: "fam-001",
@@ -32,12 +36,12 @@ describe("MemberList", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders member IDs showing first 8 characters", () => {
+  it("renders member display names or ID prefix fallback", () => {
     render(<MemberList {...defaultProps} />);
 
-    expect(screen.getByText("aaaaaaaa")).toBeInTheDocument();
-    expect(screen.getByText("11111111")).toBeInTheDocument();
-    expect(screen.getByText("aabbccdd")).toBeInTheDocument();
+    expect(screen.getByText("aaaaaaaa")).toBeInTheDocument(); // no displayName, fallback
+    expect(screen.getByText("小明")).toBeInTheDocument();      // has displayName
+    expect(screen.getByText("aabbccdd")).toBeInTheDocument(); // no displayName, fallback
   });
 
   it("shows Owner badge for the owner member", () => {
@@ -91,7 +95,7 @@ describe("MemberList", () => {
 
     // Confirm dialog appears
     expect(
-      screen.getByText(`確定要移除成員 ${USER_ID.slice(0, 8)}？`),
+      screen.getByText("確定要移除成員 小明？"),
     ).toBeInTheDocument();
 
     // Click 確定
@@ -124,7 +128,7 @@ describe("MemberList", () => {
     // Confirm dialog appears
     expect(
       screen.getByText(
-        `確定要將管理權轉移給 ${USER_ID.slice(0, 8)}？轉移後你將無法移除其他成員。`,
+        "確定要將管理權轉移給 小明？轉移後你將無法移除其他成員。",
       ),
     ).toBeInTheDocument();
 

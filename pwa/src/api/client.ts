@@ -33,10 +33,15 @@ export interface RawPersonalBooks {
   payload: string | null;
 }
 
+export interface FamilyMember {
+  userId: string;
+  displayName: string;
+}
+
 export interface FamilyGroup {
   familyId: string;
   ownerId: string;
-  members: string[];
+  members: FamilyMember[];
   maxMembers: number;
   createdAt: string;
 }

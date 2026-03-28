@@ -34,7 +34,8 @@ const defaultProps = {
 };
 
 // Helper to render with members already loaded
-function renderWithMembers(members: string[], ownerId: string) {
+function renderWithMembers(memberIds: string[], ownerId: string) {
+  const members = memberIds.map((id) => ({ userId: id, displayName: "" }));
   mockGetFamilyMembers.mockResolvedValue({
     data: { members, ownerId },
   });
@@ -50,7 +51,7 @@ describe("SettingsPage", () => {
     // Default: members load successfully
     mockGetFamilyMembers.mockResolvedValue({
       data: {
-        members: [defaultProps.userId],
+        members: [{ userId: defaultProps.userId, displayName: "" }],
         ownerId: defaultProps.userId,
       },
     });
@@ -106,6 +107,7 @@ describe("SettingsPage", () => {
     });
 
     expect(screen.getByText("成員 (2)")).toBeInTheDocument();
+    // No displayName set, so falls back to userId.slice(0, 8)
     expect(screen.getByText("11111111")).toBeInTheDocument();
     expect(screen.getByText("aabbccdd")).toBeInTheDocument();
   });

@@ -1,8 +1,12 @@
 import { useState } from "react";
-import type { ApiClient } from "@/api/client";
+import type { ApiClient, FamilyMember } from "@/api/client";
+
+function getMemberLabel(member: FamilyMember): string {
+  return member.displayName || member.userId.slice(0, 8);
+}
 
 interface MemberListProps {
-  members: string[];
+  members: FamilyMember[];
   ownerId: string;
   userId: string;
   familyId: string;
@@ -75,7 +79,9 @@ export function MemberList({
 
   return (
     <div className="bg-gray-50 rounded-lg divide-y divide-gray-200">
-      {members.map((memberId) => {
+      {members.map((member) => {
+        const memberId = member.userId;
+        const label = getMemberLabel(member);
         const isConfirmTarget =
           confirmAction &&
           ((confirmAction.type === "remove" &&
@@ -86,8 +92,8 @@ export function MemberList({
         return (
           <div key={memberId} className="px-3 py-2.5">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-sm text-gray-700">
-                {memberId.slice(0, 8)}
+              <span className="text-sm text-gray-700">
+                {label}
               </span>
               {memberId === ownerId && (
                 <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
@@ -126,8 +132,8 @@ export function MemberList({
               <div className={`mt-2 rounded p-2 ${confirmAction.type === "remove" ? "bg-red-50" : "bg-blue-50"}`}>
                 <p className={`text-xs mb-2 ${confirmAction.type === "remove" ? "text-red-700" : "text-blue-700"}`}>
                   {confirmAction.type === "remove"
-                    ? `確定要移除成員 ${memberId.slice(0, 8)}？`
-                    : `確定要將管理權轉移給 ${memberId.slice(0, 8)}？轉移後你將無法移除其他成員。`}
+                    ? `確定要移除成員 ${label}？`
+                    : `確定要將管理權轉移給 ${label}？轉移後你將無法移除其他成員。`}
                 </p>
                 <div className="flex gap-2">
                   <button

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { ApiClient } from "@/api/client";
+import type { ApiClient, FamilyMember } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
 import { MemberList } from "@/components/MemberList";
@@ -55,7 +55,7 @@ export function SettingsPage({
   }
 
   // --- Members ---
-  const [members, setMembers] = useState<string[]>([]);
+  const [members, setMembers] = useState<FamilyMember[]>([]);
   const [ownerId, setOwnerId] = useState("");
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersError, setMembersError] = useState<string | null>(null);
