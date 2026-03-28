@@ -104,20 +104,20 @@ export function App() {
         ))}
       </nav>
       <div style={{ padding: 16, overflowY: "auto", maxHeight: "60vh" }}>
-        {activeTab === "family-shelf" && (
+        <div style={{ display: activeTab === "family-shelf" ? "block" : "none" }}>
           <FamilyShelf familyId={familyId} userId={userId} apiClient={apiClientRef.current} />
-        )}
-        {activeTab === "personal-shelf" && (
+        </div>
+        <div style={{ display: activeTab === "personal-shelf" ? "block" : "none" }}>
           <PersonalShelf userId={userId} apiClient={apiClientRef.current} />
-        )}
-        {activeTab === "settings" && (
+        </div>
+        <div style={{ display: activeTab === "settings" ? "block" : "none" }}>
           <FamilySettings
             familyId={familyId}
             userId={userId}
             apiClient={apiClientRef.current}
             onLeave={handleLeaveFamily}
           />
-        )}
+        </div>
       </div>
       <DialogFooter />
     </div>

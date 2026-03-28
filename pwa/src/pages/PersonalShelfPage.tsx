@@ -58,8 +58,12 @@ export function PersonalShelfPage({
       const obj = parsed as Record<string, unknown>;
       setDisplayName(typeof obj.displayName === "string" ? obj.displayName : "");
       const rawBooks = Array.isArray(obj.books) ? (obj.books as BookEntry[]) : [];
-      // Normalize isShared: Extension stores boolean, PWA uses 0|1
-      const normalized = rawBooks.map((b) => ({ ...b, isShared: b.isShared ? (1 as const) : (0 as const) }));
+      // Normalize: Extension may store boolean for isShared/isArchived, PWA uses 0|1
+      const normalized = rawBooks.map((b) => ({
+        ...b,
+        isShared: b.isShared ? (1 as const) : (0 as const),
+        isArchived: b.isArchived ? (1 as const) : (0 as const),
+      }));
       setBooks(normalized);
       originalBooksRef.current = normalized;
       setIsDirty(false);
