@@ -5,6 +5,8 @@ import { DEFAULT_API_ENDPOINT } from "@/constants";
 import { MemberList } from "@/components/MemberList";
 import { ApiEndpointEditor } from "@/components/ApiEndpointEditor";
 
+const SYNC_ARCHIVED_KEY = "moo:syncArchived";
+
 interface SettingsPageProps {
   familyId: string;
   userId: string;
@@ -22,6 +24,20 @@ export function SettingsPage({
   encryptionKey,
   onLogout,
 }: SettingsPageProps) {
+  // --- Sync archived setting ---
+  const [syncArchived, setSyncArchived] = useState<0 | 1>(() => {
+    const stored = localStorage.getItem(SYNC_ARCHIVED_KEY);
+    return stored === "1" ? 1 : 0;
+  });
+
+  const handleToggleSyncArchived = useCallback(() => {
+    setSyncArchived(prev => {
+      const next = prev === 1 ? 0 : 1;
+      localStorage.setItem(SYNC_ARCHIVED_KEY, String(next));
+      return next as 0 | 1;
+    });
+  }, []);
+
   // --- Sync code ---
   const syncCode = useMemo(
     () =>
@@ -121,6 +137,34 @@ export function SettingsPage({
   return (
     <div className="p-4">
       <h2 className="text-xl font-bold text-gray-900 mb-4">設定</h2>
+
+      {/* Personal settings */}
+      <section className="mb-6">
+        <h3 className="text-sm font-medium text-gray-500 mb-3">個人設定</h3>
+        <button
+          role="switch"
+          aria-checked={syncArchived === 1}
+          aria-label="顯示封存書籍"
+          onClick={handleToggleSyncArchived}
+          className="flex items-center gap-2 text-sm text-gray-700"
+        >
+          <span
+            className={`relative inline-block w-8 h-[18px] rounded-full transition-colors ${
+              syncArchived === 1 ? "bg-blue-600" : "bg-gray-300"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 block w-3.5 h-3.5 rounded-full bg-white transition-[left] ${
+                syncArchived === 1 ? "left-[16px]" : "left-0.5"
+              }`}
+            />
+          </span>
+          顯示封存書籍
+        </button>
+        <p className="text-gray-400 text-xs mt-1.5">
+          啟用後，個人書櫃會顯示已封存的書籍分頁
+        </p>
+      </section>
 
       {/* Sync code */}
       <section className="mb-6">

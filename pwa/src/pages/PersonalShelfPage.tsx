@@ -143,10 +143,11 @@ export function PersonalShelfPage({
     });
   }, []);
 
+  const syncArchived = localStorage.getItem("moo:syncArchived") === "1";
   const activeBooks = useMemo(() => books.filter(b => b.isArchived !== 1), [books]);
   const archivedBooks = useMemo(() => books.filter(b => b.isArchived === 1), [books]);
-  const hasArchivedBooks = archivedBooks.length > 0;
-  const currentViewBooks = archiveView === "active" ? activeBooks : archivedBooks;
+  const showArchiveTabs = syncArchived && archivedBooks.length > 0;
+  const currentViewBooks = showArchiveTabs && archiveView === "archived" ? archivedBooks : activeBooks;
 
   const statusFilteredBooks = useMemo(() => {
     if (statusFilter === "shared") return currentViewBooks.filter((b) => b.isShared === 1);
@@ -212,7 +213,7 @@ export function PersonalShelfPage({
           <span className="text-gray-400 text-sm font-normal ml-2">({currentViewBooks.length} 本)</span>
         </h2>
 
-        {hasArchivedBooks && (
+        {showArchiveTabs && (
           <div role="tablist" className="flex border-b border-gray-200 mb-3">
             <button
               role="tab"
