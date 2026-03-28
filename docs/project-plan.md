@@ -650,7 +650,7 @@ jobs:
 - [ ] GitHub Pages 說明頁面上線驗證
 - [ ] Chrome Web Store 上架（v1.0.0）
 
-### Phase 5：借閱功能（v1.0 之後）
+### Phase 5：借閱功能（v1.1.0）
 
 > 允許家庭成員申請借閱對方的書籍，整合讀墨原生借書功能。
 
@@ -660,6 +660,45 @@ jobs:
 - [ ] 與讀墨借書功能整合研究（讀墨可主動借書出去）
 - [ ] 借閱通知機制（擁有者如何得知有人想借）
 - [ ] 借閱狀態追蹤（申請中/已借出/已歸還）
+
+### Phase 6：個人公開書櫃分享（v1.2.0）
+
+> 使用者可產生獨立網址，將個人開放書櫃對外公開分享。訪客無須登入即可瀏覽。
+
+#### 核心功能
+- [ ] 個人書櫃頁面新增「分享」icon，點擊開啟公開書櫃設定 Dialog
+- [ ] 公開書櫃設定 Dialog：開啟/關閉公開分享（預設關閉）
+- [ ] 公開書櫃設定 Dialog：自訂標題（預設「{display_name} 的公開書櫃」，可修改）
+- [ ] 公開書櫃設定 Dialog：設定過期時間（7 / 30 / 60 / 90 天 / 永久，預設 30 天）
+- [ ] 公開書櫃設定 Dialog：重設網址（產生新 share token，舊網址立即失效）
+- [ ] 公開書櫃設定 Dialog：複製公開連結
+
+#### 公開書櫃頁面（PWA 路由 `/public/{share_token}`）
+- [ ] 不需登入即可瀏覽
+- [ ] 頁面上方說明文字：「此為對外公開書櫃，無須登入即可瀏覽」
+- [ ] 標題顯示使用者自訂的公開書櫃名稱
+- [ ] 書單搜尋功能（書名 + 作者，純前端即時過濾）
+- [ ] 書籍連結至讀墨購買介紹頁（`https://readmoo.com/book/{bookId}`，另開新分頁）
+- [ ] 不提供借閱功能
+- [ ] 顯示封面圖片（來源：讀墨 CDN）
+
+#### 後端 API
+- [ ] `POST /api/user/:id/public-shelf` — 建立/更新公開書櫃設定
+- [ ] `DELETE /api/user/:id/public-shelf` — 關閉公開分享
+- [ ] `GET /api/public/{share_token}` — 查詢公開書櫃（不需認證）
+
+#### KV Schema 擴充
+- [ ] `public:{share_token}` → `{ user_id, title, books[], created_at, expires_at }` （明文儲存，KV TTL 管理過期）
+- [ ] `user:{id}` 擴充 `public_sharing` 欄位 → `{ enabled, share_token, title, expires_days }`
+
+#### 設計考量
+- 公開書櫃的書 = 個人書櫃中 `is_shared: true` 的同一組書，不另外標記
+- 不需加入家庭也可使用公開書櫃功能
+- share_token 格式：UUID 32 碼（無連字號）
+- 伺服器需儲存明文書單供公開查詢（E2EE 例外：使用者主動選擇公開）
+- 封面圖片 hotlink 讀墨 CDN，需測試可用性
+- 重設網址 = 刪除舊 `public:{old_token}` + 建立新 `public:{new_token}`
+- 關閉公開分享 = 刪除 `public:{token}` + 更新 `user:{id}.public_sharing.enabled = 0`
 
 ---
 
@@ -725,4 +764,4 @@ moo-family-bookshelf/
 
 ---
 
-*最後更新：2026-03-27*
+*最後更新：2026-03-28*

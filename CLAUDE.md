@@ -204,6 +204,13 @@ Family membership is the gate for all features. Without a family, only onboardin
 |--------|------|-------------|
 | `GET` | `/api/family/:id/bookshelf` | Aggregated shared books from all members |
 
+### Public Bookshelf (v1.2.0)
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/user/:id/public-shelf` | Create/update public shelf settings |
+| `DELETE` | `/api/user/:id/public-shelf` | Disable public sharing |
+| `GET` | `/api/public/:token` | Get public bookshelf (no auth required) |
+
 ## Security & Privacy Rules
 
 - **E2EE**: all data encrypted in browser before upload. Server is zero-knowledge. Exception: display names are stored in plaintext in the family record so members can see each other's names.

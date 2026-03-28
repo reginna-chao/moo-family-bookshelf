@@ -33,6 +33,7 @@ worker/src/
 - Prefix: `/api/`
 - Authentication: token-based (derived from sync code encryption key).
 - All data stored encrypted in KV; Worker never sees plaintext book data.
+- Exception: public bookshelf data (v1.2.0) stored in plaintext since it is user-chosen public content.
 
 ### KV Key Patterns
 
@@ -41,6 +42,7 @@ worker/src/
 | `user:{user_id}` | Encrypted personal book list + sharing settings | None (persistent) |
 | `family:{family_id}` | Family member list | Configurable |
 | `member:{user_id}` | `family_id` (reverse lookup) | Follows family TTL |
+| `public:{share_token}` | Plaintext public bookshelf (v1.2.0) | User-configured (7/30/60/90 days or none) |
 
 ### Coding Conventions
 
