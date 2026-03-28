@@ -7,6 +7,7 @@ import {
   encrypt,
   decrypt,
   sha256Hex,
+  deriveUserId,
   bufferToBase62,
   base62ToBuffer,
 } from "@/crypto/encrypt";
@@ -270,5 +271,35 @@ describe("bufferToBase62 + base62ToBuffer roundtrip", () => {
       );
       expect(decodedVal).toBe(originalVal);
     }
+  });
+});
+
+describe("deriveUserId", () => {
+  it("should hash email with 'moo:' prefix using SHA-256", async () => {
+    const email = "alice@example.com";
+    const derived = await deriveUserId(email);
+    // deriveUserId(email) should equal sha256Hex("moo:" + email)
+    const expected = await sha256Hex(`moo:${email}`);
+    expect(derived).toBe(expected);
+  });
+
+  it("should be deterministic (same email produces same userId)", async () => {
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => deriveUserId("bob@example.com")),
+    );
+    const unique = new Set(results);
+    expect(unique.size).toBe(1);
+  });
+
+  it("should produce different userIds for different emails", async () => {
+    const id1 = await deriveUserId("alice@example.com");
+    const id2 = await deriveUserId("bob@example.com");
+    expect(id1).not.toBe(id2);
+  });
+
+  it("should return a lowercase hex string of 64 characters (SHA-256)", async () => {
+    const id = await deriveUserId("test@example.com");
+    expect(id).toHaveLength(64);
+    expect(id).toMatch(/^[0-9a-f]{64}$/);
   });
 });

@@ -3,6 +3,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PersonalShelf, PersonalShelfProps } from "@/dialog/PersonalShelf";
 import type { ApiClient } from "@/api/client";
 
+const mockUseBookSync = vi.fn().mockReturnValue({
+  syncStatus: "idle",
+  syncError: "",
+  lastSyncBooks: [],
+  triggerManualSync: vi.fn(),
+  autoSyncDone: false,
+});
+
+vi.mock("@/dialog/useBookSync", () => ({
+  useBookSync: (...args: unknown[]) => mockUseBookSync(...args),
+}));
+
 vi.mock("@/crypto/encrypt", () => ({
   importKey: vi.fn().mockResolvedValue("mock-key"),
   encrypt: vi.fn().mockResolvedValue("encrypted-payload"),
@@ -33,6 +45,7 @@ vi.mock("@/content/scraper", () => ({
       readmooUrl: "https://mooink.readmoo.com/book/book-3",
     },
   ]),
+  scrapeArchivedBooks: vi.fn().mockResolvedValue([]),
 }));
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
@@ -826,6 +839,147 @@ describe("PersonalShelf", () => {
       fireEvent.click(archivedTab);
 
       expect(screen.getByText("尚無封存書籍")).toBeInTheDocument();
+    });
+  });
+
+  describe("lastSyncBooks merge preserves isShared", () => {
+    it("preserves existing isShared state when lastSyncBooks arrives", async () => {
+      const { decrypt } = await import("@/crypto/encrypt");
+      vi.mocked(decrypt).mockResolvedValue(
+        JSON.stringify({
+          books: [
+            {
+              bookId: "book-1",
+              title: "測試書籍一",
+              author: "作者A",
+              coverUrl: "https://example.com/cover1.jpg",
+              readmooUrl: "https://mooink.readmoo.com/book/book-1",
+              isShared: true,
+              isbn: "",
+            },
+          ],
+        }),
+      );
+
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockResolvedValue({
+          data: { payload: "encrypted-data" },
+        }),
+      });
+
+      // Initially return no sync books
+      mockUseBookSync.mockReturnValue({
+        syncStatus: "idle",
+        syncError: "",
+        lastSyncBooks: [],
+        triggerManualSync: vi.fn(),
+        autoSyncDone: false,
+      });
+
+      const { rerender } = render(
+        <PersonalShelf userId="user-abc123" apiClient={apiClient} />,
+      );
+
+      // Wait for initial load — book-1 should be shared from saved data
+      await waitFor(() => {
+        expect(screen.getByText("測試書籍一")).toBeInTheDocument();
+      });
+      const openBadges = screen.queryAllByText("開放");
+      expect(openBadges.length).toBeGreaterThanOrEqual(1);
+
+      // Now simulate lastSyncBooks arriving (same book-1 + a new book-4)
+      // The remap in PersonalShelf lines 125-136 intentionally omits isShared
+      mockUseBookSync.mockReturnValue({
+        syncStatus: "done",
+        syncError: "",
+        lastSyncBooks: [
+          {
+            bookId: "book-1",
+            title: "測試書籍一（更新版）",
+            author: "作者A",
+            coverUrl: "https://example.com/cover1-v2.jpg",
+            readmooUrl: "https://mooink.readmoo.com/book/book-1",
+          },
+          {
+            bookId: "book-4",
+            title: "新書籍四",
+            author: "作者D",
+            coverUrl: "https://example.com/cover4.jpg",
+            readmooUrl: "https://mooink.readmoo.com/book/book-4",
+          },
+        ],
+        triggerManualSync: vi.fn(),
+        autoSyncDone: true,
+      });
+
+      // Re-render to trigger the useEffect that reacts to lastSyncBooks
+      rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+      await waitFor(() => {
+        // New book should appear
+        expect(screen.getByText("新書籍四")).toBeInTheDocument();
+      });
+
+      // book-1 should still be shared (isShared preserved by mergeBooks)
+      // Check that "開放" badge still exists (at least 1 for book-1)
+      const updatedOpenBadges = screen.queryAllByText("開放");
+      expect(updatedOpenBadges.length).toBeGreaterThanOrEqual(1);
+
+      // book-4 is new, should default to not-shared
+      // The "未開放" badge count should include book-4
+      const hiddenBadges = screen.queryAllByText("未開放");
+      expect(hiddenBadges.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("new books from sync default to not-shared", async () => {
+      // Start with no saved books (all from scrape, none shared)
+      mockUseBookSync.mockReturnValue({
+        syncStatus: "idle",
+        syncError: "",
+        lastSyncBooks: [],
+        triggerManualSync: vi.fn(),
+        autoSyncDone: false,
+      });
+
+      const apiClient = createMockApiClient();
+      const { rerender } = render(
+        <PersonalShelf userId="user-abc123" apiClient={apiClient} />,
+      );
+
+      await waitForBooksLoaded();
+
+      // All 3 scraped books should be not-shared
+      const initialHidden = screen.getAllByText("未開放");
+      // 3 badges + 1 filter button = at least 3
+      expect(initialHidden.length).toBeGreaterThanOrEqual(3);
+
+      // Simulate sync bringing a new book
+      mockUseBookSync.mockReturnValue({
+        syncStatus: "done",
+        syncError: "",
+        lastSyncBooks: [
+          {
+            bookId: "book-new",
+            title: "全新同步書",
+            author: "新作者",
+            coverUrl: "https://example.com/new.jpg",
+            readmooUrl: "https://mooink.readmoo.com/book/book-new",
+          },
+        ],
+        triggerManualSync: vi.fn(),
+        autoSyncDone: true,
+      });
+
+      rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("全新同步書")).toBeInTheDocument();
+      });
+
+      // The new book should default to not-shared (no "開放" badge for it)
+      // Total "未開放" badges should include the new book
+      const updatedHidden = screen.getAllByText("未開放");
+      expect(updatedHidden.length).toBeGreaterThanOrEqual(4);
     });
   });
 });

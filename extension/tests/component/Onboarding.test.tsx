@@ -498,6 +498,147 @@ describe("Onboarding", () => {
     });
   });
 
+  describe("handleContinueAfterCreate when sync fails", () => {
+    it("calls onFamilyJoined even when book sync fails", async () => {
+      const onFamilyJoined = vi.fn();
+      const mockApi = createMockApiClient({
+        createFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-sync-fail",
+            members: ["user-1"],
+            createdAt: "2026-01-01",
+            authToken: "token-abc",
+          },
+        }),
+        // getPersonalBooks is called during syncBooks — make it fail
+        getPersonalBooks: vi.fn().mockRejectedValue(new Error("sync boom")),
+      });
+
+      renderOnboarding({ onFamilyJoined, apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
+      });
+
+      // Create family
+      await act(async () => {
+        fireEvent.click(screen.getByText("建立家庭公開書櫃"));
+        await flushMicrotasks();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
+      });
+
+      // Click continue — syncBooks will fail but onFamilyJoined should still be called
+      await act(async () => {
+        fireEvent.click(screen.getByText("繼續"));
+        for (let i = 0; i < 10; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
+      });
+
+      await waitFor(() => {
+        expect(onFamilyJoined).toHaveBeenCalledWith("fam-sync-fail", expect.any(String));
+      });
+    });
+  });
+
+  describe("handleJoin with custom API endpoint", () => {
+    it("sends SET_API_ENDPOINT message when sync code contains @host", async () => {
+      const onFamilyJoined = vi.fn();
+      const mockApi = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "abcd-efgh",
+            members: [],
+            createdAt: "2026-01-01",
+            authToken: "join-token",
+          },
+        }),
+      });
+
+      renderOnboarding({ onFamilyJoined, apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+      });
+
+      // Enter a sync code with @host suffix
+      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
+        target: { value: "moo-abcd-efgh-someKey123@https://custom.api.dev" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
+        for (let i = 0; i < 10; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
+      });
+
+      await waitFor(() => {
+        // Verify SET_API_ENDPOINT was sent to chrome.runtime
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "SET_API_ENDPOINT",
+            apiEndpoint: "https://custom.api.dev",
+          }),
+        );
+        // Also verify the API client endpoint was updated
+        expect(mockApi.setEndpoint).toHaveBeenCalledWith("https://custom.api.dev");
+      });
+    });
+  });
+
+  describe("handleJoin when sync fails after join", () => {
+    it("calls onFamilyJoined even when book sync fails after successful join", async () => {
+      const onFamilyJoined = vi.fn();
+      const mockApi = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "abcd-efgh",
+            members: [],
+            createdAt: "2026-01-01",
+            authToken: "join-token",
+          },
+        }),
+        // Make book sync fail
+        getPersonalBooks: vi.fn().mockRejectedValue(new Error("sync failed")),
+      });
+
+      renderOnboarding({ onFamilyJoined, apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
+        target: { value: "moo-abcd-efgh-someEncryptionKey" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
+        for (let i = 0; i < 10; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
+      });
+
+      await waitFor(() => {
+        // Despite sync failure, join succeeded so onFamilyJoined should be called
+        expect(onFamilyJoined).toHaveBeenCalledWith("abcd-efgh", expect.any(String));
+      });
+    });
+  });
+
   describe("copy sync code", () => {
     it("copies sync code to clipboard", async () => {
       const mockClipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
