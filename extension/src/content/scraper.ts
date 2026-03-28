@@ -244,6 +244,40 @@ function findFilterButton(): HTMLElement | null {
  * MUST use try/finally to ensure filter is always cleared.
  * Returns empty array on failure (silent fallback).
  */
+/**
+ * Wait for the library to finish reloading after a filter change.
+ * Readmoo clears `.library-item` elements, then re-renders new ones.
+ * We wait for items to disappear (or count to change), then wait for
+ * new items to appear and stabilize.
+ */
+async function waitForLibraryReload(timeoutMs: number): Promise<void> {
+  const start = Date.now();
+
+  // Phase 1: Wait for items to disappear or change (Readmoo clears the list)
+  const initialCount = document.querySelectorAll(".library-item").length;
+  while (Date.now() - start < timeoutMs) {
+    await wait(300);
+    const count = document.querySelectorAll(".library-item").length;
+    if (count !== initialCount) break;
+  }
+
+  // Phase 2: Wait for new items to appear and stabilize
+  //   (count stays the same for 2 consecutive checks = rendering done)
+  let stableCount = -1;
+  let stableChecks = 0;
+  while (Date.now() - start < timeoutMs) {
+    await wait(500);
+    const count = document.querySelectorAll(".library-item").length;
+    if (count > 0 && count === stableCount) {
+      stableChecks++;
+      if (stableChecks >= 2) break;
+    } else {
+      stableCount = count;
+      stableChecks = 0;
+    }
+  }
+}
+
 export async function scrapeArchivedBooks(): Promise<ScrapedBook[]> {
   try {
     // Step 1: Find and click the filter button
@@ -258,19 +292,14 @@ export async function scrapeArchivedBooks(): Promise<ScrapedBook[]> {
     // Step 3: Click "已封存書籍" option
     if (!clickElement('[data-key="archive"][data-value="true"]')) return [];
 
+    // Brief pause for React to process the selection
+    await wait(300);
+
     // Step 4: Click "確定" button
     if (!clickElement(".filter-modal .modal-footer .btn-primary")) return [];
 
-    // Step 5: Wait for library to reload — poll for DOM change
-    const itemCountBefore = document.querySelectorAll(".library-item").length;
-    const reloadStart = Date.now();
-    while (Date.now() - reloadStart < 5000) {
-      await wait(300);
-      const currentCount = document.querySelectorAll(".library-item").length;
-      if (currentCount !== itemCountBefore) break;
-    }
-    // Extra settle time for React to finish rendering
-    await wait(500);
+    // Step 5: Wait for filter modal to close and library to reload
+    await waitForLibraryReload(10000);
 
     // Step 6: Scrape books and mark as archived
     const books = await scrapeBooks();
@@ -283,25 +312,23 @@ export async function scrapeArchivedBooks(): Promise<ScrapedBook[]> {
       const clearBtn = findFilterButton();
       if (clearBtn) {
         clearBtn.click();
-        const modal = await waitForElement(".filter-modal.modal.show", 3000);
-        if (modal) {
+        const clearModal = await waitForElement(".filter-modal.modal.show", 3000);
+        if (clearModal) {
           clickElement(".filter-modal .modal-footer .btn-outline-primary");
+          await wait(300);
           clickElement(".filter-modal .modal-footer .btn-primary");
-          await wait(1000);
+          await waitForLibraryReload(10000);
         } else {
-          // Modal didn't appear — force page reload as fallback
           window.location.hash = "#/library";
-          await wait(1500);
+          await wait(2000);
         }
       } else {
-        // Filter button not found — force page reload as fallback
         window.location.hash = "#/library";
-        await wait(1500);
+        await wait(2000);
       }
     } catch {
-      // Last resort: force reload the library page
       window.location.hash = "#/library";
-      await wait(1500);
+      await wait(2000);
     }
   }
 }
