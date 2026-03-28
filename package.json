@@ -11,6 +11,7 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
+    "test:coverage": "pnpm --filter moo-family-bookshelf-extension test:coverage",
     "test:e2e": "pnpm --filter moo-family-bookshelf-extension build:e2e && pnpm --filter moo-family-bookshelf-extension test:e2e",
     "e2e:verify:selectors": "pnpm --filter moo-family-bookshelf-extension e2e:verify:selectors",
     "e2e:verify:selectors:update": "pnpm --filter moo-family-bookshelf-extension e2e:verify:selectors:update",

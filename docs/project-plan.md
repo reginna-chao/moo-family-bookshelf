@@ -558,7 +558,7 @@ jobs:
 - [x] Rate Limiting 中介層（防濫用）（60 req/min/IP，worker/src/middleware/rateLimit.ts）
 - [x] 隱私政策頁面（docs/privacy-policy.md，繁體中文完整版）
 - [x] Dialog 元件測試補齊（React Testing Library）（16 tests：FamilySettings 6 + Onboarding 6 + PersonalShelf 4）
-- [ ] E2E 測試建置（Playwright + Chrome Extension 載入）— ⚠️ 未完成：目錄已建立但無測試檔案，缺少 playwright.config.ts 及 @playwright/test 依賴
+- [x] E2E 測試建置（Playwright + Chrome Extension 載入）— 15 個測試（4 個 spec）：家庭生命週期（含多用戶）、書籍分享、Dialog 狀態機、自訂端點 + 選擇器驗證工具 + CI 整合
 - [x] Crypto 模組完整覆蓋率達 ≥ 90% — ⚠️ 所有 8 個導出函數皆有測試覆蓋，但 @vitest/coverage-v8 未安裝，尚無量化數據
 
 ### Phase 2.5：桌面版 UX 改善（v1.0 前必要）✅ 已完成
