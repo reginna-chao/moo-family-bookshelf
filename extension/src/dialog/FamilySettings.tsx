@@ -25,7 +25,29 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [copied, setCopied] = useState(false);
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
   const [leaveError, setLeaveError] = useState("");
+  const [syncArchived, setSyncArchived] = useState<number>(0);
   const displayNameState = useDisplayName({ apiClient, familyId, userId });
+
+  useEffect(() => {
+    chrome.runtime.sendMessage({ type: "GET_SYNC_ARCHIVED" }, (response) => {
+      if (response?.syncArchived !== undefined) {
+        setSyncArchived(response.syncArchived);
+      }
+    });
+  }, []);
+
+  const handleToggleSyncArchived = useCallback(() => {
+    const newValue = syncArchived === 1 ? 0 : 1;
+    setSyncArchived(newValue);
+    chrome.runtime.sendMessage(
+      { type: "SET_SYNC_ARCHIVED", syncArchived: newValue },
+      (response) => {
+        if (!response?.ok) {
+          setSyncArchived(syncArchived);
+        }
+      },
+    );
+  }, [syncArchived]);
 
   useEffect(() => {
     chrome.storage.local.get(["encryptionKey"], (result) => {
@@ -156,6 +178,53 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         )}
       </div>
       <ApiEndpointEditor apiClient={apiClient} />
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>進階設定</div>
+        <button
+          role="switch"
+          aria-checked={syncArchived === 1}
+          aria-label="同步封存書籍"
+          onClick={handleToggleSyncArchived}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 14,
+            color: "#334155",
+            cursor: "pointer",
+            background: "transparent",
+            border: "none",
+            padding: 0,
+          }}
+        >
+          <span style={{
+            display: "inline-block",
+            width: 32,
+            height: 18,
+            borderRadius: 9,
+            background: syncArchived === 1 ? "#2563eb" : "#cbd5e1",
+            position: "relative",
+            transition: "background 0.2s",
+            flexShrink: 0,
+          }}>
+            <span style={{
+              display: "block",
+              width: 14,
+              height: 14,
+              borderRadius: 7,
+              background: "#fff",
+              position: "absolute",
+              top: 2,
+              left: syncArchived === 1 ? 16 : 2,
+              transition: "left 0.2s",
+            }} />
+          </span>
+          同步封存書籍
+        </button>
+        <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
+          啟用後，同步時會一併讀取已封存的書籍
+        </div>
+      </div>
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
         {leaveError && (
           <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{leaveError}</div>

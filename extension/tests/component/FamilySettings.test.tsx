@@ -429,4 +429,22 @@ describe("FamilySettings", () => {
       expect(screen.getByText("儲存失敗")).toBeInTheDocument();
     });
   });
+
+  describe("sync archived toggle", () => {
+    it("shows '同步封存書籍' toggle switch", async () => {
+      renderFamilySettings();
+
+      await waitFor(() => {
+        expect(screen.getByRole("switch", { name: "同步封存書籍" })).toBeInTheDocument();
+      });
+    });
+
+    it("shows description text for the toggle", async () => {
+      renderFamilySettings();
+
+      await waitFor(() => {
+        expect(screen.getByText("啟用後，同步時會一併讀取已封存的書籍")).toBeInTheDocument();
+      });
+    });
+  });
 });

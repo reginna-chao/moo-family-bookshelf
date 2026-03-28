@@ -207,20 +207,6 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     setSelectedIds(new Set());
   }, []);
 
-  const handleToggleSyncArchived = useCallback(() => {
-    const newValue = syncArchived === 1 ? 0 : 1;
-    setSyncArchived(newValue);
-    chrome.runtime.sendMessage(
-      { type: "SET_SYNC_ARCHIVED", syncArchived: newValue },
-      (response) => {
-        if (!response?.ok) {
-          // Revert on failure
-          setSyncArchived(syncArchived);
-        }
-      },
-    );
-  }, [syncArchived]);
-
   const activeBooks = books.filter(b => b.isArchived !== 1);
   const archivedBooks = books.filter(b => b.isArchived === 1);
   const currentViewBooks = archiveView === "active" ? activeBooks : archivedBooks;
@@ -303,48 +289,6 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
           }}
         >
           {syncLabel}
-        </button>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <button
-          role="switch"
-          aria-checked={syncArchived === 1}
-          aria-label="同步封存書籍"
-          onClick={handleToggleSyncArchived}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 13,
-            color: "#475569",
-            cursor: "pointer",
-            background: "transparent",
-            border: "none",
-            padding: 0,
-          }}
-        >
-          <span style={{
-            display: "inline-block",
-            width: 28,
-            height: 16,
-            borderRadius: 8,
-            background: syncArchived === 1 ? "#2563eb" : "#cbd5e1",
-            position: "relative",
-            transition: "background 0.2s",
-          }}>
-            <span style={{
-              display: "block",
-              width: 12,
-              height: 12,
-              borderRadius: 6,
-              background: "#fff",
-              position: "absolute",
-              top: 2,
-              left: syncArchived === 1 ? 14 : 2,
-              transition: "left 0.2s",
-            }} />
-          </span>
-          同步封存書籍
         </button>
       </div>
 

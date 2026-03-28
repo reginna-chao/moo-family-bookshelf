@@ -436,13 +436,6 @@ describe("PersonalShelf", () => {
   });
 
   describe("archive features", () => {
-    it("shows '同步封存書籍' toggle switch", async () => {
-      renderPersonalShelf();
-      await waitForBooksLoaded();
-
-      expect(screen.getByRole("switch", { name: "同步封存書籍" })).toBeInTheDocument();
-    });
-
     it("archive view tabs appear when syncArchived is enabled and there are archived books", async () => {
       // Mock scrapeBooks to include an archived book
       const { scrapeBooks } = await import("@/content/scraper");
