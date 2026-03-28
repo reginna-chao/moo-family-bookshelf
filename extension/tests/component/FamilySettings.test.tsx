@@ -446,5 +446,245 @@ describe("FamilySettings", () => {
         expect(screen.getByText("啟用後，同步時會一併讀取已封存的書籍")).toBeInTheDocument();
       });
     });
+
+    it("toggle is initially off (aria-checked false)", async () => {
+      // Default sendMessage does not call back, so syncArchived stays 0
+      renderFamilySettings();
+
+      await waitFor(() => {
+        const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
+        expect(toggle.getAttribute("aria-checked")).toBe("false");
+      });
+    });
+
+    it("toggle reflects initial GET_SYNC_ARCHIVED value of 1", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
+        (message: unknown, callback?: (response: unknown) => void) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
+            callback({ syncArchived: 1 });
+          }
+          return undefined as unknown as Promise<unknown>;
+        },
+      );
+
+      renderFamilySettings();
+
+      await waitFor(() => {
+        const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
+        expect(toggle.getAttribute("aria-checked")).toBe("true");
+      });
+    });
+
+    it("clicking toggle sends SET_SYNC_ARCHIVED message", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
+        (message: unknown, callback?: (response: unknown) => void) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
+            callback({ syncArchived: 0 });
+          }
+          if (msg.type === "SET_SYNC_ARCHIVED" && callback) {
+            callback({ ok: true });
+          }
+          return undefined as unknown as Promise<unknown>;
+        },
+      );
+
+      renderFamilySettings();
+
+      await waitFor(() => {
+        expect(screen.getByRole("switch", { name: "同步封存書籍" })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("switch", { name: "同步封存書籍" }));
+
+      // Should have sent SET_SYNC_ARCHIVED with value 1
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "SET_SYNC_ARCHIVED", syncArchived: 1 }),
+        expect.any(Function),
+      );
+    });
+
+    it("reverts toggle state when SET_SYNC_ARCHIVED response is not ok", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
+        (message: unknown, callback?: (response: unknown) => void) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
+            callback({ syncArchived: 0 });
+          }
+          if (msg.type === "SET_SYNC_ARCHIVED" && callback) {
+            callback({ ok: false });
+          }
+          return undefined as unknown as Promise<unknown>;
+        },
+      );
+
+      renderFamilySettings();
+
+      await waitFor(() => {
+        const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
+        expect(toggle.getAttribute("aria-checked")).toBe("false");
+      });
+
+      fireEvent.click(screen.getByRole("switch", { name: "同步封存書籍" }));
+
+      // Should revert back to false after failed response
+      await waitFor(() => {
+        const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
+        expect(toggle.getAttribute("aria-checked")).toBe("false");
+      });
+    });
+  });
+
+  describe("members loading error", () => {
+    it("shows error message when getFamilyMembers fails", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          error: { code: "INTERNAL_ERROR", message: "無法載入成員" },
+        }),
+      });
+
+      renderFamilySettings({ apiClient });
+
+      await waitFor(() => {
+        expect(screen.getByText("無法載入成員")).toBeInTheDocument();
+      });
+    });
+
+    it("shows retry button when members fail to load", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          error: { code: "INTERNAL_ERROR", message: "載入失敗" },
+        }),
+      });
+
+      renderFamilySettings({ apiClient });
+
+      await waitFor(() => {
+        expect(screen.getByText("載入失敗")).toBeInTheDocument();
+        expect(screen.getByText("重試")).toBeInTheDocument();
+      });
+    });
+
+    it("retry button re-fetches members", async () => {
+      const getFamilyMembers = vi.fn()
+        .mockResolvedValueOnce({
+          error: { code: "INTERNAL_ERROR", message: "載入失敗" },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            familyId: "fam-123",
+            ownerId: "user-abc12345",
+            members: [{ userId: "user-abc12345", displayName: "小明" }],
+            maxMembers: 6,
+            createdAt: "2026-01-01",
+          },
+        });
+
+      const apiClient = createMockApiClient({ getFamilyMembers });
+      renderFamilySettings({ apiClient });
+
+      await waitFor(() => {
+        expect(screen.getByText("載入失敗")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("重試"));
+
+      await waitFor(() => {
+        expect(screen.getByText("小明")).toBeInTheDocument();
+      });
+
+      expect(getFamilyMembers).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("leave family errors", () => {
+    it("shows generic error when leave throws an exception", async () => {
+      const apiClient = createMockApiClient({
+        leaveFamily: vi.fn().mockRejectedValue(new Error("Network down")),
+      });
+      renderFamilySettings({ apiClient });
+
+      fireEvent.click(screen.getByText("離開家庭"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定離開")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("確定離開"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Network down")).toBeInTheDocument();
+      });
+
+      // Should return to idle state after error
+      await waitFor(() => {
+        expect(screen.getByText("離開家庭")).toBeInTheDocument();
+      });
+    });
+
+    it("handles non-Error exception during leave", async () => {
+      const apiClient = createMockApiClient({
+        leaveFamily: vi.fn().mockRejectedValue("string error"),
+      });
+      renderFamilySettings({ apiClient });
+
+      fireEvent.click(screen.getByText("離開家庭"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定離開")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("確定離開"));
+
+      await waitFor(() => {
+        expect(screen.getByText("發生未知錯誤")).toBeInTheDocument();
+      });
+    });
+
+    it("calls onLeave after successful leave", async () => {
+      const onLeave = vi.fn();
+      renderFamilySettings({ onLeave });
+
+      fireEvent.click(screen.getByText("離開家庭"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定離開")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("確定離開"));
+
+      await waitFor(() => {
+        expect(onLeave).toHaveBeenCalledOnce();
+      });
+    });
+
+    it("shows 離開中... during leave process", async () => {
+      let resolveLeave: (value: unknown) => void;
+      const apiClient = createMockApiClient({
+        leaveFamily: vi.fn().mockImplementation(
+          () => new Promise((resolve) => { resolveLeave = resolve; }),
+        ),
+      });
+      renderFamilySettings({ apiClient });
+
+      fireEvent.click(screen.getByText("離開家庭"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定離開")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("確定離開"));
+
+      await waitFor(() => {
+        expect(screen.getByText("離開中...")).toBeInTheDocument();
+      });
+
+      // Resolve to clean up
+      resolveLeave!({ data: { ok: true } });
+    });
   });
 });

@@ -435,6 +435,207 @@ describe("PersonalShelf", () => {
     });
   });
 
+  describe("error state", () => {
+    it("shows error message when scraping fails", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockRejectedValueOnce(new Error("Scrape failed"));
+
+      renderPersonalShelf();
+
+      await waitFor(() => {
+        expect(screen.getByText("Scrape failed")).toBeInTheDocument();
+      });
+
+      // Should show a return button
+      expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
+    });
+
+    it("return button in error state transitions to ready", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockRejectedValueOnce(new Error("Error test"));
+
+      renderPersonalShelf();
+
+      await waitFor(() => {
+        expect(screen.getByText("Error test")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "返回" }));
+
+      // After clicking return, the error should go away
+      // (status changes to "ready" but there are no books, so we check error is gone)
+      expect(screen.queryByText("Error test")).not.toBeInTheDocument();
+    });
+
+    it("shows generic error for non-Error exceptions", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockRejectedValueOnce("string error");
+
+      renderPersonalShelf();
+
+      await waitFor(() => {
+        expect(screen.getByText("載入失敗")).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("decryption path", () => {
+    it("loads and merges encrypted saved books from API", async () => {
+      const { decrypt } = await import("@/crypto/encrypt");
+      vi.mocked(decrypt).mockResolvedValue(
+        JSON.stringify({
+          books: [
+            {
+              bookId: "book-1",
+              title: "測試書籍一",
+              author: "作者A",
+              coverUrl: "https://example.com/cover1.jpg",
+              readmooUrl: "https://mooink.readmoo.com/book/book-1",
+              isShared: true,
+              isbn: "",
+            },
+          ],
+        }),
+      );
+
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockResolvedValue({
+          data: { payload: "encrypted-data" },
+        }),
+      });
+
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("測試書籍一")).toBeInTheDocument();
+      });
+
+      // The book should have preserved its isShared=true from saved data
+      // Check by looking for "開放" badge (at least one)
+      const openBadges = screen.queryAllByText("開放");
+      expect(openBadges.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("handles decryption failure gracefully", async () => {
+      const { decrypt } = await import("@/crypto/encrypt");
+      vi.mocked(decrypt).mockRejectedValueOnce(new Error("Bad key"));
+
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockResolvedValue({
+          data: { payload: "corrupted-data" },
+        }),
+      });
+
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+      // Should still render books (from scrape), ignoring failed decryption
+      await waitForBooksLoaded();
+      expect(screen.getByText("測試書籍一")).toBeInTheDocument();
+    });
+  });
+
+  describe("save flow", () => {
+    it("clears isDirty after successful save", async () => {
+      const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
+      const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+      await waitForBooksLoaded();
+
+      // Make dirty
+      const checkboxes = screen.getAllByRole("checkbox");
+      fireEvent.click(checkboxes[0]);
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+
+      // Save button should be visible
+      expect(screen.getByRole("button", { name: "儲存變更" })).toBeInTheDocument();
+
+      // Click save
+      fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+
+      // After successful save, isDirty should be false — floating bar disappears
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "儲存變更" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "取消變更" })).not.toBeInTheDocument();
+      });
+    });
+
+    it("shows error when save fails via API error", async () => {
+      const mockUpdate = vi.fn().mockResolvedValue({
+        error: { code: "SAVE_FAILED", message: "儲存失敗" },
+      });
+      const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+      await waitForBooksLoaded();
+
+      const checkboxes = screen.getAllByRole("checkbox");
+      fireEvent.click(checkboxes[0]);
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("儲存失敗")).toBeInTheDocument();
+      });
+    });
+
+    it("shows error when encryption key is missing during save", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+          // Return no encryptionKey
+          const result = { displayName: "小明" };
+          if (typeof callback === "function") {
+            callback(result);
+          }
+          return Promise.resolve(result) as unknown as void;
+        },
+      );
+
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      const checkboxes = screen.getAllByRole("checkbox");
+      fireEvent.click(checkboxes[0]);
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("找不到加密金鑰")).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("sync button", () => {
+    it("shows 同步書櫃 button", async () => {
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      expect(screen.getByRole("button", { name: "同步書櫃" })).toBeInTheDocument();
+    });
+
+    it("shows book count in header", async () => {
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      expect(screen.getByText("(3 本)")).toBeInTheDocument();
+    });
+  });
+
+  describe("empty states", () => {
+    it("shows 尚無書籍 when active books are empty", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce([]);
+
+      renderPersonalShelf();
+
+      await waitFor(() => {
+        expect(screen.getByText("尚無書籍")).toBeInTheDocument();
+      });
+    });
+  });
+
   describe("archive features", () => {
     it("archive view tabs appear when syncArchived is enabled and there are archived books", async () => {
       // Mock scrapeBooks to include an archived book
