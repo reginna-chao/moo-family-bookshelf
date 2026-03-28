@@ -18,7 +18,10 @@ export default defineConfig({
     },
   },
   build: {
-    emptyOutDir: true,
+    // In watch mode (pnpm dev), don't clear dist/ — it breaks Chrome extension
+    // reload because files disappear momentarily during rebuild.
+    // Full builds (pnpm build) run verify-build.ts afterwards anyway.
+    emptyOutDir: !process.argv.includes("--watch"),
     outDir: "dist",
     rollupOptions: {
       input: {
