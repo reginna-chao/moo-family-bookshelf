@@ -65,8 +65,13 @@ describe("SettingsPage", () => {
 
   // --- Sync code ---
 
-  it("renders the sync code and copy button", () => {
+  it("renders the sync code and copy button", async () => {
     render(<SettingsPage {...defaultProps} />);
+
+    // Wait for async member loading to settle before asserting
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
 
     expect(screen.getByText("moo-fam1-key1")).toBeInTheDocument();
     expect(
@@ -76,6 +81,11 @@ describe("SettingsPage", () => {
 
   it("copy sync code changes button text to '已複製'", async () => {
     render(<SettingsPage {...defaultProps} />);
+
+    // Wait for async member loading to settle
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "複製同步碼" }));
 
@@ -89,12 +99,13 @@ describe("SettingsPage", () => {
 
   // --- Members ---
 
-  it("shows loading state while fetching members", () => {
+  it("shows loading state while fetching members", async () => {
     // Never resolve so loading stays visible
     mockGetFamilyMembers.mockReturnValue(new Promise(() => {}));
     render(<SettingsPage {...defaultProps} />);
 
-    expect(screen.getByText("載入中...")).toBeInTheDocument();
+    // Use findByText to wait for React to flush initial render effects
+    expect(await screen.findByText("載入中...")).toBeInTheDocument();
   });
 
   it("shows member count and member IDs after loading", async () => {
