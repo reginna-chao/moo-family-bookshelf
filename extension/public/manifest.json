@@ -3,15 +3,15 @@
   "name": "MooFamily Bookshelf",
   "version": "0.1.0",
   "description": "讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍",
-  "permissions": ["storage", "activeTab"],
-  "host_permissions": ["https://readmoo.com/*", "https://*.readmoo.com/*"],
+  "permissions": ["storage", "activeTab", "alarms"],
+  "host_permissions": ["https://read.readmoo.com/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["https://readmoo.com/*", "https://*.readmoo.com/*"],
+      "matches": ["https://read.readmoo.com/*"],
       "js": ["content.js"],
       "css": ["assets/style.css"]
     }
@@ -19,7 +19,7 @@
   "web_accessible_resources": [
     {
       "resources": ["chunks/*"],
-      "matches": ["https://readmoo.com/*", "https://*.readmoo.com/*"]
+      "matches": ["https://read.readmoo.com/*"]
     }
   ],
   "icons": {

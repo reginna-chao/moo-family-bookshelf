@@ -38,9 +38,21 @@ function createStorageAreaMock(store: Record<string, unknown>) {
     onInstalled: {
       addListener: vi.fn(),
     },
+    lastError: null,
   },
   storage: {
     local: createStorageAreaMock(localStorageMock),
     sync: createStorageAreaMock(syncStorageMock),
+  },
+  alarms: {
+    create: vi.fn(),
+    get: vi.fn().mockResolvedValue(undefined),
+    onAlarm: {
+      addListener: vi.fn(),
+    },
+  },
+  tabs: {
+    query: vi.fn().mockResolvedValue([]),
+    sendMessage: vi.fn(),
   },
 } as unknown as typeof chrome;

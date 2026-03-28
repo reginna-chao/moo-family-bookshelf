@@ -46,6 +46,8 @@ export interface FamilyBookshelf {
 export class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
+  /** Guard: true while a token refresh is in flight */
+  private refreshInProgress: Promise<boolean> | null = null;
 
   constructor(apiUrl?: string) {
     this.baseUrl = (apiUrl ?? DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
@@ -158,6 +160,8 @@ export class ApiClient {
   private async request<T>(
     path: string,
     init?: RequestInit,
+    /** When true, skip 401 interception to prevent infinite loops */
+    skipRefresh = false,
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
@@ -172,6 +176,22 @@ export class ApiClient {
     try {
       const response = await fetch(url, { ...init, headers });
       const json = (await response.json()) as ApiResponse<T>;
+
+      // Intercept 401 — attempt automatic token refresh
+      if (response.status === 401 && !skipRefresh) {
+        const refreshed = await this.refreshToken();
+        if (refreshed) {
+          // Retry original request with the new token (skip refresh to avoid loop)
+          return this.request<T>(path, init, true);
+        }
+        // Refresh failed — return the original 401 error
+        return {
+          error: json.error ?? {
+            code: "UNAUTHORIZED",
+            message: "Authentication failed",
+          },
+        };
+      }
 
       if (!response.ok) {
         return {
@@ -190,6 +210,72 @@ export class ApiClient {
           message: err instanceof Error ? err.message : "Network error",
         },
       };
+    }
+  }
+
+  /**
+   * Attempt to refresh the auth token. Returns true on success.
+   * Concurrent callers share a single in-flight refresh request.
+   */
+  private async refreshToken(): Promise<boolean> {
+    // Deduplicate: if a refresh is already in progress, wait for it
+    if (this.refreshInProgress) {
+      return this.refreshInProgress;
+    }
+
+    this.refreshInProgress = this.doRefreshToken();
+    try {
+      return await this.refreshInProgress;
+    } finally {
+      this.refreshInProgress = null;
+    }
+  }
+
+  private async doRefreshToken(): Promise<boolean> {
+    try {
+      const storage = await chrome.storage.local.get(["userId", "familyId"]);
+      const userId = storage.userId as string | undefined;
+      const familyId = storage.familyId as string | undefined;
+      if (!userId || !familyId) return false;
+
+      const result = await this.request<{ token: string }>(
+        "/api/auth/refresh",
+        {
+          method: "POST",
+          body: JSON.stringify({ userId, familyId }),
+        },
+        true, // skip refresh interception — this IS the refresh call
+      );
+
+      if (result.data?.token) {
+        this.authToken = result.data.token;
+        await chrome.storage.local.set({ authToken: result.data.token });
+        return true;
+      }
+
+      // Handle NOT_FAMILY_MEMBER — user was removed from family
+      if (result.error?.code === "NOT_FAMILY_MEMBER") {
+        await chrome.storage.local.remove([
+          "familyId",
+          "encryptionKey",
+          "authToken",
+        ]);
+        try {
+          await chrome.storage.sync.remove(["familyId"]);
+        } catch {
+          // sync storage may not be available in all contexts
+        }
+        // Notify content script / dialog to reset to onboarding
+        try {
+          chrome.runtime.sendMessage({ type: "FAMILY_REMOVED" });
+        } catch {
+          // Message may fail if no listener is active
+        }
+      }
+
+      return false;
+    } catch {
+      return false;
     }
   }
 }

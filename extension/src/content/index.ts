@@ -108,15 +108,47 @@ function tryScrapeAndCacheEmail(): void {
   }, 1000);
 }
 
+/**
+ * Handle background sync requests from the service worker.
+ * The background alarm handler sends TRIGGER_BOOK_SYNC when
+ * it finds an open read.readmoo.com tab.
+ */
+function listenForBackgroundSync(): void {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message.type === "TRIGGER_BOOK_SYNC") {
+      import("../sync/syncBooks").then(async ({ syncBooks }) => {
+        const storageResult = await chrome.storage.local.get(["userId", "authToken", "apiEndpoint"]);
+        const userId = storageResult.userId as string | undefined;
+        if (!userId) {
+          sendResponse({ success: false, error: "No userId" });
+          return;
+        }
+
+        const { ApiClient } = await import("../api/client");
+        const apiClient = new ApiClient(storageResult.apiEndpoint as string | undefined);
+        if (storageResult.authToken) {
+          apiClient.setAuthToken(storageResult.authToken as string);
+        }
+
+        const result = await syncBooks({ navigate: true, userId, apiClient });
+        sendResponse({ success: result.success, error: result.error });
+      });
+      return true; // async response
+    }
+  });
+}
+
 // Run on page load
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     injectFamilyBookshelfButton();
     tryScrapeAndCacheEmail();
+    listenForBackgroundSync();
   });
 } else {
   injectFamilyBookshelfButton();
   tryScrapeAndCacheEmail();
+  listenForBackgroundSync();
 }
 
 // Also listen for hash changes (SPA navigation)

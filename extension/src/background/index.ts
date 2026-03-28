@@ -15,8 +15,52 @@
 /** Keys that are synced across devices via chrome.storage.sync */
 const SYNCED_KEYS = ["familyId"] as const;
 
-chrome.runtime.onInstalled.addListener(() => {
+/** Alarm name for scheduled background book sync */
+const BOOK_SYNC_ALARM_NAME = "bookSync";
+
+/** Background sync interval in minutes (24 hours) */
+const BACKGROUND_SYNC_INTERVAL_MIN = 24 * 60;
+
+chrome.runtime.onInstalled.addListener(async () => {
   console.log("MooFamily Bookshelf installed");
+
+  // Create recurring alarm for background book sync (skip if already exists)
+  const existing = await chrome.alarms.get(BOOK_SYNC_ALARM_NAME);
+  if (!existing) {
+    chrome.alarms.create(BOOK_SYNC_ALARM_NAME, {
+      periodInMinutes: BACKGROUND_SYNC_INTERVAL_MIN,
+    });
+  }
+});
+
+/**
+ * Handle the background sync alarm.
+ * Finds an open read.readmoo.com tab and sends a sync message.
+ */
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== BOOK_SYNC_ALARM_NAME) return;
+
+  try {
+    const tabs = await chrome.tabs.query({ url: "https://read.readmoo.com/*" });
+    if (tabs.length === 0 || !tabs[0].id) {
+      console.log("[bookSync] No read.readmoo.com tab found, skipping sync");
+      return;
+    }
+
+    chrome.tabs.sendMessage(tabs[0].id, { type: "TRIGGER_BOOK_SYNC" }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.warn("[bookSync] Failed to message tab:", chrome.runtime.lastError.message);
+        return;
+      }
+      if (response?.success) {
+        console.log("[bookSync] Background sync completed successfully");
+      } else {
+        console.warn("[bookSync] Background sync failed:", response?.error);
+      }
+    });
+  } catch (err) {
+    console.warn("[bookSync] Alarm handler error:", err);
+  }
 });
 
 /**
