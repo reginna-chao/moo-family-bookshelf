@@ -305,8 +305,9 @@ describe("scrapeArchivedBooks", () => {
     const promise = scrapeArchivedBooks();
 
     // Advance past the 3000ms waitForElement timeout (polls every 200ms)
-    // Need to advance in steps so the setInterval fires
-    for (let i = 0; i < 20; i++) {
+    // Plus the finally block: 2nd waitForElement (3000ms) + wait(2000ms)
+    // Total needed: ~8000ms — advance in steps so setInterval fires
+    for (let i = 0; i < 50; i++) {
       await vi.advanceTimersByTimeAsync(200);
     }
 
