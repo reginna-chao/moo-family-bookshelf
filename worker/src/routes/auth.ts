@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
 import { kvKeys, type AuthRecord } from "../kv/schema";
+import { getAuthenticatedUserId } from "../middleware/auth";
 
 export const authRoutes = new Hono<{ Bindings: Env }>();
 
@@ -56,8 +57,17 @@ authRoutes.post("/hash", async (c) => {
   return c.json({ data: { userId } });
 });
 
-// POST /api/auth/refresh — refresh auth token (public, no auth required)
+// POST /api/auth/refresh — refresh auth token (requires existing valid token)
 authRoutes.post("/refresh", async (c) => {
+  // Require authentication: caller must have a valid Bearer token
+  const callerUserId = getAuthenticatedUserId(c);
+  if (!callerUserId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
   let body: { userId: string; familyId: string } | null;
   try {
     body = await c.req.json();
@@ -77,6 +87,14 @@ authRoutes.post("/refresh", async (c) => {
     return c.json(
       { error: { code: "INVALID_INPUT", message: "userId must be a 64-char hex string" } },
       400,
+    );
+  }
+
+  // Verify caller identity matches the requested userId (prevent impersonation)
+  if (callerUserId !== body.userId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "Cannot refresh token for another user" } },
+      403,
     );
   }
 

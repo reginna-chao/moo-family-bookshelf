@@ -759,9 +759,9 @@ describe("Family Bookshelf Aggregation", () => {
       undefined,
       token1,
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("FORBIDDEN");
+    expect(json.error.code).toBe("NOT_FOUND");
   });
 
   it("should return 401 for unauthenticated bookshelf request", async () => {

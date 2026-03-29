@@ -252,8 +252,8 @@ familyRoutes.get("/:id/members", async (c) => {
   const memberFamily = await c.env.KV.get(kvKeys.member(userId));
   if (memberFamily !== familyId) {
     return c.json(
-      { error: { code: "FORBIDDEN", message: "Not a family member" } },
-      403,
+      { error: { code: "NOT_FOUND", message: "Family not found" } },
+      404,
     );
   }
 

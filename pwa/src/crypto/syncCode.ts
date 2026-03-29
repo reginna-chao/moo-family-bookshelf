@@ -55,9 +55,7 @@ export function decodeSyncCode(code: string): SyncCodeData {
   const encryptionKey = parts.slice(3).join("-");
 
   if (prefix !== SYNC_CODE_PREFIX) {
-    throw new SyncCodeError(
-      `Invalid sync code prefix: expected "${SYNC_CODE_PREFIX}", got "${prefix}"`,
-    );
+    throw new SyncCodeError("Invalid sync code format");
   }
 
   if (!parts[1] || !parts[2]) {

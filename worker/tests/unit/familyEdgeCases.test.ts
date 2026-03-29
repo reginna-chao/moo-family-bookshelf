@@ -210,14 +210,14 @@ describe("GET /api/family/:id/members edge cases", () => {
     expect(json.error.code).toBe("INVALID_FAMILY_ID");
   });
 
-  it("should return 403 FORBIDDEN when user is not a member of the family", async () => {
+  it("should return 404 NOT_FOUND when user is not a member of the family", async () => {
     const { authToken } = await createFamily("user1");
 
     // user1 is a member of their own family, not abcd-1234
     const res = await request("GET", "/api/family/abcd-1234/members", undefined, authToken);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("FORBIDDEN");
+    expect(json.error.code).toBe("NOT_FOUND");
   });
 
   it("should return 404 FAMILY_NOT_FOUND when family record is deleted", async () => {

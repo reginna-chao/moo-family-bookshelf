@@ -157,6 +157,16 @@ describe("isPublicRoute", () => {
     expect(isPublicRoute("POST", "/api/family/abcd-1234/join/")).toBe(true);
   });
 
+  it("should match POST /api/auth/hash", () => {
+    expect(isPublicRoute("POST", "/api/auth/hash")).toBe(true);
+    expect(isPublicRoute("POST", "/api/auth/hash/")).toBe(true);
+  });
+
+  it("should NOT match POST /api/auth/refresh (requires auth)", () => {
+    expect(isPublicRoute("POST", "/api/auth/refresh")).toBe(false);
+    expect(isPublicRoute("POST", "/api/auth/refresh/")).toBe(false);
+  });
+
   it("should not match other methods or paths", () => {
     expect(isPublicRoute("GET", "/api/family")).toBe(false);
     expect(isPublicRoute("DELETE", "/api/family/abcd-1234/member/user1")).toBe(false);
