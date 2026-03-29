@@ -18,6 +18,7 @@ export default defineConfig({
     },
   },
   build: {
+    sourcemap: process.argv.includes("--watch") ? "inline" : false,
     // In watch mode (pnpm dev), don't clear dist/ — it breaks Chrome extension
     // reload because files disappear momentarily during rebuild.
     // Full builds (pnpm build) run verify-build.ts afterwards anyway.
