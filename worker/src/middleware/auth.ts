@@ -1,7 +1,7 @@
 import { createMiddleware } from "hono/factory";
 import type { Context } from "hono";
 import type { Env } from "../index";
-import { kvKeys, type AuthRecord } from "../kv/schema";
+import { kvKeys, type AuthRecord, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isPublicRoute } from "../utils/routes";
 
 // Extend Hono Variables to carry authenticated userId
@@ -72,9 +72,6 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(
 export function getAuthenticatedUserId(c: Context): string | null {
   return c.get("authUserId") as string | null;
 }
-
-/** Token TTL: 90 days in seconds */
-const TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 /**
  * Generate a new auth token for a user and store both directions in KV.

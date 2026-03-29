@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
-import { kvKeys, type AuthRecord } from "../kv/schema";
+import { kvKeys, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { isValidFamilyId } from "../utils/validation";
+import { generateAuthToken } from "../middleware/auth";
 
 export const authRoutes = new Hono<{ Bindings: Env }>();
 
@@ -8,9 +10,6 @@ export const authRoutes = new Hono<{ Bindings: Env }>();
 function isValidSha256Hex(value: string): boolean {
   return /^[a-f0-9]{64}$/.test(value);
 }
-
-/** Token TTL: 90 days in seconds */
-const TOKEN_TTL_SECONDS = 7776000;
 
 /**
  * Convert ArrayBuffer to hex string.
@@ -83,10 +82,10 @@ authRoutes.post("/refresh", async (c) => {
   if (
     !body?.familyId ||
     typeof body.familyId !== "string" ||
-    body.familyId.trim().length === 0
+    !isValidFamilyId(body.familyId)
   ) {
     return c.json(
-      { error: { code: "INVALID_INPUT", message: "familyId is required" } },
+      { error: { code: "INVALID_INPUT", message: "familyId must match format xxxx-xxxx" } },
       400,
     );
   }
@@ -101,33 +100,8 @@ authRoutes.post("/refresh", async (c) => {
     );
   }
 
-  // Delete old token if exists
-  const existingAuth = await c.env.KV.get<AuthRecord>(kvKeys.auth(body.userId), "json");
-  if (existingAuth?.token) {
-    await c.env.KV.delete(kvKeys.authToken(existingAuth.token));
-  }
+  const newToken = await generateAuthToken(c.env.KV, body.userId);
+  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
-  // Generate new 32-byte random token (64 hex chars)
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  const newToken = Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  const authRecord: AuthRecord = {
-    token: newToken,
-    createdAt: new Date().toISOString(),
-  };
-
-  // Store bidirectional entries with 90-day TTL
-  await Promise.all([
-    c.env.KV.put(kvKeys.auth(body.userId), JSON.stringify(authRecord), {
-      expirationTtl: TOKEN_TTL_SECONDS,
-    }),
-    c.env.KV.put(kvKeys.authToken(newToken), body.userId, {
-      expirationTtl: TOKEN_TTL_SECONDS,
-    }),
-  ]);
-
-  return c.json({ data: { token: newToken, expiresAt: Date.now() + TOKEN_TTL_SECONDS * 1000 } });
+  return c.json({ data: { token: newToken, expiresAt } });
 });

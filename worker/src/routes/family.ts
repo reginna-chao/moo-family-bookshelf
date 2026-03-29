@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
-import { kvKeys, type FamilyMember, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember } from "../kv/schema";
+import { kvKeys, type FamilyMember, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName } from "../utils/validation";
 import { generateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 
@@ -60,7 +60,7 @@ familyRoutes.post("/", async (c) => {
   ]);
 
   const authToken = await generateAuthToken(c.env.KV, body.userId);
-  const expiresAt = Date.now() + 7776000 * 1000; // 90 days
+  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { ...record, authToken, expiresAt } }, 201);
 });
@@ -149,7 +149,7 @@ familyRoutes.post("/:id/join", async (c) => {
   ]);
 
   const authToken = await generateAuthToken(c.env.KV, body.userId);
-  const expiresAt = Date.now() + 7776000 * 1000; // 90 days
+  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { ...record, authToken, expiresAt } });
 });

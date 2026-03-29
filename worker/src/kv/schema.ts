@@ -65,3 +65,6 @@ export interface AuthRecord {
   token: string;
   createdAt: string;
 }
+
+/** Token TTL: 90 days in seconds. Shared by auth middleware and routes. */
+export const TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
