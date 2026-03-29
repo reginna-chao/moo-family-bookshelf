@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ApiClient } from "@/api/client";
+import { ApiClient, BoolFlag } from "@/api/client";
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -223,7 +223,7 @@ describe("ApiClient", () => {
                 isbn: "978-0000000000",
                 coverUrl: "https://example.com/cover.jpg",
                 readmooUrl: "https://readmoo.com/book/b1",
-                isShared: 1,
+                isShared: BoolFlag.TRUE,
               },
             ],
           },

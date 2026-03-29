@@ -5,7 +5,7 @@
  * C) Manual sync button
  */
 
-import { ApiClient, BookEntry } from "../api/client";
+import { ApiClient, BookEntry, BoolFlag } from "../api/client";
 import { ScrapedBook, scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { mergeBooks } from "./mergeBooks";
@@ -97,17 +97,17 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     const scrapedBooks: ScrapedBook[] = await scrapeBooks();
 
     // Step 3b: Optionally scrape archived books
-    let syncArchived = 0;
+    let syncArchived = BoolFlag.FALSE;
     try {
       const archiveResult = await chrome.storage.local.get(["syncArchived"]);
-      syncArchived = (archiveResult.syncArchived as number | undefined) ?? 0;
+      syncArchived = (archiveResult.syncArchived as number | undefined) ?? BoolFlag.FALSE;
     } catch {
       // Archive setting unavailable — skip archive sync
     }
 
     let allScrapedBooks: ScrapedBook[] = [...scrapedBooks];
 
-    if (syncArchived === 1) {
+    if (syncArchived === BoolFlag.TRUE) {
       const archivedBooks = await scrapeArchivedBooks();
       allScrapedBooks = [...allScrapedBooks, ...archivedBooks];
     }

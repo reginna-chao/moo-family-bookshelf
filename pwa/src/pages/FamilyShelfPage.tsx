@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { BookOpen } from "lucide-react";
+import { BoolFlag } from "@/api/client";
 import type { ApiClient, BookEntry } from "@/api/client";
 import { importKey, decrypt } from "@/crypto/encrypt";
 import { useSearch } from "@/hooks/useSearch";
@@ -93,7 +94,7 @@ export function FamilyShelfPage({
           decryptedMembers.push({
             userId: member.userId,
             displayName: displayName || member.userId.slice(0, 8),
-            books: books.filter((b) => b.isShared === 1),
+            books: books.filter((b) => b.isShared === BoolFlag.TRUE),
           });
         } catch {
           decryptedMembers.push({

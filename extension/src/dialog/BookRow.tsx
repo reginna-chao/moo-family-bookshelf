@@ -1,5 +1,5 @@
 import React from "react";
-import { BookEntry } from "../api/client";
+import { BookEntry, BoolFlag } from "../api/client";
 
 interface BookRowProps {
   book: BookEntry;
@@ -9,7 +9,7 @@ interface BookRowProps {
 }
 
 export const BookRow = React.memo(function BookRow({ book, selected, onSelect, onToggle }: BookRowProps) {
-  const isOn = book.isShared;
+  const isOn = book.isShared === BoolFlag.TRUE;
 
   return (
     <div
@@ -50,7 +50,7 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
           }}>
             {book.title}
           </span>
-          {book.isArchived === 1 && (
+          {book.isArchived === BoolFlag.TRUE && (
             <span style={{
               fontSize: 10,
               padding: "1px 5px",

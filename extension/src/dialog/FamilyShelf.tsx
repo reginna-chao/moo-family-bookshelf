@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { ApiClient, BookEntry } from "../api/client";
+import { ApiClient, BookEntry, BoolFlag } from "../api/client";
 import { importKey, decrypt } from "../crypto/encrypt";
 import { BookCard, BookWithMember } from "./BookCard";
 import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
@@ -101,7 +101,7 @@ export function FamilyShelf({ familyId, userId, apiClient }: FamilyShelfProps) {
           decryptedMembers.push({
             userId: member.userId,
             displayName: displayName || member.userId.slice(0, 8),
-            books: books.filter((b) => b.isShared),
+            books: books.filter((b) => b.isShared === BoolFlag.TRUE),
           });
         } catch {
           // Decryption failed — skip this member's books

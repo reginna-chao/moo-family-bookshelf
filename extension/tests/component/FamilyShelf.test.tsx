@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient } from "@/api/client";
 
 // Mock crypto module
 vi.mock("@/crypto/encrypt", () => ({
@@ -46,7 +46,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
-function makeMemberPayload(displayName: string, books: Array<{ bookId: string; title: string; author: string; isShared: boolean }>) {
+function makeMemberPayload(displayName: string, books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>) {
   return JSON.stringify({ displayName, books });
 }
 
@@ -98,7 +98,7 @@ describe("FamilyShelf", () => {
             {
               userId: "user-2",
               payload: makeMemberPayload("Alice", [
-                { bookId: "b1", title: "Book 1", author: "Author", isShared: false },
+                { bookId: "b1", title: "Book 1", author: "Author", isShared: BoolFlag.FALSE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -123,8 +123,8 @@ describe("FamilyShelf", () => {
             {
               userId: "user-2",
               payload: makeMemberPayload("Alice", [
-                { bookId: "b1", title: "共享書籍一", author: "作者A", isShared: true },
-                { bookId: "b2", title: "私密書籍", author: "作者B", isShared: false },
+                { bookId: "b1", title: "共享書籍一", author: "作者A", isShared: BoolFlag.TRUE },
+                { bookId: "b2", title: "私密書籍", author: "作者B", isShared: BoolFlag.FALSE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -172,7 +172,7 @@ describe("FamilyShelf", () => {
             {
               userId: "user-2",
               payload: makeMemberPayload("Alice", [
-                { bookId: "b1", title: "重試成功書", author: "A", isShared: true },
+                { bookId: "b1", title: "重試成功書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -220,7 +220,7 @@ describe("FamilyShelf", () => {
             {
               userId: "user-3",
               payload: makeMemberPayload("Bob", [
-                { bookId: "b1", title: "Bob的書", author: "A", isShared: true },
+                { bookId: "b1", title: "Bob的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -254,7 +254,7 @@ describe("FamilyShelf", () => {
             {
               userId: "user-3",
               payload: makeMemberPayload("Carol", [
-                { bookId: "b2", title: "Carol的書", author: "C", isShared: true },
+                { bookId: "b2", title: "Carol的書", author: "C", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -279,7 +279,7 @@ describe("FamilyShelf", () => {
             {
               userId: "abcdefghijklmnop",
               payload: makeMemberPayload("", [
-                { bookId: "b1", title: "匿名的書", author: "A", isShared: true },
+                { bookId: "b1", title: "匿名的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -306,7 +306,7 @@ describe("FamilyShelf", () => {
             {
               userId: "user-2",
               payload: makeMemberPayload("Alice", [
-                { bookId: "b1", title: "Alice的書", author: "A", isShared: true },
+                { bookId: "b1", title: "Alice的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -331,14 +331,14 @@ describe("FamilyShelf", () => {
             {
               userId: "user-1",
               payload: makeMemberPayload("Me", [
-                { bookId: "b1", title: "我的書", author: "A", isShared: true },
+                { bookId: "b1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
             {
               userId: "user-2",
               payload: makeMemberPayload("Alice", [
-                { bookId: "b2", title: "Alice的書", author: "B", isShared: true },
+                { bookId: "b2", title: "Alice的書", author: "B", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -373,8 +373,8 @@ describe("FamilyShelf", () => {
             {
               userId: "user-2",
               payload: makeMemberPayload("Alice", [
-                { bookId: "b1", title: "書一", author: "A", isShared: true },
-                { bookId: "b2", title: "書二", author: "B", isShared: true },
+                { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
+                { bookId: "b2", title: "書二", author: "B", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -399,7 +399,7 @@ describe("FamilyShelf", () => {
             {
               userId: "user-2",
               payload: makeMemberPayload("Alice", [
-                { bookId: "b1", title: "書一", author: "A", isShared: true },
+                { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -467,14 +467,14 @@ describe("FamilyShelf", () => {
             {
               userId: "user-1",
               payload: makeMemberPayload("小明", [
-                { bookId: "b1", title: "我的書", author: "A", isShared: true },
+                { bookId: "b1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
             {
               userId: "user-2",
               payload: makeMemberPayload("Alice", [
-                { bookId: "b2", title: "Alice的書", author: "B", isShared: true },
+                { bookId: "b2", title: "Alice的書", author: "B", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -522,7 +522,7 @@ describe("FamilyShelf", () => {
             {
               userId: "user-1",
               payload: makeMemberPayload("小明", [
-                { bookId: "b1", title: "我的書", author: "A", isShared: true },
+                { bookId: "b1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },

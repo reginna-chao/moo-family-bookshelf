@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { BoolFlag } from "@/api/client";
 
 describe("scrapeUserEmail", () => {
   let scrapeUserEmail: () => string | null;
@@ -257,7 +258,7 @@ describe("scrapeBooks", () => {
 
     const result = await promise;
     expect(result).toHaveLength(1);
-    expect(result[0].isArchived).toBe(0);
+    expect(result[0].isArchived).toBe(BoolFlag.FALSE);
   });
 });
 
@@ -394,7 +395,7 @@ describe("scrapeArchivedBooks", () => {
     // Should have books marked as archived
     expect(result.length).toBeGreaterThan(0);
     for (const book of result) {
-      expect(book.isArchived).toBe(1);
+      expect(book.isArchived).toBe(BoolFlag.TRUE);
     }
     // All books should have valid bookIds
     for (const book of result) {

@@ -10,11 +10,15 @@ import {
 import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
 
 // Mock API client
-vi.mock("@/api/client", () => ({
-  ApiClient: vi.fn().mockImplementation(() => ({
-    getFamilyBookshelf: vi.fn(),
-  })),
-}));
+vi.mock("@/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/client")>();
+  return {
+    ...actual,
+    ApiClient: vi.fn().mockImplementation(() => ({
+      getFamilyBookshelf: vi.fn(),
+    })),
+  };
+});
 
 // Mock crypto
 vi.mock("@/crypto/encrypt", () => ({
@@ -23,7 +27,7 @@ vi.mock("@/crypto/encrypt", () => ({
 }));
 
 import { decrypt } from "@/crypto/encrypt";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient } from "@/api/client";
 
 function makePayload(
   displayName: string,
@@ -31,7 +35,7 @@ function makePayload(
     bookId: string;
     title: string;
     author: string;
-    isShared: 0 | 1;
+    isShared: BoolFlag;
     readmooUrl?: string;
   }>,
 ): string {
@@ -114,7 +118,7 @@ describe("FamilyShelfPage", () => {
     // Set up success response for retry
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
-        { bookId: "b1", title: "Book 1", author: "Author 1", isShared: 1 },
+        { bookId: "b1", title: "Book 1", author: "Author 1", isShared: BoolFlag.TRUE },
       ]),
     );
     mockGetFamilyBookshelf.mockResolvedValue({
@@ -137,7 +141,7 @@ describe("FamilyShelfPage", () => {
   it("shows empty state when no books are shared", async () => {
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
-        { bookId: "b1", title: "Hidden Book", author: "Author", isShared: 0 },
+        { bookId: "b1", title: "Hidden Book", author: "Author", isShared: BoolFlag.FALSE },
       ]),
     );
     mockGetFamilyBookshelf.mockResolvedValue({
@@ -176,8 +180,8 @@ describe("FamilyShelfPage", () => {
   it("renders books after successful load and decrypt", async () => {
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
-        { bookId: "b1", title: "React 深入淺出", author: "作者一", isShared: 1 },
-        { bookId: "b2", title: "TypeScript 指南", author: "作者二", isShared: 1 },
+        { bookId: "b1", title: "React 深入淺出", author: "作者一", isShared: BoolFlag.TRUE },
+        { bookId: "b2", title: "TypeScript 指南", author: "作者二", isShared: BoolFlag.TRUE },
       ]),
     );
     mockGetFamilyBookshelf.mockResolvedValue({
@@ -202,8 +206,8 @@ describe("FamilyShelfPage", () => {
   it("only renders books with isShared === 1", async () => {
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
-        { bookId: "b1", title: "Shared Book", author: "Author", isShared: 1 },
-        { bookId: "b2", title: "Private Book", author: "Author", isShared: 0 },
+        { bookId: "b1", title: "Shared Book", author: "Author", isShared: BoolFlag.TRUE },
+        { bookId: "b2", title: "Private Book", author: "Author", isShared: BoolFlag.FALSE },
       ]),
     );
     mockGetFamilyBookshelf.mockResolvedValue({
@@ -228,12 +232,12 @@ describe("FamilyShelfPage", () => {
     mockDecrypt
       .mockResolvedValueOnce(
         makePayload("Me", [
-          { bookId: "b1", title: "My Book", author: "Self Author", isShared: 1 },
+          { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
         ]),
       )
       .mockResolvedValueOnce(
         makePayload("Alice", [
-          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: 1 },
+          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
         ]),
       );
     mockGetFamilyBookshelf.mockResolvedValue({
@@ -259,12 +263,12 @@ describe("FamilyShelfPage", () => {
     mockDecrypt
       .mockResolvedValueOnce(
         makePayload("Me", [
-          { bookId: "b1", title: "My Book", author: "Self Author", isShared: 1 },
+          { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
         ]),
       )
       .mockResolvedValueOnce(
         makePayload("Alice", [
-          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: 1 },
+          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
         ]),
       );
     mockGetFamilyBookshelf.mockResolvedValue({
@@ -297,8 +301,8 @@ describe("FamilyShelfPage", () => {
   it("search filters books by title", async () => {
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
-        { bookId: "b1", title: "React 入門", author: "Author A", isShared: 1 },
-        { bookId: "b2", title: "Vue 入門", author: "Author B", isShared: 1 },
+        { bookId: "b1", title: "React 入門", author: "Author A", isShared: BoolFlag.TRUE },
+        { bookId: "b2", title: "Vue 入門", author: "Author B", isShared: BoolFlag.TRUE },
       ]),
     );
     mockGetFamilyBookshelf.mockResolvedValue({
@@ -346,7 +350,7 @@ describe("FamilyShelfPage", () => {
           bookId: "book-123",
           title: "Linked Book",
           author: "Author",
-          isShared: 1,
+          isShared: BoolFlag.TRUE,
           readmooUrl,
         },
       ]),
@@ -376,12 +380,12 @@ describe("FamilyShelfPage", () => {
     mockDecrypt
       .mockResolvedValueOnce(
         makePayload("Me", [
-          { bookId: "b1", title: "My Book", author: "Self Author", isShared: 1 },
+          { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
         ]),
       )
       .mockResolvedValueOnce(
         makePayload("Alice", [
-          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: 1 },
+          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
         ]),
       );
     mockGetFamilyBookshelf.mockResolvedValue({
@@ -432,13 +436,13 @@ describe("FamilyShelfPage", () => {
     mockDecrypt
       .mockResolvedValueOnce(
         makePayload("Alice", [
-          { bookId: "b1", title: "Book 1", author: "A", isShared: 1 },
+          { bookId: "b1", title: "Book 1", author: "A", isShared: BoolFlag.TRUE },
         ]),
       )
       .mockResolvedValueOnce(
         makePayload("Bob", [
-          { bookId: "b2", title: "Book 2", author: "B", isShared: 1 },
-          { bookId: "b3", title: "Book 3", author: "C", isShared: 1 },
+          { bookId: "b2", title: "Book 2", author: "B", isShared: BoolFlag.TRUE },
+          { bookId: "b3", title: "Book 3", author: "C", isShared: BoolFlag.TRUE },
         ]),
       );
     mockGetFamilyBookshelf.mockResolvedValue({

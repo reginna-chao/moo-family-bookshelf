@@ -70,7 +70,6 @@ describe("background service worker", () => {
     );
 
     // Side-effect import: registers onMessage listener
-    // @ts-expect-error — module has no exports, import is for side effects only
     await import("@/background/index");
   });
 

@@ -17,7 +17,7 @@ vi.mock("@/crypto/encrypt", () => ({
 }));
 
 import { decrypt, encrypt } from "@/crypto/encrypt";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient } from "@/api/client";
 
 const mockDecrypt = vi.mocked(decrypt);
 const mockEncrypt = vi.mocked(encrypt);
@@ -35,7 +35,7 @@ function makePayload(
     bookId: string;
     title: string;
     author: string;
-    isShared: 0 | 1;
+    isShared: BoolFlag;
   }>,
 ): string {
   return JSON.stringify({
@@ -61,7 +61,7 @@ function createProps() {
 }
 
 async function renderWithBooks(
-  books: Array<{ bookId: string; title: string; author: string; isShared: 0 | 1 }>,
+  books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>,
   displayName = "TestUser",
 ) {
   mockDecrypt.mockResolvedValue(makePayload(displayName, books));
@@ -130,7 +130,7 @@ describe("PersonalShelfPage", () => {
     // Set up success response for retry
     mockDecrypt.mockResolvedValue(
       makePayload("TestUser", [
-        { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+        { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
       ]),
     );
     mockGetPersonalBooks.mockResolvedValue({
@@ -174,8 +174,8 @@ describe("PersonalShelfPage", () => {
 
   it("renders books with titles, authors, and share status badges", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.FALSE },
     ]);
 
     expect(screen.getByText("作者A")).toBeInTheDocument();
@@ -190,8 +190,8 @@ describe("PersonalShelfPage", () => {
 
   it("shows total book count in header", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.FALSE },
     ]);
 
     expect(screen.getByText("(2 本)")).toBeInTheDocument();
@@ -199,8 +199,8 @@ describe("PersonalShelfPage", () => {
 
   it("shows checkboxes for each book", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.FALSE },
     ]);
 
     expect(screen.getByLabelText("選取 書籍一")).toBeInTheDocument();
@@ -209,8 +209,8 @@ describe("PersonalShelfPage", () => {
 
   it("selecting a book shows floating action bar with count", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.FALSE },
     ]);
 
     // No toolbar initially
@@ -226,8 +226,8 @@ describe("PersonalShelfPage", () => {
 
   it("batch share sets selected books to shared", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.FALSE },
     ]);
 
     fireEvent.click(screen.getByLabelText("選取 書籍一"));
@@ -247,8 +247,8 @@ describe("PersonalShelfPage", () => {
 
   it("batch hide sets selected books to not shared", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 1 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.TRUE },
     ]);
 
     fireEvent.click(screen.getByLabelText("選取 書籍一"));
@@ -262,8 +262,8 @@ describe("PersonalShelfPage", () => {
 
   it("select all / deselect all toggles all visible books", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.FALSE },
     ]);
 
     fireEvent.click(screen.getByText("全選"));
@@ -277,7 +277,7 @@ describe("PersonalShelfPage", () => {
 
   it("cancel changes restores original books", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
     ]);
 
     // Batch share to make dirty
@@ -300,7 +300,7 @@ describe("PersonalShelfPage", () => {
 
   it("save flow calls encrypt then updatePersonalBooks", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
     ]);
 
     mockEncrypt.mockResolvedValue("new-encrypted-payload");
@@ -328,7 +328,7 @@ describe("PersonalShelfPage", () => {
 
   it("floating action bar hidden when not dirty and no selection", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
     ]);
 
     expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
@@ -336,8 +336,8 @@ describe("PersonalShelfPage", () => {
 
   it("status filter '已開放' shows only shared books", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.FALSE },
     ]);
 
     expect(screen.getByText("書籍二")).toBeInTheDocument();
@@ -350,8 +350,8 @@ describe("PersonalShelfPage", () => {
 
   it("status filter '未開放' shows only unshared books", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.FALSE },
     ]);
 
     // Click "未開放" filter button (first match)
@@ -366,8 +366,8 @@ describe("PersonalShelfPage", () => {
 
   it("'全部' filter shows all books", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 1 },
-      { bookId: "b2", title: "書籍二", author: "作者B", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "書籍二", author: "作者B", isShared: BoolFlag.FALSE },
     ]);
 
     // Filter to "已開放" first
@@ -382,8 +382,8 @@ describe("PersonalShelfPage", () => {
 
   it("search filters books by title", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "React 入門", author: "作者A", isShared: 1 },
-      { bookId: "b2", title: "Vue 入門", author: "作者B", isShared: 1 },
+      { bookId: "b1", title: "React 入門", author: "作者A", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "Vue 入門", author: "作者B", isShared: BoolFlag.TRUE },
     ]);
 
     expect(screen.getByText("Vue 入門")).toBeInTheDocument();
@@ -407,8 +407,8 @@ describe("PersonalShelfPage", () => {
 
   it("search filters books by author", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "張三", isShared: 1 },
-      { bookId: "b2", title: "書籍二", author: "李四", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "張三", isShared: BoolFlag.TRUE },
+      { bookId: "b2", title: "書籍二", author: "李四", isShared: BoolFlag.FALSE },
     ]);
 
     vi.useFakeTimers();
@@ -427,7 +427,7 @@ describe("PersonalShelfPage", () => {
 
   it("shows save error when updatePersonalBooks fails", async () => {
     await renderWithBooks([
-      { bookId: "b1", title: "書籍一", author: "作者A", isShared: 0 },
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
     ]);
 
     mockEncrypt.mockResolvedValue("encrypted");

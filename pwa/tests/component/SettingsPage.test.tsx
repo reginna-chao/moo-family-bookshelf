@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SettingsPage } from "@/pages/SettingsPage";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 
 // Mock syncCode module

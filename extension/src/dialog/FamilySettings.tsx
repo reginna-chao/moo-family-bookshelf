@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ApiClient, FamilyMember } from "../api/client";
+import { ApiClient, FamilyMember, BoolFlag } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
 import { DisplayNameEditor } from "./DisplayNameEditor";
@@ -39,7 +39,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   }, []);
 
   const handleToggleSyncArchived = useCallback(() => {
-    const newValue = syncArchived === 1 ? 0 : 1;
+    const newValue = syncArchived === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
     setSyncArchived(newValue);
     chrome.runtime.sendMessage(
       { type: "SET_SYNC_ARCHIVED", syncArchived: newValue },
@@ -163,7 +163,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
       <div style={{ marginBottom: 20 }}>
         <button
           role="switch"
-          aria-checked={syncArchived === 1}
+          aria-checked={syncArchived === BoolFlag.TRUE}
           aria-label="同步封存書籍"
           onClick={handleToggleSyncArchived}
           style={{
@@ -183,7 +183,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             width: 32,
             height: 18,
             borderRadius: 9,
-            background: syncArchived === 1 ? "#2563eb" : "#cbd5e1",
+            background: syncArchived === BoolFlag.TRUE ? "#2563eb" : "#cbd5e1",
             position: "relative",
             transition: "background 0.2s",
             flexShrink: 0,
@@ -196,7 +196,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
               background: "#fff",
               position: "absolute",
               top: 2,
-              left: syncArchived === 1 ? 16 : 2,
+              left: syncArchived === BoolFlag.TRUE ? 16 : 2,
               transition: "left 0.2s",
             }} />
           </span>

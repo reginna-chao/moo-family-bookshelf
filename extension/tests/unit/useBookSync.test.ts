@@ -1,6 +1,6 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient } from "@/api/client";
 
 // Mock syncBooks module
 vi.mock("@/sync/syncBooks", () => ({
@@ -116,7 +116,7 @@ describe("useBookSync", () => {
           isbn: "",
           coverUrl: "",
           readmooUrl: "",
-          isShared: false,
+          isShared: BoolFlag.FALSE,
         },
       ];
       vi.mocked(syncBooks).mockResolvedValue({ success: true, books: mockBooks });
@@ -304,7 +304,7 @@ describe("useBookSync", () => {
           isbn: "",
           coverUrl: "",
           readmooUrl: "",
-          isShared: false,
+          isShared: BoolFlag.FALSE,
         },
       ];
       vi.mocked(syncBooks).mockResolvedValue({ success: true, books: mockBooks });

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Pencil, Check, X } from "lucide-react";
+import { BoolFlag } from "@/api/client";
 import type { ApiClient, FamilyMember } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
@@ -26,16 +27,16 @@ export function SettingsPage({
   onLogout,
 }: SettingsPageProps) {
   // --- Sync archived setting ---
-  const [syncArchived, setSyncArchived] = useState<0 | 1>(() => {
+  const [syncArchived, setSyncArchived] = useState<BoolFlag>(() => {
     const stored = localStorage.getItem(SYNC_ARCHIVED_KEY);
-    return stored === "1" ? 1 : 0;
+    return stored === "1" ? BoolFlag.TRUE : BoolFlag.FALSE;
   });
 
   const handleToggleSyncArchived = useCallback(() => {
     setSyncArchived(prev => {
-      const next = prev === 1 ? 0 : 1;
+      const next = prev === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
       localStorage.setItem(SYNC_ARCHIVED_KEY, String(next));
-      return next as 0 | 1;
+      return next;
     });
   }, []);
 
@@ -238,19 +239,19 @@ export function SettingsPage({
 
         <button
           role="switch"
-          aria-checked={syncArchived === 1}
+          aria-checked={syncArchived === BoolFlag.TRUE}
           aria-label="顯示封存書籍"
           onClick={handleToggleSyncArchived}
           className="flex items-center gap-2 text-sm text-gray-700"
         >
           <span
             className={`relative inline-block w-8 h-[18px] rounded-full transition-colors ${
-              syncArchived === 1 ? "bg-blue-600" : "bg-gray-300"
+              syncArchived === BoolFlag.TRUE ? "bg-blue-600" : "bg-gray-300"
             }`}
           >
             <span
               className={`absolute top-0.5 block w-3.5 h-3.5 rounded-full bg-white transition-[left] ${
-                syncArchived === 1 ? "left-[16px]" : "left-0.5"
+                syncArchived === BoolFlag.TRUE ? "left-[16px]" : "left-0.5"
               }`}
             />
           </span>

@@ -9,7 +9,7 @@ import {
 } from "@/crypto/encrypt";
 import { encodeSyncCode, decodeSyncCode } from "@/crypto/syncCode";
 import { mergeBooks } from "@/dialog/mergeBooks";
-import type { BookEntry } from "@/api/client";
+import { BoolFlag, type BookEntry } from "@/api/client";
 import type { ScrapedBook } from "@/content/scraper";
 
 // Polyfill Web Crypto API for Node/jsdom test environment
@@ -32,7 +32,7 @@ function makeBookEntry(overrides: Partial<BookEntry> = {}): BookEntry {
     isbn: "978-0000000000",
     coverUrl: "https://example.com/cover.jpg",
     readmooUrl: "https://mooink.readmoo.com/book/book-001",
-    isShared: false,
+    isShared: BoolFlag.FALSE,
     ...overrides,
   };
 }
@@ -63,7 +63,7 @@ describe("Full personal books lifecycle", () => {
   it("should encrypt a book list, store ciphertext, then decrypt back to original", async () => {
     const books: BookEntry[] = [
       makeBookEntry({ bookId: "b1", title: "Book One" }),
-      makeBookEntry({ bookId: "b2", title: "Book Two", isShared: true }),
+      makeBookEntry({ bookId: "b2", title: "Book Two", isShared: BoolFlag.TRUE }),
     ];
     const plaintext = makePersonalBooksJson(books);
 
@@ -79,7 +79,7 @@ describe("Full personal books lifecycle", () => {
     const parsed = JSON.parse(decrypted) as { books: BookEntry[] };
     expect(parsed.books).toHaveLength(2);
     expect(parsed.books[0].title).toBe("Book One");
-    expect(parsed.books[1].isShared).toBe(true);
+    expect(parsed.books[1].isShared).toBe(BoolFlag.TRUE);
   });
 
   it("should preserve all BookEntry fields through the encrypt/decrypt cycle", async () => {
@@ -90,7 +90,7 @@ describe("Full personal books lifecycle", () => {
       isbn: "978-9573280439",
       coverUrl: "https://example.com/deep-work.jpg",
       readmooUrl: "https://mooink.readmoo.com/book/210439468000101",
-      isShared: true,
+      isShared: BoolFlag.TRUE,
     });
     const plaintext = JSON.stringify(original);
 
@@ -186,8 +186,8 @@ describe("Cross-user simulation", () => {
     const familyId = "fmly-ab01";
 
     const userABooks: BookEntry[] = [
-      makeBookEntry({ bookId: "a1", title: "Alice's Book", isShared: true }),
-      makeBookEntry({ bookId: "a2", title: "Alice's Private Book", isShared: false }),
+      makeBookEntry({ bookId: "a1", title: "Alice's Book", isShared: BoolFlag.TRUE }),
+      makeBookEntry({ bookId: "a2", title: "Alice's Private Book", isShared: BoolFlag.FALSE }),
     ];
     const userAPayload = makePersonalBooksJson(userABooks);
     const userACiphertext = await encrypt(userAPayload, keyA);
@@ -209,7 +209,7 @@ describe("Cross-user simulation", () => {
     const parsed = JSON.parse(decrypted) as { books: BookEntry[] };
     expect(parsed.books).toHaveLength(2);
     expect(parsed.books[0].title).toBe("Alice's Book");
-    expect(parsed.books[0].isShared).toBe(true);
+    expect(parsed.books[0].isShared).toBe(BoolFlag.TRUE);
   });
 
   it("should allow User B to encrypt data that User A can decrypt", async () => {
@@ -256,7 +256,7 @@ describe("Cross-user simulation", () => {
 // --- mergeBooks logic ---
 
 describe("mergeBooks", () => {
-  it("should default new scraped books to isShared: false", () => {
+  it("should default new scraped books to isShared: 0", () => {
     const scraped: ScrapedBook[] = [
       makeScrapedBook({ bookId: "new-1", title: "New Book" }),
     ];
@@ -266,7 +266,7 @@ describe("mergeBooks", () => {
 
     expect(merged).toHaveLength(1);
     expect(merged[0].bookId).toBe("new-1");
-    expect(merged[0].isShared).toBe(false);
+    expect(merged[0].isShared).toBe(BoolFlag.FALSE);
   });
 
   it("should keep isShared setting from saved books when merging", () => {
@@ -274,7 +274,7 @@ describe("mergeBooks", () => {
       makeScrapedBook({ bookId: "b1", title: "Updated Title" }),
     ];
     const saved: BookEntry[] = [
-      makeBookEntry({ bookId: "b1", title: "Old Title", isShared: true }),
+      makeBookEntry({ bookId: "b1", title: "Old Title", isShared: BoolFlag.TRUE }),
     ];
 
     const merged = mergeBooks(scraped, saved);
@@ -282,7 +282,7 @@ describe("mergeBooks", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0].bookId).toBe("b1");
     expect(merged[0].title).toBe("Updated Title"); // scraped metadata wins
-    expect(merged[0].isShared).toBe(true); // saved setting preserved
+    expect(merged[0].isShared).toBe(BoolFlag.TRUE); // saved setting preserved
   });
 
   it("should preserve saved-only books that are not in scraped data", () => {
@@ -290,8 +290,8 @@ describe("mergeBooks", () => {
       makeScrapedBook({ bookId: "b1", title: "On Page" }),
     ];
     const saved: BookEntry[] = [
-      makeBookEntry({ bookId: "b1", title: "On Page", isShared: true }),
-      makeBookEntry({ bookId: "b2", title: "Off Page Book", isShared: true }),
+      makeBookEntry({ bookId: "b1", title: "On Page", isShared: BoolFlag.TRUE }),
+      makeBookEntry({ bookId: "b2", title: "Off Page Book", isShared: BoolFlag.TRUE }),
     ];
 
     const merged = mergeBooks(scraped, saved);
@@ -300,7 +300,7 @@ describe("mergeBooks", () => {
     const offPage = merged.find((b) => b.bookId === "b2");
     expect(offPage).toBeDefined();
     expect(offPage?.title).toBe("Off Page Book");
-    expect(offPage?.isShared).toBe(true);
+    expect(offPage?.isShared).toBe(BoolFlag.TRUE);
   });
 
   it("should handle empty scraped and non-empty saved", () => {
@@ -324,7 +324,7 @@ describe("mergeBooks", () => {
     const merged = mergeBooks(scraped, saved);
 
     expect(merged).toHaveLength(1);
-    expect(merged[0].isShared).toBe(false);
+    expect(merged[0].isShared).toBe(BoolFlag.FALSE);
   });
 
   it("should handle both empty", () => {
@@ -370,11 +370,11 @@ describe("mergeBooks", () => {
     );
     const saved: BookEntry[] = [
       // 2 overlap with scraped
-      makeBookEntry({ bookId: "scraped-0", title: "Old Scraped 0", isShared: true }),
-      makeBookEntry({ bookId: "scraped-1", title: "Old Scraped 1", isShared: true }),
+      makeBookEntry({ bookId: "scraped-0", title: "Old Scraped 0", isShared: BoolFlag.TRUE }),
+      makeBookEntry({ bookId: "scraped-1", title: "Old Scraped 1", isShared: BoolFlag.TRUE }),
       // 3 saved-only
       ...Array.from({ length: 3 }, (_, i) =>
-        makeBookEntry({ bookId: `saved-${i}`, title: `Saved ${i}`, isShared: true }),
+        makeBookEntry({ bookId: `saved-${i}`, title: `Saved ${i}`, isShared: BoolFlag.TRUE }),
       ),
     ];
 
@@ -386,11 +386,11 @@ describe("mergeBooks", () => {
     // Overlapping books use scraped title but saved isShared
     const s0 = merged.find((b) => b.bookId === "scraped-0");
     expect(s0?.title).toBe("Scraped 0");
-    expect(s0?.isShared).toBe(true);
+    expect(s0?.isShared).toBe(BoolFlag.TRUE);
 
-    // New scraped books default to isShared: false
+    // New scraped books default to isShared: 0
     const s4 = merged.find((b) => b.bookId === "scraped-4");
-    expect(s4?.isShared).toBe(false);
+    expect(s4?.isShared).toBe(BoolFlag.FALSE);
   });
 });
 
@@ -431,7 +431,7 @@ describe("Edge cases", () => {
         bookId: `book-${String(i).padStart(4, "0")}`,
         title: `Book Title ${i}`,
         author: `Author ${i}`,
-        isShared: i % 3 === 0,
+        isShared: i % 3 === 0 ? BoolFlag.TRUE : BoolFlag.FALSE,
       }),
     );
     const plaintext = makePersonalBooksJson(books);
@@ -445,9 +445,9 @@ describe("Edge cases", () => {
     expect(parsed.books[0].bookId).toBe("book-0000");
     expect(parsed.books[149].bookId).toBe("book-0149");
     // Verify isShared pattern survived
-    expect(parsed.books[0].isShared).toBe(true); // 0 % 3 === 0
-    expect(parsed.books[1].isShared).toBe(false);
-    expect(parsed.books[3].isShared).toBe(true);
+    expect(parsed.books[0].isShared).toBe(BoolFlag.TRUE); // 0 % 3 === 0
+    expect(parsed.books[1].isShared).toBe(BoolFlag.FALSE);
+    expect(parsed.books[3].isShared).toBe(BoolFlag.TRUE);
   });
 
   it("should fail to decrypt tampered ciphertext of a book list", async () => {

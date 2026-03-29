@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PersonalShelf, PersonalShelfProps } from "@/dialog/PersonalShelf";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient } from "@/api/client";
 
 const mockUseBookSync = vi.fn().mockReturnValue({
   syncStatus: "idle",
@@ -504,7 +504,7 @@ describe("PersonalShelf", () => {
               author: "作者A",
               coverUrl: "https://example.com/cover1.jpg",
               readmooUrl: "https://mooink.readmoo.com/book/book-1",
-              isShared: true,
+              isShared: BoolFlag.TRUE,
               isbn: "",
             },
           ],
@@ -523,7 +523,7 @@ describe("PersonalShelf", () => {
         expect(screen.getByText("測試書籍一")).toBeInTheDocument();
       });
 
-      // The book should have preserved its isShared=true from saved data
+      // The book should have preserved its isShared=1 from saved data
       // Check by looking for "開放" badge (at least one)
       const openBadges = screen.queryAllByText("開放");
       expect(openBadges.length).toBeGreaterThanOrEqual(1);
@@ -660,7 +660,7 @@ describe("PersonalShelf", () => {
           author: "作者A",
           coverUrl: "https://example.com/cover1.jpg",
           readmooUrl: "https://mooink.readmoo.com/book/book-1",
-          isArchived: 0,
+          isArchived: BoolFlag.FALSE,
         },
         {
           bookId: "book-archived",
@@ -668,7 +668,7 @@ describe("PersonalShelf", () => {
           author: "作者D",
           coverUrl: "https://example.com/cover-a.jpg",
           readmooUrl: "https://mooink.readmoo.com/book/book-archived",
-          isArchived: 1,
+          isArchived: BoolFlag.TRUE,
         },
       ]);
 
@@ -731,7 +731,7 @@ describe("PersonalShelf", () => {
           author: "作者A",
           coverUrl: "",
           readmooUrl: "https://mooink.readmoo.com/book/book-1",
-          isArchived: 0,
+          isArchived: BoolFlag.FALSE,
         },
         {
           bookId: "book-2",
@@ -739,7 +739,7 @@ describe("PersonalShelf", () => {
           author: "作者B",
           coverUrl: "",
           readmooUrl: "https://mooink.readmoo.com/book/book-2",
-          isArchived: 1,
+          isArchived: BoolFlag.TRUE,
         },
       ]);
 
@@ -778,7 +778,7 @@ describe("PersonalShelf", () => {
           author: "作者A",
           coverUrl: "",
           readmooUrl: "https://mooink.readmoo.com/book/book-1",
-          isArchived: 0,
+          isArchived: BoolFlag.FALSE,
         },
         {
           bookId: "book-2",
@@ -786,7 +786,7 @@ describe("PersonalShelf", () => {
           author: "作者B",
           coverUrl: "",
           readmooUrl: "https://mooink.readmoo.com/book/book-2",
-          isArchived: 1,
+          isArchived: BoolFlag.TRUE,
         },
       ]);
 
@@ -854,7 +854,7 @@ describe("PersonalShelf", () => {
               author: "作者A",
               coverUrl: "https://example.com/cover1.jpg",
               readmooUrl: "https://mooink.readmoo.com/book/book-1",
-              isShared: true,
+              isShared: BoolFlag.TRUE,
               isbn: "",
             },
           ],
@@ -887,7 +887,7 @@ describe("PersonalShelf", () => {
       expect(cached.length).toBeGreaterThanOrEqual(3);
       const book1 = cached.find((b: { bookId: string }) => b.bookId === "book-1");
       expect(book1).toBeDefined();
-      expect(book1.isShared).toBe(true);
+      expect(book1.isShared).toBe(BoolFlag.TRUE);
     });
 
     it("updates cache after successful save", async () => {
@@ -928,7 +928,7 @@ describe("PersonalShelf", () => {
       const cached = JSON.parse((cacheCall![0] as Record<string, string>).personalBooksCache);
       const book1 = cached.find((b: { bookId: string }) => b.bookId === "book-1");
       expect(book1).toBeDefined();
-      expect(book1.isShared).toBe(true);
+      expect(book1.isShared).toBe(BoolFlag.TRUE);
     });
   });
 
@@ -944,7 +944,7 @@ describe("PersonalShelf", () => {
               author: "作者A",
               coverUrl: "https://example.com/cover1.jpg",
               readmooUrl: "https://mooink.readmoo.com/book/book-1",
-              isShared: true,
+              isShared: BoolFlag.TRUE,
               isbn: "",
             },
           ],

@@ -6,13 +6,15 @@
  * only appears in the DOM after a hover event is dispatched.
  */
 
+import { BoolFlag } from "../api/client";
+
 export interface ScrapedBook {
   bookId: string;
   title: string;
   author: string;
   coverUrl: string;
   readmooUrl: string;
-  isArchived?: 0 | 1;
+  isArchived?: BoolFlag;
 }
 
 const HOVER_SETTLE_MS = 120;
@@ -128,7 +130,7 @@ async function scrapeItem(item: Element): Promise<ScrapedBook | null> {
     author: "",
     coverUrl,
     readmooUrl: `${READMOO_BOOK_BASE}${bookId}`,
-    isArchived: 0,
+    isArchived: BoolFlag.FALSE,
   };
 }
 
@@ -303,7 +305,7 @@ export async function scrapeArchivedBooks(): Promise<ScrapedBook[]> {
 
     // Step 6: Scrape books and mark as archived
     const books = await scrapeBooks();
-    return books.map((b) => ({ ...b, isArchived: 1 }));
+    return books.map((b) => ({ ...b, isArchived: BoolFlag.TRUE }));
   } catch {
     return [];
   } finally {

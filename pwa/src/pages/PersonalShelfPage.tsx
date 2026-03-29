@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { BookOpen } from "lucide-react";
+import { BoolFlag } from "@/api/client";
 import type { ApiClient, BookEntry } from "@/api/client";
 import { importKey, encrypt, decrypt } from "@/crypto/encrypt";
 import { useSearch } from "@/hooks/useSearch";
@@ -59,11 +60,11 @@ export function PersonalShelfPage({
       const obj = parsed as Record<string, unknown>;
       setDisplayName(typeof obj.displayName === "string" ? obj.displayName : "");
       const rawBooks = Array.isArray(obj.books) ? (obj.books as BookEntry[]) : [];
-      // Normalize: Extension may store boolean for isShared/isArchived, PWA uses 0|1
+      // Normalize: Extension may store boolean for isShared/isArchived, PWA uses BoolFlag
       const normalized = rawBooks.map((b) => ({
         ...b,
-        isShared: b.isShared ? (1 as const) : (0 as const),
-        isArchived: b.isArchived ? (1 as const) : (0 as const),
+        isShared: b.isShared ? BoolFlag.TRUE : BoolFlag.FALSE,
+        isArchived: b.isArchived ? BoolFlag.TRUE : BoolFlag.FALSE,
       }));
       setBooks(normalized);
       originalBooksRef.current = normalized;
@@ -115,13 +116,13 @@ export function PersonalShelfPage({
   }, []);
 
   const handleBatchShare = useCallback(() => {
-    setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: 1 as const } : b));
+    setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.TRUE } : b));
     setSelectedIds(new Set());
     setIsDirty(true);
   }, [selectedIds]);
 
   const handleBatchHide = useCallback(() => {
-    setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: 0 as const } : b));
+    setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.FALSE } : b));
     setSelectedIds(new Set());
     setIsDirty(true);
   }, [selectedIds]);
@@ -129,7 +130,7 @@ export function PersonalShelfPage({
   const handleToggle = useCallback((bookId: string) => {
     setBooks((prev) =>
       prev.map((b) =>
-        b.bookId === bookId ? { ...b, isShared: b.isShared === 1 ? (0 as const) : (1 as const) } : b,
+        b.bookId === bookId ? { ...b, isShared: b.isShared === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE } : b,
       ),
     );
     setIsDirty(true);
@@ -145,14 +146,14 @@ export function PersonalShelfPage({
   }, []);
 
   const syncArchived = localStorage.getItem("moo:syncArchived") === "1";
-  const activeBooks = useMemo(() => books.filter(b => b.isArchived !== 1), [books]);
-  const archivedBooks = useMemo(() => books.filter(b => b.isArchived === 1), [books]);
+  const activeBooks = useMemo(() => books.filter(b => b.isArchived !== BoolFlag.TRUE), [books]);
+  const archivedBooks = useMemo(() => books.filter(b => b.isArchived === BoolFlag.TRUE), [books]);
   const showArchiveTabs = syncArchived && archivedBooks.length > 0;
   const currentViewBooks = showArchiveTabs && archiveView === "archived" ? archivedBooks : activeBooks;
 
   const statusFilteredBooks = useMemo(() => {
-    if (statusFilter === "shared") return currentViewBooks.filter((b) => b.isShared === 1);
-    if (statusFilter === "not-shared") return currentViewBooks.filter((b) => b.isShared === 0);
+    if (statusFilter === "shared") return currentViewBooks.filter((b) => b.isShared === BoolFlag.TRUE);
+    if (statusFilter === "not-shared") return currentViewBooks.filter((b) => b.isShared === BoolFlag.FALSE);
     return currentViewBooks;
   }, [currentViewBooks, statusFilter]);
 
@@ -310,7 +311,7 @@ export function PersonalShelfPage({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
                     <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
-                    {book.isArchived === 1 && (
+                    {book.isArchived === BoolFlag.TRUE && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium flex-shrink-0">
                         封存
                       </span>
@@ -320,15 +321,15 @@ export function PersonalShelfPage({
                 </div>
                 <button
                   onClick={() => handleToggle(book.bookId)}
-                  aria-pressed={book.isShared === 1}
-                  aria-label={`${book.title} ${book.isShared === 1 ? "已開放分享" : "未開放分享"}`}
+                  aria-pressed={book.isShared === BoolFlag.TRUE}
+                  aria-label={`${book.title} ${book.isShared === BoolFlag.TRUE ? "已開放分享" : "未開放分享"}`}
                   className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 ${
-                    book.isShared === 1
+                    book.isShared === BoolFlag.TRUE
                       ? "bg-green-100 text-green-600"
                       : "bg-gray-100 text-gray-500"
                   }`}
                 >
-                  {book.isShared === 1 ? "開放" : "未開放"}
+                  {book.isShared === BoolFlag.TRUE ? "開放" : "未開放"}
                 </button>
               </div>
             ))}

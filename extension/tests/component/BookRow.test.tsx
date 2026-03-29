@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { BookRow } from "@/dialog/BookRow";
-import type { BookEntry } from "@/api/client";
+import { BoolFlag, type BookEntry } from "@/api/client";
 
 function makeBook(overrides: Partial<BookEntry> = {}): BookEntry {
   return {
@@ -11,7 +11,7 @@ function makeBook(overrides: Partial<BookEntry> = {}): BookEntry {
     isbn: "",
     coverUrl: "https://example.com/cover.jpg",
     readmooUrl: "https://mooink.readmoo.com/book/book-1",
-    isShared: false,
+    isShared: BoolFlag.FALSE,
     ...overrides,
   };
 }
@@ -21,7 +21,7 @@ describe("BookRow — archive badge", () => {
 
   it("renders '封存' badge when book.isArchived === 1", () => {
     render(
-      <BookRow book={makeBook({ isArchived: 1 })} selected={false} onSelect={noop} onToggle={noop} />,
+      <BookRow book={makeBook({ isArchived: BoolFlag.TRUE })} selected={false} onSelect={noop} onToggle={noop} />,
     );
 
     expect(screen.getByText("封存")).toBeInTheDocument();
@@ -29,7 +29,7 @@ describe("BookRow — archive badge", () => {
 
   it("does not render badge when book.isArchived === 0", () => {
     render(
-      <BookRow book={makeBook({ isArchived: 0 })} selected={false} onSelect={noop} onToggle={noop} />,
+      <BookRow book={makeBook({ isArchived: BoolFlag.FALSE })} selected={false} onSelect={noop} onToggle={noop} />,
     );
 
     expect(screen.queryByText("封存")).not.toBeInTheDocument();

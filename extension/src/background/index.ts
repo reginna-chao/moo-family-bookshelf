@@ -12,6 +12,8 @@
  * - apiEndpoint: local only (different devices may use different endpoints).
  */
 
+import { BoolFlag } from "../api/client";
+
 /** Keys that are synced across devices via chrome.storage.sync */
 const SYNCED_KEYS = ["familyId"] as const;
 
@@ -110,14 +112,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "GET_SYNC_ARCHIVED") {
     chrome.storage.local.get(["syncArchived"], (result) => {
-      sendResponse({ syncArchived: result.syncArchived ?? 0 });
+      sendResponse({ syncArchived: result.syncArchived ?? BoolFlag.FALSE });
     });
     return true;
   }
 
   if (message.type === "SET_SYNC_ARCHIVED") {
     const value = message.syncArchived;
-    if (value !== 0 && value !== 1) {
+    if (value !== BoolFlag.FALSE && value !== BoolFlag.TRUE) {
       sendResponse({ ok: false, error: "syncArchived must be 0 or 1" });
       return true;
     }

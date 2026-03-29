@@ -5,6 +5,11 @@
 
 import { DEFAULT_API_ENDPOINT } from "../constants";
 
+export enum BoolFlag {
+  FALSE = 0,
+  TRUE = 1,
+}
+
 export interface ApiResponse<T> {
   data?: T;
   error?: { code: string; message: string };
@@ -17,8 +22,8 @@ export interface BookEntry {
   isbn: string;
   coverUrl: string;
   readmooUrl: string;
-  isShared: 0 | 1;
-  isArchived?: 0 | 1;
+  isShared: BoolFlag;
+  isArchived?: BoolFlag;
 }
 
 /** Decrypted view (used by UI after decryption) */

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ApiClient, BookEntry } from "../api/client";
+import { ApiClient, BookEntry, BoolFlag } from "../api/client";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "../constants";
@@ -60,7 +60,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   }, []);
 
   useEffect(() => {
-    if (syncArchived === 0) {
+    if (syncArchived === BoolFlag.FALSE) {
       setArchiveView("active");
     }
   }, [syncArchived]);
@@ -77,9 +77,9 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
         // Conditionally scrape archived books
         const archiveResult = await chrome.storage.local.get(["syncArchived"]);
-        const syncArchivedSetting = (archiveResult.syncArchived as number | undefined) ?? 0;
+        const syncArchivedSetting = (archiveResult.syncArchived as number | undefined) ?? BoolFlag.FALSE;
         let allScrapedBooks = [...scrapedBooks];
-        if (syncArchivedSetting === 1) {
+        if (syncArchivedSetting === BoolFlag.TRUE) {
           const archivedBooks = await scrapeArchivedBooks();
           allScrapedBooks = [...scrapedBooks, ...archivedBooks];
         }
@@ -132,7 +132,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
           author: b.author,
           coverUrl: b.coverUrl,
           readmooUrl: b.readmooUrl,
-          isArchived: b.isArchived ?? 0,
+          isArchived: b.isArchived ?? BoolFlag.FALSE,
         })),
         prev,
       ));
@@ -141,7 +141,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
   const handleToggle = useCallback((bookId: string) => {
     setBooks((prev) =>
-      prev.map((b) => (b.bookId === bookId ? { ...b, isShared: !b.isShared } : b)),
+      prev.map((b) => (b.bookId === bookId ? { ...b, isShared: b.isShared === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE } : b)),
     );
     setIsDirty(true);
   }, []);
@@ -157,7 +157,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
   const handleBatchShare = useCallback(() => {
     setBooks((prev) =>
-      prev.map((b) => (selectedIds.has(b.bookId) ? { ...b, isShared: true } : b)),
+      prev.map((b) => (selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.TRUE } : b)),
     );
     setSelectedIds(new Set());
     setIsDirty(true);
@@ -165,7 +165,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
   const handleBatchHide = useCallback(() => {
     setBooks((prev) =>
-      prev.map((b) => (selectedIds.has(b.bookId) ? { ...b, isShared: false } : b)),
+      prev.map((b) => (selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.FALSE } : b)),
     );
     setSelectedIds(new Set());
     setIsDirty(true);
@@ -212,13 +212,13 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     setSelectedIds(new Set());
   }, []);
 
-  const activeBooks = books.filter(b => b.isArchived !== 1);
-  const archivedBooks = books.filter(b => b.isArchived === 1);
+  const activeBooks = books.filter(b => b.isArchived !== BoolFlag.TRUE);
+  const archivedBooks = books.filter(b => b.isArchived === BoolFlag.TRUE);
   const currentViewBooks = archiveView === "active" ? activeBooks : archivedBooks;
 
   const statusFilteredBooks = (() => {
-    if (statusFilter === "shared") return currentViewBooks.filter((b) => b.isShared);
-    if (statusFilter === "not-shared") return currentViewBooks.filter((b) => !b.isShared);
+    if (statusFilter === "shared") return currentViewBooks.filter((b) => b.isShared === BoolFlag.TRUE);
+    if (statusFilter === "not-shared") return currentViewBooks.filter((b) => b.isShared === BoolFlag.FALSE);
     return currentViewBooks;
   })();
 
@@ -301,7 +301,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{syncError}</p>
       )}
 
-      {syncArchived === 1 && (
+      {syncArchived === BoolFlag.TRUE && (
         <div role="tablist" style={{ display: "flex", gap: 0, marginBottom: 8, borderBottom: "1px solid #e2e8f0" }}>
           <button
             role="tab"

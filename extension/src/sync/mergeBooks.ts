@@ -1,10 +1,10 @@
-import { BookEntry } from "../api/client";
+import { BookEntry, BoolFlag } from "../api/client";
 import { ScrapedBook } from "../content/scraper";
 
 /**
  * Merge scraped books with saved book entries.
  * - Books in both: use scraped metadata, keep saved isShared setting
- * - Scraped-only: default isShared = false
+ * - Scraped-only: default isShared = 0
  * - Saved-only: keep as-is (user may be on a different page)
  */
 export function mergeBooks(
@@ -23,8 +23,8 @@ export function mergeBooks(
       isbn: existing?.isbn || "",
       coverUrl: book.coverUrl || existing?.coverUrl || "",
       readmooUrl: book.readmooUrl,
-      isShared: existing?.isShared ?? false,
-      isArchived: book.isArchived ?? existing?.isArchived ?? 0,
+      isShared: existing?.isShared ?? BoolFlag.FALSE,
+      isArchived: book.isArchived ?? existing?.isArchived ?? BoolFlag.FALSE,
     });
   }
 

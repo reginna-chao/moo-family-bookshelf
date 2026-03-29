@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { BookCard, FilterButton, BookWithMember } from "@/dialog/BookCard";
+import { BoolFlag } from "@/api/client";
 
 function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
   return {
@@ -10,7 +11,7 @@ function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
     isbn: "",
     coverUrl: "https://example.com/cover.jpg",
     readmooUrl: "https://mooink.readmoo.com/book/book-1",
-    isShared: false,
+    isShared: BoolFlag.FALSE,
     memberName: "小明",
     ...overrides,
   };

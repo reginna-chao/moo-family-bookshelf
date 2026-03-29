@@ -19,14 +19,14 @@ vi.mock("@/sync/mergeBooks", () => ({
     (scraped as Record<string, unknown>[]).map((s) => ({
       ...s,
       isbn: "",
-      isShared: false,
+      isShared: BoolFlag.FALSE,
     })),
   ),
 }));
 
 import { syncBooks, type SyncBooksOptions } from "@/sync/syncBooks";
 import { scrapeBooks, scrapeArchivedBooks } from "@/content/scraper";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient } from "@/api/client";
 
 function createMockApiClient(): ApiClient {
   return {
@@ -123,7 +123,7 @@ describe("syncBooks — archive sync path", () => {
         author: "Author A",
         coverUrl: "https://example.com/cover1.jpg",
         readmooUrl: "https://mooink.readmoo.com/book/book-1",
-        isArchived: 0 as const,
+        isArchived: BoolFlag.FALSE,
       },
     ];
     const archivedBooks = [
@@ -133,7 +133,7 @@ describe("syncBooks — archive sync path", () => {
         author: "Author B",
         coverUrl: "https://example.com/cover2.jpg",
         readmooUrl: "https://mooink.readmoo.com/book/book-2",
-        isArchived: 1 as const,
+        isArchived: BoolFlag.TRUE,
       },
     ];
 
@@ -164,7 +164,7 @@ describe("syncBooks — archive sync path", () => {
         author: "",
         coverUrl: "",
         readmooUrl: "https://mooink.readmoo.com/book/b1",
-        isArchived: 0 as const,
+        isArchived: BoolFlag.FALSE,
       },
     ]);
     vi.mocked(scrapeArchivedBooks).mockResolvedValue([
@@ -174,7 +174,7 @@ describe("syncBooks — archive sync path", () => {
         author: "",
         coverUrl: "",
         readmooUrl: "https://mooink.readmoo.com/book/b2",
-        isArchived: 1 as const,
+        isArchived: BoolFlag.TRUE,
       },
     ]);
 
@@ -430,7 +430,7 @@ describe("syncBooks — full flow", () => {
     vi.mocked(decrypt).mockResolvedValue(
       JSON.stringify({
         books: [
-          { bookId: "saved-1", title: "Saved Book", isShared: true },
+          { bookId: "saved-1", title: "Saved Book", isShared: BoolFlag.TRUE },
         ],
       }),
     );

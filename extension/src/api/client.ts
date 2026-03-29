@@ -5,6 +5,11 @@
 
 import { DEFAULT_API_ENDPOINT } from "../constants";
 
+export enum BoolFlag {
+  FALSE = 0,
+  TRUE = 1,
+}
+
 export interface ApiResponse<T> {
   data?: T;
   error?: { code: string; message: string };
@@ -17,8 +22,8 @@ export interface BookEntry {
   isbn: string;
   coverUrl: string;
   readmooUrl: string;
-  isShared: boolean;
-  isArchived?: 0 | 1;  // 0 = active (default), 1 = archived
+  isShared: BoolFlag;
+  isArchived?: BoolFlag;  // FALSE = active (default), TRUE = archived
 }
 
 export interface PersonalBooks {
