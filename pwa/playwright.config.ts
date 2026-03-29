@@ -8,9 +8,7 @@ const isCI = !!process.env.CI;
 
 // CI: vite preview (HTTP, port 4173) — pre-built, stable
 // Local: vite dev (HTTPS, port 5173) — HMR, self-signed cert
-const PWA_URL = isCI
-  ? "http://localhost:4173"
-  : "https://localhost:5173";
+const PWA_PORT = isCI ? 4173 : 5173;
 const WORKER_PORT = 8787;
 
 export default defineConfig({
@@ -26,7 +24,7 @@ export default defineConfig({
     timeout: 10_000,
   },
   use: {
-    baseURL: PWA_URL,
+    baseURL: `http://localhost:${PWA_PORT}`,
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
@@ -34,18 +32,18 @@ export default defineConfig({
   webServer: [
     {
       command: isCI ? "pnpm preview" : "pnpm dev",
-      url: PWA_URL,
+      port: PWA_PORT,
       ignoreHTTPSErrors: true,
       reuseExistingServer: !isCI,
       cwd: __dirname,
-      timeout: 30_000,
+      timeout: 60_000,
     },
     {
-      command: "cd ../worker && npx wrangler dev --port 8787",
+      command: `cd ../worker && pnpm exec wrangler dev --port ${WORKER_PORT}`,
       port: WORKER_PORT,
       reuseExistingServer: !isCI,
       cwd: __dirname,
-      timeout: 30_000,
+      timeout: 60_000,
     },
   ],
   projects: [
