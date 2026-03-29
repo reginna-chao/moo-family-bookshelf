@@ -31,6 +31,7 @@ export default defineConfig({
     emptyOutDir: false,
     outDir: "dist",
     rollupOptions: {
+      preserveEntrySignatures: "exports-only",
       input: {
         "content-dialog": resolve(__dirname, "src/dialog/main.tsx"),
         "content-sync": resolve(__dirname, "src/sync/syncBooks.ts"),
