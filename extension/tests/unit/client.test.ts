@@ -449,6 +449,65 @@ describe("ApiClient", () => {
       expect(r2.data).toEqual({ ok: true });
     });
 
+    it("calls onFamilyRemoved callback on REFRESH_FAILED error", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Removed" } }),
+        });
+      globalThis.fetch = fetchMock;
+
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+          const result = { userId: "u1", familyId: "fam-1" };
+          if (typeof callback === "function") callback(result);
+          return Promise.resolve(result) as unknown as void;
+        },
+      );
+
+      const onFamilyRemoved = vi.fn();
+      client.onFamilyRemoved = onFamilyRemoved;
+
+      await client.getPersonalBooks("u1");
+
+      expect(onFamilyRemoved).toHaveBeenCalledOnce();
+    });
+
+    it("does not throw when onFamilyRemoved is null on REFRESH_FAILED", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Removed" } }),
+        });
+      globalThis.fetch = fetchMock;
+
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+          const result = { userId: "u1", familyId: "fam-1" };
+          if (typeof callback === "function") callback(result);
+          return Promise.resolve(result) as unknown as void;
+        },
+      );
+
+      client.onFamilyRemoved = null;
+
+      // Should not throw
+      const result = await client.getPersonalBooks("u1");
+      expect(result.error?.code).toBe("UNAUTHORIZED");
+    });
+
     it("clears family data on REFRESH_FAILED error", async () => {
       const fetchMock = vi.fn()
         .mockResolvedValueOnce({

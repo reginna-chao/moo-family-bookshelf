@@ -1,6 +1,7 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { App } from "@/dialog/App";
+import { ApiClient } from "@/api/client";
 
 // Mock all child components
 vi.mock("@/dialog/Onboarding", () => ({
@@ -248,6 +249,43 @@ describe("App", () => {
     // The family-shelf tab should be active (default after leave)
     const familyShelfButton = screen.getByText("家庭書櫃");
     expect(familyShelfButton).toHaveStyle({ fontWeight: 600 });
+  });
+
+  it("resets to onboarding when apiClient.onFamilyRemoved is called", async () => {
+    // Capture the ApiClient instance created by App's useRef
+    const instances: ApiClient[] = [];
+    const OrigConstructor = ApiClient;
+    const constructorSpy = vi.spyOn(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (await import("@/api/client")) as any,
+      "ApiClient",
+    ).mockImplementation((...args: unknown[]) => {
+      const instance = new OrigConstructor(...(args as [string?]));
+      instances.push(instance);
+      return instance;
+    });
+
+    setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+    });
+
+    // The App should have created exactly one ApiClient instance
+    expect(instances.length).toBeGreaterThan(0);
+    const apiClient = instances[0];
+    expect(apiClient.onFamilyRemoved).not.toBeNull();
+
+    // Simulate ApiClient calling onFamilyRemoved (e.g., REFRESH_FAILED)
+    await act(async () => {
+      apiClient.onFamilyRemoved!();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+    });
+
+    constructorSpy.mockRestore();
   });
 
   it("applies custom API endpoint from GET_API_ENDPOINT", async () => {

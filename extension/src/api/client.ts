@@ -63,6 +63,8 @@ export class ApiClient {
   private authToken: string | null = null;
   /** Guard: true while a token refresh is in flight */
   private refreshInProgress: Promise<boolean> | null = null;
+  /** Callback invoked when token refresh fails with REFRESH_FAILED (family removed) */
+  onFamilyRemoved: (() => void) | null = null;
 
   constructor(apiUrl?: string) {
     this.baseUrl = (apiUrl ?? DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
@@ -326,12 +328,14 @@ export class ApiClient {
         } catch {
           // sync storage may not be available in all contexts
         }
-        // Notify content script / dialog to reset to onboarding
+        // Notify background script
         try {
           chrome.runtime.sendMessage({ type: "FAMILY_REMOVED" });
         } catch {
           // Message may fail if no listener is active
         }
+        // Notify in-process listeners (e.g., Dialog UI)
+        this.onFamilyRemoved?.();
       }
 
       return false;

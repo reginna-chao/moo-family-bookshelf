@@ -20,6 +20,22 @@ export function App() {
   // Proactive token refresh — runs regardless of view state
   useTokenRefresh(apiClientRef.current);
 
+  // Listen for FAMILY_REMOVED from ApiClient when token refresh fails
+  // (e.g., KV data lost after wrangler dev restart, or user removed from family)
+  useEffect(() => {
+    const client = apiClientRef.current;
+    client.onFamilyRemoved = () => {
+      client.setAuthToken(null);
+      setFamilyId(null);
+      setUserId(null);
+      setActiveTab("family-shelf");
+      setView("onboarding");
+    };
+    return () => {
+      client.onFamilyRemoved = null;
+    };
+  }, []);
+
   useEffect(() => {
     // Load familyId, userId, and custom API endpoint on mount.
     // GET_FAMILY_ID checks sync first, falling back to local (handled in background).

@@ -38,6 +38,7 @@ function createStorageAreaMock(store: Record<string, unknown>) {
     sendMessage: vi.fn(),
     onMessage: {
       addListener: vi.fn(),
+      removeListener: vi.fn(),
     },
     onInstalled: {
       addListener: vi.fn(),
