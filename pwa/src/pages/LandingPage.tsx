@@ -95,6 +95,7 @@ export function LandingPage({ onAuth, apiClient }: LandingPageProps) {
           <input
             id="sync-code"
             type="text"
+            autoComplete="off"
             value={syncCode}
             onChange={(e) => {
               setSyncCode(e.target.value);

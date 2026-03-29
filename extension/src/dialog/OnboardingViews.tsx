@@ -191,6 +191,7 @@ export function IdleView({
       </div>
       <input
         type="text"
+        autoComplete="off"
         placeholder="輸入家庭同步碼"
         value={syncCodeInput}
         onChange={(e) => onSetSyncCodeInput(e.target.value)}
