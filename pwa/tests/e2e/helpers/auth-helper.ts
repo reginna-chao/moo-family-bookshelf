@@ -62,15 +62,18 @@ export async function clearAuthState(page: Page): Promise<void> {
 
 /**
  * Navigate to the PWA and wait for the page to finish its initial render.
- * Waits until the loading spinner ("載入中...") disappears or the landing page is visible.
+ * Waits until React has mounted and the landing page or main nav is visible.
  */
 export async function navigateAndWaitForLoad(page: Page): Promise<void> {
   await page.goto("/");
-  // Wait for React to hydrate — either the landing page form or the main nav should appear
+  // Wait for React to actually render content — either the landing form or the main nav
   await page.waitForFunction(
     () => {
-      const loading = document.body.textContent?.includes("載入中...");
-      return !loading;
+      const root = document.getElementById("root");
+      if (!root || !root.hasChildNodes()) return false;
+      // Still loading — wait more
+      if (document.body.textContent?.includes("載入中...")) return false;
+      return true;
     },
     { timeout: 15_000 },
   );
