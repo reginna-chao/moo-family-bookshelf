@@ -78,7 +78,7 @@ export class ApiClient {
   private refreshing: Promise<string | null> | null = null;
 
   constructor(apiUrl?: string) {
-    this.baseUrl = (apiUrl ?? DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
+    this.baseUrl = (apiUrl || DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
   }
 
   /** Register a callback that re-acquires a token on 401. */
