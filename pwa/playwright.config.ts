@@ -24,7 +24,7 @@ export default defineConfig({
     timeout: 10_000,
   },
   use: {
-    baseURL: `http://localhost:${PWA_PORT}`,
+    baseURL: `https://localhost:${PWA_PORT}`,
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
