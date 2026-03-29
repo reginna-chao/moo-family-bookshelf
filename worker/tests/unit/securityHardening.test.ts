@@ -162,9 +162,9 @@ describe("isPublicRoute", () => {
     expect(isPublicRoute("POST", "/api/auth/hash/")).toBe(true);
   });
 
-  it("should NOT match POST /api/auth/refresh (requires auth)", () => {
-    expect(isPublicRoute("POST", "/api/auth/refresh")).toBe(false);
-    expect(isPublicRoute("POST", "/api/auth/refresh/")).toBe(false);
+  it("should match POST /api/auth/refresh (public, uses membership as auth)", () => {
+    expect(isPublicRoute("POST", "/api/auth/refresh")).toBe(true);
+    expect(isPublicRoute("POST", "/api/auth/refresh/")).toBe(true);
   });
 
   it("should not match other methods or paths", () => {

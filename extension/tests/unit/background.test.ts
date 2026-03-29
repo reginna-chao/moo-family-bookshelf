@@ -142,7 +142,7 @@ describe("background service worker", () => {
         expect.any(Function),
       );
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        ["familyId", "encryptionKey", "authToken"],
+        ["familyId", "encryptionKey", "authToken", "tokenExpiresAt"],
         expect.any(Function),
       );
     });

@@ -6,12 +6,16 @@ const syncStorageMock: Record<string, unknown> = {};
 
 function createStorageAreaMock(store: Record<string, unknown>) {
   return {
-    get: vi.fn((keys: string[], callback: (result: Record<string, unknown>) => void) => {
+    get: vi.fn((keys: string | string[], callback?: (result: Record<string, unknown>) => void) => {
+      const keyList = Array.isArray(keys) ? keys : [keys];
       const result: Record<string, unknown> = {};
-      for (const key of keys) {
+      for (const key of keyList) {
         if (key in store) result[key] = store[key];
       }
-      callback(result);
+      if (typeof callback === "function") {
+        callback(result);
+      }
+      return Promise.resolve(result);
     }),
     set: vi.fn((items: Record<string, unknown>, callback?: () => void) => {
       Object.assign(store, items);

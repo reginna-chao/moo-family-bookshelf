@@ -474,7 +474,7 @@ describe("ApiClient", () => {
       await client.getPersonalBooks("u1");
 
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        ["familyId", "encryptionKey", "authToken"],
+        ["familyId", "encryptionKey", "authToken", "tokenExpiresAt"],
       );
     });
   });

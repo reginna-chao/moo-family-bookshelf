@@ -50,6 +50,9 @@ export interface FamilyBookshelf {
   }>;
 }
 
+/** Proactive refresh buffer: 5 minutes before expiry */
+const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
 export class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
@@ -70,6 +73,24 @@ export class ApiClient {
 
   setAuthToken(token: string | null): void {
     this.authToken = token;
+  }
+
+  /**
+   * Proactively refresh the token if it is about to expire.
+   * Returns true if the token is still valid or was refreshed successfully.
+   */
+  async proactiveRefresh(): Promise<boolean> {
+    try {
+      const { tokenExpiresAt } = await chrome.storage.local.get("tokenExpiresAt");
+      if (!tokenExpiresAt) return true; // No expiry info — assume valid
+
+      if (Date.now() > (tokenExpiresAt as number) - REFRESH_BUFFER_MS) {
+        return this.refreshToken();
+      }
+      return true; // Token still valid
+    } catch {
+      return false;
+    }
   }
 
   // --- Auth ---
@@ -268,7 +289,7 @@ export class ApiClient {
       const familyId = storage.familyId as string | undefined;
       if (!userId || !familyId) return false;
 
-      const result = await this.request<{ token: string }>(
+      const result = await this.request<{ token: string; expiresAt: number }>(
         "/api/auth/refresh",
         {
           method: "POST",
@@ -279,7 +300,11 @@ export class ApiClient {
 
       if (result.data?.token) {
         this.authToken = result.data.token;
-        await chrome.storage.local.set({ authToken: result.data.token });
+        const storageUpdate: Record<string, unknown> = { authToken: result.data.token };
+        if (result.data.expiresAt) {
+          storageUpdate.tokenExpiresAt = result.data.expiresAt;
+        }
+        await chrome.storage.local.set(storageUpdate);
         return true;
       }
 
@@ -289,6 +314,7 @@ export class ApiClient {
           "familyId",
           "encryptionKey",
           "authToken",
+          "tokenExpiresAt",
         ]);
         try {
           await chrome.storage.sync.remove(["familyId"]);

@@ -12,5 +12,7 @@ export function isPublicRoute(method: string, path: string): boolean {
     return true;
   // POST /api/auth/hash — derive userId from email
   if (method === "POST" && /^\/api\/auth\/hash\/?$/.test(path)) return true;
+  // POST /api/auth/refresh — token refresh (uses userId+familyId membership as auth)
+  if (method === "POST" && /^\/api\/auth\/refresh\/?$/.test(path)) return true;
   return false;
 }

@@ -60,8 +60,9 @@ familyRoutes.post("/", async (c) => {
   ]);
 
   const authToken = await generateAuthToken(c.env.KV, body.userId);
+  const expiresAt = Date.now() + 7776000 * 1000; // 90 days
 
-  return c.json({ data: { ...record, authToken } }, 201);
+  return c.json({ data: { ...record, authToken, expiresAt } }, 201);
 });
 
 // POST /api/family/:id/join
@@ -148,8 +149,9 @@ familyRoutes.post("/:id/join", async (c) => {
   ]);
 
   const authToken = await generateAuthToken(c.env.KV, body.userId);
+  const expiresAt = Date.now() + 7776000 * 1000; // 90 days
 
-  return c.json({ data: { ...record, authToken } });
+  return c.json({ data: { ...record, authToken, expiresAt } });
 });
 
 // DELETE /api/family/:id/member/:uid

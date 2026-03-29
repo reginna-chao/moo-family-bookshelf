@@ -103,7 +103,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         setState("error");
         return;
       }
-      const data = response.data as FamilyGroup & { authToken?: string };
+      const data = response.data as FamilyGroup & { authToken?: string; expiresAt?: number };
       const familyId = data.familyId;
       const key = await generateKey();
       const keyString = await exportKey(key);
@@ -116,7 +116,11 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       });
 
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId });
-      await chrome.storage.local.set({ userId, encryptionKey: keyString, authToken: data.authToken });
+      const storageData: Record<string, unknown> = { userId, encryptionKey: keyString, authToken: data.authToken };
+      if (data.expiresAt) {
+        storageData.tokenExpiresAt = data.expiresAt;
+      }
+      await chrome.storage.local.set(storageData);
       await migratePersonalBooksCache(keyString, userId, apiClient);
 
       if (data.authToken) {
@@ -180,14 +184,18 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         return;
       }
 
-      const joinData = response.data as (FamilyGroup & { authToken?: string }) | undefined;
+      const joinData = response.data as (FamilyGroup & { authToken?: string; expiresAt?: number }) | undefined;
 
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: decoded.familyId });
-      await chrome.storage.local.set({
+      const joinStorageData: Record<string, unknown> = {
         userId,
         encryptionKey: decoded.encryptionKey,
         authToken: joinData?.authToken,
-      });
+      };
+      if (joinData?.expiresAt) {
+        joinStorageData.tokenExpiresAt = joinData.expiresAt;
+      }
+      await chrome.storage.local.set(joinStorageData);
       await migratePersonalBooksCache(decoded.encryptionKey, userId, apiClient);
 
       if (joinData?.authToken) {

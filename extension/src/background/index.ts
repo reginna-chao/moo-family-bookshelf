@@ -101,7 +101,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "CLEAR_FAMILY_ID") {
     chrome.storage.sync.remove(SYNCED_KEYS as unknown as string[], () => {
-      chrome.storage.local.remove([...SYNCED_KEYS, "encryptionKey", "authToken"], () => {
+      chrome.storage.local.remove([...SYNCED_KEYS, "encryptionKey", "authToken", "tokenExpiresAt"], () => {
         sendResponse({ ok: true });
       });
     });

@@ -5,6 +5,7 @@ import { PersonalShelf } from "./PersonalShelf";
 import { FamilyShelf } from "./FamilyShelf";
 import { FamilySettings } from "./FamilySettings";
 import { DialogFooter } from "./DialogFooter";
+import { useTokenRefresh } from "./useTokenRefresh";
 
 type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "settings";
@@ -15,6 +16,9 @@ export function App() {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const apiClientRef = useRef(new ApiClient());
+
+  // Proactive token refresh — runs regardless of view state
+  useTokenRefresh(apiClientRef.current);
 
   useEffect(() => {
     // Load familyId, userId, and custom API endpoint on mount.
@@ -48,6 +52,7 @@ export function App() {
 
   const handleLeaveFamily = () => {
     chrome.runtime.sendMessage({ type: "CLEAR_FAMILY_ID" });
+    chrome.storage.local.remove("tokenExpiresAt");
     setFamilyId(null);
     setActiveTab("family-shelf");
     setView("onboarding");
