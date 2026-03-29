@@ -646,8 +646,8 @@ jobs:
 
 ### Phase 4：開源與社群
 
-- [ ] Contributing Guide
-- [ ] GitHub Pages 說明頁面上線驗證
+- [x] Contributing Guide（`CONTRIBUTING.md`）
+- [x] GitHub Pages 說明頁面上線驗證（品牌 Logo、OG 標籤、SVG 圖示替換 emoji、正確 GitHub URL）
 - [ ] Chrome Web Store 上架（v1.0.0）
 
 ### Phase 5：借閱功能（v1.1.0）
