@@ -317,6 +317,7 @@ export class ApiClient {
 
       // Handle refresh failure — user may have been removed from family
       if (result.error?.code === "REFRESH_FAILED") {
+        this.authToken = null;
         await chrome.storage.local.remove([
           "familyId",
           "encryptionKey",
