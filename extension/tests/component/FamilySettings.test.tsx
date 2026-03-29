@@ -30,6 +30,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     getFamilyBookshelf: vi.fn(),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
+    updateFamilyEndpoint: vi.fn().mockResolvedValue({ data: { familyId: "fam-123", apiEndpoint: null } }),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -332,7 +333,7 @@ describe("FamilySettings", () => {
 
     await waitFor(() => {
       expect(apiClient.transferOwnership).toHaveBeenCalledWith(
-        "fam-123", "user-abc12345", "user-def67890",
+        "fam-123", "user-abc12345", "user-def67890", undefined,
       );
     });
 

@@ -26,6 +26,7 @@ export interface FamilyRecord {
   members: FamilyMember[];
   maxMembers: number;
   createdAt: string;
+  apiEndpoint?: string;
 }
 
 /** Raw family record from KV — may lack fields added after initial release. */
@@ -47,11 +48,12 @@ export function normalizeFamilyRecord(record: RawFamilyRecord): FamilyRecord {
   }
   const firstMember = record.members[0];
   const ownerId = record.ownerId ?? (typeof firstMember === 'string' ? firstMember : firstMember.userId);
-  return {
+  const normalized: FamilyRecord = {
     ...record,
     ownerId,
     maxMembers: record.maxMembers ?? 2,
   };
+  return normalized;
 }
 
 export interface UserBooksRecord {

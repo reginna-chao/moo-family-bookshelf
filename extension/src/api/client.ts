@@ -39,6 +39,7 @@ export interface FamilyGroup {
   members: FamilyMember[];
   maxMembers: number;
   createdAt: string;
+  apiEndpoint?: string | null;
 }
 
 export interface FamilyBookshelf {
@@ -152,10 +153,21 @@ export class ApiClient {
     familyId: string,
     userId: string,
     newOwnerId: string,
-  ): Promise<ApiResponse<{ ok: boolean }>> {
+    clearEndpoint?: 1,
+  ): Promise<ApiResponse<FamilyGroup>> {
     return this.request(`/api/family/${familyId}/transfer`, {
       method: "PUT",
-      body: JSON.stringify({ userId, newOwnerId }),
+      body: JSON.stringify({ userId, newOwnerId, ...(clearEndpoint !== undefined && { clearEndpoint }) }),
+    });
+  }
+
+  async updateFamilyEndpoint(
+    familyId: string,
+    apiEndpoint: string | null,
+  ): Promise<ApiResponse<{ familyId: string; apiEndpoint: string | null }>> {
+    return this.request(`/api/family/${familyId}/endpoint`, {
+      method: "PUT",
+      body: JSON.stringify({ apiEndpoint }),
     });
   }
 

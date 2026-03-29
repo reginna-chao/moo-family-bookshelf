@@ -382,7 +382,7 @@ familyRoutes.put("/:id/transfer", async (c) => {
     );
   }
 
-  let body: { newOwnerId: string; userId?: string } | null;
+  let body: { newOwnerId: string; userId?: string; clearEndpoint?: number } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -443,6 +443,145 @@ familyRoutes.put("/:id/transfer", async (c) => {
   }
 
   record.ownerId = body.newOwnerId;
+  if (body.clearEndpoint === 1) {
+    delete record.apiEndpoint;
+  }
+  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+
+  return c.json({ data: record });
+});
+
+// PUT /api/family/:id/endpoint — update family API endpoint
+familyRoutes.put("/:id/endpoint", async (c) => {
+  const familyId = c.req.param("id");
+
+  if (!isValidFamilyId(familyId)) {
+    return c.json(
+      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
+      400,
+    );
+  }
+
+  const callerId = getAuthenticatedUserId(c);
+  if (!callerId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
+  const memberFamily = await c.env.KV.get(kvKeys.member(callerId));
+  if (memberFamily !== familyId) {
+    return c.json(
+      { error: { code: "NOT_FOUND", message: "Family not found" } },
+      404,
+    );
+  }
+
+  let body: { apiEndpoint: string | null } | null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
+      400,
+    );
+  }
+
+  if (!body || !("apiEndpoint" in body)) {
+    return c.json(
+      { error: { code: "MISSING_FIELDS", message: "apiEndpoint is required" } },
+      400,
+    );
+  }
+
+  if (typeof body.apiEndpoint === "string" && body.apiEndpoint.length > 2048) {
+    return c.json(
+      { error: { code: "INVALID_ENDPOINT", message: "API endpoint URL is too long" } },
+      400,
+    );
+  }
+
+  let normalizedEndpoint: string | null = null;
+
+  if (body.apiEndpoint !== null) {
+    if (typeof body.apiEndpoint !== "string") {
+      return c.json(
+        { error: { code: "INVALID_ENDPOINT", message: "apiEndpoint must be a string or null" } },
+        400,
+      );
+    }
+
+    let url: URL;
+    try {
+      url = new URL(body.apiEndpoint);
+    } catch {
+      return c.json(
+        { error: { code: "INVALID_ENDPOINT", message: "apiEndpoint must be a valid URL" } },
+        400,
+      );
+    }
+
+    const isLocalhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalhost)) {
+      return c.json(
+        { error: { code: "INVALID_ENDPOINT", message: "API endpoint must use HTTPS (or HTTP for localhost)" } },
+        400,
+      );
+    }
+
+    // Block private/internal IPs (SSRF prevention)
+    const hostname = url.hostname;
+    if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+      const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+      if (ipMatch) {
+        const [, a, b] = ipMatch.map(Number);
+        const isPrivate =
+          a === 10 ||                          // 10.0.0.0/8
+          (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+          (a === 192 && b === 168) ||          // 192.168.0.0/16
+          (a === 169 && b === 254) ||          // 169.254.0.0/16 (link-local)
+          a === 0;                             // 0.0.0.0/8
+        if (isPrivate) {
+          return c.json(
+            { error: { code: "INVALID_ENDPOINT", message: "Private or internal IP addresses are not allowed" } },
+            400,
+          );
+        }
+      }
+    }
+
+    // Normalize: remove trailing slashes
+    normalizedEndpoint = url.origin + url.pathname.replace(/\/+$/, "");
+  }
+
+  const raw = await c.env.KV.get<RawFamilyRecord>(
+    kvKeys.family(familyId),
+    "json",
+  );
+
+  if (!raw) {
+    return c.json(
+      { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
+      404,
+    );
+  }
+
+  const record = normalizeFamilyRecord(raw);
+
+  if (callerId !== record.ownerId) {
+    return c.json(
+      { error: { code: "NOT_OWNER", message: "只有管理者可以修改 API 端點" } },
+      403,
+    );
+  }
+
+  if (normalizedEndpoint !== null) {
+    record.apiEndpoint = normalizedEndpoint;
+  } else {
+    delete record.apiEndpoint;
+  }
+
   await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
 
   return c.json({ data: record });

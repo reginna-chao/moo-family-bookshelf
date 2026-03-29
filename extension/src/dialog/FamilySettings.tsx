@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient, FamilyMember } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
@@ -26,6 +26,8 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
   const [leaveError, setLeaveError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
+  const [familyEndpoint, setFamilyEndpoint] = useState<string | undefined>(undefined);
+  const skipEndpointSync = useRef(false);
   const displayNameState = useDisplayName({ apiClient, familyId, userId });
 
   useEffect(() => {
@@ -53,15 +55,17 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     chrome.storage.local.get(["encryptionKey"], (result) => {
       const encryptionKey = result.encryptionKey as string | undefined;
       if (!encryptionKey) return;
-      const isCustom = apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
-      const code = encodeSyncCode({
-        familyId,
-        encryptionKey,
-        apiHost: isCustom ? apiClient.getEndpoint() : undefined,
-      });
+      let apiHost: string | undefined;
+      if (familyEndpoint) {
+        apiHost = familyEndpoint;
+      } else {
+        const isCustom = apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
+        apiHost = isCustom ? apiClient.getEndpoint() : undefined;
+      }
+      const code = encodeSyncCode({ familyId, encryptionKey, apiHost });
       setSyncCode(code);
     });
-  }, [familyId, apiClient]);
+  }, [familyId, apiClient, familyEndpoint]);
 
   const fetchMembers = useCallback(async () => {
     setMembersLoading(true);
@@ -72,6 +76,20 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     } else if (response.data) {
       setMembers(response.data.members);
       setOwnerId(response.data.ownerId);
+      setFamilyEndpoint(response.data.apiEndpoint ?? undefined);
+
+      const serverEndpoint = response.data.apiEndpoint;
+      if (!skipEndpointSync.current) {
+        const currentEndpoint = apiClient.getEndpoint();
+        if (serverEndpoint && serverEndpoint !== currentEndpoint) {
+          apiClient.setEndpoint(serverEndpoint);
+          chrome.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: serverEndpoint });
+        } else if (!serverEndpoint && currentEndpoint !== DEFAULT_API_ENDPOINT) {
+          apiClient.setEndpoint(DEFAULT_API_ENDPOINT);
+          chrome.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: null });
+        }
+      }
+      skipEndpointSync.current = false;
     }
     setMembersLoading(false);
   }, [familyId, apiClient]);
@@ -221,10 +239,20 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             familyId={familyId}
             apiClient={apiClient}
             onMembersChanged={() => void fetchMembers()}
+            familyEndpoint={familyEndpoint}
           />
         )}
       </div>
-      <ApiEndpointEditor apiClient={apiClient} />
+      <ApiEndpointEditor
+        apiClient={apiClient}
+        isOwner={userId === ownerId}
+        familyEndpoint={familyEndpoint}
+        familyId={familyId}
+        onEndpointChanged={() => {
+          skipEndpointSync.current = true;
+          void fetchMembers();
+        }}
+      />
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
         {leaveError && (
           <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{leaveError}</div>

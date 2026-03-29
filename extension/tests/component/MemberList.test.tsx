@@ -107,7 +107,7 @@ describe("MemberList", () => {
 
     await waitFor(() => {
       expect(apiClient.transferOwnership).toHaveBeenCalledWith(
-        "fam-123", "user-owner123", "user-member456",
+        "fam-123", "user-owner123", "user-member456", undefined,
       );
       expect(onMembersChanged).toHaveBeenCalled();
     });

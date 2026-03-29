@@ -135,9 +135,32 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "SET_API_ENDPOINT") {
-    chrome.storage.local.set({ apiEndpoint: message.apiEndpoint }, () => {
-      sendResponse({ ok: true });
-    });
+    const endpoint = message.apiEndpoint;
+    if (endpoint === null || endpoint === undefined) {
+      // Clear: remove custom endpoint, revert to default
+      chrome.storage.local.remove("apiEndpoint", () => {
+        sendResponse({ ok: 1 });
+      });
+    } else if (typeof endpoint === "string") {
+      // Validate URL before storing
+      try {
+        const parsed = new URL(endpoint);
+        const isHttps = parsed.protocol === "https:";
+        const isLocalHttp = parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
+        if (!isHttps && !isLocalHttp) {
+          sendResponse({ ok: 0, error: "Invalid protocol" });
+          return true;
+        }
+      } catch {
+        sendResponse({ ok: 0, error: "Invalid URL" });
+        return true;
+      }
+      chrome.storage.local.set({ apiEndpoint: endpoint }, () => {
+        sendResponse({ ok: 1 });
+      });
+    } else {
+      sendResponse({ ok: 0, error: "Invalid endpoint value" });
+    }
     return true;
   }
 });

@@ -181,7 +181,7 @@ describe("background service worker", () => {
         apiEndpoint: "https://custom.workers.dev",
       });
 
-      expect(response).toEqual({ ok: true });
+      expect(response).toEqual({ ok: 1 });
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
         { apiEndpoint: "https://custom.workers.dev" },
         expect.any(Function),
