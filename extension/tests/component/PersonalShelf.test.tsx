@@ -842,6 +842,96 @@ describe("PersonalShelf", () => {
     });
   });
 
+  describe("personalBooksCache", () => {
+    it("caches books to chrome.storage.local after successful load", async () => {
+      const { decrypt } = await import("@/crypto/encrypt");
+      vi.mocked(decrypt).mockResolvedValue(
+        JSON.stringify({
+          books: [
+            {
+              bookId: "book-1",
+              title: "測試書籍一",
+              author: "作者A",
+              coverUrl: "https://example.com/cover1.jpg",
+              readmooUrl: "https://mooink.readmoo.com/book/book-1",
+              isShared: true,
+              isbn: "",
+            },
+          ],
+        }),
+      );
+
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockResolvedValue({
+          data: { payload: "encrypted-data" },
+        }),
+      });
+
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+      await waitForBooksLoaded();
+
+      // After load, cache should be written
+      expect(chrome.storage.local.set).toHaveBeenCalledWith(
+        { personalBooksCache: expect.any(String) },
+      );
+
+      // Find the call that wrote personalBooksCache and verify contents
+      const setCalls = vi.mocked(chrome.storage.local.set).mock.calls;
+      const cacheCall = setCalls.find(
+        (call) => call[0] && typeof call[0] === "object" && "personalBooksCache" in (call[0] as Record<string, unknown>),
+      );
+      expect(cacheCall).toBeDefined();
+      const cached = JSON.parse((cacheCall![0] as Record<string, string>).personalBooksCache);
+      // Merged books should include all 3 scraped + isShared preserved from saved
+      expect(cached.length).toBeGreaterThanOrEqual(3);
+      const book1 = cached.find((b: { bookId: string }) => b.bookId === "book-1");
+      expect(book1).toBeDefined();
+      expect(book1.isShared).toBe(true);
+    });
+
+    it("updates cache after successful save", async () => {
+      const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
+      const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+      await waitForBooksLoaded();
+
+      // Clear mock calls from load phase
+      vi.mocked(chrome.storage.local.set).mockClear();
+
+      // Make dirty via batch action
+      const checkboxes = screen.getAllByRole("checkbox");
+      fireEvent.click(checkboxes[0]);
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+
+      // Click save
+      fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalled();
+      });
+
+      // After save, cache should be updated
+      await waitFor(() => {
+        expect(chrome.storage.local.set).toHaveBeenCalledWith(
+          { personalBooksCache: expect.any(String) },
+        );
+      });
+
+      // Verify the cached books include the toggled share status
+      const setCalls = vi.mocked(chrome.storage.local.set).mock.calls;
+      const cacheCall = setCalls.find(
+        (call) => call[0] && typeof call[0] === "object" && "personalBooksCache" in (call[0] as Record<string, unknown>),
+      );
+      expect(cacheCall).toBeDefined();
+      const cached = JSON.parse((cacheCall![0] as Record<string, string>).personalBooksCache);
+      const book1 = cached.find((b: { bookId: string }) => b.bookId === "book-1");
+      expect(book1).toBeDefined();
+      expect(book1.isShared).toBe(true);
+    });
+  });
+
   describe("lastSyncBooks merge preserves isShared", () => {
     it("preserves existing isShared state when lastSyncBooks arrives", async () => {
       const { decrypt } = await import("@/crypto/encrypt");

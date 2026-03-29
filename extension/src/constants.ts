@@ -10,6 +10,8 @@ export const DEFAULT_API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT as string;
 
 export const DEFAULT_PWA_URL = import.meta.env.VITE_PWA_URL as string;
 
+export const PERSONAL_BOOKS_CACHE_KEY = "personalBooksCache";
+
 /**
  * Build PWA URL with auth data in the fragment (never sent to server).
  * Format: https://pwa.example.com/#code={syncCode}&uid={userId}

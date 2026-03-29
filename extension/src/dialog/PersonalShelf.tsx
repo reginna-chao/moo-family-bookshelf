@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient, BookEntry } from "../api/client";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
+import { PERSONAL_BOOKS_CACHE_KEY } from "../constants";
 import { mergeBooks } from "./mergeBooks";
 import { BookRow } from "./BookRow";
 import { StatusFilterBar, StatusFilter } from "./StatusFilterBar";
@@ -104,6 +105,8 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         if (cancelled) return;
 
         const merged = mergeBooks(allScrapedBooks, savedBooks);
+        // Cache plaintext for family-switch migration
+        chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(merged) });
         originalBooks.current = merged;
         setBooks(merged);
         setStatus("ready");
@@ -192,6 +195,8 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         return;
       }
       originalBooks.current = books;
+      // Update cache after successful save
+      chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books) });
       setIsDirty(false);
       setStatus("saved");
       setTimeout(() => setStatus("ready"), 1500);

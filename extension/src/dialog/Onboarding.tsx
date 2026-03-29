@@ -1,8 +1,8 @@
 import React, { useState } from "react";
-import { ApiClient, FamilyGroup } from "../api/client";
-import { generateKey, exportKey, importKey } from "../crypto/encrypt";
+import { ApiClient, FamilyGroup, BookEntry } from "../api/client";
+import { generateKey, exportKey, importKey, encrypt } from "../crypto/encrypt";
 import { encodeSyncCode, decodeSyncCode, SyncCodeError } from "../crypto/syncCode";
-import { DEFAULT_API_ENDPOINT } from "../constants";
+import { DEFAULT_API_ENDPOINT, PERSONAL_BOOKS_CACHE_KEY } from "../constants";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { useAutoSetup } from "./useAutoSetup";
 import { WelcomeView, CreatedView, ErrorView, IdleView } from "./OnboardingViews";
@@ -15,6 +15,39 @@ type OnboardingState =
   | "joining"
   | "syncing-books"
   | "error";
+
+/**
+ * Re-encrypt cached personal books with the new family's encryption key.
+ * Best-effort: failures do not block family create/join.
+ */
+async function migratePersonalBooksCache(
+  encKeyString: string,
+  userId: string,
+  apiClient: ApiClient,
+): Promise<void> {
+  try {
+    const result = await chrome.storage.local.get([PERSONAL_BOOKS_CACHE_KEY, "displayName"]);
+    const raw = result[PERSONAL_BOOKS_CACHE_KEY] as string | undefined;
+    if (!raw) return;
+
+    const storedDisplayName = (result.displayName as string | undefined) ?? "";
+    const books = JSON.parse(raw) as BookEntry[];
+    const key = await importKey(encKeyString);
+    const payload = JSON.stringify({
+      userId,
+      displayName: storedDisplayName,
+      books,
+      lastUpdated: new Date().toISOString(),
+    });
+    const encrypted = await encrypt(payload, key);
+    await apiClient.updatePersonalBooks(userId, encrypted);
+    await chrome.storage.local.remove([PERSONAL_BOOKS_CACHE_KEY]);
+  } catch {
+    // Cache migration is best-effort; don't block family join/create
+    console.warn("[Onboarding] Failed to migrate personal books cache");
+    await chrome.storage.local.remove([PERSONAL_BOOKS_CACHE_KEY]);
+  }
+}
 
 export interface OnboardingProps {
   onFamilyJoined: (familyId: string, userId: string) => void;
@@ -84,6 +117,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
 
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId });
       await chrome.storage.local.set({ userId, encryptionKey: keyString, authToken: data.authToken });
+      await migratePersonalBooksCache(keyString, userId, apiClient);
 
       if (data.authToken) {
         apiClient.setAuthToken(data.authToken);
@@ -154,6 +188,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         encryptionKey: decoded.encryptionKey,
         authToken: joinData?.authToken,
       });
+      await migratePersonalBooksCache(decoded.encryptionKey, userId, apiClient);
 
       if (joinData?.authToken) {
         apiClient.setAuthToken(joinData.authToken);

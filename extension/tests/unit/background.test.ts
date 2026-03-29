@@ -146,6 +146,17 @@ describe("background service worker", () => {
         expect.any(Function),
       );
     });
+
+    it("does not remove personalBooksCache", async () => {
+      await sendMessage({ type: "CLEAR_FAMILY_ID" });
+
+      // Verify that personalBooksCache is NOT in the keys removed from local storage
+      const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
+      for (const call of removeCalls) {
+        const keys = call[0] as string[];
+        expect(keys).not.toContain("personalBooksCache");
+      }
+    });
   });
 
   describe("GET_API_ENDPOINT", () => {

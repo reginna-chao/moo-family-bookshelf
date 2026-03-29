@@ -639,6 +639,198 @@ describe("Onboarding", () => {
     });
   });
 
+  describe("personalBooksCache migration", () => {
+    const cachedBooks = [
+      {
+        bookId: "book-cached-1",
+        title: "快取書籍一",
+        author: "作者X",
+        coverUrl: "https://example.com/cached1.jpg",
+        readmooUrl: "https://mooink.readmoo.com/book/book-cached-1",
+        isShared: true,
+      },
+    ];
+
+    function setupCacheMock(cache: unknown[] | null) {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+          const keyArr = Array.isArray(keys) ? keys : typeof keys === "string" ? [keys] : [];
+          const result: Record<string, unknown> = {};
+          if (cache && keyArr.includes("personalBooksCache")) {
+            result.personalBooksCache = JSON.stringify(cache);
+          }
+          if (typeof callback === "function") {
+            callback(result);
+          }
+          return Promise.resolve(result) as unknown as void;
+        },
+      );
+    }
+
+    it("migrates cached books when creating a new family", async () => {
+      const mockApi = createMockApiClient({
+        createFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-migrate-1",
+            members: ["user-1"],
+            createdAt: "2026-01-01",
+            authToken: "auth-token-migrate",
+          },
+        }),
+      });
+
+      setupCacheMock(cachedBooks);
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("建立家庭公開書櫃"));
+        await flushMicrotasks();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
+      });
+
+      // Migration should have called updatePersonalBooks with userId and encrypted payload
+      expect(mockApi.updatePersonalBooks).toHaveBeenCalledWith(
+        expect.any(String), // userId (hashed)
+        expect.any(String), // encrypted payload
+      );
+
+      // Cache should be removed after successful migration
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith(["personalBooksCache"]);
+    });
+
+    it("migrates cached books when joining a family", async () => {
+      const mockApi = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "abcd-efgh",
+            members: [],
+            createdAt: "2026-01-01",
+            authToken: "join-token-migrate",
+          },
+        }),
+      });
+
+      setupCacheMock(cachedBooks);
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
+        target: { value: "moo-abcd-efgh-someEncryptionKey" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
+        for (let i = 0; i < 10; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
+      });
+
+      await waitFor(() => {
+        expect(mockApi.joinFamily).toHaveBeenCalled();
+      });
+
+      // Migration should have uploaded cached books
+      expect(mockApi.updatePersonalBooks).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+      );
+
+      // Cache should be removed
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith(["personalBooksCache"]);
+    });
+
+    it("skips migration when no cache exists", async () => {
+      const mockApi = createMockApiClient({
+        createFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-no-cache",
+            members: ["user-1"],
+            createdAt: "2026-01-01",
+            authToken: "auth-token-no-cache",
+          },
+        }),
+      });
+
+      // No cache
+      setupCacheMock(null);
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("建立家庭公開書櫃"));
+        await flushMicrotasks();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
+      });
+
+      // updatePersonalBooks should NOT have been called for migration
+      expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
+    });
+
+    it("cleans up cache even when migration fails", async () => {
+      const mockApi = createMockApiClient({
+        createFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-fail-migrate",
+            members: ["user-1"],
+            createdAt: "2026-01-01",
+            authToken: "auth-token-fail",
+          },
+        }),
+        // Make migration upload fail
+        updatePersonalBooks: vi.fn().mockRejectedValue(new Error("Upload failed")),
+      });
+
+      setupCacheMock(cachedBooks);
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("建立家庭公開書櫃"));
+        await flushMicrotasks();
+      });
+
+      // The create flow should still succeed despite migration failure
+      await waitFor(() => {
+        expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
+      });
+
+      // Cache should still be cleaned up even on failure
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith(["personalBooksCache"]);
+    });
+  });
+
   describe("copy sync code", () => {
     it("copies sync code to clipboard", async () => {
       const mockClipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
