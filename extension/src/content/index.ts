@@ -5,6 +5,12 @@
  * 2. Mount the Dialog UI when button is clicked
  */
 
+// The scraper module is statically imported here (bundled into the content script IIFE)
+// and also imported by syncBooks.ts (bundled into the ESM content-sync module).
+// This intentional duplication is safe because the scraper is stateless — it only
+// reads DOM elements and returns data, with no shared mutable state.
+import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
+
 function injectFamilyBookshelfButton(): void {
   // Avoid duplicate injection
   if (document.getElementById("moo-family-bookshelf-btn")) return;
@@ -84,10 +90,17 @@ function toggleDialog(): void {
   document.body.appendChild(backdrop);
   document.body.appendChild(dialog);
 
-  // Dynamically import and mount the React Dialog into the container
-  import("../dialog/main").then(({ mountDialog }) => {
-    mountDialog(mountPoint);
-  });
+  // Content scripts run in Chrome's isolated world — standard ES module
+  // imports don't resolve correctly, so we load code-split modules via
+  // chrome.runtime.getURL() which points to web-accessible extension resources.
+  import(/* @vite-ignore */ chrome.runtime.getURL("content-dialog.js"))
+    .then(({ mountDialog }) => {
+      mountDialog(mountPoint);
+    })
+    .catch((err) => {
+      console.error("[MooFamily] Failed to load dialog module:", err);
+      mountPoint.textContent = "載入失敗，請重新整理頁面再試。";
+    });
 }
 
 /**
@@ -98,8 +111,7 @@ function tryScrapeAndCacheEmail(): void {
   if (!location.hash.includes("/me")) return;
 
   // Delay slightly to let React render the profile panel
-  setTimeout(async () => {
-    const { scrapeUserEmail, scrapeDisplayName } = await import("./scraper");
+  setTimeout(() => {
     const email = scrapeUserEmail();
     if (!email) return;
 
@@ -116,23 +128,28 @@ function tryScrapeAndCacheEmail(): void {
 function listenForBackgroundSync(): void {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "TRIGGER_BOOK_SYNC") {
-      import("../sync/syncBooks").then(async ({ syncBooks }) => {
-        const storageResult = await chrome.storage.local.get(["userId", "authToken", "apiEndpoint"]);
-        const userId = storageResult.userId as string | undefined;
-        if (!userId) {
-          sendResponse({ success: false, error: "No userId" });
-          return;
-        }
+      // ApiClient is re-exported from content-sync.js, so a single import suffices.
+      import(/* @vite-ignore */ chrome.runtime.getURL("content-sync.js"))
+        .then(async ({ syncBooks, ApiClient }) => {
+          const storageResult = await chrome.storage.local.get(["userId", "authToken", "apiEndpoint"]);
+          const userId = storageResult.userId as string | undefined;
+          if (!userId) {
+            sendResponse({ success: false, error: "No userId" });
+            return;
+          }
 
-        const { ApiClient } = await import("../api/client");
-        const apiClient = new ApiClient(storageResult.apiEndpoint as string | undefined);
-        if (storageResult.authToken) {
-          apiClient.setAuthToken(storageResult.authToken as string);
-        }
+          const apiClient = new ApiClient(storageResult.apiEndpoint as string | undefined);
+          if (storageResult.authToken) {
+            apiClient.setAuthToken(storageResult.authToken as string);
+          }
 
-        const result = await syncBooks({ navigate: true, userId, apiClient });
-        sendResponse({ success: result.success, error: result.error });
-      });
+          const result = await syncBooks({ navigate: true, userId, apiClient });
+          sendResponse({ success: result.success, error: result.error });
+        })
+        .catch((err) => {
+          console.error("[MooFamily] Failed to load sync module:", err);
+          sendResponse({ success: false, error: "Module load failed" });
+        });
       return true; // async response
     }
   });

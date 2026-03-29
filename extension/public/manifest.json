@@ -21,7 +21,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["chunks/*"],
+      "resources": ["chunks/*", "content-dialog.js", "content-sync.js"],
       "matches": ["https://read.readmoo.com/*"]
     }
   ],

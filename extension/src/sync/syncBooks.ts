@@ -6,6 +6,10 @@
  */
 
 import { ApiClient, BookEntry, BoolFlag } from "../api/client";
+
+// Re-export ApiClient so the content script can import it from content-sync.js
+// instead of needing a separate content-api.js entry point.
+export { ApiClient } from "../api/client";
 import { ScrapedBook, scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { mergeBooks } from "./mergeBooks";
