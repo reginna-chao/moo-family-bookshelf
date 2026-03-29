@@ -139,7 +139,7 @@ jobs:
 
       - name: Run E2E tests
         working-directory: extension
-        run: pnpm test:e2e
+        run: xvfb-run --auto-servernum pnpm test:e2e
         env:
           CI: true
 
@@ -177,6 +177,10 @@ jobs:
       - name: Install worker dependencies
         working-directory: worker
         run: pnpm install --frozen-lockfile
+
+      - name: Build PWA
+        working-directory: pwa
+        run: pnpm build
 
       - name: Typecheck E2E tests
         working-directory: pwa
