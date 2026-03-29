@@ -63,6 +63,7 @@ function toggleDialog(): void {
     "overflow: hidden",
     "display: flex",
     "flex-direction: column",
+    "min-height: 200px",
   ].join(";");
 
   // Backdrop

@@ -8,8 +8,8 @@ const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "package.json"), "utf-8"),
 ) as { version: string };
 
-export default defineConfig({
-  plugins: [react(), basicSsl()],
+export default defineConfig(({ command }) => ({
+  plugins: [react(), ...(command === "serve" ? [basicSsl()] : [])],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
@@ -30,4 +30,4 @@ export default defineConfig({
   build: {
     outDir: "dist",
   },
-});
+}));
