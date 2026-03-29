@@ -372,6 +372,62 @@ describe("FamilyShelfPage", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
+  it("updates member display name on displayNameChanged CustomEvent", async () => {
+    mockDecrypt
+      .mockResolvedValueOnce(
+        makePayload("Me", [
+          { bookId: "b1", title: "My Book", author: "Self Author", isShared: 1 },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makePayload("Alice", [
+          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: 1 },
+        ]),
+      );
+    mockGetFamilyBookshelf.mockResolvedValue({
+      data: {
+        familyId: "fam-1",
+        members: [
+          { userId: "user-self", payload: "encrypted-self", lastUpdated: "2026-01-01" },
+          { userId: "user-alice", payload: "encrypted-alice", lastUpdated: "2026-01-01" },
+        ],
+      },
+    });
+
+    render(<FamilyShelfPage {...defaultProps} />);
+
+    // Wait for data to load
+    await waitFor(() => {
+      expect(screen.getByText("Alice Book")).toBeInTheDocument();
+    });
+
+    // Switch to "all" filter to see self's books
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "all" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("My Book")).toBeInTheDocument();
+    });
+
+    // The current user's display name "Me" appears on their book card
+    expect(screen.getByText("Me")).toBeInTheDocument();
+
+    // Dispatch CustomEvent to update display name
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("displayNameChanged", { detail: { displayName: "新名字" } }),
+      );
+    });
+
+    // Verify the current user's name updates
+    await waitFor(() => {
+      expect(screen.getByText("新名字")).toBeInTheDocument();
+    });
+    // Old name should be gone
+    expect(screen.queryByText("Me")).not.toBeInTheDocument();
+  });
+
   it("shows total book count in header", async () => {
     mockDecrypt
       .mockResolvedValueOnce(

@@ -116,6 +116,20 @@ export function FamilyShelfPage({
     void loadBookshelf();
   }, [loadBookshelf]);
 
+  // Cross-component sync: update current user's display name when changed in settings
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ displayName: string }>).detail;
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.userId === userId ? { ...m, displayName: detail.displayName } : m,
+        ),
+      );
+    };
+    window.addEventListener("displayNameChanged", handler);
+    return () => window.removeEventListener("displayNameChanged", handler);
+  }, [userId]);
+
   const totalBooks = useMemo(
     () => members.reduce((sum, m) => sum + m.books.length, 0),
     [members],
@@ -200,11 +214,12 @@ export function FamilyShelfPage({
         aria-label="篩選成員"
         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-4 bg-white focus:border-blue-500 outline-none"
       >
+        <option value="all">所有人的書</option>
         <option value="all-except-self">其他家人的書</option>
-        <option value="all">所有人</option>
-        {members.map((m) => (
+        <option value={userId}>自己的書</option>
+        {members.filter(m => m.userId !== userId).map((m) => (
           <option key={m.userId} value={m.userId}>
-            {m.displayName}
+            {m.displayName || m.userId.slice(0, 8)}
           </option>
         ))}
       </select>

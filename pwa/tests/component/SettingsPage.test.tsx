@@ -292,6 +292,86 @@ describe("SettingsPage", () => {
     });
   });
 
+  it("dispatches displayNameChanged CustomEvent after successful save", async () => {
+    mockUpdateDisplayName.mockResolvedValue({ data: { ok: true } });
+    mockGetFamilyMembers.mockResolvedValue({
+      data: {
+        members: [{ userId: defaultProps.userId, displayName: "Alice" }],
+        ownerId: defaultProps.userId,
+      },
+    });
+
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+
+    render(<SettingsPage {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Alice")).toBeInTheDocument();
+    });
+
+    // Edit name
+    fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+    const input = screen.getByRole("textbox", { name: "顯示名稱" });
+    fireEvent.change(input, { target: { value: "新名字" } });
+    fireEvent.click(screen.getByRole("button", { name: "確認修改名稱" }));
+
+    await waitFor(() => {
+      expect(mockUpdateDisplayName).toHaveBeenCalledWith(
+        defaultProps.familyId,
+        defaultProps.userId,
+        "新名字",
+      );
+    });
+
+    // Verify CustomEvent was dispatched
+    await waitFor(() => {
+      const dispatchedEvents = dispatchSpy.mock.calls
+        .map(([event]) => event)
+        .filter((e): e is CustomEvent => e instanceof CustomEvent && e.type === "displayNameChanged");
+      expect(dispatchedEvents.length).toBe(1);
+      expect(dispatchedEvents[0].detail).toEqual({ displayName: "新名字" });
+    });
+
+    dispatchSpy.mockRestore();
+  });
+
+  it("does not dispatch CustomEvent when display name update fails", async () => {
+    mockUpdateDisplayName.mockResolvedValue({
+      error: { code: "INVALID", message: "名稱格式不正確" },
+    });
+    mockGetFamilyMembers.mockResolvedValue({
+      data: {
+        members: [{ userId: defaultProps.userId, displayName: "Alice" }],
+        ownerId: defaultProps.userId,
+      },
+    });
+
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+
+    render(<SettingsPage {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Alice")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+    const input = screen.getByRole("textbox", { name: "顯示名稱" });
+    fireEvent.change(input, { target: { value: "Bad" } });
+    fireEvent.click(screen.getByRole("button", { name: "確認修改名稱" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("名稱格式不正確")).toBeInTheDocument();
+    });
+
+    // Verify no CustomEvent was dispatched
+    const dispatchedEvents = dispatchSpy.mock.calls
+      .map(([event]) => event)
+      .filter((e): e is CustomEvent => e instanceof CustomEvent && e.type === "displayNameChanged");
+    expect(dispatchedEvents.length).toBe(0);
+
+    dispatchSpy.mockRestore();
+  });
+
   it("shows error when display name update fails", async () => {
     mockUpdateDisplayName.mockResolvedValue({
       error: { code: "INVALID", message: "名稱格式不正確" },

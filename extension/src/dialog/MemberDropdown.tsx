@@ -10,12 +10,13 @@ interface MemberInfo {
 
 export interface MemberDropdownProps {
   members: MemberInfo[];
+  userId: string;
   value: MemberFilterValue;
   onChange: (value: MemberFilterValue) => void;
 }
 
-export function MemberDropdown({ members, value, onChange }: MemberDropdownProps) {
-  const membersWithBooks = members.filter((m) => m.books.length > 0);
+export function MemberDropdown({ members, userId, value, onChange }: MemberDropdownProps) {
+  const othersWithBooks = members.filter((m) => m.userId !== userId && m.books.length > 0);
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -35,9 +36,10 @@ export function MemberDropdown({ members, value, onChange }: MemberDropdownProps
           outline: "none",
         }}
       >
-        <option value="all-except-self">全部（不含自己）</option>
-        <option value="all">全部</option>
-        {membersWithBooks.map((m) => (
+        <option value="all">所有人的書</option>
+        <option value="all-except-self">其他家人的書</option>
+        <option value={userId}>自己的書</option>
+        {othersWithBooks.map((m) => (
           <option key={m.userId} value={m.userId}>
             {m.displayName || m.userId.slice(0, 8)}
           </option>

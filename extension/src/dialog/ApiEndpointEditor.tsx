@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, HelpCircle } from "lucide-react";
 import { ApiClient } from "../api/client";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 
@@ -133,12 +133,28 @@ export function ApiEndpointEditor({
         <div style={{ marginTop: 8 }}>
           {isOwner ? (
             <>
-              <div style={{ color: "#64748b", fontSize: 12, marginBottom: 4 }}>目前 API 端點</div>
+              <div style={{ color: "#64748b", fontSize: 12, marginBottom: 4 }}>
+                目前 API 端點
+                <a
+                  href="https://github.com/reginna-chao/moo-family-bookshelf/blob/main/worker/DEPLOY.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="自架部署說明"
+                  style={{ color: "#94a3b8", marginLeft: 4, verticalAlign: "middle" }}
+                >
+                  <HelpCircle size={12} style={{ display: "inline", verticalAlign: "middle" }} />
+                </a>
+              </div>
               <div style={{
                 padding: 8, background: "#f8fafc", borderRadius: 6,
                 fontFamily: "monospace", fontSize: 12, wordBreak: "break-all", marginBottom: 10,
               }}>
                 {currentEndpoint}
+                {isDefault && (
+                  <span style={{ fontFamily: "sans-serif", color: "#94a3b8", marginLeft: 4 }}>
+                    （預設）
+                  </span>
+                )}
               </div>
               <input
                 type="url"
@@ -232,6 +248,15 @@ export function ApiEndpointEditor({
             <>
               <div style={{ color: "#64748b", fontSize: 12, marginBottom: 4 }}>
                 API 端點（由家庭建立者設定）：
+                <a
+                  href="https://github.com/reginna-chao/moo-family-bookshelf/blob/main/worker/DEPLOY.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="自架部署說明"
+                  style={{ color: "#94a3b8", marginLeft: 4, verticalAlign: "middle" }}
+                >
+                  <HelpCircle size={12} style={{ display: "inline", verticalAlign: "middle" }} />
+                </a>
               </div>
               <div style={{
                 padding: 8, background: "#f8fafc", borderRadius: 6,

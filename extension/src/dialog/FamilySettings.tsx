@@ -98,6 +98,33 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     void fetchMembers();
   }, [fetchMembers]);
 
+  // Cross-component sync: update local member display name without refetching
+  useEffect(() => {
+    const listener = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      area: string,
+    ) => {
+      if (area === "local" && changes.displayName) {
+        const newName = (changes.displayName.newValue as string) ?? "";
+        setMembers(prev => prev.map(m =>
+          m.userId === userId ? { ...m, displayName: newName } : m
+        ));
+      }
+    };
+    try {
+      chrome.storage.onChanged.addListener(listener);
+    } catch {
+      // Extension context may be invalidated after reload
+    }
+    return () => {
+      try {
+        chrome.storage.onChanged.removeListener(listener);
+      } catch {
+        // Extension context may be invalidated after reload
+      }
+    };
+  }, [userId]);
+
   const handleCopy = async () => {
     if (!syncCode) return;
     await navigator.clipboard.writeText(syncCode);
@@ -132,7 +159,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   return (
     <div>
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>個人設定</h3>
-      <DisplayNameEditor {...displayNameState} />
+      <DisplayNameEditor {...displayNameState} userId={userId} />
       <div style={{ marginBottom: 20 }}>
         <button
           role="switch"
@@ -179,6 +206,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           啟用後，同步時會一併讀取已封存的書籍
         </div>
       </div>
+      {syncCode && (
+        <QrCodeLink syncCode={syncCode} userId={userId} />
+      )}
+      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 4 }} />
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>家庭設定</h3>
       <div style={{ marginBottom: 20 }}>
         <div style={{ color: "#64748b", fontSize: 13, marginBottom: 6 }}>家庭同步碼</div>
@@ -204,9 +235,6 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           將此代碼分享給家人即可加入書櫃
         </div>
       </div>
-      {syncCode && (
-        <QrCodeLink syncCode={syncCode} userId={userId} />
-      )}
       <div style={{ marginBottom: 20 }}>
         <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>
           家庭成員{!membersLoading && !membersError ? ` (${members.length})` : ""}

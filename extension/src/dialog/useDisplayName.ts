@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient } from "../api/client";
 
 type NameSaveState = "idle" | "saving" | "saved" | "error";
@@ -15,7 +15,7 @@ export interface UseDisplayNameResult {
   nameSaveState: NameSaveState;
   nameSaveError: string;
   setDisplayName: (name: string) => void;
-  handleSaveDisplayName: () => Promise<void>;
+  handleSaveDisplayName: () => Promise<boolean>;
 }
 
 export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameResult {
@@ -23,6 +23,7 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
   const [savedDisplayName, setSavedDisplayName] = useState("");
   const [nameSaveState, setNameSaveState] = useState<NameSaveState>("idle");
   const [nameSaveError, setNameSaveError] = useState("");
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     chrome.storage.local.get(["displayName"], (result) => {
@@ -30,33 +31,44 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
       setDisplayName(name);
       setSavedDisplayName(name);
     });
+
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
   }, []);
 
-  const handleSaveDisplayName = useCallback(async () => {
+  const handleSaveDisplayName = useCallback(async (): Promise<boolean> => {
     const trimmed = displayName.trim();
     setNameSaveState("saving");
     setNameSaveError("");
 
-    // Call API if available
-    if (options?.apiClient && options.familyId && options.userId) {
-      const response = await options.apiClient.updateDisplayName(
-        options.familyId,
-        options.userId,
-        trimmed,
-      );
-      if (response.error) {
-        setNameSaveError(response.error.message);
-        setNameSaveState("error");
-        return;
+    try {
+      // Call API if available
+      if (options?.apiClient && options.familyId && options.userId) {
+        const response = await options.apiClient.updateDisplayName(
+          options.familyId,
+          options.userId,
+          trimmed,
+        );
+        if (response.error) {
+          setNameSaveError(response.error.message);
+          setNameSaveState("error");
+          return false;
+        }
       }
-    }
 
-    await chrome.storage.local.set({ displayName: trimmed });
-    await chrome.storage.sync.set({ displayName: trimmed });
-    setDisplayName(trimmed);
-    setSavedDisplayName(trimmed);
-    setNameSaveState("saved");
-    setTimeout(() => setNameSaveState("idle"), 1500);
+      await chrome.storage.local.set({ displayName: trimmed });
+      await chrome.storage.sync.set({ displayName: trimmed });
+      setDisplayName(trimmed);
+      setSavedDisplayName(trimmed);
+      setNameSaveState("saved");
+      timeoutRef.current = setTimeout(() => setNameSaveState("idle"), 1500);
+      return true;
+    } catch (err) {
+      setNameSaveError(err instanceof Error ? err.message : "儲存失敗");
+      setNameSaveState("error");
+      return false;
+    }
   }, [displayName, options?.apiClient, options?.familyId, options?.userId]);
 
   return {

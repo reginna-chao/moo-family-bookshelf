@@ -47,6 +47,10 @@ function createStorageAreaMock(store: Record<string, unknown>) {
   storage: {
     local: createStorageAreaMock(localStorageMock),
     sync: createStorageAreaMock(syncStorageMock),
+    onChanged: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
   },
   alarms: {
     create: vi.fn(),

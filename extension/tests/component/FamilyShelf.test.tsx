@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
 import type { ApiClient } from "@/api/client";
@@ -456,5 +456,104 @@ describe("FamilyShelf", () => {
     await waitFor(() => {
       expect(screen.getByText("尚無家人分享書籍")).toBeInTheDocument();
     });
+  });
+
+  it("updates member display name on chrome.storage.onChanged", async () => {
+    const apiClient = createMockApiClient({
+      getFamilyBookshelf: vi.fn().mockResolvedValue({
+        data: {
+          familyId: "fam-1",
+          members: [
+            {
+              userId: "user-1",
+              payload: makeMemberPayload("小明", [
+                { bookId: "b1", title: "我的書", author: "A", isShared: true },
+              ]),
+              lastUpdated: "2024-01-01",
+            },
+            {
+              userId: "user-2",
+              payload: makeMemberPayload("Alice", [
+                { bookId: "b2", title: "Alice的書", author: "B", isShared: true },
+              ]),
+              lastUpdated: "2024-01-01",
+            },
+          ],
+        },
+      }),
+    });
+
+    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+
+    // Wait for initial load — switch to "all" filter so current user's books are visible
+    await waitFor(() => {
+      expect(screen.getByText("Alice的書")).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText("篩選成員"), { target: { value: "all" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("我的書")).toBeInTheDocument();
+    });
+
+    // Get the listener registered on chrome.storage.onChanged
+    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const listener = addListenerCalls[addListenerCalls.length - 1][0];
+
+    // Simulate storage change
+    act(() => {
+      listener(
+        { displayName: { newValue: "新名字", oldValue: "小明" } },
+        "local",
+      );
+    });
+
+    // Verify UI updated — the member name shown on the book card should change
+    await waitFor(() => {
+      expect(screen.getByText("新名字")).toBeInTheDocument();
+    });
+  });
+
+  it("ignores chrome.storage.onChanged from non-local area", async () => {
+    const apiClient = createMockApiClient({
+      getFamilyBookshelf: vi.fn().mockResolvedValue({
+        data: {
+          familyId: "fam-1",
+          members: [
+            {
+              userId: "user-1",
+              payload: makeMemberPayload("小明", [
+                { bookId: "b1", title: "我的書", author: "A", isShared: true },
+              ]),
+              lastUpdated: "2024-01-01",
+            },
+          ],
+        },
+      }),
+    });
+
+    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText("篩選成員"), { target: { value: "all" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("我的書")).toBeInTheDocument();
+    });
+
+    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const listener = addListenerCalls[addListenerCalls.length - 1][0];
+
+    // Fire from "sync" area — should be ignored
+    act(() => {
+      listener(
+        { displayName: { newValue: "不應出現", oldValue: "小明" } },
+        "sync",
+      );
+    });
+
+    // The name should still be "小明", not "不應出現"
+    expect(screen.queryByText("不應出現")).not.toBeInTheDocument();
   });
 });

@@ -324,7 +324,7 @@ export function PersonalShelfPage({
                   aria-label={`${book.title} ${book.isShared === 1 ? "已開放分享" : "未開放分享"}`}
                   className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 ${
                     book.isShared === 1
-                      ? "bg-blue-100 text-blue-700"
+                      ? "bg-green-100 text-green-600"
                       : "bg-gray-100 text-gray-500"
                   }`}
                 >

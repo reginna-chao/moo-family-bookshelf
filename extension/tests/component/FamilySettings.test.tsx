@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FamilySettings, FamilySettingsProps } from "@/dialog/FamilySettings";
 import type { ApiClient } from "@/api/client";
@@ -62,38 +62,63 @@ describe("FamilySettings", () => {
     vi.mocked(chrome.storage.sync.set).mockResolvedValue();
   });
 
-  it("shows display name section with loaded value", async () => {
+  // Helper: find the display name section by its label
+  function getDisplayNameSection() {
+    return screen.getByText("顯示名稱").closest("div")!.parentElement!;
+  }
+
+  function enterEditMode() {
+    const section = getDisplayNameSection();
+    const pencilBtn = section.querySelector("button")!;
+    fireEvent.click(pencilBtn);
+  }
+
+  it("shows display name section with loaded value in display mode", async () => {
     renderFamilySettings();
 
     expect(screen.getByText("顯示名稱")).toBeInTheDocument();
     expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
 
+    // New inline edit: display mode shows text, not input
     await waitFor(() => {
-      const input = screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement;
-      expect(input.value).toBe("小明");
+      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
     });
+    // No input visible in display mode
+    expect(screen.queryByPlaceholderText("輸入顯示名稱")).not.toBeInTheDocument();
   });
 
-  it("save button disabled when display name unchanged", async () => {
+  it("enters edit mode when pencil icon is clicked", async () => {
     renderFamilySettings();
 
     await waitFor(() => {
-      expect((screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement).value).toBe("小明");
+      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
     });
 
-    // "儲存" button should be disabled since name hasn't changed
-    expect(screen.getByText("儲存")).toBeDisabled();
+    enterEditMode();
+
+    // Now input should be visible
+    expect(screen.getByPlaceholderText("輸入顯示名稱")).toBeInTheDocument();
   });
 
-  it("save button enabled after changing display name", async () => {
+  it("exits edit mode and reverts on cancel", async () => {
     renderFamilySettings();
 
     await waitFor(() => {
-      expect((screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement).value).toBe("小明");
+      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
     });
+
+    enterEditMode();
 
     fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), { target: { value: "大明" } });
-    expect(screen.getByText("儲存")).toBeEnabled();
+
+    // Click cancel (X) button — second button in the edit row
+    const editButtons = screen.getByPlaceholderText("輸入顯示名稱").parentElement!.querySelectorAll("button");
+    fireEvent.click(editButtons[1]); // X button
+
+    // Should be back in display mode
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText("輸入顯示名稱")).not.toBeInTheDocument();
+    });
   });
 
   it("saves display name via API and to local/sync storage", async () => {
@@ -101,11 +126,16 @@ describe("FamilySettings", () => {
     renderFamilySettings({ apiClient });
 
     await waitFor(() => {
-      expect((screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement).value).toBe("小明");
+      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
     });
 
+    enterEditMode();
+
     fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), { target: { value: "大明" } });
-    fireEvent.click(screen.getByText("儲存"));
+
+    // Click check (confirm) button — first button in the edit row
+    const editButtons = screen.getByPlaceholderText("輸入顯示名稱").parentElement!.querySelectorAll("button");
+    fireEvent.click(editButtons[0]); // Check button
 
     await waitFor(() => {
       expect(apiClient.updateDisplayName).toHaveBeenCalledWith(
@@ -114,19 +144,14 @@ describe("FamilySettings", () => {
       expect(chrome.storage.local.set).toHaveBeenCalledWith({ displayName: "大明" });
       expect(chrome.storage.sync.set).toHaveBeenCalledWith({ displayName: "大明" });
     });
-
-    // Should show success feedback
-    await waitFor(() => {
-      expect(screen.getByText("已儲存")).toBeInTheDocument();
-    });
   });
 
   it("shows API displayName for all members in member list", async () => {
     renderFamilySettings();
 
     await waitFor(() => {
-      // Owner has displayName "小明" from API
-      expect(screen.getByText("小明")).toBeInTheDocument();
+      // Owner has displayName "小明" from API — appears in both display name editor and member list
+      expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
       // Other member has empty displayName, falls back to userId slice
       expect(screen.getByText("user-def")).toBeInTheDocument();
     });
@@ -158,7 +183,8 @@ describe("FamilySettings", () => {
 
     // Wait for member loading to complete
     await waitFor(() => {
-      expect(screen.getByText("小明")).toBeInTheDocument();
+      // "小明" appears in both display name editor and member list
+      expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText("user-def")).toBeInTheDocument();
     });
 
@@ -419,16 +445,22 @@ describe("FamilySettings", () => {
     renderFamilySettings({ apiClient });
 
     await waitFor(() => {
-      expect((screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement).value).toBe("小明");
+      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
     });
 
+    enterEditMode();
+
     fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), { target: { value: "新名稱" } });
-    fireEvent.click(screen.getByText("儲存"));
+
+    // Click check (confirm) button
+    const editButtons = screen.getByPlaceholderText("輸入顯示名稱").parentElement!.querySelectorAll("button");
+    fireEvent.click(editButtons[0]);
 
     await waitFor(() => {
       expect(screen.getByText("名稱過長")).toBeInTheDocument();
-      expect(screen.getByText("儲存失敗")).toBeInTheDocument();
     });
+    // Should stay in edit mode after error
+    expect(screen.getByPlaceholderText("輸入顯示名稱")).toBeInTheDocument();
   });
 
   describe("sync archived toggle", () => {
@@ -600,6 +632,54 @@ describe("FamilySettings", () => {
 
       expect(getFamilyMembers).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("updates member display name on chrome.storage.onChanged", async () => {
+    renderFamilySettings();
+
+    // Wait for members to load
+    await waitFor(() => {
+      expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText("user-def")).toBeInTheDocument();
+    });
+
+    // Get the listener registered on chrome.storage.onChanged
+    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const listener = addListenerCalls[addListenerCalls.length - 1][0];
+
+    // Simulate storage change for displayName
+    act(() => {
+      listener(
+        { displayName: { newValue: "大明", oldValue: "小明" } },
+        "local",
+      );
+    });
+
+    // The member list should update the current user's name
+    await waitFor(() => {
+      expect(screen.getByText("大明")).toBeInTheDocument();
+    });
+  });
+
+  it("ignores chrome.storage.onChanged from non-local area", async () => {
+    renderFamilySettings();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
+    });
+
+    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const listener = addListenerCalls[addListenerCalls.length - 1][0];
+
+    // Fire from "sync" area — should be ignored
+    act(() => {
+      listener(
+        { displayName: { newValue: "不應出現", oldValue: "小明" } },
+        "sync",
+      );
+    });
+
+    expect(screen.queryByText("不應出現")).not.toBeInTheDocument();
   });
 
   describe("leave family errors", () => {

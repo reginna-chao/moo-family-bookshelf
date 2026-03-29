@@ -130,6 +130,9 @@ export function SettingsPage({
       }
       setCurrentName(trimmed);
       setEditingName(false);
+      window.dispatchEvent(
+        new CustomEvent("displayNameChanged", { detail: { displayName: trimmed } }),
+      );
       void loadMembers();
     } catch (err) {
       setNameError(err instanceof Error ? err.message : "更新失敗");
@@ -258,28 +261,29 @@ export function SettingsPage({
         </p>
       </section>
 
-      {/* Sync code */}
+      {/* Family settings */}
       <section className="mb-6">
-        <h3 className="text-sm font-medium text-gray-500 mb-2">家庭同步碼</h3>
+        <h3 className="text-sm font-medium text-gray-500 mb-3">家庭設定</h3>
+
+        <p className="text-xs text-gray-500 mb-1">家庭同步碼</p>
         <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs break-all mb-2">
           {syncCode}
         </div>
         <button
           onClick={() => void handleCopy()}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+          className={`w-full rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-600 ${
+            copied ? "bg-blue-50" : "bg-transparent hover:bg-blue-50"
+          } transition-colors`}
         >
           {copied ? "已複製" : "複製同步碼"}
         </button>
-        <p className="text-gray-400 text-xs mt-1.5">
+        <p className="text-gray-400 text-xs mt-1.5 mb-4">
           將此代碼分享給家人即可加入書櫃
         </p>
-      </section>
 
-      {/* Members */}
-      <section className="mb-6">
-        <h3 className="text-sm font-medium text-gray-500 mb-2">
+        <p className="text-xs text-gray-500 mb-1">
           成員{!membersLoading && !membersError ? ` (${members.length})` : ""}
-        </h3>
+        </p>
         {membersLoading && (
           <p className="text-gray-400 text-sm">載入中...</p>
         )}
@@ -304,10 +308,11 @@ export function SettingsPage({
             onMembersChanged={loadMembers}
           />
         )}
-      </section>
 
-      {/* API Endpoint */}
-      <ApiEndpointEditor apiClient={apiClient} />
+        <div className="mt-4">
+          <ApiEndpointEditor apiClient={apiClient} />
+        </div>
+      </section>
 
       {/* Leave family */}
       <section className="mb-6 pt-6 border-t border-gray-200">

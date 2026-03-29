@@ -125,6 +125,35 @@ export function FamilyShelf({ familyId, userId, apiClient }: FamilyShelfProps) {
     void loadBookshelf();
   }, [loadBookshelf]);
 
+  // Cross-component sync: update current user's display name when changed in settings
+  useEffect(() => {
+    const listener = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      area: string,
+    ) => {
+      if (area === "local" && changes.displayName) {
+        const newName = (changes.displayName.newValue as string) ?? "";
+        setMembers((prev) =>
+          prev.map((m) =>
+            m.userId === userId ? { ...m, displayName: newName } : m,
+          ),
+        );
+      }
+    };
+    try {
+      chrome.storage.onChanged.addListener(listener);
+    } catch {
+      // Extension context may be invalidated after reload
+    }
+    return () => {
+      try {
+        chrome.storage.onChanged.removeListener(listener);
+      } catch {
+        // Extension context may be invalidated after reload
+      }
+    };
+  }, [userId]);
+
   const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
   const memberFilteredBooks = (() => {
@@ -209,6 +238,7 @@ export function FamilyShelf({ familyId, userId, apiClient }: FamilyShelfProps) {
 
       <MemberDropdown
         members={members}
+        userId={userId}
         value={filterMember}
         onChange={setFilterMember}
       />
