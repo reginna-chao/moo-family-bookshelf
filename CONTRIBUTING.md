@@ -1,74 +1,182 @@
-# 貢獻指南
+# Contributing to MooFamily Bookshelf
 
-感謝你有興趣參與 MooFamily Bookshelf 的開發！本文件說明如何參與貢獻。
+Thank you for your interest in contributing! This guide covers the development setup, workflow, and conventions for the project.
 
-## 開發環境
+## Development Setup
+
+### Prerequisites
 
 - **Node.js** 20+
-- **pnpm** 作為套件管理工具
+- **pnpm** 9+
 - **Git**
 
+### Clone & Install
+
 ```bash
-# Clone 專案
 git clone https://github.com/reginna-chao/moo-family-bookshelf.git
 cd moo-family-bookshelf
-
-# 安裝依賴
 pnpm install
 ```
 
-## 專案結構
+### Environment Variables
 
-| 目錄 | 說明 |
-|------|------|
-| `extension/` | Chrome Extension（React + Vite） |
-| `pwa/` | PWA 行動端（React + Vite） |
-| `worker/` | Cloudflare Workers 後端（Hono） |
-| `site/` | GitHub Pages 靜態說明頁面 |
-| `docs/` | 專案文件（計畫書、架構、隱私政策） |
-| `assets/brand/` | 品牌素材（Logo、Favicon、OG Image） |
-
-## 開發指令
+Each sub-project provides an `.env.example` template. Copy and adjust as needed:
 
 ```bash
-# Extension
-pnpm dev              # 開發伺服器
-pnpm build            # 正式建置
-pnpm typecheck        # 型別檢查
-pnpm lint             # ESLint + Prettier
-pnpm test             # 單元 + 元件測試
-pnpm test:e2e         # E2E 測試（Playwright）
+cp extension/.env.example extension/.env.production
+cp extension/.env.example extension/.env.development
+cp pwa/.env.example pwa/.env.production
+cp pwa/.env.example pwa/.env.development
+```
 
-# Worker
+- `.env.development` — Local dev mode, typically set API to `http://localhost:8787`
+- `.env.production` — Production build, uses the default or self-hosted Worker URL
+- Self-hosters: set `VITE_API_ENDPOINT` to your own Worker URL
+
+## Project Structure
+
+| Directory | Description |
+|-----------|-------------|
+| `extension/` | Chrome Extension (React + TypeScript + Vite) |
+| `pwa/` | PWA mobile viewer (React + Vite) |
+| `worker/` | Cloudflare Workers backend (Hono + KV) |
+| `site/` | GitHub Pages landing page |
+| `docs/` | Project documentation (plan, architecture, privacy) |
+| `assets/brand/` | Brand assets (logo, favicon, OG image) |
+
+### Tech Stack
+
+| Layer | Technology | Notes |
+|-------|-----------|-------|
+| Frontend | React + TypeScript + Vite | Chrome Extension, Dialog injected via Content Script |
+| Mobile | PWA | Shares the same Workers API; cannot scrape Readmoo |
+| Backend | Cloudflare Workers | Serverless; free tier sufficient; self-hostable |
+| Storage | Cloudflare KV | `user:{id}` for personal settings, `family:{id}` for groups |
+| Encryption | Web Crypto API (AES-256-GCM) | E2EE; server stores ciphertext only |
+
+## Development Commands
+
+### Extension
+
+```bash
+cd extension
+pnpm dev        # Dev server (API points to localhost:8787)
+pnpm build      # Production build (API points to prod Worker)
+pnpm typecheck  # Type check
+pnpm lint       # ESLint + Prettier
+pnpm test       # Unit + component tests
+```
+
+### Worker
+
+```bash
 cd worker
-pnpm dev              # 本地 Wrangler 開發
-pnpm test             # 單元 + 整合測試
-pnpm typecheck
+pnpm dev        # Local dev (Miniflare + preview-kv)
+pnpm build      # Build
+pnpm typecheck  # Type check
+pnpm test       # Unit + integration tests (Vitest + Miniflare)
+```
 
-# PWA
+### PWA
+
+```bash
 cd pwa
 pnpm dev
-pnpm test
+pnpm build
 pnpm typecheck
+pnpm test
+```
 
-# 全專案覆蓋率
+### Dev vs Production
+
+| Mode | Commands | API Endpoint | KV |
+|------|----------|-------------|-----|
+| Dev | `cd worker && pnpm dev` + `cd extension && pnpm dev` | `localhost:8787` | preview-kv |
+| Prod | `cd extension && pnpm build` | prod Worker | prod-kv |
+
+Run Worker and Extension in separate terminals during development. Data writes go to preview-kv, keeping the production environment clean.
+
+## E2E Testing
+
+E2E tests use Playwright to load the built Chrome Extension and run full-flow tests against a simulated Readmoo page.
+
+```bash
+pnpm test:e2e   # Builds Extension + starts local Worker + runs all E2E tests
+```
+
+First-time setup — install the Playwright browser:
+
+```bash
+cd extension && npx playwright install chromium
+```
+
+### Test Scenarios
+
+| Spec file | Coverage |
+|-----------|----------|
+| `family-lifecycle.spec.ts` | Create family → sync code → second user joins → verify members |
+| `book-sharing.spec.ts` | Books default to not-shared → toggle → save → visible in family shelf |
+| `dialog-state-machine.spec.ts` | No family → onboarding → create → main view → close/reopen persistence |
+| `custom-endpoint.spec.ts` | Custom API endpoint → sync code with `@host` → format validation |
+
+### Selector Verification
+
+E2E tests rely on mock HTML that simulates the Readmoo DOM. When Readmoo updates their page structure, verify that `scraper.ts` selectors still work:
+
+```bash
+pnpm e2e:verify:selectors          # Check all selectors against live Readmoo
+pnpm e2e:verify:selectors:update   # Check + regenerate mock HTML from live DOM
+```
+
+The first run opens Chromium and requires manual Readmoo login. Login state is persisted for subsequent runs.
+
+## Testing Conventions
+
+- Test **business behavior**, not implementation details.
+- New features must include corresponding tests.
+- Tests must clean up state (no leaked timers, mocks, listeners, or KV entries).
+- Integration tests use Miniflare to simulate KV — never connect to real Cloudflare in tests.
+- E2E tests load the built Extension into a real Chrome instance via Playwright.
+
+### Coverage Targets
+
+| Scope | Target |
+|-------|--------|
+| `extension/src/crypto/` | ≥ 90% |
+| `extension/src/api/` | ≥ 80% |
+| `extension/src/dialog/` | ≥ 70% |
+| `worker/src/` | ≥ 80% |
+| Overall | ≥ 70% |
+
+Run full coverage report:
+
+```bash
 pnpm test:coverage
 ```
 
-## 提交 Pull Request
+## Code Style
 
-### 分支命名
+- **TypeScript**: strict mode, no `any`. Use `unknown` + type guards when needed.
+- **React**: functional components + hooks. No class components.
+- **CSS**: Tailwind CSS utility classes.
+- **Naming**: `camelCase` for variables/functions, `PascalCase` for components/types, `UPPER_SNAKE` for constants.
+- **Language**: English for code identifiers; 繁體中文 for UI text.
+- Keep files under 300 lines. Split when it improves clarity.
 
-使用描述性的分支名稱：
+## Pull Requests
 
-- `feat/add-book-search` — 新功能
-- `fix/sync-code-parsing` — Bug 修復
-- `docs/update-privacy-policy` — 文件更新
-- `refactor/extract-crypto-utils` — 重構
+### Branch Naming
 
-### Commit 格式
+Use descriptive branch names:
 
-遵循 [Conventional Commits](https://www.conventionalcommits.org/)：
+- `feat/add-book-search` — New feature
+- `fix/sync-code-parsing` — Bug fix
+- `docs/update-privacy-policy` — Documentation
+- `refactor/extract-crypto-utils` — Refactoring
+
+### Commit Format
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 feat: add personal shelf search
@@ -79,63 +187,48 @@ test: add crypto roundtrip tests
 chore: update dependencies
 ```
 
-### PR 流程
+### PR Workflow
 
-1. Fork 本專案並建立功能分支
-2. 開發並撰寫測試
-3. 確保所有檢查通過：
+1. Fork the repo and create a feature branch
+2. Develop and write tests
+3. Ensure all checks pass:
    ```bash
    pnpm lint
    pnpm typecheck
    pnpm test
    cd worker && pnpm test
    ```
-4. 提交 PR，說明變更內容與動機
+4. Submit a PR describing the changes and motivation
 
-### CI 會自動執行
+### CI Checks
 
-- ESLint + Prettier 格式檢查
-- TypeScript 型別檢查
-- 單元 + 元件測試
-- E2E 測試（PR to `main` 時）
+Every push/PR triggers:
 
-## 測試
+- ESLint + Prettier formatting
+- TypeScript type checking
+- Unit + component tests
+- E2E tests (on PR to `main`)
 
-- 測試商業行為，而非實作細節
-- 新功能需附帶對應測試
-- 覆蓋率目標：crypto >= 90%, API/Worker >= 80%, Dialog UI >= 70%
-- 整合測試使用 Miniflare 模擬 KV，不連接真實 Cloudflare
-- E2E 測試使用 Playwright 載入完整 Extension
+## Security Notes
 
-## 程式碼風格
+- All book data defaults to not-shared; users must explicitly opt-in.
+- Data is encrypted client-side (AES-256-GCM) before upload.
+- Never hardcode keys or sensitive information in source code.
+- `.env`, `.dev.vars`, and similar files must not be committed to git.
+- Content Script only reads publicly visible book information — never touch account credentials.
 
-- **TypeScript**：嚴格模式，避免 `any`
-- **React**：函式元件 + Hooks，不使用 Class Component
-- **CSS**：Tailwind CSS utility classes
-- **命名**：`camelCase` 變數/函式、`PascalCase` 元件/型別、`UPPER_SNAKE` 常數
-- **語言**：程式碼識別符用英文，UI 文字用繁體中文
-- 每個檔案盡量不超過 300 行
+## Self-Hosting
 
-## 安全注意事項
+To deploy your own Cloudflare Worker backend:
 
-- 所有書籍資料預設不開放，使用者主動選擇才分享
-- 資料在瀏覽器端加密（AES-256-GCM）後才上傳
-- 不要在程式碼中硬編碼任何密鑰或敏感資訊
-- `.env`、`.dev.vars` 等檔案不可提交至 Git
-- Content Script 僅讀取公開可見的書籍資訊，不觸碰帳號認證
+1. See [worker/DEPLOY.md](worker/DEPLOY.md) for the deployment guide
+2. Set your Worker URL in Extension / PWA settings
+3. The sync code automatically includes the API endpoint via the `@host` format
 
-## 自建後端
+## Reporting Issues
 
-如果你想使用自己的 Cloudflare Worker：
+Please use [GitHub Issues](https://github.com/reginna-chao/moo-family-bookshelf/issues) to report bugs or suggest features.
 
-1. 參考 `worker/DEPLOY.md` 部署指南
-2. 在 Extension / PWA 設定中填入你的 Worker URL
-3. 同步碼會自動帶入 API 端點（`@host` 格式）
+## License
 
-## 問題回報
-
-請到 [GitHub Issues](https://github.com/reginna-chao/moo-family-bookshelf/issues) 回報 Bug 或提出功能建議。
-
-## 授權
-
-本專案採用 [MIT License](LICENSE) 開源。提交 PR 即表示你同意將貢獻以相同授權釋出。
+This project is released under the [MIT License](LICENSE). By submitting a PR, you agree to license your contribution under the same terms.
