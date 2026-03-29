@@ -435,11 +435,11 @@ describe("SettingsPage", () => {
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(localStorage.getItem("moo:syncArchived")).toBe("1");
+    expect(localStorage.getItem(`moo:${defaultProps.userId}:syncArchived`)).toBe("1");
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(localStorage.getItem("moo:syncArchived")).toBe("0");
+    expect(localStorage.getItem(`moo:${defaultProps.userId}:syncArchived`)).toBe("0");
   });
 
   // --- Version & disclaimer ---

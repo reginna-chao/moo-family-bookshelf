@@ -2,9 +2,11 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ApiClient } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
+import { namespacedKey } from "@/hooks/useAuth";
 
 interface ApiEndpointEditorProps {
   apiClient: ApiClient;
+  userId: string;
 }
 
 function isValidEndpoint(url: string): boolean {
@@ -16,7 +18,7 @@ function isValidEndpoint(url: string): boolean {
   }
 }
 
-export function ApiEndpointEditor({ apiClient }: ApiEndpointEditorProps) {
+export function ApiEndpointEditor({ apiClient, userId }: ApiEndpointEditorProps) {
   const [expanded, setExpanded] = useState(false);
   const [inputUrl, setInputUrl] = useState("");
   const [currentEndpoint, setCurrentEndpoint] = useState(apiClient.getEndpoint());
@@ -34,7 +36,7 @@ export function ApiEndpointEditor({ apiClient }: ApiEndpointEditorProps) {
       return;
     }
     const normalized = trimmed.replace(/\/+$/, "");
-    localStorage.setItem("moo:apiHost", normalized);
+    localStorage.setItem(namespacedKey(userId, "apiHost"), normalized);
     apiClient.setEndpoint(normalized);
     setCurrentEndpoint(normalized);
     setInputUrl("");
@@ -43,7 +45,7 @@ export function ApiEndpointEditor({ apiClient }: ApiEndpointEditorProps) {
   };
 
   const handleReset = () => {
-    localStorage.removeItem("moo:apiHost");
+    localStorage.removeItem(namespacedKey(userId, "apiHost"));
     apiClient.setEndpoint(DEFAULT_API_ENDPOINT);
     setCurrentEndpoint(DEFAULT_API_ENDPOINT);
     setInputUrl("");

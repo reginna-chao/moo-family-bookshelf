@@ -14,7 +14,9 @@ vi.mock("@/hooks/useAuth", () => ({
     isLoading: mockIsLoading,
     login: mockLogin,
     logout: mockLogout,
+    initialSyncCode: "",
   }),
+  namespacedKey: (userId: string, suffix: string) => `moo:${userId}:${suffix}`,
 }));
 
 // Mock API client using class syntax to ensure proper prototype chain
@@ -50,6 +52,10 @@ vi.mock("@/pages/PersonalShelfPage", () => ({
 
 vi.mock("@/pages/SettingsPage", () => ({
   SettingsPage: () => <div data-testid="settings-page">Settings</div>,
+}));
+
+vi.mock("@/components/InstallPrompt", () => ({
+  InstallPrompt: () => null,
 }));
 
 import App from "@/App";

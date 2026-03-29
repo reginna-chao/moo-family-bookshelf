@@ -6,8 +6,7 @@ import { encodeSyncCode } from "@/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
 import { MemberList } from "@/components/MemberList";
 import { ApiEndpointEditor } from "@/components/ApiEndpointEditor";
-
-const SYNC_ARCHIVED_KEY = "moo:syncArchived";
+import { namespacedKey } from "@/hooks/useAuth";
 
 interface SettingsPageProps {
   familyId: string;
@@ -27,18 +26,19 @@ export function SettingsPage({
   onLogout,
 }: SettingsPageProps) {
   // --- Sync archived setting ---
+  const syncArchivedKey = namespacedKey(userId, "syncArchived");
   const [syncArchived, setSyncArchived] = useState<BoolFlag>(() => {
-    const stored = localStorage.getItem(SYNC_ARCHIVED_KEY);
+    const stored = localStorage.getItem(syncArchivedKey);
     return stored === "1" ? BoolFlag.TRUE : BoolFlag.FALSE;
   });
 
   const handleToggleSyncArchived = useCallback(() => {
     setSyncArchived(prev => {
       const next = prev === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
-      localStorage.setItem(SYNC_ARCHIVED_KEY, String(next));
+      localStorage.setItem(syncArchivedKey, String(next));
       return next;
     });
-  }, []);
+  }, [syncArchivedKey]);
 
   // --- Sync code ---
   const syncCode = useMemo(
@@ -309,9 +309,12 @@ export function SettingsPage({
             onMembersChanged={loadMembers}
           />
         )}
+        <p className="text-gray-400 text-xs mt-1.5">
+          基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
+        </p>
 
         <div className="mt-4">
-          <ApiEndpointEditor apiClient={apiClient} />
+          <ApiEndpointEditor apiClient={apiClient} userId={userId} />
         </div>
       </section>
 

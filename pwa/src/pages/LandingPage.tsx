@@ -1,18 +1,40 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
-import type { ApiClient } from "@/api/client";
+import { ApiClient } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
   apiClient: ApiClient;
+  /** Pre-filled sync code from invite link (#family= URL param). */
+  initialSyncCode?: string;
+  /** External error (e.g., FAMILY_FULL from token refresh). */
+  externalError?: string;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function LandingPage({ onAuth, apiClient }: LandingPageProps) {
-  const [syncCode, setSyncCode] = useState("");
+export function LandingPage({ onAuth, apiClient, initialSyncCode = "", externalError = "" }: LandingPageProps) {
+  const [syncCode, setSyncCode] = useState(initialSyncCode);
   const [email, setEmail] = useState("");
+
+  // Cache join client per apiHost to avoid re-creating on each submit
+  const joinClientRef = useRef<{ host: string | undefined; client: ApiClient } | null>(null);
+  function getJoinClient(apiHost: string | undefined): ApiClient {
+    if (joinClientRef.current !== null && joinClientRef.current.host === apiHost) {
+      return joinClientRef.current.client;
+    }
+    const client = new ApiClient(apiHost);
+    joinClientRef.current = { host: apiHost, client };
+    return client;
+  }
+
+  // Update sync code if initialSyncCode changes (e.g., invite link loaded after mount)
+  useEffect(() => {
+    if (initialSyncCode) {
+      setSyncCode(initialSyncCode);
+    }
+  }, [initialSyncCode]);
   const [syncCodeError, setSyncCodeError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [generalError, setGeneralError] = useState("");
@@ -58,11 +80,29 @@ export function LandingPage({ onAuth, apiClient }: LandingPageProps) {
         return;
       }
       const userId = hashRes.data?.userId ?? "";
+
+      // Join family before completing auth — blocks on FAMILY_FULL
+      const joinClient = getJoinClient(decoded.apiHost);
+      const joinRes = await joinClient.joinFamily(decoded.familyId, userId);
+      if (joinRes.error) {
+        if (joinRes.error.code === "FAMILY_FULL") {
+          setGeneralError("家庭成員已達上限（每個家庭最多 2 位成員）");
+        } else {
+          setGeneralError(joinRes.error.message || "加入家庭失敗，請重試。");
+        }
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Extract auth token from join response
+      const joinData = joinRes.data as unknown as { authToken?: string };
+
       onAuth({
         userId,
         familyId: decoded.familyId,
         encryptionKey: decoded.encryptionKey,
         apiHost: decoded.apiHost,
+        authToken: joinData?.authToken,
       });
     } catch {
       setGeneralError("處理失敗，請重試。");
@@ -79,9 +119,9 @@ export function LandingPage({ onAuth, apiClient }: LandingPageProps) {
       </p>
 
       <form onSubmit={handleSubmit} className="w-full space-y-4 mt-8">
-        {generalError && (
+        {(generalError || externalError) && (
           <p role="alert" className="text-red-500 text-sm text-center">
-            {generalError}
+            {generalError || externalError}
           </p>
         )}
 

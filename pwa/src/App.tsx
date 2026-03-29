@@ -6,6 +6,8 @@ import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { InstallPrompt } from "./components/InstallPrompt";
+import { PwaCreateNotice } from "./components/PwaCreateNotice";
 
 type Page = "family-shelf" | "personal-shelf" | "settings";
 
@@ -22,8 +24,18 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export default function App() {
-  const { auth, isLoading, login, logout } = useAuth();
+  const { auth, isLoading, login, logout, initialSyncCode } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>("family-shelf");
+  const [familyFullError, setFamilyFullError] = useState("");
+
+  // Reset to family shelf when user logs in (auth transitions from null to non-null)
+  const prevAuthRef = useRef<typeof auth>(null);
+  useEffect(() => {
+    if (prevAuthRef.current === null && auth !== null) {
+      setCurrentPage("family-shelf");
+    }
+    prevAuthRef.current = auth;
+  }, [auth]);
 
   // Re-join family to get a fresh token, used both on init and on 401 refresh
   const authRef = useRef(auth);
@@ -34,6 +46,13 @@ export default function App() {
     if (!current) return null;
     const tempClient = new ApiClient(current.apiHost);
     const res = await tempClient.joinFamily(current.familyId, current.userId);
+    if (res.error) {
+      if (res.error.code === "FAMILY_FULL") {
+        setFamilyFullError("家庭成員已達上限（每個家庭最多 2 位成員）");
+        logout();
+      }
+      return null;
+    }
     if (res.data) {
       const data = res.data as unknown as { authToken?: string };
       if (data.authToken) {
@@ -42,7 +61,7 @@ export default function App() {
       }
     }
     return null;
-  }, [login]);
+  }, [login, logout]);
 
   const apiClient = useMemo(() => {
     const client = new ApiClient(auth?.apiHost);
@@ -76,11 +95,23 @@ export default function App() {
   }
 
   if (!auth) {
-    return <LandingPage onAuth={login} apiClient={baseApiClient} />;
+    return (
+      <LandingPage
+        onAuth={(data) => {
+          setFamilyFullError("");
+          login(data);
+        }}
+        apiClient={baseApiClient}
+        initialSyncCode={initialSyncCode}
+        externalError={familyFullError}
+      />
+    );
   }
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50">
+      <PwaCreateNotice userId={auth.userId} onDismiss={() => {}} />
+      <InstallPrompt userId={auth.userId} />
       <main className="flex-1 overflow-y-auto pb-16">
         {currentPage === "family-shelf" && (
           <FamilyShelfPage

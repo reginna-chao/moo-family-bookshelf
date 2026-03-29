@@ -14,15 +14,17 @@ export interface UseAuthReturn {
   isLoading: boolean;
   login: (data: AuthState) => void;
   logout: () => void;
+  /** Pre-filled sync code from #family= URL parameter (invite link). */
+  initialSyncCode: string;
 }
 
-const STORAGE_KEYS = {
-  userId: "moo:userId",
-  familyId: "moo:familyId",
-  encryptionKey: "moo:encryptionKey",
-  apiHost: "moo:apiHost",
-  authToken: "moo:authToken",
-} as const;
+/** Bootstrap key — global, not namespaced (needed to find the namespace). */
+const USER_ID_KEY = "moo:userId";
+
+/** Build a namespaced localStorage key: moo:{userId}:{suffix} */
+export function namespacedKey(userId: string, suffix: string): string {
+  return `moo:${userId}:${suffix}`;
+}
 
 /**
  * ACCEPTED RISK: encryptionKey is stored in localStorage as plaintext.
@@ -32,29 +34,31 @@ const STORAGE_KEYS = {
  * Mitigations: strict CSP, no inline scripts, no third-party dependencies at runtime.
  */
 function saveToStorage(data: AuthState): void {
-  localStorage.setItem(STORAGE_KEYS.userId, data.userId);
-  localStorage.setItem(STORAGE_KEYS.familyId, data.familyId);
-  localStorage.setItem(STORAGE_KEYS.encryptionKey, data.encryptionKey);
+  localStorage.setItem(USER_ID_KEY, data.userId);
+  localStorage.setItem(namespacedKey(data.userId, "familyId"), data.familyId);
+  localStorage.setItem(namespacedKey(data.userId, "encryptionKey"), data.encryptionKey);
   if (data.apiHost) {
-    localStorage.setItem(STORAGE_KEYS.apiHost, data.apiHost);
+    localStorage.setItem(namespacedKey(data.userId, "apiHost"), data.apiHost);
   } else {
-    localStorage.removeItem(STORAGE_KEYS.apiHost);
+    localStorage.removeItem(namespacedKey(data.userId, "apiHost"));
   }
   if (data.authToken) {
-    localStorage.setItem(STORAGE_KEYS.authToken, data.authToken);
+    localStorage.setItem(namespacedKey(data.userId, "authToken"), data.authToken);
   } else {
-    localStorage.removeItem(STORAGE_KEYS.authToken);
+    localStorage.removeItem(namespacedKey(data.userId, "authToken"));
   }
 }
 
 function loadFromStorage(): AuthState | null {
-  const userId = localStorage.getItem(STORAGE_KEYS.userId);
-  const familyId = localStorage.getItem(STORAGE_KEYS.familyId);
-  const encryptionKey = localStorage.getItem(STORAGE_KEYS.encryptionKey);
-  const apiHost = localStorage.getItem(STORAGE_KEYS.apiHost);
-  const authToken = localStorage.getItem(STORAGE_KEYS.authToken);
+  const userId = localStorage.getItem(USER_ID_KEY);
+  if (!userId) return null;
 
-  if (!userId || !familyId || !encryptionKey) {
+  const familyId = localStorage.getItem(namespacedKey(userId, "familyId"));
+  const encryptionKey = localStorage.getItem(namespacedKey(userId, "encryptionKey"));
+  const apiHost = localStorage.getItem(namespacedKey(userId, "apiHost"));
+  const authToken = localStorage.getItem(namespacedKey(userId, "authToken"));
+
+  if (!familyId || !encryptionKey) {
     return null;
   }
 
@@ -68,11 +72,17 @@ function loadFromStorage(): AuthState | null {
 }
 
 function clearStorage(): void {
-  localStorage.removeItem(STORAGE_KEYS.userId);
-  localStorage.removeItem(STORAGE_KEYS.familyId);
-  localStorage.removeItem(STORAGE_KEYS.encryptionKey);
-  localStorage.removeItem(STORAGE_KEYS.apiHost);
-  localStorage.removeItem(STORAGE_KEYS.authToken);
+  const userId = localStorage.getItem(USER_ID_KEY);
+  if (userId) {
+    localStorage.removeItem(namespacedKey(userId, "familyId"));
+    localStorage.removeItem(namespacedKey(userId, "encryptionKey"));
+    localStorage.removeItem(namespacedKey(userId, "apiHost"));
+    localStorage.removeItem(namespacedKey(userId, "authToken"));
+    localStorage.removeItem(namespacedKey(userId, "syncArchived"));
+    localStorage.removeItem(namespacedKey(userId, "pwaNoticeShown"));
+    localStorage.removeItem(namespacedKey(userId, "installPromptDismissed"));
+  }
+  localStorage.removeItem(USER_ID_KEY);
 }
 
 function clearUrlParams(): void {
@@ -109,13 +119,27 @@ function tryParseQrParams(): AuthState | null {
   }
 }
 
+/**
+ * Parse #family={syncCode} from URL hash (invite link flow).
+ * Returns the sync code string if found, null otherwise.
+ */
+function tryParseFamilyParam(): string | null {
+  const hash = window.location.hash.slice(1);
+  const params = new URLSearchParams(hash);
+  return params.get("family");
+}
+
 export function useAuth(): UseAuthReturn {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [initialSyncCode, setInitialSyncCode] = useState("");
 
   useEffect(() => {
     // 1. Parse QR params BEFORE clearing — clearUrlParams removes the hash
     const qrAuth = tryParseQrParams();
+
+    // 2. Parse #family={syncCode} invite link (separate from QR flow)
+    const familySyncCode = tryParseFamilyParam();
 
     // Always clear URL params to avoid leaving encryption key in address bar
     clearUrlParams();
@@ -127,7 +151,12 @@ export function useAuth(): UseAuthReturn {
       return;
     }
 
-    // 2. Check localStorage for existing session
+    // Pre-fill sync code from invite link (don't auto-submit)
+    if (familySyncCode) {
+      setInitialSyncCode(familySyncCode);
+    }
+
+    // 3. Check localStorage for existing session
     const stored = loadFromStorage();
     if (stored) {
       setAuth(stored);
@@ -146,5 +175,5 @@ export function useAuth(): UseAuthReturn {
     setAuth(null);
   }, []);
 
-  return { auth, isLoading, login, logout };
+  return { auth, isLoading, login, logout, initialSyncCode };
 }

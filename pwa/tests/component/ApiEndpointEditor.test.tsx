@@ -44,20 +44,20 @@ describe("ApiEndpointEditor", () => {
   });
 
   it("renders collapsed by default with '進階設定' header", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     expect(screen.getByText(/進階設定/)).toBeInTheDocument();
     expect(screen.queryByText(/目前 API 端點/)).not.toBeInTheDocument();
   });
 
   it("expands on header click and shows current endpoint", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
     expect(screen.getByText(/目前 API 端點/)).toBeInTheDocument();
     expect(screen.getByText("https://custom.api.com")).toBeInTheDocument();
   });
 
   it("shows input field and buttons when expanded", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
     expect(
       screen.getByPlaceholderText("https://your-worker.example.com"),
@@ -67,7 +67,7 @@ describe("ApiEndpointEditor", () => {
   });
 
   it("saves valid URL, updates localStorage and apiClient", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     const input = screen.getByPlaceholderText(
@@ -79,7 +79,7 @@ describe("ApiEndpointEditor", () => {
     fireEvent.click(screen.getByText("儲存"));
 
     expect(localStorageSetItem).toHaveBeenCalledWith(
-      "moo:apiHost",
+      "moo:abc123:apiHost",
       "https://my-worker.example.com",
     );
     expect(
@@ -91,7 +91,7 @@ describe("ApiEndpointEditor", () => {
   });
 
   it("strips trailing slashes from the URL before saving", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     const input = screen.getByPlaceholderText(
@@ -103,13 +103,13 @@ describe("ApiEndpointEditor", () => {
     fireEvent.click(screen.getByText("儲存"));
 
     expect(localStorageSetItem).toHaveBeenCalledWith(
-      "moo:apiHost",
+      "moo:abc123:apiHost",
       "https://my-worker.example.com",
     );
   });
 
   it("shows error for invalid URL and does not save", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     const input = screen.getByPlaceholderText(
@@ -125,7 +125,7 @@ describe("ApiEndpointEditor", () => {
   });
 
   it("disables save button when input is empty", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     const saveButton = screen.getByText("儲存");
@@ -133,7 +133,7 @@ describe("ApiEndpointEditor", () => {
   });
 
   it("allows localhost URLs", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     const input = screen.getByPlaceholderText(
@@ -145,18 +145,18 @@ describe("ApiEndpointEditor", () => {
     fireEvent.click(screen.getByText("儲存"));
 
     expect(localStorageSetItem).toHaveBeenCalledWith(
-      "moo:apiHost",
+      "moo:abc123:apiHost",
       "http://localhost:8787",
     );
   });
 
   it("resets to default: removes localStorage key and restores default endpoint", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     fireEvent.click(screen.getByText("重設為預設"));
 
-    expect(localStorageRemoveItem).toHaveBeenCalledWith("moo:apiHost");
+    expect(localStorageRemoveItem).toHaveBeenCalledWith("moo:abc123:apiHost");
     expect(
       (mockApiClient.setEndpoint as ReturnType<typeof vi.fn>),
     ).toHaveBeenCalledWith(DEFAULT_ENDPOINT);
@@ -165,14 +165,14 @@ describe("ApiEndpointEditor", () => {
 
   it("disables reset button when already at default endpoint", () => {
     const defaultClient = createMockApiClient(DEFAULT_ENDPOINT);
-    render(<ApiEndpointEditor apiClient={defaultClient} />);
+    render(<ApiEndpointEditor apiClient={defaultClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     expect(screen.getByText("重設為預設")).toBeDisabled();
   });
 
   it("shows warning text when expanded", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     expect(
@@ -183,7 +183,7 @@ describe("ApiEndpointEditor", () => {
   });
 
   it("shows '已儲存' feedback after saving and reverts after timeout", async () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     const input = screen.getByPlaceholderText(
@@ -204,7 +204,7 @@ describe("ApiEndpointEditor", () => {
   });
 
   it("clears error when input changes", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
 
     const input = screen.getByPlaceholderText(
@@ -223,7 +223,7 @@ describe("ApiEndpointEditor", () => {
   });
 
   it("collapses on second header click", () => {
-    render(<ApiEndpointEditor apiClient={mockApiClient} />);
+    render(<ApiEndpointEditor apiClient={mockApiClient} userId="abc123" />);
     fireEvent.click(screen.getByText(/進階設定/));
     expect(screen.getByText(/目前 API 端點/)).toBeInTheDocument();
 

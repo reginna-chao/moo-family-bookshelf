@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth, namespacedKey } from "@/hooks/useAuth";
 
 // Mock decodeSyncCode
 vi.mock("@/crypto/syncCode", () => ({
@@ -16,18 +16,22 @@ vi.mock("@/crypto/syncCode", () => ({
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
 
-// Helper to set up localStorage with auth data
+// Helper to set up localStorage with auth data (using namespaced keys)
 function seedStorage(data: {
   userId?: string;
   familyId?: string;
   encryptionKey?: string;
   apiHost?: string;
 }) {
-  if (data.userId) localStorage.setItem("moo:userId", data.userId);
-  if (data.familyId) localStorage.setItem("moo:familyId", data.familyId);
-  if (data.encryptionKey)
-    localStorage.setItem("moo:encryptionKey", data.encryptionKey);
-  if (data.apiHost) localStorage.setItem("moo:apiHost", data.apiHost);
+  if (data.userId) {
+    localStorage.setItem("moo:userId", data.userId);
+    if (data.familyId)
+      localStorage.setItem(namespacedKey(data.userId, "familyId"), data.familyId);
+    if (data.encryptionKey)
+      localStorage.setItem(namespacedKey(data.userId, "encryptionKey"), data.encryptionKey);
+    if (data.apiHost)
+      localStorage.setItem(namespacedKey(data.userId, "apiHost"), data.apiHost);
+  }
 }
 
 describe("useAuth", () => {
@@ -50,6 +54,13 @@ describe("useAuth", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe("namespacedKey", () => {
+    it("should build namespaced key with userId", () => {
+      expect(namespacedKey("user-1", "familyId")).toBe("moo:user-1:familyId");
+      expect(namespacedKey("user-1", "encryptionKey")).toBe("moo:user-1:encryptionKey");
+    });
   });
 
   describe("localStorage session restore", () => {
@@ -91,8 +102,7 @@ describe("useAuth", () => {
 
   describe("localStorage missing keys", () => {
     it("should return null auth when userId is missing", () => {
-      seedStorage({ familyId: "fam-1", encryptionKey: "key-1" });
-
+      // Without userId, namespaced keys can't be found
       const { result } = renderHook(() => useAuth());
 
       expect(result.current.auth).toBeNull();
@@ -100,7 +110,8 @@ describe("useAuth", () => {
     });
 
     it("should return null auth when familyId is missing", () => {
-      seedStorage({ userId: "user-1", encryptionKey: "key-1" });
+      localStorage.setItem("moo:userId", "user-1");
+      localStorage.setItem(namespacedKey("user-1", "encryptionKey"), "key-1");
 
       const { result } = renderHook(() => useAuth());
 
@@ -108,7 +119,8 @@ describe("useAuth", () => {
     });
 
     it("should return null auth when encryptionKey is missing", () => {
-      seedStorage({ userId: "user-1", familyId: "fam-1" });
+      localStorage.setItem("moo:userId", "user-1");
+      localStorage.setItem(namespacedKey("user-1", "familyId"), "fam-1");
 
       const { result } = renderHook(() => useAuth());
 
@@ -171,7 +183,7 @@ describe("useAuth", () => {
       });
     });
 
-    it("should save parsed QR data to localStorage", () => {
+    it("should save parsed QR data to localStorage with namespaced keys", () => {
       vi.stubGlobal("location", {
         search: "",
         hash: "#code=moo-fam99-secretKey&uid=user-abc",
@@ -186,8 +198,8 @@ describe("useAuth", () => {
       renderHook(() => useAuth());
 
       expect(localStorage.getItem("moo:userId")).toBe("user-abc");
-      expect(localStorage.getItem("moo:familyId")).toBe("fam99");
-      expect(localStorage.getItem("moo:encryptionKey")).toBe("secretKey");
+      expect(localStorage.getItem(namespacedKey("user-abc", "familyId"))).toBe("fam99");
+      expect(localStorage.getItem(namespacedKey("user-abc", "encryptionKey"))).toBe("secretKey");
     });
 
     it("should clear URL fragment via replaceState after parsing", () => {
@@ -253,8 +265,30 @@ describe("useAuth", () => {
     });
   });
 
+  describe("#family= invite link parsing", () => {
+    it("should set initialSyncCode from #family= URL param", () => {
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#family=moo-abc1-def2-secretKey",
+        pathname: "/",
+        href: "http://localhost/#family=moo-abc1-def2-secretKey",
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      expect(result.current.initialSyncCode).toBe("moo-abc1-def2-secretKey");
+      expect(result.current.auth).toBeNull();
+    });
+
+    it("should return empty initialSyncCode when no #family= param", () => {
+      const { result } = renderHook(() => useAuth());
+
+      expect(result.current.initialSyncCode).toBe("");
+    });
+  });
+
   describe("login()", () => {
-    it("should save to localStorage and set auth", () => {
+    it("should save to localStorage with namespaced keys and set auth", () => {
       const { result } = renderHook(() => useAuth());
 
       act(() => {
@@ -273,13 +307,15 @@ describe("useAuth", () => {
         apiHost: "api.example.com",
       });
       expect(localStorage.getItem("moo:userId")).toBe("user-new");
-      expect(localStorage.getItem("moo:familyId")).toBe("fam-new");
-      expect(localStorage.getItem("moo:encryptionKey")).toBe("key-new");
-      expect(localStorage.getItem("moo:apiHost")).toBe("api.example.com");
+      expect(localStorage.getItem(namespacedKey("user-new", "familyId"))).toBe("fam-new");
+      expect(localStorage.getItem(namespacedKey("user-new", "encryptionKey"))).toBe("key-new");
+      expect(localStorage.getItem(namespacedKey("user-new", "apiHost"))).toBe("api.example.com");
     });
 
     it("should remove apiHost from localStorage when not provided", () => {
-      localStorage.setItem("moo:apiHost", "old-host.com");
+      // Seed old data
+      localStorage.setItem("moo:userId", "user-new");
+      localStorage.setItem(namespacedKey("user-new", "apiHost"), "old-host.com");
 
       const { result } = renderHook(() => useAuth());
 
@@ -291,7 +327,7 @@ describe("useAuth", () => {
         });
       });
 
-      expect(localStorage.getItem("moo:apiHost")).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-new", "apiHost"))).toBeNull();
     });
   });
 
@@ -315,9 +351,9 @@ describe("useAuth", () => {
 
       expect(result.current.auth).toBeNull();
       expect(localStorage.getItem("moo:userId")).toBeNull();
-      expect(localStorage.getItem("moo:familyId")).toBeNull();
-      expect(localStorage.getItem("moo:encryptionKey")).toBeNull();
-      expect(localStorage.getItem("moo:apiHost")).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBeNull();
     });
   });
 
@@ -351,8 +387,8 @@ describe("useAuth", () => {
 
       expect(result.current.auth).toBeNull();
       expect(localStorage.getItem("moo:userId")).toBeNull();
-      expect(localStorage.getItem("moo:familyId")).toBeNull();
-      expect(localStorage.getItem("moo:encryptionKey")).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-cycle", "familyId"))).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-cycle", "encryptionKey"))).toBeNull();
     });
   });
 });

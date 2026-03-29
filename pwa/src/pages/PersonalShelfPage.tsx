@@ -5,6 +5,7 @@ import type { ApiClient, BookEntry } from "@/api/client";
 import { importKey, encrypt, decrypt } from "@/crypto/encrypt";
 import { useSearch } from "@/hooks/useSearch";
 import { FloatingActionBar } from "@/components/FloatingActionBar";
+import { namespacedKey } from "@/hooks/useAuth";
 
 interface PersonalShelfPageProps {
   userId: string;
@@ -145,7 +146,7 @@ export function PersonalShelfPage({
     });
   }, []);
 
-  const syncArchived = localStorage.getItem("moo:syncArchived") === "1";
+  const syncArchived = localStorage.getItem(namespacedKey(userId, "syncArchived")) === "1";
   const activeBooks = useMemo(() => books.filter(b => b.isArchived !== BoolFlag.TRUE), [books]);
   const archivedBooks = useMemo(() => books.filter(b => b.isArchived === BoolFlag.TRUE), [books]);
   const showArchiveTabs = syncArchived && archivedBooks.length > 0;

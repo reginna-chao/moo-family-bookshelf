@@ -4,7 +4,7 @@ import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
 import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
-import { DEFAULT_API_ENDPOINT } from "../constants";
+import { DEFAULT_API_ENDPOINT, DEFAULT_PWA_URL } from "../constants";
 import { QrCodeLink } from "./QrCodeLink";
 import { ApiEndpointEditor } from "./ApiEndpointEditor";
 
@@ -23,6 +23,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersError, setMembersError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
   const [leaveError, setLeaveError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
@@ -132,6 +133,14 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleInviteCopy = async () => {
+    if (!syncCode) return;
+    const inviteUrl = `${DEFAULT_PWA_URL}/#family=${encodeURIComponent(syncCode)}`;
+    await navigator.clipboard.writeText(inviteUrl);
+    setInviteCopied(true);
+    setTimeout(() => setInviteCopied(false), 2000);
+  };
+
   const dangerBtnBase: React.CSSProperties = { width: "100%", padding: 12,
     border: "1px solid #ef4444", borderRadius: 8, background: "transparent",
     color: "#ef4444", fontWeight: 600, fontSize: 14 };
@@ -219,20 +228,34 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         }}>
           {syncCode ?? "載入中..."}
         </div>
-        <button
-          onClick={handleCopy}
-          disabled={!syncCode}
-          style={{
-            width: "100%", padding: 10, border: "1px solid #2563eb", borderRadius: 8,
-            background: copied ? "#eff6ff" : "transparent", color: "#2563eb",
-            fontWeight: 600, cursor: syncCode ? "pointer" : "not-allowed",
-            opacity: syncCode ? 1 : 0.5, fontSize: 14,
-          }}
-        >
-          {copied ? "已複製" : "複製同步碼"}
-        </button>
-        <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
-          將此代碼分享給家人即可加入書櫃
+        <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+          <button
+            onClick={handleCopy}
+            disabled={!syncCode}
+            style={{
+              flex: 1, padding: 10, border: "1px solid #2563eb", borderRadius: 8,
+              background: copied ? "#eff6ff" : "transparent", color: "#2563eb",
+              fontWeight: 600, cursor: syncCode ? "pointer" : "not-allowed",
+              opacity: syncCode ? 1 : 0.5, fontSize: 14,
+            }}
+          >
+            {copied ? "已複製" : "複製同步碼"}
+          </button>
+          <button
+            onClick={() => void handleInviteCopy()}
+            disabled={!syncCode}
+            style={{
+              flex: 1, padding: 10, border: "1px solid #10b981", borderRadius: 8,
+              background: inviteCopied ? "#ecfdf5" : "transparent", color: "#10b981",
+              fontWeight: 600, cursor: syncCode ? "pointer" : "not-allowed",
+              opacity: syncCode ? 1 : 0.5, fontSize: 14,
+            }}
+          >
+            {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
+          </button>
+        </div>
+        <div style={{ color: "#94a3b8", fontSize: 12 }}>
+          將同步碼或邀請連結分享給家人即可加入書櫃
         </div>
       </div>
       <div style={{ marginBottom: 20 }}>
@@ -270,6 +293,9 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             familyEndpoint={familyEndpoint}
           />
         )}
+        <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
+          基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
+        </div>
       </div>
       <ApiEndpointEditor
         apiClient={apiClient}

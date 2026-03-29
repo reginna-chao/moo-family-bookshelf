@@ -15,6 +15,16 @@ vi.mock("@/crypto/syncCode", () => ({
   },
 }));
 
+// Mock ApiClient constructor so joinFamily can be controlled in LandingPage
+const { mockJoinFamily } = vi.hoisted(() => ({
+  mockJoinFamily: vi.fn(),
+}));
+vi.mock("@/api/client", () => ({
+  ApiClient: vi.fn().mockImplementation(() => ({
+    joinFamily: mockJoinFamily,
+  })),
+}));
+
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 
 const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
@@ -42,10 +52,15 @@ describe("LandingPage", () => {
     mockOnAuth.mockReset();
     mockDecodeSyncCode.mockReset();
     mockHashEmail.mockReset();
+    mockJoinFamily.mockReset();
+    // Default: joinFamily succeeds with token
+    mockJoinFamily.mockResolvedValue({ data: { ok: true, authToken: "tok-123" } as unknown as { ok: boolean } });
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    // Use clearAllMocks instead of restoreAllMocks to preserve vi.mock() factory mocks.
+    // restoreAllMocks undoes mockResolvedValue set in beforeEach for hoisted fns.
+    vi.clearAllMocks();
   });
 
   describe("renders form", () => {
@@ -231,6 +246,7 @@ describe("LandingPage", () => {
           familyId: "fam-1",
           encryptionKey: "key-1",
           apiHost: "custom.api.com",
+          authToken: "tok-123",
         });
       });
 
@@ -256,6 +272,7 @@ describe("LandingPage", () => {
           familyId: "fam-1",
           encryptionKey: "key-1",
           apiHost: undefined,
+          authToken: "tok-123",
         });
       });
     });
@@ -342,6 +359,102 @@ describe("LandingPage", () => {
       const button = screen.getByRole("button", { name: "開始使用" });
       expect(button).not.toBeDisabled();
       expect(mockOnAuth).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("FAMILY_FULL error", () => {
+    it("should show family full error when joinFamily returns FAMILY_FULL", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+      mockHashEmail.mockResolvedValue({ data: { userId: "hash123" } });
+      mockJoinFamily.mockResolvedValue({
+        error: { code: "FAMILY_FULL", message: "Family is full" },
+      });
+
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("家庭成員已達上限（每個家庭最多 2 位成員）"),
+        ).toBeInTheDocument();
+      });
+
+      expect(mockOnAuth).not.toHaveBeenCalled();
+      const button = screen.getByRole("button", { name: "開始使用" });
+      expect(button).not.toBeDisabled();
+    });
+
+    it("should show joinFamily error message for non-FAMILY_FULL errors", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+      mockHashEmail.mockResolvedValue({ data: { userId: "hash123" } });
+      mockJoinFamily.mockResolvedValue({
+        error: { code: "NOT_FOUND", message: "Family not found" },
+      });
+
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByText("Family not found")).toBeInTheDocument();
+      });
+
+      expect(mockOnAuth).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("initialSyncCode prop", () => {
+    it("should pre-fill sync code from initialSyncCode prop", () => {
+      render(
+        <LandingPage
+          onAuth={mockOnAuth}
+          apiClient={mockApiClient}
+          initialSyncCode="moo-abc1-def2-key123"
+        />,
+      );
+
+      const input = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(input.value).toBe("moo-abc1-def2-key123");
+    });
+
+    it("should not pre-fill when initialSyncCode is empty", () => {
+      render(
+        <LandingPage
+          onAuth={mockOnAuth}
+          apiClient={mockApiClient}
+          initialSyncCode=""
+        />,
+      );
+
+      const input = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(input.value).toBe("");
+    });
+  });
+
+  describe("externalError prop", () => {
+    it("should display externalError when provided", () => {
+      render(
+        <LandingPage
+          onAuth={mockOnAuth}
+          apiClient={mockApiClient}
+          externalError="家庭成員已達上限（每個家庭最多 2 位成員）"
+        />,
+      );
+
+      expect(
+        screen.getByText("家庭成員已達上限（每個家庭最多 2 位成員）"),
+      ).toBeInTheDocument();
     });
   });
 });
