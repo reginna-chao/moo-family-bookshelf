@@ -127,6 +127,13 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         apiClient.setAuthToken(data.authToken);
       }
 
+      // Store custom endpoint on the server so FamilySettings endpoint sync
+      // does not reset it to the default. Fire-and-forget: failure is non-fatal
+      // because the sync code already encodes the @host for invited members.
+      if (isCustomEndpoint) {
+        apiClient.updateFamilyEndpoint(familyId, apiClient.getEndpoint()).catch(() => {});
+      }
+
       setGeneratedSyncCode(syncCode);
       setCreatedFamilyId(familyId);
       setCreatedUserId(userId);

@@ -36,6 +36,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
     setAuthToken: vi.fn(),
+    updateFamilyEndpoint: vi.fn().mockResolvedValue({ data: { ok: true } }),
     ...overrides,
   } as unknown as ApiClient;
 }
