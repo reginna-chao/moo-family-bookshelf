@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MooFamily Bookshelf — 家庭開放書櫃</title>
   <meta name="description" content="讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍，隱私優先、開源免費。">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta property="og:title" content="MooFamily Bookshelf — 家庭開放書櫃">
+  <meta property="og:description" content="讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍，隱私優先、開源免費。">
+  <meta property="og:image" content="og-image.png">
+  <meta property="og:type" content="website">
   <style>
     :root {
       --color-primary: #2563eb;
@@ -359,6 +365,7 @@
 
   <!-- Header -->
   <header class="header">
+    <img src="favicon.svg" alt="MooFamily Bookshelf" width="72" height="72" style="border-radius: 16px; margin-bottom: 16px;">
     <h1>MooFamily Bookshelf</h1>
     <p class="tagline">讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍。隱私優先、開源免費。</p>
     <div class="badges">
@@ -461,24 +468,24 @@
       <h2>隱私與安全</h2>
       <ul class="privacy-list">
         <li>
-          <span class="privacy-icon">&#x1f512;</span>
+          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
           <span><strong>端對端加密 (E2EE)</strong> — 資料在你的瀏覽器中加密後才上傳，伺服器只存亂碼，開發者無法解密。</span>
         </li>
         <li>
-          <span class="privacy-icon">&#x1f6ab;</span>
-          <span><strong>不收集個資</strong> — 不需要額外帳號、不記錄 Email、不追蹤你是誰。</span>
+          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg></span>
+          <span><strong>不收集個資</strong> �� 不需要額外帳號、不記錄 Email、不追蹤你是誰。</span>
         </li>
         <li>
-          <span class="privacy-icon">&#x1f510;</span>
+          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg></span>
           <span><strong>預設不公開</strong> — 所有書籍預設關閉分享。你主動開放的書才會出現在家庭書櫃。</span>
         </li>
         <li>
-          <span class="privacy-icon">&#x1f4be;</span>
-          <span><strong>解綁即隔離</strong> — 離開家庭後，其他成員立刻無法看到你的書。但你的偏好設定保留，換家庭不用重設。</span>
+          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14"/><path d="M2 20h20"/><path d="M14 12v.01"/></svg></span>
+          <span><strong>解綁即隔離</strong> — 離開家庭後，其��成員立刻無法看到你的書��但你的偏好設定保留，換家庭不用重設。</span>
         </li>
         <li>
-          <span class="privacy-icon">&#x1f4e6;</span>
-          <span><strong>程式碼完全公開</strong> — 開源專案，任何人可以審查程式碼。不信任預設伺服器？你可以自建。</span>
+          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>
+          <span><strong>程���碼完全公開</strong> — 開源專案，任何人可以審查程式碼。不信任預設伺服器？你可以自建。</span>
         </li>
       </ul>
     </section>
@@ -581,7 +588,7 @@ wrangler deploy</code></pre>
       <div class="btn-group">
         <a href="#" class="btn btn-primary">Chrome Web Store (coming soon)</a>
         <a href="#" class="btn btn-secondary">PWA 行動版 (coming soon)</a>
-        <a href="https://github.com/user/moo-family-bookshelf" class="btn btn-secondary">GitHub 原始碼</a>
+        <a href="https://github.com/reginna-chao/moo-family-bookshelf" class="btn btn-secondary">GitHub 原始碼</a>
       </div>
     </section>
 

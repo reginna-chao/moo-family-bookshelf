@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Library } from "lucide-react";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 import type { ApiClient } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
@@ -73,9 +72,7 @@ export function LandingPage({ onAuth, apiClient }: LandingPageProps) {
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
-      <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center mb-4">
-        <Library size={36} className="text-white" />
-      </div>
+      <img src="/icon.svg" alt="牧家書櫃" className="w-16 h-16 rounded-2xl mb-4" />
       <h1 className="text-3xl font-bold text-gray-900 mb-2">牧家書櫃</h1>
       <p className="text-gray-500 mb-8 text-center">
         家庭共享書櫃 — 與家人分享你的讀墨藏書
