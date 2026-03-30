@@ -19,7 +19,7 @@ export interface UseAuthReturn {
 }
 
 /** Bootstrap key — global, not namespaced (needed to find the namespace). */
-const USER_ID_KEY = "moo:userId";
+export const USER_ID_KEY = "moo:userId";
 
 /** Build a namespaced localStorage key: moo:{userId}:{suffix} */
 export function namespacedKey(userId: string, suffix: string): string {

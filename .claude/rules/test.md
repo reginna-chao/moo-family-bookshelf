@@ -43,3 +43,9 @@
 
 - **Mock**: external API calls, `chrome.storage`, `fetch` to Worker.
 - **Do NOT mock**: React hooks, internal utility functions, KV in integration tests (use Miniflare).
+
+### E2E Anti-Drift Rules
+
+- **Import from production code**: E2E test helpers must import constants and key-building functions (e.g., `namespacedKey`, `USER_ID_KEY`) from production source instead of duplicating them. This ensures tests break at compile time when production code changes, rather than silently drifting.
+- **Blocking UI checklist**: When adding a modal, overlay, dialog, or any `fixed`/`z-*` element that covers the viewport, verify that E2E test helpers dismiss or skip it. Full-screen overlays block all Playwright `.click()` calls and cause silent timeout failures.
+- **E2E must run in CI**: E2E jobs must not be disabled (`if: false`) for more than one release cycle. If a job is temporarily skipped, create a tracking issue.

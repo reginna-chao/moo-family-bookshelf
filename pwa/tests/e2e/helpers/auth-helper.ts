@@ -1,22 +1,14 @@
 /**
  * E2E test helpers for PWA auth state management.
  *
- * The PWA stores auth state in localStorage under the "moo:" prefix.
- * These helpers set/clear that state before tests run.
+ * Imports key format from production useAuth to prevent drift.
  */
 
 import type { Page } from "@playwright/test";
+import { USER_ID_KEY, namespacedKey } from "@/hooks/useAuth";
 
 export const PWA_URL = "https://localhost:5173";
 export const API_URL = "http://localhost:8787";
-
-/** Bootstrap key (global, not namespaced) — must match useAuth.ts */
-const USER_ID_KEY = "moo:userId";
-
-/** Build namespaced key: moo:{userId}:{suffix} — must match useAuth.ts */
-function namespacedKey(userId: string, suffix: string): string {
-  return `moo:${userId}:${suffix}`;
-}
 
 export interface TestAuthState {
   userId: string;
@@ -28,47 +20,57 @@ export interface TestAuthState {
 
 /**
  * Inject auth state into localStorage so the PWA treats the user as logged in.
- * Uses the same namespaced key format as useAuth.ts: moo:{userId}:{field}
+ * Keys are built on the Node side via the production namespacedKey function,
+ * then passed as plain strings into page.evaluate — no format duplication.
  * Must be called after page.goto() since localStorage is origin-scoped.
  */
 export async function setAuthState(
   page: Page,
   auth: TestAuthState,
 ): Promise<void> {
-  await page.evaluate(
-    ({ userIdKey, auth }) => {
-      const ns = (suffix: string) => `moo:${auth.userId}:${suffix}`;
-      localStorage.setItem(userIdKey, auth.userId);
-      localStorage.setItem(ns("familyId"), auth.familyId);
-      localStorage.setItem(ns("encryptionKey"), auth.encryptionKey);
-      if (auth.apiHost) {
-        localStorage.setItem(ns("apiHost"), auth.apiHost);
-      }
-      if (auth.authToken) {
-        localStorage.setItem(ns("authToken"), auth.authToken);
-      }
-      // Dismiss PwaCreateNotice so it doesn't block interactions
-      localStorage.setItem(ns("pwaNoticeShown"), "1");
-    },
-    { userIdKey: USER_ID_KEY, auth },
-  );
+  // Build all keys on the Node side using the production helper
+  const entries: [string, string][] = [
+    [USER_ID_KEY, auth.userId],
+    [namespacedKey(auth.userId, "familyId"), auth.familyId],
+    [namespacedKey(auth.userId, "encryptionKey"), auth.encryptionKey],
+    // Dismiss PwaCreateNotice so it doesn't block interactions
+    [namespacedKey(auth.userId, "pwaNoticeShown"), "1"],
+  ];
+  if (auth.apiHost) {
+    entries.push([namespacedKey(auth.userId, "apiHost"), auth.apiHost]);
+  }
+  if (auth.authToken) {
+    entries.push([namespacedKey(auth.userId, "authToken"), auth.authToken]);
+  }
+
+  await page.evaluate((pairs) => {
+    for (const [key, value] of pairs) {
+      localStorage.setItem(key, value);
+    }
+  }, entries);
 }
 
 /**
  * Remove all auth-related localStorage entries.
  */
 export async function clearAuthState(page: Page): Promise<void> {
-  await page.evaluate((userIdKey) => {
-    const userId = localStorage.getItem(userIdKey);
-    if (userId) {
-      const ns = (suffix: string) => `moo:${userId}:${suffix}`;
-      localStorage.removeItem(ns("familyId"));
-      localStorage.removeItem(ns("encryptionKey"));
-      localStorage.removeItem(ns("apiHost"));
-      localStorage.removeItem(ns("authToken"));
-    }
-    localStorage.removeItem(userIdKey);
-  }, USER_ID_KEY);
+  // Read userId first so we can build namespaced keys
+  const userId = await page.evaluate((key) => localStorage.getItem(key), USER_ID_KEY);
+  if (userId) {
+    const keysToRemove = [
+      USER_ID_KEY,
+      namespacedKey(userId, "familyId"),
+      namespacedKey(userId, "encryptionKey"),
+      namespacedKey(userId, "apiHost"),
+      namespacedKey(userId, "authToken"),
+      namespacedKey(userId, "pwaNoticeShown"),
+    ];
+    await page.evaluate((keys) => {
+      for (const k of keys) localStorage.removeItem(k);
+    }, keysToRemove);
+  } else {
+    await page.evaluate((key) => localStorage.removeItem(key), USER_ID_KEY);
+  }
 }
 
 /**
