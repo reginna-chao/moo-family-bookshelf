@@ -31,7 +31,10 @@ export async function openDialog(page: Page): Promise<Locator> {
   // Collect console errors and failed network requests for debugging mount failures
   const errors: string[] = [];
   const onError = (msg: import("@playwright/test").ConsoleMessage) => {
-    if (msg.type() === "error") errors.push(msg.text());
+    // Capture all MooFamily logs + errors for debugging
+    if (msg.type() === "error" || msg.text().includes("[MooFamily]")) {
+      errors.push(`[${msg.type()}] ${msg.text()}`);
+    }
   };
   const onRequestFailed = (request: import("@playwright/test").Request) => {
     errors.push(`[NET FAIL] ${request.url()} — ${request.failure()?.errorText ?? "unknown"}`);
