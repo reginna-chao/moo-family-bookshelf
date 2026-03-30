@@ -29,7 +29,9 @@ export const test = base.extend<ExtensionFixtures>({
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-search-engine-choice-screen",
+        "--window-size=1280,720",
       ],
+      viewport: { width: 1280, height: 720 },
     });
 
     await use(context);
