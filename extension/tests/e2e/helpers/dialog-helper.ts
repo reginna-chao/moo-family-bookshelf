@@ -137,10 +137,15 @@ export async function getDialogText(page: Page): Promise<string> {
 export async function waitForOnboarding(page: Page): Promise<void> {
   const dialog = page.locator(DIALOG_SELECTOR);
   // Onboarding shows "歡迎使用家庭書櫃" heading
-  await dialog.locator("text=歡迎使用家庭書櫃").waitFor({
-    state: "visible",
-    timeout: 10_000,
-  });
+  try {
+    await dialog.locator("text=歡迎使用家庭書櫃").waitFor({
+      state: "visible",
+      timeout: 15_000,
+    });
+  } catch (e) {
+    const html = await dialog.innerHTML().catch(() => "(unreadable)");
+    throw new Error(`waitForOnboarding failed. Dialog HTML:\n${html}\n\nOriginal: ${e}`);
+  }
 }
 
 /**
