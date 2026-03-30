@@ -402,7 +402,7 @@ describe("useAuth", () => {
   });
 
   describe("remember sync code on logout", () => {
-    it("should preserve familyId, encryptionKey, apiHost when rememberSyncCode=1", () => {
+    it("should clear all auth keys and store sync code in REMEMBERED_LOGOUT_KEY when rememberSyncCode=1", () => {
       localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "1");
       seedStorage({
         userId: "user-1",
@@ -421,16 +421,14 @@ describe("useAuth", () => {
       });
 
       expect(result.current.auth).toBeNull();
-      // Session keys cleared
+      // ALL auth keys cleared (including identity keys)
+      expect(localStorage.getItem("moo:userId")).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "authToken"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "syncArchived"))).toBeNull();
-      // Identity keys preserved
-      expect(localStorage.getItem("moo:userId")).toBe("user-1");
-      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBe("fam-1");
-      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBe("key-1");
-      expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBe("custom.host.com");
-      // Remembered logout flag set
-      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("1");
+      // REMEMBERED_LOGOUT_KEY stores the sync code string
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1-key-1@custom.host.com");
     });
 
     it("should clear everything when rememberSyncCode is not set", () => {
@@ -453,9 +451,21 @@ describe("useAuth", () => {
       expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
     });
 
-    it("should populate initialSyncCode after remembered logout", () => {
-      // Simulate a previous remembered logout: storage has identity keys + flag
-      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "1");
+    it("should not auto-login when REMEMBERED_LOGOUT_KEY is present (LandingPage reads it)", () => {
+      // REMEMBERED_LOGOUT_KEY stores the sync code but useAuth does NOT consume it.
+      // LandingPage reads it directly. useAuth just ensures no auto-login.
+      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "moo-fam-1-key-1@custom.host.com");
+
+      const { result } = renderHook(() => useAuth());
+
+      // Auth should NOT be set (no auth data in localStorage)
+      expect(result.current.auth).toBeNull();
+      // REMEMBERED_LOGOUT_KEY is NOT consumed by useAuth — LandingPage does that
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1-key-1@custom.host.com");
+    });
+
+    it("should set initialSyncCode immediately on logout when remember is enabled", () => {
+      localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "1");
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
@@ -464,27 +474,28 @@ describe("useAuth", () => {
       });
 
       const { result } = renderHook(() => useAuth());
+      expect(result.current.auth).not.toBeNull();
 
-      // Auth should NOT be set (user must re-login)
-      expect(result.current.auth).toBeNull();
-      // Sync code should be pre-filled
-      expect(result.current.initialSyncCode).toBe("moo-fam-1-key-1@custom.host.com");
-      // Flag should be cleared
-      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
-    });
-
-    it("should populate initialSyncCode without apiHost after remembered logout", () => {
-      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "1");
-      seedStorage({
-        userId: "user-1",
-        familyId: "fam-1",
-        encryptionKey: "key-1",
+      act(() => {
+        result.current.logout();
       });
 
+      // initialSyncCode should be set immediately (no refresh needed)
+      expect(result.current.auth).toBeNull();
+      expect(result.current.initialSyncCode).toBe("moo-fam-1-key-1@custom.host.com");
+    });
+
+    it("should not auto-login on second refresh after remembered logout", () => {
+      // After remembered logout, REMEMBERED_LOGOUT_KEY has the sync code
+      // but all auth data is cleared. Simulate a second refresh where
+      // REMEMBERED_LOGOUT_KEY was already consumed on first refresh.
+      // No auth data remains, so no auto-login should occur.
+
+      // localStorage is empty — no userId, no familyId, nothing
       const { result } = renderHook(() => useAuth());
 
       expect(result.current.auth).toBeNull();
-      expect(result.current.initialSyncCode).toBe("moo-fam-1-key-1");
+      expect(result.current.isLoading).toBe(false);
     });
   });
 
@@ -516,7 +527,7 @@ describe("useAuth", () => {
 
     it("should clear everything even with rememberSyncCode=1", () => {
       localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "1");
-      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "1");
+      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "moo-fam-1-key-1");
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 import { ApiClient } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
+import { REMEMBERED_LOGOUT_KEY } from "@/hooks/useAuth";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
@@ -28,6 +29,15 @@ export function LandingPage({ onAuth, apiClient, initialSyncCode = "", externalE
     joinClientRef.current = { host: apiHost, client };
     return client;
   }
+
+  // Pick up remembered sync code from localStorage (logout with "remember" enabled)
+  useEffect(() => {
+    const remembered = localStorage.getItem(REMEMBERED_LOGOUT_KEY);
+    if (remembered) {
+      localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
+      setSyncCode(remembered);
+    }
+  }, []);
 
   // Update sync code if initialSyncCode changes (e.g., invite link loaded after mount)
   useEffect(() => {

@@ -83,28 +83,32 @@ function clearStorage(): void {
   const userId = localStorage.getItem(USER_ID_KEY);
   const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) === "1";
 
-  if (userId) {
-    if (remember) {
-      // Only clear session-specific keys; keep familyId, encryptionKey, apiHost
-      localStorage.removeItem(namespacedKey(userId, "authToken"));
-      localStorage.removeItem(namespacedKey(userId, "syncArchived"));
-      localStorage.removeItem(namespacedKey(userId, "pwaNoticeShown"));
-      localStorage.removeItem(namespacedKey(userId, "installPromptDismissed"));
-      // Signal remembered logout for next load
-      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "1");
-    } else {
-      localStorage.removeItem(namespacedKey(userId, "familyId"));
-      localStorage.removeItem(namespacedKey(userId, "encryptionKey"));
-      localStorage.removeItem(namespacedKey(userId, "apiHost"));
-      localStorage.removeItem(namespacedKey(userId, "authToken"));
-      localStorage.removeItem(namespacedKey(userId, "syncArchived"));
-      localStorage.removeItem(namespacedKey(userId, "pwaNoticeShown"));
-      localStorage.removeItem(namespacedKey(userId, "installPromptDismissed"));
-      localStorage.removeItem(USER_ID_KEY);
+  // Build sync code BEFORE clearing, if remember is enabled
+  if (remember && userId) {
+    const familyId = localStorage.getItem(namespacedKey(userId, "familyId"));
+    const encryptionKey = localStorage.getItem(namespacedKey(userId, "encryptionKey"));
+    const apiHost = localStorage.getItem(namespacedKey(userId, "apiHost"));
+    if (familyId && encryptionKey) {
+      const code = encodeSyncCode({
+        familyId,
+        encryptionKey,
+        apiHost: apiHost || undefined,
+      });
+      localStorage.setItem(REMEMBERED_LOGOUT_KEY, code);
     }
-  } else {
-    localStorage.removeItem(USER_ID_KEY);
   }
+
+  // Always clear ALL auth data
+  if (userId) {
+    localStorage.removeItem(namespacedKey(userId, "familyId"));
+    localStorage.removeItem(namespacedKey(userId, "encryptionKey"));
+    localStorage.removeItem(namespacedKey(userId, "apiHost"));
+    localStorage.removeItem(namespacedKey(userId, "authToken"));
+    localStorage.removeItem(namespacedKey(userId, "syncArchived"));
+    localStorage.removeItem(namespacedKey(userId, "pwaNoticeShown"));
+    localStorage.removeItem(namespacedKey(userId, "installPromptDismissed"));
+  }
+  localStorage.removeItem(USER_ID_KEY);
 }
 
 /** Clears ALL localStorage keys unconditionally, including rememberSyncCode. */
@@ -195,25 +199,7 @@ export function useAuth(): UseAuthReturn {
       setInitialSyncCode(familySyncCode);
     }
 
-    // 3. Check for remembered logout — build sync code from stored data
-    const wasRemembered = localStorage.getItem(REMEMBERED_LOGOUT_KEY) === "1";
-    if (wasRemembered) {
-      localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
-      const stored = loadFromStorage();
-      if (stored) {
-        const code = encodeSyncCode({
-          familyId: stored.familyId,
-          encryptionKey: stored.encryptionKey,
-          apiHost: stored.apiHost,
-        });
-        setInitialSyncCode(code);
-        // Don't set auth — user must re-login
-        setIsLoading(false);
-        return;
-      }
-    }
-
-    // 4. Check localStorage for existing session
+    // 3. Check localStorage for existing session
     const stored = loadFromStorage();
     if (stored) {
       setAuth(stored);
@@ -228,8 +214,23 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const logout = useCallback((): void => {
+    const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) === "1";
+    let code = "";
+    if (remember) {
+      const stored = loadFromStorage();
+      if (stored) {
+        code = encodeSyncCode({
+          familyId: stored.familyId,
+          encryptionKey: stored.encryptionKey,
+          apiHost: stored.apiHost,
+        });
+      }
+    }
     clearStorage();
     setAuth(null);
+    if (code) {
+      setInitialSyncCode(code);
+    }
   }, []);
 
   const forceLogout = useCallback((): void => {

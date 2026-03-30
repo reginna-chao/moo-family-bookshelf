@@ -442,6 +442,26 @@ describe("LandingPage", () => {
     });
   });
 
+  describe("remembered sync code from localStorage", () => {
+    it("should pre-fill sync code from REMEMBERED_LOGOUT_KEY on mount", () => {
+      localStorage.setItem("moo:rememberedLogout", "moo-fam1-key1@custom.host.com");
+
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
+
+      const input = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(input.value).toBe("moo-fam1-key1@custom.host.com");
+      // Key should be consumed
+      expect(localStorage.getItem("moo:rememberedLogout")).toBeNull();
+    });
+
+    it("should not pre-fill when REMEMBERED_LOGOUT_KEY is absent", () => {
+      render(<LandingPage onAuth={mockOnAuth} apiClient={mockApiClient} />);
+
+      const input = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(input.value).toBe("");
+    });
+  });
+
   describe("externalError prop", () => {
     it("should display externalError when provided", () => {
       render(
