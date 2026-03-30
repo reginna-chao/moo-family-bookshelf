@@ -193,7 +193,12 @@ export async function getSyncCode(page: Page): Promise<string> {
   const dialog = page.locator(DIALOG_SELECTOR);
   // Sync code is displayed in a monospace div
   const codeEl = dialog.locator("div[style*='monospace']");
-  await codeEl.waitFor({ state: "visible", timeout: 10_000 });
+  try {
+    await codeEl.waitFor({ state: "visible", timeout: 15_000 });
+  } catch (e) {
+    const html = await dialog.innerHTML().catch(() => "(unreadable)");
+    throw new Error(`getSyncCode failed — sync code div not found.\nDialog HTML:\n${html}\n\nOriginal: ${e}`);
+  }
   return (await codeEl.textContent())?.trim() ?? "";
 }
 
