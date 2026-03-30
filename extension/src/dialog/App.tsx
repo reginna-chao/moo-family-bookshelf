@@ -6,6 +6,7 @@ import { FamilyShelf } from "./FamilyShelf";
 import { FamilySettings } from "./FamilySettings";
 import { DialogFooter } from "./DialogFooter";
 import { useTokenRefresh } from "./useTokenRefresh";
+import { isExtensionContextValid } from "../utils/extensionContext";
 
 type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "settings";
@@ -37,11 +38,18 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    // If extension context is invalidated (e.g., extension updated/reloaded),
+    // chrome.runtime APIs will throw. Let the error boundary handle the UI.
+    if (!isExtensionContextValid()) {
+      throw new Error("Extension context invalidated");
+    }
+
     // Load familyId, userId, and custom API endpoint on mount.
     // GET_FAMILY_ID checks sync first, falling back to local (handled in background).
     chrome.runtime.sendMessage({ type: "GET_FAMILY_ID" }, (familyResponse) => {
       chrome.storage.local.get(["userId", "authToken"], (storageResult) => {
         chrome.runtime.sendMessage({ type: "GET_API_ENDPOINT" }, (apiResponse) => {
+          console.log("[MooFamily] GET_API_ENDPOINT response:", JSON.stringify(apiResponse));
           if (apiResponse?.apiEndpoint) {
             apiClientRef.current.setEndpoint(apiResponse.apiEndpoint);
           }
