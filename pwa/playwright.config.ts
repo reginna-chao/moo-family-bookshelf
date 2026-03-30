@@ -39,7 +39,7 @@ export default defineConfig({
       timeout: 60_000,
     },
     {
-      command: `cd ../worker && pnpm exec wrangler dev --port ${WORKER_PORT}`,
+      command: `cd ../worker && pnpm exec wrangler dev --port ${WORKER_PORT} --var DEV_MODE:1`,
       port: WORKER_PORT,
       reuseExistingServer: !isCI,
       cwd: __dirname,
