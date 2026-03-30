@@ -6,9 +6,13 @@
  * VITE_API_ENDPOINT is set via .env.development / .env.production
  */
 
-export const DEFAULT_API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT as string;
+export const DEFAULT_API_ENDPOINT: string =
+  import.meta.env.VITE_API_ENDPOINT ??
+  "https://moo-family-bookshelf.rcworkadd.workers.dev";
 
-export const DEFAULT_PWA_URL = import.meta.env.VITE_PWA_URL as string;
+export const DEFAULT_PWA_URL: string =
+  import.meta.env.VITE_PWA_URL ??
+  "https://moo-family-bookshelf-pwa.pages.dev";
 
 export const PERSONAL_BOOKS_CACHE_KEY = "personalBooksCache";
 
