@@ -54,20 +54,32 @@ export async function openDialog(page: Page): Promise<Locator> {
   const dialog = page.locator(DIALOG_SELECTOR);
   await dialog.waitFor({ state: "visible", timeout: 10_000 });
 
-  // Wait for React to mount content inside the dialog
-  // Dynamic import of content-dialog.js may be slow in CI
+  // Wait for React to mount and finish loading (past "載入中..." state).
+  // The dialog App does async chrome.runtime.sendMessage calls on mount,
+  // which may be slow in CI — wait for actual content to appear.
   const root = page.locator("#moo-family-bookshelf-root");
   try {
+    // First: wait for React to mount anything (including "載入中...")
     await expect(root).not.toBeEmpty({ timeout: 30_000 });
+    // Then: wait for the loading state to resolve
+    await page.waitForFunction(
+      (sel) => {
+        const el = document.querySelector(sel);
+        return el && !el.textContent?.includes("載入中...");
+      },
+      "#moo-family-bookshelf-root",
+      { timeout: 30_000 },
+    );
   } catch (e) {
     page.off("console", onError);
     page.off("requestfailed", onRequestFailed);
     page.off("response", onResponse);
+    const rootContent = await root.innerHTML().catch(() => "(unreadable)");
     const errorDetail = errors.length > 0
       ? `Console errors:\n${errors.join("\n")}`
       : "No console errors captured";
     throw new Error(
-      `Dialog React mount failed — #moo-family-bookshelf-root is empty after 30s.\n${errorDetail}\n\nOriginal: ${e}`,
+      `Dialog mount/load failed after 30s.\nRoot HTML: ${rootContent}\n${errorDetail}\n\nOriginal: ${e}`,
     );
   }
   page.off("console", onError);
