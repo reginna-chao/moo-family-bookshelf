@@ -7,7 +7,7 @@
     "dev:main": "vite build --watch --mode development",
     "dev:content": "vite build --watch --mode development --config vite.config.content.ts",
     "dev:content-modules": "vite build --watch --mode development --config vite.config.content-modules.ts",
-    "dev": "concurrently pnpm:dev:*",
+    "dev": "rimraf dist && concurrently pnpm:dev:*",
     "sync-version": "tsx scripts/sync-version.ts",
     "build": "tsx scripts/sync-version.ts && tsc --noEmit && vite build && vite build --config vite.config.content.ts && vite build --config vite.config.content-modules.ts && tsx scripts/verify-build.ts",
     "typecheck": "tsc --noEmit",

@@ -11,6 +11,35 @@
 // reads DOM elements and returns data, with no shared mutable state.
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
 import { isExtensionContextValid, cleanupMooFamilyUI, MOO_ELEMENT_IDS } from "../utils/extensionContext";
+import { DEFAULT_API_ENDPOINT } from "../constants";
+
+const IS_DEV_MODE = /^https?:\/\/localhost(:|$)/.test(DEFAULT_API_ENDPOINT);
+
+let devStyleInjected = false;
+function injectDevRainbowStyle(): void {
+  if (devStyleInjected) return;
+  devStyleInjected = true;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    @property --moo-angle {
+      syntax: '<angle>';
+      initial-value: 0deg;
+      inherits: false;
+    }
+    @keyframes moo-dev-rainbow {
+      to { --moo-angle: 360deg; }
+    }
+    #${MOO_ELEMENT_IDS.button}.moo-dev-mode {
+      border: 3px solid transparent !important;
+      background:
+        linear-gradient(#2563eb, #2563eb) padding-box,
+        conic-gradient(from var(--moo-angle), #ff0000, #ff8800, #ffff00, #00ff00, #0088ff, #8800ff, #ff0000) border-box !important;
+      animation: moo-dev-rainbow 2s linear infinite;
+    }
+  `;
+  document.head.appendChild(style);
+}
 
 function injectFamilyBookshelfButton(): void {
   if (!isExtensionContextValid()) {
@@ -40,6 +69,11 @@ function injectFamilyBookshelfButton(): void {
     "box-shadow: 0 2px 8px rgba(0,0,0,0.15)",
     "font-family: -apple-system, BlinkMacSystemFont, sans-serif",
   ].join(";");
+
+  if (IS_DEV_MODE) {
+    injectDevRainbowStyle();
+    button.classList.add("moo-dev-mode");
+  }
 
   button.addEventListener("click", toggleDialog);
   document.body.appendChild(button);
