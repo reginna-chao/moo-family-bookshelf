@@ -47,6 +47,8 @@ export async function setAuthState(
       if (auth.authToken) {
         localStorage.setItem(ns("authToken"), auth.authToken);
       }
+      // Dismiss PwaCreateNotice so it doesn't block interactions
+      localStorage.setItem(ns("pwaNoticeShown"), "1");
     },
     { userIdKey: USER_ID_KEY, auth },
   );
