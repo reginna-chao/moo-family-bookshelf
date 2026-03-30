@@ -86,8 +86,9 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
     try {
       console.log("[MooFamily] handleCreate: endpoint =", apiClient.getEndpoint(), "email =", userEmail);
       const hashRes = await apiClient.hashEmail(userEmail);
+      console.log("[MooFamily] hashEmail result:", JSON.stringify(hashRes));
       if (hashRes.error) {
-        setErrorMessage("無法驗證帳號，請重試。");
+        setErrorMessage(`無法驗證帳號：${hashRes.error.code} — ${hashRes.error.message}`);
         setState("error");
         return;
       }
