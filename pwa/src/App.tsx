@@ -24,7 +24,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export default function App() {
-  const { auth, isLoading, login, logout, initialSyncCode } = useAuth();
+  const { auth, isLoading, login, logout, forceLogout, initialSyncCode } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>("family-shelf");
   const [familyFullError, setFamilyFullError] = useState("");
 
@@ -131,6 +131,7 @@ export default function App() {
             apiClient={apiClient}
             encryptionKey={auth.encryptionKey}
             onLogout={logout}
+            onForceLogout={forceLogout}
           />
         )}
       </main>

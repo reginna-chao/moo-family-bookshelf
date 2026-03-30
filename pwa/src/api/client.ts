@@ -205,6 +205,15 @@ export class ApiClient {
     );
   }
 
+  // --- Account ---
+
+  async deleteAccount(
+    userId: string,
+  ): Promise<ApiResponse<{ ok: boolean }>> {
+    this.validateHexId(userId, "userId");
+    return this.request(`/api/user/${userId}`, { method: "DELETE" });
+  }
+
   // --- Family Bookshelf ---
 
   async getFamilyBookshelf(

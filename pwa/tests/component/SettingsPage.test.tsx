@@ -18,10 +18,12 @@ vi.mock("@/constants", () => ({
 const mockGetFamilyMembers = vi.fn();
 const mockLeaveFamily = vi.fn();
 const mockUpdateDisplayName = vi.fn();
+const mockDeleteAccount = vi.fn();
 const mockApiClient = {
   getFamilyMembers: mockGetFamilyMembers,
   leaveFamily: mockLeaveFamily,
   updateDisplayName: mockUpdateDisplayName,
+  deleteAccount: mockDeleteAccount,
   getEndpoint: vi
     .fn()
     .mockReturnValue(DEFAULT_API_ENDPOINT),
@@ -33,6 +35,7 @@ const defaultProps = {
   apiClient: mockApiClient,
   encryptionKey: "enc-key-123",
   onLogout: vi.fn(),
+  onForceLogout: vi.fn(),
 };
 
 // Helper to render with members already loaded
@@ -491,6 +494,159 @@ describe("SettingsPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Network fail")).toBeInTheDocument();
+    });
+  });
+
+  // --- Remember sync code toggle ---
+
+  it("renders remember sync code toggle", async () => {
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    const toggle = screen.getByRole("switch", { name: "登出時記住同步碼" });
+    expect(toggle).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("toggles remember sync code setting and persists to localStorage", async () => {
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    const toggle = screen.getByRole("switch", { name: "登出時記住同步碼" });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(localStorage.getItem("moo:rememberSyncCode")).toBe("1");
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(localStorage.getItem("moo:rememberSyncCode")).toBe("0");
+  });
+
+  it("shows description text for remember sync code", async () => {
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText("啟用後，登出時會保留同步碼，下次登入免重新輸入"),
+    ).toBeInTheDocument();
+  });
+
+  // --- Delete account ---
+
+  it("renders 移除帳戶 button", async () => {
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByRole("button", { name: "移除帳戶" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows confirmation card when 移除帳戶 is clicked", async () => {
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+
+    expect(screen.getByText("確定要移除帳戶嗎？")).toBeInTheDocument();
+    expect(screen.getByText("將移除牧家書櫃中的所有資料")).toBeInTheDocument();
+    expect(screen.getByText("不影響你的讀墨帳號及書籍")).toBeInTheDocument();
+    expect(screen.getByText("下次登入時將重新設定")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "確定移除" }),
+    ).toBeInTheDocument();
+  });
+
+  it("returns to idle when cancel is clicked in delete confirmation", async () => {
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+    expect(screen.getByText("確定要移除帳戶嗎？")).toBeInTheDocument();
+
+    // Find cancel button in delete section (last 取消 since it's after logout section)
+    const cancelButtons = screen.getAllByRole("button", { name: "取消" });
+    fireEvent.click(cancelButtons[cancelButtons.length - 1]);
+
+    expect(screen.queryByText("確定要移除帳戶嗎？")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "移除帳戶" }),
+    ).toBeInTheDocument();
+  });
+
+  it("calls deleteAccount API and onForceLogout on confirm", async () => {
+    mockDeleteAccount.mockResolvedValue({ data: { ok: true } });
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+    fireEvent.click(screen.getByRole("button", { name: "確定移除" }));
+
+    await waitFor(() => {
+      expect(mockDeleteAccount).toHaveBeenCalledWith(defaultProps.userId);
+    });
+    await waitFor(() => {
+      expect(defaultProps.onForceLogout).toHaveBeenCalled();
+    });
+  });
+
+  it("shows OWNER_CANNOT_DELETE error message", async () => {
+    mockDeleteAccount.mockResolvedValue({
+      error: {
+        code: "OWNER_CANNOT_DELETE",
+        message: "Owner cannot delete",
+      },
+    });
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+    fireEvent.click(screen.getByRole("button", { name: "確定移除" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("管理者必須先轉移管理權才能移除帳戶"),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows generic error when delete account throws", async () => {
+    mockDeleteAccount.mockRejectedValue(new Error("Network error"));
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+    fireEvent.click(screen.getByRole("button", { name: "確定移除" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Network error")).toBeInTheDocument();
     });
   });
 });

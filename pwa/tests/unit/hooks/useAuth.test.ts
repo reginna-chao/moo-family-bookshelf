@@ -1,10 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useAuth, namespacedKey } from "@/hooks/useAuth";
+import {
+  useAuth,
+  namespacedKey,
+  REMEMBER_SYNC_CODE_KEY,
+  REMEMBERED_LOGOUT_KEY,
+} from "@/hooks/useAuth";
 
-// Mock decodeSyncCode
+// Mock syncCode module
 vi.mock("@/crypto/syncCode", () => ({
   decodeSyncCode: vi.fn(),
+  encodeSyncCode: vi.fn((data: { familyId: string; encryptionKey: string; apiHost?: string }) => {
+    const base = `moo-${data.familyId}-${data.encryptionKey}`;
+    return data.apiHost ? `${base}@${data.apiHost}` : base;
+  }),
   SyncCodeError: class SyncCodeError extends Error {
     constructor(message: string) {
       super(message);
@@ -389,6 +398,142 @@ describe("useAuth", () => {
       expect(localStorage.getItem("moo:userId")).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-cycle", "familyId"))).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-cycle", "encryptionKey"))).toBeNull();
+    });
+  });
+
+  describe("remember sync code on logout", () => {
+    it("should preserve familyId, encryptionKey, apiHost when rememberSyncCode=1", () => {
+      localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "1");
+      seedStorage({
+        userId: "user-1",
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+        apiHost: "custom.host.com",
+      });
+      // Also set authToken
+      localStorage.setItem(namespacedKey("user-1", "authToken"), "tok-abc");
+
+      const { result } = renderHook(() => useAuth());
+      expect(result.current.auth).not.toBeNull();
+
+      act(() => {
+        result.current.logout();
+      });
+
+      expect(result.current.auth).toBeNull();
+      // Session keys cleared
+      expect(localStorage.getItem(namespacedKey("user-1", "authToken"))).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "syncArchived"))).toBeNull();
+      // Identity keys preserved
+      expect(localStorage.getItem("moo:userId")).toBe("user-1");
+      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBe("fam-1");
+      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBe("key-1");
+      expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBe("custom.host.com");
+      // Remembered logout flag set
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("1");
+    });
+
+    it("should clear everything when rememberSyncCode is not set", () => {
+      seedStorage({
+        userId: "user-1",
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+
+      const { result } = renderHook(() => useAuth());
+      expect(result.current.auth).not.toBeNull();
+
+      act(() => {
+        result.current.logout();
+      });
+
+      expect(result.current.auth).toBeNull();
+      expect(localStorage.getItem("moo:userId")).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
+    });
+
+    it("should populate initialSyncCode after remembered logout", () => {
+      // Simulate a previous remembered logout: storage has identity keys + flag
+      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "1");
+      seedStorage({
+        userId: "user-1",
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+        apiHost: "custom.host.com",
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      // Auth should NOT be set (user must re-login)
+      expect(result.current.auth).toBeNull();
+      // Sync code should be pre-filled
+      expect(result.current.initialSyncCode).toBe("moo-fam-1-key-1@custom.host.com");
+      // Flag should be cleared
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
+    });
+
+    it("should populate initialSyncCode without apiHost after remembered logout", () => {
+      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "1");
+      seedStorage({
+        userId: "user-1",
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      expect(result.current.auth).toBeNull();
+      expect(result.current.initialSyncCode).toBe("moo-fam-1-key-1");
+    });
+  });
+
+  describe("forceLogout()", () => {
+    it("should clear everything including rememberSyncCode", () => {
+      localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "1");
+      seedStorage({
+        userId: "user-1",
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+        apiHost: "custom.host.com",
+      });
+
+      const { result } = renderHook(() => useAuth());
+      expect(result.current.auth).not.toBeNull();
+
+      act(() => {
+        result.current.forceLogout();
+      });
+
+      expect(result.current.auth).toBeNull();
+      expect(localStorage.getItem("moo:userId")).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBeNull();
+      expect(localStorage.getItem(REMEMBER_SYNC_CODE_KEY)).toBeNull();
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
+    });
+
+    it("should clear everything even with rememberSyncCode=1", () => {
+      localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "1");
+      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "1");
+      seedStorage({
+        userId: "user-1",
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      act(() => {
+        result.current.forceLogout();
+      });
+
+      expect(result.current.auth).toBeNull();
+      expect(localStorage.getItem("moo:userId")).toBeNull();
+      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
+      expect(localStorage.getItem(REMEMBER_SYNC_CODE_KEY)).toBeNull();
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
     });
   });
 });

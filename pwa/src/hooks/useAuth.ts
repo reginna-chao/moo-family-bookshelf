@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { decodeSyncCode } from "@/crypto/syncCode";
+import { decodeSyncCode, encodeSyncCode } from "@/crypto/syncCode";
 
 export interface AuthState {
   userId: string;
@@ -14,9 +14,17 @@ export interface UseAuthReturn {
   isLoading: boolean;
   login: (data: AuthState) => void;
   logout: () => void;
-  /** Pre-filled sync code from #family= URL parameter (invite link). */
+  /** Clears everything unconditionally, ignoring rememberSyncCode. Used by delete account. */
+  forceLogout: () => void;
+  /** Pre-filled sync code from #family= URL parameter or remembered logout. */
   initialSyncCode: string;
 }
+
+/** Global key for "remember sync code on logout" preference. */
+export const REMEMBER_SYNC_CODE_KEY = "moo:rememberSyncCode";
+
+/** Flag set during remembered logout to trigger sync code pre-fill on next load. */
+export const REMEMBERED_LOGOUT_KEY = "moo:rememberedLogout";
 
 /** Bootstrap key — global, not namespaced (needed to find the namespace). */
 export const USER_ID_KEY = "moo:userId";
@@ -73,6 +81,35 @@ function loadFromStorage(): AuthState | null {
 
 function clearStorage(): void {
   const userId = localStorage.getItem(USER_ID_KEY);
+  const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) === "1";
+
+  if (userId) {
+    if (remember) {
+      // Only clear session-specific keys; keep familyId, encryptionKey, apiHost
+      localStorage.removeItem(namespacedKey(userId, "authToken"));
+      localStorage.removeItem(namespacedKey(userId, "syncArchived"));
+      localStorage.removeItem(namespacedKey(userId, "pwaNoticeShown"));
+      localStorage.removeItem(namespacedKey(userId, "installPromptDismissed"));
+      // Signal remembered logout for next load
+      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "1");
+    } else {
+      localStorage.removeItem(namespacedKey(userId, "familyId"));
+      localStorage.removeItem(namespacedKey(userId, "encryptionKey"));
+      localStorage.removeItem(namespacedKey(userId, "apiHost"));
+      localStorage.removeItem(namespacedKey(userId, "authToken"));
+      localStorage.removeItem(namespacedKey(userId, "syncArchived"));
+      localStorage.removeItem(namespacedKey(userId, "pwaNoticeShown"));
+      localStorage.removeItem(namespacedKey(userId, "installPromptDismissed"));
+      localStorage.removeItem(USER_ID_KEY);
+    }
+  } else {
+    localStorage.removeItem(USER_ID_KEY);
+  }
+}
+
+/** Clears ALL localStorage keys unconditionally, including rememberSyncCode. */
+export function forceClearStorage(): void {
+  const userId = localStorage.getItem(USER_ID_KEY);
   if (userId) {
     localStorage.removeItem(namespacedKey(userId, "familyId"));
     localStorage.removeItem(namespacedKey(userId, "encryptionKey"));
@@ -83,6 +120,8 @@ function clearStorage(): void {
     localStorage.removeItem(namespacedKey(userId, "installPromptDismissed"));
   }
   localStorage.removeItem(USER_ID_KEY);
+  localStorage.removeItem(REMEMBER_SYNC_CODE_KEY);
+  localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
 }
 
 function clearUrlParams(): void {
@@ -156,7 +195,25 @@ export function useAuth(): UseAuthReturn {
       setInitialSyncCode(familySyncCode);
     }
 
-    // 3. Check localStorage for existing session
+    // 3. Check for remembered logout — build sync code from stored data
+    const wasRemembered = localStorage.getItem(REMEMBERED_LOGOUT_KEY) === "1";
+    if (wasRemembered) {
+      localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
+      const stored = loadFromStorage();
+      if (stored) {
+        const code = encodeSyncCode({
+          familyId: stored.familyId,
+          encryptionKey: stored.encryptionKey,
+          apiHost: stored.apiHost,
+        });
+        setInitialSyncCode(code);
+        // Don't set auth — user must re-login
+        setIsLoading(false);
+        return;
+      }
+    }
+
+    // 4. Check localStorage for existing session
     const stored = loadFromStorage();
     if (stored) {
       setAuth(stored);
@@ -175,5 +232,10 @@ export function useAuth(): UseAuthReturn {
     setAuth(null);
   }, []);
 
-  return { auth, isLoading, login, logout, initialSyncCode };
+  const forceLogout = useCallback((): void => {
+    forceClearStorage();
+    setAuth(null);
+  }, []);
+
+  return { auth, isLoading, login, logout, forceLogout, initialSyncCode };
 }

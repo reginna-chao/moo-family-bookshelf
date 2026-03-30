@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
-import { kvKeys, type UserBooksRecord } from "../kv/schema";
+import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord } from "../kv/schema";
 import { isValidUserId } from "../utils/validation";
-import { getAuthenticatedUserId } from "../middleware/auth";
+import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
 
 export const userRoutes = new Hono<{ Bindings: Env }>();
 
@@ -81,4 +81,66 @@ userRoutes.put("/:id/books", async (c) => {
   await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
 
   return c.json({ data: record });
+});
+
+// DELETE /api/user/:id — delete user account
+userRoutes.delete("/:id", async (c) => {
+  const userId = c.req.param("id");
+
+  if (!isValidUserId(userId)) {
+    return c.json(
+      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  const callerId = getAuthenticatedUserId(c);
+
+  if (!callerId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
+  if (callerId !== userId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "Cannot delete another user's account" } },
+      403,
+    );
+  }
+
+  // Check family membership
+  const familyId = await c.env.KV.get(kvKeys.member(userId));
+
+  if (familyId) {
+    const raw = await c.env.KV.get<RawFamilyRecord>(
+      kvKeys.family(familyId),
+      "json",
+    );
+
+    if (raw) {
+      const record = normalizeFamilyRecord(raw);
+
+      if (record.ownerId === userId) {
+        return c.json(
+          { error: { code: "OWNER_CANNOT_DELETE", message: "管理者必須先轉移管理權才能移除帳戶" } },
+          403,
+        );
+      }
+
+      // Remove user from family members
+      record.members = record.members.filter((m) => m.userId !== userId);
+      await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+    }
+  }
+
+  // Delete all user data in parallel
+  await Promise.all([
+    c.env.KV.delete(kvKeys.user(userId)),
+    c.env.KV.delete(kvKeys.member(userId)),
+    deleteAuthToken(c.env.KV, userId),
+  ]);
+
+  return c.json({ data: { ok: true } });
 });
