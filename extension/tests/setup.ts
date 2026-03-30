@@ -35,6 +35,7 @@ function createStorageAreaMock(store: Record<string, unknown>) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).chrome = {
   runtime: {
+    id: "mock-extension-id",
     sendMessage: vi.fn(),
     onMessage: {
       addListener: vi.fn(),

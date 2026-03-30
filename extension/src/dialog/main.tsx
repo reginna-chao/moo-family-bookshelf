@@ -1,6 +1,51 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { isExtensionContextValid } from "../utils/extensionContext";
+
+function isContextInvalidatedError(error: Error): boolean {
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes("extension context invalidated") ||
+    !isExtensionContextValid()
+  );
+}
+
+function ContextInvalidatedFallback() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 32,
+        textAlign: "center",
+        minHeight: 160,
+      }}
+    >
+      <p style={{ fontSize: 15, color: "#334155", marginBottom: 16, lineHeight: 1.6 }}>
+        擴充功能已更新，請重新整理頁面以繼續使用。
+      </p>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        style={{
+          padding: "10px 24px",
+          borderRadius: 8,
+          border: "none",
+          background: "#2563eb",
+          color: "white",
+          fontSize: 14,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        重新整理
+      </button>
+    </div>
+  );
+}
 
 class DialogErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -15,6 +60,9 @@ class DialogErrorBoundary extends React.Component<
   }
   render() {
     if (this.state.error) {
+      if (isContextInvalidatedError(this.state.error)) {
+        return <ContextInvalidatedFallback />;
+      }
       return <div style={{ padding: 16, color: "red" }}>Error: {this.state.error.message}</div>;
     }
     return this.props.children;

@@ -10,13 +10,19 @@
 // This intentional duplication is safe because the scraper is stateless — it only
 // reads DOM elements and returns data, with no shared mutable state.
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
+import { isExtensionContextValid, cleanupMooFamilyUI, MOO_ELEMENT_IDS } from "../utils/extensionContext";
 
 function injectFamilyBookshelfButton(): void {
+  if (!isExtensionContextValid()) {
+    cleanupMooFamilyUI();
+    return;
+  }
+
   // Avoid duplicate injection
-  if (document.getElementById("moo-family-bookshelf-btn")) return;
+  if (document.getElementById(MOO_ELEMENT_IDS.button)) return;
 
   const button = document.createElement("button");
-  button.id = "moo-family-bookshelf-btn";
+  button.id = MOO_ELEMENT_IDS.button;
   button.textContent = "家庭書櫃";
   button.style.cssText = [
     "position: fixed",
@@ -40,14 +46,19 @@ function injectFamilyBookshelfButton(): void {
 }
 
 function toggleDialog(): void {
-  const existing = document.getElementById("moo-family-bookshelf-dialog");
+  if (!isExtensionContextValid()) {
+    cleanupMooFamilyUI();
+    return;
+  }
+
+  const existing = document.getElementById(MOO_ELEMENT_IDS.dialog);
   if (existing) {
     existing.remove();
     return;
   }
 
   const dialog = document.createElement("div");
-  dialog.id = "moo-family-bookshelf-dialog";
+  dialog.id = MOO_ELEMENT_IDS.dialog;
   dialog.style.cssText = [
     "position: fixed",
     "top: 50%",
@@ -68,7 +79,7 @@ function toggleDialog(): void {
 
   // Backdrop
   const backdrop = document.createElement("div");
-  backdrop.id = "moo-family-bookshelf-backdrop";
+  backdrop.id = MOO_ELEMENT_IDS.backdrop;
   backdrop.style.cssText = [
     "position: fixed",
     "top: 0",
@@ -85,7 +96,7 @@ function toggleDialog(): void {
 
   // Mount point for React app
   const mountPoint = document.createElement("div");
-  mountPoint.id = "moo-family-bookshelf-root";
+  mountPoint.id = MOO_ELEMENT_IDS.root;
   dialog.appendChild(mountPoint);
 
   document.body.appendChild(backdrop);
@@ -94,7 +105,13 @@ function toggleDialog(): void {
   // Content scripts run in Chrome's isolated world — standard ES module
   // imports don't resolve correctly, so we load code-split modules via
   // chrome.runtime.getURL() which points to web-accessible extension resources.
-  const dialogUrl = chrome.runtime.getURL("content-dialog.js");
+  let dialogUrl: string;
+  try {
+    dialogUrl = chrome.runtime.getURL("content-dialog.js");
+  } catch {
+    cleanupMooFamilyUI();
+    return;
+  }
   console.log("[MooFamily] Loading dialog from:", dialogUrl);
   import(/* @vite-ignore */ dialogUrl)
     .then(({ mountDialog }) => {
@@ -112,6 +129,7 @@ function toggleDialog(): void {
  * and cache it in chrome.storage.local for later use.
  */
 function tryScrapeAndCacheEmail(): void {
+  if (!isExtensionContextValid()) return;
   if (!location.hash.includes("/me")) return;
 
   // Delay slightly to let React render the profile panel
@@ -130,8 +148,14 @@ function tryScrapeAndCacheEmail(): void {
  * it finds an open read.readmoo.com tab.
  */
 function listenForBackgroundSync(): void {
+  if (!isExtensionContextValid()) return;
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "TRIGGER_BOOK_SYNC") {
+      if (!isExtensionContextValid()) {
+        sendResponse({ success: false, error: "Extension context invalidated" });
+        return;
+      }
       // ApiClient is re-exported from content-sync.js, so a single import suffices.
       import(/* @vite-ignore */ chrome.runtime.getURL("content-sync.js"))
         .then(async ({ syncBooks, ApiClient }) => {
@@ -160,17 +184,20 @@ function listenForBackgroundSync(): void {
 }
 
 // Run on page load
-if (document.readyState === "loading") {
+if (!isExtensionContextValid()) {
+  cleanupMooFamilyUI();
+} else if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     injectFamilyBookshelfButton();
     tryScrapeAndCacheEmail();
     listenForBackgroundSync();
   });
+  // Also listen for hash changes (SPA navigation)
+  window.addEventListener("hashchange", tryScrapeAndCacheEmail);
 } else {
   injectFamilyBookshelfButton();
   tryScrapeAndCacheEmail();
   listenForBackgroundSync();
+  // Also listen for hash changes (SPA navigation)
+  window.addEventListener("hashchange", tryScrapeAndCacheEmail);
 }
-
-// Also listen for hash changes (SPA navigation)
-window.addEventListener("hashchange", tryScrapeAndCacheEmail);

@@ -16,6 +16,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<Tab>("family-shelf");
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [contextLost, setContextLost] = useState(false);
   const apiClientRef = useRef(new ApiClient());
 
   // Proactive token refresh — runs regardless of view state
@@ -39,9 +40,10 @@ export function App() {
 
   useEffect(() => {
     // If extension context is invalidated (e.g., extension updated/reloaded),
-    // chrome.runtime APIs will throw. Let the error boundary handle the UI.
+    // set state so the throw happens during render (error boundaries only catch render errors).
     if (!isExtensionContextValid()) {
-      throw new Error("Extension context invalidated");
+      setContextLost(true);
+      return;
     }
 
     // Load familyId, userId, and custom API endpoint on mount.
@@ -81,6 +83,11 @@ export function App() {
     setActiveTab("family-shelf");
     setView("onboarding");
   };
+
+  // Throw during render so error boundary catches it
+  if (contextLost) {
+    throw new Error("Extension context invalidated");
+  }
 
   if (view === "loading") {
     return <div style={{ padding: 24, textAlign: "center" }}>載入中...</div>;
