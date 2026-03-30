@@ -10,14 +10,13 @@ import type { Page } from "@playwright/test";
 export const PWA_URL = "https://localhost:5173";
 export const API_URL = "http://localhost:8787";
 
-/** localStorage keys used by useAuth hook */
-const STORAGE_KEYS = {
-  userId: "moo:userId",
-  familyId: "moo:familyId",
-  encryptionKey: "moo:encryptionKey",
-  apiHost: "moo:apiHost",
-  authToken: "moo:authToken",
-} as const;
+/** Bootstrap key (global, not namespaced) — must match useAuth.ts */
+const USER_ID_KEY = "moo:userId";
+
+/** Build namespaced key: moo:{userId}:{suffix} — must match useAuth.ts */
+function namespacedKey(userId: string, suffix: string): string {
+  return `moo:${userId}:${suffix}`;
+}
 
 export interface TestAuthState {
   userId: string;
@@ -29,6 +28,7 @@ export interface TestAuthState {
 
 /**
  * Inject auth state into localStorage so the PWA treats the user as logged in.
+ * Uses the same namespaced key format as useAuth.ts: moo:{userId}:{field}
  * Must be called after page.goto() since localStorage is origin-scoped.
  */
 export async function setAuthState(
@@ -36,18 +36,19 @@ export async function setAuthState(
   auth: TestAuthState,
 ): Promise<void> {
   await page.evaluate(
-    ({ keys, auth }) => {
-      localStorage.setItem(keys.userId, auth.userId);
-      localStorage.setItem(keys.familyId, auth.familyId);
-      localStorage.setItem(keys.encryptionKey, auth.encryptionKey);
+    ({ userIdKey, auth }) => {
+      const ns = (suffix: string) => `moo:${auth.userId}:${suffix}`;
+      localStorage.setItem(userIdKey, auth.userId);
+      localStorage.setItem(ns("familyId"), auth.familyId);
+      localStorage.setItem(ns("encryptionKey"), auth.encryptionKey);
       if (auth.apiHost) {
-        localStorage.setItem(keys.apiHost, auth.apiHost);
+        localStorage.setItem(ns("apiHost"), auth.apiHost);
       }
       if (auth.authToken) {
-        localStorage.setItem(keys.authToken, auth.authToken);
+        localStorage.setItem(ns("authToken"), auth.authToken);
       }
     },
-    { keys: STORAGE_KEYS, auth },
+    { userIdKey: USER_ID_KEY, auth },
   );
 }
 
@@ -55,9 +56,17 @@ export async function setAuthState(
  * Remove all auth-related localStorage entries.
  */
 export async function clearAuthState(page: Page): Promise<void> {
-  await page.evaluate((keys) => {
-    Object.values(keys).forEach((k) => localStorage.removeItem(k));
-  }, STORAGE_KEYS);
+  await page.evaluate((userIdKey) => {
+    const userId = localStorage.getItem(userIdKey);
+    if (userId) {
+      const ns = (suffix: string) => `moo:${userId}:${suffix}`;
+      localStorage.removeItem(ns("familyId"));
+      localStorage.removeItem(ns("encryptionKey"));
+      localStorage.removeItem(ns("apiHost"));
+      localStorage.removeItem(ns("authToken"));
+    }
+    localStorage.removeItem(userIdKey);
+  }, USER_ID_KEY);
 }
 
 /**
