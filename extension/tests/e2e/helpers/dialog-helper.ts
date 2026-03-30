@@ -28,6 +28,13 @@ export async function waitForButton(page: Page): Promise<Locator> {
  * Returns the dialog locator.
  */
 export async function openDialog(page: Page): Promise<Locator> {
+  // Collect console errors for debugging mount failures
+  const errors: string[] = [];
+  const onError = (msg: import("@playwright/test").ConsoleMessage) => {
+    if (msg.type() === "error") errors.push(msg.text());
+  };
+  page.on("console", onError);
+
   const button = await waitForButton(page);
   await button.click();
 
@@ -35,8 +42,20 @@ export async function openDialog(page: Page): Promise<Locator> {
   await dialog.waitFor({ state: "visible", timeout: 10_000 });
 
   // Wait for React to mount content inside the dialog
+  // Dynamic import of content-dialog.js may be slow in CI
   const root = page.locator("#moo-family-bookshelf-root");
-  await expect(root).not.toBeEmpty({ timeout: 10_000 });
+  try {
+    await expect(root).not.toBeEmpty({ timeout: 30_000 });
+  } catch (e) {
+    page.off("console", onError);
+    const errorDetail = errors.length > 0
+      ? `Console errors:\n${errors.join("\n")}`
+      : "No console errors captured";
+    throw new Error(
+      `Dialog React mount failed — #moo-family-bookshelf-root is empty after 30s.\n${errorDetail}\n\nOriginal: ${e}`,
+    );
+  }
+  page.off("console", onError);
 
   return dialog;
 }
