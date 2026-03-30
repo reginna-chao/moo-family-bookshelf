@@ -42,8 +42,13 @@ async function setupFamily(
     .waitFor({ state: "visible", timeout: 15_000 });
   await clickCreateFamily(page);
 
-  // Wait for sync code to appear
-  await dialog.locator("div[style*='monospace']").waitFor({ state: "visible", timeout: 15_000 });
+  // Wait for sync code to appear (or dump dialog HTML on failure)
+  try {
+    await dialog.locator("div[style*='monospace']").waitFor({ state: "visible", timeout: 30_000 });
+  } catch (e) {
+    const html = await dialog.innerHTML().catch(() => "(unreadable)");
+    throw new Error(`setupFamily: sync code not found after create.\nDialog HTML:\n${html}\n\nOriginal: ${e}`);
+  }
   await clickContinue(page);
   await waitForMainView(page);
 }

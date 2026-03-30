@@ -38,8 +38,13 @@ async function goThroughOnboarding(
     .waitFor({ state: "visible", timeout: 15_000 });
   await clickCreateFamily(page);
 
-  // Wait for sync code to appear
-  await dialog.locator("div[style*='monospace']").waitFor({ state: "visible", timeout: 15_000 });
+  // Wait for sync code to appear (or dump dialog HTML on failure)
+  try {
+    await dialog.locator("div[style*='monospace']").waitFor({ state: "visible", timeout: 30_000 });
+  } catch (e) {
+    const html = await dialog.innerHTML().catch(() => "(unreadable)");
+    throw new Error(`goThroughOnboarding: sync code not found.\nDialog HTML:\n${html}\n\nOriginal: ${e}`);
+  }
   await clickContinue(page);
   await waitForMainView(page);
 }
