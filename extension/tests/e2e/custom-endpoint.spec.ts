@@ -28,12 +28,6 @@ async function createFamilyAndGetSyncCode(
   page: import("@playwright/test").Page,
   extensionId: string,
 ): Promise<string> {
-  // Capture all MooFamily logs for debugging
-  const logs: string[] = [];
-  page.on("console", (msg) => {
-    if (msg.text().includes("[MooFamily]")) logs.push(msg.text());
-  });
-
   await page.goto(`chrome-extension://${extensionId}/background.js`);
   await page.evaluate((apiUrl) => {
     chrome.storage.local.set({ apiEndpoint: apiUrl });
@@ -51,13 +45,13 @@ async function createFamilyAndGetSyncCode(
     .waitFor({ state: "visible", timeout: 15_000 });
   await clickCreateFamily(page);
 
-  // Wait for sync code to appear (or dump dialog HTML + logs on failure)
+  // Wait for sync code to appear (or dump dialog HTML on failure)
   try {
     await dialog.locator("div[style*='monospace']").waitFor({ state: "visible", timeout: 30_000 });
   } catch (e) {
     const html = await dialog.innerHTML().catch(() => "(unreadable)");
     throw new Error(
-      `createFamilyAndGetSyncCode failed.\nLogs: ${logs.join(" | ")}\nDialog HTML: ${html}\nOriginal: ${e}`,
+      `createFamilyAndGetSyncCode failed.\nDialog HTML: ${html}\nOriginal: ${e}`,
     );
   }
   const syncCode = await getSyncCode(page);

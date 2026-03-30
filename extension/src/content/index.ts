@@ -139,21 +139,12 @@ function toggleDialog(): void {
   // Content scripts run in Chrome's isolated world — standard ES module
   // imports don't resolve correctly, so we load code-split modules via
   // chrome.runtime.getURL() which points to web-accessible extension resources.
-  let dialogUrl: string;
-  try {
-    dialogUrl = chrome.runtime.getURL("content-dialog.js");
-  } catch {
-    cleanupMooFamilyUI();
-    return;
-  }
-  console.log("[MooFamily] Loading dialog from:", dialogUrl);
-  import(/* @vite-ignore */ dialogUrl)
+  import(/* @vite-ignore */ chrome.runtime.getURL("content-dialog.js"))
     .then(({ mountDialog }) => {
-      console.log("[MooFamily] Dialog module loaded, mounting...");
       mountDialog(mountPoint);
     })
     .catch((err) => {
-      console.error("[MooFamily] Failed to load dialog module from:", dialogUrl, err);
+      console.error("[MooFamily] Failed to load dialog module:", err);
       mountPoint.textContent = "載入失敗，請重新整理頁面再試。";
     });
 }

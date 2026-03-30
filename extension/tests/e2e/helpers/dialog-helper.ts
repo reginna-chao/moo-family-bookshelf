@@ -28,26 +28,6 @@ export async function waitForButton(page: Page): Promise<Locator> {
  * Returns the dialog locator.
  */
 export async function openDialog(page: Page): Promise<Locator> {
-  // Collect console errors and failed network requests for debugging mount failures
-  const errors: string[] = [];
-  const onError = (msg: import("@playwright/test").ConsoleMessage) => {
-    // Capture all MooFamily logs + errors for debugging
-    if (msg.type() === "error" || msg.text().includes("[MooFamily]")) {
-      errors.push(`[${msg.type()}] ${msg.text()}`);
-    }
-  };
-  const onRequestFailed = (request: import("@playwright/test").Request) => {
-    errors.push(`[NET FAIL] ${request.url()} — ${request.failure()?.errorText ?? "unknown"}`);
-  };
-  const onResponse = (response: import("@playwright/test").Response) => {
-    if (response.status() >= 400) {
-      errors.push(`[HTTP ${response.status()}] ${response.url()}`);
-    }
-  };
-  page.on("console", onError);
-  page.on("requestfailed", onRequestFailed);
-  page.on("response", onResponse);
-
   const button = await waitForButton(page);
   await button.click();
 
@@ -71,20 +51,11 @@ export async function openDialog(page: Page): Promise<Locator> {
       { timeout: 30_000 },
     );
   } catch (e) {
-    page.off("console", onError);
-    page.off("requestfailed", onRequestFailed);
-    page.off("response", onResponse);
     const rootContent = await root.innerHTML().catch(() => "(unreadable)");
-    const errorDetail = errors.length > 0
-      ? `Console errors:\n${errors.join("\n")}`
-      : "No console errors captured";
     throw new Error(
-      `Dialog mount/load failed after 30s.\nRoot HTML: ${rootContent}\n${errorDetail}\n\nOriginal: ${e}`,
+      `Dialog mount/load failed after 30s.\nRoot HTML: ${rootContent}\n\nOriginal: ${e}`,
     );
   }
-  page.off("console", onError);
-  page.off("requestfailed", onRequestFailed);
-  page.off("response", onResponse);
 
   return dialog;
 }

@@ -319,7 +319,7 @@ describe("Onboarding", () => {
 
       await waitFor(() => {
         expect(screen.getByText("發生錯誤")).toBeInTheDocument();
-        expect(screen.getByText(/無法驗證帳號/)).toBeInTheDocument();
+        expect(screen.getByText("無法驗證帳號，請重試。")).toBeInTheDocument();
       });
     });
 
@@ -494,7 +494,7 @@ describe("Onboarding", () => {
 
       await waitFor(() => {
         expect(screen.getByText("發生錯誤")).toBeInTheDocument();
-        expect(screen.getByText(/無法驗證帳號/)).toBeInTheDocument();
+        expect(screen.getByText("無法驗證帳號，請重試。")).toBeInTheDocument();
       });
     });
   });

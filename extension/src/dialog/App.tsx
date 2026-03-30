@@ -51,7 +51,6 @@ export function App() {
     chrome.runtime.sendMessage({ type: "GET_FAMILY_ID" }, (familyResponse) => {
       chrome.storage.local.get(["userId", "authToken"], (storageResult) => {
         chrome.runtime.sendMessage({ type: "GET_API_ENDPOINT" }, (apiResponse) => {
-          console.log("[MooFamily] GET_API_ENDPOINT response:", JSON.stringify(apiResponse));
           if (apiResponse?.apiEndpoint) {
             apiClientRef.current.setEndpoint(apiResponse.apiEndpoint);
           }
