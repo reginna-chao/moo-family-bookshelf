@@ -63,7 +63,12 @@ export function FamilyShelfPage({
     setState("loading");
     setErrorMessage("");
     try {
-      const response = await apiClient.getFamilyBookshelf(familyId);
+      // Fetch bookshelf and family members in parallel
+      const [response, membersResponse] = await Promise.all([
+        apiClient.getFamilyBookshelf(familyId),
+        apiClient.getFamilyMembers(familyId),
+      ]);
+
       if (response.error) {
         setErrorMessage(response.error.message);
         setState("error");
@@ -75,31 +80,42 @@ export function FamilyShelfPage({
         return;
       }
 
+      // Build a lookup map of displayNames from the family members API
+      const memberNameMap = new Map<string, string>();
+      if (membersResponse.data?.members) {
+        for (const m of membersResponse.data.members) {
+          if (m.displayName) memberNameMap.set(m.userId, m.displayName);
+        }
+      }
+
       const decryptedMembers: MemberBooks[] = [];
       for (const member of response.data.members) {
+        // Use family record displayName, falling back to userId slice
+        const familyDisplayName = memberNameMap.get(member.userId) || member.userId.slice(0, 8);
+
         if (!member.payload || !encryptionKey) {
           decryptedMembers.push({
             userId: member.userId,
-            displayName: member.userId.slice(0, 8),
+            displayName: familyDisplayName,
             books: [],
           });
           continue;
         }
 
         try {
-          const { displayName, books } = await decryptPayload(
+          const { books } = await decryptPayload(
             member.payload,
             encryptionKey,
           );
           decryptedMembers.push({
             userId: member.userId,
-            displayName: displayName || member.userId.slice(0, 8),
+            displayName: familyDisplayName,
             books: books.filter((b) => b.isShared === BoolFlag.TRUE),
           });
         } catch {
           decryptedMembers.push({
             userId: member.userId,
-            displayName: member.userId.slice(0, 8),
+            displayName: familyDisplayName,
             books: [],
           });
         }
@@ -115,6 +131,15 @@ export function FamilyShelfPage({
 
   useEffect(() => {
     void loadBookshelf();
+  }, [loadBookshelf]);
+
+  // Cross-component sync: re-fetch when PersonalShelf saves book settings
+  useEffect(() => {
+    const handler = () => {
+      void loadBookshelf();
+    };
+    window.addEventListener("personalShelfSaved", handler);
+    return () => window.removeEventListener("personalShelfSaved", handler);
   }, [loadBookshelf]);
 
   // Cross-component sync: update current user's display name when changed in settings

@@ -33,7 +33,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     leaveFamily: vi.fn(),
     getPersonalBooks: vi.fn(),
     updatePersonalBooks: vi.fn(),
-    getFamilyMembers: vi.fn(),
+    getFamilyMembers: vi.fn().mockResolvedValue({ data: { familyId: "fam-1", ownerId: "user-1", members: [] } }),
     getFamilyBookshelf: vi.fn().mockResolvedValue({ data: { familyId: "fam-1", members: [] } }),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
@@ -91,6 +91,9 @@ describe("FamilyShelf", () => {
 
   it("shows empty state when members have no shared books", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -116,6 +119,9 @@ describe("FamilyShelf", () => {
 
   it("renders books when members have shared books", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -180,7 +186,12 @@ describe("FamilyShelf", () => {
         },
       });
 
-    const apiClient = createMockApiClient({ getFamilyBookshelf });
+    const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+      }),
+      getFamilyBookshelf,
+    });
 
     render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
 
@@ -212,6 +223,12 @@ describe("FamilyShelf", () => {
 
   it("handles member with null payload gracefully", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [
+          { userId: "user-2", displayName: "" },
+          { userId: "user-3", displayName: "Bob" },
+        ] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -242,6 +259,12 @@ describe("FamilyShelf", () => {
     vi.mocked(decrypt).mockRejectedValueOnce(new Error("Decryption failed"));
 
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [
+          { userId: "user-2", displayName: "" },
+          { userId: "user-3", displayName: "Carol" },
+        ] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -272,6 +295,9 @@ describe("FamilyShelf", () => {
 
   it("uses userId prefix as display name when displayName is empty", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "abcdefghijklmnop", displayName: "" }] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -299,6 +325,9 @@ describe("FamilyShelf", () => {
 
   it("renders member dropdown for filtering", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -324,6 +353,12 @@ describe("FamilyShelf", () => {
 
   it("filters books by selected member", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [
+          { userId: "user-1", displayName: "Me" },
+          { userId: "user-2", displayName: "Alice" },
+        ] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -366,6 +401,9 @@ describe("FamilyShelf", () => {
 
   it("shows total book count in header", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -392,6 +430,9 @@ describe("FamilyShelf", () => {
 
   it("shows search bar when books exist", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -460,6 +501,12 @@ describe("FamilyShelf", () => {
 
   it("updates member display name on chrome.storage.onChanged", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [
+          { userId: "user-1", displayName: "小明" },
+          { userId: "user-2", displayName: "Alice" },
+        ] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
@@ -515,6 +562,9 @@ describe("FamilyShelf", () => {
 
   it("ignores chrome.storage.onChanged from non-local area", async () => {
     const apiClient = createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-1", displayName: "小明" }] },
+      }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
+import { kvKeys } from "../../src/kv/schema";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -295,5 +296,49 @@ describe("Index fallback routes", () => {
     expect(res.status).toBe(500);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INTERNAL_ERROR");
+  });
+});
+
+// ===========================================================================
+// DELETE /api/family/:id/member/:uid — single-member owner leave
+// ===========================================================================
+
+describe("Single-member owner leave family", () => {
+  it("should allow single-member owner to leave and delete family record", async () => {
+    const { familyId, authToken } = await createFamily("user1");
+
+    const res = await request(
+      "DELETE",
+      `/api/family/${familyId}/member/user1`,
+      undefined,
+      authToken,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.ok).toBe(true);
+
+    // Verify family record is deleted
+    expect(await kv.get(kvKeys.family(familyId))).toBeNull();
+    // Verify member reverse lookup is deleted
+    expect(await kv.get(kvKeys.member("user1"))).toBeNull();
+    // Verify auth token is deleted
+    expect(await kv.get(kvKeys.auth("user1"))).toBeNull();
+  });
+
+  it("should still block multi-member owner from leaving", async () => {
+    const { familyId, token1 } = await createFamilyWithTwoMembers();
+
+    const res = await request(
+      "DELETE",
+      `/api/family/${familyId}/member/user1`,
+      undefined,
+      token1,
+    );
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("OWNER_CANNOT_LEAVE");
+
+    // Verify family record still exists
+    expect(await kv.get(kvKeys.family(familyId))).not.toBeNull();
   });
 });

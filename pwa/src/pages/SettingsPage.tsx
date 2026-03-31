@@ -57,11 +57,14 @@ export function SettingsPage({
     [familyId, encryptionKey, apiClient],
   );
   const [copied, setCopied] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const inviteCopyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     return () => {
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      if (inviteCopyTimerRef.current) clearTimeout(inviteCopyTimerRef.current);
     };
   }, []);
 
@@ -70,6 +73,25 @@ export function SettingsPage({
       await navigator.clipboard.writeText(syncCode);
       setCopied(true);
       copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API failed — ignore silently on mobile
+    }
+  }
+
+  async function handleInvite() {
+    const inviteUrl = `${window.location.origin}${window.location.pathname}#family=${encodeURIComponent(syncCode)}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "加入牧家書櫃", url: inviteUrl });
+        return;
+      } catch {
+        // User cancelled or share failed — fall through to clipboard
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setInviteCopied(true);
+      inviteCopyTimerRef.current = setTimeout(() => setInviteCopied(false), 2000);
     } catch {
       // Clipboard API failed — ignore silently on mobile
     }
@@ -320,8 +342,16 @@ export function SettingsPage({
         >
           {copied ? "已複製" : "複製同步碼"}
         </button>
+        <button
+          onClick={() => void handleInvite()}
+          className={`w-full rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-600 mt-2 ${
+            inviteCopied ? "bg-green-50" : "bg-transparent hover:bg-green-50"
+          } transition-colors`}
+        >
+          {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
+        </button>
         <p className="text-gray-400 text-xs mt-1.5 mb-4">
-          將此代碼分享給家人即可加入書櫃
+          將此代碼或邀請連結分享給家人即可加入書櫃
         </p>
 
         <p className="text-xs text-gray-500 mb-1">

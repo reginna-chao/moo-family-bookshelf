@@ -72,6 +72,13 @@ export function App() {
   const handleFamilyJoined = (id: string, newUserId: string) => {
     setFamilyId(id);
     setUserId(newUserId);
+    // First-time onboarding: default to personal-shelf tab
+    chrome.storage.local.get(["hasCompletedInitialSetup"], (result) => {
+      if (!result.hasCompletedInitialSetup) {
+        setActiveTab("personal-shelf");
+        chrome.storage.local.set({ hasCompletedInitialSetup: true });
+      }
+    });
     setView("main");
   };
 

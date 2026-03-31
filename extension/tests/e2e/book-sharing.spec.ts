@@ -95,9 +95,9 @@ test.describe("Book Sharing", () => {
       timeout: 15_000,
     });
 
-    // Find book toggle buttons in BookRow — they show "未開放" (not shared) or "開放" (shared)
-    // Note: button[role="switch"] is the archive sync toggle in Settings, NOT book toggles
-    const bookToggles = dialog.locator("button", { hasText: "未開放" });
+    // Find all book toggle buttons via data-toggle-btn attribute (stable locator —
+    // clicking doesn't change the element count, only the text "未開放" ↔ "開放")
+    const bookToggles = dialog.locator("[data-toggle-btn]");
 
     // Wait for book toggles to appear
     await expect(bookToggles.first()).toBeVisible({ timeout: 10_000 });
@@ -125,19 +125,20 @@ test.describe("Book Sharing", () => {
       timeout: 10_000,
     });
 
-    // The default filter is "全部（不含自己）" which excludes our own books.
-    // Change the filter to "全部" to see our own shared books.
+    // The default filter is "其他家人的書" which excludes our own books.
+    // Change the filter to "所有人的書" to see our own shared books.
     const dropdown = dialog.locator("select");
     if (await dropdown.isVisible()) {
-      await dropdown.selectOption({ label: "全部" });
+      await dropdown.selectOption({ label: "所有人的書" });
 
-      // Wait for re-render after filter change
-      await expect(dialog.locator("text=被討厭的勇氣")).toBeVisible({
+      // Wait for re-render after filter change — use BookCard's <a> tag to avoid
+      // strict mode violation from hidden PersonalShelf tab's <span> elements
+      await expect(dialog.locator("a", { hasText: "被討厭的勇氣" }).first()).toBeVisible({
         timeout: 10_000,
       });
 
       // Assert that the shared books are visible
-      await expect(dialog.locator("text=原子習慣")).toBeVisible({
+      await expect(dialog.locator("a", { hasText: "原子習慣" }).first()).toBeVisible({
         timeout: 5_000,
       });
     }

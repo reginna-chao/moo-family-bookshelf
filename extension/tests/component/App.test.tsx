@@ -219,15 +219,33 @@ describe("App", () => {
   it("handleLeaveFamily resets active tab to family-shelf", async () => {
     setupChromeMessages({ familyId: null, userId: null });
 
+    // Track hasCompletedInitialSetup state across mock calls
+    const storageState: Record<string, unknown> = {};
+    vi.mocked(chrome.storage.local.set).mockImplementation((items) => {
+      Object.assign(storageState, items);
+      return Promise.resolve();
+    });
+    vi.mocked(chrome.storage.local.get).mockImplementation(
+      (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        const result: Record<string, unknown> = {};
+        const keyList = Array.isArray(keys) ? keys : (typeof keys === "string" ? [keys] : Object.keys(keys as Record<string, unknown>));
+        for (const k of keyList) {
+          if (k in storageState) result[k] = storageState[k];
+        }
+        if (typeof callback === "function") callback(result);
+        return Promise.resolve(result) as unknown as void;
+      },
+    );
+
     render(<App />);
     await waitFor(() => {
       expect(screen.getByTestId("onboarding")).toBeInTheDocument();
     });
 
-    // Join a family
+    // First join — first-time setup, defaults to personal-shelf
     fireEvent.click(screen.getByText("Mock Join"));
     await waitFor(() => {
-      expect(screen.getByText("設定")).toBeInTheDocument();
+      expect(screen.getByText("個人書櫃")).toBeInTheDocument();
     });
 
     // Switch to settings tab
@@ -239,14 +257,13 @@ describe("App", () => {
       expect(screen.getByTestId("onboarding")).toBeInTheDocument();
     });
 
-    // Re-join: verify tab resets to family-shelf (default)
-    // Re-setup chrome messages so re-join works
+    // Re-join: hasCompletedInitialSetup is now true, should default to family-shelf
     fireEvent.click(screen.getByText("Mock Join"));
     await waitFor(() => {
       expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
     });
 
-    // The family-shelf tab should be active (default after leave)
+    // The family-shelf tab should be active (default after leave + re-join)
     const familyShelfButton = screen.getByText("家庭書櫃");
     expect(familyShelfButton).toHaveStyle({ fontWeight: 600 });
   });

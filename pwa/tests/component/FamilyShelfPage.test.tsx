@@ -55,12 +55,18 @@ function makePayload(
 
 const mockDecrypt = vi.mocked(decrypt);
 const mockGetFamilyBookshelf = vi.fn();
+const mockGetFamilyMembers = vi.fn().mockResolvedValue({
+  data: { familyId: "fam-1", ownerId: "user-self", members: [] },
+});
 
 function createProps() {
   return {
     familyId: "fam-1",
     userId: "user-self",
-    apiClient: { getFamilyBookshelf: mockGetFamilyBookshelf } as unknown as ApiClient,
+    apiClient: {
+      getFamilyBookshelf: mockGetFamilyBookshelf,
+      getFamilyMembers: mockGetFamilyMembers,
+    } as unknown as ApiClient,
     encryptionKey: "test-key",
   };
 }
@@ -71,6 +77,10 @@ describe("FamilyShelfPage", () => {
   beforeEach(() => {
     mockDecrypt.mockReset();
     mockGetFamilyBookshelf.mockReset();
+    mockGetFamilyMembers.mockReset();
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [] },
+    });
     defaultProps = createProps();
   });
 
@@ -108,6 +118,9 @@ describe("FamilyShelfPage", () => {
   });
 
   it("clicking retry button re-fetches data", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+    });
     mockGetFamilyBookshelf.mockRejectedValueOnce(new Error("Network error"));
     render(<FamilyShelfPage {...defaultProps} />);
 
@@ -139,6 +152,9 @@ describe("FamilyShelfPage", () => {
   });
 
   it("shows empty state when no books are shared", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+    });
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
         { bookId: "b1", title: "Hidden Book", author: "Author", isShared: BoolFlag.FALSE },
@@ -178,6 +194,9 @@ describe("FamilyShelfPage", () => {
   });
 
   it("renders books after successful load and decrypt", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+    });
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
         { bookId: "b1", title: "React 深入淺出", author: "作者一", isShared: BoolFlag.TRUE },
@@ -204,6 +223,9 @@ describe("FamilyShelfPage", () => {
   });
 
   it("only renders books with isShared === 1", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+    });
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
         { bookId: "b1", title: "Shared Book", author: "Author", isShared: BoolFlag.TRUE },
@@ -228,6 +250,12 @@ describe("FamilyShelfPage", () => {
   });
 
   it("default member filter excludes self", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [
+        { userId: "user-self", displayName: "Me" },
+        { userId: "user-alice", displayName: "Alice" },
+      ] },
+    });
     // decrypt is called per member; return different payloads per call
     mockDecrypt
       .mockResolvedValueOnce(
@@ -260,6 +288,12 @@ describe("FamilyShelfPage", () => {
   });
 
   it("'所有人' filter shows all members including self", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [
+        { userId: "user-self", displayName: "Me" },
+        { userId: "user-alice", displayName: "Alice" },
+      ] },
+    });
     mockDecrypt
       .mockResolvedValueOnce(
         makePayload("Me", [
@@ -299,6 +333,9 @@ describe("FamilyShelfPage", () => {
   });
 
   it("search filters books by title", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+    });
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
         { bookId: "b1", title: "React 入門", author: "Author A", isShared: BoolFlag.TRUE },
@@ -343,6 +380,9 @@ describe("FamilyShelfPage", () => {
   });
 
   it("books link to readmooUrl with target _blank", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+    });
     const readmooUrl = "https://readmoo.com/book-123";
     mockDecrypt.mockResolvedValue(
       makePayload("Alice", [
@@ -377,6 +417,12 @@ describe("FamilyShelfPage", () => {
   });
 
   it("updates member display name on displayNameChanged CustomEvent", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [
+        { userId: "user-self", displayName: "Me" },
+        { userId: "user-alice", displayName: "Alice" },
+      ] },
+    });
     mockDecrypt
       .mockResolvedValueOnce(
         makePayload("Me", [
@@ -433,6 +479,12 @@ describe("FamilyShelfPage", () => {
   });
 
   it("shows total book count in header", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-self", members: [
+        { userId: "user-alice", displayName: "Alice" },
+        { userId: "user-bob", displayName: "Bob" },
+      ] },
+    });
     mockDecrypt
       .mockResolvedValueOnce(
         makePayload("Alice", [

@@ -102,6 +102,8 @@ export function PersonalShelfPage({
       originalBooksRef.current = books;
       setIsDirty(false);
       setState("saved");
+      // Signal FamilyShelfPage to re-fetch
+      window.dispatchEvent(new CustomEvent("personalShelfSaved"));
       setTimeout(() => setState("ready"), 1500);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
@@ -294,7 +296,15 @@ export function PersonalShelfPage({
         ) : (
           <div>
             {visibleBooks.map((book) => (
-              <div key={book.bookId} className="flex items-center gap-3 py-3 border-b border-gray-100">
+              <div
+                key={book.bookId}
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (target.closest("[data-toggle-btn]") || target.tagName === "INPUT") return;
+                  toggleSelect(book.bookId);
+                }}
+                className="flex items-center gap-3 py-3 border-b border-gray-100 cursor-pointer"
+              >
                 <input
                   type="checkbox"
                   checked={selectedIds.has(book.bookId)}
@@ -321,6 +331,7 @@ export function PersonalShelfPage({
                   <p className="text-xs text-gray-500 truncate">{book.author}</p>
                 </div>
                 <button
+                  data-toggle-btn
                   onClick={() => handleToggle(book.bookId)}
                   aria-pressed={book.isShared === BoolFlag.TRUE}
                   aria-label={`${book.title} ${book.isShared === BoolFlag.TRUE ? "已開放分享" : "未開放分享"}`}

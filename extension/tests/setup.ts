@@ -29,6 +29,13 @@ function createStorageAreaMock(store: Record<string, unknown>) {
       }
       callback?.();
     }),
+    clear: vi.fn((callback?: () => void) => {
+      for (const key of Object.keys(store)) {
+        delete store[key];
+      }
+      callback?.();
+      return Promise.resolve();
+    }),
   };
 }
 

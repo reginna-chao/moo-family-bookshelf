@@ -11,6 +11,24 @@ import { PwaCreateNotice } from "./components/PwaCreateNotice";
 
 type Page = "family-shelf" | "personal-shelf" | "settings";
 
+const HASH_TO_PAGE: Record<string, Page> = {
+  "#family-shelf": "family-shelf",
+  "#personal-shelf": "personal-shelf",
+  "#settings": "settings",
+};
+
+const PAGE_TO_HASH: Record<Page, string> = {
+  "family-shelf": "#family-shelf",
+  "personal-shelf": "#personal-shelf",
+  "settings": "#settings",
+};
+
+/** Read page from hash, but only if it's a simple page hash (not auth params). */
+function pageFromHash(): Page | null {
+  const hash = window.location.hash;
+  return HASH_TO_PAGE[hash] ?? null;
+}
+
 interface NavItem {
   page: Page;
   label: string;
@@ -25,17 +43,33 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function App() {
   const { auth, isLoading, login, logout, forceLogout, initialSyncCode } = useAuth();
-  const [currentPage, setCurrentPage] = useState<Page>("family-shelf");
+  const [currentPage, setCurrentPage] = useState<Page>(() => pageFromHash() ?? "family-shelf");
   const [familyFullError, setFamilyFullError] = useState("");
+
+  // Sync page state with hash
+  const navigate = useCallback((page: Page) => {
+    setCurrentPage(page);
+    window.history.replaceState(null, "", PAGE_TO_HASH[page]);
+  }, []);
+
+  // Listen for browser back/forward (hashchange)
+  useEffect(() => {
+    const handler = () => {
+      const page = pageFromHash();
+      if (page) setCurrentPage(page);
+    };
+    window.addEventListener("hashchange", handler);
+    return () => window.removeEventListener("hashchange", handler);
+  }, []);
 
   // Reset to family shelf when user logs in (auth transitions from null to non-null)
   const prevAuthRef = useRef<typeof auth>(null);
   useEffect(() => {
     if (prevAuthRef.current === null && auth !== null) {
-      setCurrentPage("family-shelf");
+      navigate("family-shelf");
     }
     prevAuthRef.current = auth;
-  }, [auth]);
+  }, [auth, navigate]);
 
   // Re-join family to get a fresh token, used both on init and on 401 refresh
   const authRef = useRef(auth);
@@ -144,7 +178,7 @@ export default function App() {
           {NAV_ITEMS.map((item) => (
             <button
               key={item.page}
-              onClick={() => setCurrentPage(item.page)}
+              onClick={() => navigate(item.page)}
               aria-current={currentPage === item.page ? "page" : undefined}
               className={`flex-1 flex flex-col items-center py-2 text-xs transition-colors ${
                 currentPage === item.page

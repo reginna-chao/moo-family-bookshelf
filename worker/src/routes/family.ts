@@ -196,12 +196,23 @@ familyRoutes.delete("/:id/member/:uid", async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Owner cannot leave (must transfer first)
+  // Owner trying to leave: allow only when they are the sole member
   if (callerId === record.ownerId && targetUserId === callerId) {
-    return c.json(
-      { error: { code: "OWNER_CANNOT_LEAVE", message: "請先轉移管理權後再離開" } },
-      403,
-    );
+    if (record.members.length > 1) {
+      return c.json(
+        { error: { code: "OWNER_CANNOT_LEAVE", message: "請先轉移管理權後再離開" } },
+        403,
+      );
+    }
+
+    // Single-member owner: delete entire family
+    await Promise.all([
+      c.env.KV.delete(kvKeys.family(familyId)),
+      c.env.KV.delete(kvKeys.member(callerId)),
+      deleteAuthToken(c.env.KV, callerId),
+    ]);
+
+    return c.json({ data: { ok: true } });
   }
 
   // Non-owner cannot remove others

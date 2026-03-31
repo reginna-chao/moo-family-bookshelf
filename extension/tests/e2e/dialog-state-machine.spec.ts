@@ -143,7 +143,7 @@ test.describe("Dialog State Machine", () => {
     await page.close();
   });
 
-  test("Owner cannot leave without transferring ownership", async ({
+  test("Single-member owner can leave family and return to onboarding", async ({
     context,
     extensionId,
   }) => {
@@ -161,20 +161,15 @@ test.describe("Dialog State Machine", () => {
 
     await goThroughOnboarding(page);
 
-    // Go to Settings tab and attempt to leave
+    // Go to Settings tab and leave
     await navigateToTab(page, "設定");
 
     const dialog = page.locator("#moo-family-bookshelf-dialog");
     await expect(dialog.locator("text=離開家庭")).toBeVisible({ timeout: 10_000 });
     await leaveFamily(page);
 
-    // Owner should see error — cannot leave without transferring ownership
-    await expect(dialog.locator("text=管理者必須先轉移管理權才能離開家庭")).toBeVisible({
-      timeout: 10_000,
-    });
-
-    // Should still be on the Settings tab, NOT onboarding
-    await expect(dialog.locator("text=家庭設定")).toBeVisible();
+    // Single-member owner should successfully leave — returns to onboarding
+    await waitForOnboarding(page);
 
     await page.close();
   });

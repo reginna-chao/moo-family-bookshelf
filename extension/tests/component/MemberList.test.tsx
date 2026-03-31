@@ -35,10 +35,10 @@ describe("MemberList", () => {
     expect(screen.getByText("user-mem")).toBeInTheDocument();
   });
 
-  it("shows (Owner) badge for the owner", () => {
+  it("shows (管理員) badge for the owner", () => {
     renderMemberList();
 
-    expect(screen.getByText("(Owner)")).toBeInTheDocument();
+    expect(screen.getByText("(管理員)")).toBeInTheDocument();
   });
 
   it("shows (你) badge for the current user", () => {

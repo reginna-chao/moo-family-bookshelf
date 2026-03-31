@@ -205,6 +205,14 @@ export class ApiClient {
     return this.request(`/api/family/${familyId}/members`);
   }
 
+  // --- Account ---
+
+  async deleteAccount(
+    userId: string,
+  ): Promise<ApiResponse<{ ok: boolean }>> {
+    return this.request(`/api/user/${userId}`, { method: "DELETE" });
+  }
+
   // --- Family Bookshelf ---
 
   async getFamilyBookshelf(

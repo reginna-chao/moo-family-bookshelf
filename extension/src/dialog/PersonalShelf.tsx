@@ -197,6 +197,8 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
       originalBooks.current = books;
       // Update cache after successful save
       chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books) });
+      // Signal FamilyShelf to re-fetch (timestamp triggers onChanged listener)
+      chrome.storage.local.set({ personalShelfSavedAt: Date.now() });
       setIsDirty(false);
       setStatus("saved");
       setTimeout(() => setStatus("ready"), 1500);

@@ -212,7 +212,7 @@ test.describe("Family Lifecycle", () => {
     await page.close();
   });
 
-  test("Owner leave attempt shows ownership error", async ({
+  test("Single-member owner can leave and dissolve family", async ({
     context,
     extensionId,
   }) => {
@@ -242,15 +242,13 @@ test.describe("Family Lifecycle", () => {
     await clickContinue(page);
     await waitForMainView(page);
 
-    // Navigate to Settings and attempt to leave
+    // Navigate to Settings and leave — single-member owner should succeed
     await navigateToTab(page, "設定");
     await expect(dialog.locator("text=離開家庭")).toBeVisible({ timeout: 10_000 });
     await leaveFamily(page);
 
-    // Owner should see error message
-    await expect(dialog.locator("text=管理者必須先轉移管理權才能離開家庭")).toBeVisible({
-      timeout: 10_000,
-    });
+    // Should return to onboarding after successful leave
+    await waitForOnboarding(page);
 
     await page.close();
   });

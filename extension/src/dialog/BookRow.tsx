@@ -11,8 +11,16 @@ interface BookRowProps {
 export const BookRow = React.memo(function BookRow({ book, selected, onSelect, onToggle }: BookRowProps) {
   const isOn = book.isShared === BoolFlag.TRUE;
 
+  const handleRowClick = (e: React.MouseEvent) => {
+    // Don't select when clicking the toggle button or the checkbox itself
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-toggle-btn]") || target.tagName === "INPUT") return;
+    onSelect(book.bookId);
+  };
+
   return (
     <div
+      onClick={handleRowClick}
       style={{
         display: "flex",
         alignItems: "center",
@@ -20,6 +28,7 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
         padding: 8,
         borderRadius: 8,
         background: selected ? "#eff6ff" : "#f8fafc",
+        cursor: "pointer",
       }}
     >
       <input
@@ -66,6 +75,7 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
         </div>
       </div>
       <button
+        data-toggle-btn
         onClick={() => onToggle(book.bookId)}
         style={{
           flexShrink: 0,

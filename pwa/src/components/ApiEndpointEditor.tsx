@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, HelpCircle } from "lucide-react";
 import type { ApiClient } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
 import { namespacedKey } from "@/hooks/useAuth";
@@ -62,7 +62,18 @@ export function ApiEndpointEditor({ apiClient, userId }: ApiEndpointEditorProps)
       </div>
       {expanded && (
         <div className="mt-2">
-          <p className="text-xs text-gray-500 mb-1">目前 API 端點</p>
+          <p className="text-xs text-gray-500 mb-1">
+            目前 API 端點
+            <a
+              href="https://github.com/reginna-chao/moo-family-bookshelf/blob/main/worker/DEPLOY.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="自架部署說明"
+              className="text-gray-400 ml-1 align-middle inline-block"
+            >
+              <HelpCircle size={12} className="inline align-middle" />
+            </a>
+          </p>
           <div className="bg-gray-50 rounded-lg p-2 font-mono text-xs break-all mb-3">
             {currentEndpoint}
           </div>

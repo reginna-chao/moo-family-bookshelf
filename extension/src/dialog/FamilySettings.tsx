@@ -15,6 +15,7 @@ export interface FamilySettingsProps {
   onLeave: () => void;
 }
 type LeaveState = "idle" | "confirming" | "leaving";
+type DeleteState = "idle" | "confirming" | "deleting";
 
 export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilySettingsProps) {
   const [syncCode, setSyncCode] = useState<string | null>(null);
@@ -26,6 +27,8 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [inviteCopied, setInviteCopied] = useState(false);
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
   const [leaveError, setLeaveError] = useState("");
+  const [deleteState, setDeleteState] = useState<DeleteState>("idle");
+  const [deleteError, setDeleteError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
   const [familyEndpoint, setFamilyEndpoint] = useState<string | undefined>(undefined);
   const skipEndpointSync = useRef(false);
@@ -162,6 +165,27 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     } catch (err) {
       setLeaveError(err instanceof Error ? err.message : "發生未知錯誤");
       setLeaveState("idle");
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    setDeleteState("deleting");
+    setDeleteError("");
+    try {
+      const response = await apiClient.deleteAccount(userId);
+      if (response.error) {
+        const msg = response.error.code === "OWNER_CANNOT_DELETE"
+          ? "管理者必須先轉移管理權才能移除帳戶"
+          : response.error.message;
+        setDeleteError(msg);
+        setDeleteState("idle");
+        return;
+      }
+      chrome.storage.local.clear();
+      onLeave();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "發生未知錯誤");
+      setDeleteState("idle");
     }
   };
 
@@ -348,6 +372,63 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         {leaveState === "leaving" && (
           <button disabled style={{ ...dangerBtnBase, cursor: "not-allowed", opacity: 0.5 }}>
             離開中...
+          </button>
+        )}
+      </div>
+      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 16 }}>
+        {deleteError && (
+          <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{deleteError}</div>
+        )}
+        {deleteState === "idle" && (
+          <button
+            onClick={() => setDeleteState("confirming")}
+            style={{ ...dangerBtnBase, cursor: "pointer" }}
+          >
+            移除帳戶
+          </button>
+        )}
+        {deleteState === "confirming" && (
+          <div>
+            <div style={{
+              background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8,
+              padding: 12, marginBottom: 12,
+            }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#b91c1c", marginBottom: 8 }}>
+                確定要移除帳戶嗎？
+              </div>
+              <ul style={{ fontSize: 12, color: "#ef4444", margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+                <li>將移除牧家書櫃中的所有資料</li>
+                <li>不影響你的讀墨帳號及書籍</li>
+                <li>下次登入時將重新設定</li>
+              </ul>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => void handleDeleteConfirm()}
+                style={{
+                  flex: 1, padding: 12, border: "none", borderRadius: 8,
+                  background: "#ef4444", color: "white", fontWeight: 600,
+                  cursor: "pointer", fontSize: 14,
+                }}
+              >
+                確定移除
+              </button>
+              <button
+                onClick={() => { setDeleteState("idle"); setDeleteError(""); }}
+                style={{
+                  flex: 1, padding: 12, border: "1px solid #e2e8f0", borderRadius: 8,
+                  background: "transparent", color: "#64748b", fontWeight: 600,
+                  cursor: "pointer", fontSize: 14,
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
+        {deleteState === "deleting" && (
+          <button disabled style={{ ...dangerBtnBase, cursor: "not-allowed", opacity: 0.5 }}>
+            移除中...
           </button>
         )}
       </div>

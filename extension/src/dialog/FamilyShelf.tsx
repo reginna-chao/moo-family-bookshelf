@@ -60,10 +60,15 @@ export function FamilyShelf({ familyId, userId, apiClient }: FamilyShelfProps) {
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
 
   const loadBookshelf = useCallback(async () => {
-    setState("loading");
+    setState((prev) => (prev === "ready" ? prev : "loading"));
     setErrorMessage("");
     try {
-      const response = await apiClient.getFamilyBookshelf(familyId);
+      // Fetch bookshelf and family members in parallel
+      const [response, membersResponse] = await Promise.all([
+        apiClient.getFamilyBookshelf(familyId),
+        apiClient.getFamilyMembers(familyId),
+      ]);
+
       if (response.error) {
         setErrorMessage(response.error.message);
         setState("error");
@@ -79,35 +84,46 @@ export function FamilyShelf({ familyId, userId, apiClient }: FamilyShelfProps) {
         return;
       }
 
+      // Build a lookup map of displayNames from the family members API
+      const memberNameMap = new Map<string, string>();
+      if (membersResponse.data?.members) {
+        for (const m of membersResponse.data.members) {
+          if (m.displayName) memberNameMap.set(m.userId, m.displayName);
+        }
+      }
+
       const storageResult = await chrome.storage.local.get(["encryptionKey"]);
       const encKey = storageResult.encryptionKey as string | undefined;
 
       const decryptedMembers: MemberBooks[] = [];
       for (const member of data.members) {
+        // Use family record displayName, falling back to userId slice
+        const familyDisplayName = memberNameMap.get(member.userId) || member.userId.slice(0, 8);
+
         if (!member.payload || !encKey) {
           decryptedMembers.push({
             userId: member.userId,
-            displayName: member.userId.slice(0, 8),
+            displayName: familyDisplayName,
             books: [],
           });
           continue;
         }
 
         try {
-          const { displayName, books } = await decryptPayload(
+          const { books } = await decryptPayload(
             member.payload,
             encKey,
           );
           decryptedMembers.push({
             userId: member.userId,
-            displayName: displayName || member.userId.slice(0, 8),
+            displayName: familyDisplayName,
             books: books.filter((b) => b.isShared === BoolFlag.TRUE),
           });
         } catch {
           // Decryption failed — skip this member's books
           decryptedMembers.push({
             userId: member.userId,
-            displayName: member.userId.slice(0, 8),
+            displayName: familyDisplayName,
             books: [],
           });
         }
@@ -123,6 +139,30 @@ export function FamilyShelf({ familyId, userId, apiClient }: FamilyShelfProps) {
 
   useEffect(() => {
     void loadBookshelf();
+  }, [loadBookshelf]);
+
+  // Cross-component sync: re-fetch when PersonalShelf saves book settings
+  useEffect(() => {
+    const saveListener = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      area: string,
+    ) => {
+      if (area === "local" && changes.personalShelfSavedAt) {
+        void loadBookshelf();
+      }
+    };
+    try {
+      chrome.storage.onChanged.addListener(saveListener);
+    } catch {
+      // Extension context may be invalidated after reload
+    }
+    return () => {
+      try {
+        chrome.storage.onChanged.removeListener(saveListener);
+      } catch {
+        // Extension context may be invalidated after reload
+      }
+    };
   }, [loadBookshelf]);
 
   // Cross-component sync: update current user's display name when changed in settings

@@ -233,7 +233,7 @@ export function MemberList({
               {getMemberLabel(member)}
               {member.userId === ownerId && (
                 <span style={{ color: "#f59e0b", fontSize: 12, fontWeight: 600, marginLeft: 4 }}>
-                  (Owner)
+                  (管理員)
                 </span>
               )}
               {member.userId === userId && (

@@ -28,6 +28,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
       },
     }),
     getFamilyBookshelf: vi.fn(),
+    deleteAccount: vi.fn().mockResolvedValue({ data: { ok: true } }),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
     updateFamilyEndpoint: vi.fn().mockResolvedValue({ data: { familyId: "fam-123", apiEndpoint: null } }),
@@ -240,11 +241,11 @@ describe("FamilySettings", () => {
     });
   });
 
-  it("shows (Owner) badge next to the owner in member list", async () => {
+  it("shows (管理員) badge next to the owner in member list", async () => {
     renderFamilySettings();
 
     await waitFor(() => {
-      expect(screen.getByText("(Owner)")).toBeInTheDocument();
+      expect(screen.getByText("(管理員)")).toBeInTheDocument();
     });
   });
 
@@ -766,6 +767,86 @@ describe("FamilySettings", () => {
 
       // Resolve to clean up
       resolveLeave!({ data: { ok: true } });
+    });
+  });
+
+  describe("delete account", () => {
+    it("shows 移除帳戶 button", async () => {
+      renderFamilySettings();
+
+      await waitFor(() => {
+        expect(screen.getByText("移除帳戶")).toBeInTheDocument();
+      });
+    });
+
+    it("shows confirmation dialog when clicking delete button", async () => {
+      renderFamilySettings();
+
+      fireEvent.click(screen.getByText("移除帳戶"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定要移除帳戶嗎？")).toBeInTheDocument();
+        expect(screen.getByText("確定移除")).toBeInTheDocument();
+      });
+    });
+
+    it("calls deleteAccount API and onLeave on confirm", async () => {
+      const apiClient = createMockApiClient();
+      const onLeave = vi.fn();
+      renderFamilySettings({ apiClient, onLeave });
+
+      fireEvent.click(screen.getByText("移除帳戶"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定移除")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("確定移除"));
+
+      await waitFor(() => {
+        expect(apiClient.deleteAccount).toHaveBeenCalledWith("user-abc12345");
+        expect(onLeave).toHaveBeenCalled();
+      });
+    });
+
+    it("shows owner error when OWNER_CANNOT_DELETE", async () => {
+      const apiClient = createMockApiClient({
+        deleteAccount: vi.fn().mockResolvedValue({
+          error: { code: "OWNER_CANNOT_DELETE", message: "Owner cannot delete" },
+        }),
+      });
+      renderFamilySettings({ apiClient });
+
+      fireEvent.click(screen.getByText("移除帳戶"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定移除")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("確定移除"));
+
+      await waitFor(() => {
+        expect(screen.getByText("管理者必須先轉移管理權才能移除帳戶")).toBeInTheDocument();
+      });
+    });
+
+    it("cancel returns to idle delete state", async () => {
+      renderFamilySettings();
+
+      fireEvent.click(screen.getByText("移除帳戶"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定要移除帳戶嗎？")).toBeInTheDocument();
+      });
+
+      // Find cancel buttons; last one is for delete section
+      const cancelButtons = screen.getAllByText("取消");
+      fireEvent.click(cancelButtons[cancelButtons.length - 1]);
+
+      await waitFor(() => {
+        expect(screen.getByText("移除帳戶")).toBeInTheDocument();
+        expect(screen.queryByText("確定要移除帳戶嗎？")).not.toBeInTheDocument();
+      });
     });
   });
 });

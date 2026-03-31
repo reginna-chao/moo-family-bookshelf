@@ -123,15 +123,20 @@ userRoutes.delete("/:id", async (c) => {
       const record = normalizeFamilyRecord(raw);
 
       if (record.ownerId === userId) {
-        return c.json(
-          { error: { code: "OWNER_CANNOT_DELETE", message: "管理者必須先轉移管理權才能移除帳戶" } },
-          403,
-        );
-      }
+        if (record.members.length > 1) {
+          return c.json(
+            { error: { code: "OWNER_CANNOT_DELETE", message: "管理者必須先轉移管理權才能移除帳戶" } },
+            403,
+          );
+        }
 
-      // Remove user from family members
-      record.members = record.members.filter((m) => m.userId !== userId);
-      await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+        // Single-member owner: delete entire family record
+        await c.env.KV.delete(kvKeys.family(familyId));
+      } else {
+        // Remove user from family members
+        record.members = record.members.filter((m) => m.userId !== userId);
+        await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+      }
     }
   }
 

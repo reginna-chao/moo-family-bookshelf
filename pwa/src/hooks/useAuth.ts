@@ -178,6 +178,13 @@ export function useAuth(): UseAuthReturn {
   const [initialSyncCode, setInitialSyncCode] = useState("");
 
   useEffect(() => {
+    // 0. If URL contains "family" param, clear auth state to start fresh for invite
+    const preCheckHash = window.location.hash.slice(1);
+    const preCheckSearch = window.location.search;
+    if (preCheckHash.includes("family") || preCheckSearch.includes("family")) {
+      forceClearStorage();
+    }
+
     // 1. Parse QR params BEFORE clearing — clearUrlParams removes the hash
     const qrAuth = tryParseQrParams();
 
