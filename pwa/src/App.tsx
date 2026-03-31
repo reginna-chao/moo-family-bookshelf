@@ -83,8 +83,8 @@ export default function App() {
     if (res.error) {
       if (res.error.code === "FAMILY_FULL") {
         setFamilyFullError("家庭成員已達上限（每個家庭最多 2 位成員）");
-        logout();
       }
+      logout();
       return null;
     }
     if (res.data) {

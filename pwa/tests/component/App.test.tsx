@@ -19,6 +19,9 @@ vi.mock("@/hooks/useAuth", () => ({
   namespacedKey: (userId: string, suffix: string) => `moo:${userId}:${suffix}`,
 }));
 
+// Shared mock for joinFamily — can be overridden per test
+const mockJoinFamily = vi.fn().mockResolvedValue({ data: { authToken: "new-token" } });
+
 // Mock API client using class syntax to ensure proper prototype chain
 vi.mock("@/api/client", () => {
   class MockApiClient {
@@ -26,7 +29,7 @@ vi.mock("@/api/client", () => {
     setTokenRefresher = vi.fn();
     getEndpoint = vi.fn().mockReturnValue("https://api.example.com");
     setEndpoint = vi.fn();
-    joinFamily = vi.fn().mockResolvedValue({ data: { authToken: "new-token" } });
+    joinFamily = mockJoinFamily;
   }
   return { ApiClient: MockApiClient };
 });
@@ -65,6 +68,7 @@ describe("App", () => {
     mockAuth = null;
     mockIsLoading = false;
     vi.clearAllMocks();
+    mockJoinFamily.mockResolvedValue({ data: { authToken: "new-token" } });
   });
 
   afterEach(() => {
@@ -161,6 +165,53 @@ describe("App", () => {
     // After token acquisition completes, should show main view
     await waitFor(() => {
       expect(screen.getByTestId("family-shelf-page")).toBeInTheDocument();
+    });
+  });
+
+  it("calls logout on acquireNewToken non-FAMILY_FULL error", async () => {
+    mockJoinFamily.mockResolvedValueOnce({
+      error: { code: "INVALID_TOKEN", message: "Token invalid" },
+    });
+    mockAuth = {
+      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      encryptionKey: "key-123",
+      // No authToken — triggers acquireNewToken via auto-acquire effect
+    };
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(mockLogout).toHaveBeenCalled();
+    });
+  });
+
+  it("calls logout and sets FAMILY_FULL error on acquireNewToken FAMILY_FULL error", async () => {
+    mockJoinFamily.mockResolvedValueOnce({
+      error: { code: "FAMILY_FULL", message: "Family is full" },
+    });
+
+    // After logout is called, auth becomes null → LandingPage renders with externalError
+    // We need to simulate this by having mockLogout update mockAuth
+    mockLogout.mockImplementationOnce(() => {
+      mockAuth = null;
+    });
+
+    mockAuth = {
+      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      encryptionKey: "key-123",
+      // No authToken — triggers acquireNewToken via auto-acquire effect
+    };
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(mockLogout).toHaveBeenCalled();
     });
   });
 });

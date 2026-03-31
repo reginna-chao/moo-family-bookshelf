@@ -115,6 +115,26 @@ export async function generateAuthToken(
 }
 
 /**
+ * Return the existing valid auth token for a user, or generate a new one.
+ * Prevents token churn when the same user re-joins from multiple devices.
+ */
+export async function getOrGenerateAuthToken(
+  kv: KVNamespace,
+  userId: string,
+): Promise<string> {
+  const existingAuth = await kv.get<AuthRecord>(kvKeys.auth(userId), "json");
+  if (existingAuth?.token) {
+    // Verify the reverse lookup still exists (KV TTL may have expired it)
+    const reverseUserId = await kv.get(kvKeys.authToken(existingAuth.token));
+    if (reverseUserId === userId) {
+      return existingAuth.token;
+    }
+  }
+  // No valid token found — generate a fresh one
+  return generateAuthToken(kv, userId);
+}
+
+/**
  * Delete the auth token for a user (both directions).
  */
 export async function deleteAuthToken(

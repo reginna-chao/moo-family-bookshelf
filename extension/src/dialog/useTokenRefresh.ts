@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ApiClient } from "../api/client";
+import { isExtensionContextValid } from "../utils/extensionContext";
 
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
 
@@ -14,7 +15,17 @@ export function useTokenRefresh(apiClient: ApiClient): void {
 
   useEffect(() => {
     async function scheduleRefresh() {
-      const { tokenExpiresAt } = await chrome.storage.local.get("tokenExpiresAt");
+      // Guard: after extension reload, chrome.* APIs are unavailable
+      if (!isExtensionContextValid()) return;
+
+      let tokenExpiresAt: number | undefined;
+      try {
+        const result = await chrome.storage.local.get("tokenExpiresAt");
+        tokenExpiresAt = result.tokenExpiresAt as number | undefined;
+      } catch {
+        // Extension context may have been invalidated between the check and the call
+        return;
+      }
 
       if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -29,16 +40,24 @@ export function useTokenRefresh(apiClient: ApiClient): void {
         // Already expired or about to expire — refresh immediately
         const success = await apiClient.proactiveRefresh();
         if (success) {
-          scheduleRefresh();
+          // Re-read tokenExpiresAt to see if it was updated by the refresh
+          try {
+            const updated = await chrome.storage.local.get("tokenExpiresAt");
+            const newExpiry = updated.tokenExpiresAt as number | undefined;
+            const newDelay = newExpiry
+              ? newExpiry - Date.now() - REFRESH_BUFFER_MS
+              : 0;
+            if (newDelay > 0) {
+              timerRef.current = setTimeout(scheduleRefresh, newDelay);
+            }
+            // If delay is still <= 0, stop — refresh already happened, nothing to schedule
+          } catch {
+            // Extension context invalidated
+          }
         }
       } else {
         // Schedule future refresh
-        timerRef.current = setTimeout(async () => {
-          const success = await apiClient.proactiveRefresh();
-          if (success) {
-            scheduleRefresh();
-          }
-        }, delay);
+        timerRef.current = setTimeout(scheduleRefresh, delay);
       }
     }
 
@@ -47,7 +66,7 @@ export function useTokenRefresh(apiClient: ApiClient): void {
 
     // visibilitychange handler — recalibrate on page focus
     function handleVisibilityChange() {
-      if (document.visibilityState === "visible") {
+      if (document.visibilityState === "visible" && isExtensionContextValid()) {
         scheduleRefresh();
       }
     }

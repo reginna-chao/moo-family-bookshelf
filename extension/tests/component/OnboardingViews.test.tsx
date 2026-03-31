@@ -34,6 +34,42 @@ describe("WelcomeView", () => {
 
     expect(screen.getByText(/我們僅讀取你的帳號信箱用於生成匿名識別碼/)).toBeInTheDocument();
   });
+
+  it("renders '繼續使用' button when hasUsedBefore is true", () => {
+    render(<WelcomeView onStart={() => {}} hasUsedBefore={true} />);
+
+    expect(screen.getByRole("button", { name: "繼續使用" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "開始使用" })).not.toBeInTheDocument();
+  });
+
+  it("renders recovery subtitle when hasUsedBefore is true", () => {
+    render(<WelcomeView onStart={() => {}} hasUsedBefore={true} />);
+
+    expect(screen.getByText("偵測到你曾使用過家庭書櫃，請重新設定以繼續。")).toBeInTheDocument();
+    expect(screen.queryByText("一鍵開始，自動同步你的讀墨帳號與書單。")).not.toBeInTheDocument();
+  });
+
+  it("renders default text when hasUsedBefore is false", () => {
+    render(<WelcomeView onStart={() => {}} hasUsedBefore={false} />);
+
+    expect(screen.getByRole("button", { name: "開始使用" })).toBeInTheDocument();
+    expect(screen.getByText("一鍵開始，自動同步你的讀墨帳號與書單。")).toBeInTheDocument();
+  });
+
+  it("renders default text when hasUsedBefore is undefined", () => {
+    render(<WelcomeView onStart={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "開始使用" })).toBeInTheDocument();
+    expect(screen.getByText("一鍵開始，自動同步你的讀墨帳號與書單。")).toBeInTheDocument();
+  });
+
+  it("calls onStart when '繼續使用' button is clicked", () => {
+    const onStart = vi.fn();
+    render(<WelcomeView onStart={onStart} hasUsedBefore={true} />);
+
+    fireEvent.click(screen.getByText("繼續使用"));
+    expect(onStart).toHaveBeenCalledOnce();
+  });
 });
 
 describe("CreatedView", () => {

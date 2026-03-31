@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../index";
 import { kvKeys, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isValidFamilyId } from "../utils/validation";
-import { generateAuthToken } from "../middleware/auth";
+import { getOrGenerateAuthToken } from "../middleware/auth";
 
 export const authRoutes = new Hono<{ Bindings: Env }>();
 
@@ -100,7 +100,7 @@ authRoutes.post("/refresh", async (c) => {
     );
   }
 
-  const newToken = await generateAuthToken(c.env.KV, body.userId);
+  const newToken = await getOrGenerateAuthToken(c.env.KV, body.userId);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { token: newToken, expiresAt } });

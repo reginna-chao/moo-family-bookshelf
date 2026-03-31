@@ -23,7 +23,7 @@ export interface BookEntry {
   coverUrl: string;
   readmooUrl: string;
   isShared: BoolFlag;
-  isArchived?: BoolFlag;  // FALSE = active (default), TRUE = archived
+  isArchived?: BoolFlag; // FALSE = active (default), TRUE = archived
 }
 
 export interface PersonalBooks {
@@ -88,7 +88,8 @@ export class ApiClient {
    */
   async proactiveRefresh(): Promise<boolean> {
     try {
-      const { tokenExpiresAt } = await chrome.storage.local.get("tokenExpiresAt");
+      const { tokenExpiresAt } =
+        await chrome.storage.local.get("tokenExpiresAt");
       if (!tokenExpiresAt) return true; // No expiry info — assume valid
 
       if (Date.now() > (tokenExpiresAt as number) - REFRESH_BUFFER_MS) {
@@ -111,9 +112,7 @@ export class ApiClient {
 
   // --- Personal Settings ---
 
-  async getPersonalBooks(
-    userId: string,
-  ): Promise<ApiResponse<PersonalBooks>> {
+  async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
     return this.request(`/api/user/${userId}/books`);
   }
 
@@ -129,7 +128,10 @@ export class ApiClient {
 
   // --- Family Group ---
 
-  async createFamily(userId: string, displayName?: string): Promise<ApiResponse<FamilyGroup>> {
+  async createFamily(
+    userId: string,
+    displayName?: string,
+  ): Promise<ApiResponse<FamilyGroup>> {
     return this.request("/api/family", {
       method: "POST",
       body: JSON.stringify({ userId, displayName: displayName ?? "" }),
@@ -152,10 +154,13 @@ export class ApiClient {
     userId: string,
     displayName: string,
   ): Promise<ApiResponse<{ userId: string; displayName: string }>> {
-    return this.request(`/api/family/${familyId}/member/${userId}/displayName`, {
-      method: "PUT",
-      body: JSON.stringify({ displayName }),
-    });
+    return this.request(
+      `/api/family/${familyId}/member/${userId}/displayName`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ displayName }),
+      },
+    );
   }
 
   async leaveFamily(
@@ -171,10 +176,9 @@ export class ApiClient {
     familyId: string,
     targetUserId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    return this.request(
-      `/api/family/${familyId}/member/${targetUserId}`,
-      { method: "DELETE" },
-    );
+    return this.request(`/api/family/${familyId}/member/${targetUserId}`, {
+      method: "DELETE",
+    });
   }
 
   async transferOwnership(
@@ -185,7 +189,11 @@ export class ApiClient {
   ): Promise<ApiResponse<FamilyGroup>> {
     return this.request(`/api/family/${familyId}/transfer`, {
       method: "PUT",
-      body: JSON.stringify({ userId, newOwnerId, ...(clearEndpoint !== undefined && { clearEndpoint }) }),
+      body: JSON.stringify({
+        userId,
+        newOwnerId,
+        ...(clearEndpoint !== undefined && { clearEndpoint }),
+      }),
     });
   }
 
@@ -199,17 +207,13 @@ export class ApiClient {
     });
   }
 
-  async getFamilyMembers(
-    familyId: string,
-  ): Promise<ApiResponse<FamilyGroup>> {
+  async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
     return this.request(`/api/family/${familyId}/members`);
   }
 
   // --- Account ---
 
-  async deleteAccount(
-    userId: string,
-  ): Promise<ApiResponse<{ ok: boolean }>> {
+  async deleteAccount(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
     return this.request(`/api/user/${userId}`, { method: "DELETE" });
   }
 
@@ -315,7 +319,9 @@ export class ApiClient {
 
       if (result.data?.token) {
         this.authToken = result.data.token;
-        const storageUpdate: Record<string, unknown> = { authToken: result.data.token };
+        const storageUpdate: Record<string, unknown> = {
+          authToken: result.data.token,
+        };
         if (result.data.expiresAt) {
           storageUpdate.tokenExpiresAt = result.data.expiresAt;
         }
@@ -323,29 +329,69 @@ export class ApiClient {
         return true;
       }
 
-      // Handle refresh failure — user may have been removed from family
-      if (result.error?.code === "REFRESH_FAILED") {
-        this.authToken = null;
-        await chrome.storage.local.remove([
-          "familyId",
-          "encryptionKey",
-          "authToken",
-          "tokenExpiresAt",
-        ]);
-        try {
-          await chrome.storage.sync.remove(["familyId"]);
-        } catch {
-          // sync storage may not be available in all contexts
+      // Refresh failed (REFRESH_FAILED, rate limit, network error, etc.)
+      // Attempt staged recovery via joinFamily (public endpoint, no token needed)
+      this.authToken = null;
+      await chrome.storage.local.remove(["authToken", "tokenExpiresAt"]);
+
+      const recoveryStorage = await chrome.storage.local.get([
+        "familyId",
+        "userId",
+        "displayName",
+      ]);
+      const recFamilyId = recoveryStorage.familyId as string | undefined;
+      const recUserId = recoveryStorage.userId as string | undefined;
+      const recDisplayName =
+        (recoveryStorage.displayName as string | undefined) ?? "";
+
+      if (recFamilyId && recUserId) {
+        const joinResult = await this.request<{
+          familyId: string;
+          ownerId: string;
+          members: Array<{ userId: string; displayName: string }>;
+          maxMembers: number;
+          createdAt: string;
+          authToken?: string;
+          expiresAt?: number;
+        }>(
+          `/api/family/${recFamilyId}/join`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              userId: recUserId,
+              displayName: recDisplayName,
+            }),
+          },
+          true, // skipRefresh to avoid infinite loops
+        );
+
+        if (joinResult.data?.authToken) {
+          // Recovery succeeded — store new token and continue seamlessly
+          this.authToken = joinResult.data.authToken;
+          const recoveryUpdate: Record<string, unknown> = {
+            authToken: joinResult.data.authToken,
+          };
+          if (joinResult.data.expiresAt) {
+            recoveryUpdate.tokenExpiresAt = joinResult.data.expiresAt;
+          }
+          await chrome.storage.local.set(recoveryUpdate);
+          return true;
         }
-        // Notify background script
-        try {
-          chrome.runtime.sendMessage({ type: "FAMILY_REMOVED" });
-        } catch {
-          // Message may fail if no listener is active
-        }
-        // Notify in-process listeners (e.g., Dialog UI)
-        this.onFamilyRemoved?.();
       }
+
+      // Recovery also failed — truly cannot access this family, clear all data
+      await chrome.storage.local.remove(["familyId", "encryptionKey"]);
+      try {
+        await chrome.storage.sync.remove(["familyId"]);
+      } catch {
+        // sync storage may not be available in all contexts
+      }
+      try {
+        chrome.runtime.sendMessage({ type: "FAMILY_REMOVED" });
+      } catch {
+        // Message may fail if no listener is active
+      }
+      this.onFamilyRemoved?.();
 
       return false;
     } catch {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ApiClient, FamilyGroup, BookEntry } from "../api/client";
 import { generateKey, exportKey, importKey, encrypt } from "../crypto/encrypt";
 import { encodeSyncCode, decodeSyncCode, SyncCodeError } from "../crypto/syncCode";
@@ -64,8 +64,18 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   const [createdFamilyId, setCreatedFamilyId] = useState("");
   const [createdUserId, setCreatedUserId] = useState("");
   const [copied, setCopied] = useState(false);
+  const [hasUsedBefore, setHasUsedBefore] = useState(false);
 
   const autoSetup = useAutoSetup();
+
+  // Check if user has previously used the extension (has displayName stored)
+  useEffect(() => {
+    chrome.storage.local.get(["displayName"], (result) => {
+      if (result.displayName) {
+        setHasUsedBefore(true);
+      }
+    });
+  }, []);
 
   const isAutoSetupActive = autoSetup.phase !== "idle" && autoSetup.phase !== "error";
 
@@ -252,7 +262,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   const isProcessing = effectiveState === "creating" || effectiveState === "joining" || effectiveState === "syncing-books";
 
   const renderContent = () => {
-    if (effectiveState === "welcome") return <WelcomeView onStart={handleStart} />;
+    if (effectiveState === "welcome") return <WelcomeView onStart={handleStart} hasUsedBefore={hasUsedBefore} />;
     if (effectiveState === "error") return <ErrorView errorMessage={effectiveError} onRetry={handleRetry} />;
     if (effectiveState === "created") {
       return (

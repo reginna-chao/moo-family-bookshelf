@@ -77,7 +77,7 @@ describe("POST /api/auth/refresh", () => {
     expect(json.data.token).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("should delete old token entry after refresh", async () => {
+  it("should reuse existing valid token on refresh", async () => {
     const oldToken = "b".repeat(64);
     await seedMember(VALID_USER_ID, VALID_FAMILY_ID, oldToken);
 
@@ -87,19 +87,17 @@ describe("POST /api/auth/refresh", () => {
 
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    const newToken = json.data.token;
 
-    // Old token should be removed from KV
-    const oldTokenLookup = await kv.get(`token:${oldToken}`);
-    expect(oldTokenLookup).toBeNull();
+    // Should return the same token (not generate a new one)
+    expect(json.data.token).toBe(oldToken);
 
-    // New token should exist in KV
-    const newTokenLookup = await kv.get(`token:${newToken}`);
-    expect(newTokenLookup).toBe(VALID_USER_ID);
+    // Old token should still exist in KV
+    const tokenLookup = await kv.get(`token:${oldToken}`);
+    expect(tokenLookup).toBe(VALID_USER_ID);
 
-    // auth:{userId} should point to new token
+    // auth:{userId} should still point to old token
     const authRecord = await kv.get(`auth:${VALID_USER_ID}`, "json") as Json;
-    expect(authRecord.token).toBe(newToken);
+    expect(authRecord.token).toBe(oldToken);
   });
 
   it("should return 400 for invalid userId format (too short)", async () => {
@@ -199,7 +197,7 @@ describe("POST /api/auth/refresh", () => {
     expect(json.data.expiresAt).toBeTypeOf("number");
   });
 
-  it("should return different tokens on consecutive refreshes", async () => {
+  it("should return same token on consecutive refreshes", async () => {
     await seedMember(VALID_USER_ID, VALID_FAMILY_ID);
 
     const res1 = await request("POST", "/api/auth/refresh", {
@@ -212,6 +210,7 @@ describe("POST /api/auth/refresh", () => {
     });
     const json2 = (await res2.json()) as Json;
 
-    expect(json1.data.token).not.toBe(json2.data.token);
+    // Consecutive refreshes should return the same valid token
+    expect(json1.data.token).toBe(json2.data.token);
   });
 });

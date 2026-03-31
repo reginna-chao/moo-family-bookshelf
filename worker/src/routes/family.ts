@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../index";
 import { kvKeys, type FamilyMember, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName } from "../utils/validation";
-import { generateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
+import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
 
@@ -131,7 +131,9 @@ familyRoutes.post("/:id/join", async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  if (!hasMember(record.members, body.userId)) {
+  const isExistingMember = hasMember(record.members, body.userId);
+
+  if (!isExistingMember) {
     // NOTE: No atomic compare-and-swap in KV. Concurrent joins could bypass
     // maxMembers limit. Acceptable for 2-person families with low concurrency.
     if (record.members.length >= record.maxMembers) {
@@ -148,7 +150,11 @@ familyRoutes.post("/:id/join", async (c) => {
     c.env.KV.put(kvKeys.member(body.userId), familyId),
   ]);
 
-  const authToken = await generateAuthToken(c.env.KV, body.userId);
+  // Existing members reuse their current token to avoid invalidating other devices.
+  // New members always get a fresh token.
+  const authToken = isExistingMember
+    ? await getOrGenerateAuthToken(c.env.KV, body.userId)
+    : await generateAuthToken(c.env.KV, body.userId);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { ...record, authToken, expiresAt } });

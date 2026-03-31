@@ -5,16 +5,19 @@ import { Lock } from "lucide-react";
 
 export interface WelcomeViewProps {
   onStart: () => void;
+  hasUsedBefore?: boolean;
 }
 
-export function WelcomeView({ onStart }: WelcomeViewProps) {
+export function WelcomeView({ onStart, hasUsedBefore }: WelcomeViewProps) {
   return (
     <div style={{ padding: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
         歡迎使用家庭書櫃
       </h2>
       <p style={{ color: "#64748b", marginBottom: 24, fontSize: 14 }}>
-        一鍵開始，自動同步你的讀墨帳號與書單。
+        {hasUsedBefore
+          ? "偵測到你曾使用過家庭書櫃，請重新設定以繼續。"
+          : "一鍵開始，自動同步你的讀墨帳號與書單。"}
       </p>
       <button
         onClick={onStart}
@@ -30,7 +33,7 @@ export function WelcomeView({ onStart }: WelcomeViewProps) {
           cursor: "pointer",
         }}
       >
-        開始使用
+        {hasUsedBefore ? "繼續使用" : "開始使用"}
       </button>
       <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 16, textAlign: "center" }}>
         我們僅讀取你的帳號信箱用於生成匿名識別碼，信箱不會上傳至伺服器。
