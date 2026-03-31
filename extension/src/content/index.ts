@@ -12,6 +12,7 @@
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
 import { isExtensionContextValid, cleanupMooFamilyUI, MOO_ELEMENT_IDS } from "../utils/extensionContext";
 import { DEFAULT_API_ENDPOINT } from "../constants";
+import { waitForPageReady } from "./pageReady";
 
 const IS_DEV_MODE = /^https?:\/\/localhost(:|$)/.test(DEFAULT_API_ENDPOINT);
 
@@ -208,21 +209,47 @@ function listenForBackgroundSync(): void {
   });
 }
 
+let currentAbortController: AbortController | null = null;
+
+/**
+ * Abort any in-flight page-ready wait, then wait for the page to finish
+ * loading before injecting the 家庭書櫃 button.
+ */
+function waitAndInjectButton(): void {
+  currentAbortController?.abort();
+  const controller = new AbortController();
+  currentAbortController = controller;
+
+  // Remove existing button for hashchange re-injection
+  document.getElementById(MOO_ELEMENT_IDS.button)?.remove();
+
+  waitForPageReady(controller.signal)
+    .then(() => injectFamilyBookshelfButton())
+    .catch((err: unknown) => {
+      // AbortError means a new navigation cancelled this wait — silently ignore
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      console.error("[MooFamily] Page ready detection failed:", err);
+    });
+}
+
 // Run on page load
 if (!isExtensionContextValid()) {
   cleanupMooFamilyUI();
-} else if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => {
-    injectFamilyBookshelfButton();
+} else {
+  const init = (): void => {
+    waitAndInjectButton();
     tryScrapeAndCacheEmail();
     listenForBackgroundSync();
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+
+  window.addEventListener("hashchange", () => {
+    waitAndInjectButton();
+    tryScrapeAndCacheEmail();
   });
-  // Also listen for hash changes (SPA navigation)
-  window.addEventListener("hashchange", tryScrapeAndCacheEmail);
-} else {
-  injectFamilyBookshelfButton();
-  tryScrapeAndCacheEmail();
-  listenForBackgroundSync();
-  // Also listen for hash changes (SPA navigation)
-  window.addEventListener("hashchange", tryScrapeAndCacheEmail);
 }
