@@ -10,7 +10,7 @@ function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
     author: "測試作者",
     isbn: "",
     coverUrl: "https://example.com/cover.jpg",
-    readmooUrl: "https://mooink.readmoo.com/book/book-1",
+    readmooUrl: "https://readmoo.com/book/book-1",
     isShared: BoolFlag.FALSE,
     memberName: "小明",
     ...overrides,
@@ -32,7 +32,7 @@ describe("BookCard", () => {
     const img = screen.getByAltText("測試書籍");
     const link = img.closest("a") as HTMLAnchorElement;
     expect(link).not.toBeNull();
-    expect(link.href).toBe("https://mooink.readmoo.com/book/book-1");
+    expect(link.href).toBe("https://readmoo.com/book/book-1");
     expect(link.target).toBe("_blank");
     expect(link.rel).toContain("noopener");
   });
@@ -42,7 +42,7 @@ describe("BookCard", () => {
 
     const titleLink = screen.getByText("測試書籍") as HTMLAnchorElement;
     expect(titleLink.tagName).toBe("A");
-    expect(titleLink.href).toBe("https://mooink.readmoo.com/book/book-1");
+    expect(titleLink.href).toBe("https://readmoo.com/book/book-1");
     expect(titleLink.target).toBe("_blank");
   });
 

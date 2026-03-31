@@ -31,7 +31,7 @@ function makeBookEntry(overrides: Partial<BookEntry> = {}): BookEntry {
     author: "Test Author",
     isbn: "978-0000000000",
     coverUrl: "https://example.com/cover.jpg",
-    readmooUrl: "https://mooink.readmoo.com/book/book-001",
+    readmooUrl: "https://readmoo.com/book/book-001",
     isShared: BoolFlag.FALSE,
     ...overrides,
   };
@@ -43,7 +43,7 @@ function makeScrapedBook(overrides: Partial<ScrapedBook> = {}): ScrapedBook {
     title: "Test Book",
     author: "Test Author",
     coverUrl: "https://example.com/cover.jpg",
-    readmooUrl: "https://mooink.readmoo.com/book/book-001",
+    readmooUrl: "https://readmoo.com/book/book-001",
     ...overrides,
   };
 }
@@ -89,7 +89,7 @@ describe("Full personal books lifecycle", () => {
       author: "乔尔·乔纳森",
       isbn: "978-9573280439",
       coverUrl: "https://example.com/deep-work.jpg",
-      readmooUrl: "https://mooink.readmoo.com/book/210439468000101",
+      readmooUrl: "https://readmoo.com/book/210439468000101",
       isShared: BoolFlag.TRUE,
     });
     const plaintext = JSON.stringify(original);

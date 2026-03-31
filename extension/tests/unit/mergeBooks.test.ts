@@ -9,7 +9,7 @@ function makeScraped(overrides: Partial<ScrapedBook> = {}): ScrapedBook {
     title: "Test Book",
     author: "Author",
     coverUrl: "https://example.com/cover.jpg",
-    readmooUrl: "https://mooink.readmoo.com/book/book-1",
+    readmooUrl: "https://readmoo.com/book/book-1",
     ...overrides,
   };
 }
@@ -21,7 +21,7 @@ function makeSaved(overrides: Partial<BookEntry> = {}): BookEntry {
     author: "Author",
     isbn: "978-0000000000",
     coverUrl: "https://example.com/cover.jpg",
-    readmooUrl: "https://mooink.readmoo.com/book/book-1",
+    readmooUrl: "https://readmoo.com/book/book-1",
     isShared: BoolFlag.FALSE,
     ...overrides,
   };

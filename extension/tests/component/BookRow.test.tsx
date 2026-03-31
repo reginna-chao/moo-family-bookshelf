@@ -10,7 +10,7 @@ function makeBook(overrides: Partial<BookEntry> = {}): BookEntry {
     author: "作者A",
     isbn: "",
     coverUrl: "https://example.com/cover.jpg",
-    readmooUrl: "https://mooink.readmoo.com/book/book-1",
+    readmooUrl: "https://readmoo.com/book/book-1",
     isShared: BoolFlag.FALSE,
     ...overrides,
   };

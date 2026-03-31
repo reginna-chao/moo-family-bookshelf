@@ -647,7 +647,7 @@ describe("Onboarding", () => {
         title: "快取書籍一",
         author: "作者X",
         coverUrl: "https://example.com/cached1.jpg",
-        readmooUrl: "https://mooink.readmoo.com/book/book-cached-1",
+        readmooUrl: "https://readmoo.com/book/book-cached-1",
         isShared: BoolFlag.TRUE,
       },
     ];

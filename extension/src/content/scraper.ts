@@ -18,7 +18,10 @@ export interface ScrapedBook {
 }
 
 const HOVER_SETTLE_MS = 120;
-const READMOO_BOOK_BASE = "https://mooink.readmoo.com/book/";
+const READMOO_BOOK_BASE = "https://readmoo.com/book/";
+const ATTR_BOOK_ID = "data-moo-book-id";
+const ATTR_COVER = "data-moo-cover-url";
+const ATTR_AUTHOR = "data-moo-author";
 
 /**
  * Dispatch synthetic hover events on an element so Readmoo's React
@@ -74,11 +77,73 @@ function extractTitle(item: Element): string | null {
 }
 
 /**
- * Extract the cover image URL from `.cover-img[src]`.
+ * Readmoo placeholder image used for books whose cover hasn't loaded.
  */
+const PLACEHOLDER_COVER = "openbook.png";
+
+function isPlaceholderCover(url: string): boolean {
+  return url.endsWith(PLACEHOLDER_COVER);
+}
+
 function extractCoverUrl(item: Element): string {
   const img = item.querySelector<HTMLImageElement>(".cover-img[src]");
-  return img?.src ?? "";
+  const src = img?.src ?? "";
+  // Return empty string for placeholder so mergeBooks preserves the
+  // real cover URL from a previous scrape.
+  return isPlaceholderCover(src) ? "" : src;
+}
+
+/**
+ * Inject the fiber-bridge script into the page's main world.
+ *
+ * The bridge script runs in the same JS context as React and can read
+ * `__reactFiber*` properties that are invisible from the Content
+ * Script's isolated world.
+ */
+function injectFiberBridge(): void {
+  if (document.documentElement.hasAttribute("data-moo-fiber-bridge")) return;
+  document.documentElement.setAttribute("data-moo-fiber-bridge", "1");
+  const script = document.createElement("script");
+  script.src = chrome.runtime.getURL("fiber-bridge.js");
+  script.onload = () => script.remove();
+  document.documentElement.appendChild(script);
+}
+
+/**
+ * Request the fiber bridge to stamp `data-moo-book-id` attributes on
+ * all `.library-item` elements. The bridge runs in the main world and
+ * can read React fiber internals that are invisible from the isolated
+ * Content Script world.
+ */
+async function requestFiberData(): Promise<void> {
+  injectFiberBridge();
+  // Small delay to ensure the injected script has loaded
+  await wait(100);
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve();
+    }, 2000);
+
+    document.addEventListener(
+      "moo-fiber-data",
+      () => {
+        clearTimeout(timeout);
+        resolve();
+      },
+      { once: true },
+    );
+
+    document.dispatchEvent(new CustomEvent("moo-request-fiber-data"));
+  });
+}
+
+/**
+ * Read the book ID from the `data-moo-book-id` attribute stamped by
+ * the fiber bridge. Returns null when the attribute is absent.
+ */
+function extractBookIdFromFiber(item: Element): string | null {
+  return item.getAttribute(ATTR_BOOK_ID);
 }
 
 /**
@@ -99,35 +164,41 @@ async function scrapeItem(item: Element): Promise<ScrapedBook | null> {
   const title = extractTitle(item);
   if (!title) return null;
 
-  const coverUrl = extractCoverUrl(item);
+  // Primary: read metadata from fiber bridge data attributes
+  let bookId = extractBookIdFromFiber(item);
+  let coverUrl = item.getAttribute(ATTR_COVER) ?? "";
+  const author = item.getAttribute(ATTR_AUTHOR) ?? "";
 
-  // Trigger hover to make .openbook link appear
-  if (item instanceof HTMLElement) {
-    triggerHover(item);
-  }
-  await wait(HOVER_SETTLE_MS);
-
-  // Try to get book ID from .openbook link
-  const openbookLink = item.querySelector<HTMLAnchorElement>(
-    ".openbook a.reader-link[href]",
-  );
-  let bookId: string | null = null;
-
-  if (openbookLink) {
-    bookId = extractBookIdFromHref(openbookLink.href);
-  }
-
-  // Fallback: use privacy element ID
+  // Fallback: hover + DOM extraction when fiber tree is unavailable
   if (!bookId) {
-    bookId = extractFallbackId(item);
+    if (!coverUrl) coverUrl = extractCoverUrl(item);
+
+    if (item instanceof HTMLElement) {
+      triggerHover(item);
+    }
+    await wait(HOVER_SETTLE_MS);
+
+    const openbookLink = item.querySelector<HTMLAnchorElement>(
+      ".openbook a.reader-link[href]",
+    );
+    if (openbookLink) {
+      bookId = extractBookIdFromHref(openbookLink.href);
+    }
+
+    if (!bookId) {
+      bookId = extractFallbackId(item);
+    }
   }
 
   if (!bookId) return null;
 
+  // If fiber didn't provide cover, fall back to DOM
+  if (!coverUrl) coverUrl = extractCoverUrl(item);
+
   return {
     bookId,
     title,
-    author: "",
+    author,
     coverUrl,
     readmooUrl: `${READMOO_BOOK_BASE}${bookId}`,
     isArchived: BoolFlag.FALSE,
@@ -177,6 +248,9 @@ export function scrapeDisplayName(): string | null {
  * reveal the book-specific link, then extracts metadata.
  */
 export async function scrapeBooks(): Promise<ScrapedBook[]> {
+  // Ask the main-world bridge to stamp bookIds onto .library-item elements
+  await requestFiberData();
+
   const items = document.querySelectorAll(".library-item");
   const books: ScrapedBook[] = [];
 
@@ -193,7 +267,10 @@ export async function scrapeBooks(): Promise<ScrapedBook[]> {
 /**
  * Poll for an element matching the selector, returning null on timeout.
  */
-function waitForElement(selector: string, timeoutMs: number): Promise<Element | null> {
+function waitForElement(
+  selector: string,
+  timeoutMs: number,
+): Promise<Element | null> {
   return new Promise((resolve) => {
     const start = Date.now();
     const interval = setInterval(() => {
@@ -314,7 +391,10 @@ export async function scrapeArchivedBooks(): Promise<ScrapedBook[]> {
       const clearBtn = findFilterButton();
       if (clearBtn) {
         clearBtn.click();
-        const clearModal = await waitForElement(".filter-modal.modal.show", 3000);
+        const clearModal = await waitForElement(
+          ".filter-modal.modal.show",
+          3000,
+        );
         if (clearModal) {
           clickElement(".filter-modal .modal-footer .btn-outline-primary");
           await wait(300);

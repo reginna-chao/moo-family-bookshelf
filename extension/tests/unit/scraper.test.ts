@@ -124,12 +124,42 @@ describe("scrapeDisplayName", () => {
   });
 });
 
+/**
+ * Helper: install a mock fiber bridge responder on document.
+ *
+ * Listens for `moo-request-fiber-data`, stamps `data-moo-book-id`
+ * attributes on matching `.library-item` elements (matching by title),
+ * then dispatches `moo-fiber-data` to signal completion.
+ * Returns a cleanup function to remove the listener.
+ */
+function installFiberBridgeMock(
+  mockBooks: Array<{ bookId: string; title: string }>,
+): () => void {
+  const handler = () => {
+    // Stamp bookIds onto .library-item elements by matching title
+    const items = document.querySelectorAll(".library-item");
+    for (const item of items) {
+      const titleEl = item.querySelector(".title[title]");
+      const title = titleEl?.getAttribute("title");
+      const match = mockBooks.find((b) => b.title === title);
+      if (match) {
+        item.setAttribute("data-moo-book-id", match.bookId);
+      }
+    }
+    document.dispatchEvent(new CustomEvent("moo-fiber-data"));
+  };
+  document.addEventListener("moo-request-fiber-data", handler);
+  return () =>
+    document.removeEventListener("moo-request-fiber-data", handler);
+}
+
 describe("scrapeBooks", () => {
   let scrapeBooks: () => Promise<import("@/content/scraper").ScrapedBook[]>;
 
   beforeEach(async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     document.body.innerHTML = "";
+    document.documentElement.removeAttribute("data-moo-fiber-bridge");
     vi.resetModules();
     const mod = await import("@/content/scraper");
     scrapeBooks = mod.scrapeBooks;
@@ -138,10 +168,16 @@ describe("scrapeBooks", () => {
   afterEach(() => {
     vi.useRealTimers();
     document.body.innerHTML = "";
+    document.documentElement.removeAttribute("data-moo-fiber-bridge");
   });
 
   it("returns empty array when no .library-item elements exist", async () => {
-    const result = await scrapeBooks();
+    const promise = scrapeBooks();
+    // Advance past fiber bridge wait (100ms) + timeout (2000ms)
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    const result = await promise;
     expect(result).toEqual([]);
   });
 
@@ -156,9 +192,9 @@ describe("scrapeBooks", () => {
 
     const promise = scrapeBooks();
 
-    // Advance past the hover wait (120ms per item)
-    for (let i = 0; i < 5; i++) {
-      await vi.advanceTimersByTimeAsync(120);
+    // Advance past fiber bridge timeout (100ms + 2000ms) + hover wait (120ms)
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
     }
 
     const result = await promise;
@@ -177,8 +213,8 @@ describe("scrapeBooks", () => {
     `;
 
     const promise = scrapeBooks();
-    for (let i = 0; i < 5; i++) {
-      await vi.advanceTimersByTimeAsync(120);
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
     }
 
     const result = await promise;
@@ -196,8 +232,8 @@ describe("scrapeBooks", () => {
     `;
 
     const promise = scrapeBooks();
-    for (let i = 0; i < 5; i++) {
-      await vi.advanceTimersByTimeAsync(120);
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
     }
 
     const result = await promise;
@@ -213,8 +249,8 @@ describe("scrapeBooks", () => {
     `;
 
     const promise = scrapeBooks();
-    for (let i = 0; i < 5; i++) {
-      await vi.advanceTimersByTimeAsync(120);
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
     }
 
     const result = await promise;
@@ -233,13 +269,112 @@ describe("scrapeBooks", () => {
     `;
 
     const promise = scrapeBooks();
-    for (let i = 0; i < 5; i++) {
-      await vi.advanceTimersByTimeAsync(120);
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
     }
 
     const result = await promise;
     expect(result).toHaveLength(1);
     expect(result[0].bookId).toBe("123456");
+  });
+
+  it("extracts bookId from fiber bridge (primary method)", async () => {
+    const cleanup = installFiberBridgeMock([
+      { bookId: "210439468000101", title: "Fiber Book" },
+    ]);
+
+    document.body.innerHTML = `
+      <div class="library-item">
+        <div class="info"><div class="title" title="Fiber Book">Fiber Book</div></div>
+        <img class="cover-img" src="https://cdn.readmoo.com/cover/some-book/cover.jpg" alt="Fiber Book" />
+        <div class="privacy" id="privacy-18049960"></div>
+      </div>
+    `;
+
+    const promise = scrapeBooks();
+    // Advance past the 100ms bridge injection delay
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(50);
+    }
+
+    const result = await promise;
+    expect(result).toHaveLength(1);
+    // Should use fiber bridge bookId, NOT privacy element id
+    expect(result[0].bookId).toBe("210439468000101");
+    cleanup();
+  });
+
+  it("uses correct readmooUrl format from fiber bridge bookId", async () => {
+    const cleanup = installFiberBridgeMock([
+      { bookId: "310000000000101", title: "URL Test Book" },
+    ]);
+
+    document.body.innerHTML = `
+      <div class="library-item">
+        <div class="info"><div class="title" title="URL Test Book">URL Test Book</div></div>
+        <img class="cover-img" src="https://cdn.readmoo.com/cover/url-test/cover.jpg" alt="URL Test Book" />
+      </div>
+    `;
+
+    const promise = scrapeBooks();
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(50);
+    }
+
+    const result = await promise;
+    expect(result).toHaveLength(1);
+    expect(result[0].readmooUrl).toBe(
+      "https://readmoo.com/book/310000000000101",
+    );
+    cleanup();
+  });
+
+  it("falls back to DOM extraction when fiber bridge returns no data", async () => {
+    // No matching cover URL in fiber bridge response
+    document.body.innerHTML = `
+      <div class="library-item">
+        <div class="info"><div class="title" title="Fallback Book">Fallback Book</div></div>
+        <img class="cover-img" src="https://example.com/cover.jpg" />
+        <div class="privacy" id="privacy-55555"></div>
+      </div>
+    `;
+
+    const promise = scrapeBooks();
+    // Advance past fiber bridge timeout (100ms + 2000ms) + hover wait (120ms)
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+
+    const result = await promise;
+    expect(result).toHaveLength(1);
+    expect(result[0].bookId).toBe("55555");
+  });
+
+  it("skips hover when fiber bridge extraction succeeds", async () => {
+    const cleanup = installFiberBridgeMock([
+      { bookId: "888777666000101", title: "No Hover Book" },
+    ]);
+
+    document.body.innerHTML = `
+      <div class="library-item">
+        <div class="info"><div class="title" title="No Hover Book">No Hover Book</div></div>
+        <img class="cover-img" src="https://cdn.readmoo.com/cover/no-hover/cover.jpg" alt="No Hover Book" />
+        <div class="openbook">
+          <a class="reader-link" href="https://readmoo.com/api/reader/999">Open</a>
+        </div>
+      </div>
+    `;
+
+    const promise = scrapeBooks();
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(50);
+    }
+
+    const result = await promise;
+    expect(result).toHaveLength(1);
+    // Should use fiber bookId, not the reader-link href id
+    expect(result[0].bookId).toBe("888777666000101");
+    cleanup();
   });
 
   it("marks all scraped books with isArchived: 0", async () => {
@@ -252,8 +387,8 @@ describe("scrapeBooks", () => {
     `;
 
     const promise = scrapeBooks();
-    for (let i = 0; i < 5; i++) {
-      await vi.advanceTimersByTimeAsync(120);
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
     }
 
     const result = await promise;
@@ -267,9 +402,8 @@ describe("scrapeArchivedBooks", () => {
 
   beforeEach(async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    // Reset DOM
     document.body.innerHTML = "";
-    // Fresh import each time to avoid stale module state
+    document.documentElement.removeAttribute("data-moo-fiber-bridge");
     vi.resetModules();
     const mod = await import("@/content/scraper");
     scrapeArchivedBooks = mod.scrapeArchivedBooks;
@@ -278,10 +412,10 @@ describe("scrapeArchivedBooks", () => {
   afterEach(() => {
     vi.useRealTimers();
     document.body.innerHTML = "";
+    document.documentElement.removeAttribute("data-moo-fiber-bridge");
   });
 
   it("returns empty array when filter button is not found in DOM", async () => {
-    // No .desktop-top-nav-btn elements in DOM at all
     const result = await scrapeArchivedBooks();
     expect(result).toEqual([]);
   });
@@ -297,16 +431,13 @@ describe("scrapeArchivedBooks", () => {
   });
 
   it("returns empty array when filter modal does not appear (timeout)", async () => {
-    // Add filter button but never create the modal
     document.body.innerHTML = `
       <button class="desktop-top-nav-btn"><i class="mo-filter"></i></button>
     `;
 
     const promise = scrapeArchivedBooks();
 
-    // Advance past the 3000ms waitForElement timeout (polls every 200ms)
-    // Plus the finally block: 2nd waitForElement (3000ms) + wait(2000ms)
-    // Total needed: ~8000ms — advance in steps so setInterval fires
+    // Advance past the 3000ms waitForElement timeout + finally block cleanup
     for (let i = 0; i < 50; i++) {
       await vi.advanceTimersByTimeAsync(200);
     }
@@ -322,7 +453,6 @@ describe("scrapeArchivedBooks", () => {
 
     const promise = scrapeArchivedBooks();
 
-    // Wait for filter button click, then create modal without archive option
     await vi.advanceTimersByTimeAsync(200);
     const modal = document.createElement("div");
     modal.className = "filter-modal modal show";
@@ -333,8 +463,7 @@ describe("scrapeArchivedBooks", () => {
     `;
     document.body.appendChild(modal);
 
-    // Advance enough for: waitForElement poll + early return + finally block cleanup
-    // Finally block opens filter dialog again, waits, etc.
+    // Advance enough for early return + finally block cleanup
     for (let i = 0; i < 120; i++) {
       await vi.advanceTimersByTimeAsync(200);
     }
@@ -344,7 +473,6 @@ describe("scrapeArchivedBooks", () => {
   }, 15000);
 
   it("returns scraped books marked with isArchived=1 on success", async () => {
-    // Set up full DOM: filter button, library items
     document.body.innerHTML = `
       <button class="desktop-top-nav-btn"><i class="mo-filter"></i></button>
       <div class="library-item">
@@ -356,8 +484,6 @@ describe("scrapeArchivedBooks", () => {
 
     const promise = scrapeArchivedBooks();
 
-    // After the filter button click, the code waits for .filter-modal.modal.show
-    // Simulate the modal appearing after a short delay
     await vi.advanceTimersByTimeAsync(200);
     const modal = document.createElement("div");
     modal.className = "filter-modal modal show";
@@ -370,11 +496,8 @@ describe("scrapeArchivedBooks", () => {
     `;
     document.body.appendChild(modal);
 
-    // Let waitForElement find the modal
     await vi.advanceTimersByTimeAsync(200);
 
-    // The code clicks archive option and confirm button, then waits for library reload.
-    // Simulate library count change by adding another item
     await vi.advanceTimersByTimeAsync(300);
     const newItem = document.createElement("div");
     newItem.className = "library-item";
@@ -385,20 +508,17 @@ describe("scrapeArchivedBooks", () => {
     `;
     document.body.appendChild(newItem);
 
-    // Advance through the reload polling (5000ms max) + settle time (500ms)
-    // + scrapeItem hover wait (120ms per item) + finally block cleanup
-    for (let i = 0; i < 80; i++) {
+    // Advance through reload polling + fiber bridge timeout + hover + finally cleanup
+    for (let i = 0; i < 120; i++) {
       await vi.advanceTimersByTimeAsync(200);
     }
 
     const result = await promise;
 
-    // Should have books marked as archived
     expect(result.length).toBeGreaterThan(0);
     for (const book of result) {
       expect(book.isArchived).toBe(BoolFlag.TRUE);
     }
-    // All books should have valid bookIds
     for (const book of result) {
       expect(book.bookId).toBeTruthy();
     }

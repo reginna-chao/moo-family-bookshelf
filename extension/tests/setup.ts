@@ -43,6 +43,7 @@ function createStorageAreaMock(store: Record<string, unknown>) {
 (globalThis as any).chrome = {
   runtime: {
     id: "mock-extension-id",
+    getURL: vi.fn((path: string) => `chrome-extension://mock-extension-id/${path}`),
     sendMessage: vi.fn(),
     onMessage: {
       addListener: vi.fn(),

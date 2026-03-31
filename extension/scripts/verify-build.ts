@@ -24,6 +24,7 @@ function check(filePath: string, label: string): void {
 check(resolve(dist, "content.js"), "dist/content.js");
 check(resolve(dist, "background.js"), "dist/background.js");
 check(resolve(dist, "popup.js"), "dist/popup.js");
+check(resolve(dist, "fiber-bridge.js"), "dist/fiber-bridge.js");
 check(resolve(dist, "manifest.json"), "dist/manifest.json");
 
 // Check content.js is IIFE format (not ESM)
