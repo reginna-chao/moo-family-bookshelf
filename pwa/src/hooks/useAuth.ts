@@ -178,10 +178,12 @@ export function useAuth(): UseAuthReturn {
   const [initialSyncCode, setInitialSyncCode] = useState("");
 
   useEffect(() => {
-    // 0. If URL contains "family" param, clear auth state to start fresh for invite
-    const preCheckHash = window.location.hash.slice(1);
-    const preCheckSearch = window.location.search;
-    if (preCheckHash.includes("family") || preCheckSearch.includes("family")) {
+    // 0. If URL contains "family=" param key, clear auth state to start fresh for invite.
+    // Must check for "family=" specifically (not substring "family") to avoid matching
+    // hash-routing paths like #family-shelf which also contain the word "family".
+    const preCheckHashParams = new URLSearchParams(window.location.hash.slice(1));
+    const preCheckSearchParams = new URLSearchParams(window.location.search);
+    if (preCheckHashParams.has("family") || preCheckSearchParams.has("family")) {
       forceClearStorage();
     }
 
