@@ -1,14 +1,20 @@
-name = "moo-family-bookshelf"
+name = "moo-family-bookshelf-dev"
 main = "src/index.ts"
 compatibility_date = "2024-12-30"
 
-# KV namespace IDs — replaced by CD pipeline from GitHub Variables.
-# For local dev: wrangler dev --kv KV=<your-kv-id>
-# To create your own: wrangler kv namespace create KV
+# Dev environment KV (default for wrangler dev / wrangler deploy)
 [[kv_namespaces]]
 binding = "KV"
-id = "placeholder-kv-id"
-preview_id = "placeholder-preview-id"
+id = "caf9d82798de4c73be7cc5d1d0a9cacd"
+preview_id = "caf9d82798de4c73be7cc5d1d0a9cacd"
+
+# Production environment
+[env.production]
+name = "moo-family-bookshelf"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "a9784db6a8cc4f308c57724cae2dc44a"
 
 # DEV_MODE is NOT set in production.
 # For local dev, create .dev.vars with DEV_MODE=1 to enable localhost CORS.

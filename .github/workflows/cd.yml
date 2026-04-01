@@ -29,11 +29,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Inject KV namespace IDs
-        run: |
-          sed -i "s/placeholder-kv-id/${{ vars.KV_NAMESPACE_ID }}/" wrangler.toml
-          sed -i "s/placeholder-preview-id/${{ vars.KV_PREVIEW_NAMESPACE_ID }}/" wrangler.toml
-
       - name: Deploy to Cloudflare
         run: pnpm run deploy
         env:

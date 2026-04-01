@@ -5,14 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --ip 0.0.0.0",
-    "build": "wrangler deploy --dry-run --outdir=dist",
+    "dev:remote": "wrangler dev --ip 0.0.0.0 --remote",
+    "build": "wrangler deploy --dry-run --outdir=dist --env production",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "deploy": "wrangler deploy",
-    "deploy:local": "bash -c 'source .env && sed \"s/placeholder-kv-id/$KV_NAMESPACE_ID/;s/placeholder-preview-id/$KV_PREVIEW_NAMESPACE_ID/\" wrangler.toml > wrangler.local.toml && wrangler deploy -c wrangler.local.toml && rm wrangler.local.toml'"
+    "deploy": "wrangler deploy --env production"
   },
   "dependencies": {
     "hono": "^4.6.14"
