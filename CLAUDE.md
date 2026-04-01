@@ -1,1 +1,1 @@
-D:/test/moo-family-bookshelf/AGENTS.md
+AGENTS.md
