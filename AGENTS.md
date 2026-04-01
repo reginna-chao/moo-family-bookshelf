@@ -243,3 +243,7 @@ Family membership is the gate for all features. Without a family, only onboardin
 - Do not edit `node_modules`.
 - Keep `pnpm-lock.yaml` in sync when changing dependencies.
 - PWA limitation: cannot scrape Readmoo book lists (no Content Script). Personal shelf management requires at least one sync from desktop Extension first.
+
+## Final Note
+
+I will have Gemini or other LLM review this project and report areas for improvement.
