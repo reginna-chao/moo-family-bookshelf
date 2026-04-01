@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:e2e:headed": "E2E_HEADED=1 playwright test",
     "build:e2e": "tsx scripts/build-e2e.ts",
     "e2e:verify:selectors": "tsx scripts/verify-selectors.ts",
     "e2e:verify:selectors:update": "tsx scripts/verify-selectors.ts --update-mock"

@@ -55,6 +55,16 @@ export interface FamilyBookshelf {
   }>;
 }
 
+/** Raw server response — members have encrypted payloads */
+export interface RawFamilyBookshelf {
+  familyId: string;
+  members: Array<{
+    userId: string;
+    payload: string | null;
+    lastUpdated: string | null;
+  }>;
+}
+
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
@@ -65,6 +75,8 @@ export class ApiClient {
   private refreshInProgress: Promise<boolean> | null = null;
   /** Callback invoked when token refresh fails with REFRESH_FAILED (family removed) */
   onFamilyRemoved: (() => void) | null = null;
+  /** In-flight GET request deduplication map: URL -> Promise */
+  private inflightGets = new Map<string, Promise<ApiResponse<unknown>>>();
 
   constructor(apiUrl?: string) {
     this.baseUrl = (apiUrl ?? DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
@@ -221,7 +233,7 @@ export class ApiClient {
 
   async getFamilyBookshelf(
     familyId: string,
-  ): Promise<ApiResponse<FamilyBookshelf>> {
+  ): Promise<ApiResponse<RawFamilyBookshelf>> {
     return this.request(`/api/family/${familyId}/bookshelf`);
   }
 
@@ -233,7 +245,32 @@ export class ApiClient {
     /** When true, skip 401 interception to prevent infinite loops */
     skipRefresh = false,
   ): Promise<ApiResponse<T>> {
+    const method = init?.method?.toUpperCase() ?? "GET";
     const url = `${this.baseUrl}${path}`;
+
+    // Deduplicate concurrent GET requests to the same URL
+    if (method === "GET" && !skipRefresh) {
+      const existing = this.inflightGets.get(url);
+      if (existing) {
+        return existing as Promise<ApiResponse<T>>;
+      }
+      const promise = this.doRequest<T>(url, init, skipRefresh);
+      this.inflightGets.set(url, promise as Promise<ApiResponse<unknown>>);
+      try {
+        return await promise;
+      } finally {
+        this.inflightGets.delete(url);
+      }
+    }
+
+    return this.doRequest<T>(url, init, skipRefresh);
+  }
+
+  private async doRequest<T>(
+    url: string,
+    init?: RequestInit,
+    skipRefresh = false,
+  ): Promise<ApiResponse<T>> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...(init?.headers as Record<string, string>),
@@ -249,10 +286,12 @@ export class ApiClient {
 
       // Intercept 401 — attempt automatic token refresh
       if (response.status === 401 && !skipRefresh) {
+        // Clear stale dedup promises — token is about to change
+        this.inflightGets.clear();
         const refreshed = await this.refreshToken();
         if (refreshed) {
           // Retry original request with the new token (skip refresh to avoid loop)
-          return this.request<T>(path, init, true);
+          return this.doRequest<T>(url, init, true);
         }
         // Refresh failed — return the original 401 error
         return {

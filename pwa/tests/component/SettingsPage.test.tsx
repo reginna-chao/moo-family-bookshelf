@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import React from "react";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { FamilyDataProvider } from "@/hooks/useFamilyData";
 import { BoolFlag, type ApiClient } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 
@@ -10,17 +12,27 @@ vi.mock("@/crypto/syncCode", () => ({
   encodeSyncCode: vi.fn().mockReturnValue("moo-fam1-key1"),
 }));
 
+// Mock crypto module (needed by FamilyDataProvider's refreshBookshelf)
+vi.mock("@/crypto/encrypt", () => ({
+  importKey: vi.fn().mockResolvedValue("mock-crypto-key"),
+  decrypt: vi.fn().mockImplementation((payload: string) => {
+    return Promise.resolve(payload);
+  }),
+}));
+
 // Mock constants to match the default endpoint used in the mock
 vi.mock("@/constants", () => ({
   DEFAULT_API_ENDPOINT: "https://default-api.example.com",
 }));
 
 const mockGetFamilyMembers = vi.fn();
+const mockGetFamilyBookshelf = vi.fn();
 const mockLeaveFamily = vi.fn();
 const mockUpdateDisplayName = vi.fn();
 const mockDeleteAccount = vi.fn();
 const mockApiClient = {
   getFamilyMembers: mockGetFamilyMembers,
+  getFamilyBookshelf: mockGetFamilyBookshelf,
   leaveFamily: mockLeaveFamily,
   updateDisplayName: mockUpdateDisplayName,
   deleteAccount: mockDeleteAccount,
@@ -38,13 +50,26 @@ const defaultProps = {
   onForceLogout: vi.fn(),
 };
 
+function renderWithProvider(props = defaultProps) {
+  return render(
+    <FamilyDataProvider
+      familyId={props.familyId}
+      userId={props.userId}
+      apiClient={props.apiClient}
+      encryptionKey={props.encryptionKey}
+    >
+      <SettingsPage {...props} />
+    </FamilyDataProvider>,
+  );
+}
+
 // Helper to render with members already loaded
 function renderWithMembers(memberIds: string[], ownerId: string) {
   const members = memberIds.map((id) => ({ userId: id, displayName: "" }));
   mockGetFamilyMembers.mockResolvedValue({
     data: { members, ownerId },
   });
-  return render(<SettingsPage {...defaultProps} />);
+  return renderWithProvider();
 }
 
 describe("SettingsPage", () => {
@@ -60,6 +85,10 @@ describe("SettingsPage", () => {
         ownerId: defaultProps.userId,
       },
     });
+    // Default: bookshelf loads successfully (needed by FamilyDataProvider)
+    mockGetFamilyBookshelf.mockResolvedValue({
+      data: { familyId: defaultProps.familyId, members: [] },
+    });
   });
 
   afterEach(() => {
@@ -69,7 +98,7 @@ describe("SettingsPage", () => {
   // --- Sync code ---
 
   it("renders the sync code and copy button", async () => {
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     // Wait for async member loading to settle before asserting
     await waitFor(() => {
@@ -83,7 +112,7 @@ describe("SettingsPage", () => {
   });
 
   it("copy sync code changes button text to '已複製'", async () => {
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     // Wait for async member loading to settle
     await waitFor(() => {
@@ -105,7 +134,7 @@ describe("SettingsPage", () => {
   it("shows loading state while fetching members", async () => {
     // Never resolve so loading stays visible
     mockGetFamilyMembers.mockReturnValue(new Promise(() => {}));
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     // Use findByText to wait for React to flush initial render effects
     expect(await screen.findByText("載入中...")).toBeInTheDocument();
@@ -132,7 +161,7 @@ describe("SettingsPage", () => {
     mockGetFamilyMembers.mockResolvedValue({
       error: { code: "FETCH_ERROR", message: "無法載入成員" },
     });
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     await waitFor(() => {
       expect(screen.getByText("無法載入成員")).toBeInTheDocument();
@@ -253,7 +282,7 @@ describe("SettingsPage", () => {
         ownerId: defaultProps.userId,
       },
     });
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     // Wait for members to load and name to be set
     await waitFor(() => {
@@ -274,7 +303,7 @@ describe("SettingsPage", () => {
         ownerId: defaultProps.userId,
       },
     });
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     await waitFor(() => {
       expect(screen.getByText("Alice")).toBeInTheDocument();
@@ -306,7 +335,7 @@ describe("SettingsPage", () => {
 
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
 
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     await waitFor(() => {
       expect(screen.getByText("Alice")).toBeInTheDocument();
@@ -351,7 +380,7 @@ describe("SettingsPage", () => {
 
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
 
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     await waitFor(() => {
       expect(screen.getByText("Alice")).toBeInTheDocument();
@@ -385,7 +414,7 @@ describe("SettingsPage", () => {
         ownerId: defaultProps.userId,
       },
     });
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     await waitFor(() => {
       expect(screen.getByText("Alice")).toBeInTheDocument();
@@ -408,7 +437,7 @@ describe("SettingsPage", () => {
         ownerId: defaultProps.userId,
       },
     });
-    render(<SettingsPage {...defaultProps} />);
+    renderWithProvider();
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "編輯顯示名稱" })).toBeInTheDocument();

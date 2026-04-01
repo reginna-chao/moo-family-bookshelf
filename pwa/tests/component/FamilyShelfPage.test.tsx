@@ -7,7 +7,9 @@ import {
   waitFor,
   act,
 } from "@testing-library/react";
+import React from "react";
 import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
+import { FamilyDataProvider } from "@/hooks/useFamilyData";
 
 // Mock API client
 vi.mock("@/api/client", async (importOriginal) => {
@@ -71,6 +73,19 @@ function createProps() {
   };
 }
 
+function renderWithProvider(props: ReturnType<typeof createProps>) {
+  return render(
+    <FamilyDataProvider
+      familyId={props.familyId}
+      userId={props.userId}
+      apiClient={props.apiClient}
+      encryptionKey={props.encryptionKey}
+    >
+      <FamilyShelfPage userId={props.userId} />
+    </FamilyDataProvider>,
+  );
+}
+
 describe("FamilyShelfPage", () => {
   let defaultProps: ReturnType<typeof createProps>;
 
@@ -91,14 +106,14 @@ describe("FamilyShelfPage", () => {
 
   it("shows loading state initially", () => {
     mockGetFamilyBookshelf.mockReturnValue(new Promise(() => {})); // never resolves
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     expect(screen.getByText("載入家庭書櫃中...")).toBeInTheDocument();
   });
 
   it("shows error message and retry button when API fails", async () => {
     mockGetFamilyBookshelf.mockRejectedValue(new Error("Network error"));
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("Network error")).toBeInTheDocument();
@@ -110,7 +125,7 @@ describe("FamilyShelfPage", () => {
     mockGetFamilyBookshelf.mockResolvedValue({
       error: { code: "NOT_FOUND", message: "找不到家庭群組" },
     });
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("找不到家庭群組")).toBeInTheDocument();
@@ -122,7 +137,7 @@ describe("FamilyShelfPage", () => {
       data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
     });
     mockGetFamilyBookshelf.mockRejectedValueOnce(new Error("Network error"));
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("重試")).toBeInTheDocument();
@@ -169,7 +184,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("尚無家人分享書籍")).toBeInTheDocument();
@@ -186,7 +201,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("尚無家人分享書籍")).toBeInTheDocument();
@@ -212,7 +227,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("React 深入淺出")).toBeInTheDocument();
@@ -241,7 +256,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("Shared Book")).toBeInTheDocument();
@@ -278,7 +293,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("Alice Book")).toBeInTheDocument();
@@ -315,7 +330,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("Alice Book")).toBeInTheDocument();
@@ -351,7 +366,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     // Wait for data to load
     await waitFor(() => {
@@ -404,7 +419,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("Linked Book")).toBeInTheDocument();
@@ -444,7 +459,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     // Wait for data to load
     await waitFor(() => {
@@ -507,7 +522,7 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    render(<FamilyShelfPage {...defaultProps} />);
+    renderWithProvider(defaultProps);
 
     await waitFor(() => {
       expect(screen.getByText("(3 本)")).toBeInTheDocument();

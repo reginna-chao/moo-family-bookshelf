@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Pencil, Check, X } from "lucide-react";
 import { BoolFlag } from "@/api/client";
-import type { ApiClient, FamilyMember } from "@/api/client";
+import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
 import { MemberList } from "@/components/MemberList";
 import { ApiEndpointEditor } from "@/components/ApiEndpointEditor";
 import { namespacedKey, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
+import { useFamilyData } from "@/hooks/useFamilyData";
 
 interface SettingsPageProps {
   familyId: string;
@@ -97,33 +98,17 @@ export function SettingsPage({
     }
   }
 
-  // --- Members ---
-  const [members, setMembers] = useState<FamilyMember[]>([]);
-  const [ownerId, setOwnerId] = useState("");
-  const [membersLoading, setMembersLoading] = useState(true);
-  const [membersError, setMembersError] = useState<string | null>(null);
-
-  const loadMembers = useCallback(async () => {
-    setMembersLoading(true);
-    setMembersError(null);
-    try {
-      const res = await apiClient.getFamilyMembers(familyId);
-      if (res.error) {
-        setMembersError(res.error.message);
-      } else if (res.data) {
-        setMembers(res.data.members);
-        setOwnerId(res.data.ownerId);
-      }
-    } catch (err) {
-      setMembersError(err instanceof Error ? err.message : "載入失敗");
-    } finally {
-      setMembersLoading(false);
-    }
-  }, [apiClient, familyId]);
-
-  useEffect(() => {
-    void loadMembers();
-  }, [loadMembers]);
+  // --- Members (from Context) ---
+  const {
+    members,
+    ownerId,
+    membersState,
+    membersError: ctxMembersError,
+    refreshMembers: loadMembers,
+    refreshBookshelf,
+  } = useFamilyData();
+  const membersLoading = membersState === "loading";
+  const membersError = ctxMembersError || null;
 
   // --- Display name ---
   const [editingName, setEditingName] = useState(false);
@@ -378,7 +363,7 @@ export function SettingsPage({
             userId={userId}
             familyId={familyId}
             apiClient={apiClient}
-            onMembersChanged={loadMembers}
+            onMembersChanged={() => { void loadMembers(); void refreshBookshelf(); }}
           />
         )}
         <p className="text-gray-400 text-xs mt-1.5">

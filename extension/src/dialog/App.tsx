@@ -7,6 +7,7 @@ import { FamilySettings } from "./FamilySettings";
 import { DialogFooter } from "./DialogFooter";
 import { useTokenRefresh } from "./useTokenRefresh";
 import { isExtensionContextValid } from "../utils/extensionContext";
+import { FamilyDataProvider } from "./FamilyDataContext";
 
 type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "settings";
@@ -116,53 +117,55 @@ export function App() {
   }
 
   return (
-    <div>
-      <nav style={{ display: "flex", borderBottom: "1px solid #e2e8f0" }}>
-        {(
-          [
-            ["family-shelf", "家庭書櫃"],
-            ["personal-shelf", "個人書櫃"],
-            ["settings", "設定"],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            style={{
-              flex: 1,
-              padding: "12px 0",
-              border: "none",
-              background: activeTab === key ? "#eff6ff" : "transparent",
-              fontWeight: activeTab === key ? 600 : 400,
-              color: activeTab === key ? "#2563eb" : "#64748b",
-              cursor: "pointer",
-              fontSize: 14,
-              borderBottom:
-                activeTab === key ? "2px solid #2563eb" : "2px solid transparent",
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
-      <div style={{ padding: 16, overflowY: "auto", maxHeight: "60vh" }}>
-        <div style={{ display: activeTab === "family-shelf" ? "block" : "none" }}>
-          <FamilyShelf familyId={familyId} userId={userId} apiClient={apiClientRef.current} />
+    <FamilyDataProvider familyId={familyId} userId={userId} apiClient={apiClientRef.current}>
+      <div>
+        <nav style={{ display: "flex", borderBottom: "1px solid #e2e8f0" }}>
+          {(
+            [
+              ["family-shelf", "家庭書櫃"],
+              ["personal-shelf", "個人書櫃"],
+              ["settings", "設定"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              style={{
+                flex: 1,
+                padding: "12px 0",
+                border: "none",
+                background: activeTab === key ? "#eff6ff" : "transparent",
+                fontWeight: activeTab === key ? 600 : 400,
+                color: activeTab === key ? "#2563eb" : "#64748b",
+                cursor: "pointer",
+                fontSize: 14,
+                borderBottom:
+                  activeTab === key ? "2px solid #2563eb" : "2px solid transparent",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div style={{ padding: 16, overflowY: "auto", maxHeight: "60vh" }}>
+          <div style={{ display: activeTab === "family-shelf" ? "block" : "none" }}>
+            <FamilyShelf userId={userId} />
+          </div>
+          <div style={{ display: activeTab === "personal-shelf" ? "block" : "none" }}>
+            <PersonalShelf userId={userId} apiClient={apiClientRef.current} />
+          </div>
+          <div style={{ display: activeTab === "settings" ? "block" : "none" }}>
+            <FamilySettings
+              familyId={familyId}
+              userId={userId}
+              apiClient={apiClientRef.current}
+              onLeave={handleLeaveFamily}
+            />
+          </div>
         </div>
-        <div style={{ display: activeTab === "personal-shelf" ? "block" : "none" }}>
-          <PersonalShelf userId={userId} apiClient={apiClientRef.current} />
-        </div>
-        <div style={{ display: activeTab === "settings" ? "block" : "none" }}>
-          <FamilySettings
-            familyId={familyId}
-            userId={userId}
-            apiClient={apiClientRef.current}
-            onLeave={handleLeaveFamily}
-          />
-        </div>
+        <DialogFooter />
       </div>
-      <DialogFooter />
-    </div>
+    </FamilyDataProvider>
   );
 }
 

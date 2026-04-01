@@ -1,6 +1,8 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
+import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { BoolFlag, type ApiClient } from "@/api/client";
 
 // Mock crypto module
@@ -46,6 +48,18 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
+function renderWithProvider(
+  ui: React.ReactElement,
+  apiClient: ApiClient,
+  { familyId = "fam-1", userId = "user-1" } = {},
+) {
+  return render(
+    <FamilyDataProvider familyId={familyId} userId={userId} apiClient={apiClient}>
+      {ui}
+    </FamilyDataProvider>,
+  );
+}
+
 function makeMemberPayload(displayName: string, books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>) {
   return JSON.stringify({ displayName, books });
 }
@@ -71,7 +85,7 @@ describe("FamilyShelf", () => {
       })),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
     expect(screen.getByText("載入家庭書櫃中...")).toBeInTheDocument();
   });
 
@@ -82,7 +96,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("尚無家人分享書籍")).toBeInTheDocument();
@@ -110,7 +124,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("尚無家人分享書籍")).toBeInTheDocument();
@@ -139,7 +153,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("共享書籍一")).toBeInTheDocument();
@@ -158,7 +172,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("伺服器錯誤")).toBeInTheDocument();
@@ -193,7 +207,7 @@ describe("FamilyShelf", () => {
       getFamilyBookshelf,
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("重試")).toBeInTheDocument();
@@ -213,7 +227,7 @@ describe("FamilyShelf", () => {
       getFamilyBookshelf: vi.fn().mockRejectedValue(new Error("Network failure")),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("Network failure")).toBeInTheDocument();
@@ -246,7 +260,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("Bob的書")).toBeInTheDocument();
@@ -286,7 +300,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("Carol的書")).toBeInTheDocument();
@@ -314,7 +328,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       // Should show first 8 chars of userId as member name (appears in dropdown + BookCard)
@@ -344,7 +358,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
@@ -382,7 +396,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       // Default filter is "all-except-self", so "我的書" should NOT appear
@@ -421,7 +435,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("(2 本)")).toBeInTheDocument();
@@ -449,7 +463,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByLabelText("搜尋書名或作者")).toBeInTheDocument();
@@ -477,7 +491,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     // Should still render without crashing — member gets empty books
     await waitFor(() => {
@@ -492,7 +506,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("尚無家人分享書籍")).toBeInTheDocument();
@@ -530,7 +544,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     // Wait for initial load — switch to "all" filter so current user's books are visible
     await waitFor(() => {
@@ -581,7 +595,7 @@ describe("FamilyShelf", () => {
       }),
     });
 
-    render(<FamilyShelf familyId="fam-1" userId="user-1" apiClient={apiClient} />);
+    renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
       expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();

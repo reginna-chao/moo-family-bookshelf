@@ -8,6 +8,7 @@ import { PersonalShelfPage } from "./pages/PersonalShelfPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { PwaCreateNotice } from "./components/PwaCreateNotice";
+import { FamilyDataProvider } from "./hooks/useFamilyData";
 
 type Page = "family-shelf" | "personal-shelf" | "settings";
 
@@ -143,55 +144,57 @@ export default function App() {
   }
 
   return (
-    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50">
-      <PwaCreateNotice userId={auth.userId} onDismiss={() => {}} />
-      <InstallPrompt userId={auth.userId} />
-      <main className="flex-1 overflow-y-auto pb-16">
-        {currentPage === "family-shelf" && (
-          <FamilyShelfPage
-            familyId={auth.familyId}
-            userId={auth.userId}
-            apiClient={apiClient}
-            encryptionKey={auth.encryptionKey}
-          />
-        )}
-        {currentPage === "personal-shelf" && (
-          <PersonalShelfPage userId={auth.userId} apiClient={apiClient} encryptionKey={auth.encryptionKey} />
-        )}
-        {currentPage === "settings" && (
-          <SettingsPage
-            familyId={auth.familyId}
-            userId={auth.userId}
-            apiClient={apiClient}
-            encryptionKey={auth.encryptionKey}
-            onLogout={logout}
-            onForceLogout={forceLogout}
-          />
-        )}
-      </main>
+    <FamilyDataProvider
+      familyId={auth.familyId}
+      userId={auth.userId}
+      apiClient={apiClient}
+      encryptionKey={auth.encryptionKey}
+    >
+      <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50">
+        <PwaCreateNotice userId={auth.userId} onDismiss={() => {}} />
+        <InstallPrompt userId={auth.userId} />
+        <main className="flex-1 overflow-y-auto pb-16">
+          {currentPage === "family-shelf" && (
+            <FamilyShelfPage userId={auth.userId} />
+          )}
+          {currentPage === "personal-shelf" && (
+            <PersonalShelfPage userId={auth.userId} apiClient={apiClient} encryptionKey={auth.encryptionKey} />
+          )}
+          {currentPage === "settings" && (
+            <SettingsPage
+              familyId={auth.familyId}
+              userId={auth.userId}
+              apiClient={apiClient}
+              encryptionKey={auth.encryptionKey}
+              onLogout={logout}
+              onForceLogout={forceLogout}
+            />
+          )}
+        </main>
 
-      <nav
-        aria-label="主要導覽"
-        className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200"
-      >
-        <div className="max-w-md mx-auto flex">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.page}
-              onClick={() => navigate(item.page)}
-              aria-current={currentPage === item.page ? "page" : undefined}
-              className={`flex-1 flex flex-col items-center py-2 text-xs transition-colors ${
-                currentPage === item.page
-                  ? "text-blue-600 font-semibold"
-                  : "text-gray-500"
-              }`}
-            >
-              <item.icon size={20} aria-hidden="true" className="mb-0.5" />
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </div>
-      </nav>
-    </div>
+        <nav
+          aria-label="主要導覽"
+          className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200"
+        >
+          <div className="max-w-md mx-auto flex">
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.page}
+                onClick={() => navigate(item.page)}
+                aria-current={currentPage === item.page ? "page" : undefined}
+                className={`flex-1 flex flex-col items-center py-2 text-xs transition-colors ${
+                  currentPage === item.page
+                    ? "text-blue-600 font-semibold"
+                    : "text-gray-500"
+                }`}
+              >
+                <item.icon size={20} aria-hidden="true" className="mb-0.5" />
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+      </div>
+    </FamilyDataProvider>
   );
 }

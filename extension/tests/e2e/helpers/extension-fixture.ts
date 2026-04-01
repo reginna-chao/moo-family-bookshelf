@@ -21,6 +21,7 @@ export interface ExtensionFixtures {
 export const test = base.extend<ExtensionFixtures>({
   // eslint-disable-next-line no-empty-pattern
   context: async ({}, use) => {
+    const useHeadedMode = process.env.E2E_HEADED === "1";
     const context = await chromium.launchPersistentContext("", {
       headless: false,
       args: [
@@ -30,6 +31,7 @@ export const test = base.extend<ExtensionFixtures>({
         "--no-default-browser-check",
         "--disable-search-engine-choice-screen",
         "--window-size=1280,720",
+        ...(useHeadedMode ? [] : ["--headless=new"]),
       ],
       viewport: { width: 1280, height: 720 },
     });

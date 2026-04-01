@@ -50,6 +50,7 @@ export interface FamilyGroup {
   members: FamilyMember[];
   maxMembers: number;
   createdAt: string;
+  apiEndpoint?: string | null;
 }
 
 /** Decrypted view (used by UI after decryption) */
@@ -76,6 +77,8 @@ export class ApiClient {
   private authToken: string | null = null;
   private refreshToken: (() => Promise<string | null>) | null = null;
   private refreshing: Promise<string | null> | null = null;
+  /** In-flight GET request deduplication map: URL -> Promise */
+  private inflightGets = new Map<string, Promise<ApiResponse<unknown>>>();
 
   constructor(apiUrl?: string) {
     this.baseUrl = (apiUrl || DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
@@ -235,7 +238,32 @@ export class ApiClient {
     init?: RequestInit,
     isRetry = false,
   ): Promise<ApiResponse<T>> {
+    const method = init?.method?.toUpperCase() ?? "GET";
     const url = `${this.baseUrl}${path}`;
+
+    // Deduplicate concurrent GET requests to the same URL
+    if (method === "GET" && !isRetry) {
+      const existing = this.inflightGets.get(url);
+      if (existing) {
+        return existing as Promise<ApiResponse<T>>;
+      }
+      const promise = this.doRequest<T>(url, init, isRetry);
+      this.inflightGets.set(url, promise as Promise<ApiResponse<unknown>>);
+      try {
+        return await promise;
+      } finally {
+        this.inflightGets.delete(url);
+      }
+    }
+
+    return this.doRequest<T>(url, init, isRetry);
+  }
+
+  private async doRequest<T>(
+    url: string,
+    init?: RequestInit,
+    isRetry = false,
+  ): Promise<ApiResponse<T>> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...(init?.headers as Record<string, string>),
@@ -251,7 +279,9 @@ export class ApiClient {
 
       // On 401, try to refresh token once
       if (response.status === 401 && !isRetry && this.refreshToken) {
-        // Deduplicate concurrent refresh calls
+        // Clear stale dedup promises — token is about to change
+        this.inflightGets.clear();
+        // Deduplicate concurrent refresh calls (F3: prevents double-join)
         if (!this.refreshing) {
           this.refreshing = this.refreshToken().finally(() => {
             this.refreshing = null;
@@ -260,7 +290,7 @@ export class ApiClient {
         const newToken = await this.refreshing;
         if (newToken) {
           this.authToken = newToken;
-          return this.request(path, init, true);
+          return this.doRequest(url, init, true);
         }
       }
 

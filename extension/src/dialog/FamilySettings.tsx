@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ApiClient, FamilyMember, BoolFlag } from "../api/client";
+import { ApiClient, BoolFlag } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
 import { DisplayNameEditor } from "./DisplayNameEditor";
@@ -7,6 +7,7 @@ import { MemberList } from "./MemberList";
 import { DEFAULT_API_ENDPOINT, DEFAULT_PWA_URL } from "../constants";
 import { QrCodeLink } from "./QrCodeLink";
 import { ApiEndpointEditor } from "./ApiEndpointEditor";
+import { useFamilyData } from "./FamilyDataContext";
 
 export interface FamilySettingsProps {
   familyId: string;
@@ -18,11 +19,17 @@ type LeaveState = "idle" | "confirming" | "leaving";
 type DeleteState = "idle" | "confirming" | "deleting";
 
 export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilySettingsProps) {
+  const {
+    members,
+    ownerId,
+    membersState,
+    membersError,
+    familyEndpoint,
+    refreshMembers: fetchMembers,
+    refreshBookshelf,
+  } = useFamilyData();
+
   const [syncCode, setSyncCode] = useState<string | null>(null);
-  const [members, setMembers] = useState<FamilyMember[]>([]);
-  const [ownerId, setOwnerId] = useState("");
-  const [membersLoading, setMembersLoading] = useState(true);
-  const [membersError, setMembersError] = useState("");
   const [copied, setCopied] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
@@ -30,9 +37,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [deleteState, setDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
-  const [familyEndpoint, setFamilyEndpoint] = useState<string | undefined>(undefined);
   const skipEndpointSync = useRef(false);
   const displayNameState = useDisplayName({ apiClient, familyId, userId });
+
+  const membersLoading = membersState === "loading";
 
   useEffect(() => {
     chrome.runtime.sendMessage({ type: "GET_SYNC_ARCHIVED" }, (response) => {
@@ -71,63 +79,21 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     });
   }, [familyId, apiClient, familyEndpoint]);
 
-  const fetchMembers = useCallback(async () => {
-    setMembersLoading(true);
-    setMembersError("");
-    const response = await apiClient.getFamilyMembers(familyId);
-    if (response.error) {
-      setMembersError(response.error.message);
-    } else if (response.data) {
-      setMembers(response.data.members);
-      setOwnerId(response.data.ownerId);
-      setFamilyEndpoint(response.data.apiEndpoint ?? undefined);
-
-      const serverEndpoint = response.data.apiEndpoint;
-      if (!skipEndpointSync.current) {
-        const currentEndpoint = apiClient.getEndpoint();
-        if (serverEndpoint && serverEndpoint !== currentEndpoint) {
-          apiClient.setEndpoint(serverEndpoint);
-          chrome.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: serverEndpoint });
-        } else if (!serverEndpoint && currentEndpoint !== DEFAULT_API_ENDPOINT) {
-          apiClient.setEndpoint(DEFAULT_API_ENDPOINT);
-          chrome.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: null });
-        }
-      }
+  // Sync API endpoint from family record (when members data refreshes)
+  useEffect(() => {
+    if (membersState !== "ready" || skipEndpointSync.current) {
       skipEndpointSync.current = false;
+      return;
     }
-    setMembersLoading(false);
-  }, [familyId, apiClient]);
-
-  useEffect(() => {
-    void fetchMembers();
-  }, [fetchMembers]);
-
-  // Cross-component sync: update local member display name without refetching
-  useEffect(() => {
-    const listener = (
-      changes: { [key: string]: chrome.storage.StorageChange },
-      area: string,
-    ) => {
-      if (area === "local" && changes.displayName) {
-        const newName = (changes.displayName.newValue as string) ?? "";
-        setMembers(prev => prev.map(m =>
-          m.userId === userId ? { ...m, displayName: newName } : m
-        ));
-      }
-    };
-    try {
-      chrome.storage.onChanged.addListener(listener);
-    } catch {
-      // Extension context may be invalidated after reload
+    const currentEndpoint = apiClient.getEndpoint();
+    if (familyEndpoint && familyEndpoint !== currentEndpoint) {
+      apiClient.setEndpoint(familyEndpoint);
+      chrome.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: familyEndpoint });
+    } else if (!familyEndpoint && currentEndpoint !== DEFAULT_API_ENDPOINT) {
+      apiClient.setEndpoint(DEFAULT_API_ENDPOINT);
+      chrome.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: null });
     }
-    return () => {
-      try {
-        chrome.storage.onChanged.removeListener(listener);
-      } catch {
-        // Extension context may be invalidated after reload
-      }
-    };
-  }, [userId]);
+  }, [membersState, familyEndpoint, apiClient]);
 
   const handleCopy = async () => {
     if (!syncCode) return;
@@ -313,7 +279,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             userId={userId}
             familyId={familyId}
             apiClient={apiClient}
-            onMembersChanged={() => void fetchMembers()}
+            onMembersChanged={() => { void fetchMembers(); void refreshBookshelf(); }}
             familyEndpoint={familyEndpoint}
           />
         )}

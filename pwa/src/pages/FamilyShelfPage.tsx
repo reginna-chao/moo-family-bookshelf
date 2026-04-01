@@ -1,21 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { BookOpen } from "lucide-react";
-import { BoolFlag } from "@/api/client";
-import type { ApiClient, BookEntry } from "@/api/client";
-import { importKey, decrypt } from "@/crypto/encrypt";
+import type { BookEntry } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
+import { useFamilyData, MemberBooks } from "@/hooks/useFamilyData";
 
 export interface FamilyShelfPageProps {
-  familyId: string;
   userId: string;
-  apiClient: ApiClient;
-  encryptionKey: string;
-}
-
-interface MemberBooks {
-  userId: string;
-  displayName: string;
-  books: BookEntry[];
 }
 
 interface BookWithMember extends BookEntry {
@@ -23,24 +13,6 @@ interface BookWithMember extends BookEntry {
 }
 
 type MemberFilterValue = "all" | "all-except-self" | string;
-type LoadState = "loading" | "ready" | "error";
-
-async function decryptPayload(
-  payload: string,
-  encKey: string,
-): Promise<{ displayName: string; books: BookEntry[] }> {
-  const key = await importKey(encKey);
-  const decrypted = await decrypt(payload, key);
-  const parsed: unknown = JSON.parse(decrypted);
-  if (typeof parsed !== "object" || parsed === null) {
-    return { displayName: "", books: [] };
-  }
-  const obj = parsed as Record<string, unknown>;
-  return {
-    displayName: typeof obj.displayName === "string" ? obj.displayName : "",
-    books: Array.isArray(obj.books) ? (obj.books as BookEntry[]) : [],
-  };
-}
 
 function toBookWithMember(member: MemberBooks): BookWithMember[] {
   const name = member.displayName || member.userId.slice(0, 8);
@@ -48,113 +20,16 @@ function toBookWithMember(member: MemberBooks): BookWithMember[] {
 }
 
 export function FamilyShelfPage({
-  familyId,
   userId,
-  apiClient,
-  encryptionKey,
 }: FamilyShelfPageProps) {
-  const [members, setMembers] = useState<MemberBooks[]>([]);
-  const [state, setState] = useState<LoadState>("loading");
-  const [errorMessage, setErrorMessage] = useState("");
+  const {
+    bookshelfMembers: members,
+    bookshelfState: state,
+    bookshelfError: errorMessage,
+    refreshBookshelf: loadBookshelf,
+  } = useFamilyData();
   const [filterMember, setFilterMember] =
     useState<MemberFilterValue>("all-except-self");
-
-  const loadBookshelf = useCallback(async () => {
-    setState("loading");
-    setErrorMessage("");
-    try {
-      // Fetch bookshelf and family members in parallel
-      const [response, membersResponse] = await Promise.all([
-        apiClient.getFamilyBookshelf(familyId),
-        apiClient.getFamilyMembers(familyId),
-      ]);
-
-      if (response.error) {
-        setErrorMessage(response.error.message);
-        setState("error");
-        return;
-      }
-
-      if (!response.data) {
-        setState("ready");
-        return;
-      }
-
-      // Build a lookup map of displayNames from the family members API
-      const memberNameMap = new Map<string, string>();
-      if (membersResponse.data?.members) {
-        for (const m of membersResponse.data.members) {
-          if (m.displayName) memberNameMap.set(m.userId, m.displayName);
-        }
-      }
-
-      const decryptedMembers: MemberBooks[] = [];
-      for (const member of response.data.members) {
-        // Use family record displayName, falling back to userId slice
-        const familyDisplayName = memberNameMap.get(member.userId) || member.userId.slice(0, 8);
-
-        if (!member.payload || !encryptionKey) {
-          decryptedMembers.push({
-            userId: member.userId,
-            displayName: familyDisplayName,
-            books: [],
-          });
-          continue;
-        }
-
-        try {
-          const { books } = await decryptPayload(
-            member.payload,
-            encryptionKey,
-          );
-          decryptedMembers.push({
-            userId: member.userId,
-            displayName: familyDisplayName,
-            books: books.filter((b) => b.isShared === BoolFlag.TRUE),
-          });
-        } catch {
-          decryptedMembers.push({
-            userId: member.userId,
-            displayName: familyDisplayName,
-            books: [],
-          });
-        }
-      }
-
-      setMembers(decryptedMembers);
-      setState("ready");
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "載入失敗");
-      setState("error");
-    }
-  }, [familyId, apiClient, encryptionKey]);
-
-  useEffect(() => {
-    void loadBookshelf();
-  }, [loadBookshelf]);
-
-  // Cross-component sync: re-fetch when PersonalShelf saves book settings
-  useEffect(() => {
-    const handler = () => {
-      void loadBookshelf();
-    };
-    window.addEventListener("personalShelfSaved", handler);
-    return () => window.removeEventListener("personalShelfSaved", handler);
-  }, [loadBookshelf]);
-
-  // Cross-component sync: update current user's display name when changed in settings
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ displayName: string }>).detail;
-      setMembers((prev) =>
-        prev.map((m) =>
-          m.userId === userId ? { ...m, displayName: detail.displayName } : m,
-        ),
-      );
-    };
-    window.addEventListener("displayNameChanged", handler);
-    return () => window.removeEventListener("displayNameChanged", handler);
-  }, [userId]);
 
   const totalBooks = useMemo(
     () => members.reduce((sum, m) => sum + m.books.length, 0),

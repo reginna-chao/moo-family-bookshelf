@@ -96,6 +96,7 @@ test.describe("Family Lifecycle", () => {
 
     // --- User 2: Join family using a second persistent context ---
 
+    const useHeadedMode = process.env.E2E_HEADED === "1";
     const context2 = await chromium.launchPersistentContext("", {
       headless: false,
       args: [
@@ -104,6 +105,7 @@ test.describe("Family Lifecycle", () => {
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-search-engine-choice-screen",
+        ...(useHeadedMode ? [] : ["--headless=new"]),
       ],
     });
 

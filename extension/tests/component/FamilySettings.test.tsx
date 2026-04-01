@@ -1,7 +1,17 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import React from "react";
 import { FamilySettings, FamilySettingsProps } from "@/dialog/FamilySettings";
+import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import type { ApiClient } from "@/api/client";
+
+// Mock crypto module (needed by FamilyDataProvider's refreshBookshelf)
+vi.mock("@/crypto/encrypt", () => ({
+  importKey: vi.fn().mockResolvedValue("mock-crypto-key"),
+  decrypt: vi.fn().mockImplementation((payload: string) => {
+    return Promise.resolve(payload);
+  }),
+}));
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
@@ -27,7 +37,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
         createdAt: "2026-01-01",
       },
     }),
-    getFamilyBookshelf: vi.fn(),
+    getFamilyBookshelf: vi.fn().mockResolvedValue({ data: { familyId: "fam-123", members: [] } }),
     deleteAccount: vi.fn().mockResolvedValue({ data: { ok: true } }),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
@@ -43,7 +53,12 @@ function renderFamilySettings(props: Partial<FamilySettingsProps> = {}) {
     apiClient: createMockApiClient(),
     onLeave: vi.fn(),
   };
-  return render(<FamilySettings {...defaultProps} {...props} />);
+  const merged = { ...defaultProps, ...props };
+  return render(
+    <FamilyDataProvider familyId={merged.familyId} userId={merged.userId} apiClient={merged.apiClient}>
+      <FamilySettings {...merged} />
+    </FamilyDataProvider>,
+  );
 }
 
 describe("FamilySettings", () => {
@@ -307,6 +322,8 @@ describe("FamilySettings", () => {
       expect(screen.getByText("移除")).toBeInTheDocument();
     });
 
+    const callsBefore = vi.mocked(apiClient.getFamilyMembers).mock.calls.length;
+
     fireEvent.click(screen.getByText("移除"));
 
     await waitFor(() => {
@@ -321,9 +338,9 @@ describe("FamilySettings", () => {
       );
     });
 
-    // fetchMembers should be called again (initial + refresh)
+    // fetchMembers should be called at least once more after the action
     await waitFor(() => {
-      expect(apiClient.getFamilyMembers).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(apiClient.getFamilyMembers).mock.calls.length).toBeGreaterThan(callsBefore);
     });
   });
 
@@ -358,6 +375,8 @@ describe("FamilySettings", () => {
 
     fireEvent.click(screen.getByText("確定"));
 
+    const callsBefore = vi.mocked(apiClient.getFamilyMembers).mock.calls.length;
+
     await waitFor(() => {
       expect(apiClient.transferOwnership).toHaveBeenCalledWith(
         "fam-123", "user-abc12345", "user-def67890", undefined,
@@ -365,7 +384,7 @@ describe("FamilySettings", () => {
     });
 
     await waitFor(() => {
-      expect(apiClient.getFamilyMembers).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(apiClient.getFamilyMembers).mock.calls.length).toBeGreaterThan(callsBefore);
     });
   });
 
@@ -604,19 +623,21 @@ describe("FamilySettings", () => {
     });
 
     it("retry button re-fetches members", async () => {
+      const successData = {
+        data: {
+          familyId: "fam-123",
+          ownerId: "user-abc12345",
+          members: [{ userId: "user-abc12345", displayName: "小明" }],
+          maxMembers: 6,
+          createdAt: "2026-01-01",
+        },
+      };
       const getFamilyMembers = vi.fn()
         .mockResolvedValueOnce({
           error: { code: "INTERNAL_ERROR", message: "載入失敗" },
         })
-        .mockResolvedValueOnce({
-          data: {
-            familyId: "fam-123",
-            ownerId: "user-abc12345",
-            members: [{ userId: "user-abc12345", displayName: "小明" }],
-            maxMembers: 6,
-            createdAt: "2026-01-01",
-          },
-        });
+        // Subsequent calls (from refreshBookshelf and retry) return success
+        .mockResolvedValue(successData);
 
       const apiClient = createMockApiClient({ getFamilyMembers });
       renderFamilySettings({ apiClient });
@@ -625,13 +646,16 @@ describe("FamilySettings", () => {
         expect(screen.getByText("載入失敗")).toBeInTheDocument();
       });
 
+      const callsBefore = getFamilyMembers.mock.calls.length;
+
       fireEvent.click(screen.getByText("重試"));
 
       await waitFor(() => {
         expect(screen.getByText("小明")).toBeInTheDocument();
       });
 
-      expect(getFamilyMembers).toHaveBeenCalledTimes(2);
+      // Verify retry caused additional call(s)
+      expect(getFamilyMembers.mock.calls.length).toBeGreaterThan(callsBefore);
     });
   });
 
