@@ -1,0 +1,5 @@
+# Copy this file to .dev.vars for local development (wrangler dev).
+# This file is NOT committed to git.
+
+# Enable localhost CORS for development
+DEV_MODE=1

@@ -8,11 +8,11 @@
 
 export const DEFAULT_API_ENDPOINT: string =
   import.meta.env.VITE_API_ENDPOINT ??
-  "https://moo-family-bookshelf.rcworkadd.workers.dev";
+  "https://moo-family-bookshelf-dev.rcworkadd.workers.dev";
 
 export const DEFAULT_PWA_URL: string =
   import.meta.env.VITE_PWA_URL ??
-  "https://moo-family-bookshelf-pwa.pages.dev";
+  "https://moo-family-bookshelf-dev.pages.dev";
 
 export const PERSONAL_BOOKS_CACHE_KEY = "personalBooksCache";
 

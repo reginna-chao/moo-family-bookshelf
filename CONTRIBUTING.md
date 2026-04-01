@@ -20,18 +20,17 @@ pnpm install
 
 ### Environment Variables
 
-Each sub-project provides an `.env.example` template. Copy and adjust as needed:
+`.env.example` contains dev defaults. Copy to `.env` to start developing:
 
 ```bash
-cp extension/.env.example extension/.env.production
-cp extension/.env.example extension/.env.development
-cp pwa/.env.example pwa/.env.production
-cp pwa/.env.example pwa/.env.development
+cp extension/.env.example extension/.env
+cp pwa/.env.example pwa/.env
+cp worker/.dev.vars.example worker/.dev.vars
 ```
 
-- `.env.development` — Local dev mode, typically set API to `http://localhost:8787`
-- `.env.production` — Production build, uses the default or self-hosted Worker URL
-- Self-hosters: set `VITE_API_ENDPOINT` to your own Worker URL
+- `.env` — gitignored, personal dev config
+- `.env.production` — committed, prod URLs
+- `.env.example` — committed, dev defaults template
 
 ## Project Structure
 
@@ -71,10 +70,11 @@ pnpm test       # Unit + component tests
 
 ```bash
 cd worker
-pnpm dev        # Local dev (Miniflare + preview-kv)
-pnpm build      # Build
-pnpm typecheck  # Type check
-pnpm test       # Unit + integration tests (Vitest + Miniflare)
+pnpm dev          # Local dev (Miniflare local KV)
+pnpm dev:remote   # Local dev (remote dev KV)
+pnpm build        # Build (dry-run, prod config)
+pnpm typecheck    # Type check
+pnpm test         # Unit + integration tests (Vitest + Miniflare)
 ```
 
 ### PWA
@@ -89,12 +89,20 @@ pnpm test
 
 ### Dev vs Production
 
-| Mode | Commands | API Endpoint | KV |
-|------|----------|-------------|-----|
-| Dev | `cd worker && pnpm dev` + `cd extension && pnpm dev` | `localhost:8787` | preview-kv |
-| Prod | `cd extension && pnpm build` | prod Worker | prod-kv |
+From the project root:
 
-Run Worker and Extension in separate terminals during development. Data writes go to preview-kv, keeping the production environment clean.
+| Script | Worker | KV | Use case |
+|--------|--------|-----|----------|
+| `pnpm dev` | `localhost:8787` | Local Miniflare | Daily development |
+| `pnpm dev:remote` | `localhost:8787` | Remote dev KV | Test with real KV |
+| `pnpm deploy:prod` | Cloudflare | Prod KV | Deploy production |
+
+Utility scripts:
+
+| Script | Description |
+|--------|-------------|
+| `pnpm clean:kv` | Clear local Miniflare KV data |
+| `pnpm clean:kv:dev` | Clear remote dev KV data |
 
 ## E2E Testing
 
@@ -214,7 +222,7 @@ Every push/PR triggers:
 - All book data defaults to not-shared; users must explicitly opt-in.
 - Data is encrypted client-side (AES-256-GCM) before upload.
 - Never hardcode keys or sensitive information in source code.
-- `.env`, `.dev.vars`, and similar files must not be committed to git.
+- `.env`, `.dev.vars`, and files containing secrets must not be committed to git. (`.env.production` is committed because it only contains public URLs.)
 - Content Script only reads publicly visible book information — never touch account credentials.
 
 ## Self-Hosting
