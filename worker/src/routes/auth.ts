@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
-import { kvKeys, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { kvKeys, TOKEN_TTL_SECONDS, type RawFamilyRecord, normalizeFamilyRecord } from "../kv/schema";
 import { isValidFamilyId } from "../utils/validation";
 import { getOrGenerateAuthToken } from "../middleware/auth";
 
@@ -52,7 +52,21 @@ authRoutes.post("/hash", async (c) => {
   const hash = await crypto.subtle.digest("SHA-256", encoded);
   const userId = bufferToHex(hash);
 
-  return c.json({ data: { userId } });
+  // Look up family membership
+  let existingFamilyId: string | null = null;
+  let memberCount = 0;
+
+  const familyId = await c.env.KV.get(kvKeys.member(userId));
+  if (familyId) {
+    existingFamilyId = familyId;
+    const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
+    if (raw) {
+      const record = normalizeFamilyRecord(raw);
+      memberCount = record.members.length;
+    }
+  }
+
+  return c.json({ data: { userId, existingFamilyId, memberCount } });
 });
 
 // POST /api/auth/refresh — refresh auth token (public route, uses membership as auth)

@@ -115,7 +115,7 @@ export class ApiClient {
 
   // --- Auth ---
 
-  async hashEmail(email: string): Promise<ApiResponse<{ userId: string }>> {
+  async hashEmail(email: string): Promise<ApiResponse<{ userId: string; existingFamilyId: string | null; memberCount: number }>> {
     return this.request("/api/auth/hash", {
       method: "POST",
       body: JSON.stringify({ email }),
@@ -421,7 +421,7 @@ export class ApiClient {
       // Recovery also failed — truly cannot access this family, clear all data
       await chrome.storage.local.remove(["familyId", "encryptionKey"]);
       try {
-        await chrome.storage.sync.remove(["familyId"]);
+        await chrome.storage.sync.remove(["familyId", "encryptionKey"]);
       } catch {
         // sync storage may not be available in all contexts
       }

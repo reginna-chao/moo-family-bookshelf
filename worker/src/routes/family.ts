@@ -44,6 +44,20 @@ familyRoutes.post("/", async (c) => {
     );
   }
 
+  // Prevent duplicate family creation — user must leave existing family first
+  const existingFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
+  if (existingFamilyId) {
+    const oldRaw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(existingFamilyId), "json");
+    if (oldRaw) {
+      return c.json(
+        { error: { code: "ALREADY_IN_FAMILY", message: "已有家庭群組，無法再建立新的" } },
+        409,
+      );
+    }
+    // Orphaned member key (family record missing) — clean up and proceed
+    await c.env.KV.delete(kvKeys.member(body.userId));
+  }
+
   const member: FamilyMember = { userId: body.userId, displayName };
 
   const record = {

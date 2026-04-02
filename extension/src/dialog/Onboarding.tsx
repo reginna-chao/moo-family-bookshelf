@@ -11,6 +11,7 @@ type OnboardingState =
   | "welcome"
   | "idle"
   | "creating"
+  | "recovering"
   | "created"
   | "joining"
   | "syncing-books"
@@ -49,6 +50,122 @@ async function migratePersonalBooksCache(
   }
 }
 
+/** Retrieve the encryption key from sync storage (falls back to local). */
+function getSyncedEncryptionKey(): Promise<string | null> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: "GET_ENCRYPTION_KEY" },
+      (res: { encryptionKey?: unknown } | undefined) => {
+        const key = res?.encryptionKey;
+        resolve(typeof key === "string" ? key : null);
+      },
+    );
+  });
+}
+
+interface RecoveryResult {
+  recovered: boolean;
+}
+
+/**
+ * Attempt to rejoin an existing family using the synced encryption key.
+ * Returns { recovered: true } on success, { recovered: false } if the key
+ * is unavailable or the join request fails.
+ */
+async function tryAutoRecovery(opts: {
+  familyId: string;
+  userId: string;
+  displayName: string;
+  apiClient: ApiClient;
+  autoSetup: ReturnType<typeof useAutoSetup>;
+  onFamilyJoined: (familyId: string, userId: string) => void;
+}): Promise<RecoveryResult> {
+  const encryptionKey = await getSyncedEncryptionKey();
+  if (!encryptionKey) return { recovered: false };
+
+  const joinRes = await opts.apiClient.joinFamily(opts.familyId, opts.userId, opts.displayName);
+  if (joinRes.error) return { recovered: false };
+
+  const joinData = joinRes.data as (FamilyGroup & { authToken?: string; expiresAt?: number }) | undefined;
+
+  chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: opts.familyId });
+  chrome.runtime.sendMessage({ type: "SET_ENCRYPTION_KEY", encryptionKey });
+  const storageData: Record<string, unknown> = {
+    userId: opts.userId,
+    encryptionKey,
+    authToken: joinData?.authToken,
+  };
+  if (joinData?.expiresAt) {
+    storageData.tokenExpiresAt = joinData.expiresAt;
+  }
+  await chrome.storage.local.set(storageData);
+  await migratePersonalBooksCache(encryptionKey, opts.userId, opts.apiClient);
+
+  if (joinData?.authToken) {
+    opts.apiClient.setAuthToken(joinData.authToken);
+  }
+
+  await opts.autoSetup.syncBooks({ userId: opts.userId, apiClient: opts.apiClient });
+  opts.onFamilyJoined(opts.familyId, opts.userId);
+  return { recovered: true };
+}
+
+interface CreateFamilyResult {
+  familyId: string;
+  userId: string;
+  syncCode: string;
+  authToken?: string;
+}
+
+/**
+ * Create a new family on the backend and persist all credentials locally.
+ * Backend auto-cleans any solo-member old family for this userId.
+ */
+async function createNewFamily(opts: {
+  userId: string;
+  displayName: string;
+  apiClient: ApiClient;
+}): Promise<CreateFamilyResult> {
+  const response = await opts.apiClient.createFamily(opts.userId, opts.displayName);
+  if (response.error) throw new Error(response.error.message);
+  if (!response.data) throw new Error("伺服器未回傳資料");
+
+  const data = response.data as FamilyGroup & { authToken?: string; expiresAt?: number };
+  const familyId = data.familyId;
+  const key = await generateKey();
+  const keyString = await exportKey(key);
+
+  const isCustomEndpoint = opts.apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
+  const syncCode = encodeSyncCode({
+    familyId,
+    encryptionKey: keyString,
+    apiHost: isCustomEndpoint ? opts.apiClient.getEndpoint() : undefined,
+  });
+
+  chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId });
+  chrome.runtime.sendMessage({ type: "SET_ENCRYPTION_KEY", encryptionKey: keyString });
+  const storageData: Record<string, unknown> = {
+    userId: opts.userId,
+    encryptionKey: keyString,
+    authToken: data.authToken,
+  };
+  if (data.expiresAt) {
+    storageData.tokenExpiresAt = data.expiresAt;
+  }
+  await chrome.storage.local.set(storageData);
+  await migratePersonalBooksCache(keyString, opts.userId, opts.apiClient);
+
+  if (data.authToken) {
+    opts.apiClient.setAuthToken(data.authToken);
+  }
+
+  if (isCustomEndpoint) {
+    opts.apiClient.updateFamilyEndpoint(familyId, opts.apiClient.getEndpoint()).catch(() => {});
+  }
+
+  return { familyId, userId: opts.userId, syncCode, authToken: data.authToken };
+}
+
 export interface OnboardingProps {
   onFamilyJoined: (familyId: string, userId: string) => void;
   apiClient: ApiClient;
@@ -85,6 +202,63 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
 
     setUserEmail(result.email);
     setUserDisplayName(result.displayName);
+
+    // Attempt auto-recovery or auto-create for returning users
+    try {
+      const hashRes = await apiClient.hashEmail(result.email);
+      if (!hashRes.error && hashRes.data) {
+        const { userId, existingFamilyId, memberCount } = hashRes.data;
+        if (existingFamilyId && memberCount > 0) {
+          // Try sync-key recovery first
+          setState("recovering");
+          const { recovered } = await tryAutoRecovery({
+            familyId: existingFamilyId,
+            userId,
+            displayName: result.displayName,
+            apiClient,
+            autoSetup,
+            onFamilyJoined,
+          });
+          if (recovered) return;
+
+          // No sync key — decide based on member count
+          if (memberCount === 1) {
+            // Solo member: rejoin existing family with a fresh encryption key
+            const joinRes = await apiClient.joinFamily(existingFamilyId, userId, result.displayName);
+            if (!joinRes.error) {
+              const joinData = joinRes.data as (FamilyGroup & { authToken?: string; expiresAt?: number }) | undefined;
+              const newKey = await generateKey();
+              const newKeyString = await exportKey(newKey);
+
+              chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: existingFamilyId });
+              chrome.runtime.sendMessage({ type: "SET_ENCRYPTION_KEY", encryptionKey: newKeyString });
+              const storageData: Record<string, unknown> = {
+                userId,
+                encryptionKey: newKeyString,
+                authToken: joinData?.authToken,
+              };
+              if (joinData?.expiresAt) {
+                storageData.tokenExpiresAt = joinData.expiresAt;
+              }
+              await chrome.storage.local.set(storageData);
+
+              if (joinData?.authToken) {
+                apiClient.setAuthToken(joinData.authToken);
+              }
+
+              setState("syncing-books");
+              await autoSetup.syncBooks({ userId, apiClient });
+              onFamilyJoined(existingFamilyId, userId);
+              return;
+            }
+          }
+          // Multi-member: need sync code — fall through to idle view
+        }
+      }
+    } catch {
+      // Recovery/auto-create failed — fall through to normal onboarding
+    }
+
     setState("idle");
   };
 
@@ -101,52 +275,69 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         return;
       }
       const userId = hashRes.data?.userId ?? "";
-      const response = await apiClient.createFamily(userId, userDisplayName);
-      if (response.error) {
-        setErrorMessage(response.error.message);
-        setState("error");
-        return;
+      const existingFamilyId = hashRes.data?.existingFamilyId ?? null;
+      const memberCount = hashRes.data?.memberCount ?? 0;
+
+      // Auto-recovery: user already belongs to a family
+      if (existingFamilyId && memberCount > 0) {
+        setState("recovering");
+        const { recovered } = await tryAutoRecovery({
+          familyId: existingFamilyId,
+          userId,
+          displayName: userDisplayName,
+          apiClient,
+          autoSetup,
+          onFamilyJoined,
+        });
+        if (recovered) return;
+
+        // Recovery failed (no sync key) — decide based on member count
+        if (memberCount > 1) {
+          setErrorMessage("你已有家庭群組，請向家人索取同步碼重新加入，或輸入同步碼加入。");
+          setState("error");
+          return;
+        }
+        // Solo member, no key — rejoin existing family with fresh key
+        const joinRes = await apiClient.joinFamily(existingFamilyId, userId, userDisplayName);
+        if (!joinRes.error) {
+          const joinData = joinRes.data as (FamilyGroup & { authToken?: string; expiresAt?: number }) | undefined;
+          const newKey = await generateKey();
+          const newKeyString = await exportKey(newKey);
+
+          chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: existingFamilyId });
+          chrome.runtime.sendMessage({ type: "SET_ENCRYPTION_KEY", encryptionKey: newKeyString });
+          const storageData: Record<string, unknown> = {
+            userId,
+            encryptionKey: newKeyString,
+            authToken: joinData?.authToken,
+          };
+          if (joinData?.expiresAt) {
+            storageData.tokenExpiresAt = joinData.expiresAt;
+          }
+          await chrome.storage.local.set(storageData);
+
+          if (joinData?.authToken) {
+            apiClient.setAuthToken(joinData.authToken);
+          }
+
+          setState("syncing-books");
+          await autoSetup.syncBooks({ userId, apiClient });
+          onFamilyJoined(existingFamilyId, userId);
+          return;
+        }
+        // Join failed — fall through to create new family
+        setState("creating");
       }
 
-      if (!response.data) {
-        setErrorMessage("伺服器未回傳資料");
-        setState("error");
-        return;
-      }
-      const data = response.data as FamilyGroup & { authToken?: string; expiresAt?: number };
-      const familyId = data.familyId;
-      const key = await generateKey();
-      const keyString = await exportKey(key);
-
-      const isCustomEndpoint = apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
-      const syncCode = encodeSyncCode({
-        familyId,
-        encryptionKey: keyString,
-        apiHost: isCustomEndpoint ? apiClient.getEndpoint() : undefined,
+      const created = await createNewFamily({
+        userId,
+        displayName: userDisplayName,
+        apiClient,
       });
 
-      chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId });
-      const storageData: Record<string, unknown> = { userId, encryptionKey: keyString, authToken: data.authToken };
-      if (data.expiresAt) {
-        storageData.tokenExpiresAt = data.expiresAt;
-      }
-      await chrome.storage.local.set(storageData);
-      await migratePersonalBooksCache(keyString, userId, apiClient);
-
-      if (data.authToken) {
-        apiClient.setAuthToken(data.authToken);
-      }
-
-      // Store custom endpoint on the server so FamilySettings endpoint sync
-      // does not reset it to the default. Fire-and-forget: failure is non-fatal
-      // because the sync code already encodes the @host for invited members.
-      if (isCustomEndpoint) {
-        apiClient.updateFamilyEndpoint(familyId, apiClient.getEndpoint()).catch(() => {});
-      }
-
-      setGeneratedSyncCode(syncCode);
-      setCreatedFamilyId(familyId);
-      setCreatedUserId(userId);
+      setGeneratedSyncCode(created.syncCode);
+      setCreatedFamilyId(created.familyId);
+      setCreatedUserId(created.userId);
       setState("created");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
@@ -204,6 +395,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       const joinData = response.data as (FamilyGroup & { authToken?: string; expiresAt?: number }) | undefined;
 
       chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: decoded.familyId });
+      chrome.runtime.sendMessage({ type: "SET_ENCRYPTION_KEY", encryptionKey: decoded.encryptionKey });
       const joinStorageData: Record<string, unknown> = {
         userId,
         encryptionKey: decoded.encryptionKey,
@@ -255,11 +447,13 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       ? autoSetup.phaseMessage
       : state === "syncing-books"
         ? "正在同步書單..."
-        : "";
+        : state === "recovering"
+          ? "正在恢復家庭資料..."
+          : "";
 
   const effectiveState = autoSetup.phase === "error" ? "error" : state;
   const effectiveError = autoSetup.phase === "error" ? autoSetup.errorMessage : errorMessage;
-  const isProcessing = effectiveState === "creating" || effectiveState === "joining" || effectiveState === "syncing-books";
+  const isProcessing = effectiveState === "creating" || effectiveState === "joining" || effectiveState === "syncing-books" || effectiveState === "recovering";
 
   const renderContent = () => {
     if (effectiveState === "welcome") return <WelcomeView onStart={handleStart} hasUsedBefore={hasUsedBefore} />;
@@ -288,7 +482,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
 
   return (
     <div style={{ position: "relative", minHeight: 200 }}>
-      {(isAutoSetupActive || state === "syncing-books") && overlayMessage && (
+      {(isAutoSetupActive || state === "syncing-books" || state === "recovering") && overlayMessage && (
         <LoadingOverlay message={overlayMessage} />
       )}
       {renderContent()}

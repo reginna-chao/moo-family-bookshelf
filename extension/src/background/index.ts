@@ -6,16 +6,16 @@
  * - familyId: written to BOTH chrome.storage.sync and chrome.storage.local.
  *   Read from sync first, falling back to local. This enables multi-device sync
  *   for users signed into the same Google account.
- * - encryptionKey: local ONLY. Never synced to Google Cloud to prevent key
- *   exposure if the Google account is compromised. Cross-device setup uses
- *   the sync code mechanism instead.
+ * - encryptionKey: written to BOTH chrome.storage.sync and chrome.storage.local.
+ *   Read from sync first, falling back to local. This enables automatic recovery
+ *   after extension reinstall (sync storage survives uninstall/reinstall).
  * - apiEndpoint: local only (different devices may use different endpoints).
  */
 
 import { BoolFlag } from "../api/client";
 
 /** Keys that are synced across devices via chrome.storage.sync */
-const SYNCED_KEYS = ["familyId"] as const;
+const SYNCED_KEYS = ["familyId", "encryptionKey"] as const;
 
 /** Alarm name for scheduled background book sync */
 const BOOK_SYNC_ALARM_NAME = "bookSync";
@@ -101,9 +101,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "GET_ENCRYPTION_KEY") {
+    getWithSyncFallback("encryptionKey", (value) => {
+      sendResponse({ encryptionKey: value ?? null });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_ENCRYPTION_KEY") {
+    chrome.storage.sync.set({ encryptionKey: message.encryptionKey }, () => {
+      chrome.storage.local.set({ encryptionKey: message.encryptionKey }, () => {
+        sendResponse({ ok: true });
+      });
+    });
+    return true;
+  }
+
   if (message.type === "CLEAR_FAMILY_ID") {
     chrome.storage.sync.remove(SYNCED_KEYS as unknown as string[], () => {
-      chrome.storage.local.remove([...SYNCED_KEYS, "encryptionKey", "authToken", "tokenExpiresAt"], () => {
+      chrome.storage.local.remove([...SYNCED_KEYS, "authToken", "tokenExpiresAt"], () => {
         sendResponse({ ok: true });
       });
     });

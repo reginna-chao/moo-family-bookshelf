@@ -832,6 +832,120 @@ describe("Onboarding", () => {
     });
   });
 
+  describe("auto-recovery flow", () => {
+    /**
+     * Helper to mock chrome.runtime.sendMessage so GET_ENCRYPTION_KEY
+     * returns a given encryptionKey value.
+     */
+    function mockEncryptionKeyMessage(encryptionKey: string | null) {
+      vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+        (...args: unknown[]) => {
+          const msg = args[0] as Record<string, unknown>;
+          const callback = args[1] as ((response: unknown) => void) | undefined;
+          if (msg.type === "GET_ENCRYPTION_KEY" && typeof callback === "function") {
+            callback({ encryptionKey });
+          }
+          return Promise.resolve();
+        },
+      );
+    }
+
+    it("auto-recovers when existingFamilyId is returned and encryption key is available", async () => {
+      const onFamilyJoined = vi.fn();
+      const mockApi = createMockApiClient({
+        hashEmail: vi.fn().mockResolvedValue({
+          data: { userId: "a".repeat(64), existingFamilyId: "fam-existing", memberCount: 2 },
+        }),
+        joinFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-existing",
+            members: [],
+            createdAt: "2026-01-01",
+            authToken: "recovery-token",
+          },
+        }),
+      });
+
+      mockEncryptionKeyMessage("synced-key-abc");
+
+      renderOnboarding({ onFamilyJoined, apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      // Wait for the create button in case early recovery did not trigger
+      // The early recovery in handleStart should fire and call onFamilyJoined
+      await waitFor(() => {
+        expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", "a".repeat(64));
+      });
+
+      // Should have called joinFamily with the existing family
+      expect(mockApi.joinFamily).toHaveBeenCalledWith(
+        "fam-existing",
+        "a".repeat(64),
+        expect.any(String),
+      );
+    });
+
+    it("rejoins existing family for solo member without encryption key", async () => {
+      const onFamilyJoined = vi.fn();
+      const mockApi = createMockApiClient({
+        hashEmail: vi.fn().mockResolvedValue({
+          data: { userId: "a".repeat(64), existingFamilyId: "fam-solo", memberCount: 1 },
+        }),
+        joinFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-solo",
+            members: [{ userId: "a".repeat(64), displayName: "Test" }],
+            createdAt: "2026-01-01",
+            authToken: "rejoined-token",
+          },
+        }),
+      });
+
+      mockEncryptionKeyMessage(null);
+
+      renderOnboarding({ apiClient: mockApi, onFamilyJoined });
+
+      await clickStartAndWait();
+
+      // Solo member + no key: handleStart rejoins existing family with fresh key
+      await waitFor(() => {
+        expect(mockApi.joinFamily).toHaveBeenCalledWith("fam-solo", "a".repeat(64), expect.any(String));
+        expect(onFamilyJoined).toHaveBeenCalledWith("fam-solo", "a".repeat(64));
+      });
+    });
+
+    it("shows error for multi-member family without encryption key", async () => {
+      const mockApi = createMockApiClient({
+        hashEmail: vi.fn().mockResolvedValue({
+          data: { userId: "a".repeat(64), existingFamilyId: "fam-multi", memberCount: 3 },
+        }),
+      });
+
+      mockEncryptionKeyMessage(null);
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      // Should show idle state (early recovery skips to idle for multi-member without key)
+      await waitFor(() => {
+        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
+      });
+
+      // Click create — should hit multi-member check and show error
+      await act(async () => {
+        fireEvent.click(screen.getByText("建立家庭公開書櫃"));
+        await flushMicrotasks();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("發生錯誤")).toBeInTheDocument();
+        expect(screen.getByText("你已有家庭群組，請向家人索取同步碼重新加入，或輸入同步碼加入。")).toBeInTheDocument();
+      });
+    });
+  });
+
   describe("copy sync code", () => {
     it("copies sync code to clipboard", async () => {
       const mockClipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
