@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n ext,worker,pwa -c blue,green,magenta \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev\" \"pnpm --filter moo-family-bookshelf-pwa dev\"",
-    "dev:remote": "concurrently -n ext,worker,pwa -c blue,green,magenta \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev:remote\" \"pnpm --filter moo-family-bookshelf-pwa dev\"",
+    "dev": "concurrently -n ext,worker,pwa,info -c blue,green,magenta,yellow \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev\" \"pnpm --filter moo-family-bookshelf-pwa dev\" \"node scripts/dev-info.mjs\"",
+    "dev:remote": "concurrently -n ext,worker,pwa,info -c blue,green,magenta,yellow \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev:remote\" \"pnpm --filter moo-family-bookshelf-pwa dev\" \"node scripts/dev-info.mjs --remote\"",
     "deploy:prod": "pnpm --filter moo-family-bookshelf-worker deploy",
     "dev:extension": "pnpm --filter moo-family-bookshelf-extension dev",
     "dev:worker": "pnpm --filter moo-family-bookshelf-worker dev",
