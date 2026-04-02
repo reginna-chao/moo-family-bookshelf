@@ -10,6 +10,7 @@
     "dev:worker": "pnpm --filter moo-family-bookshelf-worker dev",
     "dev:pwa": "pnpm --filter moo-family-bookshelf-pwa dev",
     "build": "pnpm --filter moo-family-bookshelf-extension build && pnpm --filter moo-family-bookshelf-worker build",
+    "build:dev": "pnpm --filter moo-family-bookshelf-extension build:dev && pnpm --filter moo-family-bookshelf-pwa build:dev && pnpm --filter moo-family-bookshelf-worker build:dev",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",

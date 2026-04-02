@@ -11,6 +11,7 @@
     "dev": "rimraf dist && concurrently pnpm:dev:*",
     "sync-version": "tsx scripts/sync-version.ts",
     "build": "tsx scripts/sync-version.ts && tsc --noEmit && vite build && vite build --config vite.config.content.ts && vite build --config vite.config.content-modules.ts && vite build --config vite.config.fiber-bridge.ts && tsx scripts/verify-build.ts",
+    "build:dev": "tsx scripts/sync-version.ts && tsc --noEmit && vite build --mode dev && vite build --mode dev --config vite.config.content.ts && vite build --mode dev --config vite.config.content-modules.ts && vite build --mode dev --config vite.config.fiber-bridge.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
