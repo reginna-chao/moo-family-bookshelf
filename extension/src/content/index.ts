@@ -11,15 +11,15 @@
 // reads DOM elements and returns data, with no shared mutable state.
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
 import { isExtensionContextValid, cleanupMooFamilyUI, MOO_ELEMENT_IDS } from "../utils/extensionContext";
-import { DEFAULT_API_ENDPOINT } from "../constants";
 import { waitForPageReady } from "./pageReady";
+import { getAppEnv } from "../utils/appEnv";
 
-const IS_DEV_MODE = /^https?:\/\/localhost(:|$)/.test(DEFAULT_API_ENDPOINT);
+const APP_ENV = getAppEnv();
 
-let devStyleInjected = false;
-function injectDevRainbowStyle(): void {
-  if (devStyleInjected) return;
-  devStyleInjected = true;
+let envStyleInjected = false;
+function injectEnvStyle(): void {
+  if (envStyleInjected) return;
+  envStyleInjected = true;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -31,12 +31,15 @@ function injectDevRainbowStyle(): void {
     @keyframes moo-dev-rainbow {
       to { --moo-angle: 360deg; }
     }
-    #${MOO_ELEMENT_IDS.button}.moo-dev-mode {
+    #${MOO_ELEMENT_IDS.button}.moo-env-local {
       border: 3px solid transparent !important;
       background:
         linear-gradient(#2563eb, #2563eb) padding-box,
         conic-gradient(from var(--moo-angle), #ff0000, #ff8800, #ffff00, #00ff00, #0088ff, #8800ff, #ff0000) border-box !important;
       animation: moo-dev-rainbow 2s linear infinite;
+    }
+    #${MOO_ELEMENT_IDS.button}.moo-env-dev {
+      border: 2px solid #93c5fd !important;
     }
   `;
   document.head.appendChild(style);
@@ -71,9 +74,9 @@ function injectFamilyBookshelfButton(): void {
     "font-family: -apple-system, BlinkMacSystemFont, sans-serif",
   ].join(";");
 
-  if (IS_DEV_MODE) {
-    injectDevRainbowStyle();
-    button.classList.add("moo-dev-mode");
+  if (APP_ENV !== "prod") {
+    injectEnvStyle();
+    button.classList.add(`moo-env-${APP_ENV}`);
   }
 
   button.addEventListener("click", toggleDialog);

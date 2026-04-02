@@ -3,6 +3,7 @@ import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 import { ApiClient } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
 import { REMEMBERED_LOGOUT_KEY } from "@/hooks/useAuth";
+import { getAppEnv } from "@/utils/appEnv";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
@@ -14,6 +15,7 @@ interface LandingPageProps {
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const APP_ENV = getAppEnv();
 
 export function LandingPage({ onAuth, apiClient, initialSyncCode = "", externalError = "" }: LandingPageProps) {
   const [syncCode, setSyncCode] = useState(initialSyncCode);
@@ -122,8 +124,21 @@ export function LandingPage({ onAuth, apiClient, initialSyncCode = "", externalE
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
-      <img src="/icon.svg" alt="牧家書櫃" className="w-16 h-16 rounded-2xl mb-4" />
-      <h1 className="text-3xl font-bold text-gray-900 mb-2">牧家書櫃</h1>
+      <img src={APP_ENV !== "prod" ? "/dev/icon.svg" : "/icon.svg"} alt="牧家書櫃" className="w-16 h-16 rounded-2xl mb-4" />
+      <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+        牧家書櫃
+        {APP_ENV !== "prod" && (
+          <span
+            className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+              APP_ENV === "local"
+                ? "bg-gradient-to-r from-red-400 via-yellow-400 to-blue-400 text-white"
+                : "bg-blue-100 text-blue-700 border border-blue-300"
+            }`}
+          >
+            {APP_ENV === "local" ? "LOCAL" : "DEV"}
+          </span>
+        )}
+      </h1>
       <p className="text-gray-500 mb-8 text-center">
         家庭共享書櫃 — 與家人分享你的讀墨藏書
       </p>

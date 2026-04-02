@@ -17,6 +17,7 @@ export default defineConfig({
       "@": resolve(__dirname, "src"),
     },
   },
+  publicDir: false,
   build: {
     sourcemap: process.argv.includes("--watch") ? "inline" : false,
     emptyOutDir: false,
