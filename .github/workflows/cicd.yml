@@ -261,7 +261,7 @@ jobs:
       - name: Build PWA (Dev)
         run: pnpm --filter moo-family-bookshelf-pwa build
         env:
-          VITE_API_ENDPOINT: https://moo-family-bookshelf-dev.rcworkadd.workers.dev
+          VITE_API_ENDPOINT: https://moo-family-bookshelf-dev.rcwork.workers.dev
 
       - name: Deploy to Cloudflare Pages (Dev)
         run: npx wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf-dev
