@@ -1,14 +1,14 @@
 /**
- * Vite plugin that rewrites manifest.json for dev builds:
- * - Appends " (dev)" to name and short_name
- * - Swaps icon paths to dev/ variants
+ * Vite plugin that rewrites manifest.json and index.html for dev builds:
+ * - Appends " (dev)" to manifest name and short_name
+ * - Swaps icon paths to dev/ variants in both manifest and HTML
+ * - Updates HTML <title> with (dev) suffix
  *
- * Also copies dev/ icon files into the build output.
- * Only active when mode === "dev" (i.e., pnpm build:dev).
+ * Only active when mode === "dev" or "development" (i.e., pnpm build:dev / pnpm dev).
  */
-import { readFileSync, writeFileSync, cpSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import type { Plugin } from "vite";
+import type { Plugin, IndexHtmlTransformResult } from "vite";
 
 export function devManifest(): Plugin {
   let outDir: string;
@@ -20,6 +20,17 @@ export function devManifest(): Plugin {
       outDir = resolve(config.root, config.build.outDir);
       isDev = config.mode === "dev" || config.mode === "development";
     },
+
+    // Rewrite index.html icon links and title for dev builds
+    transformIndexHtml(html): IndexHtmlTransformResult {
+      if (!isDev) return html;
+
+      return html
+        .replace(/href="\/icon\.svg"/g, 'href="/dev/icon.svg"')
+        .replace(/href="\/icon-192\.png"/g, 'href="/dev/icon-192.png"')
+        .replace(/<title>牧家書櫃<\/title>/, "<title>牧家書櫃 (dev)</title>");
+    },
+
     closeBundle() {
       if (!isDev) return;
 
@@ -43,7 +54,6 @@ export function devManifest(): Plugin {
       const icons = manifest.icons as Array<{ src: string }> | undefined;
       if (icons) {
         for (const icon of icons) {
-          // /icon.svg → /dev/icon.svg, /icon-192.png → /dev/icon-192.png
           icon.src = icon.src.replace(/^\//, "/dev/");
         }
       }

@@ -9,6 +9,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { PwaCreateNotice } from "./components/PwaCreateNotice";
 import { FamilyDataProvider } from "./hooks/useFamilyData";
+import { getAppEnv } from "./utils/appEnv";
 
 type Page = "family-shelf" | "personal-shelf" | "settings";
 
@@ -35,6 +36,8 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
 }
+
+const APP_ENV = getAppEnv();
 
 const NAV_ITEMS: NavItem[] = [
   { page: "family-shelf", label: "家庭書櫃", icon: Library },
@@ -176,7 +179,7 @@ export default function App() {
           aria-label="主要導覽"
           className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200"
         >
-          <div className="max-w-md mx-auto flex">
+          <div className="max-w-md mx-auto flex relative">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item.page}
@@ -192,6 +195,17 @@ export default function App() {
                 <span>{item.label}</span>
               </button>
             ))}
+            {APP_ENV !== "prod" && (
+              <span
+                className={`absolute -top-2 right-2 text-[10px] font-bold px-1.5 py-0 rounded-full leading-4 ${
+                  APP_ENV === "local"
+                    ? "bg-gradient-to-r from-red-400 via-yellow-400 to-blue-400 text-white"
+                    : "bg-blue-100 text-blue-700 border border-blue-300"
+                }`}
+              >
+                {APP_ENV === "local" ? "LOCAL" : "DEV"}
+              </span>
+            )}
           </div>
         </nav>
       </div>
