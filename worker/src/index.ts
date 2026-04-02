@@ -23,8 +23,12 @@ export function isAllowedOrigin(origin: string, devMode?: boolean): boolean {
   if (/^https:\/\/[a-zA-Z0-9-]+\.readmoo\.com$/.test(origin)) return true;
 
   // PWA on Cloudflare Pages (production + preview deploys)
-  if (origin === "https://moo-family-bookshelf-pwa.pages.dev") return true;
-  if (/^https:\/\/[a-z0-9]+\.moo-family-bookshelf-pwa\.pages\.dev$/.test(origin)) return true;
+  if (origin === "https://moo-family-bookshelf.pages.dev") return true;
+  if (/^https:\/\/[a-z0-9]+\.moo-family-bookshelf\.pages\.dev$/.test(origin)) return true;
+
+  // PWA on Cloudflare Pages (dev + preview deploys)
+  if (origin === "https://moo-family-bookshelf-dev.pages.dev") return true;
+  if (/^https:\/\/[a-z0-9]+\.moo-family-bookshelf-dev\.pages\.dev$/.test(origin)) return true;
 
   // localhost (any port, http or https, dev only — gated behind DEV_MODE binding)
   if (devMode && /^https?:\/\/localhost(:\d+)?$/.test(origin)) return true;

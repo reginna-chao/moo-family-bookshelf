@@ -38,8 +38,10 @@ describe("isAllowedOrigin", () => {
     "https://read.readmoo.com",
     "https://readmoo.com",
     "https://store.readmoo.com",
-    "https://moo-family-bookshelf-pwa.pages.dev",
-    "https://abc123.moo-family-bookshelf-pwa.pages.dev",
+    "https://moo-family-bookshelf.pages.dev",
+    "https://abc123.moo-family-bookshelf.pages.dev",
+    "https://moo-family-bookshelf-dev.pages.dev",
+    "https://abc123.moo-family-bookshelf-dev.pages.dev",
     "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
   ];
 
