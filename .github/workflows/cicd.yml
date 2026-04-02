@@ -3,7 +3,7 @@ name: CI/CD
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ["v*"]
   pull_request:
     branches: [main]
 
@@ -264,7 +264,7 @@ jobs:
           VITE_API_ENDPOINT: https://moo-family-bookshelf-dev.rcworkadd.workers.dev
 
       - name: Deploy to Cloudflare Pages (Dev)
-        run: npx wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf --branch=dev
+        run: npx wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf-dev
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -349,7 +349,7 @@ jobs:
         run: pnpm --filter moo-family-bookshelf-pwa build
 
       - name: Deploy to Cloudflare Pages (Prod)
-        run: npx wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf --branch=main
+        run: npx wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
