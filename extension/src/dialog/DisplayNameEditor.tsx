@@ -45,6 +45,14 @@ export function DisplayNameEditor({
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Enter" && nameSaveState !== "saving") {
+                  void handleConfirm();
+                } else if (e.key === "Escape" && nameSaveState !== "saving") {
+                  handleCancel();
+                }
+              }}
               maxLength={20}
               placeholder="輸入顯示名稱"
               style={{
