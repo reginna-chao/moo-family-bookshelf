@@ -119,6 +119,17 @@ app.use("/api/*", authMiddleware);
 // Health check
 app.get("/", (c) => c.json({ status: "ok", service: "moo-family-bookshelf" }));
 
+/**
+ * API version endpoint for client compatibility checks.
+ * Bump API_VERSION when making breaking API changes.
+ */
+const API_VERSION = 1;
+const SERVER_VERSION = "0.1.0";
+
+app.get("/api/version", (c) =>
+  c.json({ data: { apiVersion: API_VERSION, serverVersion: SERVER_VERSION } }),
+);
+
 // Routes
 app.route("/api/user", userRoutes);
 app.route("/api/family", familyRoutes);

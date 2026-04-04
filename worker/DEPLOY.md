@@ -56,16 +56,87 @@ pnpm deploy
 https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev
 ```
 
-### 6. 設定 Extension / PWA
+### 6. 設定 Extension / PWA 使用自訂端點
 
-在 Extension 設定頁面中填入你的 Worker URL。
+自訂 API 端點不會顯示在一般使用者介面中，需透過開發者工具手動設定。
 
-或者在建立家庭時，同步碼會自動帶入你的 API 端點：
+#### Extension（Chrome 開發者工具）
+
+1. 在讀墨頁面按 F12 開啟 DevTools
+2. 切換到 Console 分頁
+3. 執行以下指令設定端點：
+
+```js
+chrome.storage.local.set({ apiEndpoint: "https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev" });
+```
+
+查詢目前端點：
+
+```js
+chrome.storage.local.get("apiEndpoint", console.log);
+```
+
+重設為預設端點：
+
+```js
+chrome.storage.local.remove("apiEndpoint");
+```
+
+設定或重設後重新載入頁面即生效。
+
+#### PWA（瀏覽器開發者工具）
+
+1. 開啟 PWA 頁面，按 F12 開啟 DevTools
+2. 在 Console 中，先取得你的 userId（可在 Application → Local Storage 中找到 `moo_userId` 對應的值）
+3. 執行以下指令：
+
+```js
+localStorage.setItem("moo_{userId}_apiHost", "https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev");
+```
+
+將 `{userId}` 替換為實際的使用者 ID。查詢目前端點：
+
+```js
+localStorage.getItem("moo_{userId}_apiHost");
+```
+
+重設為預設：
+
+```js
+localStorage.removeItem("moo_{userId}_apiHost");
+```
+
+設定或重設後重新載入頁面即生效。
+
+#### 透過同步碼自動傳播
+
+使用自訂端點建立家庭時，同步碼會自動帶入 `@host` 後綴：
+
 ```
 moo-xxxx-yyyy@moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev
 ```
 
-家人貼上此同步碼後會自動切換到你的伺服器。
+家人貼上此同步碼後會自動切換到你的伺服器，無需手動設定。
+
+#### 管理者 API
+
+管理者也可透過 API 更新家庭端點：
+
+```bash
+curl -X PUT https://YOUR_WORKER/api/family/{familyId}/endpoint \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"apiEndpoint": "https://new-worker.example.com"}'
+```
+
+重設為預設：
+
+```bash
+curl -X PUT https://YOUR_WORKER/api/family/{familyId}/endpoint \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"apiEndpoint": null}'
+```
 
 ## 本地開發
 

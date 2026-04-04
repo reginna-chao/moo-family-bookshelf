@@ -53,6 +53,11 @@ export interface FamilyGroup {
   apiEndpoint?: string | null;
 }
 
+export interface VersionInfo {
+  apiVersion: number;
+  serverVersion: string;
+}
+
 /** Decrypted view (used by UI after decryption) */
 export interface FamilyBookshelf {
   members: Array<{
@@ -99,6 +104,18 @@ export class ApiClient {
 
   setAuthToken(token: string | null): void {
     this.authToken = token;
+  }
+
+  /** Check server API version. Returns null on network/parse errors. */
+  async checkVersion(): Promise<VersionInfo | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/version`);
+      if (!res.ok) return null;
+      const json = await res.json() as ApiResponse<VersionInfo>;
+      return json.data ?? null;
+    } catch {
+      return null;
+    }
   }
 
   // --- Auth ---

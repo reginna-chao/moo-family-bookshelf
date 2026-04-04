@@ -9,6 +9,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { PwaCreateNotice } from "./components/PwaCreateNotice";
 import { FamilyDataProvider } from "./hooks/useFamilyData";
+import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
 
 type Page = "family-shelf" | "personal-shelf" | "settings";
@@ -154,6 +155,7 @@ export default function App() {
       encryptionKey={auth.encryptionKey}
     >
       <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50">
+        <VersionWarning apiClient={apiClient} />
         <PwaCreateNotice userId={auth.userId} onDismiss={() => {}} />
         <InstallPrompt userId={auth.userId} />
         <main className="flex-1 overflow-y-auto pb-16">

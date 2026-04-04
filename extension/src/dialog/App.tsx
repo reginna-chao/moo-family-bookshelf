@@ -9,6 +9,7 @@ import { useTokenRefresh } from "./useTokenRefresh";
 import { isExtensionContextValid } from "../utils/extensionContext";
 import { FamilyDataProvider } from "./FamilyDataContext";
 import { EnvBadge } from "./EnvBadge";
+import { VersionWarning } from "./VersionWarning";
 
 type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "settings";
@@ -123,6 +124,7 @@ export function App() {
   return (
     <FamilyDataProvider familyId={familyId} userId={userId} apiClient={apiClientRef.current}>
       <div>
+        <VersionWarning apiClient={apiClientRef.current} />
         <nav style={{ display: "flex", borderBottom: "1px solid #e2e8f0", alignItems: "center" }}>
           {(
             [

@@ -5,7 +5,6 @@ import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
 import { MemberList } from "@/components/MemberList";
-import { ApiEndpointEditor } from "@/components/ApiEndpointEditor";
 import { namespacedKey, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import { useFamilyData } from "@/hooks/useFamilyData";
 
@@ -370,9 +369,6 @@ export function SettingsPage({
           基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
         </p>
 
-        <div className="mt-4">
-          <ApiEndpointEditor apiClient={apiClient} userId={userId} />
-        </div>
       </section>
 
       {/* Leave family */}

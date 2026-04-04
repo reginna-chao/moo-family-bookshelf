@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
@@ -6,7 +6,6 @@ import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
 import { DEFAULT_API_ENDPOINT, DEFAULT_PWA_URL } from "../constants";
 import { QrCodeLink } from "./QrCodeLink";
-import { ApiEndpointEditor } from "./ApiEndpointEditor";
 import { useFamilyData } from "./FamilyDataContext";
 
 export interface FamilySettingsProps {
@@ -37,7 +36,6 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [deleteState, setDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
-  const skipEndpointSync = useRef(false);
   const displayNameState = useDisplayName({ apiClient, familyId, userId });
 
   const membersLoading = membersState === "loading";
@@ -81,10 +79,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
 
   // Sync API endpoint from family record (when members data refreshes)
   useEffect(() => {
-    if (membersState !== "ready" || skipEndpointSync.current) {
-      skipEndpointSync.current = false;
-      return;
-    }
+    if (membersState !== "ready") return;
     const currentEndpoint = apiClient.getEndpoint();
     if (familyEndpoint && familyEndpoint !== currentEndpoint) {
       apiClient.setEndpoint(familyEndpoint);
@@ -287,16 +282,6 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
         </div>
       </div>
-      <ApiEndpointEditor
-        apiClient={apiClient}
-        isOwner={userId === ownerId}
-        familyEndpoint={familyEndpoint}
-        familyId={familyId}
-        onEndpointChanged={() => {
-          skipEndpointSync.current = true;
-          void fetchMembers();
-        }}
-      />
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
         {leaveError && (
           <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{leaveError}</div>

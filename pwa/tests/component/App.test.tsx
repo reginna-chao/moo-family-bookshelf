@@ -61,6 +61,10 @@ vi.mock("@/components/InstallPrompt", () => ({
   InstallPrompt: () => null,
 }));
 
+vi.mock("@/components/VersionWarning", () => ({
+  VersionWarning: () => null,
+}));
+
 import App from "@/App";
 
 describe("App", () => {
