@@ -8,7 +8,6 @@ import { DialogFooter } from "./DialogFooter";
 import { useTokenRefresh } from "./useTokenRefresh";
 import { isExtensionContextValid } from "../utils/extensionContext";
 import { FamilyDataProvider } from "./FamilyDataContext";
-import { EnvBadge } from "./EnvBadge";
 import { VersionWarning } from "./VersionWarning";
 
 type View = "loading" | "onboarding" | "main";
@@ -105,9 +104,6 @@ export function App() {
   if (view === "onboarding") {
     return (
       <div>
-        <div style={{ display: "flex", justifyContent: "flex-end", padding: "8px 12px 0" }}>
-          <EnvBadge />
-        </div>
         <Onboarding
           onFamilyJoined={handleFamilyJoined}
           apiClient={apiClientRef.current}
@@ -152,7 +148,6 @@ export function App() {
               {label}
             </button>
           ))}
-          <span style={{ padding: "0 8px", flexShrink: 0 }}><EnvBadge /></span>
         </nav>
         <div style={{ padding: 16, overflowY: "auto", maxHeight: "60vh" }}>
           <div style={{ display: activeTab === "family-shelf" ? "block" : "none" }}>

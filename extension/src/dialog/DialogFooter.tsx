@@ -1,5 +1,6 @@
 import React from "react";
 import { reportLinks } from "../config/links";
+import { EnvBadge } from "./EnvBadge";
 
 export interface DialogFooterProps {
   /** When true, only shows disclaimer and version (no report links). */
@@ -29,6 +30,7 @@ export function DialogFooter({ minimal = false }: DialogFooterProps) {
       <div>{DISCLAIMER}</div>
       <div style={{ marginTop: 2 }}>
         {VERSION}
+        <span style={{ marginLeft: 4 }}><EnvBadge /></span>
         {!minimal && (
           <>
             {" — "}
