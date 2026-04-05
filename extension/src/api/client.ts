@@ -130,29 +130,47 @@ export class ApiClient {
     }
   }
 
+  // --- HTTP helpers ---
+
+  private get<T>(path: string): Promise<ApiResponse<T>> {
+    return this.request(path);
+  }
+
+  private post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request(path, {
+      method: "POST",
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  private put<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request(path, {
+      method: "PUT",
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  private del<T>(path: string): Promise<ApiResponse<T>> {
+    return this.request(path, { method: "DELETE" });
+  }
+
   // --- Auth ---
 
   async hashEmail(email: string): Promise<ApiResponse<{ userId: string; existingFamilyId: string | null; memberCount: number }>> {
-    return this.request("/api/auth/hash", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    });
+    return this.post("/api/auth/hash", { email });
   }
 
   // --- Personal Settings ---
 
   async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
-    return this.request(`/api/user/${userId}/books`);
+    return this.get(`/api/user/${userId}/books`);
   }
 
   async updatePersonalBooks(
     userId: string,
     payload: string, // encrypted
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    return this.request(`/api/user/${userId}/books`, {
-      method: "PUT",
-      body: JSON.stringify({ payload }),
-    });
+    return this.put(`/api/user/${userId}/books`, { payload });
   }
 
   // --- Family Group ---
@@ -161,10 +179,7 @@ export class ApiClient {
     userId: string,
     displayName?: string,
   ): Promise<ApiResponse<FamilyGroup>> {
-    return this.request("/api/family", {
-      method: "POST",
-      body: JSON.stringify({ userId, displayName: displayName ?? "" }),
-    });
+    return this.post("/api/family", { userId, displayName: displayName ?? "" });
   }
 
   async joinFamily(
@@ -172,10 +187,7 @@ export class ApiClient {
     userId: string,
     displayName?: string,
   ): Promise<ApiResponse<FamilyGroup>> {
-    return this.request(`/api/family/${familyId}/join`, {
-      method: "POST",
-      body: JSON.stringify({ userId, displayName: displayName ?? "" }),
-    });
+    return this.post(`/api/family/${familyId}/join`, { userId, displayName: displayName ?? "" });
   }
 
   async updateDisplayName(
@@ -183,31 +195,21 @@ export class ApiClient {
     userId: string,
     displayName: string,
   ): Promise<ApiResponse<{ userId: string; displayName: string }>> {
-    return this.request(
-      `/api/family/${familyId}/member/${userId}/displayName`,
-      {
-        method: "PUT",
-        body: JSON.stringify({ displayName }),
-      },
-    );
+    return this.put(`/api/family/${familyId}/member/${userId}/displayName`, { displayName });
   }
 
   async leaveFamily(
     familyId: string,
     userId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    return this.request(`/api/family/${familyId}/member/${userId}`, {
-      method: "DELETE",
-    });
+    return this.del(`/api/family/${familyId}/member/${userId}`);
   }
 
   async removeMember(
     familyId: string,
     targetUserId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    return this.request(`/api/family/${familyId}/member/${targetUserId}`, {
-      method: "DELETE",
-    });
+    return this.del(`/api/family/${familyId}/member/${targetUserId}`);
   }
 
   async transferOwnership(
@@ -216,13 +218,10 @@ export class ApiClient {
     newOwnerId: string,
     clearEndpoint?: 1,
   ): Promise<ApiResponse<FamilyGroup>> {
-    return this.request(`/api/family/${familyId}/transfer`, {
-      method: "PUT",
-      body: JSON.stringify({
-        userId,
-        newOwnerId,
-        ...(clearEndpoint !== undefined && { clearEndpoint }),
-      }),
+    return this.put(`/api/family/${familyId}/transfer`, {
+      userId,
+      newOwnerId,
+      ...(clearEndpoint !== undefined && { clearEndpoint }),
     });
   }
 
@@ -230,20 +229,17 @@ export class ApiClient {
     familyId: string,
     apiEndpoint: string | null,
   ): Promise<ApiResponse<{ familyId: string; apiEndpoint: string | null }>> {
-    return this.request(`/api/family/${familyId}/endpoint`, {
-      method: "PUT",
-      body: JSON.stringify({ apiEndpoint }),
-    });
+    return this.put(`/api/family/${familyId}/endpoint`, { apiEndpoint });
   }
 
   async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
-    return this.request(`/api/family/${familyId}/members`);
+    return this.get(`/api/family/${familyId}/members`);
   }
 
   // --- Account ---
 
   async deleteAccount(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
-    return this.request(`/api/user/${userId}`, { method: "DELETE" });
+    return this.del(`/api/user/${userId}`);
   }
 
   // --- Family Bookshelf ---
@@ -251,7 +247,7 @@ export class ApiClient {
   async getFamilyBookshelf(
     familyId: string,
   ): Promise<ApiResponse<RawFamilyBookshelf>> {
-    return this.request(`/api/family/${familyId}/bookshelf`);
+    return this.get(`/api/family/${familyId}/bookshelf`);
   }
 
   // --- Internal ---

@@ -80,7 +80,7 @@ export interface RawFamilyBookshelf {
 export class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
-  private refreshToken: (() => Promise<string | null>) | null = null;
+  private tokenRefresher: (() => Promise<string | null>) | null = null;
   private refreshing: Promise<string | null> | null = null;
   /** In-flight GET request deduplication map: URL -> Promise */
   private inflightGets = new Map<string, Promise<ApiResponse<unknown>>>();
@@ -91,7 +91,7 @@ export class ApiClient {
 
   /** Register a callback that re-acquires a token on 401. */
   setTokenRefresher(fn: () => Promise<string | null>): void {
-    this.refreshToken = fn;
+    this.tokenRefresher = fn;
   }
 
   setEndpoint(url: string): void {
@@ -118,15 +118,36 @@ export class ApiClient {
     }
   }
 
+  // --- HTTP helpers ---
+
+  private get<T>(path: string): Promise<ApiResponse<T>> {
+    return this.request(path);
+  }
+
+  private post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request(path, {
+      method: "POST",
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  private put<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request(path, {
+      method: "PUT",
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  private del<T>(path: string): Promise<ApiResponse<T>> {
+    return this.request(path, { method: "DELETE" });
+  }
+
   // --- Auth ---
 
   async hashEmail(
     email: string,
   ): Promise<ApiResponse<{ userId: string }>> {
-    return this.request("/api/auth/hash", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    });
+    return this.post("/api/auth/hash", { email });
   }
 
   // --- Personal Settings ---
@@ -135,7 +156,7 @@ export class ApiClient {
     userId: string,
   ): Promise<ApiResponse<RawPersonalBooks>> {
     this.validateHexId(userId, "userId");
-    return this.request(`/api/user/${userId}/books`);
+    return this.get(`/api/user/${userId}/books`);
   }
 
   async updatePersonalBooks(
@@ -143,20 +164,14 @@ export class ApiClient {
     payload: string, // encrypted
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
-    return this.request(`/api/user/${userId}/books`, {
-      method: "PUT",
-      body: JSON.stringify({ payload }),
-    });
+    return this.put(`/api/user/${userId}/books`, { payload });
   }
 
   // --- Family Group ---
 
   async createFamily(userId: string): Promise<ApiResponse<FamilyGroup>> {
     this.validateHexId(userId, "userId");
-    return this.request("/api/family", {
-      method: "POST",
-      body: JSON.stringify({ userId }),
-    });
+    return this.post("/api/family", { userId });
   }
 
   async joinFamily(
@@ -164,10 +179,7 @@ export class ApiClient {
     userId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
-    return this.request(`/api/family/${familyId}/join`, {
-      method: "POST",
-      body: JSON.stringify({ userId }),
-    });
+    return this.post(`/api/family/${familyId}/join`, { userId });
   }
 
   async leaveFamily(
@@ -175,9 +187,7 @@ export class ApiClient {
     userId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
-    return this.request(`/api/family/${familyId}/member/${userId}`, {
-      method: "DELETE",
-    });
+    return this.del(`/api/family/${familyId}/member/${userId}`);
   }
 
   async removeMember(
@@ -185,10 +195,7 @@ export class ApiClient {
     targetUserId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(targetUserId, "targetUserId");
-    return this.request(
-      `/api/family/${familyId}/member/${targetUserId}`,
-      { method: "DELETE" },
-    );
+    return this.del(`/api/family/${familyId}/member/${targetUserId}`);
   }
 
   async transferOwnership(
@@ -198,16 +205,13 @@ export class ApiClient {
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
     this.validateHexId(newOwnerId, "newOwnerId");
-    return this.request(`/api/family/${familyId}/transfer`, {
-      method: "PUT",
-      body: JSON.stringify({ userId, newOwnerId }),
-    });
+    return this.put(`/api/family/${familyId}/transfer`, { userId, newOwnerId });
   }
 
   async getFamilyMembers(
     familyId: string,
   ): Promise<ApiResponse<FamilyGroup>> {
-    return this.request(`/api/family/${familyId}/members`);
+    return this.get(`/api/family/${familyId}/members`);
   }
 
   async updateDisplayName(
@@ -216,13 +220,7 @@ export class ApiClient {
     displayName: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
-    return this.request(
-      `/api/family/${familyId}/member/${userId}/displayName`,
-      {
-        method: "PUT",
-        body: JSON.stringify({ displayName }),
-      },
-    );
+    return this.put(`/api/family/${familyId}/member/${userId}/displayName`, { displayName });
   }
 
   // --- Account ---
@@ -231,7 +229,7 @@ export class ApiClient {
     userId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
-    return this.request(`/api/user/${userId}`, { method: "DELETE" });
+    return this.del(`/api/user/${userId}`);
   }
 
   // --- Family Bookshelf ---
@@ -239,7 +237,7 @@ export class ApiClient {
   async getFamilyBookshelf(
     familyId: string,
   ): Promise<ApiResponse<RawFamilyBookshelf>> {
-    return this.request(`/api/family/${familyId}/bookshelf`);
+    return this.get(`/api/family/${familyId}/bookshelf`);
   }
 
   // --- Internal ---
@@ -295,12 +293,12 @@ export class ApiClient {
       const json = (await response.json()) as ApiResponse<T>;
 
       // On 401, try to refresh token once
-      if (response.status === 401 && !isRetry && this.refreshToken) {
+      if (response.status === 401 && !isRetry && this.tokenRefresher) {
         // Clear stale dedup promises — token is about to change
         this.inflightGets.clear();
         // Deduplicate concurrent refresh calls (F3: prevents double-join)
         if (!this.refreshing) {
-          this.refreshing = this.refreshToken().finally(() => {
+          this.refreshing = this.tokenRefresher().finally(() => {
             this.refreshing = null;
           });
         }
