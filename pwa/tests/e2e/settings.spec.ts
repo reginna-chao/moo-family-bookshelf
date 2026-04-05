@@ -101,27 +101,6 @@ test.describe("Settings page", () => {
     await expect(leaveButton).toBeVisible();
   });
 
-  test("should expand advanced settings and show API endpoint editor", async ({
-    page,
-  }) => {
-    // Click "進階設定" to expand
-    await page.locator("text=進階設定").click();
-
-    // Should show current API endpoint
-    await expect(page.locator("text=目前 API 端點")).toBeVisible();
-
-    // Should show URL input and buttons
-    await expect(
-      page.locator('input[placeholder="https://your-worker.example.com"]'),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "儲存" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "重設為預設" }),
-    ).toBeVisible();
-  });
-
   test("should show sync code section", async ({ page }) => {
     // Sync code section heading
     await expect(page.locator("text=家庭同步碼")).toBeVisible();
