@@ -3,6 +3,17 @@ import { describe, it, expect, vi } from "vitest";
 import { DialogFooter } from "@/dialog/DialogFooter";
 import { reportLinks } from "@/config/links";
 
+vi.stubGlobal("matchMedia", (query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  dispatchEvent: vi.fn(),
+}));
+
 vi.mock("@/utils/appEnv", () => ({
   getAppEnv: vi.fn(() => "prod"),
 }));
