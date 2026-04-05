@@ -4,7 +4,7 @@ import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
 import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
 import { useFamilyData, MemberBooks } from "./FamilyDataContext";
-import { CategoryDropdown, filterByCategory } from "./CategoryDropdown";
+import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
 
 export interface FamilyShelfProps {
   userId: string;
@@ -24,6 +24,7 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   } = useFamilyData();
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [categoryOpen, setCategoryOpen] = useState(false);
 
   const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
@@ -45,6 +46,7 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   const handleMemberFilterChange = useCallback((value: MemberFilterValue) => {
     setFilterMember(value);
     setCategoryFilter("");
+    setCategoryOpen(false);
     resetSearch();
   }, [resetSearch]);
 
@@ -113,19 +115,24 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
         value={filterMember}
         onChange={handleMemberFilterChange}
       />
-      <CategoryDropdown
-        books={memberFilteredBooks}
-        value={categoryFilter}
-        onChange={setCategoryFilter}
-      />
-
-      <SearchBar
-        value={searchTerm}
-        onChange={setSearchTerm}
-        totalCount={categoryFilteredBooks.length}
-        filteredCount={visibleBooks.length}
-        isFiltering={isFiltering}
-      />
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <SearchBar
+            value={searchTerm}
+            onChange={setSearchTerm}
+            totalCount={categoryFilteredBooks.length}
+            filteredCount={visibleBooks.length}
+            isFiltering={isFiltering}
+          />
+        </div>
+        <CategoryFilter
+          books={memberFilteredBooks}
+          value={categoryFilter}
+          onChange={setCategoryFilter}
+          open={categoryOpen}
+          onToggle={() => setCategoryOpen(prev => !prev)}
+        />
+      </div>
 
       <div
         style={{

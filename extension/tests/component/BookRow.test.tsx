@@ -45,21 +45,25 @@ describe("BookRow — archive badge", () => {
   });
 });
 
-describe("BookRow — category label", () => {
+describe("BookRow — author display", () => {
   const noop = vi.fn();
 
-  it("renders category when book.category is non-empty", () => {
+  it("renders author below title", () => {
     render(
-      <BookRow book={makeBook({ category: "奇幻冒險" })} selected={false} onSelect={noop} onToggle={noop} />,
+      <BookRow book={makeBook({ author: "作者A" })} selected={false} onSelect={noop} onToggle={noop} />,
     );
-    expect(screen.getByText("奇幻冒險")).toBeInTheDocument();
-    expect(screen.getByTitle("分類：奇幻冒險")).toBeInTheDocument();
+    expect(screen.getByText("作者A")).toBeInTheDocument();
   });
 
-  it("does not render category when book.category is empty", () => {
-    render(
-      <BookRow book={makeBook({ category: "" })} selected={false} onSelect={noop} onToggle={noop} />,
+  it("does not render author when empty", () => {
+    const { container } = render(
+      <BookRow book={makeBook({ author: "" })} selected={false} onSelect={noop} onToggle={noop} />,
     );
-    expect(screen.queryByTitle(/分類/)).not.toBeInTheDocument();
+    // No small grey text should exist for author
+    const authorDivs = container.querySelectorAll("div");
+    const authorTexts = Array.from(authorDivs).filter(
+      (d) => d.style.fontSize === "11px" && d.style.color === "rgb(148, 163, 184)",
+    );
+    expect(authorTexts).toHaveLength(0);
   });
 });

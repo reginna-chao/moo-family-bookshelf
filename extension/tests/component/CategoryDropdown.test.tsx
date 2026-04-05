@@ -1,81 +1,133 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { CategoryDropdown, filterByCategory } from "@/dialog/CategoryDropdown";
+import { CategoryFilter, filterByCategory } from "@/dialog/CategoryDropdown";
 
 function makeBooks(categories: string[]) {
   return categories.map((category, i) => ({ category, bookId: `b${i}` }));
 }
 
-describe("CategoryDropdown", () => {
+describe("CategoryFilter", () => {
+  const defaultProps = {
+    value: "",
+    onChange: vi.fn(),
+    open: false,
+    onToggle: vi.fn(),
+  };
+
   it("renders nothing when all books share one category", () => {
-    const onChange = vi.fn();
     const { container } = render(
-      <CategoryDropdown books={makeBooks(["奇幻冒險", "奇幻冒險"])} value="" onChange={onChange} />,
+      <CategoryFilter {...defaultProps} books={makeBooks(["奇幻冒險", "奇幻冒險"])} />,
     );
     expect(container.innerHTML).toBe("");
   });
 
   it("renders nothing when book list is empty", () => {
-    const onChange = vi.fn();
     const { container } = render(
-      <CategoryDropdown books={[]} value="" onChange={onChange} />,
+      <CategoryFilter {...defaultProps} books={[]} />,
     );
     expect(container.innerHTML).toBe("");
   });
 
-  it("renders dropdown with multiple categories", () => {
-    const onChange = vi.fn();
+  it("renders filter icon button with multiple categories", () => {
     render(
-      <CategoryDropdown
+      <CategoryFilter
+        {...defaultProps}
         books={makeBooks(["奇幻冒險", "韓國耽美", "軍事\\戰略"])}
-        value=""
-        onChange={onChange}
       />,
     );
-    const select = screen.getByLabelText("篩選分類");
-    expect(select).toBeInTheDocument();
+    expect(screen.getByLabelText("篩選分類")).toBeInTheDocument();
+  });
 
+  it("does not show popover when closed", () => {
+    render(
+      <CategoryFilter
+        {...defaultProps}
+        books={makeBooks(["奇幻冒險", "韓國耽美"])}
+        open={false}
+      />,
+    );
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("shows popover with categories when open", () => {
+    render(
+      <CategoryFilter
+        {...defaultProps}
+        books={makeBooks(["奇幻冒險", "韓國耽美"])}
+        open={true}
+      />,
+    );
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
     const options = screen.getAllByRole("option");
-    // "全部分類" + 3 categories
-    expect(options).toHaveLength(4);
+    // "全部分類" + 2 categories
+    expect(options).toHaveLength(3);
     expect(options[0]).toHaveTextContent("全部分類");
   });
 
-  it("sorts categories alphabetically with 未分類 at the end", () => {
-    const onChange = vi.fn();
+  it("shows count per category", () => {
     render(
-      <CategoryDropdown
-        books={makeBooks(["韓國耽美", "", "奇幻冒險"])}
-        value=""
-        onChange={onChange}
+      <CategoryFilter
+        {...defaultProps}
+        books={makeBooks(["奇幻冒險", "奇幻冒險", "韓國耽美"])}
+        open={true}
       />,
     );
     const options = screen.getAllByRole("option");
-    // "全部分類", then sorted categories, then "未分類"
+    // "全部分類 3", "奇幻冒險 2", "韓國耽美 1"
+    expect(options[0]).toHaveTextContent("3");
+    expect(options[1]).toHaveTextContent("2");
+    expect(options[2]).toHaveTextContent("1");
+  });
+
+  it("sorts 未分類 to the end", () => {
+    render(
+      <CategoryFilter
+        {...defaultProps}
+        books={makeBooks(["韓國耽美", "", "奇幻冒險"])}
+        open={true}
+      />,
+    );
+    const options = screen.getAllByRole("option");
     expect(options[options.length - 1]).toHaveTextContent("未分類");
   });
 
-  it("calls onChange when a category is selected", () => {
+  it("calls onChange and onToggle when a category is selected", () => {
     const onChange = vi.fn();
+    const onToggle = vi.fn();
     render(
-      <CategoryDropdown
+      <CategoryFilter
         books={makeBooks(["奇幻冒險", "韓國耽美"])}
         value=""
         onChange={onChange}
+        open={true}
+        onToggle={onToggle}
       />,
     );
-    const select = screen.getByLabelText("篩選分類");
-    fireEvent.change(select, { target: { value: "奇幻冒險" } });
+    // Click "奇幻冒險" option
+    fireEvent.click(screen.getByText("奇幻冒險"));
     expect(onChange).toHaveBeenCalledWith("奇幻冒險");
+    expect(onToggle).toHaveBeenCalled();
+  });
+
+  it("calls onToggle when icon button is clicked", () => {
+    const onToggle = vi.fn();
+    render(
+      <CategoryFilter
+        {...defaultProps}
+        books={makeBooks(["奇幻冒險", "韓國耽美"])}
+        onToggle={onToggle}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("篩選分類"));
+    expect(onToggle).toHaveBeenCalled();
   });
 
   it("deduplicates categories", () => {
-    const onChange = vi.fn();
     render(
-      <CategoryDropdown
+      <CategoryFilter
+        {...defaultProps}
         books={makeBooks(["奇幻冒險", "奇幻冒險", "韓國耽美"])}
-        value=""
-        onChange={onChange}
+        open={true}
       />,
     );
     const options = screen.getAllByRole("option");

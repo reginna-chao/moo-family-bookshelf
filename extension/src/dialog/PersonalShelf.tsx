@@ -6,7 +6,7 @@ import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
 import { useBookSync } from "./useBookSync";
 import { FloatingActionBar } from "./FloatingActionBar";
-import { CategoryDropdown, filterByCategory } from "./CategoryDropdown";
+import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
 import { usePersonalBooks } from "./usePersonalBooks";
 
 export interface PersonalShelfProps {
@@ -27,6 +27,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [categoryOpen, setCategoryOpen] = useState(false);
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const [syncArchived, setSyncArchived] = useState<number>(0);
   const { syncStatus, syncError, triggerManualSync, lastSyncBooks } = useBookSync({
@@ -58,12 +59,14 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const handleStatusFilterChange = useCallback((value: StatusFilter) => {
     setStatusFilter(value);
     setCategoryFilter("");
+    setCategoryOpen(false);
     resetSearchRef.current();
   }, []);
 
   const handleArchiveViewChange = useCallback((view: "active" | "archived") => {
     setArchiveView(view);
     setCategoryFilter("");
+    setCategoryOpen(false);
     resetSearchRef.current();
   }, []);
 
@@ -161,11 +164,18 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
       {currentViewBooks.length > 0 && (
         <>
           <StatusFilterBar value={statusFilter} onChange={handleStatusFilterChange} />
-          <CategoryDropdown books={statusFilteredBooks} value={categoryFilter} onChange={setCategoryFilter} />
-          <SearchBar
-            value={searchTerm} onChange={setSearchTerm}
-            totalCount={categoryFilteredBooks.length} filteredCount={displayedBooks.length} isFiltering={isFiltering}
-          />
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <SearchBar
+                value={searchTerm} onChange={setSearchTerm}
+                totalCount={categoryFilteredBooks.length} filteredCount={displayedBooks.length} isFiltering={isFiltering}
+              />
+            </div>
+            <CategoryFilter
+              books={statusFilteredBooks} value={categoryFilter} onChange={setCategoryFilter}
+              open={categoryOpen} onToggle={() => setCategoryOpen(prev => !prev)}
+            />
+          </div>
           <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
             <button onClick={handleSelectAll} style={{
               padding: "4px 10px", border: "1px solid #cbd5e1", borderRadius: 6,

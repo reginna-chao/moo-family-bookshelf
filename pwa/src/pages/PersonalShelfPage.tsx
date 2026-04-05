@@ -5,6 +5,7 @@ import type { ApiClient, BookEntry } from "@/api/client";
 import { importKey, encrypt, decrypt } from "@/crypto/encrypt";
 import { useSearch } from "@/hooks/useSearch";
 import { FloatingActionBar } from "@/components/FloatingActionBar";
+import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
 import { namespacedKey } from "@/hooks/useAuth";
 
 interface PersonalShelfPageProps {
@@ -27,6 +28,7 @@ export function PersonalShelfPage({
   const [errorMessage, setErrorMessage] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [categoryFilter, setCategoryFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const originalBooksRef = useRef<BookEntry[]>([]);
@@ -160,12 +162,17 @@ export function PersonalShelfPage({
     return currentViewBooks;
   }, [currentViewBooks, statusFilter]);
 
+  const categoryFilteredBooks = useMemo(
+    () => filterByCategory(statusFilteredBooks, categoryFilter),
+    [statusFilteredBooks, categoryFilter],
+  );
+
   const {
     searchTerm,
     setSearchTerm,
     filteredItems: visibleBooks,
     isFiltering,
-  } = useSearch(statusFilteredBooks);
+  } = useSearch(categoryFilteredBooks);
 
   const handleSelectAll = useCallback(() => {
     const allVisible = visibleBooks.every(b => selectedIds.has(b.bookId));
@@ -223,7 +230,7 @@ export function PersonalShelfPage({
             <button
               role="tab"
               aria-selected={archiveView === "active"}
-              onClick={() => setArchiveView("active")}
+              onClick={() => { setArchiveView("active"); setCategoryFilter(""); }}
               className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
                 archiveView === "active"
                   ? "border-blue-600 text-blue-600"
@@ -235,7 +242,7 @@ export function PersonalShelfPage({
             <button
               role="tab"
               aria-selected={archiveView === "archived"}
-              onClick={() => setArchiveView("archived")}
+              onClick={() => { setArchiveView("archived"); setCategoryFilter(""); }}
               className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
                 archiveView === "archived"
                   ? "border-blue-600 text-blue-600"
@@ -251,7 +258,7 @@ export function PersonalShelfPage({
           {(["all", "shared", "not-shared"] as const).map((f) => (
             <button
               key={f}
-              onClick={() => setStatusFilter(f)}
+              onClick={() => { setStatusFilter(f); setCategoryFilter(""); }}
               aria-pressed={statusFilter === f}
               className={`px-3 py-1.5 text-xs rounded-full ${
                 statusFilter === f ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"
@@ -262,14 +269,21 @@ export function PersonalShelfPage({
           ))}
         </div>
 
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="搜尋書名或作者"
-          aria-label="搜尋書名或作者"
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-3 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-        />
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="搜尋書名或作者"
+            aria-label="搜尋書名或作者"
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+          />
+          <CategoryFilter
+            books={statusFilteredBooks}
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+          />
+        </div>
 
         {visibleBooks.length > 0 && (
           <div className="flex items-center justify-between mb-2">

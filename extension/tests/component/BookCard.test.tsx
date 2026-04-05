@@ -97,17 +97,11 @@ describe("BookCard", () => {
     expect(screen.getByText(longTitle)).toBeInTheDocument();
   });
 
-  it("renders category when present", () => {
+  it("does not render category label", () => {
     render(<BookCard book={makeBook({ category: "韓國耽美" })} />);
 
-    expect(screen.getByText("韓國耽美")).toBeInTheDocument();
-    expect(screen.getByTitle("分類：韓國耽美")).toBeInTheDocument();
-  });
-
-  it("does not render category when empty", () => {
-    render(<BookCard book={makeBook({ category: "" })} />);
-
-    expect(screen.queryByTitle(/分類/)).not.toBeInTheDocument();
+    // Category should not be displayed on BookCard
+    expect(screen.queryByText("韓國耽美")).not.toBeInTheDocument();
   });
 });
 

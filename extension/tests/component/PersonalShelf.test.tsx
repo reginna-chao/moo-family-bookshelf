@@ -967,20 +967,16 @@ describe("PersonalShelf", () => {
         expect(screen.getByText("奇幻書籍")).toBeInTheDocument();
       });
 
-      // Select a specific category
-      const categorySelect = screen.getByLabelText("篩選分類");
-      fireEvent.change(categorySelect, { target: { value: "奇幻冒險" } });
+      // Open category filter popover and select a category
+      fireEvent.click(screen.getByLabelText("篩選分類"));
+      fireEvent.click(screen.getByText("奇幻冒險"));
 
       // Only the matching book should be visible
       expect(screen.getByText("奇幻書籍")).toBeInTheDocument();
       expect(screen.queryByText("韓國書籍")).not.toBeInTheDocument();
 
-      // Switch status filter to "已開放" — no books are shared,
-      // so CategoryDropdown hides (<=1 categories). When switching back,
-      // category should be reset.
+      // Switch status filter — category should reset
       fireEvent.click(screen.getByText("已開放"));
-
-      // Switch back to "全部" — both books should reappear
       fireEvent.click(screen.getByText("全部"));
 
       // Both books should be visible (category filter was reset)
@@ -988,10 +984,6 @@ describe("PersonalShelf", () => {
         expect(screen.getByText("奇幻書籍")).toBeInTheDocument();
         expect(screen.getByText("韓國書籍")).toBeInTheDocument();
       });
-
-      // Category dropdown should be back and reset to "全部分類"
-      const updatedSelect = screen.getByLabelText("篩選分類") as HTMLSelectElement;
-      expect(updatedSelect.value).toBe("");
     });
   });
 
