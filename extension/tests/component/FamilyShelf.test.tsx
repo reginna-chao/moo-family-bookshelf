@@ -19,6 +19,7 @@ vi.mock("@/dialog/useSearch", () => ({
   useSearch: vi.fn().mockImplementation((items: unknown[]) => ({
     searchTerm: "",
     setSearchTerm: vi.fn(),
+    resetSearch: vi.fn(),
     filteredItems: items,
     isFiltering: false,
   })),

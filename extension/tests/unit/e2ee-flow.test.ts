@@ -32,6 +32,7 @@ function makeBookEntry(overrides: Partial<BookEntry> = {}): BookEntry {
     isbn: "978-0000000000",
     coverUrl: "https://example.com/cover.jpg",
     readmooUrl: "https://readmoo.com/book/book-001",
+    category: "",
     isShared: BoolFlag.FALSE,
     ...overrides,
   };
@@ -44,6 +45,7 @@ function makeScrapedBook(overrides: Partial<ScrapedBook> = {}): ScrapedBook {
     author: "Test Author",
     coverUrl: "https://example.com/cover.jpg",
     readmooUrl: "https://readmoo.com/book/book-001",
+    category: "",
     ...overrides,
   };
 }

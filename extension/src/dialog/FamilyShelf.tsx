@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { BookCard, BookWithMember } from "./BookCard";
 import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
 import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
 import { useFamilyData, MemberBooks } from "./FamilyDataContext";
+import { CategoryDropdown, filterByCategory } from "./CategoryDropdown";
 
 export interface FamilyShelfProps {
   userId: string;
@@ -22,6 +23,7 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     refreshBookshelf: loadBookshelf,
   } = useFamilyData();
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
+  const [categoryFilter, setCategoryFilter] = useState("");
 
   const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
@@ -35,8 +37,16 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     return members.filter((m) => m.userId === filterMember).flatMap(toBookWithMember);
   })();
 
-  const { searchTerm, setSearchTerm, filteredItems: visibleBooks, isFiltering } =
-    useSearch(memberFilteredBooks);
+  const categoryFilteredBooks = filterByCategory(memberFilteredBooks, categoryFilter);
+
+  const { searchTerm, setSearchTerm, resetSearch, filteredItems: visibleBooks, isFiltering } =
+    useSearch(categoryFilteredBooks);
+
+  const handleMemberFilterChange = useCallback((value: MemberFilterValue) => {
+    setFilterMember(value);
+    setCategoryFilter("");
+    resetSearch();
+  }, [resetSearch]);
 
   if (state === "loading") {
     return (
@@ -97,19 +107,24 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
         </span>
       </h3>
 
-      <SearchBar
-        value={searchTerm}
-        onChange={setSearchTerm}
-        totalCount={memberFilteredBooks.length}
-        filteredCount={visibleBooks.length}
-        isFiltering={isFiltering}
-      />
-
       <MemberDropdown
         members={members}
         userId={userId}
         value={filterMember}
-        onChange={setFilterMember}
+        onChange={handleMemberFilterChange}
+      />
+      <CategoryDropdown
+        books={memberFilteredBooks}
+        value={categoryFilter}
+        onChange={setCategoryFilter}
+      />
+
+      <SearchBar
+        value={searchTerm}
+        onChange={setSearchTerm}
+        totalCount={categoryFilteredBooks.length}
+        filteredCount={visibleBooks.length}
+        isFiltering={isFiltering}
       />
 
       <div

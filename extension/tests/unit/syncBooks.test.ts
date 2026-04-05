@@ -123,6 +123,7 @@ describe("syncBooks — archive sync path", () => {
         author: "Author A",
         coverUrl: "https://example.com/cover1.jpg",
         readmooUrl: "https://readmoo.com/book/book-1",
+        category: "",
         isArchived: BoolFlag.FALSE,
       },
     ];
@@ -133,6 +134,7 @@ describe("syncBooks — archive sync path", () => {
         author: "Author B",
         coverUrl: "https://example.com/cover2.jpg",
         readmooUrl: "https://readmoo.com/book/book-2",
+        category: "",
         isArchived: BoolFlag.TRUE,
       },
     ];
@@ -164,6 +166,7 @@ describe("syncBooks — archive sync path", () => {
         author: "",
         coverUrl: "",
         readmooUrl: "https://readmoo.com/book/b1",
+        category: "",
         isArchived: BoolFlag.FALSE,
       },
     ]);
@@ -174,6 +177,7 @@ describe("syncBooks — archive sync path", () => {
         author: "",
         coverUrl: "",
         readmooUrl: "https://readmoo.com/book/b2",
+        category: "",
         isArchived: BoolFlag.TRUE,
       },
     ]);
@@ -327,6 +331,7 @@ describe("syncBooks — full flow", () => {
         author: "",
         coverUrl: "",
         readmooUrl: "https://readmoo.com/book/b1",
+        category: "",
       },
     ]);
 

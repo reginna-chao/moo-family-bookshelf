@@ -11,6 +11,7 @@ function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
     isbn: "",
     coverUrl: "https://example.com/cover.jpg",
     readmooUrl: "https://readmoo.com/book/book-1",
+    category: "",
     isShared: BoolFlag.FALSE,
     memberName: "小明",
     ...overrides,
@@ -94,6 +95,19 @@ describe("BookCard", () => {
     render(<BookCard book={makeBook({ title: longTitle })} />);
 
     expect(screen.getByText(longTitle)).toBeInTheDocument();
+  });
+
+  it("renders category when present", () => {
+    render(<BookCard book={makeBook({ category: "韓國耽美" })} />);
+
+    expect(screen.getByText("韓國耽美")).toBeInTheDocument();
+    expect(screen.getByTitle("分類：韓國耽美")).toBeInTheDocument();
+  });
+
+  it("does not render category when empty", () => {
+    render(<BookCard book={makeBook({ category: "" })} />);
+
+    expect(screen.queryByTitle(/分類/)).not.toBeInTheDocument();
   });
 });
 

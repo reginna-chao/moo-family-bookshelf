@@ -23,6 +23,7 @@ export function mergeBooks(
       isbn: existing?.isbn || "",
       coverUrl: book.coverUrl || existing?.coverUrl || "",
       readmooUrl: book.readmooUrl,
+      category: book.category || existing?.category || "",
       isShared: existing?.isShared ?? BoolFlag.FALSE,
       isArchived: book.isArchived ?? existing?.isArchived ?? BoolFlag.FALSE,
     });

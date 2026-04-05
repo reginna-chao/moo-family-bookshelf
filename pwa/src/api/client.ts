@@ -22,6 +22,7 @@ export interface BookEntry {
   isbn: string;
   coverUrl: string;
   readmooUrl: string;
+  category: string;
   isShared: BoolFlag;
   isArchived?: BoolFlag;
 }

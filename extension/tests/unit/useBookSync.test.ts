@@ -116,6 +116,7 @@ describe("useBookSync", () => {
           isbn: "",
           coverUrl: "",
           readmooUrl: "",
+          category: "",
           isShared: BoolFlag.FALSE,
         },
       ];
@@ -304,6 +305,7 @@ describe("useBookSync", () => {
           isbn: "",
           coverUrl: "",
           readmooUrl: "",
+          category: "",
           isShared: BoolFlag.FALSE,
         },
       ];

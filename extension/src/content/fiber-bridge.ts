@@ -14,6 +14,8 @@
 const ATTR_BOOK_ID = "data-moo-book-id";
 const ATTR_COVER = "data-moo-cover-url";
 const ATTR_AUTHOR = "data-moo-author";
+const ATTR_CATEGORY = "data-moo-category";
+const MAX_CATEGORY_LEN = 50;
 
 /**
  * For each `.library-item`, find any child element with a React fiber,
@@ -52,6 +54,13 @@ function stampBookData(): void {
           if (coverHref) item.setAttribute(ATTR_COVER, coverHref);
 
           if (attrs?.author) item.setAttribute(ATTR_AUTHOR, attrs.author);
+
+          if (attrs?.main_subject) {
+            // Readmoo uses "\\" as separator (e.g. "奇幻\\科幻小說");
+            // normalise to single backslash to match their book detail page.
+            const category = attrs.main_subject.replace(/\\\\/g, "\\").slice(0, MAX_CATEGORY_LEN);
+            item.setAttribute(ATTR_CATEGORY, category);
+          }
 
           break;
         }

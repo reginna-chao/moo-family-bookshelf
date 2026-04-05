@@ -73,6 +73,11 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
             </span>
           )}
         </div>
+        {book.category && (
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }} title={`分類：${book.category}`}>
+            {book.category}
+          </div>
+        )}
       </div>
       <button
         data-toggle-btn

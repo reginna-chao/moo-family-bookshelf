@@ -10,6 +10,7 @@ function makeScraped(overrides: Partial<ScrapedBook> = {}): ScrapedBook {
     author: "Author",
     coverUrl: "https://example.com/cover.jpg",
     readmooUrl: "https://readmoo.com/book/book-1",
+    category: "",
     ...overrides,
   };
 }
@@ -22,6 +23,7 @@ function makeSaved(overrides: Partial<BookEntry> = {}): BookEntry {
     isbn: "978-0000000000",
     coverUrl: "https://example.com/cover.jpg",
     readmooUrl: "https://readmoo.com/book/book-1",
+    category: "",
     isShared: BoolFlag.FALSE,
     ...overrides,
   };
@@ -78,5 +80,43 @@ describe("mergeBooks — isArchived", () => {
     expect(result[0].bookId).toBe("b1");
     expect(result[0].isArchived).toBe(BoolFlag.TRUE);
     expect(result[0].isShared).toBe(BoolFlag.TRUE);
+  });
+});
+
+describe("mergeBooks — category", () => {
+  it("scraped category takes priority over saved", () => {
+    const scraped = [makeScraped({ bookId: "b1", category: "奇幻冒險" })];
+    const saved = [makeSaved({ bookId: "b1", category: "文學小說" })];
+
+    const result = mergeBooks(scraped, saved);
+
+    expect(result[0].category).toBe("奇幻冒險");
+  });
+
+  it("falls back to saved category when scraped is empty", () => {
+    const scraped = [makeScraped({ bookId: "b1", category: "" })];
+    const saved = [makeSaved({ bookId: "b1", category: "韓國耽美" })];
+
+    const result = mergeBooks(scraped, saved);
+
+    expect(result[0].category).toBe("韓國耽美");
+  });
+
+  it("scraped-only book keeps its category", () => {
+    const scraped = [makeScraped({ bookId: "b1", category: "軍事\\戰略" })];
+    const saved: BookEntry[] = [];
+
+    const result = mergeBooks(scraped, saved);
+
+    expect(result[0].category).toBe("軍事\\戰略");
+  });
+
+  it("saved-only book keeps its category", () => {
+    const scraped: ScrapedBook[] = [];
+    const saved = [makeSaved({ bookId: "b1", category: "西洋羅曼史" })];
+
+    const result = mergeBooks(scraped, saved);
+
+    expect(result[0].category).toBe("西洋羅曼史");
   });
 });

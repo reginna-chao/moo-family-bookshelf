@@ -4,71 +4,27 @@
  */
 
 import { DEFAULT_API_ENDPOINT } from "../constants";
+import type {
+  ApiResponse,
+  FamilyGroup,
+  PersonalBooks,
+  RawFamilyBookshelf,
+  VersionInfo,
+} from "./types";
+import { doRefreshToken } from "./auth-refresh";
 
-export enum BoolFlag {
-  FALSE = 0,
-  TRUE = 1,
-}
-
-export interface ApiResponse<T> {
-  data?: T;
-  error?: { code: string; message: string };
-}
-
-export interface BookEntry {
-  bookId: string;
-  title: string;
-  author: string;
-  isbn: string;
-  coverUrl: string;
-  readmooUrl: string;
-  isShared: BoolFlag;
-  isArchived?: BoolFlag; // FALSE = active (default), TRUE = archived
-}
-
-export interface PersonalBooks {
-  userId: string;
-  displayName: string;
-  books: BookEntry[];
-  lastUpdated: string;
-}
-
-export interface FamilyMember {
-  userId: string;
-  displayName: string;
-}
-
-export interface FamilyGroup {
-  familyId: string;
-  ownerId: string;
-  members: FamilyMember[];
-  maxMembers: number;
-  createdAt: string;
-  apiEndpoint?: string | null;
-}
-
-export interface VersionInfo {
-  apiVersion: number;
-  serverVersion: string;
-}
-
-export interface FamilyBookshelf {
-  members: Array<{
-    userId: string;
-    displayName: string;
-    books: BookEntry[];
-  }>;
-}
-
-/** Raw server response — members have encrypted payloads */
-export interface RawFamilyBookshelf {
-  familyId: string;
-  members: Array<{
-    userId: string;
-    payload: string | null;
-    lastUpdated: string | null;
-  }>;
-}
+// Re-export all types so existing imports from "./client" continue to work
+export { BoolFlag } from "./types";
+export type {
+  ApiResponse,
+  BookEntry,
+  FamilyBookshelf,
+  FamilyGroup,
+  FamilyMember,
+  PersonalBooks,
+  RawFamilyBookshelf,
+  VersionInfo,
+} from "./types";
 
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
@@ -354,100 +310,10 @@ export class ApiClient {
   }
 
   private async doRefreshToken(): Promise<boolean> {
-    try {
-      const storage = await chrome.storage.local.get(["userId", "familyId"]);
-      const userId = storage.userId as string | undefined;
-      const familyId = storage.familyId as string | undefined;
-      if (!userId || !familyId) return false;
-
-      const result = await this.request<{ token: string; expiresAt: number }>(
-        "/api/auth/refresh",
-        {
-          method: "POST",
-          body: JSON.stringify({ userId, familyId }),
-        },
-        true, // skip refresh interception — this IS the refresh call
-      );
-
-      if (result.data?.token) {
-        this.authToken = result.data.token;
-        const storageUpdate: Record<string, unknown> = {
-          authToken: result.data.token,
-        };
-        if (result.data.expiresAt) {
-          storageUpdate.tokenExpiresAt = result.data.expiresAt;
-        }
-        await chrome.storage.local.set(storageUpdate);
-        return true;
-      }
-
-      // Refresh failed (REFRESH_FAILED, rate limit, network error, etc.)
-      // Attempt staged recovery via joinFamily (public endpoint, no token needed)
-      this.authToken = null;
-      await chrome.storage.local.remove(["authToken", "tokenExpiresAt"]);
-
-      const recoveryStorage = await chrome.storage.local.get([
-        "familyId",
-        "userId",
-        "displayName",
-      ]);
-      const recFamilyId = recoveryStorage.familyId as string | undefined;
-      const recUserId = recoveryStorage.userId as string | undefined;
-      const recDisplayName =
-        (recoveryStorage.displayName as string | undefined) ?? "";
-
-      if (recFamilyId && recUserId) {
-        const joinResult = await this.request<{
-          familyId: string;
-          ownerId: string;
-          members: Array<{ userId: string; displayName: string }>;
-          maxMembers: number;
-          createdAt: string;
-          authToken?: string;
-          expiresAt?: number;
-        }>(
-          `/api/family/${recFamilyId}/join`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              userId: recUserId,
-              displayName: recDisplayName,
-            }),
-          },
-          true, // skipRefresh to avoid infinite loops
-        );
-
-        if (joinResult.data?.authToken) {
-          // Recovery succeeded — store new token and continue seamlessly
-          this.authToken = joinResult.data.authToken;
-          const recoveryUpdate: Record<string, unknown> = {
-            authToken: joinResult.data.authToken,
-          };
-          if (joinResult.data.expiresAt) {
-            recoveryUpdate.tokenExpiresAt = joinResult.data.expiresAt;
-          }
-          await chrome.storage.local.set(recoveryUpdate);
-          return true;
-        }
-      }
-
-      // Recovery also failed — truly cannot access this family, clear all data
-      await chrome.storage.local.remove(["familyId", "encryptionKey"]);
-      try {
-        await chrome.storage.sync.remove(["familyId", "encryptionKey"]);
-      } catch {
-        // sync storage may not be available in all contexts
-      }
-      try {
-        chrome.runtime.sendMessage({ type: "FAMILY_REMOVED" });
-      } catch {
-        // Message may fail if no listener is active
-      }
-      this.onFamilyRemoved?.();
-
-      return false;
-    } catch {
-      return false;
-    }
+    return doRefreshToken({
+      request: this.request.bind(this),
+      setAuthToken: (token) => { this.authToken = token; },
+      onFamilyRemoved: this.onFamilyRemoved,
+    });
   }
 }

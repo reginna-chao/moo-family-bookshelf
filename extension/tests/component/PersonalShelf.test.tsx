@@ -660,6 +660,7 @@ describe("PersonalShelf", () => {
           author: "作者A",
           coverUrl: "https://example.com/cover1.jpg",
           readmooUrl: "https://readmoo.com/book/book-1",
+          category: "",
           isArchived: BoolFlag.FALSE,
         },
         {
@@ -668,6 +669,7 @@ describe("PersonalShelf", () => {
           author: "作者D",
           coverUrl: "https://example.com/cover-a.jpg",
           readmooUrl: "https://readmoo.com/book/book-archived",
+          category: "",
           isArchived: BoolFlag.TRUE,
         },
       ]);
@@ -731,6 +733,7 @@ describe("PersonalShelf", () => {
           author: "作者A",
           coverUrl: "",
           readmooUrl: "https://readmoo.com/book/book-1",
+          category: "",
           isArchived: BoolFlag.FALSE,
         },
         {
@@ -739,6 +742,7 @@ describe("PersonalShelf", () => {
           author: "作者B",
           coverUrl: "",
           readmooUrl: "https://readmoo.com/book/book-2",
+          category: "",
           isArchived: BoolFlag.TRUE,
         },
       ]);
@@ -778,6 +782,7 @@ describe("PersonalShelf", () => {
           author: "作者A",
           coverUrl: "",
           readmooUrl: "https://readmoo.com/book/book-1",
+          category: "",
           isArchived: BoolFlag.FALSE,
         },
         {
@@ -786,6 +791,7 @@ describe("PersonalShelf", () => {
           author: "作者B",
           coverUrl: "",
           readmooUrl: "https://readmoo.com/book/book-2",
+          category: "",
           isArchived: BoolFlag.TRUE,
         },
       ]);
@@ -929,6 +935,63 @@ describe("PersonalShelf", () => {
       const book1 = cached.find((b: { bookId: string }) => b.bookId === "book-1");
       expect(book1).toBeDefined();
       expect(book1.isShared).toBe(BoolFlag.TRUE);
+    });
+  });
+
+  describe("category filter reset", () => {
+    it("resets category filter when status filter changes", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce([
+        {
+          bookId: "book-1",
+          title: "奇幻書籍",
+          author: "作者A",
+          coverUrl: "",
+          readmooUrl: "https://readmoo.com/book/book-1",
+          category: "奇幻冒險",
+          isArchived: BoolFlag.FALSE,
+        },
+        {
+          bookId: "book-2",
+          title: "韓國書籍",
+          author: "作者B",
+          coverUrl: "",
+          readmooUrl: "https://readmoo.com/book/book-2",
+          category: "韓國耽美",
+          isArchived: BoolFlag.FALSE,
+        },
+      ]);
+
+      renderPersonalShelf();
+      await waitFor(() => {
+        expect(screen.getByText("奇幻書籍")).toBeInTheDocument();
+      });
+
+      // Select a specific category
+      const categorySelect = screen.getByLabelText("篩選分類");
+      fireEvent.change(categorySelect, { target: { value: "奇幻冒險" } });
+
+      // Only the matching book should be visible
+      expect(screen.getByText("奇幻書籍")).toBeInTheDocument();
+      expect(screen.queryByText("韓國書籍")).not.toBeInTheDocument();
+
+      // Switch status filter to "已開放" — no books are shared,
+      // so CategoryDropdown hides (<=1 categories). When switching back,
+      // category should be reset.
+      fireEvent.click(screen.getByText("已開放"));
+
+      // Switch back to "全部" — both books should reappear
+      fireEvent.click(screen.getByText("全部"));
+
+      // Both books should be visible (category filter was reset)
+      await waitFor(() => {
+        expect(screen.getByText("奇幻書籍")).toBeInTheDocument();
+        expect(screen.getByText("韓國書籍")).toBeInTheDocument();
+      });
+
+      // Category dropdown should be back and reset to "全部分類"
+      const updatedSelect = screen.getByLabelText("篩選分類") as HTMLSelectElement;
+      expect(updatedSelect.value).toBe("");
     });
   });
 

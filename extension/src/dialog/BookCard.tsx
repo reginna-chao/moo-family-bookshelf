@@ -74,6 +74,11 @@ export function BookCard({ book }: { book: BookWithMember }) {
           {book.author}
         </span>
       )}
+      {book.category && (
+        <span style={{ fontSize: 11, color: "#64748b", textAlign: "center" }} title={`分類：${book.category}`}>
+          {book.category}
+        </span>
+      )}
       <span
         style={{
           fontSize: 11,

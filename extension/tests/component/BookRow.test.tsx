@@ -11,6 +11,7 @@ function makeBook(overrides: Partial<BookEntry> = {}): BookEntry {
     isbn: "",
     coverUrl: "https://example.com/cover.jpg",
     readmooUrl: "https://readmoo.com/book/book-1",
+    category: "",
     isShared: BoolFlag.FALSE,
     ...overrides,
   };
@@ -41,5 +42,24 @@ describe("BookRow — archive badge", () => {
     );
 
     expect(screen.queryByText("封存")).not.toBeInTheDocument();
+  });
+});
+
+describe("BookRow — category label", () => {
+  const noop = vi.fn();
+
+  it("renders category when book.category is non-empty", () => {
+    render(
+      <BookRow book={makeBook({ category: "奇幻冒險" })} selected={false} onSelect={noop} onToggle={noop} />,
+    );
+    expect(screen.getByText("奇幻冒險")).toBeInTheDocument();
+    expect(screen.getByTitle("分類：奇幻冒險")).toBeInTheDocument();
+  });
+
+  it("does not render category when book.category is empty", () => {
+    render(
+      <BookRow book={makeBook({ category: "" })} selected={false} onSelect={noop} onToggle={noop} />,
+    );
+    expect(screen.queryByTitle(/分類/)).not.toBeInTheDocument();
   });
 });
