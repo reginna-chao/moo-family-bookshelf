@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { BookOpen } from "lucide-react";
+import { BoolFlag } from "@/api/client";
 import type { BookEntry } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
 import { useFamilyData, MemberBooks } from "@/hooks/useFamilyData";
@@ -11,13 +12,21 @@ export interface FamilyShelfPageProps {
 
 interface BookWithMember extends BookEntry {
   memberName: string;
+  isUpdated: BoolFlag;
 }
 
 type MemberFilterValue = "all" | "all-except-self" | string;
 
-function toBookWithMember(member: MemberBooks): BookWithMember[] {
+function toBookWithMember(
+  member: MemberBooks,
+  updatedBookIds: Set<string>,
+): BookWithMember[] {
   const name = member.displayName || member.userId.slice(0, 8);
-  return member.books.map((b) => ({ ...b, memberName: name }));
+  return member.books.map((b) => ({
+    ...b,
+    memberName: name,
+    isUpdated: updatedBookIds.has(b.bookId) ? BoolFlag.TRUE : BoolFlag.FALSE,
+  }));
 }
 
 export function FamilyShelfPage({
@@ -28,6 +37,7 @@ export function FamilyShelfPage({
     bookshelfState: state,
     bookshelfError: errorMessage,
     refreshBookshelf: loadBookshelf,
+    updatedBookIds,
   } = useFamilyData();
   const [filterMember, setFilterMember] =
     useState<MemberFilterValue>("all-except-self");
@@ -39,18 +49,19 @@ export function FamilyShelfPage({
   );
 
   const memberFilteredBooks = useMemo(() => {
+    const toBooks = (m: MemberBooks) => toBookWithMember(m, updatedBookIds);
     if (filterMember === "all") {
-      return members.flatMap(toBookWithMember);
+      return members.flatMap(toBooks);
     }
     if (filterMember === "all-except-self") {
       return members
         .filter((m) => m.userId !== userId)
-        .flatMap(toBookWithMember);
+        .flatMap(toBooks);
     }
     return members
       .filter((m) => m.userId === filterMember)
-      .flatMap(toBookWithMember);
-  }, [members, filterMember, userId]);
+      .flatMap(toBooks);
+  }, [members, filterMember, userId, updatedBookIds]);
 
   const categoryFilteredBooks = useMemo(
     () => filterByCategory(memberFilteredBooks, categoryFilter),
@@ -159,17 +170,24 @@ export function FamilyShelfPage({
               rel="noopener noreferrer"
               className="block rounded-lg bg-white shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
             >
-              {book.coverUrl ? (
-                <img
-                  src={book.coverUrl}
-                  alt={book.title}
-                  className="w-full aspect-[3/4] object-cover"
-                />
-              ) : (
-                <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center">
-                  <BookOpen size={32} className="text-gray-300" aria-hidden="true" />
-                </div>
-              )}
+              <div className="relative">
+                {book.coverUrl ? (
+                  <img
+                    src={book.coverUrl}
+                    alt={book.title}
+                    className="w-full aspect-[3/4] object-cover"
+                  />
+                ) : (
+                  <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center">
+                    <BookOpen size={32} className="text-gray-300" aria-hidden="true" />
+                  </div>
+                )}
+                {book.isUpdated === BoolFlag.TRUE && (
+                  <span aria-label="新分享書籍" className="absolute bottom-1 left-1 bg-green-100 text-green-600 text-[10px] font-semibold px-1.5 rounded-full leading-4">
+                    更新
+                  </span>
+                )}
+              </div>
               <div className="p-2">
                 <p className="text-sm font-medium text-gray-900 truncate">
                   {book.title}

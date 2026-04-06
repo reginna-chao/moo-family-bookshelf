@@ -8,7 +8,7 @@ import { PersonalShelfPage } from "./pages/PersonalShelfPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { PwaCreateNotice } from "./components/PwaCreateNotice";
-import { FamilyDataProvider } from "./hooks/useFamilyData";
+import { FamilyDataProvider, useFamilyData } from "./hooks/useFamilyData";
 import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
 
@@ -154,63 +154,112 @@ export default function App() {
       apiClient={apiClient}
       encryptionKey={auth.encryptionKey}
     >
-      <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50">
-        <VersionWarning apiClient={apiClient} />
-        <PwaCreateNotice userId={auth.userId} onDismiss={() => {}} />
-        <InstallPrompt userId={auth.userId} />
-        <main className="flex-1 overflow-y-auto pb-16">
-          {currentPage === "family-shelf" && (
-            <FamilyShelfPage userId={auth.userId} />
-          )}
-          {currentPage === "personal-shelf" && (
-            <PersonalShelfPage userId={auth.userId} apiClient={apiClient} encryptionKey={auth.encryptionKey} />
-          )}
-          {currentPage === "settings" && (
-            <SettingsPage
-              familyId={auth.familyId}
-              userId={auth.userId}
-              apiClient={apiClient}
-              encryptionKey={auth.encryptionKey}
-              onLogout={logout}
-              onForceLogout={forceLogout}
-            />
-          )}
-        </main>
-
-        <nav
-          aria-label="主要導覽"
-          className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200"
-        >
-          <div className="max-w-md mx-auto flex relative">
-            {NAV_ITEMS.map((item) => (
-              <button
-                key={item.page}
-                onClick={() => navigate(item.page)}
-                aria-current={currentPage === item.page ? "page" : undefined}
-                className={`flex-1 flex flex-col items-center py-2 text-xs transition-colors ${
-                  currentPage === item.page
-                    ? "text-blue-600 font-semibold"
-                    : "text-gray-500"
-                }`}
-              >
-                <item.icon size={20} aria-hidden="true" className="mb-0.5" />
-                <span>{item.label}</span>
-              </button>
-            ))}
-            {APP_ENV !== "prod" && (
-              <span
-                className={`absolute -top-2 right-2 text-[10px] font-bold px-1.5 py-0 rounded-full leading-4 ${
-                  APP_ENV === "local"
-                    ? "bg-gradient-to-r from-red-400 via-yellow-400 to-blue-400 text-white"
-                    : "bg-blue-100 text-blue-700 border border-blue-300"
-                }`}
-              >
-                {APP_ENV === "local" ? "LOCAL" : "DEV"}
-              </span>
-            )}
-          </div>
-        </nav>
-      </div>
+      <MainContent
+        auth={auth}
+        apiClient={apiClient}
+        currentPage={currentPage}
+        navigate={navigate}
+        logout={logout}
+        forceLogout={forceLogout}
+      />
     </FamilyDataProvider>
+  );
+}
+
+interface MainContentProps {
+  auth: NonNullable<ReturnType<typeof useAuth>["auth"]>;
+  apiClient: ApiClient;
+  currentPage: Page;
+  navigate: (page: Page) => void;
+  logout: () => void;
+  forceLogout: () => void;
+}
+
+function MainContent({
+  auth,
+  apiClient,
+  currentPage,
+  navigate,
+  logout,
+  forceLogout,
+}: MainContentProps) {
+  const { hasBookshelfUpdates, markBookshelfSeen } = useFamilyData();
+
+  const handleNavigate = useCallback(
+    (page: Page) => {
+      if (page === "family-shelf") {
+        markBookshelfSeen();
+      }
+      navigate(page);
+    },
+    [markBookshelfSeen, navigate],
+  );
+
+  const showRedDot = hasBookshelfUpdates;
+
+  return (
+    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50">
+      <VersionWarning apiClient={apiClient} />
+      <PwaCreateNotice userId={auth.userId} onDismiss={() => {}} />
+      <InstallPrompt userId={auth.userId} />
+      <main className="flex-1 overflow-y-auto pb-16">
+        {currentPage === "family-shelf" && (
+          <FamilyShelfPage userId={auth.userId} />
+        )}
+        {currentPage === "personal-shelf" && (
+          <PersonalShelfPage userId={auth.userId} apiClient={apiClient} encryptionKey={auth.encryptionKey} />
+        )}
+        {currentPage === "settings" && (
+          <SettingsPage
+            familyId={auth.familyId}
+            userId={auth.userId}
+            apiClient={apiClient}
+            encryptionKey={auth.encryptionKey}
+            onLogout={logout}
+            onForceLogout={forceLogout}
+          />
+        )}
+      </main>
+
+      <nav
+        aria-label="主要導覽"
+        className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200"
+      >
+        <div className="max-w-md mx-auto flex relative">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.page}
+              onClick={() => handleNavigate(item.page)}
+              aria-label={item.page === "family-shelf" && showRedDot ? "家庭書櫃（有新更新）" : undefined}
+              aria-current={currentPage === item.page ? "page" : undefined}
+              className={`flex-1 flex flex-col items-center py-2 text-xs transition-colors ${
+                currentPage === item.page
+                  ? "text-blue-600 font-semibold"
+                  : "text-gray-500"
+              }`}
+            >
+              <span className="relative">
+                <item.icon size={20} aria-hidden="true" className="mb-0.5" />
+                {item.page === "family-shelf" && showRedDot && (
+                  <span aria-hidden="true" className="absolute -top-0.5 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+                )}
+              </span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+          {APP_ENV !== "prod" && (
+            <span
+              className={`absolute -top-2 right-2 text-[10px] font-bold px-1.5 py-0 rounded-full leading-4 ${
+                APP_ENV === "local"
+                  ? "bg-gradient-to-r from-red-400 via-yellow-400 to-blue-400 text-white"
+                  : "bg-blue-100 text-blue-700 border border-blue-300"
+              }`}
+            >
+              {APP_ENV === "local" ? "LOCAL" : "DEV"}
+            </span>
+          )}
+        </div>
+      </nav>
+    </div>
   );
 }

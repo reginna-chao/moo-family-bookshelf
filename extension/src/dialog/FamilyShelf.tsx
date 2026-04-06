@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { BoolFlag } from "../api/client";
 import { BookCard, BookWithMember } from "./BookCard";
 import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
 import { SearchBar } from "./SearchBar";
@@ -10,9 +11,16 @@ export interface FamilyShelfProps {
   userId: string;
 }
 
-function toBookWithMember(member: MemberBooks): BookWithMember[] {
+function toBookWithMember(
+  member: MemberBooks,
+  updatedBookIds: Set<string>,
+): BookWithMember[] {
   const name = member.displayName || member.userId.slice(0, 8);
-  return member.books.map((b) => ({ ...b, memberName: name }));
+  return member.books.map((b) => ({
+    ...b,
+    memberName: name,
+    isUpdated: updatedBookIds.has(b.bookId) ? BoolFlag.TRUE : BoolFlag.FALSE,
+  }));
 }
 
 export function FamilyShelf({ userId }: FamilyShelfProps) {
@@ -21,6 +29,7 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     bookshelfState: state,
     bookshelfError: errorMessage,
     refreshBookshelf: loadBookshelf,
+    updatedBookIds,
   } = useFamilyData();
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -29,13 +38,14 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
   const memberFilteredBooks = (() => {
+    const toBooks = (m: MemberBooks) => toBookWithMember(m, updatedBookIds);
     if (filterMember === "all") {
-      return members.flatMap(toBookWithMember);
+      return members.flatMap(toBooks);
     }
     if (filterMember === "all-except-self") {
-      return members.filter((m) => m.userId !== userId).flatMap(toBookWithMember);
+      return members.filter((m) => m.userId !== userId).flatMap(toBooks);
     }
-    return members.filter((m) => m.userId === filterMember).flatMap(toBookWithMember);
+    return members.filter((m) => m.userId === filterMember).flatMap(toBooks);
   })();
 
   const categoryFilteredBooks = filterByCategory(memberFilteredBooks, categoryFilter);

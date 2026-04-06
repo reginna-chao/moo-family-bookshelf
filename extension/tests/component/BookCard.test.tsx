@@ -13,6 +13,7 @@ function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
     readmooUrl: "https://readmoo.com/book/book-1",
     category: "",
     isShared: BoolFlag.FALSE,
+    isUpdated: BoolFlag.FALSE,
     memberName: "小明",
     ...overrides,
   };

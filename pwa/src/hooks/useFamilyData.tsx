@@ -17,6 +17,17 @@ import type {
   RawFamilyBookshelf,
 } from "@/api/client";
 import { importKey, decrypt } from "@/crypto/encrypt";
+import {
+  seenKey,
+  chipsKey,
+  readLocalJson,
+  writeLocalJson,
+  computeFreshBookIds,
+  loadValidChipBookIds,
+  buildSeenBaseline,
+  type BookshelfSeenRecord,
+  type BookshelfChipsRecord,
+} from "./updateTracking";
 
 /** Decrypted member bookshelf for family shelf display */
 export interface MemberBooks {
@@ -45,6 +56,12 @@ interface FamilyDataState {
   refreshBookshelf: () => Promise<void>;
   /** Update a member's display name locally (optimistic) */
   updateMemberDisplayName: (userId: string, displayName: string) => void;
+  /** Set of bookIds with "更新" chip (fresh + unexpired chips) */
+  updatedBookIds: Set<string>;
+  /** Whether there are unseen bookshelf updates (drives red dot) */
+  hasBookshelfUpdates: boolean;
+  /** Mark current bookshelf as seen: clears red dot, preserves chips for 24h */
+  markBookshelfSeen: () => void;
 }
 
 const FamilyDataContext = createContext<FamilyDataState | null>(null);
@@ -102,6 +119,28 @@ export function FamilyDataProvider({
   const [bookshelfMembers, setBookshelfMembers] = useState<MemberBooks[]>([]);
   const [bookshelfState, setBookshelfState] = useState<LoadState>("loading");
   const [bookshelfError, setBookshelfError] = useState("");
+
+  // --- Update tracking state ---
+  const [freshUpdateBookIds, setFreshUpdateBookIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [chipBookIds, setChipBookIds] = useState<Set<string>>(new Set());
+  const freshUpdateBookIdsRef = useRef<Set<string>>(new Set());
+  freshUpdateBookIdsRef.current = freshUpdateBookIds;
+  const chipBookIdsRef = useRef<Set<string>>(new Set());
+  chipBookIdsRef.current = chipBookIds;
+  const rawMembersDataRef = useRef<{
+    decrypted: MemberBooks[];
+    raw: RawFamilyBookshelf["members"];
+  } | null>(null);
+
+  const updatedBookIds = useMemo(() => {
+    const combined = new Set(freshUpdateBookIds);
+    for (const id of chipBookIds) combined.add(id);
+    return combined;
+  }, [freshUpdateBookIds, chipBookIds]);
+
+  const hasBookshelfUpdates = freshUpdateBookIds.size > 0;
 
   const mountedRef = useRef(true);
   const membersRef = useRef<FamilyMember[]>([]);
@@ -194,15 +233,46 @@ export function FamilyDataProvider({
         }
       }
 
+      // --- Update tracking ---
+      const seenData =
+        readLocalJson<BookshelfSeenRecord>(seenKey(userId)) ?? {};
+      const chipsData =
+        readLocalJson<BookshelfChipsRecord>(chipsKey(userId));
+
+      const freshIds = computeFreshBookIds(
+        decryptedMembers,
+        data.members,
+        userId,
+        seenData,
+      );
+
+      const allCurrentBookIds = new Set(
+        decryptedMembers.flatMap((m) => m.books.map((b) => b.bookId)),
+      );
+      const chipIds = loadValidChipBookIds(chipsData, allCurrentBookIds);
+
+      // First use: silently initialize baseline
+      if (Object.keys(seenData).length === 0) {
+        const baseline = buildSeenBaseline(decryptedMembers, data.members);
+        writeLocalJson(seenKey(userId), baseline);
+      }
+
+      rawMembersDataRef.current = {
+        decrypted: decryptedMembers,
+        raw: data.members,
+      };
+
       if (!mountedRef.current) return;
       setBookshelfMembers(decryptedMembers);
+      setFreshUpdateBookIds(freshIds);
+      setChipBookIds(chipIds);
       setBookshelfState("ready");
     } catch (err) {
       if (!mountedRef.current) return;
       setBookshelfError(err instanceof Error ? err.message : "載入失敗");
       setBookshelfState("error");
     }
-  }, [familyId, apiClient, encryptionKey]);
+  }, [familyId, apiClient, encryptionKey, userId]);
 
   const updateMemberDisplayName = useCallback(
     (targetUserId: string, displayName: string) => {
@@ -219,6 +289,33 @@ export function FamilyDataProvider({
     },
     [],
   );
+
+  const markBookshelfSeen = useCallback(() => {
+    if (freshUpdateBookIdsRef.current.size === 0) return;
+
+    const raw = rawMembersDataRef.current;
+    if (!raw) return;
+
+    // Update baseline
+    const baseline = buildSeenBaseline(raw.decrypted, raw.raw);
+
+    // Merge fresh IDs into chips with 24h expiry
+    const mergedChips = new Set(chipBookIdsRef.current);
+    for (const id of freshUpdateBookIdsRef.current) mergedChips.add(id);
+
+    const expiresAt = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    writeLocalJson(seenKey(userId), baseline);
+    writeLocalJson(chipsKey(userId), {
+      bookIds: [...mergedChips],
+      expiresAt,
+    });
+
+    setChipBookIds(mergedChips);
+    setFreshUpdateBookIds(new Set());
+  }, [userId]);
 
   // Fetch on mount: members first, then bookshelf (sequential to avoid redundant API call)
   useEffect(() => {
@@ -260,6 +357,9 @@ export function FamilyDataProvider({
       refreshMembers,
       refreshBookshelf,
       updateMemberDisplayName,
+      updatedBookIds,
+      hasBookshelfUpdates,
+      markBookshelfSeen,
     }),
     [
       members,
@@ -273,6 +373,9 @@ export function FamilyDataProvider({
       refreshMembers,
       refreshBookshelf,
       updateMemberDisplayName,
+      updatedBookIds,
+      hasBookshelfUpdates,
+      markBookshelfSeen,
     ],
   );
 

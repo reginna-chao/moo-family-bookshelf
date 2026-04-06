@@ -1,8 +1,9 @@
 import React from "react";
-import { BookEntry } from "../api/client";
+import { BookEntry, BoolFlag } from "../api/client";
 
 export interface BookWithMember extends BookEntry {
   memberName: string;
+  isUpdated: BoolFlag;
 }
 
 export function FilterButton({
@@ -40,13 +41,32 @@ export function BookCard({ book }: { book: BookWithMember }) {
         href={book.readmooUrl}
         target="_blank"
         rel="noopener noreferrer"
-        style={{ display: "block", textDecoration: "none" }}
+        style={{ display: "block", textDecoration: "none", position: "relative" }}
       >
         <img
           src={book.coverUrl}
           alt={book.title}
           style={{ width: 80, height: 120, objectFit: "cover", borderRadius: 4, background: "#f1f5f9" }}
         />
+        {book.isUpdated === BoolFlag.TRUE && (
+          <span
+            aria-label="新分享書籍"
+            style={{
+              position: "absolute",
+              bottom: 4,
+              left: 4,
+              background: "#dcfce7",
+              color: "#16a34a",
+              fontSize: 10,
+              fontWeight: 600,
+              padding: "1px 6px",
+              borderRadius: 8,
+              lineHeight: "16px",
+            }}
+          >
+            更新
+          </span>
+        )}
       </a>
       <a
         href={book.readmooUrl}
