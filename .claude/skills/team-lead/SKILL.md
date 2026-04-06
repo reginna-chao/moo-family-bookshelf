@@ -91,7 +91,8 @@ After both teams complete, **present ALL review findings to the user**:
 3. Verify API contracts match between FE and BE.
 4. Report test suite results: `pnpm test` (extension) + `cd worker && pnpm test`.
 5. Report `pnpm typecheck` results on both sides.
-6. **Wait for the user to decide** which items to fix and which to skip.
+6. Run E2E typecheck on affected packages (`npx tsc --noEmit --project tests/e2e/tsconfig.json` in extension/pwa) and report results.
+7. **Wait for the user to decide** which items to fix and which to skip.
 
 ### Phase 5: Fix & Complete
 

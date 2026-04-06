@@ -52,6 +52,7 @@ describe('ComponentOrFunction', () => {
 |------|----------|------|
 | Unit | `tests/unit/` | Pure functions: crypto, API client, sync code parser, utils |
 | Component | `tests/component/` | React components: Dialog views, toggles, forms |
+| E2E maintenance | `tests/e2e/` | Fix existing E2E tests broken by production code changes (helpers, imports, selectors). Do NOT write new E2E test scenarios. |
 
 ## Mock Policy
 
@@ -69,4 +70,4 @@ describe('ComponentOrFunction', () => {
 
 - Modify production code.
 - Test implementation details (internal state, private methods).
-- Write E2E tests (that's a separate concern using Playwright).
+- Write new E2E test scenarios (that's a separate concern). However, DO fix existing E2E tests that break due to production code changes (e.g., updated imports, renamed exports, changed selectors).

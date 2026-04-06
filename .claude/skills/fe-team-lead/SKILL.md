@@ -74,8 +74,15 @@ Orchestrate the frontend development lifecycle: spec analysis → coding → tes
 - Tester reports completion.
 - `pnpm typecheck` passes.
 - `pnpm test` passes.
+- E2E impact check passes (see below).
 
 If any fail, fix via coder or tester before proceeding.
+
+**E2E Impact Check** — after unit/component tests pass:
+1. Identify if any changed production files are imported (directly or transitively) by E2E tests (`extension/tests/e2e/`, `pwa/tests/e2e/`).
+2. Run E2E typecheck: `npx tsc --noEmit --project tests/e2e/tsconfig.json` in the affected package(s).
+3. If typecheck fails, spawn `/fe-coder` to fix the breakage (update imports, adapt helpers, etc.).
+4. This step catches compile-time breaks early — it does NOT require running the full E2E suite locally.
 
 **Mode B**: present dev results and wait for confirmation.
 
