@@ -2,6 +2,15 @@
   "name": "moo-family-bookshelf",
   "version": "0.1.0",
   "private": true,
+  "description": "Chrome Extension for Readmoo family account members to browse each other's shared books",
+  "license": "MIT",
+  "author": "Reginna Chao",
+  "bugs": {
+    "url": "https://github.com/reginna-chao/moo-family-bookshelf/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -n ext,worker,pwa,info -c blue,green,magenta,yellow \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev\" \"pnpm --filter moo-family-bookshelf-pwa dev\" \"node scripts/dev-info.mjs\"",
     "dev:remote": "concurrently -n ext,worker,pwa,info -c blue,green,magenta,yellow \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev:remote\" \"pnpm --filter moo-family-bookshelf-pwa dev\" \"node scripts/dev-info.mjs --remote\"",
