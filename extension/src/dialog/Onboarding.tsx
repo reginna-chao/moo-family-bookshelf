@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { ApiClient, FamilyGroup, BookEntry } from "../api/client";
-import { generateKey, exportKey, importKey, encrypt } from "../crypto/encrypt";
+import { ApiClient, FamilyGroup, BookEntry, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import { generateKey, exportKey, importKey, encrypt, deriveUserId } from "../crypto/encrypt";
 import { encodeSyncCode, decodeSyncCode, SyncCodeError } from "../crypto/syncCode";
 import { DEFAULT_API_ENDPOINT, PERSONAL_BOOKS_CACHE_KEY } from "../constants";
 import { LoadingOverlay } from "./LoadingOverlay";
@@ -35,6 +35,7 @@ async function migratePersonalBooksCache(
     const books = JSON.parse(raw) as BookEntry[];
     const key = await importKey(encKeyString);
     const payload = JSON.stringify({
+      schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
       userId,
       displayName: storedDisplayName,
       books,
@@ -205,9 +206,10 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
 
     // Attempt auto-recovery or auto-create for returning users
     try {
-      const hashRes = await apiClient.hashEmail(result.email);
-      if (!hashRes.error && hashRes.data) {
-        const { userId, existingFamilyId, memberCount } = hashRes.data;
+      const userId = await deriveUserId(result.email);
+      const lookupRes = await apiClient.lookupUser(userId);
+      if (!lookupRes.error && lookupRes.data) {
+        const { existingFamilyId, memberCount } = lookupRes.data;
         if (existingFamilyId && memberCount > 0) {
           // Try sync-key recovery first
           setState("recovering");
@@ -268,15 +270,15 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
     setErrorMessage("");
 
     try {
-      const hashRes = await apiClient.hashEmail(userEmail);
-      if (hashRes.error) {
+      const userId = await deriveUserId(userEmail);
+      const lookupRes = await apiClient.lookupUser(userId);
+      if (lookupRes.error) {
         setErrorMessage("無法驗證帳號，請重試。");
         setState("error");
         return;
       }
-      const userId = hashRes.data?.userId ?? "";
-      const existingFamilyId = hashRes.data?.existingFamilyId ?? null;
-      const memberCount = hashRes.data?.memberCount ?? 0;
+      const existingFamilyId = lookupRes.data?.existingFamilyId ?? null;
+      const memberCount = lookupRes.data?.memberCount ?? 0;
 
       // Auto-recovery: user already belongs to a family
       if (existingFamilyId && memberCount > 0) {
@@ -377,13 +379,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       }
 
       await importKey(decoded.encryptionKey);
-      const hashRes = await apiClient.hashEmail(userEmail);
-      if (hashRes.error) {
-        setErrorMessage("無法驗證帳號，請重試。");
-        setState("error");
-        return;
-      }
-      const userId = hashRes.data?.userId ?? "";
+      const userId = await deriveUserId(userEmail);
 
       const response = await apiClient.joinFamily(decoded.familyId, userId, userDisplayName);
       if (response.error) {

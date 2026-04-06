@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ApiClient, BookEntry, BoolFlag } from "../api/client";
+import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "../constants";
@@ -13,25 +13,34 @@ export interface UsePersonalBooksParams {
   lastSyncBooks: BookEntry[];
 }
 
+interface LoadSavedResult {
+  books: BookEntry[];
+  /** Full decrypted payload — preserved so save can merge back unknown fields */
+  raw: Record<string, unknown> | null;
+}
+
 async function loadSavedBooks(
   data: Record<string, unknown>,
   encKeyString: string,
-): Promise<BookEntry[]> {
+): Promise<LoadSavedResult> {
   if (typeof data.payload === "string") {
     const key = await importKey(encKeyString);
     const decrypted = await decrypt(data.payload, key);
-    const parsed = JSON.parse(decrypted) as { books: BookEntry[] };
-    return parsed.books;
+    const parsed = JSON.parse(decrypted) as Record<string, unknown>;
+    const books = Array.isArray(parsed.books) ? (parsed.books as BookEntry[]) : [];
+    return { books, raw: parsed };
   }
   if (Array.isArray(data.books)) {
-    return data.books as BookEntry[];
+    return { books: data.books as BookEntry[], raw: null };
   }
-  return [];
+  return { books: [], raw: null };
 }
 
 export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePersonalBooksParams) {
   const [books, setBooks] = useState<BookEntry[]>([]);
   const originalBooks = useRef<BookEntry[]>([]);
+  /** Raw decrypted payload — kept so save can spread back unknown fields from future versions */
+  const savedRawPayload = useRef<Record<string, unknown> | null>(null);
   const [status, setStatus] = useState<PersonalBooksStatus>("scraping");
   const [errorMessage, setErrorMessage] = useState("");
   const [isDirty, setIsDirty] = useState(false);
@@ -62,10 +71,12 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
         let savedBooks: BookEntry[] = [];
         if (apiResponse.data && encKeyString) {
           try {
-            savedBooks = await loadSavedBooks(
+            const result = await loadSavedBooks(
               apiResponse.data as unknown as Record<string, unknown>,
               encKeyString,
             );
+            savedBooks = result.books;
+            savedRawPayload.current = result.raw;
           } catch {
             console.warn("[PersonalShelf] Decrypt failed, ignoring saved data");
             savedBooks = [];
@@ -126,6 +137,8 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
 
       const key = await importKey(encKeyString);
       const payload = JSON.stringify({
+        ...savedRawPayload.current,
+        schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
         userId,
         displayName: storedDisplayName,
         books,

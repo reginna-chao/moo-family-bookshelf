@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { BookOpen } from "lucide-react";
-import { BoolFlag } from "@/api/client";
+import { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
 import type { ApiClient, BookEntry } from "@/api/client";
 import { importKey, encrypt, decrypt } from "@/crypto/encrypt";
 import { useSearch } from "@/hooks/useSearch";
@@ -32,6 +32,8 @@ export function PersonalShelfPage({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const originalBooksRef = useRef<BookEntry[]>([]);
+  /** Raw decrypted payload — kept so save can spread back unknown fields from future versions */
+  const savedRawPayload = useRef<Record<string, unknown> | null>(null);
 
   const loadBooks = useCallback(async () => {
     setState("loading");
@@ -61,6 +63,7 @@ export function PersonalShelfPage({
       }
 
       const obj = parsed as Record<string, unknown>;
+      savedRawPayload.current = obj;
       setDisplayName(typeof obj.displayName === "string" ? obj.displayName : "");
       const rawBooks = Array.isArray(obj.books) ? (obj.books as BookEntry[]) : [];
       // Normalize: Extension may store boolean for isShared/isArchived, PWA uses BoolFlag
@@ -89,6 +92,8 @@ export function PersonalShelfPage({
     try {
       const key = await importKey(encryptionKey);
       const payload = JSON.stringify({
+        ...savedRawPayload.current,
+        schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
         userId,
         displayName,
         books,

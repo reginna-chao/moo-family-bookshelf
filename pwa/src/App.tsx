@@ -127,8 +127,6 @@ export default function App() {
     void acquireNewToken().finally(() => setAcquiringToken(false));
   }, [auth, acquireNewToken]);
 
-  // Unauthenticated client for LandingPage (email hash endpoint)
-  const baseApiClient = useMemo(() => new ApiClient(), []);
 
   if (isLoading || acquiringToken) {
     return (
@@ -145,7 +143,6 @@ export default function App() {
           setFamilyFullError("");
           login(data);
         }}
-        apiClient={baseApiClient}
         initialSyncCode={initialSyncCode}
         externalError={familyFullError}
       />

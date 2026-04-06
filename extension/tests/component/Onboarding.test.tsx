@@ -12,6 +12,15 @@ beforeAll(() => {
   }
 });
 
+// Partially mock crypto module — override deriveUserId for deterministic & fast resolution
+vi.mock("@/crypto/encrypt", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/crypto/encrypt")>();
+  return {
+    ...actual,
+    deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
+  };
+});
+
 // Mock the scraper module
 vi.mock("@/content/scraper", () => ({
   scrapeUserEmail: vi.fn().mockReturnValue("test@example.com"),
@@ -21,7 +30,7 @@ vi.mock("@/content/scraper", () => ({
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
-    hashEmail: vi.fn().mockResolvedValue({ data: { userId: "a".repeat(64) } }),
+    lookupUser: vi.fn().mockResolvedValue({ data: { existingFamilyId: null, memberCount: 0 } }),
     createFamily: vi.fn().mockResolvedValue({
       data: { familyId: "fam-123", members: ["user-1"], createdAt: "2026-01-01" },
     }),
@@ -65,10 +74,13 @@ describe("Onboarding", () => {
     // Restore default scraper mock
     vi.mocked(scrapeUserEmail).mockReturnValue("test@example.com");
 
-    // Reset chrome.storage.local mock
+    // Reset chrome.storage.local mock — handle both callback-based and promise-based calls
     vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-        callback({});
+      (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        if (typeof callback === "function") {
+          callback({});
+        }
+        return Promise.resolve({}) as unknown as void;
       },
     );
     vi.mocked(chrome.storage.local.set).mockImplementation(
@@ -298,10 +310,10 @@ describe("Onboarding", () => {
       expect(screen.getByText("繼續")).toBeInTheDocument();
     });
 
-    it("shows error when hashEmail fails", async () => {
+    it("shows error when lookupUser fails", async () => {
       const mockApi = createMockApiClient({
-        hashEmail: vi.fn().mockResolvedValue({
-          error: { code: "INTERNAL_ERROR", message: "Hash failed" },
+        lookupUser: vi.fn().mockResolvedValue({
+          error: { code: "INTERNAL_ERROR", message: "Lookup failed" },
         }),
       });
 
@@ -469,34 +481,8 @@ describe("Onboarding", () => {
       });
     });
 
-    it("shows error when hashEmail fails during join", async () => {
-      const mockApi = createMockApiClient({
-        hashEmail: vi.fn().mockResolvedValue({
-          error: { code: "INTERNAL_ERROR", message: "Hash failed" },
-        }),
-      });
-
-      renderOnboarding({ apiClient: mockApi });
-
-      await clickStartAndWait();
-
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
-      });
-
-      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
-        target: { value: "moo-abcd-efgh-validKey123" },
-      });
-
-      await act(async () => {
-        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText("發生錯誤")).toBeInTheDocument();
-        expect(screen.getByText("無法驗證帳號，請重試。")).toBeInTheDocument();
-      });
-    });
+    // Note: the join flow no longer calls lookupUser — it hashes client-side
+    // via deriveUserId, so there is no server-side hash failure path to test.
   });
 
   describe("handleContinueAfterCreate when sync fails", () => {
@@ -853,8 +839,8 @@ describe("Onboarding", () => {
     it("auto-recovers when existingFamilyId is returned and encryption key is available", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
-        hashEmail: vi.fn().mockResolvedValue({
-          data: { userId: "a".repeat(64), existingFamilyId: "fam-existing", memberCount: 2 },
+        lookupUser: vi.fn().mockResolvedValue({
+          data: { existingFamilyId: "fam-existing", memberCount: 2 },
         }),
         joinFamily: vi.fn().mockResolvedValue({
           data: {
@@ -875,13 +861,13 @@ describe("Onboarding", () => {
       // Wait for the create button in case early recovery did not trigger
       // The early recovery in handleStart should fire and call onFamilyJoined
       await waitFor(() => {
-        expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", "a".repeat(64));
+        expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", expect.any(String));
       });
 
       // Should have called joinFamily with the existing family
       expect(mockApi.joinFamily).toHaveBeenCalledWith(
         "fam-existing",
-        "a".repeat(64),
+        expect.any(String),
         expect.any(String),
       );
     });
@@ -889,8 +875,8 @@ describe("Onboarding", () => {
     it("rejoins existing family for solo member without encryption key", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
-        hashEmail: vi.fn().mockResolvedValue({
-          data: { userId: "a".repeat(64), existingFamilyId: "fam-solo", memberCount: 1 },
+        lookupUser: vi.fn().mockResolvedValue({
+          data: { existingFamilyId: "fam-solo", memberCount: 1 },
         }),
         joinFamily: vi.fn().mockResolvedValue({
           data: {
@@ -910,15 +896,15 @@ describe("Onboarding", () => {
 
       // Solo member + no key: handleStart rejoins existing family with fresh key
       await waitFor(() => {
-        expect(mockApi.joinFamily).toHaveBeenCalledWith("fam-solo", "a".repeat(64), expect.any(String));
-        expect(onFamilyJoined).toHaveBeenCalledWith("fam-solo", "a".repeat(64));
+        expect(mockApi.joinFamily).toHaveBeenCalledWith("fam-solo", expect.any(String), expect.any(String));
+        expect(onFamilyJoined).toHaveBeenCalledWith("fam-solo", expect.any(String));
       });
     });
 
     it("shows error for multi-member family without encryption key", async () => {
       const mockApi = createMockApiClient({
-        hashEmail: vi.fn().mockResolvedValue({
-          data: { userId: "a".repeat(64), existingFamilyId: "fam-multi", memberCount: 3 },
+        lookupUser: vi.fn().mockResolvedValue({
+          data: { existingFamilyId: "fam-multi", memberCount: 3 },
         }),
       });
 

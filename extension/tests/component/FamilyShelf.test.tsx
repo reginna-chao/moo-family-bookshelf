@@ -41,7 +41,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
     setAuthToken: vi.fn(),
-    hashEmail: vi.fn(),
+    lookupUser: vi.fn(),
     removeMember: vi.fn(),
     transferOwnership: vi.fn(),
     updateDisplayName: vi.fn(),

@@ -159,9 +159,9 @@ describe("isPublicRoute", () => {
     expect(isPublicRoute("POST", "/api/family/abcd-1234/join/")).toBe(true);
   });
 
-  it("should match POST /api/auth/hash", () => {
-    expect(isPublicRoute("POST", "/api/auth/hash")).toBe(true);
-    expect(isPublicRoute("POST", "/api/auth/hash/")).toBe(true);
+  it("should match POST /api/auth/lookup", () => {
+    expect(isPublicRoute("POST", "/api/auth/lookup")).toBe(true);
+    expect(isPublicRoute("POST", "/api/auth/lookup/")).toBe(true);
   });
 
   it("should match POST /api/auth/refresh (public, uses membership as auth)", () => {

@@ -25,13 +25,12 @@ function request(
   return app.request(path, init, { KV: kv });
 }
 
-/** Helper: hash an email to get its userId via the /api/auth/hash endpoint. */
-async function hashEmail(email: string): Promise<string> {
-  const res = await request("POST", "/api/auth/hash", {
-    body: JSON.stringify({ email }),
-  });
-  const json = (await res.json()) as Json;
-  return json.data.userId as string;
+/** Helper: compute userId from email (same as client-side sha256Hex). */
+async function computeUserId(email: string): Promise<string> {
+  const normalized = email.toLowerCase().trim();
+  const encoded = new TextEncoder().encode(`moo:${normalized}`);
+  const hash = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Helper: create a family for a given userId, returns familyId + authToken. */
@@ -53,69 +52,48 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-describe("POST /api/auth/hash", () => {
-  it("should return userId for a valid email", async () => {
-    const res = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "test@example.com" }),
+describe("POST /api/auth/lookup", () => {
+  it("should return existingFamilyId null and memberCount 0 for unknown userId", async () => {
+    const res = await request("POST", "/api/auth/lookup", {
+      body: JSON.stringify({ userId: "a".repeat(64) }),
     });
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.userId).toMatch(/^[a-f0-9]{64}$/);
+    expect(json.data.existingFamilyId).toBeNull();
+    expect(json.data.memberCount).toBe(0);
   });
 
-  it("should produce the same userId for different casing", async () => {
-    const res1 = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "Test@Example.COM" }),
+  it("should return correct family info when user has a family", async () => {
+    const userId = await computeUserId("lookup-test@example.com");
+    const { familyId } = await createFamily(userId);
+
+    const res = await request("POST", "/api/auth/lookup", {
+      body: JSON.stringify({ userId }),
     });
-    const res2 = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "test@example.com" }),
-    });
-    const json1 = (await res1.json()) as Json;
-    const json2 = (await res2.json()) as Json;
-    expect(json1.data.userId).toBe(json2.data.userId);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.existingFamilyId).toBe(familyId);
+    expect(json.data.memberCount).toBe(1);
   });
 
-  it("should produce the same userId when email has extra whitespace", async () => {
-    const res1 = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "  test@example.com  " }),
+  it("should return 400 for invalid userId format", async () => {
+    const res = await request("POST", "/api/auth/lookup", {
+      body: JSON.stringify({ userId: "not-a-hex-id" }),
     });
-    const res2 = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "test@example.com" }),
-    });
-    const json1 = (await res1.json()) as Json;
-    const json2 = (await res2.json()) as Json;
-    expect(json1.data.userId).toBe(json2.data.userId);
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("INVALID_INPUT");
   });
 
-  it("should return 400 when email is missing", async () => {
-    const res = await request("POST", "/api/auth/hash", {
+  it("should return 400 when userId is missing", async () => {
+    const res = await request("POST", "/api/auth/lookup", {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-    const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("MISSING_EMAIL");
-  });
-
-  it("should return 400 when email is empty string", async () => {
-    const res = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "" }),
-    });
-    expect(res.status).toBe(400);
-    const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("MISSING_EMAIL");
-  });
-
-  it("should return 400 when email is whitespace only", async () => {
-    const res = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "   " }),
-    });
-    expect(res.status).toBe(400);
-    const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("MISSING_EMAIL");
   });
 
   it("should return 400 for invalid JSON body", async () => {
-    const res = await request("POST", "/api/auth/hash", {
+    const res = await request("POST", "/api/auth/lookup", {
       body: "not json",
     });
     expect(res.status).toBe(400);
@@ -124,80 +102,9 @@ describe("POST /api/auth/hash", () => {
   });
 
   it("should not require authentication", async () => {
-    // No Authorization header — should still succeed
-    const res = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "test@example.com" }),
+    const res = await request("POST", "/api/auth/lookup", {
+      body: JSON.stringify({ userId: "b".repeat(64) }),
     });
     expect(res.status).toBe(200);
-  });
-
-  it("should return existingFamilyId null and memberCount 0 when user has no family", async () => {
-    const res = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "nofamily@example.com" }),
-    });
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as Json;
-    expect(json.data.existingFamilyId).toBeNull();
-    expect(json.data.memberCount).toBe(0);
-  });
-
-  it("should return correct existingFamilyId and memberCount when user has a family", async () => {
-    // First, hash email to get userId
-    const userId = await hashEmail("familyuser@example.com");
-
-    // Create a family for this user
-    const { familyId } = await createFamily(userId);
-
-    // Now hash again — should include family info
-    const res = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "familyuser@example.com" }),
-    });
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as Json;
-    expect(json.data.existingFamilyId).toBe(familyId);
-    expect(json.data.memberCount).toBe(1);
-  });
-
-  it("should return correct memberCount when family has multiple members", async () => {
-    const userId1 = await hashEmail("owner@example.com");
-    const userId2 = await hashEmail("member@example.com");
-
-    // Create family with user1
-    const { familyId } = await createFamily(userId1);
-
-    // user2 joins
-    await app.request(
-      `/api/family/${familyId}/join`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: userId2 }),
-      },
-      { KV: kv },
-    );
-
-    // Hash owner — should show memberCount 2
-    const res = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "owner@example.com" }),
-    });
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as Json;
-    expect(json.data.existingFamilyId).toBe(familyId);
-    expect(json.data.memberCount).toBe(2);
-  });
-
-  it("should return existingFamilyId with memberCount 0 when family record is missing", async () => {
-    const userId = await hashEmail("orphan@example.com");
-
-    // Manually set member key without a family record (orphaned state)
-    await kv.put(kvKeys.member(userId), "abcd-1234");
-
-    const res = await request("POST", "/api/auth/hash", {
-      body: JSON.stringify({ email: "orphan@example.com" }),
-    });
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as Json;
-    expect(json.data.existingFamilyId).toBe("abcd-1234");
-    expect(json.data.memberCount).toBe(0);
   });
 });

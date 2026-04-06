@@ -25,11 +25,17 @@ export interface BookEntry {
 }
 
 export interface PersonalBooks {
+  schemaVersion: number;
   userId: string;
   displayName: string;
   books: BookEntry[];
   lastUpdated: string;
+  /** Preserve unknown fields from future schema versions */
+  [key: string]: unknown;
 }
+
+/** Current schema version for PersonalBooks encrypted payload */
+export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 
 export interface FamilyMember {
   userId: string;

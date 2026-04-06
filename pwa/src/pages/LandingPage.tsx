@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
+import { deriveUserId } from "@/crypto/encrypt";
 import { ApiClient } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
 import { REMEMBERED_LOGOUT_KEY } from "@/hooks/useAuth";
@@ -7,7 +8,6 @@ import { getAppEnv } from "@/utils/appEnv";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
-  apiClient: ApiClient;
   /** Pre-filled sync code from invite link (#family= URL param). */
   initialSyncCode?: string;
   /** External error (e.g., FAMILY_FULL from token refresh). */
@@ -17,7 +17,7 @@ interface LandingPageProps {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_ENV = getAppEnv();
 
-export function LandingPage({ onAuth, apiClient, initialSyncCode = "", externalError = "" }: LandingPageProps) {
+export function LandingPage({ onAuth, initialSyncCode = "", externalError = "" }: LandingPageProps) {
   const [syncCode, setSyncCode] = useState(initialSyncCode);
   const [email, setEmail] = useState("");
 
@@ -85,13 +85,7 @@ export function LandingPage({ onAuth, apiClient, initialSyncCode = "", externalE
     setIsSubmitting(true);
 
     try {
-      const hashRes = await apiClient.hashEmail(trimmedEmail);
-      if (hashRes.error) {
-        setGeneralError("無法驗證帳號，請重試。");
-        setIsSubmitting(false);
-        return;
-      }
-      const userId = hashRes.data?.userId ?? "";
+      const userId = await deriveUserId(trimmedEmail);
 
       // Join family before completing auth — blocks on FAMILY_FULL
       const joinClient = getJoinClient(decoded.apiHost);

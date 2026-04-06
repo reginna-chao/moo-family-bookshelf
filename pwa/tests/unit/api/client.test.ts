@@ -239,19 +239,26 @@ describe("ApiClient", () => {
     });
   });
 
-  describe("hashEmail", () => {
-    it("should call POST /api/auth/hash with email", async () => {
+  describe("lookupUser", () => {
+    it("should call POST /api/auth/lookup with userId", async () => {
       mockFetch.mockResolvedValueOnce(
-        jsonResponse({ data: { userId: USER_1 } }),
+        jsonResponse({ data: { existingFamilyId: null, memberCount: 0 } }),
       );
 
-      const result = await client.hashEmail("test@example.com");
+      const userId = "a".repeat(64);
+      const result = await client.lookupUser(userId);
 
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toBe("https://api.example.com/api/auth/hash");
+      expect(url).toBe("https://api.example.com/api/auth/lookup");
       expect(init.method).toBe("POST");
-      expect(JSON.parse(init.body)).toEqual({ email: "test@example.com" });
-      expect(result.data).toEqual({ userId: USER_1 });
+      expect(JSON.parse(init.body)).toEqual({ userId });
+      expect(result.data).toEqual({ existingFamilyId: null, memberCount: 0 });
+    });
+
+    it("should reject invalid userId", async () => {
+      await expect(client.lookupUser("invalid-id")).rejects.toThrow(
+        "Invalid userId",
+      );
     });
   });
 

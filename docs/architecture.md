@@ -209,7 +209,7 @@
 2. 顯示 Loading 遮罩（半透明背景 + 進度提示）
 3. 自動導航到 #/me
 4. 抓取使用者名稱（.me-nickname）+ email
-5. 用 SHA-256(email) 產生 userId
+5. 用 deriveUserId（加鹽 SHA-256, `moo:` prefix）產生 userId
 6. 查詢 API（GET /api/member/:userId）是否已有家庭資料
    → 有：從 chrome.storage.sync 恢復 familyId + encryptionKey
    → 無：移除遮罩，顯示「建立新家庭」/「加入家庭」選擇
@@ -419,7 +419,7 @@ Extension 設定頁 → 「連結手機」按鈕
 PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
        ↓
   同步碼 → familyId + encryptionKey
-  Email → 前端 SHA-256 → userId（不上傳伺服器）
+  Email → 前端 deriveUserId（加鹽 SHA-256）→ userId（不上傳伺服器）
        ↓
   儲存至 localStorage → 完成
 ```

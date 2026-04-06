@@ -11,18 +11,9 @@ function isValidSha256Hex(value: string): boolean {
   return /^[a-f0-9]{64}$/.test(value);
 }
 
-/**
- * Convert ArrayBuffer to hex string.
- */
-function bufferToHex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-// POST /api/auth/hash — derive userId from email (public, no auth required)
-authRoutes.post("/hash", async (c) => {
-  let body: { email: string } | null;
+// POST /api/auth/lookup — look up family membership by userId (public, no auth required)
+authRoutes.post("/lookup", async (c) => {
+  let body: { userId: string } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -32,25 +23,14 @@ authRoutes.post("/hash", async (c) => {
     );
   }
 
-  if (!body?.email || typeof body.email !== "string") {
+  if (!body?.userId || typeof body.userId !== "string" || !isValidSha256Hex(body.userId)) {
     return c.json(
-      { error: { code: "MISSING_EMAIL", message: "email is required" } },
+      { error: { code: "INVALID_INPUT", message: "userId must be a 64-char hex string" } },
       400,
     );
   }
 
-  const trimmed = body.email.trim();
-  if (trimmed.length === 0) {
-    return c.json(
-      { error: { code: "MISSING_EMAIL", message: "email must not be empty" } },
-      400,
-    );
-  }
-
-  const normalized = trimmed.toLowerCase();
-  const encoded = new TextEncoder().encode(normalized);
-  const hash = await crypto.subtle.digest("SHA-256", encoded);
-  const userId = bufferToHex(hash);
+  const userId = body.userId;
 
   // Look up family membership
   let existingFamilyId: string | null = null;
@@ -66,7 +46,7 @@ authRoutes.post("/hash", async (c) => {
     }
   }
 
-  return c.json({ data: { userId, existingFamilyId, memberCount } });
+  return c.json({ data: { existingFamilyId, memberCount } });
 });
 
 // POST /api/auth/refresh — refresh auth token (public route, uses membership as auth)

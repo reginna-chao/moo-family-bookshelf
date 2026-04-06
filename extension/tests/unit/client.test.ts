@@ -139,19 +139,17 @@ describe("ApiClient", () => {
     });
   });
 
-  describe("hashEmail", () => {
-    it("sends POST to /api/auth/hash with email", async () => {
-      globalThis.fetch = mockFetchSuccess({ userId: "hashed-id" });
-      const result = await client.hashEmail("test@example.com");
+  describe("lookupUser", () => {
+    it("sends POST to /api/auth/lookup with userId", async () => {
+      globalThis.fetch = mockFetchSuccess({ existingFamilyId: null, memberCount: 0 });
+      const userId = "a".repeat(64);
+      const result = await client.lookupUser(userId);
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        `${MOCK_ENDPOINT}/api/auth/hash`,
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ email: "test@example.com" }),
-        }),
+        expect.stringContaining("/api/auth/lookup"),
+        expect.objectContaining({ method: "POST" }),
       );
-      expect(result.data).toEqual({ userId: "hashed-id" });
+      expect(result.data).toEqual({ existingFamilyId: null, memberCount: 0 });
     });
   });
 

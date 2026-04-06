@@ -29,11 +29,17 @@ export interface BookEntry {
 
 /** Decrypted view (used by UI after decryption) */
 export interface PersonalBooks {
+  schemaVersion: number;
   userId: string;
   displayName: string;
   books: BookEntry[];
   lastUpdated: string;
+  /** Preserve unknown fields from future schema versions */
+  [key: string]: unknown;
 }
+
+/** Current schema version for PersonalBooks encrypted payload */
+export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 
 /** Raw server response — encrypted payload */
 export interface RawPersonalBooks {
@@ -145,10 +151,10 @@ export class ApiClient {
 
   // --- Auth ---
 
-  async hashEmail(
-    email: string,
-  ): Promise<ApiResponse<{ userId: string }>> {
-    return this.post("/api/auth/hash", { email });
+  /** Look up family membership for a pre-hashed userId. Server never sees the email. */
+  async lookupUser(userId: string): Promise<ApiResponse<{ existingFamilyId: string | null; memberCount: number }>> {
+    this.validateHexId(userId, "userId");
+    return this.post("/api/auth/lookup", { userId });
   }
 
   // --- Personal Settings ---

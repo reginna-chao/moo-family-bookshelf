@@ -14,7 +14,7 @@ import type {
 import { doRefreshToken } from "./auth-refresh";
 
 // Re-export all types so existing imports from "./client" continue to work
-export { BoolFlag } from "./types";
+export { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "./types";
 export type {
   ApiResponse,
   BookEntry,
@@ -112,8 +112,10 @@ export class ApiClient {
 
   // --- Auth ---
 
-  async hashEmail(email: string): Promise<ApiResponse<{ userId: string; existingFamilyId: string | null; memberCount: number }>> {
-    return this.post("/api/auth/hash", { email });
+  /** Look up family membership for a pre-hashed userId. Server never sees the email. */
+  async lookupUser(userId: string): Promise<ApiResponse<{ existingFamilyId: string | null; memberCount: number }>> {
+    this.validateHexId(userId, "userId");
+    return this.post("/api/auth/lookup", { userId });
   }
 
   // --- Personal Settings ---
@@ -315,5 +317,11 @@ export class ApiClient {
       setAuthToken: (token) => { this.authToken = token; },
       onFamilyRemoved: this.onFamilyRemoved,
     });
+  }
+
+  private validateHexId(id: string, label: string): void {
+    if (!/^[a-f0-9]{64}$/.test(id)) {
+      throw new Error(`Invalid ${label}: expected 64-char hex string`);
+    }
   }
 }

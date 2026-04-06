@@ -5,7 +5,7 @@
  * C) Manual sync button
  */
 
-import { ApiClient, BookEntry, BoolFlag } from "../api/client";
+import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 
 // Re-export ApiClient so the content script can import it from content-sync.js
 // instead of needing a separate content-api.js entry point.
@@ -43,20 +43,27 @@ export async function canAutoSync(): Promise<boolean> {
 /**
  * Decrypt and parse saved books from the API response.
  */
+interface LoadSavedResult {
+  books: BookEntry[];
+  /** Full decrypted payload — preserved so save can merge back unknown fields */
+  raw: Record<string, unknown> | null;
+}
+
 async function loadSavedBooks(
   data: Record<string, unknown>,
   encKeyString: string,
-): Promise<BookEntry[]> {
+): Promise<LoadSavedResult> {
   if (typeof data.payload === "string") {
     const key = await importKey(encKeyString);
     const decrypted = await decrypt(data.payload, key);
-    const parsed = JSON.parse(decrypted) as { books: BookEntry[] };
-    return parsed.books;
+    const parsed = JSON.parse(decrypted) as Record<string, unknown>;
+    const books = Array.isArray(parsed.books) ? (parsed.books as BookEntry[]) : [];
+    return { books, raw: parsed };
   }
   if (Array.isArray(data.books)) {
-    return data.books as BookEntry[];
+    return { books: data.books as BookEntry[], raw: null };
   }
-  return [];
+  return { books: [], raw: null };
 }
 
 export interface SyncBooksOptions {
@@ -124,13 +131,16 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     }
 
     let savedBooks: BookEntry[] = [];
+    let savedRawPayload: Record<string, unknown> | null = null;
     const apiResponse = await apiClient.getPersonalBooks(userId);
     if (apiResponse.data) {
       try {
-        savedBooks = await loadSavedBooks(
+        const result = await loadSavedBooks(
           apiResponse.data as unknown as Record<string, unknown>,
           encKeyString,
         );
+        savedBooks = result.books;
+        savedRawPayload = result.raw;
       } catch {
         // Decryption failed — treat as no saved data
         console.warn("[syncBooks] Decrypt failed, ignoring saved data");
@@ -140,10 +150,12 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
 
     const merged = mergeBooks(allScrapedBooks, savedBooks);
 
-    // Step 5: Encrypt and upload
+    // Step 5: Encrypt and upload (spread savedRawPayload to preserve unknown fields from future versions)
     const key = await importKey(encKeyString);
     const displayName = (storageResult.displayName as string | undefined) ?? "";
     const payload = JSON.stringify({
+      ...savedRawPayload,
+      schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
       userId,
       displayName,
       books: merged,

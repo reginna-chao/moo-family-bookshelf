@@ -185,6 +185,26 @@ describe("sha256Hex", () => {
     const hash2 = await sha256Hex("bob");
     expect(hash1).not.toBe(hash2);
   });
+
+  // Cross-platform test vectors: these exact values MUST match in both
+  // Extension and PWA tests. If a test fails here, the other platform's
+  // userId derivation is out of sync — do NOT change the expected values.
+  it.each([
+    [
+      "test@example.com",
+      "973dfe463ec85785f5f95af5ba3906eedb2d931c24e69824a89ea65dba4e813b",
+    ],
+    [
+      "Alice@Readmoo.COM",
+      "19cfc819633f935f1286e5b0f142cbf8108f6e2f94ea3d58db690043fbc5c281",
+    ],
+    [
+      "  User@Example.com  ",
+      "b4c9a289323b21a01c3e940f150eb9b8c542587f1abfd8f0e1cc1ffc5e475514",
+    ],
+  ])("cross-platform vector: sha256Hex(%j) = %s", async (input, expected) => {
+    expect(await sha256Hex(input)).toBe(expected);
+  });
 });
 
 describe("bufferToBase62", () => {
@@ -301,5 +321,25 @@ describe("deriveUserId", () => {
     const id = await deriveUserId("test@example.com");
     expect(id).toHaveLength(64);
     expect(id).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  // Cross-platform test vectors: these exact values MUST match in both
+  // Extension and PWA tests. If a test fails here, the other platform's
+  // userId derivation is out of sync — do NOT change the expected values.
+  it.each([
+    [
+      "test@example.com",
+      "e1c3d577b4d43fae376a7d6c504020cfd43f8f51c48bb97c9ca64361ab1fe540",
+    ],
+    [
+      "Alice@Readmoo.COM",
+      "3f29ef58c6ada4d69fb047baa40ff2e34708a90047d3de933cc02a9d90ea17aa",
+    ],
+    [
+      "  User@Example.com  ",
+      "89f7e39cc90a4bf90502af2f6862d07bcd3dbe9f08cb6dcc96e8a0fd1f404da1",
+    ],
+  ])("cross-platform vector: deriveUserId(%j) = %s", async (input, expected) => {
+    expect(await deriveUserId(input)).toBe(expected);
   });
 });

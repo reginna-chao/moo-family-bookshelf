@@ -21,6 +21,9 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
     const limit = isPublic ? RATE_LIMIT_PUBLIC : RATE_LIMIT_STANDARD;
     const key = `${prefix}:${ip}:${minuteBucket}`;
 
+    // Known limitation: KV get-then-put is not atomic. Concurrent requests may
+    // exceed the limit by ~2x in a burst. Acceptable at current scale; for stricter
+    // enforcement, consider Cloudflare Rate Limiting rules or Durable Objects.
     const current = await c.env.KV.get(key);
     const count = current ? parseInt(current, 10) : 0;
 

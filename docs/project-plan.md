@@ -139,7 +139,7 @@
 4. 按下「開始使用」後，顯示 loading 遮罩（半透明背景 + 進度提示）
 5. 系統自動：
    - 導航到 `#/me`，抓取使用者名稱（`.me-nickname`）及 email
-   - 用 SHA-256(email) 產生 userId
+   - 用 deriveUserId（加鹽 SHA-256, `moo:` prefix）產生 userId
    - 查詢 API 是否已有此 userId 的資料
    - 若已有家庭資料：自動恢復，跳至步驟 7
    - 若無：移除遮罩，顯示「建立新家庭」或「加入家庭（輸入同步碼）」選擇
@@ -547,7 +547,7 @@ jobs:
 - [x] 新書預設不開放邏輯（合併爬取結果 vs 已儲存設定）
 - [x] Cloudflare KV namespace 建立 + wrangler.toml 更新
 - [x] Worker 部署至 Cloudflare（首次 `wrangler deploy`）
-- [x] 使用者識別：SHA-256(email) 作為 deterministic userId
+- [x] 使用者識別：deriveUserId（加鹽 SHA-256, `moo:` prefix）作為 deterministic userId
 - [x] 借入書籍過濾（不爬取他人借出的書）
 - [x] 開發/正式環境分離（Vite env vars + preview-kv / prod-kv）
 
@@ -613,7 +613,7 @@ jobs:
 #### PWA 認證設計
 - [x] Extension 設定頁：「連結手機」按鈕，產生 QR Code（PWA URL + familyId + encKey + userId，使用 URL fragment 保護金鑰）
 - [x] PWA Landing Page：掃碼自動解析 URL fragment → 儲存至 localStorage → 自動 join 取得 auth token
-- [x] PWA 備用入口：手動輸入同步碼 + 讀墨 Email（前端 SHA-256 → userId，不上傳）
+- [x] PWA 備用入口：手動輸入同步碼 + 讀墨 Email（前端 deriveUserId → userId，不上傳伺服器）
 
 #### PWA 核心功能
 - [x] PWA 專案建置（React + TypeScript + Vite + Tailwind，複製 crypto/ 和 api/ 模組）

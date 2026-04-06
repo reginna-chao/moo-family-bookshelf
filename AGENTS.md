@@ -185,6 +185,12 @@ Family membership is the gate for all features. Without a family, only onboardin
 
 ## API Endpoints
 
+### Authentication
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/auth/lookup` | Look up family membership by pre-hashed userId |
+| `POST` | `/api/auth/refresh` | Refresh auth token (uses userId + familyId membership) |
+
 ### Personal Settings
 | Method | Path | Description |
 |--------|------|-------------|
