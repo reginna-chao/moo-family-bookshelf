@@ -84,6 +84,19 @@ export interface RawFamilyBookshelf {
   }>;
 }
 
+export type VerifyMethod = "pin" | "pattern" | "code" | "none";
+
+export interface VerifyInfo {
+  method: VerifyMethod;
+  prompted: number;
+}
+
+export interface SetVerifyBody {
+  method: VerifyMethod;
+  secret?: string;
+  prompted?: number;
+}
+
 export class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
@@ -184,9 +197,14 @@ export class ApiClient {
   async joinFamily(
     familyId: string,
     userId: string,
+    verifySecret?: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
-    return this.post(`/api/family/${familyId}/join`, { userId });
+    const body: Record<string, string> = { userId };
+    if (verifySecret !== undefined) {
+      body.verifySecret = verifySecret;
+    }
+    return this.post(`/api/family/${familyId}/join`, body);
   }
 
   async leaveFamily(
@@ -245,6 +263,29 @@ export class ApiClient {
     familyId: string,
   ): Promise<ApiResponse<RawFamilyBookshelf>> {
     return this.get(`/api/family/${familyId}/bookshelf`);
+  }
+
+  // --- Verification ---
+
+  /** Get verification method for a user (no auth needed). */
+  async getVerifyMethod(userId: string): Promise<ApiResponse<VerifyInfo>> {
+    this.validateHexId(userId, "userId");
+    return this.get(`/api/user/${userId}/verify`);
+  }
+
+  /** Set verification method for a user. */
+  async setVerifyMethod(
+    userId: string,
+    body: SetVerifyBody,
+  ): Promise<ApiResponse<{ ok: boolean }>> {
+    this.validateHexId(userId, "userId");
+    return this.put(`/api/user/${userId}/verify`, body);
+  }
+
+  /** Mark verification as prompted (requires auth token). */
+  async markVerifyPrompted(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
+    this.validateHexId(userId, "userId");
+    return this.post(`/api/user/${userId}/verify/prompted`);
   }
 
   // --- Internal ---

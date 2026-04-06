@@ -2,9 +2,12 @@ import { useState, useEffect, useRef } from "react";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 import { deriveUserId } from "@/crypto/encrypt";
 import { ApiClient } from "@/api/client";
+import type { VerifyMethod } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
 import { REMEMBERED_LOGOUT_KEY } from "@/hooks/useAuth";
 import { getAppEnv } from "@/utils/appEnv";
+import { PinInput } from "@/components/PinInput";
+import { PatternLock } from "@/components/PatternLock";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
@@ -12,6 +15,15 @@ interface LandingPageProps {
   initialSyncCode?: string;
   /** External error (e.g., FAMILY_FULL from token refresh). */
   externalError?: string;
+}
+
+/** Pending auth data waiting for verification completion. */
+interface PendingAuth {
+  userId: string;
+  familyId: string;
+  encryptionKey: string;
+  apiHost?: string;
+  verifyMethod: VerifyMethod;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -52,6 +64,11 @@ export function LandingPage({ onAuth, initialSyncCode = "", externalError = "" }
   const [generalError, setGeneralError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Verification state
+  const [pendingAuth, setPendingAuth] = useState<PendingAuth | null>(null);
+  const [verifyError, setVerifyError] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSyncCodeError("");
@@ -86,13 +103,54 @@ export function LandingPage({ onAuth, initialSyncCode = "", externalError = "" }
 
     try {
       const userId = await deriveUserId(trimmedEmail);
-
-      // Join family before completing auth — blocks on FAMILY_FULL
       const joinClient = getJoinClient(decoded.apiHost);
-      const joinRes = await joinClient.joinFamily(decoded.familyId, userId);
+
+      // Check verification method before joining
+      const verifyRes = await joinClient.getVerifyMethod(userId);
+      const method: VerifyMethod = verifyRes.data?.method ?? "none";
+
+      if (method !== "none") {
+        setPendingAuth({
+          userId,
+          familyId: decoded.familyId,
+          encryptionKey: decoded.encryptionKey,
+          apiHost: decoded.apiHost,
+          verifyMethod: method,
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // No verification needed — join directly
+      await completeJoin(decoded.familyId, userId, decoded.encryptionKey, decoded.apiHost);
+    } catch {
+      setGeneralError("處理失敗，請重試。");
+      setIsSubmitting(false);
+    }
+  }
+
+  async function completeJoin(
+    familyId: string,
+    userId: string,
+    encryptionKey: string,
+    apiHost?: string,
+    verifySecret?: string,
+  ) {
+    setIsSubmitting(true);
+    try {
+      const joinClient = getJoinClient(apiHost);
+      const joinRes = await joinClient.joinFamily(familyId, userId, verifySecret);
       if (joinRes.error) {
-        if (joinRes.error.code === "FAMILY_FULL") {
+        const code = joinRes.error.code;
+        if (code === "FAMILY_FULL") {
           setGeneralError("家庭成員已達上限（每個家庭最多 2 位成員）");
+        } else if (code === "VERIFICATION_REQUIRED") {
+          setVerifyError("需要驗證才能登入。");
+        } else if (code === "VERIFICATION_FAILED") {
+          setVerifyError("驗證失敗，請重新輸入。");
+        } else if (code === "VERIFICATION_LOCKED") {
+          setVerifyError("驗證錯誤次數過多，請稍後再試。");
+          setPendingAuth(null);
         } else {
           setGeneralError(joinRes.error.message || "加入家庭失敗，請重試。");
         }
@@ -100,20 +158,98 @@ export function LandingPage({ onAuth, initialSyncCode = "", externalError = "" }
         return;
       }
 
-      // Extract auth token from join response
       const joinData = joinRes.data as unknown as { authToken?: string };
-
+      setPendingAuth(null);
       onAuth({
         userId,
-        familyId: decoded.familyId,
-        encryptionKey: decoded.encryptionKey,
-        apiHost: decoded.apiHost,
+        familyId,
+        encryptionKey,
+        apiHost,
         authToken: joinData?.authToken,
       });
     } catch {
       setGeneralError("處理失敗，請重試。");
       setIsSubmitting(false);
     }
+  }
+
+  function handleVerifyComplete(secret: string) {
+    if (!pendingAuth) return;
+    setVerifyError("");
+    void completeJoin(
+      pendingAuth.familyId,
+      pendingAuth.userId,
+      pendingAuth.encryptionKey,
+      pendingAuth.apiHost,
+      secret,
+    );
+  }
+
+  function handleVerifyCancel() {
+    setPendingAuth(null);
+    setVerifyError("");
+    setCodeInput("");
+  }
+
+  // Show verification UI
+  if (pendingAuth) {
+    return (
+      <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
+        {pendingAuth.verifyMethod === "pin" && (
+          <PinInput
+            mode="verify"
+            error={verifyError}
+            onComplete={handleVerifyComplete}
+            onCancel={handleVerifyCancel}
+          />
+        )}
+        {pendingAuth.verifyMethod === "pattern" && (
+          <PatternLock
+            mode="verify"
+            error={verifyError}
+            onComplete={handleVerifyComplete}
+            onCancel={handleVerifyCancel}
+          />
+        )}
+        {pendingAuth.verifyMethod === "code" && (
+          <div className="flex flex-col items-center w-full max-w-xs mx-auto">
+            <h2 className="text-lg font-bold text-gray-900 mb-2">輸入驗證碼</h2>
+            <p className="text-sm text-gray-500 mb-4 text-center">
+              請在電腦版 Extension 查看驗證碼
+            </p>
+            {verifyError && (
+              <p role="alert" className="text-red-500 text-sm mb-3 text-center">
+                {verifyError}
+              </p>
+            )}
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value.replace(/\D/g, ""))}
+              placeholder="6 位數驗證碼"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-center text-2xl tracking-widest focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none mb-4"
+            />
+            <button
+              type="button"
+              onClick={() => handleVerifyComplete(codeInput)}
+              disabled={codeInput.length !== 6 || isSubmitting}
+              className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? "驗證中..." : "確認"}
+            </button>
+            <button
+              type="button"
+              onClick={handleVerifyCancel}
+              className="mt-3 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              取消
+            </button>
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (

@@ -30,6 +30,9 @@ vi.mock("@/api/client", () => {
     getEndpoint = vi.fn().mockReturnValue("https://api.example.com");
     setEndpoint = vi.fn();
     joinFamily = mockJoinFamily;
+    getVerifyMethod = vi.fn().mockResolvedValue({ data: { method: "none", prompted: 1 } });
+    setVerifyMethod = vi.fn().mockResolvedValue({ data: { ok: true } });
+    markVerifyPrompted = vi.fn().mockResolvedValue({ data: { ok: true } });
   }
   return { ApiClient: MockApiClient };
 });

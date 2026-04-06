@@ -7,10 +7,13 @@ import { DEFAULT_API_ENDPOINT } from "../constants";
 import type {
   ApiResponse,
   FamilyGroup,
+  OtpInfo,
   PersonalBooks,
   RawFamilyBookshelf,
+  VerifyInfo,
   VersionInfo,
 } from "./types";
+import type { VerifyMethod } from "./types";
 import { doRefreshToken } from "./auth-refresh";
 
 // Re-export all types so existing imports from "./client" continue to work
@@ -21,8 +24,11 @@ export type {
   FamilyBookshelf,
   FamilyGroup,
   FamilyMember,
+  OtpInfo,
   PersonalBooks,
   RawFamilyBookshelf,
+  VerifyInfo,
+  VerifyMethod,
   VersionInfo,
 } from "./types";
 
@@ -206,6 +212,23 @@ export class ApiClient {
     familyId: string,
   ): Promise<ApiResponse<RawFamilyBookshelf>> {
     return this.get(`/api/family/${familyId}/bookshelf`);
+  }
+
+  // --- Verification ---
+
+  async getVerifyMethod(userId: string): Promise<ApiResponse<VerifyInfo>> {
+    return this.get(`/api/user/${userId}/verify`);
+  }
+
+  async setVerifyMethod(
+    userId: string,
+    body: { method: VerifyMethod; secret?: string; prompted?: number },
+  ): Promise<ApiResponse<{ ok: boolean }>> {
+    return this.put(`/api/user/${userId}/verify`, body);
+  }
+
+  async generateOtp(userId: string): Promise<ApiResponse<OtpInfo>> {
+    return this.post(`/api/user/${userId}/verify/otp`);
   }
 
   // --- Internal ---

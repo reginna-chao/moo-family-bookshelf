@@ -8,6 +8,7 @@ import { PersonalShelfPage } from "./pages/PersonalShelfPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { PwaCreateNotice } from "./components/PwaCreateNotice";
+import { VerifySetupPrompt } from "./components/VerifySetupPrompt";
 import { FamilyDataProvider, useFamilyData } from "./hooks/useFamilyData";
 import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
@@ -50,6 +51,7 @@ export default function App() {
   const { auth, isLoading, login, logout, forceLogout, initialSyncCode } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>(() => pageFromHash() ?? "family-shelf");
   const [familyFullError, setFamilyFullError] = useState("");
+  const [verifySetupDone, setVerifySetupDone] = useState(false);
 
   // Sync page state with hash
   const navigate = useCallback((page: Page) => {
@@ -89,6 +91,10 @@ export default function App() {
     const current = authRef.current;
     if (!current) return null;
     const tempClient = new ApiClient(current.apiHost);
+    // Refresh endpoint is protected — include current token for authentication
+    if (current.authToken) {
+      tempClient.setAuthToken(current.authToken);
+    }
     const res = await tempClient.joinFamily(current.familyId, current.userId);
     if (res.error) {
       if (res.error.code === "FAMILY_FULL") {
@@ -156,6 +162,13 @@ export default function App() {
       apiClient={apiClient}
       encryptionKey={auth.encryptionKey}
     >
+      {!verifySetupDone && (
+        <VerifySetupPrompt
+          userId={auth.userId}
+          apiClient={apiClient}
+          onComplete={() => setVerifySetupDone(true)}
+        />
+      )}
       <MainContent
         auth={auth}
         apiClient={apiClient}

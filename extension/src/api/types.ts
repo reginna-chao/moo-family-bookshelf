@@ -64,6 +64,18 @@ export interface FamilyBookshelf {
   }>;
 }
 
+export type VerifyMethod = "pin" | "pattern" | "code" | "none";
+
+export interface VerifyInfo {
+  method: VerifyMethod;
+  prompted: number;
+}
+
+export interface OtpInfo {
+  code: string;
+  expiresAt: number;
+}
+
 /** Raw server response — members have encrypted payloads */
 export interface RawFamilyBookshelf {
   familyId: string;

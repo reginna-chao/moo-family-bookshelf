@@ -182,6 +182,8 @@
 | `family:{family_id}` | `{ owner_id, members[], max_members, created_at }` | 記錄家庭組成 + 管理者 |
 | `member:{user_id}` | 所屬 family_id | 反向查詢用 |
 | `public:{share_token}` | `{ user_id, title, books[], created_at, expires_at }` | 公開書櫃明文書單（v1.2.0） |
+| `verify:{user_id}` | `{ method, hash, salt, prompted, failCount, lockedUntil }` | PWA 登入驗證設定 |
+| `otp:{user_id}` | `{ code, createdAt }` | 一次性驗證碼（TTL 5 分鐘） |
 
 - **TTL**：個人開放設定不設過期（持久化）；家庭群組可設定過期時間；公開書櫃依使用者設定（7/30/60/90 天或永久）
 - **家庭人數上限**：`max_members` 預設為 2（配合讀墨官方限制）
@@ -334,6 +336,45 @@ moo-{family_id_short}-{encryption_key_encoded}@{api_host_encoded}
 | **資料獨立** | 個人設定不隨家庭解綁而消失 |
 | **權限分離** | 家庭成員僅可瀏覽他人已開放書籍，無法修改 |
 | **解綁隔離** | 離開家庭後，其他成員立即無法存取該使用者的書籍 |
+| **PWA 登入驗證** | 可選式驗證機制（PIN / 圖形 / 隨機碼），防止家庭成員冒用身份 |
+
+### PWA 登入驗證機制
+
+#### 問題
+同步碼為家庭共享秘密，家人間通常知道彼此的 Email。若不設驗證，家庭成員可用「共享同步碼 + 對方 Email」在 PWA 冒充他人登入。
+
+#### 解決方案
+使用者可選擇設定 PWA 登入驗證方式：
+
+| 方式 | 說明 | 安全性 |
+|------|------|--------|
+| PIN 碼 | 4-6 位數字 | 中（需搭配暴力破解鎖定） |
+| 圖形驗證 | 九宮格至少連 4 點 | 中（同上） |
+| 隨機驗證碼 | Extension 產生 6 位數，有效期 5 分鐘 | 高（需要電腦在旁） |
+| 不設定驗證 | 現有行為，接受風險 | 低 |
+
+#### 安全措施
+- PIN/Pattern hash 以 SHA-256(salt + secret) 儲存於 `verify:{userId}`（非 E2EE，server 需驗證）
+- 連續 5 次驗證失敗 → 鎖定 15 分鐘
+- OTP 使用後立即刪除（一次性）
+- Token refresh 改為 protected route（需有效 Bearer token），防止 userId + familyId 直接取得新 token
+- 預設不設定；首次 PWA 登入後提醒一次，之後不再提醒
+
+#### KV Key 設計
+
+| Key Pattern | Value | TTL |
+|-------------|-------|-----|
+| `verify:{userId}` | `{ method, hash, salt, prompted, failCount, lockedUntil }` | None |
+| `otp:{userId}` | `{ code, createdAt }` | 300 秒 |
+
+#### API 端點
+
+| Method | Path | 說明 | 權限 |
+|--------|------|------|------|
+| `GET` | `/api/user/:id/verify` | 查詢驗證方式（不回傳 hash） | 公開 |
+| `PUT` | `/api/user/:id/verify` | 設定/變更驗證方式 | 本人 |
+| `POST` | `/api/user/:id/verify/otp` | 產生一次性驗證碼 | 本人 |
+| `POST` | `/api/user/:id/verify/prompted` | 標記已提醒 | 公開 |
 
 ---
 

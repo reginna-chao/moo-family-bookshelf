@@ -3,6 +3,7 @@ import type { Env } from "../index";
 import { kvKeys, type FamilyMember, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName } from "../utils/validation";
 import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
+import { validateVerification } from "./verify";
 
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
 
@@ -90,7 +91,7 @@ familyRoutes.post("/:id/join", async (c) => {
     );
   }
 
-  let body: { userId: string; displayName?: string } | null;
+  let body: { userId: string; displayName?: string; verifySecret?: string } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -119,6 +120,15 @@ familyRoutes.post("/:id/join", async (c) => {
     return c.json(
       { error: { code: "INVALID_DISPLAY_NAME", message: "displayName must be a string of 20 characters or fewer" } },
       400,
+    );
+  }
+
+  // Verify PWA login verification (PIN / pattern / OTP) if user has it set
+  const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
+  if (!verification.valid && verification.error) {
+    return c.json(
+      { error: { code: verification.error.code, message: verification.error.message } },
+      verification.error.status as 403 | 429,
     );
   }
 

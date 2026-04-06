@@ -1,3 +1,5 @@
+import type { VerifyMethod } from "../kv/schema";
+
 const USER_ID_MAX_LENGTH = 128;
 const USER_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
@@ -43,4 +45,34 @@ export function validateDisplayName(name: unknown): string | null {
   const cleaned = cleanDisplayName(name);
   if (cleaned.length > DISPLAY_NAME_MAX_LENGTH) return null;
   return cleaned;
+}
+
+const VALID_VERIFY_METHODS: VerifyMethod[] = ["pin", "pattern", "code", "none"];
+
+export function isValidVerifyMethod(method: unknown): method is VerifyMethod {
+  return typeof method === "string" && VALID_VERIFY_METHODS.includes(method as VerifyMethod);
+}
+
+/** PIN: 4-6 digits only. */
+const PIN_PATTERN = /^\d{4,6}$/;
+
+export function isValidPin(value: string): boolean {
+  return PIN_PATTERN.test(value);
+}
+
+/**
+ * Pattern: comma-separated node indices (0-8), at least 4 nodes,
+ * no repeats, each value 0-8.
+ */
+export function isValidPattern(value: string): boolean {
+  const parts = value.split(",");
+  if (parts.length < 4 || parts.length > 9) return false;
+  const seen = new Set<number>();
+  for (const p of parts) {
+    const n = parseInt(p, 10);
+    if (Number.isNaN(n) || n < 0 || n > 8 || String(n) !== p) return false;
+    if (seen.has(n)) return false;
+    seen.add(n);
+  }
+  return true;
 }

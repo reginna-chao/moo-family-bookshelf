@@ -48,11 +48,25 @@ beforeEach(() => {
 });
 
 describe("POST /api/auth/refresh", () => {
-  it("should return a new token without requiring Authorization header", async () => {
+  it("should return 401 without Authorization header (now protected)", async () => {
     await seedMember(VALID_USER_ID, VALID_FAMILY_ID);
 
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+    });
+
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("should return a new token with valid Authorization header", async () => {
+    const oldToken = "f".repeat(64);
+    await seedMember(VALID_USER_ID, VALID_FAMILY_ID, oldToken);
+
+    const res = await request("POST", "/api/auth/refresh", {
+      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${oldToken}` },
     });
 
     expect(res.status).toBe(200);
@@ -62,27 +76,13 @@ describe("POST /api/auth/refresh", () => {
     expect(json.data.expiresAt).toBeGreaterThan(Date.now());
   });
 
-  it("should also work when Authorization header is provided", async () => {
-    const oldToken = "f".repeat(64);
-    await seedMember(VALID_USER_ID, VALID_FAMILY_ID, oldToken);
-
-    const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
-      headers: { Authorization: `Bearer ${oldToken}` },
-    });
-
-    // Public route ignores the Authorization header
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as Json;
-    expect(json.data.token).toMatch(/^[a-f0-9]{64}$/);
-  });
-
   it("should reuse existing valid token on refresh", async () => {
     const oldToken = "b".repeat(64);
     await seedMember(VALID_USER_ID, VALID_FAMILY_ID, oldToken);
 
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${oldToken}` },
     });
 
     expect(res.status).toBe(200);
@@ -100,9 +100,29 @@ describe("POST /api/auth/refresh", () => {
     expect(authRecord.token).toBe(oldToken);
   });
 
+  it("should return 401 when token belongs to different user than body.userId", async () => {
+    const otherUserId = "c".repeat(64);
+    const token = "d".repeat(64);
+    await seedMember(VALID_USER_ID, VALID_FAMILY_ID);
+    await seedMember(otherUserId, VALID_FAMILY_ID, token);
+
+    const res = await request("POST", "/api/auth/refresh", {
+      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("REFRESH_FAILED");
+  });
+
   it("should return 400 for invalid userId format (too short)", async () => {
+    const token = "e".repeat(64);
+    await kv.put(`token:${token}`, VALID_USER_ID);
+
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: "abc123", familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     expect(res.status).toBe(400);
@@ -111,8 +131,12 @@ describe("POST /api/auth/refresh", () => {
   });
 
   it("should return 400 for invalid userId format (uppercase hex)", async () => {
+    const token = "e".repeat(64);
+    await kv.put(`token:${token}`, VALID_USER_ID);
+
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: "A".repeat(64), familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     expect(res.status).toBe(400);
@@ -121,8 +145,12 @@ describe("POST /api/auth/refresh", () => {
   });
 
   it("should return 400 for missing userId", async () => {
+    const token = "e".repeat(64);
+    await kv.put(`token:${token}`, VALID_USER_ID);
+
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     expect(res.status).toBe(400);
@@ -131,8 +159,12 @@ describe("POST /api/auth/refresh", () => {
   });
 
   it("should return 400 for missing familyId", async () => {
+    const token = "e".repeat(64);
+    await kv.put(`token:${token}`, VALID_USER_ID);
+
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID }),
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     expect(res.status).toBe(400);
@@ -141,8 +173,12 @@ describe("POST /api/auth/refresh", () => {
   });
 
   it("should return 400 for empty familyId", async () => {
+    const token = "e".repeat(64);
+    await kv.put(`token:${token}`, VALID_USER_ID);
+
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID, familyId: "" }),
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     expect(res.status).toBe(400);
@@ -151,8 +187,12 @@ describe("POST /api/auth/refresh", () => {
   });
 
   it("should return 400 for invalid JSON body", async () => {
+    const token = "e".repeat(64);
+    await kv.put(`token:${token}`, VALID_USER_ID);
+
     const res = await request("POST", "/api/auth/refresh", {
       body: "not json",
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     expect(res.status).toBe(400);
@@ -160,10 +200,13 @@ describe("POST /api/auth/refresh", () => {
     expect(json.error.code).toBe("INVALID_JSON");
   });
 
-  it("should return generic 401 when userId is not a member of any family", async () => {
-    // No member mapping seeded
+  it("should return 401 when userId belongs to a different family", async () => {
+    const token = "f".repeat(64);
+    await seedMember(VALID_USER_ID, "wxyz-9876", token);
+
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     expect(res.status).toBe(401);
@@ -171,24 +214,16 @@ describe("POST /api/auth/refresh", () => {
     expect(json.error.code).toBe("REFRESH_FAILED");
   });
 
-  it("should return generic 401 when userId belongs to a different family", async () => {
-    await seedMember(VALID_USER_ID, "wxyz-9876"); // different family
+  it("should generate new token when no existing auth record", async () => {
+    const token = "f".repeat(64);
+    // Seed member with token but create a second user with only member mapping
+    await kv.put(`token:${token}`, VALID_USER_ID);
+    await kv.put(`auth:${VALID_USER_ID}`, JSON.stringify({ token, createdAt: "2026-01-01T00:00:00Z" }));
+    await kv.put(`member:${VALID_USER_ID}`, VALID_FAMILY_ID);
 
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
-    });
-
-    expect(res.status).toBe(401);
-    const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("REFRESH_FAILED");
-  });
-
-  it("should work when there is no existing auth token in auth record", async () => {
-    await seedMember(VALID_USER_ID, VALID_FAMILY_ID);
-    // No auth record seeded — only member mapping
-
-    const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     expect(res.status).toBe(200);
@@ -197,20 +232,23 @@ describe("POST /api/auth/refresh", () => {
     expect(json.data.expiresAt).toBeTypeOf("number");
   });
 
-  it("should return same token on consecutive refreshes", async () => {
-    await seedMember(VALID_USER_ID, VALID_FAMILY_ID);
+  it("should return same token on consecutive refreshes with same auth", async () => {
+    const token = "f".repeat(64);
+    await seedMember(VALID_USER_ID, VALID_FAMILY_ID, token);
 
     const res1 = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${token}` },
     });
     const json1 = (await res1.json()) as Json;
 
+    // Use the returned token for the second request
     const res2 = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${json1.data.token}` },
     });
     const json2 = (await res2.json()) as Json;
 
-    // Consecutive refreshes should return the same valid token
     expect(json1.data.token).toBe(json2.data.token);
   });
 });

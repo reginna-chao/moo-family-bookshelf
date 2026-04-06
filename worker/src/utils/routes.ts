@@ -12,7 +12,7 @@ export function isPublicRoute(method: string, path: string): boolean {
     return true;
   // POST /api/auth/lookup — look up family by userId
   if (method === "POST" && /^\/api\/auth\/lookup\/?$/.test(path)) return true;
-  // POST /api/auth/refresh — token refresh (uses userId+familyId membership as auth)
-  if (method === "POST" && /^\/api\/auth\/refresh\/?$/.test(path)) return true;
+  // GET /api/user/:id/verify — check verification method (needed before login)
+  if (method === "GET" && /^\/api\/user\/[^/]+\/verify\/?$/.test(path)) return true;
   return false;
 }

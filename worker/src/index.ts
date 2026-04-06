@@ -6,6 +6,7 @@ import { userRoutes } from "./routes/user";
 import { familyRoutes } from "./routes/family";
 import { bookshelfRoutes } from "./routes/bookshelf";
 import { authRoutes } from "./routes/auth";
+import { verifyRoutes } from "./routes/verify";
 
 export interface Env {
   KV: KVNamespace;
@@ -132,6 +133,7 @@ app.get("/api/version", (c) =>
 
 // Routes
 app.route("/api/user", userRoutes);
+app.route("/api/user", verifyRoutes);
 app.route("/api/family", familyRoutes);
 app.route("/api/auth", authRoutes);
 app.route("/api", bookshelfRoutes);

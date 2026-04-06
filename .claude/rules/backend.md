@@ -17,7 +17,9 @@ worker/src/
 ├── routes/
 │   ├── user.ts       # Personal settings API
 │   ├── family.ts     # Family group API
-│   └── bookshelf.ts  # Family bookshelf aggregation API
+│   ├── bookshelf.ts  # Family bookshelf aggregation API
+│   ├── auth.ts       # Auth lookup & token refresh
+│   └── verify.ts     # PWA login verification (PIN/pattern/OTP)
 ├── middleware/
 │   ├── auth.ts       # Request authentication
 │   └── rateLimit.ts  # Rate limiting
@@ -43,6 +45,8 @@ worker/src/
 | `family:{family_id}` | Family member list | Configurable |
 | `member:{user_id}` | `family_id` (reverse lookup) | Follows family TTL |
 | `public:{share_token}` | Plaintext public bookshelf (v1.2.0) | User-configured (7/30/60/90 days or none) |
+| `verify:{user_id}` | PWA login verification settings (hash, salt, method) | None (persistent) |
+| `otp:{user_id}` | One-time verification code | 300s (5 minutes) |
 
 ### Coding Conventions
 

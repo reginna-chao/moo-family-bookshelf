@@ -16,13 +16,15 @@ vi.mock("@/crypto/syncCode", () => ({
   },
 }));
 
-// Mock ApiClient constructor so joinFamily can be controlled in LandingPage
-const { mockJoinFamily } = vi.hoisted(() => ({
+// Mock ApiClient constructor so joinFamily and getVerifyMethod can be controlled
+const { mockJoinFamily, mockGetVerifyMethod } = vi.hoisted(() => ({
   mockJoinFamily: vi.fn(),
+  mockGetVerifyMethod: vi.fn(),
 }));
 vi.mock("@/api/client", () => ({
   ApiClient: vi.fn().mockImplementation(() => ({
     joinFamily: mockJoinFamily,
+    getVerifyMethod: mockGetVerifyMethod,
   })),
 }));
 
@@ -43,8 +45,6 @@ function fillInput(label: string, value: string) {
 }
 
 function submitForm() {
-  // Use fireEvent.submit on the form element directly to bypass
-  // jsdom's built-in HTML5 constraint validation for type="email" inputs.
   const form = screen.getByRole("button", { name: /開始使用|處理中/ })
     .closest("form")!;
   fireEvent.submit(form);
@@ -57,13 +57,13 @@ describe("LandingPage", () => {
     mockOnAuth.mockReset();
     mockDecodeSyncCode.mockReset();
     mockJoinFamily.mockReset();
-    // Default: joinFamily succeeds with token
+    mockGetVerifyMethod.mockReset();
+    // Default: no verification, joinFamily succeeds with token
+    mockGetVerifyMethod.mockResolvedValue({ data: { method: "none", prompted: 0 } });
     mockJoinFamily.mockResolvedValue({ data: { ok: true, authToken: "tok-123" } as unknown as { ok: boolean } });
   });
 
   afterEach(() => {
-    // Use clearAllMocks instead of restoreAllMocks to preserve vi.mock() factory mocks.
-    // restoreAllMocks undoes mockResolvedValue set in beforeEach for hoisted fns.
     vi.clearAllMocks();
   });
 
@@ -174,7 +174,6 @@ describe("LandingPage", () => {
         ).toBeInTheDocument();
       });
 
-      // Type in the sync code field to clear error
       fillInput("同步碼", "m");
 
       expect(
@@ -220,7 +219,6 @@ describe("LandingPage", () => {
         expect(screen.getByText("Email 格式不正確。")).toBeInTheDocument();
       });
 
-      // Type in the email field to clear error
       fillInput("讀墨帳號 Email", "badx");
 
       expect(
@@ -284,7 +282,6 @@ describe("LandingPage", () => {
         familyId: "fam-1",
         encryptionKey: "key-1",
       });
-      // Create a promise that we control to keep the submission pending
       let resolveJoin!: (value: { data: { ok: boolean } }) => void;
       mockJoinFamily.mockReturnValue(
         new Promise((resolve) => {
@@ -298,14 +295,12 @@ describe("LandingPage", () => {
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
-      // Button should now show processing state
       await waitFor(() => {
         const button = screen.getByRole("button", { name: "處理中..." });
         expect(button).toBeInTheDocument();
         expect(button).toBeDisabled();
       });
 
-      // Resolve to clean up
       resolveJoin({ data: { ok: true } });
 
       await waitFor(() => {
@@ -332,7 +327,6 @@ describe("LandingPage", () => {
         expect(screen.getByText("Family not found")).toBeInTheDocument();
       });
 
-      // Button should be re-enabled
       const button = screen.getByRole("button", { name: "開始使用" });
       expect(button).not.toBeDisabled();
       expect(mockOnAuth).not.toHaveBeenCalled();
@@ -355,7 +349,6 @@ describe("LandingPage", () => {
         expect(screen.getByText("處理失敗，請重試。")).toBeInTheDocument();
       });
 
-      // Button should be re-enabled
       const button = screen.getByRole("button", { name: "開始使用" });
       expect(button).not.toBeDisabled();
       expect(mockOnAuth).not.toHaveBeenCalled();
@@ -446,7 +439,6 @@ describe("LandingPage", () => {
 
       const input = screen.getByLabelText("同步碼") as HTMLInputElement;
       expect(input.value).toBe("moo-fam1-key1@custom.host.com");
-      // Key should be consumed
       expect(localStorage.getItem("moo:rememberedLogout")).toBeNull();
     });
 
@@ -470,6 +462,144 @@ describe("LandingPage", () => {
       expect(
         screen.getByText("家庭成員已達上限（每個家庭最多 2 位成員）"),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("verification flow", () => {
+    it("should show PIN verification when method is pin", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+      mockGetVerifyMethod.mockResolvedValue({ data: { method: "pin", prompted: 1 } });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByText("請輸入 PIN 碼")).toBeInTheDocument();
+      });
+
+      // joinFamily should NOT have been called yet
+      expect(mockJoinFamily).not.toHaveBeenCalled();
+    });
+
+    it("should show pattern verification when method is pattern", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+      mockGetVerifyMethod.mockResolvedValue({ data: { method: "pattern", prompted: 1 } });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByText("請繪製圖形驗證")).toBeInTheDocument();
+      });
+
+      expect(mockJoinFamily).not.toHaveBeenCalled();
+    });
+
+    it("should show code input when method is code", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+      mockGetVerifyMethod.mockResolvedValue({ data: { method: "code", prompted: 1 } });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByText("輸入驗證碼")).toBeInTheDocument();
+        expect(screen.getByText("請在電腦版 Extension 查看驗證碼")).toBeInTheDocument();
+      });
+
+      expect(mockJoinFamily).not.toHaveBeenCalled();
+    });
+
+    it("should go back to form when cancelling verification", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+      mockGetVerifyMethod.mockResolvedValue({ data: { method: "pin", prompted: 1 } });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByText("請輸入 PIN 碼")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("取消"));
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
+      });
+    });
+
+    it("should show VERIFICATION_FAILED error from joinFamily", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+      mockGetVerifyMethod.mockResolvedValue({ data: { method: "code", prompted: 1 } });
+      mockJoinFamily.mockResolvedValue({
+        error: { code: "VERIFICATION_FAILED", message: "Wrong code" },
+      });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByText("輸入驗證碼")).toBeInTheDocument();
+      });
+
+      // Enter a 6-digit code
+      const codeInput = screen.getByPlaceholderText("6 位數驗證碼");
+      fireEvent.change(codeInput, { target: { value: "123456" } });
+      fireEvent.click(screen.getByRole("button", { name: "確認" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("驗證失敗，請重新輸入。")).toBeInTheDocument();
+      });
+
+      expect(mockOnAuth).not.toHaveBeenCalled();
+    });
+
+    it("should proceed directly when method is none", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+      mockGetVerifyMethod.mockResolvedValue({ data: { method: "none", prompted: 1 } });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(mockOnAuth).toHaveBeenCalled();
+      });
     });
   });
 });

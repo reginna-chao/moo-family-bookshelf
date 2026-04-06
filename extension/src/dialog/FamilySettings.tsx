@@ -6,6 +6,7 @@ import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
 import { DEFAULT_API_ENDPOINT, DEFAULT_PWA_URL } from "../constants";
 import { QrCodeLink } from "./QrCodeLink";
+import { VerificationSettings } from "./VerificationSettings";
 import { useFamilyData } from "./FamilyDataContext";
 
 export interface FamilySettingsProps {
@@ -281,6 +282,9 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
           基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
         </div>
+      </div>
+      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginBottom: 16 }}>
+        <VerificationSettings userId={userId} apiClient={apiClient} />
       </div>
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
         {leaveError && (

@@ -12,15 +12,25 @@ interface RefreshDeps {
 
 /**
  * Attempt to refresh the auth token via /api/auth/refresh.
- * If that fails, attempt staged recovery via joinFamily.
+ * The refresh endpoint is a PROTECTED route — the current Bearer token
+ * (even if expired) must be included in the Authorization header.
+ * The `deps.request` helper already attaches the token from ApiClient.
+ * If refresh fails, attempt staged recovery via joinFamily.
  * If both fail, clear family data and notify via onFamilyRemoved.
  */
 export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
   try {
-    const storage = await chrome.storage.local.get(["userId", "familyId"]);
+    const storage = await chrome.storage.local.get(["userId", "familyId", "authToken"]);
     const userId = storage.userId as string | undefined;
     const familyId = storage.familyId as string | undefined;
+    const storedToken = storage.authToken as string | undefined;
     if (!userId || !familyId) return false;
+
+    // Ensure the current token is set before calling the protected refresh endpoint.
+    // This covers edge cases where the in-memory token was cleared but storage still has it.
+    if (storedToken) {
+      deps.setAuthToken(storedToken);
+    }
 
     const result = await deps.request<{ token: string; expiresAt: number }>(
       "/api/auth/refresh",

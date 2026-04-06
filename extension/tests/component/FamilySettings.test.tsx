@@ -42,6 +42,9 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
     updateFamilyEndpoint: vi.fn().mockResolvedValue({ data: { familyId: "fam-123", apiEndpoint: null } }),
+    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none", prompted: 0 } }),
+    setVerifyMethod: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    generateOtp: vi.fn().mockResolvedValue({ data: { code: "123456", expiresAt: Date.now() + 300000 } }),
     ...overrides,
   } as unknown as ApiClient;
 }

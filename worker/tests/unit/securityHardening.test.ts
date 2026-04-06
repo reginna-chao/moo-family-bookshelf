@@ -164,9 +164,27 @@ describe("isPublicRoute", () => {
     expect(isPublicRoute("POST", "/api/auth/lookup/")).toBe(true);
   });
 
-  it("should match POST /api/auth/refresh (public, uses membership as auth)", () => {
-    expect(isPublicRoute("POST", "/api/auth/refresh")).toBe(true);
-    expect(isPublicRoute("POST", "/api/auth/refresh/")).toBe(true);
+  it("should NOT match POST /api/auth/refresh (now protected)", () => {
+    expect(isPublicRoute("POST", "/api/auth/refresh")).toBe(false);
+    expect(isPublicRoute("POST", "/api/auth/refresh/")).toBe(false);
+  });
+
+  it("should match GET /api/user/:id/verify (public, needed before login)", () => {
+    expect(isPublicRoute("GET", "/api/user/abc123/verify")).toBe(true);
+    expect(isPublicRoute("GET", "/api/user/abc123/verify/")).toBe(true);
+  });
+
+  it("should NOT match POST /api/user/:id/verify/prompted (now protected)", () => {
+    expect(isPublicRoute("POST", "/api/user/abc123/verify/prompted")).toBe(false);
+    expect(isPublicRoute("POST", "/api/user/abc123/verify/prompted/")).toBe(false);
+  });
+
+  it("should NOT match PUT /api/user/:id/verify (protected)", () => {
+    expect(isPublicRoute("PUT", "/api/user/abc123/verify")).toBe(false);
+  });
+
+  it("should NOT match POST /api/user/:id/verify/otp (protected)", () => {
+    expect(isPublicRoute("POST", "/api/user/abc123/verify/otp")).toBe(false);
   });
 
   it("should not match other methods or paths", () => {

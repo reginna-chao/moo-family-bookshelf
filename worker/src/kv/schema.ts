@@ -13,6 +13,8 @@ export const kvKeys = {
   member: (userId: string) => `member:${userId}`,
   auth: (userId: string) => `auth:${userId}`,
   authToken: (token: string) => `token:${token}`,
+  verify: (userId: string) => `verify:${userId}`,
+  otp: (userId: string) => `otp:${userId}`,
 } as const;
 
 export interface FamilyMember {
@@ -68,3 +70,33 @@ export interface AuthRecord {
 
 /** Token TTL: 90 days in seconds. Shared by auth middleware and routes. */
 export const TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
+
+/** OTP TTL: 5 minutes in seconds. */
+export const OTP_TTL_SECONDS = 5 * 60;
+
+/** Verification method for PWA login. */
+export type VerifyMethod = "pin" | "pattern" | "code" | "none";
+
+export interface VerifyRecord {
+  method: VerifyMethod;
+  /** SHA-256(salt + secret). null when method is 'code' or 'none'. */
+  hash: string | null;
+  /** Random hex salt for hashing. null when method is 'code' or 'none'. */
+  salt: string | null;
+  /** Whether user has been prompted to set up verification (0 or 1). */
+  prompted: number;
+  /** Consecutive failed verification attempts. */
+  failCount: number;
+  /** Lockout expiry timestamp (ms). null if not locked. */
+  lockedUntil: number | null;
+}
+
+export interface OtpRecord {
+  code: string;
+  createdAt: string;
+}
+
+/** Max consecutive failures before lockout. */
+export const VERIFY_MAX_FAILURES = 5;
+/** Lockout duration: 15 minutes in ms. */
+export const VERIFY_LOCKOUT_MS = 15 * 60 * 1000;

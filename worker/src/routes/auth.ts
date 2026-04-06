@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../index";
 import { kvKeys, TOKEN_TTL_SECONDS, type RawFamilyRecord, normalizeFamilyRecord } from "../kv/schema";
 import { isValidFamilyId } from "../utils/validation";
-import { getOrGenerateAuthToken } from "../middleware/auth";
+import { getOrGenerateAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 
 export const authRoutes = new Hono<{ Bindings: Env }>();
 
@@ -49,8 +49,16 @@ authRoutes.post("/lookup", async (c) => {
   return c.json({ data: { existingFamilyId, memberCount } });
 });
 
-// POST /api/auth/refresh — refresh auth token (public route, uses membership as auth)
+// POST /api/auth/refresh — refresh auth token (protected: requires valid Bearer token)
 authRoutes.post("/refresh", async (c) => {
+  const callerId = getAuthenticatedUserId(c);
+  if (!callerId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
   let body: { userId: string; familyId: string } | null;
   try {
     body = await c.req.json();
@@ -84,8 +92,15 @@ authRoutes.post("/refresh", async (c) => {
     );
   }
 
+  // Ensure the authenticated user matches the requested userId
+  if (callerId !== body.userId) {
+    return c.json(
+      { error: { code: "REFRESH_FAILED", message: "Token refresh failed" } },
+      401,
+    );
+  }
+
   // Verify user is a member of the requested family
-  // Return generic 401 (not 403) to avoid leaking membership info
   const storedFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
   if (!storedFamilyId || storedFamilyId !== body.familyId) {
     return c.json(
