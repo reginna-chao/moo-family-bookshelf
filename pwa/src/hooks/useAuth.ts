@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { decodeSyncCode, encodeSyncCode } from "@/crypto/syncCode";
+import { PAGE_HASHES } from "@/constants";
 
 export interface AuthState {
   userId: string;
@@ -129,7 +130,9 @@ export function forceClearStorage(): void {
 }
 
 function clearUrlParams(): void {
-  // Clear both fragment and query params to handle either format
+  // Preserve page routing hashes (#family-shelf, #personal-shelf, #settings);
+  // only clear auth-related hashes (#code=…&uid=…, #family=…) and query params.
+  if (PAGE_HASHES.has(window.location.hash)) return;
   if (window.location.hash || window.location.search) {
     window.history.replaceState({}, "", window.location.pathname);
   }

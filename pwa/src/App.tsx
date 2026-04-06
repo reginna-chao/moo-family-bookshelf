@@ -67,11 +67,16 @@ export default function App() {
     return () => window.removeEventListener("hashchange", handler);
   }, []);
 
-  // Reset to family shelf when user logs in (auth transitions from null to non-null)
+  // Navigate to family shelf on login, but respect existing page hash on refresh
+  const initialPageFromHash = useRef(pageFromHash());
   const prevAuthRef = useRef<typeof auth>(null);
   useEffect(() => {
     if (prevAuthRef.current === null && auth !== null) {
-      navigate("family-shelf");
+      if (initialPageFromHash.current) {
+        initialPageFromHash.current = null; // Only skip once
+      } else {
+        navigate("family-shelf");
+      }
     }
     prevAuthRef.current = auth;
   }, [auth, navigate]);

@@ -65,18 +65,73 @@ vi.mock("@/components/VersionWarning", () => ({
   VersionWarning: () => null,
 }));
 
+vi.mock("@/hooks/useFamilyData", () => ({
+  FamilyDataProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useFamilyData: () => ({
+    members: [],
+    ownerId: "",
+    membersState: "ready",
+    membersError: "",
+    familyEndpoint: undefined,
+    bookshelfMembers: [],
+    bookshelfState: "ready",
+    bookshelfError: "",
+    refreshMembers: vi.fn(),
+    refreshBookshelf: vi.fn(),
+    updateMemberDisplayName: vi.fn(),
+    updatedBookIds: new Set(),
+    hasBookshelfUpdates: false,
+    markBookshelfSeen: vi.fn(),
+  }),
+}));
+
+import React from "react";
 import App from "@/App";
 
 describe("App", () => {
   beforeEach(() => {
     mockAuth = null;
     mockIsLoading = false;
+    window.location.hash = "";
     vi.clearAllMocks();
     mockJoinFamily.mockResolvedValue({ data: { authToken: "new-token" } });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("preserves page hash on refresh (does not redirect to family-shelf)", () => {
+    // Simulate: user was on personal-shelf, then refreshed the page.
+    // On refresh, hash is #personal-shelf and auth restores from localStorage.
+    window.location.hash = "#personal-shelf";
+
+    mockAuth = {
+      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      encryptionKey: "key-123",
+      authToken: "token-123",
+    };
+    render(<App />);
+
+    // Should stay on personal-shelf, not redirect to family-shelf
+    expect(screen.getByTestId("personal-shelf-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("family-shelf-page")).not.toBeInTheDocument();
+  });
+
+  it("preserves settings page hash on refresh", () => {
+    window.location.hash = "#settings";
+
+    mockAuth = {
+      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      encryptionKey: "key-123",
+      authToken: "token-123",
+    };
+    render(<App />);
+
+    expect(screen.getByTestId("settings-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("family-shelf-page")).not.toBeInTheDocument();
   });
 
   it("shows loading state when isLoading is true", () => {

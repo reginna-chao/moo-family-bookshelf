@@ -144,6 +144,91 @@ describe("useAuth", () => {
     });
   });
 
+  describe("clearUrlParams (page hash preservation)", () => {
+    it("should NOT clear URL when hash is a known page routing hash", () => {
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#family-shelf",
+        pathname: "/",
+        href: "http://localhost/#family-shelf",
+      });
+
+      renderHook(() => useAuth());
+
+      // replaceState should NOT be called — page hash should be preserved
+      expect(replaceStateSpy).not.toHaveBeenCalled();
+    });
+
+    it("should NOT clear URL when hash is #personal-shelf", () => {
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#personal-shelf",
+        pathname: "/",
+        href: "http://localhost/#personal-shelf",
+      });
+
+      renderHook(() => useAuth());
+
+      expect(replaceStateSpy).not.toHaveBeenCalled();
+    });
+
+    it("should NOT clear URL when hash is #settings", () => {
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#settings",
+        pathname: "/",
+        href: "http://localhost/#settings",
+      });
+
+      renderHook(() => useAuth());
+
+      expect(replaceStateSpy).not.toHaveBeenCalled();
+    });
+
+    it("should clear URL when hash contains auth params (key=value format)", () => {
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#code=moo-fam99-secretKey&uid=user-abc",
+        pathname: "/app",
+        href: "http://localhost/app#code=moo-fam99-secretKey&uid=user-abc",
+      });
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam99",
+        encryptionKey: "secretKey",
+      });
+
+      renderHook(() => useAuth());
+
+      expect(replaceStateSpy).toHaveBeenCalledWith({}, "", "/app");
+    });
+
+    it("should clear URL when search params are present", () => {
+      vi.stubGlobal("location", {
+        search: "?foo=bar",
+        hash: "",
+        pathname: "/",
+        href: "http://localhost/?foo=bar",
+      });
+
+      renderHook(() => useAuth());
+
+      expect(replaceStateSpy).toHaveBeenCalledWith({}, "", "/");
+    });
+
+    it("should NOT clear URL when both hash and search are empty", () => {
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "",
+        pathname: "/",
+        href: "http://localhost/",
+      });
+
+      renderHook(() => useAuth());
+
+      expect(replaceStateSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe("QR Code URL parsing", () => {
     it("should parse auth from URL fragment and set auth", () => {
       vi.stubGlobal("location", {
