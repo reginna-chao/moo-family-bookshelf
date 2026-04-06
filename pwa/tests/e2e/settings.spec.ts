@@ -1,11 +1,14 @@
 import { test, expect } from "@playwright/test";
-import { loginAndNavigate, createTestAuth } from "./helpers/auth-helper";
+import { loginAndNavigate, createTestAuth, mockDefaultApiRoutes } from "./helpers/auth-helper";
 
 test.describe("Settings page", () => {
   const auth = createTestAuth();
 
   test.beforeEach(async ({ page }) => {
-    // Mock the members API
+    // Install default mocks first
+    await mockDefaultApiRoutes(page, auth);
+
+    // Override members API with 2-member response (LIFO: last registered wins)
     await page.route("**/api/family/*/members", (route) => {
       route.fulfill({
         status: 200,
@@ -28,29 +31,7 @@ test.describe("Settings page", () => {
       });
     });
 
-    // Mock the join API for token refresh
-    await page.route("**/api/family/*/join", (route) => {
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          data: { ok: true, authToken: "refreshed-token" },
-        }),
-      });
-    });
-
-    // Mock the bookshelf API so family shelf tab doesn't error during load
-    await page.route("**/api/family/*/bookshelf", (route) => {
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          data: { familyId: auth.familyId, members: [] },
-        }),
-      });
-    });
-
-    await loginAndNavigate(page, auth);
+    await loginAndNavigate(page, auth, { skipDefaultMocks: true });
 
     // Navigate to settings tab
     await page

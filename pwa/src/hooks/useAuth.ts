@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { decodeSyncCode, encodeSyncCode } from "@/crypto/syncCode";
-import { PAGE_HASHES } from "@/constants";
+import { PAGE_HASHES } from "@/routes";
 
 export interface AuthState {
   userId: string;

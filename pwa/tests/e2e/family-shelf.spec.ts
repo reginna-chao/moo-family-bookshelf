@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginAndNavigate, createTestAuth } from "./helpers/auth-helper";
+import { loginAndNavigate, createTestAuth, mockDefaultApiRoutes } from "./helpers/auth-helper";
 
 test.describe("Family shelf page", () => {
   const auth = createTestAuth();
@@ -117,7 +117,10 @@ test.describe("Family shelf page", () => {
   test("should show error state and retry button on API failure", async ({
     page,
   }) => {
-    // Mock the bookshelf API to return an error
+    // Install default mocks first, then override bookshelf with error
+    await mockDefaultApiRoutes(page, auth);
+
+    // Override bookshelf with error — Playwright LIFO means this wins
     await page.route("**/api/family/*/bookshelf", (route) => {
       route.fulfill({
         status: 500,
@@ -128,17 +131,7 @@ test.describe("Family shelf page", () => {
       });
     });
 
-    await page.route("**/api/family/*/join", (route) => {
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          data: { ok: true, authToken: "refreshed-token" },
-        }),
-      });
-    });
-
-    await loginAndNavigate(page, auth);
+    await loginAndNavigate(page, auth, { skipDefaultMocks: true });
 
     // Should show error message and retry button
     await expect(page.locator("text=伺服器錯誤")).toBeVisible({

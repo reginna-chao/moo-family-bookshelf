@@ -10,12 +10,6 @@ export const DEFAULT_API_ENDPOINT: string =
   import.meta.env.VITE_API_ENDPOINT ??
   "https://moo-family-bookshelf.rcwork.workers.dev";
 
-/**
- * Valid page routing hashes.
- * Used by both App.tsx (routing) and useAuth.ts (clearUrlParams).
- */
-export const PAGE_HASHES = new Set([
-  "#family-shelf",
-  "#personal-shelf",
-  "#settings",
-]);
+// PAGE_HASHES moved to routes.ts to avoid import.meta.env side-effects
+// when imported from Node-side code (Playwright E2E helpers).
+export { PAGE_HASHES } from "./routes";

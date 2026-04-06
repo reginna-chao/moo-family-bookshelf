@@ -93,12 +93,91 @@ export async function navigateAndWaitForLoad(page: Page): Promise<void> {
 }
 
 /**
+ * Install default API route mocks so the PWA stays authenticated after reload.
+ * Without these, API calls to a non-running worker cause token refresh failure
+ * which triggers logout. Call BEFORE page.goto() so routes are intercepted.
+ *
+ * Individual tests can override specific routes with page.route() after this.
+ */
+export async function mockDefaultApiRoutes(
+  page: Page,
+  auth: TestAuthState,
+): Promise<void> {
+  // Token refresh / join — must succeed to keep auth alive
+  await page.route("**/api/family/*/join", (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          familyId: auth.familyId,
+          ownerId: auth.userId,
+          members: [{ userId: auth.userId, displayName: "測試使用者" }],
+          maxMembers: 6,
+          createdAt: "2025-01-01T00:00:00Z",
+          authToken: auth.authToken ?? "mock-token",
+          expiresAt: Date.now() + 86_400_000,
+        },
+      }),
+    });
+  });
+
+  // Family members
+  await page.route("**/api/family/*/members", (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          familyId: auth.familyId,
+          ownerId: auth.userId,
+          members: [{ userId: auth.userId, displayName: "測試使用者" }],
+          maxMembers: 6,
+          createdAt: "2025-01-01T00:00:00Z",
+        },
+      }),
+    });
+  });
+
+  // Bookshelf — empty but valid
+  await page.route("**/api/family/*/bookshelf", (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: { familyId: auth.familyId, members: [] },
+      }),
+    });
+  });
+
+  // API version check
+  await page.route("**/api/version", (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: { apiVersion: 1, serverVersion: "0.1.0" },
+      }),
+    });
+  });
+}
+
+/**
  * Set auth state and reload the page so the PWA picks up the new state.
+ * Installs default API mocks to prevent auth loss from failed API calls.
+ *
+ * Pass `skipDefaultMocks: true` if the test needs full control over API routes.
+ * In that case, the test MUST mock at least the family join endpoint to prevent
+ * token refresh from triggering logout.
  */
 export async function loginAndNavigate(
   page: Page,
   auth: TestAuthState,
+  opts?: { skipDefaultMocks?: boolean },
 ): Promise<void> {
+  if (!opts?.skipDefaultMocks) {
+    await mockDefaultApiRoutes(page, auth);
+  }
   await page.goto("/");
   await setAuthState(page, auth);
   await page.reload();
