@@ -6,7 +6,9 @@ compatibility_date = "2024-12-30"
 # Replace with your own KV namespace ID (see worker/DEPLOY.md)
 [[kv_namespaces]]
 binding = "KV"
+# KV namespace used after deployment (wrangler deploy)
 id = "YOUR_DEV_KV_NAMESPACE_ID"
+# KV namespace used during local development (wrangler dev --remote)
 preview_id = "YOUR_DEV_KV_NAMESPACE_ID"
 
 # Production environment

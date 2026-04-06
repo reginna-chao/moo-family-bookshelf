@@ -1,0 +1,14 @@
+# Local override for remote development (pnpm dev:remote).
+# Copy this file to wrangler.local.toml and fill in your real KV namespace IDs.
+# wrangler.local.toml is gitignored — never commit real IDs.
+
+name = "moo-family-bookshelf-dev"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+
+[[kv_namespaces]]
+binding = "KV"
+# KV namespace used after deployment (wrangler deploy)
+id = "YOUR_DEV_KV_NAMESPACE_ID"
+# KV namespace used during local development (wrangler dev --remote)
+preview_id = "YOUR_DEV_KV_NAMESPACE_ID"
