@@ -7,7 +7,7 @@
  */
 
 export const DEFAULT_API_ENDPOINT: string =
-  import.meta?.env?.VITE_API_ENDPOINT ??
+  import.meta.env.VITE_API_ENDPOINT ??
   "https://moo-family-bookshelf.rcwork.workers.dev";
 
 /**
