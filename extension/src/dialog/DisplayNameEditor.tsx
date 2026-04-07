@@ -33,7 +33,7 @@ export function DisplayNameEditor({
 
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ color: "#64748b", fontSize: 13, marginBottom: 4 }}>顯示名稱</div>
+      <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 4 }}>顯示名稱</div>
       <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 6 }}>
         此名稱僅用於家庭書櫃，不影響讀墨帳號
       </div>

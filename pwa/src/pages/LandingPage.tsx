@@ -306,7 +306,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
           <span
             className={`text-xs font-bold px-2 py-0.5 rounded-full ${
               APP_ENV === "local"
-                ? "bg-gradient-to-r from-red-400 via-yellow-400 to-blue-400 text-white"
+                ? "bg-red-100 text-red-700 border border-red-300"
                 : "bg-blue-100 text-blue-700 border border-blue-300"
             }`}
           >
@@ -393,7 +393,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
       <p className="text-xs text-gray-400 mt-6 text-center">
         建議使用桌面版 Chrome 擴充功能掃描 QR Code，更快完成設定。
       </p>
-      <p className="text-[10px] text-gray-300 mt-4 text-center">
+      <p className="text-xs text-gray-300 mt-4 text-center">
         本程式為第三方開發，非 Readmoo 讀墨官方提供。
       </p>
     </div>

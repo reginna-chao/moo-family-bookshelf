@@ -276,9 +276,9 @@ function MainContent({
           ))}
           {APP_ENV !== "prod" && (
             <span
-              className={`absolute -top-2 right-2 text-[10px] font-bold px-1.5 py-0 rounded-full leading-4 ${
+              className={`absolute -top-2 right-2 text-xs font-bold px-1.5 py-0 rounded-full leading-4 ${
                 APP_ENV === "local"
-                  ? "bg-gradient-to-r from-red-400 via-yellow-400 to-blue-400 text-white"
+                  ? "bg-red-100 text-red-700 border border-red-300"
                   : "bg-blue-100 text-blue-700 border border-blue-300"
               }`}
             >

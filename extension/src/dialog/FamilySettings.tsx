@@ -8,6 +8,7 @@ import { DEFAULT_API_ENDPOINT, DEFAULT_PWA_URL } from "../constants";
 import { QrCodeLink } from "./QrCodeLink";
 import { VerificationSettings } from "./VerificationSettings";
 import { useFamilyData } from "./FamilyDataContext";
+import { reportLinks } from "moo-family-bookshelf-shared/config/links";
 
 export interface FamilySettingsProps {
   familyId: string;
@@ -201,13 +202,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           啟用後，同步時會一併讀取已封存的書籍
         </div>
       </div>
-      {syncCode && (
-        <QrCodeLink syncCode={syncCode} userId={userId} />
-      )}
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 4 }} />
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>家庭設定</h3>
       <div style={{ marginBottom: 20 }}>
-        <div style={{ color: "#64748b", fontSize: 13, marginBottom: 6 }}>家庭同步碼</div>
+        <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 6 }}>家庭同步碼</div>
         <div style={{
           padding: 12, background: "#f8fafc", borderRadius: 8, marginBottom: 8,
           wordBreak: "break-all", fontSize: 13, fontFamily: "monospace",
@@ -245,7 +243,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         </div>
       </div>
       <div style={{ marginBottom: 20 }}>
-        <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>
+        <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
           家庭成員{!membersLoading && !membersError ? ` (${members.length})` : ""}
         </div>
         {membersLoading && (
@@ -283,10 +281,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
         </div>
       </div>
-      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginBottom: 16 }}>
-        <VerificationSettings userId={userId} apiClient={apiClient} />
-      </div>
-      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
+      <div style={{ marginBottom: 20 }}>
         {leaveError && (
           <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{leaveError}</div>
         )}
@@ -329,6 +324,13 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             離開中...
           </button>
         )}
+      </div>
+      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>手機版登入</h3>
+        {syncCode && (
+          <QrCodeLink syncCode={syncCode} userId={userId} />
+        )}
+        <VerificationSettings userId={userId} apiClient={apiClient} />
       </div>
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 16 }}>
         {deleteError && (
@@ -386,6 +388,34 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             移除中...
           </button>
         )}
+      </div>
+      <div style={{
+        borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 16,
+        textAlign: "center",
+      }}>
+        <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>問題回報</div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
+          {reportLinks.map((link) => (
+            <a
+              key={link.name}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={link.name}
+              style={{ color: "#94a3b8", textDecoration: "none",  display: 'inline-block' }}
+            >
+              <svg
+                role="img"
+                viewBox="0 0 24 24"
+                width={24}
+                height={24}
+                fill="currentColor"
+              >
+                <path d={link.svgPath} />
+              </svg>
+            </a>
+          ))}
+        </div>
       </div>
     </div>
   );

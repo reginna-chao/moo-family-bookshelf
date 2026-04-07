@@ -226,7 +226,7 @@ export function IdleView({
       >
         {state === "joining" ? "加入中..." : "加入家庭公開書櫃"}
       </button>
-      <p style={{ color: "#94a3b8", fontSize: 11, marginTop: 16, textAlign: "center" }}>
+      <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 16, textAlign: "center" }}>
         <Lock size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
         本工具採端對端加密，伺服器無法讀取你的資料。
       </p>

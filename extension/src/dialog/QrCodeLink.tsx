@@ -50,7 +50,7 @@ export function QrCodeLink({ syncCode, userId }: QrCodeLinkProps) {
 
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ color: "#64748b", fontSize: 13, marginBottom: 6 }}>連結手機</div>
+      <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 6 }}>連結手機</div>
 
       {loading && (
         <div style={{ color: "#94a3b8", fontSize: 14, textAlign: "center", padding: 12 }}>

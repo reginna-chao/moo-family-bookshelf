@@ -5,9 +5,9 @@ import type { AppEnv } from "../utils/appEnv";
 const ENV_CONFIG: Record<Exclude<AppEnv, "prod">, { label: string; bg: string; color: string; border: string }> = {
   local: {
     label: "LOCAL",
-    bg: "#dbeafe",
-    color: "#1d4ed8",
-    border: "1px solid #93c5fd",
+    bg: "#fedbdb",
+    color: "#d81d1d",
+    border: "1px solid #fd9393",
   },
   dev: {
     label: "DEV",

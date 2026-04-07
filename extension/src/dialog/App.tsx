@@ -108,7 +108,7 @@ export function App() {
           onFamilyJoined={handleFamilyJoined}
           apiClient={apiClientRef.current}
         />
-        <DialogFooter minimal />
+        <DialogFooter />
       </div>
     );
   }

@@ -130,7 +130,7 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: "#334155", marginBottom: 8 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#64748b", marginBottom: 8 }}>
         手機版登入驗證
       </div>
       <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>

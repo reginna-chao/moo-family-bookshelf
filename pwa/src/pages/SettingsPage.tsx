@@ -309,10 +309,35 @@ export function SettingsPage({
         <p className="text-gray-400 text-xs mt-1.5">
           啟用後，個人書櫃會顯示已封存的書籍分頁
         </p>
+
+        <div className="mt-4" />
+        <button
+          role="switch"
+          aria-checked={rememberSyncCode === BoolFlag.TRUE}
+          aria-label="登出時記住同步碼"
+          onClick={handleToggleRememberSyncCode}
+          className="flex items-center gap-2 text-sm text-gray-700"
+        >
+          <span
+            className={`relative inline-block w-8 h-[18px] rounded-full transition-colors ${
+              rememberSyncCode === BoolFlag.TRUE ? "bg-blue-600" : "bg-gray-300"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 block w-3.5 h-3.5 rounded-full bg-white transition-[left] ${
+                rememberSyncCode === BoolFlag.TRUE ? "left-[16px]" : "left-0.5"
+              }`}
+            />
+          </span>
+          登出時記住同步碼
+        </button>
+        <p className="text-gray-400 text-xs mt-1.5">
+          啟用後，登出時會保留同步碼，下次登入免重新輸入
+        </p>
       </section>
 
       {/* Family settings */}
-      <section className="mb-6">
+      <section className="mb-6 pt-6 border-t border-gray-200">
         <h3 className="text-sm font-medium text-gray-500 mb-3">家庭設定</h3>
 
         <p className="text-xs text-gray-500 mb-1">家庭同步碼</p>
@@ -373,7 +398,7 @@ export function SettingsPage({
       </section>
 
       {/* Leave family */}
-      <section className="mb-6 pt-6 border-t border-gray-200">
+      <section className="mb-6">
         {leaveError && (
           <p role="alert" className="text-red-500 text-sm mb-2">{leaveError}</p>
         )}
@@ -416,32 +441,6 @@ export function SettingsPage({
 
       {/* Logout */}
       <section className="pt-6 border-t border-gray-200">
-        <div className="mb-4">
-          <button
-            role="switch"
-            aria-checked={rememberSyncCode === BoolFlag.TRUE}
-            aria-label="登出時記住同步碼"
-            onClick={handleToggleRememberSyncCode}
-            className="flex items-center gap-2 text-sm text-gray-700"
-          >
-            <span
-              className={`relative inline-block w-8 h-[18px] rounded-full transition-colors ${
-                rememberSyncCode === BoolFlag.TRUE ? "bg-blue-600" : "bg-gray-300"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 block w-3.5 h-3.5 rounded-full bg-white transition-[left] ${
-                  rememberSyncCode === BoolFlag.TRUE ? "left-[16px]" : "left-0.5"
-                }`}
-              />
-            </span>
-            登出時記住同步碼
-          </button>
-          <p className="text-gray-400 text-xs mt-1.5">
-            啟用後，登出時會保留同步碼，下次登入免重新輸入
-          </p>
-        </div>
-
         {showLogoutConfirm ? (
           <div>
             <p className="text-sm text-gray-600 mb-2">
@@ -475,7 +474,7 @@ export function SettingsPage({
       </section>
 
       {/* Delete account */}
-      <section className="mb-6 pt-6 border-t border-gray-200">
+      <section className="mb-6 mt-4">
         {deleteError && (
           <p role="alert" className="text-red-500 text-sm mb-2">{deleteError}</p>
         )}
@@ -531,7 +530,7 @@ export function SettingsPage({
         <p className="text-xs text-gray-400">
           墨家書櫃 v{__APP_VERSION__}
         </p>
-        <p className="text-[10px] text-gray-300 mt-1">
+        <p className="text-xs text-gray-300 mt-1">
           本程式為第三方開發，非 Readmoo 讀墨官方提供。
         </p>
         <div className="flex justify-center gap-3 mt-2">

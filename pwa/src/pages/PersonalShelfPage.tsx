@@ -342,7 +342,7 @@ export function PersonalShelfPage({
                   <div className="flex items-center gap-1">
                     <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
                     {book.isArchived === BoolFlag.TRUE && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium flex-shrink-0">
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium flex-shrink-0">
                         封存
                       </span>
                     )}

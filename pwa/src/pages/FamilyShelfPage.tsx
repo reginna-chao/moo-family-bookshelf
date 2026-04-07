@@ -183,7 +183,7 @@ export function FamilyShelfPage({
                   </div>
                 )}
                 {book.isUpdated === BoolFlag.TRUE && (
-                  <span aria-label="新分享書籍" className="absolute bottom-1 left-1 bg-green-100 text-green-600 text-[10px] font-semibold px-1.5 rounded-full leading-4">
+                  <span aria-label="新分享書籍" className="absolute bottom-1 left-1 bg-green-100 text-green-600 text-xs font-semibold px-1.5 rounded-full leading-4">
                     更新
                   </span>
                 )}

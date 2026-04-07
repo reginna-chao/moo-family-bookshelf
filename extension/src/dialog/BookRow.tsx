@@ -61,7 +61,7 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
           </span>
           {book.isArchived === BoolFlag.TRUE && (
             <span style={{
-              fontSize: 10,
+              fontSize: 12,
               padding: "1px 5px",
               borderRadius: 4,
               background: "#fef3c7",
@@ -74,7 +74,7 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
           )}
         </div>
         {book.author && (
-          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 1 }}>
             {book.author}
           </div>
         )}
@@ -87,7 +87,7 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
           padding: "2px 8px",
           borderRadius: 10,
           border: "none",
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: 600,
           background: isOn ? "#dcfce7" : "#f1f5f9",
           color: isOn ? "#16a34a" : "#94a3b8",

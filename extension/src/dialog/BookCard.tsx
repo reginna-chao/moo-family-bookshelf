@@ -57,7 +57,7 @@ export function BookCard({ book }: { book: BookWithMember }) {
               left: 4,
               background: "#dcfce7",
               color: "#16a34a",
-              fontSize: 10,
+              fontSize: 12,
               fontWeight: 600,
               padding: "1px 6px",
               borderRadius: 8,
@@ -96,7 +96,7 @@ export function BookCard({ book }: { book: BookWithMember }) {
       )}
       <span
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: "#2563eb",
           background: "#eff6ff",
           padding: "1px 6px",
