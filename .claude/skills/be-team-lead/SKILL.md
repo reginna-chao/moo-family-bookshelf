@@ -33,14 +33,15 @@ Orchestrate the backend development lifecycle: spec analysis → coding → test
 ### Mode A — Run-through (省 Token)
 
 - Complete Phase 1 (spec analysis) and **wait for user confirmation**.
-- After confirmation, run Phase 2 (dev) and Phase 3 (review) autonomously.
-- **Only stop mid-execution if** a blocker affects architecture or security.
-- Stop at Phase 4 (Review Report) and present all findings to the user.
+- After confirmation, run Phase 2 (dev), Phase 3 (review), and Phase 4 Fix Cycle autonomously.
+- **CRITICAL findings are auto-fixed without asking** in both modes.
+- **Only stop for user input when** SUGGESTION findings need user decision, or a blocker affects architecture/security.
 
 ### Mode B — Checkpoint (default)
 
 - Stop and wait for user confirmation at **every phase boundary**.
-- Phase 1 → confirm → Phase 2 → confirm → Phase 3 → confirm → Phase 4 → confirm → Phase 5.
+- Phase 1 → confirm → Phase 2 → confirm → Phase 3 + Phase 4 Fix Cycle → Phase 5.
+- **CRITICAL findings are auto-fixed without asking** — the Fix Cycle only pauses for SUGGESTION decisions.
 
 ---
 
@@ -83,21 +84,49 @@ If any fail, fix via coder or tester before proceeding.
 
 Spawn **`/be-review`** on the changed files.
 
-### Phase 4: Review Report (both modes stop here)
+### Phase 4: Fix Cycle
 
-Present **ALL review findings** to the user:
+Repeat **Review → Fix → Re-review** until the codebase is clean.
 
-1. List every finding (CRITICAL and SUGGESTION) **verbatim** from be-review — do not summarize or filter.
-2. For each finding, include: severity, dimension, location, issue, impact, and suggested fix.
-3. Report test results and typecheck status.
-4. **Wait for the user to decide** which items to fix and which to skip.
+#### 4.1: Present Findings
 
-### Phase 5: Fix & Complete
+List every finding (CRITICAL and SUGGESTION) **verbatim** from be-review — do not summarize or filter. For each finding, include: severity, dimension, location, issue, impact, and suggested fix.
 
-1. Apply only the fixes the user approved (spawn be-coder as needed).
-2. Re-run `cd worker && pnpm typecheck && pnpm lint && pnpm test`.
-3. `git add` changed files.
-4. Ask user about committing.
+#### 4.2: Handle CRITICAL Findings
+
+If any CRITICAL findings exist:
+1. Merge all CRITICAL findings (deduplicate).
+2. **Do NOT ask the user** — assign fixes immediately:
+   - Production code issues → spawn `/be-coder` to fix.
+   - Test code issues → spawn `/be-tester` to fix.
+3. Run verification: `cd worker && pnpm typecheck && pnpm lint && pnpm test`.
+4. Re-review **only the files changed by fixes** via `/be-review`.
+5. Return to step 4.1 with the new review results.
+
+#### 4.3: Handle SUGGESTION Findings
+
+When no CRITICAL findings remain, if SUGGESTION findings exist:
+1. Present all SUGGESTION findings to the user.
+2. **Wait for the user to decide** which items to fix and which to skip.
+3. If the user approves any fixes:
+   - Spawn `/be-coder` or `/be-tester` as appropriate.
+   - Run verification: `cd worker && pnpm typecheck && pnpm lint && pnpm test`.
+   - Re-review **only the files changed by fixes** via `/be-review`.
+   - Return to step 4.1 with the new review results (fixes may introduce new findings).
+4. If the user skips all remaining suggestions, proceed to Phase 5.
+
+#### 4.4: Exit Condition
+
+The Fix Cycle ends when **both** conditions are met:
+- No CRITICAL findings remain.
+- No user-requested SUGGESTION fixes remain (user skipped all, or none exist).
+
+Log the Fix Cycle history (rounds, what was fixed per round) for the final report.
+
+### Phase 5: Complete
+
+1. `git add` changed files.
+2. Ask user about committing.
 
 ### Phase 6: Security Scan
 
@@ -120,6 +149,8 @@ This phase runs automatically — no user confirmation needed to start, but CRIT
 
 - Never write production or test code directly.
 - **Never skip Phase 1 user confirmation** — this applies to both modes.
-- **Never skip Phase 4 review report** — the user decides what to fix.
-- Always verify with typecheck + lint + test after each development phase.
+- **CRITICAL findings are always auto-fixed** — never ask the user whether to fix a CRITICAL.
+- **SUGGESTION findings require user approval** — never auto-fix a SUGGESTION without asking.
+- Always verify with typecheck + lint + test after each fix in the Fix Cycle.
+- Re-review only the files changed by fixes, unless the user explicitly requests a full review.
 - If coder or tester encounters a schema or API design question, escalate to user.

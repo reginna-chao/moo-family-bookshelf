@@ -84,22 +84,24 @@ Spawn in parallel when tasks are independent. Run sequentially if there are depe
 
 ### Phase 4: Review Report (both modes stop here)
 
-After both teams complete, **present ALL review findings to the user**:
+After both teams complete their Fix Cycles, **present the consolidated report**:
 
-1. Collect the complete review output from fe-team-lead and be-team-lead.
-2. Present every finding (CRITICAL and SUGGESTION) **verbatim** — do not summarize or filter.
-3. Verify API contracts match between FE and BE.
-4. Report test suite results: `pnpm test` (extension) + `cd worker && pnpm test`.
-5. Report `pnpm typecheck` results on both sides.
-6. Run E2E typecheck on affected packages (`npx tsc --noEmit --project tests/e2e/tsconfig.json` in extension/pwa) and report results.
-7. **Wait for the user to decide** which items to fix and which to skip.
+1. Collect the complete Fix Cycle history from fe-team-lead and be-team-lead:
+   - How many rounds each team went through.
+   - What CRITICAL findings were auto-fixed per round.
+   - What SUGGESTION findings remain (skipped or unaddressed).
+2. Verify API contracts match between FE and BE.
+3. Report test suite results: `pnpm test` (extension) + `cd worker && pnpm test`.
+4. Report `pnpm typecheck` results on both sides.
+5. Run E2E typecheck on affected packages (`npx tsc --noEmit --project tests/e2e/tsconfig.json` in extension/pwa) and report results.
+6. If any cross-team issues are found (API contract mismatch, integration gaps), flag them as CRITICAL and delegate fixes to the appropriate sub-team-lead.
 
-### Phase 5: Fix & Complete
+**Note:** CRITICAL and SUGGESTION findings within each team are already handled by sub-team-lead Fix Cycles. Phase 4 focuses on cross-team validation and consolidated reporting.
 
-1. Apply only the fixes the user approved.
-2. Re-run full verification (typecheck + lint + test).
-3. `git add` changed files.
-4. Ask user about committing.
+### Phase 5: Complete
+
+1. `git add` changed files.
+2. Ask user about committing.
 
 ### Phase 6: Security Scan
 
@@ -126,7 +128,7 @@ Run **once** after the entire feature is complete (all sub-tasks committed), not
 
 - Always read project docs before breaking down tasks.
 - **Never skip Phase 1 user confirmation** — this applies to both modes.
-- **Never skip Phase 4 review report** — the user decides what to fix.
+- Sub-team-leads handle CRITICAL and SUGGESTION findings via their own Fix Cycles. Team-lead Phase 4 focuses on cross-team validation.
 - If a task is purely frontend or purely backend, tell the user to use the specific team-lead.
 - If unsure about scope, ask the user rather than guessing.
 - When delegating, always pass the execution mode to sub-team-leads.
