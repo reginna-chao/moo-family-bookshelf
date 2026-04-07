@@ -29,6 +29,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "moo-family-bookshelf-shared": "workspace:*",
     "simple-icons": "^16.15.0"
   },
   "devDependencies": {

@@ -29,6 +29,9 @@ importers:
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)
+      moo-family-bookshelf-shared:
+        specifier: workspace:*
+        version: link:../shared
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -117,6 +120,9 @@ importers:
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)
+      moo-family-bookshelf-shared:
+        specifier: workspace:*
+        version: link:../shared
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -181,6 +187,12 @@ importers:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@25.5.0)(jsdom@25.0.1)
+
+  shared:
+    dependencies:
+      simple-icons:
+        specifier: ^16.15.0
+        version: 16.15.0
 
   worker:
     dependencies:

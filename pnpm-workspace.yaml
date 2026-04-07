@@ -1,4 +1,5 @@
 packages:
+  - shared
   - extension
   - worker
   - pwa

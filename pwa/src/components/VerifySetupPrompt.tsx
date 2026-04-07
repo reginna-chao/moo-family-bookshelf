@@ -157,7 +157,7 @@ function ChooseMethodView({
     <>
       <h2 className="text-lg font-bold text-gray-900 mb-2">設定登入驗證</h2>
       <p className="text-sm text-gray-500 mb-5">
-        保護你的帳號，防止他人在 PWA 未經授權登入。
+        保護你的帳號，防止他人在手機版未經授權登入。
       </p>
       <div className="space-y-3">
         <button
@@ -219,7 +219,7 @@ function ConfirmSkipView({ onConfirm, onBack, saving }: ConfirmSkipViewProps) {
     <>
       <h2 className="text-lg font-bold text-gray-900 mb-3">確定不設定驗證？</h2>
       <p className="text-sm text-gray-600 leading-relaxed mb-6">
-        家庭成員若知道你的 Email，可能在 PWA 登入你的帳號。確定不設定驗證嗎？
+        家庭成員若知道你的 Email，可能在手機版登入你的帳號。確定不設定驗證嗎？
       </p>
       <div className="flex gap-3">
         <button

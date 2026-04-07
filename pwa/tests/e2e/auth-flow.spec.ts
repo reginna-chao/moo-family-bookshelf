@@ -11,7 +11,7 @@ test.describe("Auth flow", () => {
     await navigateAndWaitForLoad(page);
 
     // Landing page heading
-    await expect(page.locator("h1")).toContainText("牧家書櫃");
+    await expect(page.locator("h1")).toContainText("墨家書櫃");
     // Sync code input
     await expect(page.locator("#sync-code")).toBeVisible();
     // Email input
@@ -73,7 +73,7 @@ test.describe("Auth flow", () => {
     await page.getByRole("button", { name: "確定登出" }).click();
 
     // Should return to landing page
-    await expect(page.locator("h1")).toContainText("牧家書櫃");
+    await expect(page.locator("h1")).toContainText("墨家書櫃");
     await expect(page.locator("#sync-code")).toBeVisible();
   });
 });

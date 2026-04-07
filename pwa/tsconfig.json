@@ -16,7 +16,8 @@
     "outDir": "dist",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "moo-family-bookshelf-shared/*": ["../shared/src/*"]
     }
   },
   "include": ["src/**/*", "tests/**/*"],

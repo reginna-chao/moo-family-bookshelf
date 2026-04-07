@@ -68,7 +68,7 @@ export function QrCodeLink({ syncCode, userId }: QrCodeLinkProps) {
         <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
           <img
             src={qrDataUrl}
-            alt="掃描此 QR Code 以在手機上開啟牧家書櫃"
+            alt="掃描此 QR Code 以在手機上開啟墨家書櫃"
             width={200}
             height={200}
           />
@@ -87,7 +87,7 @@ export function QrCodeLink({ syncCode, userId }: QrCodeLinkProps) {
       </button>
 
       <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6, textAlign: "center" }}>
-        用手機掃描 QR Code 或複製連結，即可在行動裝置上使用牧家書櫃
+        用手機掃描 QR Code 或複製連結，即可在行動裝置上使用墨家書櫃
       </div>
     </div>
   );

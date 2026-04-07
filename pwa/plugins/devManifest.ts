@@ -28,7 +28,7 @@ export function devManifest(): Plugin {
       return html
         .replace(/href="\/icon\.svg"/g, 'href="/dev/icon.svg"')
         .replace(/href="\/icon-192\.png"/g, 'href="/dev/icon-192.png"')
-        .replace(/<title>牧家書櫃<\/title>/, "<title>牧家書櫃 (dev)</title>");
+        .replace(/<title>墨家書櫃<\/title>/, "<title>墨家書櫃 (dev)</title>");
     },
 
     closeBundle() {

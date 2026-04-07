@@ -131,7 +131,7 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ fontSize: 14, fontWeight: 600, color: "#334155", marginBottom: 8 }}>
-        PWA 登入驗證
+        手機版登入驗證
       </div>
       <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
         目前方式：{METHOD_LABELS[currentMethod ?? "none"]}
@@ -193,7 +193,7 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
             }}
           >
             <div style={{ fontSize: 13, color: "#92400e" }}>
-              家庭成員若知道你的 Email，可能在 PWA 登入你的帳號
+              家庭成員若知道你的 Email，可能在手機版登入你的帳號
             </div>
           </div>
           <button

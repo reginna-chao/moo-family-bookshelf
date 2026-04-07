@@ -29,7 +29,7 @@ describe("QrCodeLink", () => {
 
     render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
 
-    const img = await screen.findByAltText("掃描此 QR Code 以在手機上開啟牧家書櫃");
+    const img = await screen.findByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃");
     expect(img).toBeInTheDocument();
     expect(img).toHaveAttribute("src", fakeDataUrl);
     expect(img).toHaveAttribute("width", "200");
@@ -41,7 +41,7 @@ describe("QrCodeLink", () => {
 
     render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
 
-    await screen.findByAltText("掃描此 QR Code 以在手機上開啟牧家書櫃");
+    await screen.findByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃");
     expect(screen.queryByText("產生 QR Code 中...")).not.toBeInTheDocument();
   });
 
@@ -49,7 +49,7 @@ describe("QrCodeLink", () => {
     mockToDataURL.mockReturnValue(new Promise(() => {}));
     render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
     expect(
-      screen.getByText("用手機掃描 QR Code 或複製連結，即可在行動裝置上使用牧家書櫃"),
+      screen.getByText("用手機掃描 QR Code 或複製連結，即可在行動裝置上使用墨家書櫃"),
     ).toBeInTheDocument();
   });
 
@@ -66,7 +66,7 @@ describe("QrCodeLink", () => {
 
     render(<QrCodeLink syncCode={syncCode} userId={userId} />);
 
-    await screen.findByAltText("掃描此 QR Code 以在手機上開啟牧家書櫃");
+    await screen.findByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃");
 
     const expectedUrl = buildPwaUrl(syncCode, userId);
     expect(mockToDataURL).toHaveBeenCalledWith(expectedUrl, {
@@ -106,13 +106,13 @@ describe("QrCodeLink", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟牧家書櫃")).toHaveAttribute("src", dataUrl1);
+      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toHaveAttribute("src", dataUrl1);
     });
 
     rerender(<QrCodeLink syncCode="moo-abc-key2" userId="user1" />);
 
     await waitFor(() => {
-      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟牧家書櫃")).toHaveAttribute("src", dataUrl2);
+      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toHaveAttribute("src", dataUrl2);
     });
     expect(mockToDataURL).toHaveBeenCalledTimes(2);
   });
@@ -127,13 +127,13 @@ describe("QrCodeLink", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟牧家書櫃")).toHaveAttribute("src", dataUrl1);
+      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toHaveAttribute("src", dataUrl1);
     });
 
     rerender(<QrCodeLink syncCode="moo-abc-key1" userId="userB" />);
 
     await waitFor(() => {
-      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟牧家書櫃")).toHaveAttribute("src", dataUrl2);
+      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toHaveAttribute("src", dataUrl2);
     });
     expect(mockToDataURL).toHaveBeenCalledTimes(2);
   });

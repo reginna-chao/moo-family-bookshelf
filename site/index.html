@@ -352,6 +352,37 @@
     .footer a { color: var(--color-primary); text-decoration: none; }
     .footer a:hover { text-decoration: underline; }
 
+    /* FAQ */
+    .faq details {
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .faq details:last-child { border-bottom: none; }
+
+    .faq summary {
+      padding: 16px 0;
+      font-weight: 600;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .faq summary::before {
+      content: "+";
+      display: inline-block;
+      width: 20px;
+      font-weight: 700;
+      color: var(--color-text-secondary);
+    }
+
+    .faq details[open] summary::before { content: "−"; }
+
+    .faq details p {
+      padding: 0 0 16px 20px;
+      color: var(--color-text-secondary);
+      font-size: 0.92rem;
+      margin-bottom: 0;
+    }
+
     /* Responsive */
     @media (max-width: 640px) {
       .header { padding: 56px 20px 44px; }
@@ -370,7 +401,7 @@
     <p class="tagline">讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍。隱私優先、開源免費。</p>
     <div class="badges">
       <span class="badge">Chrome Extension</span>
-      <span class="badge">PWA 行動端</span>
+      <span class="badge">手機版</span>
       <span class="badge">E2EE 端對端加密</span>
       <span class="badge">MIT License</span>
     </div>
@@ -453,7 +484,7 @@
           </div>
           <div class="flow-body">
             <h3>瀏覽家庭書櫃</h3>
-            <p>在「家庭開放書櫃」中看到所有家人選擇分享的書籍。手機上也可以透過 PWA 網頁瀏覽。</p>
+            <p>在「家庭開放書櫃」中看到所有家人選擇分享的書籍。手機上也可以透過手機版網頁瀏覽。</p>
           </div>
         </div>
       </div>
@@ -488,6 +519,34 @@
           <span><strong>程式碼完全公開</strong> — 開源專案，任何人可以審查程式碼。不信任預設伺服器？你可以自建。</span>
         </li>
       </ul>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq">
+      <h2>常見問題</h2>
+
+      <div class="faq">
+        <details>
+          <summary>別人會看到我不想分享的書嗎？</summary>
+          <p>不會。所有書籍預設不公開，只有你手動選擇「開放」的書才會出現在家庭書櫃。</p>
+        </details>
+        <details>
+          <summary>如果我退出家庭了呢？</summary>
+          <p>退出後對方立刻看不到你的任何資料。你的分享設定會保留，下次加入新家庭時不用重新設定。</p>
+        </details>
+        <details>
+          <summary>最多幾位家庭成員？</summary>
+          <p>基於讀墨的家庭運作方式，最多只能兩人在一個家庭內。與讀墨官方不同，退出家庭後沒有 180 天限制。</p>
+        </details>
+        <details>
+          <summary>可以增加不是讀墨家庭成員的人嗎？</summary>
+          <p>可以，但只能看到互相開放的書櫃，未來也不能借書。</p>
+        </details>
+        <details>
+          <summary>更改墨家書櫃的顯示名稱會影響讀墨官方的設定嗎？</summary>
+          <p>完全不會，與讀墨官方的設定是分開互不影響。</p>
+        </details>
+      </div>
     </section>
 
     <!-- Architecture -->
@@ -547,7 +606,7 @@
           <pre><code>cd worker
 wrangler deploy</code></pre>
         </li>
-        <li>在 Extension 或 PWA 設定中填入你的 Worker URL</li>
+        <li>在擴充功能或手機版設定中填入你的 Worker URL</li>
         <li>將同步碼分享給家人 — 同步碼會自動帶入你的 API 端點，家人無需額外設定</li>
       </ol>
 
@@ -558,14 +617,14 @@ wrangler deploy</code></pre>
 
     <!-- PWA -->
     <section>
-      <h2>行動端 (PWA)</h2>
+      <h2>手機版</h2>
       <p>
-        手機上無法安裝 Chrome Extension，但你可以透過 PWA 行動網頁瀏覽家庭開放書櫃。
+        手機上無法安裝 Chrome Extension，但你可以透過手機版網頁瀏覽家庭開放書櫃。
       </p>
 
       <table>
         <thead>
-          <tr><th>功能</th><th>Extension</th><th>PWA</th></tr>
+          <tr><th>功能</th><th>Extension</th><th>手機版</th></tr>
         </thead>
         <tbody>
           <tr><td>瀏覽家庭開放書櫃</td><td>&#10003;</td><td>&#10003;</td></tr>
@@ -577,7 +636,7 @@ wrangler deploy</code></pre>
       </table>
 
       <div class="callout">
-        PWA 無法直接爬取讀墨網頁書單。個人書櫃需先在桌面端 Extension 完成至少一次同步，之後即可在 PWA 調整開放設定。
+        手機版無法自動匯入讀墨書單。個人書櫃需先在桌面端 Extension 完成至少一次同步，之後即可在 PWA 調整開放設定。
       </div>
     </section>
 
@@ -587,7 +646,7 @@ wrangler deploy</code></pre>
       <p>專案目前開發中，以下連結將在各階段完成後啟用。</p>
       <div class="btn-group">
         <a href="#" class="btn btn-primary">Chrome Web Store (coming soon)</a>
-        <a href="#" class="btn btn-secondary">PWA 行動版 (coming soon)</a>
+        <a href="#" class="btn btn-secondary">手機版 (coming soon)</a>
         <a href="https://github.com/reginna-chao/moo-family-bookshelf" class="btn btn-secondary">GitHub 原始碼</a>
       </div>
     </section>

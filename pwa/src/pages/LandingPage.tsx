@@ -299,9 +299,9 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
-      <img src={APP_ENV !== "prod" ? "/dev/icon.svg" : "/icon.svg"} alt="牧家書櫃" className="w-16 h-16 rounded-2xl mb-4" />
+      <img src={APP_ENV !== "prod" ? "/dev/icon.svg" : "/icon.svg"} alt="墨家書櫃" className="w-16 h-16 rounded-2xl mb-4" />
       <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-        牧家書櫃
+        墨家書櫃
         {APP_ENV !== "prod" && (
           <span
             className={`text-xs font-bold px-2 py-0.5 rounded-full ${

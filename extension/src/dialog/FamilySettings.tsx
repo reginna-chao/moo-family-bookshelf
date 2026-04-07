@@ -352,7 +352,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
                 確定要移除帳戶嗎？
               </div>
               <ul style={{ fontSize: 12, color: "#ef4444", margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-                <li>將移除牧家書櫃中的所有資料</li>
+                <li>將移除墨家書櫃中的所有資料</li>
                 <li>不影響你的讀墨帳號及書籍</li>
                 <li>下次登入時將重新設定</li>
               </ul>

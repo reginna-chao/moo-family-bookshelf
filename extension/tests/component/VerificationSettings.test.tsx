@@ -102,7 +102,7 @@ describe("VerificationSettings", () => {
 
     fireEvent.click(screen.getByText("不設定驗證"));
     expect(
-      screen.getByText("家庭成員若知道你的 Email，可能在 PWA 登入你的帳號"),
+      screen.getByText("家庭成員若知道你的 Email，可能在手機版登入你的帳號"),
     ).toBeInTheDocument();
   });
 

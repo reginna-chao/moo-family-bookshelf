@@ -87,7 +87,7 @@ export function InstallPrompt({ userId }: InstallPromptProps) {
             </p>
           ) : (
             <p className="text-sm text-blue-800">
-              將牧家書櫃安裝到桌面，方便隨時使用。
+              將墨家書櫃安裝到桌面，方便隨時使用。
             </p>
           )}
         </div>

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { DialogFooter } from "@/dialog/DialogFooter";
-import { reportLinks } from "@/config/links";
+import { reportLinks } from "moo-family-bookshelf-shared/config/links";
 
 vi.stubGlobal("matchMedia", (query: string) => ({
   matches: false,

@@ -483,7 +483,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    expect(screen.getByText(/牧家書櫃 v/)).toBeInTheDocument();
+    expect(screen.getByText(/墨家書櫃 v/)).toBeInTheDocument();
     expect(screen.getByText("本程式為第三方開發，非 Readmoo 讀墨官方提供。")).toBeInTheDocument();
   });
 
@@ -593,7 +593,7 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
 
     expect(screen.getByText("確定要移除帳戶嗎？")).toBeInTheDocument();
-    expect(screen.getByText("將移除牧家書櫃中的所有資料")).toBeInTheDocument();
+    expect(screen.getByText("將移除墨家書櫃中的所有資料")).toBeInTheDocument();
     expect(screen.getByText("不影響你的讀墨帳號及書籍")).toBeInTheDocument();
     expect(screen.getByText("下次登入時將重新設定")).toBeInTheDocument();
     expect(

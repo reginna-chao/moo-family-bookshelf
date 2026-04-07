@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Pencil, Check, X } from "lucide-react";
+import { reportLinks } from "moo-family-bookshelf-shared/config/links";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
@@ -82,7 +83,7 @@ export function SettingsPage({
     const inviteUrl = `${window.location.origin}${window.location.pathname}#family=${encodeURIComponent(syncCode)}`;
     if (navigator.share) {
       try {
-        await navigator.share({ title: "加入牧家書櫃", url: inviteUrl });
+        await navigator.share({ title: "加入墨家書櫃", url: inviteUrl });
         return;
       } catch {
         // User cancelled or share failed — fall through to clipboard
@@ -491,7 +492,7 @@ export function SettingsPage({
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
               <p className="text-sm font-bold text-red-700 mb-2">確定要移除帳戶嗎？</p>
               <ul className="text-xs text-red-600 list-disc list-inside space-y-1">
-                <li>將移除牧家書櫃中的所有資料</li>
+                <li>將移除墨家書櫃中的所有資料</li>
                 <li>不影響你的讀墨帳號及書籍</li>
                 <li>下次登入時將重新設定</li>
               </ul>
@@ -528,11 +529,33 @@ export function SettingsPage({
       {/* About */}
       <section className="pt-6 mt-6 border-t border-gray-200 text-center">
         <p className="text-xs text-gray-400">
-          牧家書櫃 v{__APP_VERSION__}
+          墨家書櫃 v{__APP_VERSION__}
         </p>
         <p className="text-[10px] text-gray-300 mt-1">
           本程式為第三方開發，非 Readmoo 讀墨官方提供。
         </p>
+        <div className="flex justify-center gap-3 mt-2">
+          {reportLinks.map((link) => (
+            <a
+              key={link.name}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gray-300 hover:text-gray-500 transition-colors"
+              title={link.name}
+            >
+              <svg
+                role="img"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="currentColor"
+              >
+                <path d={link.svgPath} />
+              </svg>
+            </a>
+          ))}
+        </div>
       </section>
     </div>
   );

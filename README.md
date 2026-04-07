@@ -1,72 +1,68 @@
-# MooFamily Bookshelf
+# 墨家書櫃 MooFamily Bookshelf
 
-讓讀墨 (Readmoo) 家庭帳號成員輕鬆瀏覽彼此開放的書籍。
+讓讀墨家庭帳號成員，輕鬆瀏覽彼此選擇分享的書籍。
 
-## 功能特色
+<!-- TODO: 加入產品截圖 -->
 
-- **隱私優先** — 所有書籍預設不開放，由你主動選擇要分享的書
-- **端對端加密** — 資料在瀏覽器中加密後才上傳，伺服器只存密文
-- **跨家庭保留設定** — 解綁家庭帳號後，開放偏好不會消失
-- **可自建後端** — 部署自己的 Cloudflare Worker，完全掌控資料
-- **行動端支援** — PWA 網頁讓你在手機上也能瀏覽家庭書櫃
+## 功能
 
-## 安裝方式
+- **家庭書櫃** — 一眼看到家人分享的藏書，不用借帳號、不用傳書名
+- **你決定要分享什麼** — 所有書籍預設不公開，只有你手動開放的書才會出現在家庭書櫃
+- **資料安全** — 書單在你的瀏覽器中加密後才上傳，連伺服器都無法讀取
+- **跨家庭保留設定** — 離開或更換家庭，你的分享偏好不會消失
+- **手機也能看** — 透過手機版網頁瀏覽家庭書櫃，不限桌機
 
-### Chrome 擴充功能
+## 安裝
 
-從 [Chrome Web Store](#) 安裝（審核中），或從 [GitHub Releases](https://github.com/reginna-chao/moo-family-bookshelf/releases) 下載 `.zip` 手動載入：
+### Chrome Web Store（推薦）
 
-1. 前往 `chrome://extensions/`
-2. 開啟右上角「開發人員模式」
-3. 點擊「載入未封裝項目」，選擇解壓後的資料夾
+> Coming soon — 審核通過後會更新連結
 
-### PWA 行動端
+<details>
 
-用手機瀏覽器開啟 PWA 網址，即可加入主畫面使用。
+<summary>手動安裝</summary>
 
-> **注意：** PWA 無法擷取讀墨書單，需先透過電腦版 Extension 同步至少一次。
+1. [下載最新版本](https://github.com/reginna-chao/moo-family-bookshelf/releases) 並解壓縮
+2. 開啟 Chrome，在網址列輸入 `chrome://extensions/`
+3. 打開右上角「開發人員模式」
+4. 點擊「載入未封裝項目」，選取解壓縮的資料夾
+5. 完成！前往讀墨網頁，你會看到「家庭書櫃」按鈕
+
+</details>
 
 ## 使用方式
 
-1. 安裝 Chrome 擴充功能
-2. 在讀墨網頁中點擊「家庭書櫃」，建立或加入家庭
-3. 在「個人書櫃管理」中選擇要開放的書籍
-4. 家人即可在「家庭開放書櫃」中瀏覽你分享的書
+1. **建立家庭** — 在讀墨網頁點擊「家庭書櫃」，建立家庭後取得同步碼
+2. **邀請家人** — 把同步碼傳給家人，對方輸入後就能加入
+3. **選擇分享的書** — 在「個人書櫃管理」逐本切換開放/關閉，儲存後才同步
+4. **瀏覽家庭書櫃** — 在「家庭書櫃」看到所有家人分享的書
 
-所有互動透過 Dialog 完成，不會產生新的頁面路由。
+手機使用者可以透過手機版網頁瀏覽家庭書櫃（建議先在電腦版完成一次同步）。
 
-## 自建後端
+## 隱私
 
-不想使用預設伺服器？你可以部署自己的 Cloudflare Worker：
+- 資料加密保護 — 你的書單在上傳前就已加密，連伺服器都無法讀取
+- 不收集個人資料 — 不需要帳號、不記錄 Email、不追蹤使用者
+- 離開家庭即隔離 — 退出後，其他成員立刻無法看到你的書
 
-1. Fork 本專案
-2. `cd worker && wrangler deploy`
-3. 在 Extension 設定中填入你的 Worker URL
-4. 同步碼會自動帶入你的 API 端點，家人無需額外設定
+完整隱私政策請參閱[隱私政策頁面](https://reginna-chao.github.io/moo-family-bookshelf/privacy-policy.html)。
 
-詳細步驟請參考 [worker/DEPLOY.md](worker/DEPLOY.md)。
+## 常見問題
 
-## 隱私與安全
+請參閱[常見問題頁面](https://reginna-chao.github.io/moo-family-bookshelf/#faq)。
 
-- 端對端加密 (E2EE)，伺服器為零知識架構
-- 不收集任何個人識別資訊
-- 所有書籍預設不公開，需手動儲存才同步
-- 解綁家庭後，其他成員立即無法存取你的書籍
-- 程式碼完全開源，歡迎審查
+---
 
-詳見 [隱私政策](https://reginna-chao.github.io/moo-family-bookshelf/privacy-policy.html)。
+## 開發者
 
-## 專案文件
+想要貢獻或自建後端？請參閱 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-- [開發計畫書](docs/project-plan.md)
-- [架構設計文件](docs/architecture.md)
-- [隱私政策](https://reginna-chao.github.io/moo-family-bookshelf/privacy-policy.html)
-- [貢獻指南 (Contributing)](CONTRIBUTING.md)
+## 支持開發
+
+<a href="https://www.buymeacoffee.com/rcworkaddi" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee, but I prefer tea 👍" height="40"></a>
 
 ## 授權
 
 [MIT License](LICENSE)
 
----
-
-> 本專案與 Readmoo 讀墨無官方關聯。
+本專案與 Readmoo 讀墨無官方關聯。

@@ -1,5 +1,5 @@
 import React from "react";
-import { reportLinks } from "../config/links";
+import { reportLinks } from "moo-family-bookshelf-shared/config/links";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { EnvBadge } from "./EnvBadge";
 
