@@ -1,7 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { DialogFooter } from "@/dialog/DialogFooter";
-import { reportLinks } from "moo-family-bookshelf-shared/config/links";
 
 vi.stubGlobal("matchMedia", (query: string) => ({
   matches: false,
@@ -31,35 +30,9 @@ describe("DialogFooter", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the version number", () => {
+  it("renders the app name and version number", () => {
     render(<DialogFooter />);
-    expect(screen.getByText(/v0\.1\.0/)).toBeInTheDocument();
-  });
-
-  it("renders all report links in full mode", () => {
-    render(<DialogFooter />);
-    for (const link of reportLinks) {
-      const anchor = screen.getByTitle(link.name);
-      expect(anchor).toBeInTheDocument();
-      expect(anchor).toHaveAttribute("href", link.url);
-      expect(anchor).toHaveAttribute("target", "_blank");
-      expect(anchor).toHaveAttribute("rel", "noopener noreferrer");
-    }
-  });
-
-  it("does not render report links in minimal mode", () => {
-    render(<DialogFooter minimal />);
-    for (const link of reportLinks) {
-      expect(screen.queryByTitle(link.name)).not.toBeInTheDocument();
-    }
-  });
-
-  it("renders disclaimer and version in minimal mode", () => {
-    render(<DialogFooter minimal />);
-    expect(
-      screen.getByText("本功能由第三方開發，非 Readmoo 官方提供"),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/v0\.1\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/墨家書櫃 v0\.1\.0/)).toBeInTheDocument();
   });
 
   it("has the dialog-footer test id", () => {

@@ -31,8 +31,8 @@ vi.mock("@/dialog/FamilySettings", () => ({
 }));
 
 vi.mock("@/dialog/DialogFooter", () => ({
-  DialogFooter: ({ minimal }: { minimal?: boolean }) => (
-    <div data-testid="dialog-footer">{minimal ? "minimal" : "full"}</div>
+  DialogFooter: () => (
+    <div data-testid="dialog-footer">footer</div>
   ),
 }));
 
@@ -111,12 +111,12 @@ describe("App", () => {
     });
   });
 
-  it("shows minimal DialogFooter in onboarding view", async () => {
+  it("shows DialogFooter in onboarding view", async () => {
     setupChromeMessages({ familyId: null, userId: null });
 
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByTestId("dialog-footer")).toHaveTextContent("minimal");
+      expect(screen.getByTestId("dialog-footer")).toBeInTheDocument();
     });
   });
 
@@ -131,12 +131,12 @@ describe("App", () => {
     });
   });
 
-  it("shows full DialogFooter in main view", async () => {
+  it("shows DialogFooter in main view", async () => {
     setupChromeMessages({ familyId: "fam-1", userId: "user-1" });
 
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByTestId("dialog-footer")).toHaveTextContent("full");
+      expect(screen.getByTestId("dialog-footer")).toBeInTheDocument();
     });
   });
 
