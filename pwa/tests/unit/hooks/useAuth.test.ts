@@ -230,7 +230,7 @@ describe("useAuth", () => {
   });
 
   describe("QR Code URL parsing", () => {
-    it("should parse auth from URL fragment and set auth", () => {
+    it("should set initialSyncCode and qrUserId instead of auto-logging in", () => {
       vi.stubGlobal("location", {
         search: "",
         hash: "#code=moo-fam99-secretKey&uid=user-abc",
@@ -245,16 +245,14 @@ describe("useAuth", () => {
       const { result } = renderHook(() => useAuth());
 
       expect(mockDecodeSyncCode).toHaveBeenCalledWith("moo-fam99-secretKey");
-      expect(result.current.auth).toEqual({
-        userId: "user-abc",
-        familyId: "fam99",
-        encryptionKey: "secretKey",
-        apiHost: undefined,
-      });
+      // Should NOT auto-login — routes through LandingPage verification flow
+      expect(result.current.auth).toBeNull();
+      expect(result.current.initialSyncCode).toBe("moo-fam99-secretKey");
+      expect(result.current.qrUserId).toBe("user-abc");
       expect(result.current.isLoading).toBe(false);
     });
 
-    it("should parse auth with apiHost from URL fragment", () => {
+    it("should set initialSyncCode and qrUserId with apiHost URL", () => {
       vi.stubGlobal("location", {
         search: "",
         hash: "#code=moo-fam99-secretKey%40custom.host&uid=user-abc",
@@ -269,15 +267,12 @@ describe("useAuth", () => {
 
       const { result } = renderHook(() => useAuth());
 
-      expect(result.current.auth).toEqual({
-        userId: "user-abc",
-        familyId: "fam99",
-        encryptionKey: "secretKey",
-        apiHost: "custom.host",
-      });
+      expect(result.current.auth).toBeNull();
+      expect(result.current.initialSyncCode).toBe("moo-fam99-secretKey@custom.host");
+      expect(result.current.qrUserId).toBe("user-abc");
     });
 
-    it("should save parsed QR data to localStorage with namespaced keys", () => {
+    it("should NOT save QR data to localStorage (deferred to LandingPage login)", () => {
       vi.stubGlobal("location", {
         search: "",
         hash: "#code=moo-fam99-secretKey&uid=user-abc",
@@ -291,9 +286,7 @@ describe("useAuth", () => {
 
       renderHook(() => useAuth());
 
-      expect(localStorage.getItem("moo:userId")).toBe("user-abc");
-      expect(localStorage.getItem(namespacedKey("user-abc", "familyId"))).toBe("fam99");
-      expect(localStorage.getItem(namespacedKey("user-abc", "encryptionKey"))).toBe("secretKey");
+      expect(localStorage.getItem("moo:userId")).toBeNull();
     });
 
     it("should clear URL fragment via replaceState after parsing", () => {

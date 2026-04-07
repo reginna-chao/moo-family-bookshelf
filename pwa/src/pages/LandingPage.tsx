@@ -11,8 +11,10 @@ import { PatternLock } from "@/components/PatternLock";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
-  /** Pre-filled sync code from invite link (#family= URL param). */
+  /** Pre-filled sync code from invite link (#family= URL param) or QR code. */
   initialSyncCode?: string;
+  /** Pre-hashed userId from QR code. Skips email entry and auto-triggers login. */
+  qrUserId?: string;
   /** External error (e.g., FAMILY_FULL from token refresh). */
   externalError?: string;
 }
@@ -29,7 +31,7 @@ interface PendingAuth {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_ENV = getAppEnv();
 
-export function LandingPage({ onAuth, initialSyncCode = "", externalError = "" }: LandingPageProps) {
+export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", externalError = "" }: LandingPageProps) {
   const [syncCode, setSyncCode] = useState(initialSyncCode);
   const [email, setEmail] = useState("");
 
@@ -59,6 +61,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", externalError = "" }
       setSyncCode(initialSyncCode);
     }
   }, [initialSyncCode]);
+
   const [syncCodeError, setSyncCodeError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [generalError, setGeneralError] = useState("");
@@ -190,6 +193,48 @@ export function LandingPage({ onAuth, initialSyncCode = "", externalError = "" }
     setVerifyError("");
     setCodeInput("");
   }
+
+  // Auto-trigger login when QR code provides both sync code and userId.
+  // Routes through the same verification flow as manual login.
+  const qrTriggered = useRef(false);
+  useEffect(() => {
+    if (!qrUserId || !initialSyncCode || qrTriggered.current) return;
+    qrTriggered.current = true;
+
+    let decoded;
+    try {
+      decoded = decodeSyncCode(initialSyncCode);
+    } catch {
+      setGeneralError("QR Code 同步碼解析失敗，請手動輸入。");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const joinClient = getJoinClient(decoded.apiHost);
+    void joinClient.getVerifyMethod(qrUserId).then((verifyRes) => {
+      const method: VerifyMethod = verifyRes.data?.method ?? "none";
+
+      if (method !== "none") {
+        setPendingAuth({
+          userId: qrUserId,
+          familyId: decoded.familyId,
+          encryptionKey: decoded.encryptionKey,
+          apiHost: decoded.apiHost,
+          verifyMethod: method,
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // No verification needed — join directly
+      void completeJoin(decoded.familyId, qrUserId, decoded.encryptionKey, decoded.apiHost);
+    }).catch(() => {
+      setGeneralError("處理失敗，請重試。");
+      setIsSubmitting(false);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrUserId, initialSyncCode]);
 
   // Show verification UI
   if (pendingAuth) {

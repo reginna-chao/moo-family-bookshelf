@@ -48,7 +48,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export default function App() {
-  const { auth, isLoading, login, logout, forceLogout, initialSyncCode } = useAuth();
+  const { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>(() => pageFromHash() ?? "family-shelf");
   const [familyFullError, setFamilyFullError] = useState("");
   const [verifySetupDone, setVerifySetupDone] = useState(false);
@@ -99,6 +99,17 @@ export default function App() {
     if (res.error) {
       if (res.error.code === "FAMILY_FULL") {
         setFamilyFullError("家庭成員已達上限（每個家庭最多 2 位成員）");
+      } else if (res.error.code === "VERIFICATION_REQUIRED" && current.familyId && current.encryptionKey) {
+        // Preserve sync code so LandingPage can pre-fill and show verification UI.
+        try {
+          const { encodeSyncCode } = await import("@/crypto/syncCode");
+          const code = encodeSyncCode({
+            familyId: current.familyId,
+            encryptionKey: current.encryptionKey,
+            apiHost: current.apiHost,
+          });
+          localStorage.setItem("moo:rememberedLogout", code);
+        } catch { /* best-effort */ }
       }
       logout();
       return null;
@@ -150,6 +161,7 @@ export default function App() {
           login(data);
         }}
         initialSyncCode={initialSyncCode}
+        qrUserId={qrUserId}
         externalError={familyFullError}
       />
     );

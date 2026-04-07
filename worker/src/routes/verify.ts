@@ -133,7 +133,7 @@ verifyRoutes.put("/:id/verify", async (c) => {
   if (method === "pin") {
     if (!body.secret || typeof body.secret !== "string" || !isValidPin(body.secret)) {
       return c.json(
-        { error: { code: "INVALID_SECRET", message: "PIN must be 4-6 digits" } },
+        { error: { code: "INVALID_SECRET", message: "PIN must be 6-12 digits" } },
         400,
       );
     }

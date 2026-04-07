@@ -53,8 +53,8 @@ export function isValidVerifyMethod(method: unknown): method is VerifyMethod {
   return typeof method === "string" && VALID_VERIFY_METHODS.includes(method as VerifyMethod);
 }
 
-/** PIN: 4-6 digits only. */
-const PIN_PATTERN = /^\d{4,6}$/;
+/** PIN: 6-12 digits only. */
+const PIN_PATTERN = /^\d{6,12}$/;
 
 export function isValidPin(value: string): boolean {
   return PIN_PATTERN.test(value);

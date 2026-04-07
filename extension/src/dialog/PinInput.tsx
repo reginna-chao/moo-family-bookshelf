@@ -4,79 +4,85 @@ export interface PinInputProps {
   onComplete: (pin: string) => void;
   mode: "setup" | "verify";
   error?: string;
-  /** Number of digits (4-6). Defaults to 4. */
-  length?: number;
 }
 
 type SetupStep = "enter" | "confirm";
 
-export function PinInput({ onComplete, mode, error, length = 4 }: PinInputProps) {
-  const [digits, setDigits] = useState<string[]>(Array(length).fill(""));
+const PIN_MIN = 6;
+const PIN_MAX = 12;
+
+function validatePin(pin: string): string | null {
+  if (!/^\d+$/.test(pin)) return "PIN 碼只能包含數字";
+  if (pin.length < PIN_MIN || pin.length > PIN_MAX)
+    return `PIN 碼長度須為 ${PIN_MIN}-${PIN_MAX} 位數`;
+  return null;
+}
+
+export function PinInput({ onComplete, mode, error }: PinInputProps) {
+  const [pin, setPin] = useState("");
   const [setupStep, setSetupStep] = useState<SetupStep>("enter");
   const [firstPin, setFirstPin] = useState("");
-  const [mismatchError, setMismatchError] = useState("");
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const [localError, setLocalError] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const resetDigits = useCallback(() => {
-    setDigits(Array(length).fill(""));
-    inputRefs.current[0]?.focus();
-  }, [length]);
+  const resetInput = useCallback(() => {
+    setPin("");
+    inputRef.current?.focus();
+  }, []);
 
-  const handleDigitChange = useCallback(
-    (index: number, value: string) => {
-      if (!/^\d?$/.test(value)) return;
-
-      const updated = [...digits];
-      updated[index] = value;
-      setDigits(updated);
-      setMismatchError("");
-
-      if (value && index < length - 1) {
-        inputRefs.current[index + 1]?.focus();
-        return;
-      }
-
-      if (!value) return;
-
-      const pin = updated.join("");
-      if (pin.length < length || updated.some((d) => d === "")) return;
-
-      if (mode === "verify") {
-        onComplete(pin);
-        return;
-      }
-
-      // Setup mode
-      if (setupStep === "enter") {
-        setFirstPin(pin);
-        setSetupStep("confirm");
-        setDigits(Array(length).fill(""));
-        setTimeout(() => inputRefs.current[0]?.focus(), 0);
-        return;
-      }
-
-      // Confirm step
-      if (pin === firstPin) {
-        onComplete(pin);
-      } else {
-        setMismatchError("PIN 碼不一致，請重新輸入");
-        setDigits(Array(length).fill(""));
-        setTimeout(() => inputRefs.current[0]?.focus(), 0);
-      }
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      // Allow only digits, up to max length
+      if (value !== "" && !/^\d+$/.test(value)) return;
+      if (value.length > PIN_MAX) return;
+      setPin(value);
+      setLocalError("");
     },
-    [digits, length, mode, setupStep, firstPin, onComplete],
+    [],
   );
+
+  const handleSubmit = useCallback(() => {
+    const validationError = validatePin(pin);
+    if (validationError) {
+      setLocalError(validationError);
+      return;
+    }
+
+    if (mode === "verify") {
+      onComplete(pin);
+      return;
+    }
+
+    // Setup mode
+    if (setupStep === "enter") {
+      setFirstPin(pin);
+      setSetupStep("confirm");
+      setPin("");
+      setTimeout(() => inputRef.current?.focus(), 0);
+      return;
+    }
+
+    // Confirm step
+    if (pin === firstPin) {
+      onComplete(pin);
+    } else {
+      setLocalError("PIN 碼不一致，請重新輸入");
+      setPin("");
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [pin, mode, setupStep, firstPin, onComplete]);
 
   const handleKeyDown = useCallback(
-    (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Backspace" && !digits[index] && index > 0) {
-        inputRefs.current[index - 1]?.focus();
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        handleSubmit();
       }
     },
-    [digits],
+    [handleSubmit],
   );
 
-  const displayError = error ?? mismatchError;
+  const displayError = error ?? localError;
   const label =
     mode === "verify"
       ? "請輸入 PIN 碼"
@@ -89,31 +95,48 @@ export function PinInput({ onComplete, mode, error, length = 4 }: PinInputProps)
       <div style={{ fontSize: 14, color: "#334155", marginBottom: 12, fontWeight: 500 }}>
         {label}
       </div>
+      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
+        {PIN_MIN}-{PIN_MAX} 位數字
+      </div>
       <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 8 }}>
-        {digits.map((digit, i) => (
-          <input
-            key={i}
-            ref={(el) => { inputRefs.current[i] = el; }}
-            type="password"
-            inputMode="numeric"
-            maxLength={1}
-            value={digit}
-            onChange={(e) => handleDigitChange(i, e.target.value)}
-            onKeyDown={(e) => handleKeyDown(i, e)}
-            aria-label={`PIN 第 ${i + 1} 碼`}
-            style={{
-              width: 44,
-              height: 52,
-              textAlign: "center",
-              fontSize: 20,
-              fontWeight: 600,
-              border: `2px solid ${displayError ? "#ef4444" : digit ? "#2563eb" : "#cbd5e1"}`,
-              borderRadius: 8,
-              outline: "none",
-              background: "#f8fafc",
-            }}
-          />
-        ))}
+        <input
+          ref={inputRef}
+          type="password"
+          inputMode="numeric"
+          value={pin}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          aria-label="PIN 碼輸入"
+          placeholder={`輸入 ${PIN_MIN}-${PIN_MAX} 位數字`}
+          style={{
+            width: 200,
+            height: 44,
+            textAlign: "center",
+            fontSize: 18,
+            fontWeight: 600,
+            border: `2px solid ${displayError ? "#ef4444" : pin ? "#2563eb" : "#cbd5e1"}`,
+            borderRadius: 8,
+            outline: "none",
+            background: "#f8fafc",
+            letterSpacing: 4,
+          }}
+        />
+        <button
+          onClick={handleSubmit}
+          style={{
+            padding: "0 20px",
+            height: 44,
+            borderRadius: 8,
+            fontSize: 14,
+            fontWeight: 600,
+            border: "none",
+            background: "#2563eb",
+            color: "#ffffff",
+            cursor: "pointer",
+          }}
+        >
+          確認
+        </button>
       </div>
       {displayError && (
         <div style={{ color: "#ef4444", fontSize: 13, marginTop: 4 }}>{displayError}</div>
@@ -123,7 +146,8 @@ export function PinInput({ onComplete, mode, error, length = 4 }: PinInputProps)
           onClick={() => {
             setSetupStep("enter");
             setFirstPin("");
-            resetDigits();
+            setLocalError("");
+            resetInput();
           }}
           style={{
             marginTop: 8, background: "transparent", border: "none",

@@ -167,7 +167,7 @@ function ChooseMethodView({
           className="w-full text-left px-4 py-3 rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-colors"
         >
           <span className="font-medium text-gray-900">PIN 碼</span>
-          <span className="block text-xs text-gray-500 mt-0.5">4-6 位數字</span>
+          <span className="block text-xs text-gray-500 mt-0.5">6-12 位數字</span>
         </button>
         <button
           type="button"

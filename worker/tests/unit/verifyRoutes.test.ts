@@ -118,7 +118,7 @@ describe("PUT /api/user/:id/verify", () => {
     const token = await seedAuthToken(VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "1234" }),
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -175,7 +175,7 @@ describe("PUT /api/user/:id/verify", () => {
     const token = await seedAuthToken(VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "12" }),
+      body: JSON.stringify({ method: "pin", secret: "12345" }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -188,7 +188,7 @@ describe("PUT /api/user/:id/verify", () => {
     const token = await seedAuthToken(VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "abcd" }),
+      body: JSON.stringify({ method: "pin", secret: "abcdef" }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -252,7 +252,7 @@ describe("PUT /api/user/:id/verify", () => {
     const token = await seedAuthToken(VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${OTHER_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "1234" }),
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -275,7 +275,7 @@ describe("PUT /api/user/:id/verify", () => {
 
     // Update method without setting prompted
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "5678" }),
+      body: JSON.stringify({ method: "pin", secret: "567890" }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -311,7 +311,7 @@ describe("PUT /api/user/:id/verify", () => {
     await kv.put(`verify:${VALID_USER_ID}`, JSON.stringify(existing));
 
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "9999" }),
+      body: JSON.stringify({ method: "pin", secret: "999999" }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -487,12 +487,12 @@ describe("Verification in join flow", () => {
     // First set up PIN via the API
     const ownerToken = await seedAuthToken(VALID_USER_ID);
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "1234" }),
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
 
     const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "1234" }),
+      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "123456" }),
     });
 
     expect(res.status).toBe(200);
@@ -505,12 +505,12 @@ describe("Verification in join flow", () => {
 
     const ownerToken = await seedAuthToken(VALID_USER_ID);
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "1234" }),
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
 
     const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "9999" }),
+      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "999999" }),
     });
 
     expect(res.status).toBe(403);
@@ -591,20 +591,20 @@ describe("Verification in join flow", () => {
 
     const ownerToken = await seedAuthToken(VALID_USER_ID);
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "1234" }),
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
 
     // 5 failed attempts
     for (let i = 0; i < 5; i++) {
       await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-        body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "0000" }),
+        body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "000000" }),
       });
     }
 
     // 6th attempt should be locked
     const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "1234" }),
+      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "123456" }),
     });
 
     expect(res.status).toBe(429);
@@ -617,20 +617,20 @@ describe("Verification in join flow", () => {
 
     const ownerToken = await seedAuthToken(VALID_USER_ID);
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "1234" }),
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
 
     // 3 failed attempts
     for (let i = 0; i < 3; i++) {
       await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-        body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "0000" }),
+        body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "000000" }),
       });
     }
 
     // Successful attempt
     await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "1234" }),
+      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "123456" }),
     });
 
     // Verify fail count was reset
@@ -643,7 +643,7 @@ describe("Verification in join flow", () => {
 
     const ownerToken = await seedAuthToken(VALID_USER_ID);
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "1234" }),
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
 
@@ -653,7 +653,7 @@ describe("Verification in join flow", () => {
     await kv.put(`verify:${VALID_USER_ID}`, JSON.stringify(record));
 
     const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "1234" }),
+      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "123456" }),
     });
 
     expect(res.status).toBe(200);

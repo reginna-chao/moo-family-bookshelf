@@ -17,8 +17,10 @@ export interface UseAuthReturn {
   logout: () => void;
   /** Clears everything unconditionally, ignoring rememberSyncCode. Used by delete account. */
   forceLogout: () => void;
-  /** Pre-filled sync code from #family= URL parameter or remembered logout. */
+  /** Pre-filled sync code from #family= URL parameter, QR code, or remembered logout. */
   initialSyncCode: string;
+  /** Pre-hashed userId from QR code (#code=…&uid=…). Skips email entry on LandingPage. */
+  qrUserId: string;
 }
 
 /** Global key for "remember sync code on logout" preference. */
@@ -138,7 +140,12 @@ function clearUrlParams(): void {
   }
 }
 
-function tryParseQrParams(): AuthState | null {
+interface QrParams {
+  syncCode: string;
+  userId: string;
+}
+
+function tryParseQrParams(): QrParams | null {
   // Read from URL fragment (#) — fragments are never sent to the server,
   // keeping the encryption key out of access logs and referrer headers.
   const hash = window.location.hash.slice(1); // remove leading #
@@ -150,19 +157,15 @@ function tryParseQrParams(): AuthState | null {
     return null;
   }
 
+  // Validate that the sync code is decodable before returning
   try {
-    const decoded = decodeSyncCode(code);
-    return {
-      userId: uid,
-      familyId: decoded.familyId,
-      encryptionKey: decoded.encryptionKey,
-      apiHost: decoded.apiHost,
-    };
+    decodeSyncCode(code);
   } catch {
-    // Don't log sync code details — it contains the encryption key
     console.warn("QR Code 同步碼解析失敗");
     return null;
   }
+
+  return { syncCode: code, userId: uid };
 }
 
 /**
@@ -179,6 +182,7 @@ export function useAuth(): UseAuthReturn {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [initialSyncCode, setInitialSyncCode] = useState("");
+  const [qrUserId, setQrUserId] = useState("");
 
   useEffect(() => {
     // 0. If URL contains "family=" param key, clear auth state to start fresh for invite.
@@ -190,8 +194,10 @@ export function useAuth(): UseAuthReturn {
       forceClearStorage();
     }
 
-    // 1. Parse QR params BEFORE clearing — clearUrlParams removes the hash
-    const qrAuth = tryParseQrParams();
+    // 1. Parse QR params BEFORE clearing — clearUrlParams removes the hash.
+    //    QR codes include a pre-hashed userId, so we route through LandingPage
+    //    verification flow instead of auto-logging in.
+    const qrParams = tryParseQrParams();
 
     // 2. Parse #family={syncCode} invite link (separate from QR flow)
     const familySyncCode = tryParseFamilyParam();
@@ -199,9 +205,11 @@ export function useAuth(): UseAuthReturn {
     // Always clear URL params to avoid leaving encryption key in address bar
     clearUrlParams();
 
-    if (qrAuth) {
-      saveToStorage(qrAuth);
-      setAuth(qrAuth);
+    if (qrParams) {
+      // Clear any existing auth to force fresh login through LandingPage
+      forceClearStorage();
+      setInitialSyncCode(qrParams.syncCode);
+      setQrUserId(qrParams.userId);
       setIsLoading(false);
       return;
     }
@@ -250,5 +258,5 @@ export function useAuth(): UseAuthReturn {
     setAuth(null);
   }, []);
 
-  return { auth, isLoading, login, logout, forceLogout, initialSyncCode };
+  return { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId };
 }

@@ -602,4 +602,96 @@ describe("LandingPage", () => {
       });
     });
   });
+
+  describe("QR code auto-login flow", () => {
+    it("should auto-join when qrUserId is provided and no verification needed", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-qr",
+        encryptionKey: "key-qr",
+        apiHost: "qr.host.com",
+      });
+      mockGetVerifyMethod.mockResolvedValue({ data: { method: "none", prompted: 1 } });
+
+      render(
+        <LandingPage
+          onAuth={mockOnAuth}
+          initialSyncCode="moo-famqr-keyqr@qr.host.com"
+          qrUserId="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockJoinFamily).toHaveBeenCalledWith(
+          "fam-qr",
+          "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+          undefined,
+        );
+        expect(mockOnAuth).toHaveBeenCalledWith({
+          userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+          familyId: "fam-qr",
+          encryptionKey: "key-qr",
+          apiHost: "qr.host.com",
+          authToken: "tok-123",
+        });
+      });
+    });
+
+    it("should show PIN verification when qrUserId is provided and verification required", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-qr",
+        encryptionKey: "key-qr",
+      });
+      mockGetVerifyMethod.mockResolvedValue({ data: { method: "pin", prompted: 1 } });
+
+      render(
+        <LandingPage
+          onAuth={mockOnAuth}
+          initialSyncCode="moo-famqr-keyqr"
+          qrUserId="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("請輸入 PIN 碼")).toBeInTheDocument();
+      });
+
+      // joinFamily should NOT have been called yet (waiting for verification)
+      expect(mockJoinFamily).not.toHaveBeenCalled();
+    });
+
+    it("should show error when QR sync code is invalid", async () => {
+      mockDecodeSyncCode.mockImplementation(() => {
+        throw new Error("Invalid");
+      });
+
+      render(
+        <LandingPage
+          onAuth={mockOnAuth}
+          initialSyncCode="bad-code"
+          qrUserId="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("QR Code 同步碼解析失敗，請手動輸入。"),
+        ).toBeInTheDocument();
+      });
+
+      expect(mockOnAuth).not.toHaveBeenCalled();
+    });
+
+    it("should not auto-trigger when only qrUserId is provided without initialSyncCode", () => {
+      render(
+        <LandingPage
+          onAuth={mockOnAuth}
+          qrUserId="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        />,
+      );
+
+      // Should show the normal form
+      expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
+      expect(mockGetVerifyMethod).not.toHaveBeenCalled();
+    });
+  });
 });
