@@ -3,7 +3,8 @@
   "compilerOptions": {
     "types": ["chrome"],
     "paths": {
-      "@/*": ["../../src/*"]
+      "@/*": ["../../src/*"],
+      "moo-family-bookshelf-shared/*": ["../shared/src/*"]
     }
   },
   "include": [

@@ -12,7 +12,8 @@
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "paths": {
-      "@/*": ["../../src/*"]
+      "@/*": ["../../src/*"],
+      "moo-family-bookshelf-shared/*": ["../../../shared/src/*"]
     }
   },
   "include": ["**/*.ts"]
