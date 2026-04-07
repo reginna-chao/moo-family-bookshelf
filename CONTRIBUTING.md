@@ -171,6 +171,56 @@ pnpm test:coverage
 - **Language**: English for code identifiers; 繁體中文 for UI text.
 - Keep files under 300 lines. Split when it improves clarity.
 
+## Versioning
+
+This project uses [Changesets](https://github.com/changesets/changesets) to manage versions across all packages. All sub-packages (`extension`, `pwa`, `worker`) are locked to the same version via the `fixed` config.
+
+### Adding a Changeset
+
+After making changes, create a changeset to describe what you did:
+
+```bash
+pnpm changeset
+```
+
+This will interactively ask you to:
+1. Select affected packages
+2. Choose bump type (`patch` / `minor` / `major`)
+3. Write a summary of the change
+
+A `.changeset/*.md` file is generated — commit it along with your PR.
+
+### Releasing a New Version
+
+When ready to release, run:
+
+```bash
+pnpm version:bump
+```
+
+This does two things:
+1. `changeset version` — bumps all `package.json` files and updates changelogs
+2. `sync-manifest-version.mjs` — syncs the version to `extension/public/manifest.json` and root `package.json`
+
+Then commit and tag:
+
+```bash
+git add -A && git commit -m "chore: release vX.Y.Z"
+git tag vX.Y.Z
+```
+
+### Version Files
+
+| File | Managed by |
+|------|-----------|
+| `extension/package.json` | Changesets |
+| `pwa/package.json` | Changesets |
+| `worker/package.json` | Changesets |
+| `extension/public/manifest.json` | `sync-manifest-version.mjs` |
+| `package.json` (root) | `sync-manifest-version.mjs` |
+
+> **Do not manually edit version numbers** in any `package.json` or `manifest.json`. Always use the changeset workflow.
+
 ## Pull Requests
 
 ### Branch Naming

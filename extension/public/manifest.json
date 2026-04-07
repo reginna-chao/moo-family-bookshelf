@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "MooFamily Bookshelf",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍",
-  "permissions": ["storage", "activeTab", "alarms"],
+  "permissions": ["storage", "alarms"],
+  "homepage_url": "https://reginna-chao.github.io/moo-family-bookshelf/",
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; base-uri 'self';"
   },

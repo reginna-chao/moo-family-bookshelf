@@ -54,13 +54,13 @@
 - 解綁家庭後，其他成員立即無法存取你的書籍
 - 程式碼完全開源，歡迎審查
 
-詳見 [隱私政策](docs/privacy-policy.md)。
+詳見 [隱私政策](https://reginna-chao.github.io/moo-family-bookshelf/privacy-policy.html)。
 
 ## 專案文件
 
 - [開發計畫書](docs/project-plan.md)
 - [架構設計文件](docs/architecture.md)
-- [隱私政策](docs/privacy-policy.md)
+- [隱私政策](https://reginna-chao.github.io/moo-family-bookshelf/privacy-policy.html)
 - [貢獻指南 (Contributing)](CONTRIBUTING.md)
 
 ## 授權

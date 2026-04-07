@@ -556,7 +556,7 @@ jobs:
 - [x] 完整 E2EE 端對端加密流程驗證（53 tests：encrypt.test.ts 29 + e2ee-flow.test.ts 24）
 - [x] 家庭解綁/重新綁定流程處理（chrome.storage 清理 + 重新引導）
 - [x] Rate Limiting 中介層（防濫用）（60 req/min/IP，worker/src/middleware/rateLimit.ts）
-- [x] 隱私政策頁面（docs/privacy-policy.md，繁體中文完整版）
+- [x] 隱私政策頁面（site/privacy-policy.html，繁體中文完整版）
 - [x] Dialog 元件測試補齊（React Testing Library）（16 tests：FamilySettings 6 + Onboarding 6 + PersonalShelf 4）
 - [x] E2E 測試建置（Playwright + Chrome Extension 載入）— 15 個測試（4 個 spec）：家庭生命週期（含多用戶）、書籍分享、Dialog 狀態機、自訂端點 + 選擇器驗證工具 + CI 整合
 - [x] Crypto 模組完整覆蓋率達 ≥ 90% — 94.61%（encrypt.ts 95.72% + syncCode.ts 92%），全部 8 個導出函數皆有測試覆蓋
@@ -708,7 +708,6 @@ jobs:
 moo-family-bookshelf/
 ├── docs/                    # 計畫書與文件
 │   ├── project-plan.md      # 本計畫書
-│   ├── privacy-policy.md    # 隱私政策
 │   └── architecture.md      # 架構設計文件
 ├── extension/               # Chrome Extension 原始碼
 │   ├── src/

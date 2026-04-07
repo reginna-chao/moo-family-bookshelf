@@ -20,8 +20,7 @@ Key design decisions:
 moo-family-bookshelf/
 ├── docs/                        # Project documentation (plans, architecture, privacy)
 │   ├── project-plan.md
-│   ├── architecture.md
-│   └── privacy-policy.md
+│   └── architecture.md
 ├── extension/                   # Chrome Extension source
 │   ├── src/
 │   │   ├── dialog/              # Dialog UI (React) — injected into Readmoo pages

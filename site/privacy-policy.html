@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>隱私政策 — MooFamily Bookshelf</title>
+  <meta name="description" content="MooFamily Bookshelf 隱私政策：端對端加密、不收集個資、預設不公開。">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --color-primary: #2563eb;
+      --color-primary-dark: #1d4ed8;
+      --color-bg: #ffffff;
+      --color-bg-alt: #f8fafc;
+      --color-text: #1e293b;
+      --color-text-secondary: #64748b;
+      --color-border: #e2e8f0;
+      --max-width: 800px;
+      --radius: 8px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+      color: var(--color-text);
+      background: var(--color-bg);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      padding: 60px 24px 40px;
+      background: linear-gradient(135deg, #eff6ff 0%, #fefce8 100%);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .header .subtitle {
+      font-size: 0.95rem;
+      color: var(--color-text-secondary);
+    }
+
+    .header .back-link {
+      display: inline-block;
+      margin-top: 16px;
+      font-size: 0.9rem;
+      color: var(--color-primary);
+      text-decoration: none;
+    }
+
+    .header .back-link:hover { text-decoration: underline; }
+
+    /* Main content */
+    .content {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* TL;DR callout */
+    .tldr {
+      margin: 40px 0 0;
+      padding: 24px;
+      border-radius: var(--radius);
+      background: var(--color-bg-alt);
+      border: 1px solid var(--color-border);
+    }
+
+    .tldr h2 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    .tldr ol {
+      padding-left: 20px;
+    }
+
+    .tldr li {
+      margin-bottom: 8px;
+      font-size: 0.95rem;
+    }
+
+    /* Sections */
+    section {
+      padding: 40px 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    section:last-of-type { border-bottom: none; }
+
+    section h2 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 20px;
+      letter-spacing: -0.01em;
+    }
+
+    section h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0 0 4px;
+      color: var(--color-text);
+    }
+
+    section p {
+      margin-bottom: 12px;
+      color: var(--color-text);
+      font-size: 0.95rem;
+    }
+
+    /* Lists */
+    .policy-list {
+      list-style: none;
+      margin: 12px 0;
+    }
+
+    .policy-list li {
+      padding: 8px 0;
+      font-size: 0.95rem;
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+    }
+
+    .policy-list li .icon {
+      flex-shrink: 0;
+      font-size: 0.9rem;
+    }
+
+    .no { color: #dc2626; }
+    .yes { color: #16a34a; }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 40px 24px;
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .footer a { color: var(--color-primary); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .header { padding: 44px 20px 32px; }
+      .header h1 { font-size: 1.6rem; }
+      section { padding: 32px 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <h1>隱私政策</h1>
+    <p class="subtitle">最後更新：2026-04-02</p>
+    <a href="index.html" class="back-link">&larr; 回到首頁</a>
+  </header>
+
+  <main class="content">
+
+    <!-- TL;DR -->
+    <div class="tldr">
+      <h2>白話版（TL;DR）</h2>
+      <ol>
+        <li><strong>我們不知道你的書單內容</strong> — 所有資料在你的瀏覽器中加密後才上傳，伺服器只存亂碼</li>
+        <li><strong>我們不收集個人資料</strong> — 不需要帳號、不記錄 Email、不追蹤你是誰</li>
+        <li><strong>你的書預設都不公開</strong> — 只有你主動開放的書才會出現在家庭書櫃</li>
+        <li><strong>程式碼完全公開</strong> — 你可以自己檢查，也可以自己架設</li>
+        <li><strong>解綁家庭不影響你的設定</strong> — 你的開放偏好會保留，換家庭不用重設</li>
+      </ol>
+    </div>
+
+    <!-- 一、資料收集 -->
+    <section>
+      <h2>一、資料收集</h2>
+      <p>本擴充功能<strong>不收集</strong>以下資訊：</p>
+      <ul class="policy-list">
+        <li><span class="icon no">&#10007;</span> 個人識別資訊（姓名、Email、電話）</li>
+        <li><span class="icon no">&#10007;</span> 讀墨帳號密碼</li>
+        <li><span class="icon no">&#10007;</span> 瀏覽紀錄</li>
+        <li><span class="icon no">&#10007;</span> 裝置識別碼</li>
+      </ul>
+      <p>本擴充功能收集的資訊（僅限以下項目）：</p>
+      <ul class="policy-list">
+        <li><span class="icon yes">&#10003;</span> 您主動選擇開放的書單資料（書名、作者、ISBN）</li>
+        <li><span class="icon yes">&#10003;</span> 您的開放/關閉偏好設定</li>
+        <li><span class="icon yes">&#10003;</span> 上述資料在上傳前已經端對端加密</li>
+      </ul>
+    </section>
+
+    <!-- 二、使用者識別方式 -->
+    <section>
+      <h2>二、使用者識別方式</h2>
+      <p>本擴充功能從讀墨「個人帳戶」頁面讀取您的 Email 地址。</p>
+      <p>Email 經過<strong>加入應用程式專屬前綴後進行 SHA-256 雜湊</strong>，轉為匿名的使用者識別碼（User ID），無法被反推回原始 Email。</p>
+      <p><strong>原始 Email 永遠不會離開您的瀏覽器</strong>，僅儲存於本機 <code>chrome.storage.local</code>。</p>
+      <p>伺服器只會收到雜湊後的匿名識別碼，無法反推出您的 Email。</p>
+    </section>
+
+    <!-- 三、資料儲存 -->
+    <section>
+      <h2>三、資料儲存</h2>
+      <p>所有書單資料與開放設定均經 <strong>AES-256-GCM 端對端加密</strong>後儲存。</p>
+      <p>伺服器（Cloudflare KV）僅儲存加密後的密文。</p>
+      <p>開發者及伺服器管理員<strong>無法解密</strong>您的資料。</p>
+      <p><strong>例外：顯示名稱</strong> — 為了讓家庭成員能看到彼此的名稱，顯示名稱以明文儲存於家庭群組記錄中。顯示名稱由使用者自行設定，不包含讀墨帳號資訊。</p>
+      <p>個人開放設定持久保存，不因家庭帳號解綁而刪除。</p>
+      <p>加密金鑰可透過 Chrome 瀏覽器的同步功能（chrome.storage.sync）在同一 Google 帳號的裝置間同步，以便跨裝置使用。此同步由 Chrome 瀏覽器原生提供，資料不經由本專案伺服器。</p>
+      <p>家庭群組資料可設有 <strong>TTL 過期機制</strong>。</p>
+    </section>
+
+    <!-- 四、資料分享與隱私控制 -->
+    <section>
+      <h2>四、資料分享與隱私控制</h2>
+      <p>所有書籍<strong>預設不開放</strong>，您必須主動選擇要分享的書籍。</p>
+      <p>新購買的書籍預設為不開放。</p>
+      <p>變更開放設定後，需<strong>手動儲存</strong>才會同步至伺服器。</p>
+      <p>僅同一家庭群組的成員（持有家庭同步碼）可瀏覽您開放的書籍。</p>
+      <p>家庭成員僅能瀏覽，無法修改您的開放設定。</p>
+      <p>解綁家庭帳號後，其他成員<strong>立即無法</strong>存取您的書籍。</p>
+      <p>我們不會將您的資料提供給任何第三方。</p>
+    </section>
+
+    <!-- 五、開源與透明 -->
+    <section>
+      <h2>五、開源與透明</h2>
+      <p>本專案原始碼完全公開於 GitHub。</p>
+      <p>任何人都可以審查程式碼，確認沒有惡意行為。</p>
+      <p>進階使用者可以<strong>自行部署 Cloudflare Worker</strong>，將資料完全存放在自己的帳號下。</p>
+      <p>Extension 與 PWA 均支援自訂 API 端點，不強制使用本專案的預設伺服器。</p>
+    </section>
+
+    <!-- 六、資料刪除 -->
+    <section>
+      <h2>六、資料刪除</h2>
+      <p><strong>離開家庭</strong>：退出家庭群組後，伺服器端的家庭成員關聯會立即移除，其他成員無法再存取您的書籍資料。</p>
+      <p><strong>個人設定</strong>：您的個人書籍開放設定儲存於伺服器端（加密狀態）；如需刪除，可透過 GitHub Issues 聯繫，或自行部署後端直接刪除 KV 資料。</p>
+      <p><strong>本機資料</strong>：瀏覽器中的本機資料（Email 等）可透過擴充功能管理頁面移除。加密金鑰同時儲存於 Chrome 同步儲存空間（chrome.storage.sync），會隨 Google 帳號保留以便跨裝置或重新安裝後恢復使用；如需徹底清除，可登出 Google 帳號或在 Chrome 設定中清除同步資料。</p>
+    </section>
+
+    <!-- 七、Cookie 與追蹤 -->
+    <section>
+      <h2>七、Cookie 與追蹤</h2>
+      <p>本擴充功能<strong>不使用</strong> Cookie。</p>
+      <p>本擴充功能<strong>不嵌入</strong>任何追蹤器或分析工具。</p>
+    </section>
+
+    <!-- 八、聯絡方式 -->
+    <section>
+      <h2>八、聯絡方式</h2>
+      <p>如有任何隱私相關問題，歡迎透過 <a href="https://github.com/reginna-chao/moo-family-bookshelf/issues">GitHub Issues</a> 聯繫。</p>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>
+      <a href="index.html">MooFamily Bookshelf</a> — 以 <a href="https://opensource.org/licenses/MIT">MIT License</a> 開源
+    </p>
+    <p>
+      本專案與 Readmoo 讀墨無官方關聯。
+    </p>
+    <p style="margin-top: 8px;">
+      <em>本隱私政策可能隨產品更新而調整，變更將公告於 GitHub 儲存庫。</em>
+    </p>
+  </footer>
+
+</body>
+</html>
