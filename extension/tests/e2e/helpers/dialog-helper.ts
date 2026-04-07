@@ -15,6 +15,16 @@ const DIALOG_SELECTOR = "#moo-family-bookshelf-dialog";
 const BACKDROP_SELECTOR = "#moo-family-bookshelf-backdrop";
 
 /**
+ * Wait for the mock page to finish loading and Content Script to inject.
+ * Call after page.goto(MOCK_READMOO_URL) to avoid flaky blank-page failures.
+ */
+export async function waitForPageReady(page: Page): Promise<void> {
+  await page.waitForLoadState("domcontentloaded");
+  // Ensure the mock fixture's DOM is present (not a blank page)
+  await page.locator("body").waitFor({ state: "visible", timeout: 10_000 });
+}
+
+/**
  * Wait for the Content Script to inject the "家庭書櫃" button.
  */
 export async function waitForButton(page: Page): Promise<Locator> {

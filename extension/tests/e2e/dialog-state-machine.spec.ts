@@ -21,6 +21,7 @@ import {
   navigateToTab,
   leaveFamily,
   getDialogText,
+  waitForPageReady,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 
@@ -65,6 +66,7 @@ test.describe("Dialog State Machine", () => {
     });
 
     await page.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page);
     await openDialog(page);
     await waitForOnboarding(page);
 
@@ -87,6 +89,7 @@ test.describe("Dialog State Machine", () => {
     }, WORKER_API_URL);
 
     await page.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page);
     await openDialog(page);
     await waitForOnboarding(page);
 
@@ -122,6 +125,7 @@ test.describe("Dialog State Machine", () => {
     }, WORKER_API_URL);
 
     await page.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page);
     await openDialog(page);
     await waitForOnboarding(page);
 
@@ -158,6 +162,7 @@ test.describe("Dialog State Machine", () => {
     }, WORKER_API_URL);
 
     await page.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page);
 
     const uniqueEmail = `test-dsm-leave-${Date.now()}@readmoo.com`;
     await page.evaluate((email) => {
@@ -201,6 +206,7 @@ test.describe("Dialog State Machine", () => {
     }, WORKER_API_URL);
 
     await page.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page);
 
     const uniqueEmail = `test-dsm-clear-${Date.now()}@readmoo.com`;
     await page.evaluate((email) => {
@@ -229,6 +235,7 @@ test.describe("Dialog State Machine", () => {
 
     // Navigate back and reopen dialog — should show Onboarding
     await page.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page);
     await openDialog(page);
     await waitForOnboarding(page);
     const text = await getDialogText(page);

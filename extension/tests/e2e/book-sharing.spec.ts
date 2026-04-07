@@ -14,6 +14,7 @@ import {
   clickCreateFamily,
   clickContinue,
   navigateToTab,
+  waitForPageReady,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 
@@ -31,6 +32,7 @@ async function setupFamily(
   }, WORKER_API_URL);
 
   await page.goto(MOCK_READMOO_URL);
+  await waitForPageReady(page);
   await openDialog(page);
   await waitForOnboarding(page);
 

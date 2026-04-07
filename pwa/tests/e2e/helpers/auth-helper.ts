@@ -150,6 +150,21 @@ export async function mockDefaultApiRoutes(
     });
   });
 
+  // Verify method — mark as already prompted to skip VerifySetupPrompt overlay
+  await page.route("**/api/user/*/verify", (route) => {
+    if (route.request().method() === "GET") {
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: { method: "none", prompted: 1 },
+        }),
+      });
+    } else {
+      route.continue();
+    }
+  });
+
   // API version check
   await page.route("**/api/version", (route) => {
     route.fulfill({

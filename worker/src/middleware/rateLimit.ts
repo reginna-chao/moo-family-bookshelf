@@ -12,6 +12,12 @@ const TTL_SECONDS = 120;
 
 export const rateLimit = createMiddleware<{ Bindings: Env }>(
   async (c, next) => {
+    // Skip rate limiting in dev mode (local wrangler dev / E2E tests)
+    if (c.env.DEV_MODE === "1") {
+      await next();
+      return;
+    }
+
     // Only trust cf-connecting-ip (set by Cloudflare edge, not spoofable)
     const ip = c.req.header("cf-connecting-ip") ?? "unknown";
 

@@ -65,7 +65,7 @@ test.describe("Auth flow", () => {
     ).toBeVisible();
 
     // Navigate to settings
-    await page.getByRole("button", { name: "設定" }).click();
+    await page.getByRole("button", { name: "設定", exact: true }).click();
 
     // Click logout button
     await page.getByRole("button", { name: "登出" }).click();

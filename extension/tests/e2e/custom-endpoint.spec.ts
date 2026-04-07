@@ -18,6 +18,7 @@ import {
   getSyncCode,
   navigateToTab,
   getSyncCodeFromSettings,
+  waitForPageReady,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 
@@ -36,6 +37,7 @@ async function createFamilyAndGetSyncCode(
   }, WORKER_API_URL);
 
   await page.goto(MOCK_READMOO_URL);
+  await waitForPageReady(page);
 
   // Use a unique email to avoid KV collisions from other tests
   const uniqueEmail = `test-endpoint-${Date.now()}@readmoo.com`;

@@ -22,6 +22,7 @@ import {
   navigateToTab,
   leaveFamily,
   getDialogText,
+  waitForPageReady,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 
@@ -33,6 +34,7 @@ test.describe("Family Lifecycle", () => {
   test("Dialog button appears on mock library page", async ({ context }) => {
     const page = await context.newPage();
     await page.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page);
 
     // Content Script should inject the "家庭書櫃" button
     const button = page.locator("#moo-family-bookshelf-btn");
@@ -62,6 +64,7 @@ test.describe("Family Lifecycle", () => {
 
     // Navigate to mock page
     await page1.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page1);
 
     // Open dialog — should show onboarding
     await openDialog(page1);
@@ -127,6 +130,7 @@ test.describe("Family Lifecycle", () => {
 
       // Navigate to mock page
       await page2.goto(MOCK_READMOO_URL);
+      await waitForPageReady(page2);
 
       // Change mock email so user 2 gets a unique userId (SHA-256)
       // Use timestamp to avoid KV collisions with previous test runs
@@ -170,6 +174,7 @@ test.describe("Family Lifecycle", () => {
       // --- Switch back to User 1: verify member count is 2 ---
       // Reload the page to get a fresh state, then reopen dialog
       await page1.goto(MOCK_READMOO_URL);
+      await waitForPageReady(page1);
       await openDialog(page1);
       await waitForMainView(page1);
       await navigateToTab(page1, "設定");
@@ -204,6 +209,7 @@ test.describe("Family Lifecycle", () => {
     });
 
     await page.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page);
     await openDialog(page);
     await waitForOnboarding(page);
 
@@ -229,6 +235,7 @@ test.describe("Family Lifecycle", () => {
     }, WORKER_API_URL);
 
     await page.goto(MOCK_READMOO_URL);
+    await waitForPageReady(page);
 
     // Use a unique email to avoid KV collisions from previous tests
     const uniqueEmail = `test-leave-${Date.now()}@readmoo.com`;
