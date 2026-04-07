@@ -12,9 +12,6 @@ jobs:
   extension-check:
     name: Extension — Typecheck, Test, Build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: extension
 
     steps:
       - uses: actions/checkout@v4
@@ -27,18 +24,18 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: extension/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: pnpm --filter moo-family-bookshelf-extension typecheck
 
       - name: Test
-        run: pnpm test
+        run: pnpm --filter moo-family-bookshelf-extension test
 
       - name: Build
-        run: pnpm build
+        run: pnpm --filter moo-family-bookshelf-extension build
 
   worker-check:
     name: Worker — Typecheck, Test
@@ -115,16 +112,9 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: |
-            extension/pnpm-lock.yaml
-            worker/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install extension dependencies
-        working-directory: extension
-        run: pnpm install --frozen-lockfile
-
-      - name: Install worker dependencies
-        working-directory: worker
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build extension (E2E variant)
@@ -169,15 +159,9 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            worker/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install PWA dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install worker dependencies
-        working-directory: worker
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build PWA
@@ -361,9 +345,6 @@ jobs:
     needs: [extension-check, e2e]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: extension
 
     steps:
       - uses: actions/checkout@v4
@@ -376,13 +357,13 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: extension/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      - run: pnpm --filter moo-family-bookshelf-extension build
 
       - name: Package Extension
-        run: cd dist && zip -r ../../moo-family-bookshelf-${{ github.ref_name }}.zip .
+        run: cd extension/dist && zip -r ../../moo-family-bookshelf-${{ github.ref_name }}.zip .
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
