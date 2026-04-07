@@ -220,13 +220,28 @@ test.describe("Family Lifecycle", () => {
   }) => {
     const page = await context.newPage();
 
-    // Set up API endpoint
+    // Set up API endpoint + clear storage from previous tests
     await page.goto(`chrome-extension://${extensionId}/background.js`);
     await page.evaluate((apiUrl) => {
+      chrome.storage.local.clear();
+      try { chrome.storage.sync.clear(); } catch {}
       chrome.storage.local.set({ apiEndpoint: apiUrl });
     }, WORKER_API_URL);
 
     await page.goto(MOCK_READMOO_URL);
+
+    // Use a unique email to avoid KV collisions from previous tests
+    const uniqueEmail = `test-leave-${Date.now()}@readmoo.com`;
+    await page.evaluate((email) => {
+      const meView = document.getElementById("me-view");
+      if (meView) {
+        const emailDiv = meView.querySelector('div[style*="14px"]');
+        if (emailDiv) emailDiv.textContent = email;
+        const nameDiv = meView.querySelector('div[style*="16px"]');
+        if (nameDiv) nameDiv.textContent = "測試離開使用者";
+      }
+    }, uniqueEmail);
+
     await openDialog(page);
     await waitForOnboarding(page);
 

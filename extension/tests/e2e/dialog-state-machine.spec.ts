@@ -149,13 +149,25 @@ test.describe("Dialog State Machine", () => {
   }) => {
     const page = await context.newPage();
 
-    // Set up with family
+    // Set up with family — clear storage and use unique email to avoid KV collisions
     await page.goto(`chrome-extension://${extensionId}/background.js`);
     await page.evaluate((apiUrl) => {
+      chrome.storage.local.clear();
+      try { chrome.storage.sync.clear(); } catch {}
       chrome.storage.local.set({ apiEndpoint: apiUrl });
     }, WORKER_API_URL);
 
     await page.goto(MOCK_READMOO_URL);
+
+    const uniqueEmail = `test-dsm-leave-${Date.now()}@readmoo.com`;
+    await page.evaluate((email) => {
+      const meView = document.getElementById("me-view");
+      if (meView) {
+        const emailDiv = meView.querySelector('div[style*="14px"]');
+        if (emailDiv) emailDiv.textContent = email;
+      }
+    }, uniqueEmail);
+
     await openDialog(page);
     await waitForOnboarding(page);
 
@@ -180,13 +192,24 @@ test.describe("Dialog State Machine", () => {
   }) => {
     const page = await context.newPage();
 
-    // Set up with family
+    // Set up with family — clear storage and use unique email to avoid KV collisions
     await page.goto(`chrome-extension://${extensionId}/background.js`);
     await page.evaluate((apiUrl) => {
+      chrome.storage.local.clear();
+      try { chrome.storage.sync.clear(); } catch {}
       chrome.storage.local.set({ apiEndpoint: apiUrl });
     }, WORKER_API_URL);
 
     await page.goto(MOCK_READMOO_URL);
+
+    const uniqueEmail = `test-dsm-clear-${Date.now()}@readmoo.com`;
+    await page.evaluate((email) => {
+      const meView = document.getElementById("me-view");
+      if (meView) {
+        const emailDiv = meView.querySelector('div[style*="14px"]');
+        if (emailDiv) emailDiv.textContent = email;
+      }
+    }, uniqueEmail);
     await openDialog(page);
     await waitForOnboarding(page);
 
