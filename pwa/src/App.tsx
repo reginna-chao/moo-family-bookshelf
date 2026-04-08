@@ -12,6 +12,7 @@ import { VerifySetupPrompt } from "./components/VerifySetupPrompt";
 import { FamilyDataProvider, useFamilyData } from "./hooks/useFamilyData";
 import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
+import { encodeSyncCode } from "@/crypto/syncCode";
 
 type Page = "family-shelf" | "personal-shelf" | "settings";
 
@@ -102,7 +103,6 @@ export default function App() {
       } else if (res.error.code === "VERIFICATION_REQUIRED" && current.familyId && current.encryptionKey) {
         // Preserve sync code so LandingPage can pre-fill and show verification UI.
         try {
-          const { encodeSyncCode } = await import("@/crypto/syncCode");
           const code = encodeSyncCode({
             familyId: current.familyId,
             encryptionKey: current.encryptionKey,
