@@ -1,8 +1,12 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DisplayNameEditor } from "@/dialog/DisplayNameEditor";
 
 describe("DisplayNameEditor", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   const baseProps = {
     displayName: "小明",
     savedDisplayName: "小明",
@@ -72,7 +76,7 @@ describe("DisplayNameEditor", () => {
     expect(setDisplayName).toHaveBeenCalledWith("大明");
   });
 
-  it("calls handleSaveDisplayName on check icon click", () => {
+  it("calls handleSaveDisplayName on check icon click", async () => {
     const handleSave = vi.fn().mockResolvedValue(true);
     render(
       <DisplayNameEditor
@@ -84,9 +88,11 @@ describe("DisplayNameEditor", () => {
     // Enter edit mode
     fireEvent.click(screen.getAllByRole("button")[0]);
 
-    // Click the check button (first button in edit mode row)
+    // Click the check button — wrap in act to handle async state update
     const buttons = screen.getAllByRole("button");
-    fireEvent.click(buttons[0]);
+    await act(async () => {
+      fireEvent.click(buttons[0]);
+    });
     expect(handleSave).toHaveBeenCalled();
   });
 
@@ -164,15 +170,13 @@ describe("DisplayNameEditor", () => {
     // Enter edit mode
     fireEvent.click(screen.getAllByRole("button")[0]);
 
-    // Click check to save
+    // Click check to save — wrap in act to handle async state update
     const buttons = screen.getAllByRole("button");
-    fireEvent.click(buttons[0]);
-
-    // Wait for async save to complete
-    await waitFor(() => {
-      expect(handleSave).toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(buttons[0]);
     });
 
+    expect(handleSave).toHaveBeenCalled();
     // Should still be in edit mode — input still visible
     expect(screen.getByPlaceholderText("輸入顯示名稱")).toBeInTheDocument();
   });
@@ -190,18 +194,14 @@ describe("DisplayNameEditor", () => {
     fireEvent.click(screen.getAllByRole("button")[0]);
     expect(screen.getByPlaceholderText("輸入顯示名稱")).toBeInTheDocument();
 
-    // Click check to save
+    // Click check to save — wrap in act to handle async state update
     const buttons = screen.getAllByRole("button");
-    fireEvent.click(buttons[0]);
-
-    // Wait for async save to complete
-    await waitFor(() => {
-      expect(handleSave).toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(buttons[0]);
     });
 
+    expect(handleSave).toHaveBeenCalled();
     // Should exit edit mode — input gone
-    await waitFor(() => {
-      expect(screen.queryByPlaceholderText("輸入顯示名稱")).not.toBeInTheDocument();
-    });
+    expect(screen.queryByPlaceholderText("輸入顯示名稱")).not.toBeInTheDocument();
   });
 });

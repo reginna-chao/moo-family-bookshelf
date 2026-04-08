@@ -401,7 +401,7 @@ describe("scrapeArchivedBooks", () => {
   let scrapeArchivedBooks: () => Promise<import("@/content/scraper").ScrapedBook[]>;
 
   beforeEach(async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
     document.body.innerHTML = "";
     document.documentElement.removeAttribute("data-moo-fiber-bridge");
     vi.resetModules();
@@ -416,7 +416,10 @@ describe("scrapeArchivedBooks", () => {
   });
 
   it("returns empty array when filter button is not found in DOM", async () => {
-    const result = await scrapeArchivedBooks();
+    const promise = scrapeArchivedBooks();
+    // Advance past the finally block's wait(2000ms) with clear margin
+    await vi.advanceTimersByTimeAsync(3000);
+    const result = await promise;
     expect(result).toEqual([]);
   });
 
@@ -426,7 +429,10 @@ describe("scrapeArchivedBooks", () => {
       <button class="desktop-top-nav-btn"><i class="mo-sort"></i></button>
     `;
 
-    const result = await scrapeArchivedBooks();
+    const promise = scrapeArchivedBooks();
+    // Advance past the finally block's wait(2000ms) with clear margin
+    await vi.advanceTimersByTimeAsync(3000);
+    const result = await promise;
     expect(result).toEqual([]);
   });
 

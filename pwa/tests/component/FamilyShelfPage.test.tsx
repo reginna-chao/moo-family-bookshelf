@@ -99,13 +99,16 @@ describe("FamilyShelfPage", () => {
     defaultProps = createProps();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Flush pending async effects from FamilyDataProvider before cleanup
+    await act(async () => {});
     vi.useRealTimers();
     vi.clearAllMocks();
   });
 
   it("shows loading state initially", () => {
     mockGetFamilyBookshelf.mockReturnValue(new Promise(() => {})); // never resolves
+    mockGetFamilyMembers.mockReturnValue(new Promise(() => {})); // never resolves
     renderWithProvider(defaultProps);
 
     expect(screen.getByText("載入家庭書櫃中...")).toBeInTheDocument();

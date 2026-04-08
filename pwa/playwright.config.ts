@@ -6,10 +6,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const isCI = !!process.env.CI;
 
-// CI: vite preview (HTTP, port 4173) — pre-built, stable
-// Local: vite dev (HTTPS, port 5173) — HMR, self-signed cert
-const PWA_PORT = isCI ? 4173 : 5173;
-const WORKER_PORT = 8787;
+// E2E uses dedicated ports to avoid conflicts with other dev servers.
+// CI: vite preview (HTTP) / Local: vite dev (HTTPS, self-signed cert)
+const PWA_PORT = isCI ? 4173 : 5277;
+const WORKER_PORT = 8688;
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -31,17 +31,19 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: isCI ? "pnpm preview" : "pnpm dev",
+      command: isCI
+        ? "pnpm preview"
+        : `pnpm exec vite dev --port ${PWA_PORT}`,
       port: PWA_PORT,
       ignoreHTTPSErrors: true,
-      reuseExistingServer: !isCI,
+      reuseExistingServer: false,
       cwd: __dirname,
       timeout: 60_000,
     },
     {
       command: `cd ../worker && pnpm exec wrangler dev --port ${WORKER_PORT} --var DEV_MODE:1`,
       port: WORKER_PORT,
-      reuseExistingServer: !isCI,
+      reuseExistingServer: false,
       cwd: __dirname,
       timeout: 60_000,
     },

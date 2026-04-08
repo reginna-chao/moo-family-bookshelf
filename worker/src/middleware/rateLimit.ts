@@ -9,6 +9,7 @@ const RATE_LIMIT_STANDARD = 60;
 const RATE_LIMIT_PUBLIC = 10;
 
 const TTL_SECONDS = 120;
+const BUCKET_MS = 60000;
 
 export const rateLimit = createMiddleware<{ Bindings: Env }>(
   async (c, next) => {
@@ -21,7 +22,8 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
     // Only trust cf-connecting-ip (set by Cloudflare edge, not spoofable)
     const ip = c.req.header("cf-connecting-ip") ?? "unknown";
 
-    const minuteBucket = Math.floor(Date.now() / 60000);
+    const now = Date.now();
+    const minuteBucket = Math.floor(now / BUCKET_MS);
     const isPublic = isPublicRoute(c.req.method, c.req.path);
     const prefix = isPublic ? "ratelimit:pub" : "ratelimit";
     const limit = isPublic ? RATE_LIMIT_PUBLIC : RATE_LIMIT_STANDARD;
@@ -34,15 +36,24 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
     const count = current ? parseInt(current, 10) : 0;
 
     if (count >= limit) {
+      const retryAfter = Math.max(1, Math.ceil(((minuteBucket + 1) * BUCKET_MS - now) / 1000));
       return c.json(
         { error: { code: "RATE_LIMITED", message: "Too many requests" } },
         429,
+        {
+          "Retry-After": String(retryAfter),
+          "X-RateLimit-Limit": String(limit),
+          "X-RateLimit-Remaining": "0",
+        },
       );
     }
 
     await c.env.KV.put(key, String(count + 1), {
       expirationTtl: TTL_SECONDS,
     });
+
+    c.header("X-RateLimit-Limit", String(limit));
+    c.header("X-RateLimit-Remaining", String(limit - count - 1));
 
     await next();
   },

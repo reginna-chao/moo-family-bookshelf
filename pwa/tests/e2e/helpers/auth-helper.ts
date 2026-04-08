@@ -7,8 +7,9 @@
 import type { Page } from "@playwright/test";
 import { USER_ID_KEY, namespacedKey } from "@/hooks/useAuth";
 
-export const PWA_URL = "https://localhost:5173";
-export const API_URL = "http://localhost:8787";
+/** E2E-dedicated ports — must match playwright.config.ts */
+export const PWA_URL = "https://localhost:5277";
+export const API_URL = "http://localhost:8688";
 
 export interface TestAuthState {
   userId: string;

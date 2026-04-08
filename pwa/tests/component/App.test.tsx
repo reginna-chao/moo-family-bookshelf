@@ -101,7 +101,9 @@ describe("App", () => {
     mockJoinFamily.mockResolvedValue({ data: { authToken: "new-token" } });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Flush pending async effects (token acquisition, etc.) before cleanup
+    await act(async () => {});
     vi.restoreAllMocks();
   });
 

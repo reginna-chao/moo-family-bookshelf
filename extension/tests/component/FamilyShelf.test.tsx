@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
@@ -79,11 +79,15 @@ describe("FamilyShelf", () => {
     );
   });
 
+  afterEach(async () => {
+    // Flush pending async effects from FamilyDataProvider before cleanup
+    await act(async () => {});
+  });
+
   it("shows loading state initially", () => {
     const apiClient = createMockApiClient({
-      getFamilyBookshelf: vi.fn().mockReturnValue(new Promise(() => {
-        // Never resolves — keeps loading state
-      })),
+      getFamilyBookshelf: vi.fn().mockReturnValue(new Promise(() => {})),
+      getFamilyMembers: vi.fn().mockReturnValue(new Promise(() => {})),
     });
 
     renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);

@@ -1,5 +1,5 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PersonalShelf, PersonalShelfProps } from "@/dialog/PersonalShelf";
 import { BoolFlag, type ApiClient } from "@/api/client";
 
@@ -80,6 +80,14 @@ async function waitForBooksLoaded() {
 describe("PersonalShelf", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset useBookSync mock to default
+    mockUseBookSync.mockReturnValue({
+      syncStatus: "idle",
+      syncError: "",
+      lastSyncBooks: [],
+      triggerManualSync: vi.fn(),
+      autoSyncDone: false,
+    });
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
         const result = { encryptionKey: "fake-enc-key-abc", displayName: "小明" };
@@ -89,6 +97,11 @@ describe("PersonalShelf", () => {
         return Promise.resolve(result) as unknown as void;
       },
     );
+  });
+
+  afterEach(async () => {
+    // Flush pending async effects before cleanup
+    await act(async () => {});
   });
 
   it("shows loading state initially", () => {
@@ -1058,7 +1071,9 @@ describe("PersonalShelf", () => {
       });
 
       // Re-render to trigger the useEffect that reacts to lastSyncBooks
-      rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      await act(async () => {
+        rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      });
 
       await waitFor(() => {
         // New book should appear
@@ -1115,7 +1130,9 @@ describe("PersonalShelf", () => {
         autoSyncDone: true,
       });
 
-      rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      await act(async () => {
+        rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      });
 
       await waitFor(() => {
         expect(screen.getByText("全新同步書")).toBeInTheDocument();

@@ -1,5 +1,5 @@
 import { renderHook, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock scraper module before importing the hook
 vi.mock("@/content/scraper", () => ({
@@ -15,7 +15,7 @@ vi.mock("@/crypto/encrypt", () => ({
 }));
 
 import { useAutoSetup } from "@/dialog/useAutoSetup";
-import { scrapeUserEmail, scrapeDisplayName } from "@/content/scraper";
+import { scrapeUserEmail } from "@/content/scraper";
 import type { ApiClient } from "@/api/client";
 
 function createMockApiClient(): ApiClient {
@@ -28,7 +28,7 @@ function createMockApiClient(): ApiClient {
 describe("useAutoSetup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
 
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -61,9 +61,13 @@ describe("useAutoSetup", () => {
     const { result } = renderHook(() => useAutoSetup());
 
     let profileResult: { email: string; displayName: string } | null = null;
-    await act(async () => {
+    const promise = act(async () => {
       profileResult = await result.current.scrapeProfile();
     });
+
+    // Advance past NAV_SETTLE_MS (1500ms)
+    await vi.advanceTimersByTimeAsync(1500);
+    await promise;
 
     expect(profileResult).toEqual({
       email: "user@example.com",
@@ -77,9 +81,12 @@ describe("useAutoSetup", () => {
     const { result } = renderHook(() => useAutoSetup());
 
     let profileResult: { email: string; displayName: string } | null = null;
-    await act(async () => {
+    const promise = act(async () => {
       profileResult = await result.current.scrapeProfile();
     });
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await promise;
 
     expect(profileResult).toBeNull();
     expect(result.current.phase).toBe("error");
@@ -90,9 +97,12 @@ describe("useAutoSetup", () => {
     vi.mocked(scrapeUserEmail).mockReturnValueOnce(null);
     const { result } = renderHook(() => useAutoSetup());
 
-    await act(async () => {
+    const promise = act(async () => {
       await result.current.scrapeProfile();
     });
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await promise;
 
     expect(result.current.phase).toBe("error");
 
@@ -109,12 +119,15 @@ describe("useAutoSetup", () => {
     const { result } = renderHook(() => useAutoSetup());
 
     let success = false;
-    await act(async () => {
+    const promise = act(async () => {
       success = await result.current.syncBooks({
         userId: "user-hash",
         apiClient: mockApi,
       });
     });
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await promise;
 
     expect(success).toBe(true);
     expect(result.current.phase).toBe("done");
@@ -136,12 +149,15 @@ describe("useAutoSetup", () => {
     const { result } = renderHook(() => useAutoSetup());
 
     let success = false;
-    await act(async () => {
+    const promise = act(async () => {
       success = await result.current.syncBooks({
         userId: "user-hash",
         apiClient: mockApi,
       });
     });
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await promise;
 
     expect(success).toBe(false);
     expect(result.current.phase).toBe("error");
