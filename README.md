@@ -2,7 +2,7 @@
 
 讓讀墨家庭帳號成員，輕鬆瀏覽彼此選擇分享的書籍。
 
-<!-- TODO: 加入產品截圖 -->
+<img src="assets/brand/og-image.svg" alt="MooFamily Bookshelf - Share your bookshelf" height="40">
 
 ## 功能
 
@@ -59,7 +59,7 @@
 
 ## 支持開發
 
-<a href="https://www.buymeacoffee.com/rcworkaddi" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee, but I prefer tea 👍" height="40"></a>
+<a href="https://rcwork.bobaboba.me/" target="_blank"><img src="assets/boba-button.svg" alt="Give me a Boba!" height="40"></a>
 
 ## 授權
 
