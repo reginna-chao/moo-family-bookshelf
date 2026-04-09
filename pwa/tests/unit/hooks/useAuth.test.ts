@@ -625,6 +625,45 @@ describe("useAuth", () => {
       expect(result.current.initialSyncCode).toBe("moo-fam-1-key-1@custom.host.com");
     });
 
+    it("should clear qrUserId on logout to prevent auto-re-login", () => {
+      // Simulate: user logged in via QR code, then logs out.
+      // qrUserId must be cleared so the QR auto-login effect doesn't re-trigger.
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#code=moo-fam99-secretKey&uid=user-abc",
+        pathname: "/app",
+        href: "http://localhost/app#code=moo-fam99-secretKey&uid=user-abc",
+      });
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam99",
+        encryptionKey: "secretKey",
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      // QR params should be set
+      expect(result.current.qrUserId).toBe("user-abc");
+      expect(result.current.initialSyncCode).toBe("moo-fam99-secretKey");
+
+      // Simulate login then logout
+      act(() => {
+        result.current.login({
+          userId: "user-abc",
+          familyId: "fam99",
+          encryptionKey: "secretKey",
+        });
+      });
+      expect(result.current.auth).not.toBeNull();
+
+      act(() => {
+        result.current.logout();
+      });
+
+      // qrUserId must be cleared
+      expect(result.current.auth).toBeNull();
+      expect(result.current.qrUserId).toBe("");
+    });
+
     it("should not auto-login on second refresh after remembered logout", () => {
       // After remembered logout, REMEMBERED_LOGOUT_KEY has the sync code
       // but all auth data is cleared. Simulate a second refresh where

@@ -249,6 +249,8 @@ export function useAuth(): UseAuthReturn {
     }
     clearStorage();
     setAuth(null);
+    setQrUserId("");
+    setInitialJoinFamilyId("");
     if (code) {
       setInitialSyncCode(code);
     }
@@ -257,6 +259,9 @@ export function useAuth(): UseAuthReturn {
   const forceLogout = useCallback((): void => {
     forceClearStorage();
     setAuth(null);
+    setQrUserId("");
+    setInitialSyncCode("");
+    setInitialJoinFamilyId("");
   }, []);
 
   return { auth, isLoading, login, logout, forceLogout, initialSyncCode, initialJoinFamilyId, qrUserId };
