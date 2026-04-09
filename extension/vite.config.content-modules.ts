@@ -15,6 +15,8 @@ const pkg = JSON.parse(
 ) as { version: string };
 
 export default defineConfig({
+  envDir: resolve(__dirname, ".."),
+  envPrefix: "VITE_EXTENSION_",
   // react() plugin is included for the content-dialog entry which uses JSX.
   // It's harmless for non-JSX entries (content-sync) and keeps the config simple.
   plugins: [react()],

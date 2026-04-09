@@ -9,6 +9,8 @@ const pkg = JSON.parse(
 ) as { version: string };
 
 export default defineConfig({
+  envDir: resolve(__dirname, ".."),
+  envPrefix: "VITE_EXTENSION_",
   plugins: [react(), devManifest()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),

@@ -10,6 +10,8 @@ const pkg = JSON.parse(
 ) as { version: string };
 
 export default defineConfig(({ command }) => ({
+  envDir: resolve(__dirname, ".."),
+  envPrefix: "VITE_PWA_",
   plugins: [react(), ...(command === "serve" ? [basicSsl()] : []), devManifest()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),

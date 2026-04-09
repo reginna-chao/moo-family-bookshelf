@@ -17,8 +17,8 @@ function readEnvValue(envPath, key) {
 const isRemote = process.argv.includes("--remote");
 
 setTimeout(() => {
-  const extApi = readEnvValue("extension/.env", "VITE_API_ENDPOINT");
-  const pwaApi = readEnvValue("pwa/.env", "VITE_API_ENDPOINT");
+  const extApi = readEnvValue(".env", "VITE_EXTENSION_API_ENDPOINT");
+  const pwaApi = readEnvValue(".env", "VITE_PWA_API_ENDPOINT");
   const kv = isRemote ? "remote (dev)" : "local (simulated)";
 
   const lines = [

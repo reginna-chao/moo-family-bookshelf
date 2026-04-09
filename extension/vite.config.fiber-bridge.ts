@@ -11,6 +11,8 @@ import { defineConfig } from "vite";
 import { resolve } from "path";
 
 export default defineConfig({
+  envDir: resolve(__dirname, ".."),
+  envPrefix: "VITE_EXTENSION_",
   resolve: {
     alias: {
       "@": resolve(__dirname, "src"),
