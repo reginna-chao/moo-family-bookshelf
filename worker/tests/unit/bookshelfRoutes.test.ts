@@ -15,7 +15,7 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
   }
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
-  return app.request(path, init, { KV: kv });
+  return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
 async function createFamilyAndGetToken(userId = "user1") {

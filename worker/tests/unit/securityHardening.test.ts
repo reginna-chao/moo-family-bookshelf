@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app, { isAllowedOrigin } from "../../src/index";
-import { isPublicRoute } from "../../src/utils/routes";
+import { isPublicRoute, isSensitivePublicRoute } from "../../src/utils/routes";
 import { createMockKV } from "../helpers/mockKv";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -195,6 +195,27 @@ describe("isPublicRoute", () => {
   });
 });
 
+describe("isSensitivePublicRoute", () => {
+  it("should match POST /api/family (create)", () => {
+    expect(isSensitivePublicRoute("POST", "/api/family")).toBe(true);
+    expect(isSensitivePublicRoute("POST", "/api/family/")).toBe(true);
+  });
+
+  it("should match POST /api/family/:id/join", () => {
+    expect(isSensitivePublicRoute("POST", "/api/family/abcd-1234/join")).toBe(true);
+  });
+
+  it("should NOT match other public routes", () => {
+    expect(isSensitivePublicRoute("POST", "/api/auth/lookup")).toBe(false);
+    expect(isSensitivePublicRoute("GET", "/api/user/abc123/verify")).toBe(false);
+  });
+
+  it("should NOT match standard routes", () => {
+    expect(isSensitivePublicRoute("GET", "/api/user/test/books")).toBe(false);
+    expect(isSensitivePublicRoute("PUT", "/api/user/test/books")).toBe(false);
+  });
+});
+
 // ===========================================================================
 // B2: Request Body Size Limit
 // ===========================================================================
@@ -268,15 +289,15 @@ describe("Request body size limit", () => {
 // ===========================================================================
 
 describe("Rate limit tiers", () => {
-  it("should rate-limit public route POST /api/family after 10 requests", async () => {
-    // Send 10 requests — all should succeed
-    for (let i = 0; i < 10; i++) {
+  it("should rate-limit sensitive route POST /api/family after 3 requests", async () => {
+    // Send 3 requests — all should succeed
+    for (let i = 0; i < 3; i++) {
       const res = await request("POST", "/api/family", {
         body: JSON.stringify({ userId: `user${i}` }),
       });
       expect(res.status).not.toBe(429);
     }
-    // 11th request should be rate-limited
+    // 4th request should be rate-limited
     const res = await request("POST", "/api/family", {
       body: JSON.stringify({ userId: "user_extra" }),
     });
@@ -285,41 +306,60 @@ describe("Rate limit tiers", () => {
     expect(json.error.code).toBe("RATE_LIMITED");
   });
 
-  it("should rate-limit public route POST /api/family/:id/join after 10 requests", async () => {
-    // Create a family first
+  it("should rate-limit sensitive route POST /api/family/:id/join after 3 requests", async () => {
+    // Create a family first (uses 1 of the sensitive budget)
     const createRes = await request("POST", "/api/family", {
       body: JSON.stringify({ userId: "owner" }),
     });
     const family = (await createRes.json()) as Json;
     const familyId = family.data.familyId;
 
-    // Use up remaining public route budget (we already used 1 for create)
-    for (let i = 0; i < 9; i++) {
+    // Use up remaining sensitive budget (we already used 1 for create)
+    for (let i = 0; i < 2; i++) {
       await request("POST", `/api/family/${familyId}/join`, {
         body: JSON.stringify({ userId: `joiner${i}` }),
       });
     }
 
-    // 11th public request should be rate-limited
+    // 4th sensitive request should be rate-limited
     const res = await request("POST", `/api/family/${familyId}/join`, {
       body: JSON.stringify({ userId: "joiner_extra" }),
     });
     expect(res.status).toBe(429);
   });
 
-  it("should use separate counters for public and standard routes", async () => {
-    // Exhaust public limit (10 requests)
-    for (let i = 0; i < 10; i++) {
+  it("should use separate counters for sensitive, public, and standard routes", async () => {
+    // Exhaust sensitive limit (3 requests)
+    for (let i = 0; i < 3; i++) {
       await request("POST", "/api/family", {
         body: JSON.stringify({ userId: `user${i}` }),
       });
     }
 
-    // Standard route should still work (uses a different counter)
-    // GET /api/user/:id/books is a protected route — needs auth, but will
-    // get 401, not 429. This proves the standard counter isn't exhausted.
+    // Public (non-sensitive) route should still work (separate counter)
+    const lookupRes = await request("POST", "/api/auth/lookup", {
+      body: JSON.stringify({ userId: "test" }),
+    });
+    expect(lookupRes.status).not.toBe(429);
+
+    // Standard route should still work (separate counter)
     const res = await request("GET", "/api/user/test/books");
     expect(res.status).toBe(401); // auth required, not 429
+  });
+
+  it("should rate-limit public (non-sensitive) routes after 10 requests", async () => {
+    // POST /api/auth/lookup is public but not sensitive
+    for (let i = 0; i < 10; i++) {
+      const res = await request("POST", "/api/auth/lookup", {
+        body: JSON.stringify({ userId: `user${i}` }),
+      });
+      expect(res.status).not.toBe(429);
+    }
+    // 11th request should be rate-limited
+    const res = await request("POST", "/api/auth/lookup", {
+      body: JSON.stringify({ userId: "user_extra" }),
+    });
+    expect(res.status).toBe(429);
   });
 
   it("should allow up to 60 requests on standard routes", async () => {

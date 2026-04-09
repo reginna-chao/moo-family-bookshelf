@@ -12,7 +12,7 @@ function request(method: string, path: string, authToken?: string) {
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
-  return app.request(path, { method, headers }, { KV: kv });
+  return app.request(path, { method, headers }, { KV: kv, DEV_MODE: "1" });
 }
 
 function requestWithRawAuth(method: string, path: string, authHeader: string) {
@@ -20,7 +20,7 @@ function requestWithRawAuth(method: string, path: string, authHeader: string) {
     "Content-Type": "application/json",
     "Authorization": authHeader,
   };
-  return app.request(path, { method, headers }, { KV: kv });
+  return app.request(path, { method, headers }, { KV: kv, DEV_MODE: "1" });
 }
 
 beforeEach(() => {

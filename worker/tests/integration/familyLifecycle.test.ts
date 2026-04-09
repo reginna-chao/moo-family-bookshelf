@@ -22,7 +22,7 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
     headers,
   };
   if (body) init.body = JSON.stringify(body);
-  return app.request(path, init, { KV: kv });
+  return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
 /** Shortcut to send a request with a raw string body (for invalid JSON tests). */
@@ -34,7 +34,7 @@ function rawRequest(method: string, path: string, rawBody: string) {
       headers: { "Content-Type": "application/json" },
       body: rawBody,
     },
-    { KV: kv },
+    { KV: kv, DEV_MODE: "1" },
   );
 }
 
@@ -984,7 +984,7 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
         },
         body: "{invalid json}",
       },
-      { KV: kv },
+      { KV: kv, DEV_MODE: "1" },
     );
     expect((await res).status).toBe(400);
   });

@@ -15,7 +15,7 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
   }
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
-  return app.request(path, init, { KV: kv });
+  return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
 function rawRequest(method: string, path: string, rawBody: string, authToken?: string) {
@@ -26,7 +26,7 @@ function rawRequest(method: string, path: string, rawBody: string, authToken?: s
   return app.request(
     path,
     { method, headers, body: rawBody },
-    { KV: kv },
+    { KV: kv, DEV_MODE: "1" },
   );
 }
 

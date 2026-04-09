@@ -24,7 +24,7 @@ function request(
   };
   const init: RequestInit = { method, headers };
   if (opts?.body) init.body = opts.body;
-  return app.request(path, init, { KV: kv });
+  return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
 /** Seed KV with a member mapping and optionally an old auth record. */

@@ -15,7 +15,7 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
   }
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
-  return app.request(path, init, { KV: kv });
+  return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
 function rawRequest(method: string, path: string, rawBody: string, authToken?: string) {
@@ -26,7 +26,7 @@ function rawRequest(method: string, path: string, rawBody: string, authToken?: s
   return app.request(
     path,
     { method, headers, body: rawBody },
-    { KV: kv },
+    { KV: kv, DEV_MODE: "1" },
   );
 }
 
@@ -260,14 +260,14 @@ describe("PUT /api/family/:id/member/:uid/displayName edge cases", () => {
 
 describe("Index fallback routes", () => {
   it("should return 404 for unknown routes", async () => {
-    const res = await app.request("/nonexistent", { method: "GET" }, { KV: kv });
+    const res = await app.request("/nonexistent", { method: "GET" }, { KV: kv, DEV_MODE: "1" });
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("NOT_FOUND");
   });
 
   it("should return health check response on root", async () => {
-    const res = await app.request("/", { method: "GET" }, { KV: kv });
+    const res = await app.request("/", { method: "GET" }, { KV: kv, DEV_MODE: "1" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.status).toBe("ok");

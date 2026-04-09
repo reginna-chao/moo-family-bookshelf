@@ -22,7 +22,7 @@ function request(
   };
   const init: RequestInit = { method, headers };
   if (opts?.body) init.body = opts.body;
-  return app.request(path, init, { KV: kv });
+  return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
 /** Helper: compute userId from email (same as client-side sha256Hex). */
@@ -42,7 +42,7 @@ async function createFamily(userId: string): Promise<{ familyId: string; authTok
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId }),
     },
-    { KV: kv },
+    { KV: kv, DEV_MODE: "1" },
   );
   const json = (await res.json()) as Json;
   return { familyId: json.data.familyId as string, authToken: json.data.authToken as string };

@@ -16,3 +16,12 @@ export function isPublicRoute(method: string, path: string): boolean {
   if (method === "GET" && /^\/api\/user\/[^/]+\/verify\/?$/.test(path)) return true;
   return false;
 }
+
+/** Sensitive public routes that need extra-strict rate limits (e.g. resource creation). */
+export function isSensitivePublicRoute(method: string, path: string): boolean {
+  // POST /api/family — create family (squatting prevention)
+  if (method === "POST" && /^\/api\/family\/?$/.test(path)) return true;
+  // POST /api/family/:id/join — join family
+  if (method === "POST" && /^\/api\/family\/[^/]+\/join\/?$/.test(path)) return true;
+  return false;
+}

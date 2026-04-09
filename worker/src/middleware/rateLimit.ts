@@ -1,12 +1,15 @@
 import { createMiddleware } from "hono/factory";
 import { type Env, isDevMode } from "../utils/env";
-import { isPublicRoute } from "../utils/routes";
+import { isPublicRoute, isSensitivePublicRoute } from "../utils/routes";
 
 /** Standard rate limit: 60 req/min/IP */
 const RATE_LIMIT_STANDARD = 60;
 
 /** Strict rate limit for public routes: 10 req/min/IP */
 const RATE_LIMIT_PUBLIC = 10;
+
+/** Extra-strict rate limit for sensitive public routes (create/join family): 3 req/min/IP */
+const RATE_LIMIT_SENSITIVE = 3;
 
 const TTL_SECONDS = 120;
 const BUCKET_MS = 60000;
@@ -24,9 +27,10 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
 
     const now = Date.now();
     const minuteBucket = Math.floor(now / BUCKET_MS);
+    const isSensitive = isSensitivePublicRoute(c.req.method, c.req.path);
     const isPublic = isPublicRoute(c.req.method, c.req.path);
-    const prefix = isPublic ? "ratelimit:pub" : "ratelimit";
-    const limit = isPublic ? RATE_LIMIT_PUBLIC : RATE_LIMIT_STANDARD;
+    const prefix = isSensitive ? "ratelimit:sens" : isPublic ? "ratelimit:pub" : "ratelimit";
+    const limit = isSensitive ? RATE_LIMIT_SENSITIVE : isPublic ? RATE_LIMIT_PUBLIC : RATE_LIMIT_STANDARD;
     const key = `${prefix}:${ip}:${minuteBucket}`;
 
     // Known limitation: KV get-then-put is not atomic. Concurrent requests may
