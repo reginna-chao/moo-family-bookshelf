@@ -352,25 +352,59 @@ describe("useAuth", () => {
     });
   });
 
-  describe("#family= invite link parsing", () => {
-    it("should set initialSyncCode from #family= URL param", () => {
+  describe("#join= invite link parsing", () => {
+    it("should set initialJoinFamilyId from #join= URL param", () => {
       vi.stubGlobal("location", {
         search: "",
-        hash: "#family=moo-abc1-def2-secretKey",
+        hash: "#join=abc1-def2",
         pathname: "/",
-        href: "http://localhost/#family=moo-abc1-def2-secretKey",
+        href: "http://localhost/#join=abc1-def2",
       });
 
       const { result } = renderHook(() => useAuth());
 
-      expect(result.current.initialSyncCode).toBe("moo-abc1-def2-secretKey");
+      expect(result.current.initialJoinFamilyId).toBe("abc1-def2");
+      expect(result.current.initialSyncCode).toBe("");
       expect(result.current.auth).toBeNull();
     });
 
-    it("should return empty initialSyncCode when no #family= param", () => {
+    it("should return empty initialJoinFamilyId when no #join= param", () => {
       const { result } = renderHook(() => useAuth());
 
-      expect(result.current.initialSyncCode).toBe("");
+      expect(result.current.initialJoinFamilyId).toBe("");
+    });
+
+    it("should clear URL when hash contains #join= param", () => {
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#join=some-family-id",
+        pathname: "/",
+        href: "http://localhost/#join=some-family-id",
+      });
+
+      renderHook(() => useAuth());
+
+      expect(replaceStateSpy).toHaveBeenCalledWith({}, "", "/");
+    });
+
+    it("should clear existing auth when #join= is present in URL", () => {
+      seedStorage({
+        userId: "user-1",
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#join=new-family-id",
+        pathname: "/",
+        href: "http://localhost/#join=new-family-id",
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      expect(result.current.auth).toBeNull();
+      expect(result.current.initialJoinFamilyId).toBe("new-family-id");
     });
   });
 
@@ -509,7 +543,8 @@ describe("useAuth", () => {
       expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1-key-1@custom.host.com");
     });
 
-    it("should clear everything when rememberSyncCode is not set", () => {
+    it("should remember sync code when rememberSyncCode is not set (default to remember)", () => {
+      // Don't set REMEMBER_SYNC_CODE_KEY at all — default is remember
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
@@ -524,9 +559,36 @@ describe("useAuth", () => {
       });
 
       expect(result.current.auth).toBeNull();
+      // All auth keys should still be cleared
       expect(localStorage.getItem("moo:userId")).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
+      // REMEMBERED_LOGOUT_KEY should be set (default is remember)
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1-key-1");
+      // initialSyncCode should be set
+      expect(result.current.initialSyncCode).toBe("moo-fam-1-key-1");
+    });
+
+    it("should NOT remember sync code when rememberSyncCode is explicitly set to 0", () => {
+      localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "0");
+      seedStorage({
+        userId: "user-1",
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+
+      const { result } = renderHook(() => useAuth());
+      expect(result.current.auth).not.toBeNull();
+
+      act(() => {
+        result.current.logout();
+      });
+
+      expect(result.current.auth).toBeNull();
+      // REMEMBERED_LOGOUT_KEY should NOT be set
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
+      // initialSyncCode should remain empty
+      expect(result.current.initialSyncCode).toBe("");
     });
 
     it("should not auto-login when REMEMBERED_LOGOUT_KEY is present (LandingPage reads it)", () => {

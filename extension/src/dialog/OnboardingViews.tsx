@@ -1,5 +1,6 @@
-import React from "react";
-import { Lock } from "lucide-react";
+import React, { useState } from "react";
+import { Lock, Eye, EyeOff } from "lucide-react";
+import { decodeSyncCode } from "../crypto/syncCode";
 
 // --- WelcomeView ---
 
@@ -52,6 +53,18 @@ export interface CreatedViewProps {
 }
 
 export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: CreatedViewProps) {
+  const [showCode, setShowCode] = useState(false);
+
+  let displayFamilyId = "";
+  let displayKey = "";
+  try {
+    const decoded = decodeSyncCode(generatedSyncCode);
+    displayFamilyId = decoded.familyId;
+    displayKey = decoded.encryptionKey;
+  } catch {
+    displayFamilyId = generatedSyncCode;
+  }
+
   return (
     <div style={{ padding: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
@@ -66,12 +79,21 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
           background: "#f8fafc",
           borderRadius: 8,
           marginBottom: 12,
-          wordBreak: "break-all",
-          fontSize: 13,
-          fontFamily: "monospace",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
         }}
       >
-        {generatedSyncCode}
+        <span style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
+          moo-{displayFamilyId}-{showCode ? displayKey : "••••••••••••"}
+        </span>
+        <button
+          onClick={() => setShowCode(!showCode)}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
+          aria-label={showCode ? "隱藏加密金鑰" : "顯示加密金鑰"}
+        >
+          {showCode ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
       </div>
       <button
         onClick={onCopy}
@@ -164,6 +186,8 @@ export function IdleView({
   onCreate,
   onJoin,
 }: IdleViewProps) {
+  const [showInput, setShowInput] = useState(false);
+
   return (
     <div style={{ padding: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
@@ -192,23 +216,33 @@ export function IdleView({
       <div style={{ textAlign: "center", margin: "12px 0", color: "#94a3b8" }}>
         或
       </div>
-      <input
-        type="text"
-        autoComplete="off"
-        placeholder="輸入家庭同步碼"
-        value={syncCodeInput}
-        onChange={(e) => onSetSyncCodeInput(e.target.value)}
-        disabled={isProcessing}
-        style={{
-          width: "100%",
-          padding: 12,
-          border: "1px solid #e2e8f0",
-          borderRadius: 8,
-          marginBottom: 12,
-          boxSizing: "border-box",
-          fontSize: 14,
-        }}
-      />
+      <div style={{ position: "relative", marginBottom: 12 }}>
+        <input
+          type={showInput ? "text" : "password"}
+          autoComplete="off"
+          placeholder="輸入家庭同步碼"
+          value={syncCodeInput}
+          onChange={(e) => onSetSyncCodeInput(e.target.value)}
+          disabled={isProcessing}
+          style={{
+            width: "100%",
+            padding: 12,
+            paddingRight: 40,
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            boxSizing: "border-box",
+            fontSize: 14,
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setShowInput(!showInput)}
+          style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4 }}
+          aria-label={showInput ? "隱藏同步碼" : "顯示同步碼"}
+        >
+          {showInput ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
       <button
         onClick={onJoin}
         disabled={!syncCodeInput.trim() || isProcessing}

@@ -5,6 +5,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 // Mock useAuth hook
 const mockLogin = vi.fn();
 const mockLogout = vi.fn();
+const mockForceLogout = vi.fn();
 let mockAuth: Record<string, unknown> | null = null;
 let mockIsLoading = false;
 
@@ -14,7 +15,9 @@ vi.mock("@/hooks/useAuth", () => ({
     isLoading: mockIsLoading,
     login: mockLogin,
     logout: mockLogout,
+    forceLogout: mockForceLogout,
     initialSyncCode: "",
+    initialJoinFamilyId: "",
     qrUserId: "",
   }),
   namespacedKey: (userId: string, suffix: string) => `moo:${userId}:${suffix}`,

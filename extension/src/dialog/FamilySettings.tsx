@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
@@ -31,6 +32,8 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   } = useFamilyData();
 
   const [syncCode, setSyncCode] = useState<string | null>(null);
+  const [encryptionKey, setEncryptionKey] = useState<string | null>(null);
+  const [showSyncCode, setShowSyncCode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
@@ -65,8 +68,9 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
 
   useEffect(() => {
     chrome.storage.local.get(["encryptionKey"], (result) => {
-      const encryptionKey = result.encryptionKey as string | undefined;
-      if (!encryptionKey) return;
+      const ek = result.encryptionKey as string | undefined;
+      if (!ek) return;
+      setEncryptionKey(ek);
       let apiHost: string | undefined;
       if (familyEndpoint) {
         apiHost = familyEndpoint;
@@ -74,7 +78,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         const isCustom = apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
         apiHost = isCustom ? apiClient.getEndpoint() : undefined;
       }
-      const code = encodeSyncCode({ familyId, encryptionKey, apiHost });
+      const code = encodeSyncCode({ familyId, encryptionKey: ek, apiHost });
       setSyncCode(code);
     });
   }, [familyId, apiClient, familyEndpoint]);
@@ -100,8 +104,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   };
 
   const handleInviteCopy = async () => {
-    if (!syncCode) return;
-    const inviteUrl = `${DEFAULT_PWA_URL}/#family=${encodeURIComponent(syncCode)}`;
+    const inviteUrl = `${DEFAULT_PWA_URL}/#join=${encodeURIComponent(familyId)}`;
     await navigator.clipboard.writeText(inviteUrl);
     setInviteCopied(true);
     setTimeout(() => setInviteCopied(false), 2000);
@@ -208,9 +211,22 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 6 }}>家庭同步碼</div>
         <div style={{
           padding: 12, background: "#f8fafc", borderRadius: 8, marginBottom: 8,
-          wordBreak: "break-all", fontSize: 13, fontFamily: "monospace",
+          display: "flex", alignItems: "center", gap: 8,
         }}>
-          {syncCode ?? "載入中..."}
+          <span style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
+            {encryptionKey
+              ? `moo-${familyId}-${showSyncCode ? encryptionKey : "••••••••••••"}`
+              : "載入中..."}
+          </span>
+          {encryptionKey && (
+            <button
+              onClick={() => setShowSyncCode(!showSyncCode)}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
+              aria-label={showSyncCode ? "隱藏加密金鑰" : "顯示加密金鑰"}
+            >
+              {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
           <button
@@ -227,12 +243,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           </button>
           <button
             onClick={() => void handleInviteCopy()}
-            disabled={!syncCode}
             style={{
               flex: 1, padding: 10, border: "1px solid #10b981", borderRadius: 8,
               background: inviteCopied ? "#ecfdf5" : "transparent", color: "#10b981",
-              fontWeight: 600, cursor: syncCode ? "pointer" : "not-allowed",
-              opacity: syncCode ? 1 : 0.5, fontSize: 14,
+              fontWeight: 600, cursor: "pointer", fontSize: 14,
             }}
           >
             {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}

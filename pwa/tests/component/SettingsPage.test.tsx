@@ -105,7 +105,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    expect(screen.getByText("moo-fam1-key1")).toBeInTheDocument();
+    expect(screen.getByText(/moo-fam-001-••••/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "複製同步碼" }),
     ).toBeInTheDocument();
@@ -239,7 +239,7 @@ describe("SettingsPage", () => {
 
     // Step 2: confirm dialog appears
     expect(
-      screen.getByText("確定要登出嗎？登出後需要重新輸入同步碼才能使用。"),
+      screen.getByText("確定要登出嗎？同步碼已保留，下次登入免重新輸入。"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "確定登出" }),
@@ -526,46 +526,27 @@ describe("SettingsPage", () => {
     });
   });
 
-  // --- Remember sync code toggle ---
+  // --- Sync code visibility toggle ---
 
-  it("renders remember sync code toggle", async () => {
+  it("should toggle sync code visibility with eye button", async () => {
     renderWithMembers([defaultProps.userId], defaultProps.userId);
 
     await waitFor(() => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    const toggle = screen.getByRole("switch", { name: "登出時記住同步碼" });
-    expect(toggle).toBeInTheDocument();
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-  });
+    // Initially masked
+    expect(screen.getByText(/moo-fam-001-••••/)).toBeInTheDocument();
 
-  it("toggles remember sync code setting and persists to localStorage", async () => {
-    renderWithMembers([defaultProps.userId], defaultProps.userId);
+    // Click eye button to reveal
+    const showButton = screen.getByRole("button", { name: "顯示加密金鑰" });
+    fireEvent.click(showButton);
 
-    await waitFor(() => {
-      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
-    });
-
-    const toggle = screen.getByRole("switch", { name: "登出時記住同步碼" });
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(localStorage.getItem("moo:rememberSyncCode")).toBe("1");
-
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(localStorage.getItem("moo:rememberSyncCode")).toBe("0");
-  });
-
-  it("shows description text for remember sync code", async () => {
-    renderWithMembers([defaultProps.userId], defaultProps.userId);
-
-    await waitFor(() => {
-      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
-    });
-
+    // Now should show full key
+    expect(screen.getByText(/moo-fam-001-enc-key-123/)).toBeInTheDocument();
+    // Button label should change
     expect(
-      screen.getByText("啟用後，登出時會保留同步碼，下次登入免重新輸入"),
+      screen.getByRole("button", { name: "隱藏加密金鑰" }),
     ).toBeInTheDocument();
   });
 

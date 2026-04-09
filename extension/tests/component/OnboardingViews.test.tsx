@@ -7,6 +7,13 @@ import {
   IdleView,
 } from "@/dialog/OnboardingViews";
 
+vi.mock("@/crypto/syncCode", () => ({
+  decodeSyncCode: vi.fn().mockReturnValue({
+    familyId: "abc123",
+    encryptionKey: "keydata",
+  }),
+}));
+
 describe("WelcomeView", () => {
   it("renders heading and description", () => {
     render(<WelcomeView onStart={() => {}} />);
@@ -80,10 +87,11 @@ describe("CreatedView", () => {
     onContinue: vi.fn(),
   };
 
-  it("renders sync code text", () => {
+  it("renders masked sync code by default", () => {
     render(<CreatedView {...defaultProps} />);
 
-    expect(screen.getByText("moo-abc123-keydata")).toBeInTheDocument();
+    expect(screen.getByText(/moo-abc123-••••/)).toBeInTheDocument();
+    expect(screen.queryByText("moo-abc123-keydata")).not.toBeInTheDocument();
   });
 
   it("renders heading", () => {
@@ -135,8 +143,18 @@ describe("CreatedView", () => {
   it("sync code is displayed in monospace font", () => {
     render(<CreatedView {...defaultProps} />);
 
-    const codeEl = screen.getByText("moo-abc123-keydata");
+    const codeEl = screen.getByText(/moo-abc123-••••/);
     expect(codeEl.style.fontFamily).toBe("monospace");
+  });
+
+  it("should show full key when eye toggle is clicked", () => {
+    render(<CreatedView {...defaultProps} />);
+
+    const toggleBtn = screen.getByRole("button", { name: "顯示加密金鑰" });
+    fireEvent.click(toggleBtn);
+
+    expect(screen.getByText(/moo-abc123-keydata/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "隱藏加密金鑰" })).toBeInTheDocument();
   });
 });
 
@@ -291,5 +309,25 @@ describe("IdleView", () => {
     render(<IdleView {...defaultProps} />);
 
     expect(screen.getByText("或")).toBeInTheDocument();
+  });
+
+  it("sync code input defaults to password type", () => {
+    render(<IdleView {...defaultProps} />);
+
+    const input = screen.getByPlaceholderText("輸入家庭同步碼");
+    expect(input).toHaveAttribute("type", "password");
+  });
+
+  it("eye toggle switches input between password and text", () => {
+    render(<IdleView {...defaultProps} />);
+
+    const input = screen.getByPlaceholderText("輸入家庭同步碼");
+    expect(input).toHaveAttribute("type", "password");
+
+    const toggleBtn = screen.getByRole("button", { name: "顯示同步碼" });
+    fireEvent.click(toggleBtn);
+
+    expect(input).toHaveAttribute("type", "text");
+    expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
   });
 });

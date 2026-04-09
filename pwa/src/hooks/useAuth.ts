@@ -17,8 +17,10 @@ export interface UseAuthReturn {
   logout: () => void;
   /** Clears everything unconditionally, ignoring rememberSyncCode. Used by delete account. */
   forceLogout: () => void;
-  /** Pre-filled sync code from #family= URL parameter, QR code, or remembered logout. */
+  /** Pre-filled sync code from QR code or remembered logout. */
   initialSyncCode: string;
+  /** Pre-filled familyId from #join= invite link. */
+  initialJoinFamilyId: string;
   /** Pre-hashed userId from QR code (#code=…&uid=…). Skips email entry on LandingPage. */
   qrUserId: string;
 }
@@ -84,7 +86,7 @@ function loadFromStorage(): AuthState | null {
 
 function clearStorage(): void {
   const userId = localStorage.getItem(USER_ID_KEY);
-  const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) === "1";
+  const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0";
 
   // Build sync code BEFORE clearing, if remember is enabled
   if (remember && userId) {
@@ -133,7 +135,7 @@ export function forceClearStorage(): void {
 
 function clearUrlParams(): void {
   // Preserve page routing hashes (#family-shelf, #personal-shelf, #settings);
-  // only clear auth-related hashes (#code=…&uid=…, #family=…) and query params.
+  // only clear auth-related hashes (#code=…&uid=…, #join=…) and query params.
   if (PAGE_HASHES.has(window.location.hash)) return;
   if (window.location.hash || window.location.search) {
     window.history.replaceState({}, "", window.location.pathname);
@@ -169,28 +171,27 @@ function tryParseQrParams(): QrParams | null {
 }
 
 /**
- * Parse #family={syncCode} from URL hash (invite link flow).
- * Returns the sync code string if found, null otherwise.
+ * Parse #join={familyId} from URL hash (invite link flow).
+ * Returns the familyId string if found, null otherwise.
  */
-function tryParseFamilyParam(): string | null {
+function tryParseJoinParam(): string | null {
   const hash = window.location.hash.slice(1);
   const params = new URLSearchParams(hash);
-  return params.get("family");
+  return params.get("join");
 }
 
 export function useAuth(): UseAuthReturn {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [initialSyncCode, setInitialSyncCode] = useState("");
+  const [initialJoinFamilyId, setInitialJoinFamilyId] = useState("");
   const [qrUserId, setQrUserId] = useState("");
 
   useEffect(() => {
-    // 0. If URL contains "family=" param key, clear auth state to start fresh for invite.
-    // Must check for "family=" specifically (not substring "family") to avoid matching
-    // hash-routing paths like #family-shelf which also contain the word "family".
+    // 0. If URL contains "join=" param key, clear auth state to start fresh for invite.
     const preCheckHashParams = new URLSearchParams(window.location.hash.slice(1));
     const preCheckSearchParams = new URLSearchParams(window.location.search);
-    if (preCheckHashParams.has("family") || preCheckSearchParams.has("family")) {
+    if (preCheckHashParams.has("join") || preCheckSearchParams.has("join")) {
       forceClearStorage();
     }
 
@@ -199,8 +200,8 @@ export function useAuth(): UseAuthReturn {
     //    verification flow instead of auto-logging in.
     const qrParams = tryParseQrParams();
 
-    // 2. Parse #family={syncCode} invite link (separate from QR flow)
-    const familySyncCode = tryParseFamilyParam();
+    // 2. Parse #join={familyId} invite link (separate from QR flow)
+    const joinFamilyId = tryParseJoinParam();
 
     // Always clear URL params to avoid leaving encryption key in address bar
     clearUrlParams();
@@ -214,9 +215,9 @@ export function useAuth(): UseAuthReturn {
       return;
     }
 
-    // Pre-fill sync code from invite link (don't auto-submit)
-    if (familySyncCode) {
-      setInitialSyncCode(familySyncCode);
+    // Pre-fill familyId from invite link (don't auto-submit)
+    if (joinFamilyId) {
+      setInitialJoinFamilyId(joinFamilyId);
     }
 
     // 3. Check localStorage for existing session
@@ -234,7 +235,7 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const logout = useCallback((): void => {
-    const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) === "1";
+    const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0";
     let code = "";
     if (remember) {
       const stored = loadFromStorage();
@@ -258,5 +259,5 @@ export function useAuth(): UseAuthReturn {
     setAuth(null);
   }, []);
 
-  return { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId };
+  return { auth, isLoading, login, logout, forceLogout, initialSyncCode, initialJoinFamilyId, qrUserId };
 }

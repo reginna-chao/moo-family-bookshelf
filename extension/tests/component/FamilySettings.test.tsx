@@ -176,14 +176,31 @@ describe("FamilySettings", () => {
     });
   });
 
-  it("shows sync code section", async () => {
+  it("shows sync code section with masked display", async () => {
     renderFamilySettings();
 
     expect(screen.getByText("家庭同步碼")).toBeInTheDocument();
-    // Wait for sync code to be generated from the encryption key
+    // Wait for sync code to load and show masked format
     await waitFor(() => {
-      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+      expect(screen.getByText(/moo-fam-123-••••/)).toBeInTheDocument();
     });
+  });
+
+  it("should toggle sync code visibility with eye button", async () => {
+    renderFamilySettings();
+
+    // Wait for encryption key to load
+    await waitFor(() => {
+      expect(screen.getByText(/moo-fam-123-••••/)).toBeInTheDocument();
+    });
+
+    // Click the eye toggle button
+    const toggleBtn = screen.getByRole("button", { name: "顯示加密金鑰" });
+    fireEvent.click(toggleBtn);
+
+    // Full sync code should now be visible
+    expect(screen.getByText(/moo-fam-123-test-key-xyz/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "隱藏加密金鑰" })).toBeInTheDocument();
   });
 
   it("shows copy sync code button", async () => {
@@ -195,6 +212,30 @@ describe("FamilySettings", () => {
     await waitFor(() => {
       expect(screen.getByText("小明")).toBeInTheDocument();
     });
+  });
+
+  it("invite button copies URL with #join= format", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderFamilySettings();
+
+    // Wait for members to load so async effects settle
+    await waitFor(() => {
+      expect(screen.getByText("小明")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("邀請成員加入家庭"));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(
+        expect.stringContaining("#join=fam-123"),
+      );
+    });
+
+    // Should NOT contain the full sync code / encryption key
+    const calledWith = writeText.mock.calls[0][0] as string;
+    expect(calledWith).not.toContain("test-key-xyz");
   });
 
   it("shows member list after loading", async () => {

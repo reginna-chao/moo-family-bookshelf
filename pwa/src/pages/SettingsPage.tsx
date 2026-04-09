@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Pencil, Check, X } from "lucide-react";
+import { Pencil, Check, X, Eye, EyeOff } from "lucide-react";
 import { reportLinks } from "moo-family-bookshelf-shared/config/links";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
@@ -57,6 +57,7 @@ export function SettingsPage({
       }),
     [familyId, encryptionKey, apiClient],
   );
+  const [showSyncCode, setShowSyncCode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -80,7 +81,7 @@ export function SettingsPage({
   }
 
   async function handleInvite() {
-    const inviteUrl = `${window.location.origin}${window.location.pathname}#family=${encodeURIComponent(syncCode)}`;
+    const inviteUrl = `${window.location.origin}${window.location.pathname}#join=${encodeURIComponent(familyId)}`;
     if (navigator.share) {
       try {
         await navigator.share({ title: "加入墨家書櫃", url: inviteUrl });
@@ -176,20 +177,6 @@ export function SettingsPage({
       setLeaveState("idle");
     }
   }
-
-  // --- Remember sync code toggle ---
-  const [rememberSyncCode, setRememberSyncCode] = useState<BoolFlag>(() => {
-    const stored = localStorage.getItem(REMEMBER_SYNC_CODE_KEY);
-    return stored === "1" ? BoolFlag.TRUE : BoolFlag.FALSE;
-  });
-
-  const handleToggleRememberSyncCode = useCallback(() => {
-    setRememberSyncCode(prev => {
-      const next = prev === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
-      localStorage.setItem(REMEMBER_SYNC_CODE_KEY, String(next));
-      return next;
-    });
-  }, []);
 
   // --- Logout ---
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -310,30 +297,6 @@ export function SettingsPage({
           啟用後，個人書櫃會顯示已封存的書籍分頁
         </p>
 
-        <div className="mt-4" />
-        <button
-          role="switch"
-          aria-checked={rememberSyncCode === BoolFlag.TRUE}
-          aria-label="登出時記住同步碼"
-          onClick={handleToggleRememberSyncCode}
-          className="flex items-center gap-2 text-sm text-gray-700"
-        >
-          <span
-            className={`relative inline-block w-8 h-[18px] rounded-full transition-colors ${
-              rememberSyncCode === BoolFlag.TRUE ? "bg-blue-600" : "bg-gray-300"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 block w-3.5 h-3.5 rounded-full bg-white transition-[left] ${
-                rememberSyncCode === BoolFlag.TRUE ? "left-[16px]" : "left-0.5"
-              }`}
-            />
-          </span>
-          登出時記住同步碼
-        </button>
-        <p className="text-gray-400 text-xs mt-1.5">
-          啟用後，登出時會保留同步碼，下次登入免重新輸入
-        </p>
       </section>
 
       {/* Family settings */}
@@ -341,8 +304,17 @@ export function SettingsPage({
         <h3 className="text-sm font-medium text-gray-500 mb-3">家庭設定</h3>
 
         <p className="text-xs text-gray-500 mb-1">家庭同步碼</p>
-        <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs break-all mb-2">
-          {syncCode}
+        <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs break-all mb-2 flex items-center gap-2">
+          <span className="flex-1">
+            moo-{familyId}-{showSyncCode ? encryptionKey : "••••••••••••"}
+          </span>
+          <button
+            onClick={() => setShowSyncCode(!showSyncCode)}
+            className="flex-shrink-0 text-gray-400 hover:text-gray-600 p-1"
+            aria-label={showSyncCode ? "隱藏加密金鑰" : "顯示加密金鑰"}
+          >
+            {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
         </div>
         <button
           onClick={() => void handleCopy()}
@@ -444,7 +416,7 @@ export function SettingsPage({
         {showLogoutConfirm ? (
           <div>
             <p className="text-sm text-gray-600 mb-2">
-              {rememberSyncCode === BoolFlag.TRUE
+              {localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0"
                 ? "確定要登出嗎？同步碼已保留，下次登入免重新輸入。"
                 : "確定要登出嗎？登出後需要重新輸入同步碼才能使用。"}
             </p>
