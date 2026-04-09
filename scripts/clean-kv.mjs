@@ -4,26 +4,47 @@
  *
  * Usage:
  *   node scripts/clean-kv.mjs <namespace-id>
- *   node scripts/clean-kv.mjs dev   → uses dev KV namespace from wrangler.toml
- *   node scripts/clean-kv.mjs prod  → uses prod KV namespace from wrangler.toml
+ *   node scripts/clean-kv.mjs dev   → auto-resolves dev namespace via `wrangler kv namespace list`
+ *   node scripts/clean-kv.mjs prod  → auto-resolves prod namespace
  */
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { writeFileSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const wrangler = resolve(__dirname, "../worker/node_modules/.bin/wrangler");
 
-const NAMESPACES = (() => {
-  const toml = readFileSync(
-    resolve(__dirname, "../worker/wrangler.toml"),
-    "utf-8",
-  );
-  const ids = [...toml.matchAll(/id\s*=\s*"([a-f0-9]+)"/g)].map((m) => m[1]);
-  // First id = dev, second id (under env.production) = prod
-  return { dev: ids[0], prod: ids[ids.length - 1] };
-})();
+const ALIAS_PATTERNS = {
+  dev: /dev-kv$/,
+  prod: /prod-kv$/,
+};
+
+/**
+ * Resolve a namespace alias (dev/prod) to its UUID by querying the Cloudflare API.
+ * Falls back to using the input as-is if it's not a known alias.
+ */
+function resolveNamespaceId(input) {
+  const pattern = ALIAS_PATTERNS[input];
+  if (!pattern) return input;
+
+  const raw = execSync(`${wrangler} kv namespace list`, { encoding: "utf-8" });
+  const namespaces = JSON.parse(raw);
+  const match = namespaces.find((ns) => pattern.test(ns.title));
+
+  if (!match) {
+    console.error(
+      `Could not find a KV namespace matching alias "${input}".`,
+    );
+    console.error(
+      "Available namespaces:",
+      namespaces.map((ns) => `  ${ns.title} (${ns.id})`).join("\n"),
+    );
+    process.exit(1);
+  }
+
+  return match.id;
+}
 
 const input = process.argv[2];
 
@@ -32,8 +53,8 @@ if (!input) {
   process.exit(1);
 }
 
-const namespaceId = NAMESPACES[input] ?? input;
-const label = NAMESPACES[input] ? `${input} (${namespaceId})` : namespaceId;
+const namespaceId = resolveNamespaceId(input);
+const label = ALIAS_PATTERNS[input] ? `${input} (${namespaceId})` : namespaceId;
 
 console.log(`Listing keys in KV namespace: ${label}`);
 
@@ -51,9 +72,20 @@ if (keys.length === 0) {
 
 console.log(`Found ${keys.length} key(s). Deleting...`);
 
-execSync(`${wrangler} kv bulk delete --namespace-id=${namespaceId} --force`, {
-  input: JSON.stringify(keys),
-  stdio: ["pipe", "inherit", "inherit"],
-});
+// wrangler kv bulk delete requires a file path (not stdin)
+const tmpFile = resolve(__dirname, "../worker/.wrangler/.kv-delete-tmp.json");
+try {
+  writeFileSync(tmpFile, JSON.stringify(keys));
+  execSync(
+    `${wrangler} kv bulk delete ${tmpFile} --namespace-id=${namespaceId} --force`,
+    { stdio: ["pipe", "inherit", "inherit"] },
+  );
+} finally {
+  try {
+    unlinkSync(tmpFile);
+  } catch {
+    // ignore cleanup errors
+  }
+}
 
 console.log(`Done. Deleted ${keys.length} key(s).`);
