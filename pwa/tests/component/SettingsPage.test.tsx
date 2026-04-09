@@ -539,14 +539,14 @@ describe("SettingsPage", () => {
     expect(screen.getByText(/moo-fam-001-••••/)).toBeInTheDocument();
 
     // Click eye button to reveal
-    const showButton = screen.getByRole("button", { name: "顯示加密金鑰" });
+    const showButton = screen.getByRole("button", { name: "顯示同步碼" });
     fireEvent.click(showButton);
 
     // Now should show full key
     expect(screen.getByText(/moo-fam-001-enc-key-123/)).toBeInTheDocument();
     // Button label should change
     expect(
-      screen.getByRole("button", { name: "隱藏加密金鑰" }),
+      screen.getByRole("button", { name: "隱藏同步碼" }),
     ).toBeInTheDocument();
   });
 

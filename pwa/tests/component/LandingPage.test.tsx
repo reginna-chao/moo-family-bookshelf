@@ -76,7 +76,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       expect(screen.getByLabelText("家庭 ID")).toBeInTheDocument();
-      expect(screen.getByLabelText("加密金鑰")).toBeInTheDocument();
+      expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
       expect(screen.getByLabelText("讀墨帳號 Email")).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "開始使用" }),
@@ -87,7 +87,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       expect(screen.getByPlaceholderText("abc1-def2")).toBeInTheDocument();
-      expect(screen.getByPlaceholderText("加密金鑰")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("同步碼")).toBeInTheDocument();
       expect(
         screen.getByPlaceholderText("your@email.com"),
       ).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       submitForm();
 
       await waitFor(() => {
@@ -136,7 +136,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "bad");
-      fillInput("加密金鑰", "code");
+      fillInput("同步碼", "code");
       submitForm();
 
       await waitFor(() => {
@@ -154,7 +154,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "bad");
-      fillInput("加密金鑰", "code");
+      fillInput("同步碼", "code");
       submitForm();
 
       await waitFor(() => {
@@ -172,7 +172,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "bad");
-      fillInput("加密金鑰", "code");
+      fillInput("同步碼", "code");
       submitForm();
 
       await waitFor(() => {
@@ -199,7 +199,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "not-an-email");
       submitForm();
 
@@ -220,7 +220,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "bad");
       submitForm();
 
@@ -274,7 +274,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "test@test.com");
       submitForm();
 
@@ -306,7 +306,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -335,7 +335,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -358,7 +358,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -385,7 +385,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -412,7 +412,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -439,7 +439,7 @@ describe("LandingPage", () => {
       );
 
       const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("加密金鑰") as HTMLInputElement;
+      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
       expect(familyIdInput.value).toBe("abc1-def2");
       expect(keyInput.value).toBe("key123");
     });
@@ -453,7 +453,7 @@ describe("LandingPage", () => {
       );
 
       const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("加密金鑰") as HTMLInputElement;
+      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
       expect(familyIdInput.value).toBe("");
       expect(keyInput.value).toBe("");
     });
@@ -471,7 +471,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("加密金鑰") as HTMLInputElement;
+      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
       expect(familyIdInput.value).toBe("fam1");
       expect(keyInput.value).toBe("key1");
       expect(localStorage.getItem("moo:rememberedLogout")).toBeNull();
@@ -481,7 +481,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("加密金鑰") as HTMLInputElement;
+      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
       expect(familyIdInput.value).toBe("");
       expect(keyInput.value).toBe("");
     });
@@ -497,7 +497,7 @@ describe("LandingPage", () => {
       );
 
       const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("加密金鑰") as HTMLInputElement;
+      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
       expect(familyIdInput.value).toBe("abc-join-123");
       expect(keyInput.value).toBe("");
     });
@@ -529,7 +529,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -551,7 +551,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -572,7 +572,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -594,7 +594,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -622,7 +622,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -652,7 +652,7 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       fillInput("家庭 ID", "fam-1");
-      fillInput("加密金鑰", "key-1");
+      fillInput("同步碼", "key-1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 

@@ -90,7 +90,7 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
         <button
           onClick={() => setShowCode(!showCode)}
           style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
-          aria-label={showCode ? "隱藏加密金鑰" : "顯示加密金鑰"}
+          aria-label={showCode ? "隱藏同步碼" : "顯示同步碼"}
         >
           {showCode ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>

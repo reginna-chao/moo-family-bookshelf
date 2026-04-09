@@ -123,7 +123,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", initialJoinFamilyId 
       return;
     }
     if (!trimmedKey) {
-      setSyncCodeError("請輸入加密金鑰。");
+      setSyncCodeError("請輸入同步碼。");
       return;
     }
 
@@ -407,7 +407,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", initialJoinFamilyId 
             htmlFor="encryption-key"
             className="block text-sm font-medium text-gray-700 mb-1"
           >
-            加密金鑰
+            同步碼
           </label>
           <div className="relative">
             <input
@@ -419,7 +419,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", initialJoinFamilyId 
                 setEncryptionKeyInput(e.target.value);
                 if (syncCodeError) setSyncCodeError("");
               }}
-              placeholder="加密金鑰"
+              placeholder="同步碼"
               aria-invalid={!!syncCodeError || undefined}
               aria-describedby={syncCodeError ? "sync-code-error" : undefined}
               className="w-full rounded-lg border border-gray-300 px-3 py-2.5 pr-10 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
@@ -428,7 +428,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", initialJoinFamilyId 
               type="button"
               onClick={() => setShowKey(!showKey)}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5"
-              aria-label={showKey ? "隱藏加密金鑰" : "顯示加密金鑰"}
+              aria-label={showKey ? "隱藏同步碼" : "顯示同步碼"}
             >
               {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>

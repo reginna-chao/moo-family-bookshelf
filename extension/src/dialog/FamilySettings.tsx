@@ -222,7 +222,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             <button
               onClick={() => setShowSyncCode(!showSyncCode)}
               style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
-              aria-label={showSyncCode ? "隱藏加密金鑰" : "顯示加密金鑰"}
+              aria-label={showSyncCode ? "隱藏同步碼" : "顯示同步碼"}
             >
               {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>

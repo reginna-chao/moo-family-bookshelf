@@ -150,11 +150,11 @@ describe("CreatedView", () => {
   it("should show full key when eye toggle is clicked", () => {
     render(<CreatedView {...defaultProps} />);
 
-    const toggleBtn = screen.getByRole("button", { name: "顯示加密金鑰" });
+    const toggleBtn = screen.getByRole("button", { name: "顯示同步碼" });
     fireEvent.click(toggleBtn);
 
     expect(screen.getByText(/moo-abc123-keydata/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "隱藏加密金鑰" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
   });
 });
 

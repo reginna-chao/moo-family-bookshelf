@@ -195,12 +195,12 @@ describe("FamilySettings", () => {
     });
 
     // Click the eye toggle button
-    const toggleBtn = screen.getByRole("button", { name: "顯示加密金鑰" });
+    const toggleBtn = screen.getByRole("button", { name: "顯示同步碼" });
     fireEvent.click(toggleBtn);
 
     // Full sync code should now be visible
     expect(screen.getByText(/moo-fam-123-test-key-xyz/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "隱藏加密金鑰" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
   });
 
   it("shows copy sync code button", async () => {

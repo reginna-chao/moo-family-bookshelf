@@ -311,7 +311,7 @@ export function SettingsPage({
           <button
             onClick={() => setShowSyncCode(!showSyncCode)}
             className="flex-shrink-0 text-gray-400 hover:text-gray-600 p-1"
-            aria-label={showSyncCode ? "隱藏加密金鑰" : "顯示加密金鑰"}
+            aria-label={showSyncCode ? "隱藏同步碼" : "顯示同步碼"}
           >
             {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
