@@ -23,7 +23,7 @@ export default defineConfig(({ command }) => ({
     host: true,
     proxy: {
       "/api": {
-        target: "http://localhost:8787",
+        target: `http://localhost:${process.env.WORKER_PORT ?? "8787"}`,
         changeOrigin: true,
       },
     },

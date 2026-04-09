@@ -8,8 +8,8 @@ const isCI = !!process.env.CI;
 
 // E2E uses dedicated ports to avoid conflicts with other dev servers.
 // CI: vite preview (HTTP) / Local: vite dev (HTTPS, self-signed cert)
-const PWA_PORT = isCI ? 4173 : 5277;
-const WORKER_PORT = 8688;
+const PWA_PORT = isCI ? 4173 : 5913;
+const WORKER_PORT = 8913;
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -39,6 +39,7 @@ export default defineConfig({
       reuseExistingServer: false,
       cwd: __dirname,
       timeout: 60_000,
+      env: { WORKER_PORT: String(WORKER_PORT) },
     },
     {
       command: `cd ../worker && pnpm exec wrangler dev --port ${WORKER_PORT} --var DEV_MODE:1`,
