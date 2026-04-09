@@ -621,4 +621,56 @@ export const reportLinks = [
 - **購買連結**：書籍連結至 `https://readmoo.com/book/{bookId}`（另開分頁），不提供借閱
 - **share_token**：UUID 32 碼（無連字號），高熵防猜測
 
-*最後更新：2026-03-28*
+---
+
+## API 版本相容性策略
+
+### 策略選擇：漸進式相容（Progressive Compatibility）
+
+本專案不採用 URL path versioning（`/v1/`, `/v2/`）或 header versioning（`Accept: application/vnd.api+v2`），
+而是採用**漸進式相容策略**，原因如下：
+
+1. **所有客戶端皆為自控**：Extension、PWA 由同一團隊維護，可協調升級節奏
+2. **自架部署考量**：self-hoster 可能延遲更新 Worker，URL path versioning 會迫使伺服器端同時維護多版路由
+3. **簡單即正確**：對小型專案而言，多版本路由的維護成本遠高於漸進式遷移
+
+### 運作機制
+
+```
+Client                          Worker
+  │                               │
+  ├── GET /api/version ──────────►│
+  │◄──── { apiVersion: 1 } ──────│
+  │                               │
+  │  比對 CLIENT_MIN_API_VERSION  │
+  │  apiVersion >= min? ──► 正常運作
+  │  apiVersion <  min? ──► 顯示升級提示（非阻斷式黃色警告）
+```
+
+**伺服器端**：
+- `API_VERSION`（整數）定義於 `worker/src/index.ts`，僅在**破壞性變更**時遞增
+- `SERVER_VERSION`（語意版本）用於追蹤部署版本
+- `/api/version` 端點回傳兩者，供客戶端查詢
+
+**客戶端**：
+- `MIN_API_VERSION` 定義客戶端所需的最低 API 版本（Extension: `VersionWarning.tsx`，PWA: `VersionWarning.tsx`）
+- 啟動時呼叫 `/api/version`，若 `apiVersion < MIN_API_VERSION` 則顯示非阻斷式警告
+- 警告僅針對自架伺服器（官方 Worker 永遠是最新版）
+
+### 何時遞增 API_VERSION
+
+| 變更類型 | 是否遞增 | 範例 |
+|---------|---------|------|
+| 新增端點 | 否 | 新增 `GET /api/user/:id/stats` |
+| 新增可選欄位 | 否 | Response 多回傳 `createdAt` |
+| 移除或重新命名端點 | **是** | `GET /api/books` → `GET /api/bookshelf` |
+| 變更必要欄位格式 | **是** | `is_shared: boolean` → `is_shared: BoolFlag` |
+| 變更認證機制 | **是** | Token 格式變更 |
+
+### 遷移 SOP
+
+1. 新版 Worker 同時支援新舊格式（過渡期）
+2. 發布客戶端更新，使用新格式
+3. 確認所有客戶端已更新後，下一版移除舊格式並遞增 `API_VERSION`
+
+*最後更新：2026-04-08*

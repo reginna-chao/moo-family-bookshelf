@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Env } from "../index";
+import type { Env } from "../utils/env";
 import {
   kvKeys,
   OTP_TTL_SECONDS,

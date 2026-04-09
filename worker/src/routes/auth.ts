@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Env } from "../index";
+import type { Env } from "../utils/env";
 import { kvKeys, TOKEN_TTL_SECONDS, type RawFamilyRecord, normalizeFamilyRecord } from "../kv/schema";
 import { isValidFamilyId } from "../utils/validation";
 import { getOrGenerateAuthToken, getAuthenticatedUserId } from "../middleware/auth";

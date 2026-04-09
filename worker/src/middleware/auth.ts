@@ -1,6 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import type { Context } from "hono";
-import type { Env } from "../index";
+import type { Env } from "../utils/env";
 import { kvKeys, type AuthRecord, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isPublicRoute } from "../utils/routes";
 

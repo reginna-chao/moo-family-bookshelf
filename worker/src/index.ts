@@ -7,11 +7,10 @@ import { familyRoutes } from "./routes/family";
 import { bookshelfRoutes } from "./routes/bookshelf";
 import { authRoutes } from "./routes/auth";
 import { verifyRoutes } from "./routes/verify";
+import { isDevMode, type Env } from "./utils/env";
 
-export interface Env {
-  KV: KVNamespace;
-  DEV_MODE?: string;
-}
+export type { Env } from "./utils/env";
+export { isDevMode } from "./utils/env";
 
 /** Max request body size: 256KB */
 const MAX_BODY_SIZE = 262144;
@@ -66,7 +65,7 @@ app.use("*", async (c, next) => {
 
 // CORS with dynamic origin validation
 app.use("*", async (c, next) => {
-  const devMode = c.env.DEV_MODE === "1";
+  const devMode = isDevMode(c.env);
   const middleware = cors({
     origin: (origin) => (isAllowedOrigin(origin, devMode) ? origin : ""),
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],

@@ -1,5 +1,5 @@
 import { createMiddleware } from "hono/factory";
-import type { Env } from "../index";
+import { type Env, isDevMode } from "../utils/env";
 import { isPublicRoute } from "../utils/routes";
 
 /** Standard rate limit: 60 req/min/IP */
@@ -14,7 +14,7 @@ const BUCKET_MS = 60000;
 export const rateLimit = createMiddleware<{ Bindings: Env }>(
   async (c, next) => {
     // Skip rate limiting in dev mode (local wrangler dev / E2E tests)
-    if (c.env.DEV_MODE === "1") {
+    if (isDevMode(c.env)) {
       await next();
       return;
     }

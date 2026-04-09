@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Env } from "../index";
+import type { Env } from "../utils/env";
 import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord } from "../kv/schema";
 import { isValidUserId } from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
