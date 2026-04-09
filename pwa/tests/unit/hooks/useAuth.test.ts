@@ -704,6 +704,34 @@ describe("useAuth", () => {
       expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
     });
 
+    it("should clear qrUserId and initialJoinFamilyId on forceLogout", () => {
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#code=moo-fam99-secretKey&uid=user-abc",
+        pathname: "/app",
+        href: "http://localhost/app#code=moo-fam99-secretKey&uid=user-abc",
+      });
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam99",
+        encryptionKey: "secretKey",
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      // QR params should be set
+      expect(result.current.qrUserId).toBe("user-abc");
+      expect(result.current.initialSyncCode).toBe("moo-fam99-secretKey");
+
+      act(() => {
+        result.current.forceLogout();
+      });
+
+      // All transient state must be cleared
+      expect(result.current.qrUserId).toBe("");
+      expect(result.current.initialSyncCode).toBe("");
+      expect(result.current.initialJoinFamilyId).toBe("");
+    });
+
     it("should clear everything even with rememberSyncCode=1", () => {
       localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "1");
       localStorage.setItem(REMEMBERED_LOGOUT_KEY, "moo-fam-1-key-1");

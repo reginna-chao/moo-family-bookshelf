@@ -14,6 +14,9 @@ vi.mock("@/crypto/syncCode", () => ({
   }),
 }));
 
+import { decodeSyncCode } from "@/crypto/syncCode";
+const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
+
 describe("WelcomeView", () => {
   it("renders heading and description", () => {
     render(<WelcomeView onStart={() => {}} />);
@@ -155,6 +158,26 @@ describe("CreatedView", () => {
 
     expect(screen.getByText(/moo-abc123-keydata/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
+  });
+
+  it("should show raw sync code without garbled prefix when decode fails", () => {
+    mockDecodeSyncCode.mockImplementation(() => {
+      throw new Error("Invalid sync code");
+    });
+
+    render(<CreatedView {...defaultProps} generatedSyncCode="raw-bad-code" />);
+
+    // Should show the raw code as-is, NOT "moo-raw-bad-code-••••"
+    expect(screen.getByText("raw-bad-code")).toBeInTheDocument();
+    expect(screen.queryByText(/moo-raw-bad-code/)).not.toBeInTheDocument();
+    // Eye toggle should NOT be shown
+    expect(screen.queryByRole("button", { name: "顯示同步碼" })).not.toBeInTheDocument();
+
+    // Restore default mock
+    mockDecodeSyncCode.mockReturnValue({
+      familyId: "abc123",
+      encryptionKey: "keydata",
+    });
   });
 });
 

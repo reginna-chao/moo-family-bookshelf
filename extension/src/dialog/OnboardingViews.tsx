@@ -57,12 +57,13 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
 
   let displayFamilyId = "";
   let displayKey = "";
+  let decodeFailed = false;
   try {
     const decoded = decodeSyncCode(generatedSyncCode);
     displayFamilyId = decoded.familyId;
     displayKey = decoded.encryptionKey;
   } catch {
-    displayFamilyId = generatedSyncCode;
+    decodeFailed = true;
   }
 
   return (
@@ -85,15 +86,19 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
         }}
       >
         <span style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
-          moo-{displayFamilyId}-{showCode ? displayKey : "••••••••••••"}
+          {decodeFailed
+            ? generatedSyncCode
+            : `moo-${displayFamilyId}-${showCode ? displayKey : "••••••••••••"}`}
         </span>
-        <button
-          onClick={() => setShowCode(!showCode)}
-          style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
-          aria-label={showCode ? "隱藏同步碼" : "顯示同步碼"}
-        >
-          {showCode ? <EyeOff size={16} /> : <Eye size={16} />}
-        </button>
+        {!decodeFailed && (
+          <button
+            onClick={() => setShowCode(!showCode)}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
+            aria-label={showCode ? "隱藏同步碼" : "顯示同步碼"}
+          >
+            {showCode ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        )}
       </div>
       <button
         onClick={onCopy}

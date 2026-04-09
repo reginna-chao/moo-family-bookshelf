@@ -503,6 +503,113 @@ describe("LandingPage", () => {
     });
   });
 
+  describe("smart paste", () => {
+    it("should auto-split full sync code pasted into family ID field", () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "abc1-def2",
+        encryptionKey: "key123secret",
+        apiHost: "custom.api.com",
+      });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
+
+      fireEvent.paste(familyIdInput, {
+        clipboardData: { getData: () => "moo-abc1-def2-key123secret@custom.api.com" },
+      });
+
+      expect(familyIdInput.value).toBe("abc1-def2");
+      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(keyInput.value).toBe("key123secret");
+    });
+
+    it("should not auto-split when pasted text is not a valid sync code", () => {
+      mockDecodeSyncCode.mockImplementation(() => {
+        throw new Error("Invalid");
+      });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
+
+      // Paste something that is NOT a valid sync code — should not prevent default
+      fireEvent.paste(familyIdInput, {
+        clipboardData: { getData: () => "just-some-text" },
+      });
+
+      // decodeSyncCode threw, so fillFromSyncCode returned false; paste proceeds normally
+      // The input value won't change because fireEvent.paste doesn't actually insert text
+      expect(mockDecodeSyncCode).toHaveBeenCalledWith("just-some-text");
+    });
+  });
+
+  describe("remember sync code checkbox", () => {
+    it("should render remember checkbox checked by default (opt-out)", () => {
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      const checkbox = screen.getByRole("checkbox", { name: /記住同步碼/ });
+      expect(checkbox).toBeChecked();
+    });
+
+    it("should render remember checkbox unchecked when localStorage is '0'", () => {
+      localStorage.setItem("moo:rememberSyncCode", "0");
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      const checkbox = screen.getByRole("checkbox", { name: /記住同步碼/ });
+      expect(checkbox).not.toBeChecked();
+    });
+
+    it("should persist remember preference to localStorage on submit", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+        encryptionKey: "key-1",
+      });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      // Uncheck the checkbox via change event
+      const checkbox = screen.getByRole("checkbox", { name: /記住同步碼/ }) as HTMLInputElement;
+      fireEvent.change(checkbox, { target: { checked: false } });
+      expect(checkbox.checked).toBe(false);
+
+      fillInput("家庭 ID", "fam-1");
+      fillInput("同步碼", "key-1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(mockOnAuth).toHaveBeenCalled();
+      });
+
+      expect(localStorage.getItem("moo:rememberSyncCode")).toBe("0");
+    });
+  });
+
+  describe("encryption key eye toggle", () => {
+    it("should default to password type for encryption key input", () => {
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(keyInput.type).toBe("password");
+    });
+
+    it("should toggle encryption key visibility with eye button", () => {
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(keyInput.type).toBe("password");
+
+      fireEvent.click(screen.getByRole("button", { name: "顯示同步碼" }));
+      expect(keyInput.type).toBe("text");
+      expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "隱藏同步碼" }));
+      expect(keyInput.type).toBe("password");
+    });
+  });
+
   describe("externalError prop", () => {
     it("should display externalError when provided", () => {
       render(

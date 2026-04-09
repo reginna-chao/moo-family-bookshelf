@@ -8,8 +8,11 @@ import { BoolFlag, type ApiClient } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 
 // Mock syncCode module
+const { mockEncodeSyncCode } = vi.hoisted(() => ({
+  mockEncodeSyncCode: vi.fn().mockReturnValue("moo-fam1-key1"),
+}));
 vi.mock("@/crypto/syncCode", () => ({
-  encodeSyncCode: vi.fn().mockReturnValue("moo-fam1-key1"),
+  encodeSyncCode: mockEncodeSyncCode,
 }));
 
 // Mock crypto module (needed by FamilyDataProvider's refreshBookshelf)
@@ -248,6 +251,21 @@ describe("SettingsPage", () => {
     // Step 3: confirm → calls onLogout
     fireEvent.click(screen.getByRole("button", { name: "確定登出" }));
     expect(defaultProps.onLogout).toHaveBeenCalled();
+  });
+
+  it("shows different logout message when remember is set to 0", async () => {
+    localStorage.setItem("moo:rememberSyncCode", "0");
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "登出" }));
+
+    expect(
+      screen.getByText("確定要登出嗎？登出後需要重新輸入同步碼才能使用。"),
+    ).toBeInTheDocument();
   });
 
   it("cancel logout hides confirm dialog", async () => {
@@ -524,6 +542,22 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Network fail")).toBeInTheDocument();
     });
+  });
+
+  it("should show @host suffix in masked sync code when custom API is used", async () => {
+    mockEncodeSyncCode.mockReturnValue("moo-fam1-key1@custom.api.com");
+
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    // Masked display should include @host suffix
+    expect(screen.getByText(/moo-fam-001-••••.*@custom\.api\.com/)).toBeInTheDocument();
+
+    // Restore default mock
+    mockEncodeSyncCode.mockReturnValue("moo-fam1-key1");
   });
 
   // --- Sync code visibility toggle ---

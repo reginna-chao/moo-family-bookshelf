@@ -306,7 +306,7 @@ export function SettingsPage({
         <p className="text-xs text-gray-500 mb-1">家庭同步碼</p>
         <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs break-all mb-2 flex items-center gap-2">
           <span className="flex-1">
-            moo-{familyId}-{showSyncCode ? encryptionKey : "••••••••••••"}
+            moo-{familyId}-{showSyncCode ? encryptionKey : "••••••••••••"}{syncCode.includes("@") ? `@${syncCode.split("@")[1]}` : ""}
           </span>
           <button
             onClick={() => setShowSyncCode(!showSyncCode)}

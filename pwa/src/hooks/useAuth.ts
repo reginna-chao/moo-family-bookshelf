@@ -84,26 +84,25 @@ function loadFromStorage(): AuthState | null {
   };
 }
 
-function clearStorage(): void {
-  const userId = localStorage.getItem(USER_ID_KEY);
+/** Build a remembered sync code from current localStorage, if remember is enabled. */
+function buildRememberedSyncCode(): string {
   const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0";
+  if (!remember) return "";
 
-  // Build sync code BEFORE clearing, if remember is enabled
-  if (remember && userId) {
-    const familyId = localStorage.getItem(namespacedKey(userId, "familyId"));
-    const encryptionKey = localStorage.getItem(namespacedKey(userId, "encryptionKey"));
-    const apiHost = localStorage.getItem(namespacedKey(userId, "apiHost"));
-    if (familyId && encryptionKey) {
-      const code = encodeSyncCode({
-        familyId,
-        encryptionKey,
-        apiHost: apiHost || undefined,
-      });
-      localStorage.setItem(REMEMBERED_LOGOUT_KEY, code);
-    }
-  }
+  const userId = localStorage.getItem(USER_ID_KEY);
+  if (!userId) return "";
 
-  // Always clear ALL auth data
+  const familyId = localStorage.getItem(namespacedKey(userId, "familyId"));
+  const encryptionKey = localStorage.getItem(namespacedKey(userId, "encryptionKey"));
+  const apiHost = localStorage.getItem(namespacedKey(userId, "apiHost"));
+  if (!familyId || !encryptionKey) return "";
+
+  return encodeSyncCode({ familyId, encryptionKey, apiHost: apiHost || undefined });
+}
+
+/** Remove all namespaced auth keys for the current user. */
+function removeUserKeys(): void {
+  const userId = localStorage.getItem(USER_ID_KEY);
   if (userId) {
     localStorage.removeItem(namespacedKey(userId, "familyId"));
     localStorage.removeItem(namespacedKey(userId, "encryptionKey"));
@@ -116,19 +115,19 @@ function clearStorage(): void {
   localStorage.removeItem(USER_ID_KEY);
 }
 
+function clearStorage(): void {
+  // Build sync code BEFORE clearing, if remember is enabled
+  const code = buildRememberedSyncCode();
+  if (code) {
+    localStorage.setItem(REMEMBERED_LOGOUT_KEY, code);
+  }
+
+  removeUserKeys();
+}
+
 /** Clears ALL localStorage keys unconditionally, including rememberSyncCode. */
 export function forceClearStorage(): void {
-  const userId = localStorage.getItem(USER_ID_KEY);
-  if (userId) {
-    localStorage.removeItem(namespacedKey(userId, "familyId"));
-    localStorage.removeItem(namespacedKey(userId, "encryptionKey"));
-    localStorage.removeItem(namespacedKey(userId, "apiHost"));
-    localStorage.removeItem(namespacedKey(userId, "authToken"));
-    localStorage.removeItem(namespacedKey(userId, "syncArchived"));
-    localStorage.removeItem(namespacedKey(userId, "pwaNoticeShown"));
-    localStorage.removeItem(namespacedKey(userId, "installPromptDismissed"));
-  }
-  localStorage.removeItem(USER_ID_KEY);
+  removeUserKeys();
   localStorage.removeItem(REMEMBER_SYNC_CODE_KEY);
   localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
 }
@@ -235,18 +234,7 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const logout = useCallback((): void => {
-    const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0";
-    let code = "";
-    if (remember) {
-      const stored = loadFromStorage();
-      if (stored) {
-        code = encodeSyncCode({
-          familyId: stored.familyId,
-          encryptionKey: stored.encryptionKey,
-          apiHost: stored.apiHost,
-        });
-      }
-    }
+    const code = buildRememberedSyncCode();
     clearStorage();
     setAuth(null);
     setQrUserId("");

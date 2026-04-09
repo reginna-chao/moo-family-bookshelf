@@ -215,7 +215,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         }}>
           <span style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
             {encryptionKey
-              ? `moo-${familyId}-${showSyncCode ? encryptionKey : "••••••••••••"}`
+              ? `moo-${familyId}-${showSyncCode ? encryptionKey : "••••••••••••"}${syncCode && syncCode.includes("@") ? `@${syncCode.split("@")[1]}` : ""}`
               : "載入中..."}
           </span>
           {encryptionKey && (
