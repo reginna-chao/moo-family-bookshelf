@@ -13,7 +13,21 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const wrangler = resolve(__dirname, "../worker/node_modules/.bin/wrangler");
+// Invoke wrangler's JS entry directly via the current Node binary. Avoids the
+// platform-specific shims in node_modules/.bin: on Windows Node 20+ refuses to
+// execFile() .CMD shims (CVE-2024-27980), and the extension-less shell script
+// cannot be executed at all.
+const workerDir = resolve(__dirname, "../worker");
+const wranglerEntry = resolve(workerDir, "node_modules/wrangler/bin/wrangler.js");
+
+function runWrangler(args, options = {}) {
+  // cwd must be the worker/ directory so wrangler picks up wrangler.toml
+  // (account_id, env) instead of running with no context from the repo root.
+  return execFileSync(process.execPath, [wranglerEntry, ...args], {
+    cwd: workerDir,
+    ...options,
+  });
+}
 
 const ALIAS_PATTERNS = {
   dev: /dev-kv$/,
@@ -59,7 +73,7 @@ function resolveNamespaceId(input) {
     return input;
   }
 
-  const raw = execFileSync(wrangler, ["kv", "namespace", "list"], { encoding: "utf-8" });
+  const raw = runWrangler(["kv", "namespace", "list"], { encoding: "utf-8" });
   const namespaces = safeParseJson(raw);
   const match = namespaces.find((ns) => pattern.test(ns.title));
 
@@ -89,8 +103,7 @@ const label = ALIAS_PATTERNS[input] ? `${input} (${namespaceId})` : namespaceId;
 
 console.log(`Listing keys in KV namespace: ${label}`);
 
-const raw = execFileSync(
-  wrangler,
+const raw = runWrangler(
   ["kv", "key", "list", `--namespace-id=${namespaceId}`],
   { encoding: "utf-8" },
 );
@@ -110,8 +123,7 @@ mkdirSync(tmpDir, { recursive: true });
 const tmpFile = resolve(tmpDir, ".kv-delete-tmp.json");
 try {
   writeFileSync(tmpFile, JSON.stringify(keys));
-  execFileSync(
-    wrangler,
+  runWrangler(
     ["kv", "bulk", "delete", tmpFile, `--namespace-id=${namespaceId}`, "--force"],
     { stdio: ["pipe", "inherit", "inherit"] },
   );
