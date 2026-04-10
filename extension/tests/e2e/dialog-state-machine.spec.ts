@@ -41,7 +41,7 @@ async function goThroughOnboarding(
 
   // Wait for sync code to appear (or dump dialog HTML on failure)
   try {
-    await dialog.locator("div[style*='monospace']").waitFor({ state: "visible", timeout: 30_000 });
+    await dialog.locator("[data-testid='sync-code']").waitFor({ state: "visible", timeout: 30_000 });
   } catch (e) {
     const html = await dialog.innerHTML().catch(() => "(unreadable)");
     throw new Error(`goThroughOnboarding: sync code not found.\nDialog HTML:\n${html}\n\nOriginal: ${e}`);

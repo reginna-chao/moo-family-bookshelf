@@ -172,15 +172,28 @@ export async function joinFamily(
  */
 export async function getSyncCode(page: Page): Promise<string> {
   const dialog = page.locator(DIALOG_SELECTOR);
-  // Sync code is displayed in a monospace div
-  const codeEl = dialog.locator("div[style*='monospace']");
+  // Sync code is displayed in a span marked with data-testid="sync-code".
+  // It is masked by default; click the reveal button to show the real code.
+  const codeEl = dialog.locator("[data-testid='sync-code']");
   try {
     await codeEl.waitFor({ state: "visible", timeout: 15_000 });
   } catch (e) {
     const html = await dialog.innerHTML().catch(() => "(unreadable)");
-    throw new Error(`getSyncCode failed — sync code div not found.\nDialog HTML:\n${html}\n\nOriginal: ${e}`);
+    throw new Error(`getSyncCode failed — sync code element not found.\nDialog HTML:\n${html}\n\nOriginal: ${e}`);
   }
+  await revealSyncCode(dialog);
   return (await codeEl.textContent())?.trim() ?? "";
+}
+
+/**
+ * Click the "顯示同步碼" eye button if present so the masked sync code becomes
+ * readable. Safe to call even when the reveal button is absent.
+ */
+async function revealSyncCode(dialog: ReturnType<Page["locator"]>): Promise<void> {
+  const revealBtn = dialog.locator("button[aria-label='顯示同步碼']");
+  if ((await revealBtn.count()) > 0) {
+    await revealBtn.first().click();
+  }
 }
 
 /**
@@ -196,9 +209,11 @@ export async function clickContinue(page: Page): Promise<void> {
  */
 export async function getSyncCodeFromSettings(page: Page): Promise<string> {
   const dialog = page.locator(DIALOG_SELECTOR);
-  // The sync code in settings is in a monospace div within the settings panel
-  const codeEl = dialog.locator("div[style*='monospace']");
+  // The sync code in settings is in a span marked with data-testid="sync-code".
+  // It is masked by default; click the reveal button to show the real code.
+  const codeEl = dialog.locator("[data-testid='sync-code']");
   await codeEl.waitFor({ state: "visible", timeout: 10_000 });
+  await revealSyncCode(dialog);
   return (await codeEl.textContent())?.trim() ?? "";
 }
 

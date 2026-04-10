@@ -85,7 +85,7 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
           gap: 8,
         }}
       >
-        <span style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
+        <span data-testid="sync-code" style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
           {decodeFailed
             ? generatedSyncCode
             : `moo-${displayFamilyId}-${showCode ? displayKey : "••••••••••••"}`}

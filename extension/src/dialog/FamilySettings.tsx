@@ -244,7 +244,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
               padding: 12, background: "#f8fafc", borderRadius: 8, marginBottom: 8,
               display: "flex", alignItems: "center", gap: 8,
             }}>
-              <span style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
+              <span data-testid="sync-code" style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
                 {encryptionKey
                   ? `moo-${familyId}-${showSyncCode ? encryptionKey : "••••••••••••"}${syncCode && syncCode.includes("@") ? `@${syncCode.split("@")[1]}` : ""}`
                   : "載入中..."}

@@ -81,7 +81,7 @@ test.describe("Family Lifecycle", () => {
     await clickCreateFamily(page1);
 
     // Wait for family creation — sync code should appear
-    const syncCodeEl = dialog1.locator("div[style*='monospace']");
+    const syncCodeEl = dialog1.locator("[data-testid='sync-code']");
     await syncCodeEl.waitFor({ state: "visible", timeout: 15_000 });
     const syncCode = await getSyncCode(page1);
     expect(syncCode).toBeTruthy();
@@ -262,7 +262,7 @@ test.describe("Family Lifecycle", () => {
     await clickCreateFamily(page);
 
     // Wait for sync code to appear, then continue
-    await dialog.locator("div[style*='monospace']").waitFor({ state: "visible", timeout: 15_000 });
+    await dialog.locator("[data-testid='sync-code']").waitFor({ state: "visible", timeout: 15_000 });
     await clickContinue(page);
     await waitForMainView(page);
 
