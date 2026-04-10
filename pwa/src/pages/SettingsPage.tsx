@@ -4,7 +4,7 @@ import { reportLinks } from "moo-family-bookshelf-shared/config/links";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
-import { DEFAULT_API_ENDPOINT } from "@/constants";
+import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "@/constants";
 import { MemberList } from "@/components/MemberList";
 import { namespacedKey, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import { useFamilyData } from "@/hooks/useFamilyData";
@@ -85,7 +85,7 @@ export function SettingsPage({
   }
 
   async function handleInvite() {
-    const inviteUrl = `${window.location.origin}${window.location.pathname}#invite=${encodeURIComponent(syncCode)}`;
+    const inviteUrl = buildInviteUrl(syncCode);
     if (navigator.share) {
       try {
         await navigator.share({ title: "加入墨家書櫃", url: inviteUrl });

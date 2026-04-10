@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { Library, BookOpen, Settings, type LucideIcon } from "lucide-react";
-import { useAuth } from "./hooks/useAuth";
+import { useAuth, REMEMBER_SYNC_CODE_KEY, REMEMBERED_LOGOUT_KEY } from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
@@ -102,14 +102,17 @@ export default function App() {
         setFamilyFullError("家庭成員已達上限（每個家庭最多 2 位成員）");
       } else if (res.error.code === "VERIFICATION_REQUIRED" && current.familyId && current.encryptionKey) {
         // Preserve sync code so LandingPage can pre-fill and show verification UI.
-        try {
-          const code = encodeSyncCode({
-            familyId: current.familyId,
-            encryptionKey: current.encryptionKey,
-            apiHost: current.apiHost,
-          });
-          localStorage.setItem("moo:rememberedLogout", code);
-        } catch { /* best-effort */ }
+        // Respect the user's "remember sync code" preference.
+        if (localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0") {
+          try {
+            const code = encodeSyncCode({
+              familyId: current.familyId,
+              encryptionKey: current.encryptionKey,
+              apiHost: current.apiHost,
+            });
+            localStorage.setItem(REMEMBERED_LOGOUT_KEY, code);
+          } catch { /* best-effort */ }
+        }
       }
       logout();
       return null;

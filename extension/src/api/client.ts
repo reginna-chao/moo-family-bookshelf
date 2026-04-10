@@ -4,6 +4,25 @@
  */
 
 import { DEFAULT_API_ENDPOINT } from "../constants";
+
+/** Validate API endpoint URL: must be HTTPS (or HTTP for localhost in dev). */
+function validateEndpointUrl(raw: string): string {
+  const url = raw.replace(/\/+$/, "");
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "https:") return url;
+    if (
+      parsed.protocol === "http:" &&
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")
+    ) {
+      return url;
+    }
+  } catch {
+    throw new Error(`Invalid API endpoint URL: ${raw}`);
+  }
+  throw new Error(`Unsafe API endpoint scheme — only HTTPS is allowed: ${raw}`);
+}
+
 import type {
   ApiResponse,
   FamilyGroup,
@@ -46,11 +65,11 @@ export class ApiClient {
   private inflightGets = new Map<string, Promise<ApiResponse<unknown>>>();
 
   constructor(apiUrl?: string) {
-    this.baseUrl = (apiUrl ?? DEFAULT_API_ENDPOINT).replace(/\/+$/, "");
+    this.baseUrl = validateEndpointUrl(apiUrl ?? DEFAULT_API_ENDPOINT);
   }
 
   setEndpoint(url: string): void {
-    this.baseUrl = url.replace(/\/+$/, "");
+    this.baseUrl = validateEndpointUrl(url);
   }
 
   getEndpoint(): string {
