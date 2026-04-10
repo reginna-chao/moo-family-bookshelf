@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MooFamily Bookshelf — 家庭開放書櫃</title>
-  <meta name="description" content="讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍，隱私優先、開源免費。">
+  <title>墨家書櫃 MooFamily Bookshelf — 和家人分享你的讀墨藏書</title>
+  <meta name="description" content="讓讀墨家庭帳號成員，輕鬆瀏覽彼此選擇分享的書籍。你決定要分享什麼，資料加密保護，免費開源。">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <meta property="og:title" content="MooFamily Bookshelf — 家庭開放書櫃">
-  <meta property="og:description" content="讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍，隱私優先、開源免費。">
+  <meta property="og:title" content="墨家書櫃 MooFamily Bookshelf">
+  <meta property="og:description" content="讓讀墨家庭帳號成員，輕鬆瀏覽彼此選擇分享的書籍。">
   <meta property="og:image" content="og-image.png">
   <meta property="og:type" content="website">
   <style>
@@ -35,6 +35,8 @@
       -webkit-font-smoothing: antialiased;
     }
 
+    a { color: var(--color-primary); }
+
     /* Header */
     .header {
       text-align: center;
@@ -53,7 +55,7 @@
     .header .tagline {
       font-size: 1.15rem;
       color: var(--color-text-secondary);
-      max-width: 520px;
+      max-width: 560px;
       margin: 0 auto 32px;
     }
 
@@ -94,8 +96,13 @@
     section h2 {
       font-size: 1.5rem;
       font-weight: 700;
-      margin-bottom: 24px;
+      margin-bottom: 12px;
       letter-spacing: -0.01em;
+    }
+
+    section .section-intro {
+      color: var(--color-text-secondary);
+      margin-bottom: 24px;
     }
 
     section p {
@@ -130,13 +137,8 @@
       margin-bottom: 0;
     }
 
-    /* Flow diagram */
-    .flow {
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-      margin-top: 24px;
-    }
+    /* Flow */
+    .flow { margin-top: 24px; }
 
     .flow-step {
       display: flex;
@@ -168,7 +170,8 @@
 
     .flow-line {
       width: 2px;
-      height: 32px;
+      flex: 1;
+      min-height: 32px;
       background: var(--color-border);
     }
 
@@ -184,7 +187,7 @@
     }
 
     .flow-body p {
-      font-size: 0.9rem;
+      font-size: 0.92rem;
       color: var(--color-text-secondary);
       margin-bottom: 0;
     }
@@ -210,7 +213,7 @@
       font-size: 1.1rem;
     }
 
-    /* Self-host section */
+    /* Steps (for manual install) */
     .steps {
       counter-reset: step;
       list-style: none;
@@ -251,24 +254,6 @@
       border: 1px solid var(--color-border);
       padding: 2px 6px;
       border-radius: 4px;
-    }
-
-    pre {
-      background: #1e293b;
-      color: #e2e8f0;
-      padding: 20px;
-      border-radius: var(--radius);
-      overflow-x: auto;
-      margin: 16px 0;
-      font-size: 0.88rem;
-      line-height: 1.6;
-    }
-
-    pre code {
-      background: none;
-      border: none;
-      padding: 0;
-      color: inherit;
     }
 
     /* Callout */
@@ -321,36 +306,43 @@
 
     .btn-secondary:hover { background: var(--color-bg-alt); }
 
-    /* Architecture table */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 16px 0;
-      font-size: 0.9rem;
-    }
-
-    th, td {
-      padding: 12px 16px;
-      text-align: left;
-      border-bottom: 1px solid var(--color-border);
-    }
-
-    th {
-      font-weight: 600;
+    /* Install card */
+    .install-card {
+      padding: 24px;
+      border-radius: var(--radius);
+      border: 1px solid var(--color-border);
       background: var(--color-bg-alt);
+      margin-top: 16px;
     }
 
-    /* Footer */
-    .footer {
-      text-align: center;
-      padding: 40px 24px;
-      color: var(--color-text-secondary);
-      font-size: 0.85rem;
+    .install-card h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    details.manual-install {
+      margin-top: 20px;
       border-top: 1px solid var(--color-border);
+      padding-top: 16px;
     }
 
-    .footer a { color: var(--color-primary); text-decoration: none; }
-    .footer a:hover { text-decoration: underline; }
+    details.manual-install summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      font-size: 0.95rem;
+      list-style: none;
+    }
+
+    details.manual-install summary::before {
+      content: "▸";
+      display: inline-block;
+      width: 18px;
+      color: var(--color-text-secondary);
+    }
+
+    details.manual-install[open] summary::before { content: "▾"; }
 
     /* FAQ */
     .faq details {
@@ -383,6 +375,32 @@
       margin-bottom: 0;
     }
 
+    /* Support section */
+    .support {
+      text-align: center;
+    }
+
+    .boba-btn {
+      display: inline-block;
+      margin-top: 8px;
+    }
+
+    .boba-btn img { height: 44px; }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 40px 24px;
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .footer a { color: var(--color-primary); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+
+    .footer p + p { margin-top: 6px; }
+
     /* Responsive */
     @media (max-width: 640px) {
       .header { padding: 56px 20px 44px; }
@@ -396,14 +414,14 @@
 
   <!-- Header -->
   <header class="header">
-    <img src="favicon.svg" alt="MooFamily Bookshelf" width="72" height="72" style="border-radius: 16px; margin-bottom: 16px;">
-    <h1>MooFamily Bookshelf</h1>
-    <p class="tagline">讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍。隱私優先、開源免費。</p>
+    <img src="favicon.svg" alt="墨家書櫃" width="72" height="72" style="border-radius: 16px; margin-bottom: 16px;">
+    <h1>墨家書櫃 MooFamily Bookshelf</h1>
+    <p class="tagline">讓讀墨家庭帳號成員，輕鬆瀏覽彼此選擇分享的書籍。</p>
     <div class="badges">
-      <span class="badge">Chrome Extension</span>
-      <span class="badge">手機版</span>
-      <span class="badge">E2EE 端對端加密</span>
-      <span class="badge">MIT License</span>
+      <span class="badge">Chrome 擴充功能</span>
+      <span class="badge">手機也能看</span>
+      <span class="badge">資料加密保護</span>
+      <span class="badge">免費開源</span>
     </div>
   </header>
 
@@ -413,36 +431,75 @@
     <section>
       <h2>這是什麼？</h2>
       <p>
-        MooFamily Bookshelf 是一個 Chrome 擴充功能，直接在
-        <strong>讀墨 (Readmoo) 網頁</strong>中開啟 Dialog，讓家庭帳號成員可以瀏覽彼此選擇開放的書籍。
+        你有沒有遇過這種情況 — 家人買了一本想看的書，結果你也跟著買了一本？
+        或是想知道另一半書櫃裡有什麼，卻懶得一本一本問？
       </p>
       <p>
-        你可以決定哪些書要分享給家人看，哪些不要。所有書籍預設不開放，完全由你掌控。
+        墨家書櫃是一個 Chrome 擴充功能，直接在<strong>讀墨（Readmoo）網頁</strong>裡開啟一個小視窗，
+        讓家庭帳號的成員可以看到彼此「選擇分享」的書。不用借帳號、不用傳書名，開著就能逛。
       </p>
+      <p>
+        放心，所有書籍<strong>預設都不公開</strong>，要分享哪些書完全由你決定。
+      </p>
+    </section>
 
+    <!-- Features -->
+    <section>
+      <h2>功能</h2>
       <div class="features">
         <div class="feature-card">
-          <h3>隱私優先</h3>
-          <p>所有書籍預設不開放。你主動選擇要分享的書，儲存後才同步。</p>
+          <h3>家庭書櫃</h3>
+          <p>一眼看到家人分享的藏書，不用借帳號、不用傳書名。</p>
         </div>
         <div class="feature-card">
-          <h3>端對端加密</h3>
-          <p>資料在瀏覽器中加密後才上傳，伺服器只存密文，開發者無法讀取。</p>
+          <h3>你決定要分享什麼</h3>
+          <p>所有書籍預設不公開，只有你手動開放的書才會出現在家庭書櫃。</p>
+        </div>
+        <div class="feature-card">
+          <h3>資料安全</h3>
+          <p>書單在你的瀏覽器中加密後才上傳，連伺服器都無法讀取。</p>
         </div>
         <div class="feature-card">
           <h3>跨家庭保留設定</h3>
-          <p>解綁家庭帳號後，你的開放偏好不會消失。換家庭不用重新設定。</p>
+          <p>離開或更換家庭，你原本的分享偏好不會消失，不用重新設定。</p>
         </div>
         <div class="feature-card">
-          <h3>可自建後端</h3>
-          <p>不想用預設伺服器？部署自己的 Cloudflare Worker，完全掌控資料。</p>
+          <h3>手機也能看</h3>
+          <p>透過手機版網頁瀏覽家庭書櫃，通勤、排隊都能逛。</p>
+        </div>
+        <div class="feature-card">
+          <h3>免費開源</h3>
+          <p>MIT 授權、程式碼公開，不想用預設伺服器還可以自己架。</p>
         </div>
       </div>
     </section>
 
-    <!-- How it works -->
+    <!-- Install -->
     <section>
-      <h2>使用流程</h2>
+      <h2>安裝</h2>
+      <div class="install-card">
+        <h3>Chrome 線上應用程式商店（推薦）</h3>
+        <p style="color: var(--color-text-secondary); margin-bottom: 0;">
+          目前還在審核中，通過後會更新連結 — 敬請期待。
+        </p>
+
+        <details class="manual-install">
+          <summary>我等不及，想要手動安裝</summary>
+          <ol class="steps">
+            <li><a href="https://github.com/reginna-chao/moo-family-bookshelf/releases">下載最新版本</a>並解壓縮</li>
+            <li>開啟 Chrome，在網址列輸入 <code>chrome://extensions/</code></li>
+            <li>打開右上角的「開發人員模式」</li>
+            <li>點擊「載入未封裝項目」，選取剛剛解壓縮的資料夾</li>
+            <li>完成！前往讀墨網頁，你會看到「家庭書櫃」按鈕</li>
+          </ol>
+        </details>
+      </div>
+    </section>
+
+    <!-- How to use -->
+    <section>
+      <h2>怎麼使用？</h2>
+      <p class="section-intro">四個步驟就能和家人一起看書櫃。</p>
 
       <div class="flow">
         <div class="flow-step">
@@ -451,8 +508,8 @@
             <div class="flow-line"></div>
           </div>
           <div class="flow-body">
-            <h3>安裝擴充功能</h3>
-            <p>從 Chrome Web Store 安裝 MooFamily Bookshelf。</p>
+            <h3>建立家庭</h3>
+            <p>在讀墨網頁點擊「家庭書櫃」按鈕，建立家庭後會拿到一組同步碼。</p>
           </div>
         </div>
 
@@ -462,8 +519,8 @@
             <div class="flow-line"></div>
           </div>
           <div class="flow-body">
-            <h3>建立或加入家庭</h3>
-            <p>開啟讀墨網頁，點擊「家庭書櫃」按鈕。第一位家人建立家庭取得同步碼，其他人輸入同步碼加入。</p>
+            <h3>邀請家人</h3>
+            <p>把同步碼傳給家人，對方輸入後就能加入你的家庭。</p>
           </div>
         </div>
 
@@ -473,8 +530,8 @@
             <div class="flow-line"></div>
           </div>
           <div class="flow-body">
-            <h3>選擇要開放的書</h3>
-            <p>在「個人書櫃管理」中，逐本切換開放 / 關閉，儲存後才同步。</p>
+            <h3>選擇要分享的書</h3>
+            <p>在「個人書櫃管理」裡，逐本切換「開放 / 關閉」，記得按儲存才會同步喔。</p>
           </div>
         </div>
 
@@ -483,42 +540,38 @@
             <div class="flow-dot">4</div>
           </div>
           <div class="flow-body">
-            <h3>瀏覽家庭書櫃</h3>
-            <p>在「家庭開放書櫃」中看到所有家人選擇分享的書籍。手機上也可以透過手機版網頁瀏覽。</p>
+            <h3>開逛！</h3>
+            <p>在「家庭書櫃」就能看到所有家人分享的書。手機使用者建議先在電腦版完成一次同步，之後手機網頁就能直接逛。</p>
           </div>
         </div>
-      </div>
-
-      <div class="callout">
-        <strong>家庭帳號是前提</strong> — 此功能需要先建立或加入家庭後才能使用。尚未設定家庭時，Dialog 會引導你完成設定。
       </div>
     </section>
 
     <!-- Privacy -->
     <section>
       <h2>隱私與安全</h2>
+      <p class="section-intro">你的書單屬於你，不屬於我們。</p>
       <ul class="privacy-list">
         <li>
-          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
-          <span><strong>端對端加密 (E2EE)</strong> — 資料在你的瀏覽器中加密後才上傳，伺服器只存亂碼，開發者無法解密。</span>
+          <span class="privacy-icon">🔒</span>
+          <span><strong>資料加密保護</strong> — 你的書單在上傳前就已經加密，伺服器只看得到亂碼，連開發者也無法讀取。</span>
         </li>
         <li>
-          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg></span>
-          <span><strong>不收集個資</strong> — 不需要額外帳號、不記錄 Email、不追蹤你是誰。</span>
+          <span class="privacy-icon">🙈</span>
+          <span><strong>不收集個人資料</strong> — 不需要額外註冊、不記錄 Email、不追蹤你是誰。</span>
         </li>
         <li>
-          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg></span>
-          <span><strong>預設不公開</strong> — 所有書籍預設關閉分享。你主動開放的書才會出現在家庭書櫃。</span>
+          <span class="privacy-icon">🛡️</span>
+          <span><strong>預設不公開</strong> — 所有書籍預設都是關閉分享的，你主動開放的書才會出現在家庭書櫃。</span>
         </li>
         <li>
-          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14"/><path d="M2 20h20"/><path d="M14 12v.01"/></svg></span>
-          <span><strong>解綁即隔離</strong> — 離開家庭後，其他成員立刻無法看到你的書。但你的偏好設定保留，換家庭不用重設。</span>
-        </li>
-        <li>
-          <span class="privacy-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>
-          <span><strong>程式碼完全公開</strong> — 開源專案，任何人可以審查程式碼。不信任預設伺服器？你可以自建。</span>
+          <span class="privacy-icon">🚪</span>
+          <span><strong>離開家庭即隔離</strong> — 退出家庭後，其他成員立刻看不到你的書；但你原本的分享設定會保留，換家庭不用重設。</span>
         </li>
       </ul>
+      <p style="margin-top: 20px;">
+        完整條款請參閱 <a href="privacy-policy.html">隱私政策頁面</a>。
+      </p>
     </section>
 
     <!-- FAQ -->
@@ -536,130 +589,45 @@
         </details>
         <details>
           <summary>最多幾位家庭成員？</summary>
-          <p>基於讀墨的家庭運作方式，最多只能兩人在一個家庭內。與讀墨官方不同，退出家庭後沒有 180 天限制。</p>
+          <p>基於讀墨的家庭運作方式，最多只能兩人在一個家庭內。與讀墨官方不同的是，退出家庭後沒有 180 天的限制。</p>
         </details>
         <details>
-          <summary>可以增加不是讀墨家庭成員的人嗎？</summary>
-          <p>可以，但只能看到互相開放的書櫃，未來也不能借書。</p>
+          <summary>可以加入不是讀墨家庭的人嗎？</summary>
+          <p>可以，但只能看到互相開放的書櫃，未來也無法借書給對方。</p>
         </details>
         <details>
-          <summary>更改墨家書櫃的顯示名稱會影響讀墨官方的設定嗎？</summary>
-          <p>完全不會，與讀墨官方的設定是分開互不影響。</p>
+          <summary>更改墨家書櫃裡的顯示名稱會影響讀墨官方的設定嗎？</summary>
+          <p>完全不會，墨家書櫃的設定與讀墨官方是分開的，互不影響。</p>
+        </details>
+        <details>
+          <summary>我想自己架後端、或是想貢獻程式碼，該看哪裡？</summary>
+          <p>技術細節、自建後端指南、架構說明都整理在 <a href="technical.html">開發者與技術說明</a> 頁面。</p>
         </details>
       </div>
     </section>
 
-    <!-- Architecture -->
-    <section>
-      <h2>技術架構</h2>
-
-      <table>
-        <thead>
-          <tr><th>層級</th><th>技術</th><th>說明</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>前端</td>
-            <td>Chrome Extension (React + Vite)</td>
-            <td>Content Script 注入 Dialog 至讀墨頁面</td>
-          </tr>
-          <tr>
-            <td>行動端</td>
-            <td>PWA</td>
-            <td>行動網頁，與 Extension 共用同一後端</td>
-          </tr>
-          <tr>
-            <td>後端</td>
-            <td>Cloudflare Workers</td>
-            <td>Serverless API，可自建部署</td>
-          </tr>
-          <tr>
-            <td>儲存</td>
-            <td>Cloudflare KV</td>
-            <td>個人開放設定 (per user) + 家庭群組 (per family)</td>
-          </tr>
-          <tr>
-            <td>加密</td>
-            <td>Web Crypto API (AES-256-GCM)</td>
-            <td>端對端加密，伺服器零知識</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="callout">
-        <strong>資料歸屬設計</strong> — 個人開放設定歸屬個人帳號，不隨家庭綁定 / 解綁而變動。家庭書櫃是動態聚合查詢，不獨立儲存。
-      </div>
-    </section>
-
-    <!-- Self-hosting -->
-    <section>
-      <h2>自建後端 (BYO Backend)</h2>
-      <p>
-        不想將資料存在本專案預設的伺服器？你可以部署自己的 Cloudflare Worker，完全掌控資料。免費額度即可運行。
-      </p>
-
-      <ol class="steps">
-        <li>Fork 本專案的 <code>worker/</code> 目錄</li>
-        <li>安裝 Wrangler CLI：<code>npm install -g wrangler</code></li>
-        <li>
-          部署至你的 Cloudflare 帳號：
-          <pre><code>cd worker
-wrangler deploy</code></pre>
-        </li>
-        <li>在擴充功能或手機版設定中填入你的 Worker URL</li>
-        <li>將同步碼分享給家人 — 同步碼會自動帶入你的 API 端點，家人無需額外設定</li>
-      </ol>
-
-      <div class="callout warning">
-        <strong>注意</strong> — 同一家庭的所有成員必須使用相同的 API 端點。同步碼格式 <code>moo-{id}-{key}@{host}</code> 會自動處理這件事。
-      </div>
-    </section>
-
-    <!-- PWA -->
-    <section>
-      <h2>手機版</h2>
-      <p>
-        手機上無法安裝 Chrome Extension，但你可以透過手機版網頁瀏覽家庭開放書櫃。
-      </p>
-
-      <table>
-        <thead>
-          <tr><th>功能</th><th>Extension</th><th>手機版</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>瀏覽家庭開放書櫃</td><td>&#10003;</td><td>&#10003;</td></tr>
-          <tr><td>建立 / 加入家庭</td><td>&#10003;</td><td>&#10003;</td></tr>
-          <tr><td>個人書櫃開放設定</td><td>&#10003;</td><td>&#10003; (已同步的書)</td></tr>
-          <tr><td>爬取讀墨書單</td><td>&#10003;</td><td>&#10007;</td></tr>
-          <tr><td>自訂 API 端點</td><td>&#10003;</td><td>&#10003;</td></tr>
-        </tbody>
-      </table>
-
-      <div class="callout">
-        手機版無法自動匯入讀墨書單。個人書櫃需先在桌面端 Extension 完成至少一次同步，之後即可在 PWA 調整開放設定。
-      </div>
-    </section>
-
-    <!-- Download / Links -->
-    <section>
-      <h2>開始使用</h2>
-      <p>專案目前開發中，以下連結將在各階段完成後啟用。</p>
-      <div class="btn-group">
-        <a href="#" class="btn btn-primary">Chrome Web Store (coming soon)</a>
-        <a href="#" class="btn btn-secondary">手機版 (coming soon)</a>
-        <a href="https://github.com/reginna-chao/moo-family-bookshelf" class="btn btn-secondary">GitHub 原始碼</a>
-      </div>
+    <!-- Support -->
+    <section class="support">
+      <h2>支持開發</h2>
+      <p class="section-intro">如果這個專案幫到了你，歡迎請我喝一杯珍珠奶茶 🧋</p>
+      <a href="https://rcwork.bobaboba.me/" target="_blank" rel="noopener" class="boba-btn">
+        <img src="boba-button.svg" alt="Give me a Boba!">
+      </a>
     </section>
 
   </main>
 
   <footer class="footer">
     <p>
-      MooFamily Bookshelf — 以 <a href="https://opensource.org/licenses/MIT">MIT License</a> 開源
+      墨家書櫃 MooFamily Bookshelf — 以
+      <a href="https://opensource.org/licenses/MIT">MIT License</a> 開源
     </p>
     <p>
-      <a href="privacy-policy.html">隱私政策</a> · 本專案與 Readmoo 讀墨無官方關聯。
+      <a href="privacy-policy.html">隱私政策</a> ·
+      <a href="technical.html">開發者與技術說明</a> ·
+      <a href="https://github.com/reginna-chao/moo-family-bookshelf">GitHub</a>
     </p>
+    <p>本專案與 Readmoo 讀墨無官方關聯。</p>
   </footer>
 
 </body>
