@@ -56,3 +56,23 @@
 ### Decision Framework
 
 Testability > Readability > Simplicity > Consistency > Performance > Maintainability
+
+### Code Modification Workflow (Mandatory)
+
+Any code modification — **regardless of size** — must go through the full cycle:
+
+1. **Write** (coder) → 2. **Typecheck** → 3. **Test** (tester, where applicable) → 4. **Review** (review skill) → 5. **Fix cycle** for any CRITICAL findings → 6. **Report** to user
+
+"Size too small" is NEVER a valid reason to skip review. A one-line fix is subject to the same cycle as a 500-line feature. The cost of an extra review round is trivial; the cost of silently shipping unreviewed code is not.
+
+**Only exceptions:**
+- Pure typo fixes in user-facing strings (note: these may still break tests and should be verified).
+- Pure comment / doc changes that touch no executable code.
+- The user explicitly authorizes bypass for a specific task with a phrase such as "skip review", "just write the code", or "no need for the full workflow". Absent such explicit instruction, the cycle is mandatory.
+
+**Enforcement routes:**
+- `/team-lead` orchestrates `/fe-team-lead` and `/be-team-lead`, which in turn run `coder → tester → review → fix` inside their Fix Cycle.
+- Invoking `fe-coder`, `be-coder`, `fe-tester`, `be-tester`, `fe-review`, or `be-review` **directly from team-lead** bypasses the Fix Cycle and is prohibited.
+- When the user invokes a lower-level skill like `/fe-coder` directly, follow that skill's own scope — but still run `pnpm typecheck` and report any lint/type issues before finishing.
+
+**Self-check before the final report:** ask yourself "did I skip review because the change was small?" If yes, go back and run review. No exceptions.
