@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ApiClient, BookEntry } from "../api/client";
+import type { ApiClient, BookEntry } from "../api/client";
 import { syncBooks, canAutoSync } from "../sync/syncBooks";
 
 export type SyncStatus = "idle" | "syncing" | "done" | "error";
@@ -32,6 +32,13 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
   const [lastSyncBooks, setLastSyncBooks] = useState<BookEntry[]>([]);
   const [autoSyncDone, setAutoSyncDone] = useState(false);
   const autoSyncTriggered = useRef(false);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
+    };
+  }, []);
 
   // Mechanism A: Auto-sync when dialog opens on #/library page
   useEffect(() => {
@@ -51,7 +58,8 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
           setLastSyncBooks(result.books);
           setSyncStatus("done");
           setAutoSyncDone(true);
-          setTimeout(() => setSyncStatus("idle"), 2000);
+          if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
+          statusTimerRef.current = setTimeout(() => setSyncStatus("idle"), 2000);
         } else {
           setSyncError(result.error ?? "自動同步失敗");
           setSyncStatus("error");
@@ -74,7 +82,8 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
     if (result.success) {
       setLastSyncBooks(result.books);
       setSyncStatus("done");
-      setTimeout(() => setSyncStatus("idle"), 2000);
+      if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = setTimeout(() => setSyncStatus("idle"), 2000);
     } else {
       setSyncError(result.error ?? "同步失敗");
       setSyncStatus("error");

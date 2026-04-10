@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
@@ -45,7 +45,16 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [deleteState, setDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inviteCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const displayNameState = useDisplayName({ apiClient, familyId, userId });
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+      if (inviteCopiedTimerRef.current !== null) clearTimeout(inviteCopiedTimerRef.current);
+    };
+  }, []);
 
   const membersLoading = membersState === "loading";
 
@@ -104,14 +113,16 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     if (!syncCode) return;
     await navigator.clipboard.writeText(syncCode);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
   };
 
   const handleInviteCopy = async () => {
     if (!syncCode) return;
     await navigator.clipboard.writeText(buildInviteUrl(syncCode));
     setInviteCopied(true);
-    setTimeout(() => setInviteCopied(false), 2000);
+    if (inviteCopiedTimerRef.current !== null) clearTimeout(inviteCopiedTimerRef.current);
+    inviteCopiedTimerRef.current = setTimeout(() => setInviteCopied(false), 2000);
   };
 
   const dangerBtnBase: React.CSSProperties = { width: "100%", padding: 12,

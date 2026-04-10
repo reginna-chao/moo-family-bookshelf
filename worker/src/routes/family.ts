@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { Env } from "../utils/env";
 import { kvKeys, type FamilyMember, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName } from "../utils/validation";
@@ -8,6 +8,13 @@ import { validateVerification } from "./verify";
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
 
 export const familyRoutes = new Hono<{ Bindings: Env }>();
+
+function invalidDisplayNameResponse(c: Context<{ Bindings: Env }>) {
+  return c.json(
+    { error: { code: "INVALID_DISPLAY_NAME", message: "displayName must be a string of 20 characters or fewer" } },
+    400,
+  );
+}
 
 // POST /api/family — create new family
 familyRoutes.post("/", async (c) => {
@@ -39,10 +46,7 @@ familyRoutes.post("/", async (c) => {
 
   const displayName = sanitizeDisplayName(body.displayName);
   if (displayName === null) {
-    return c.json(
-      { error: { code: "INVALID_DISPLAY_NAME", message: "displayName must be a string of 20 characters or fewer" } },
-      400,
-    );
+    return invalidDisplayNameResponse(c);
   }
 
   // Prevent duplicate family creation — user must leave existing family first
@@ -117,10 +121,7 @@ familyRoutes.post("/:id/join", async (c) => {
 
   const displayName = sanitizeDisplayName(body.displayName);
   if (displayName === null) {
-    return c.json(
-      { error: { code: "INVALID_DISPLAY_NAME", message: "displayName must be a string of 20 characters or fewer" } },
-      400,
-    );
+    return invalidDisplayNameResponse(c);
   }
 
   // Verify PWA login verification (PIN / pattern / OTP) if user has it set
@@ -371,10 +372,7 @@ familyRoutes.put("/:id/member/:uid/displayName", async (c) => {
 
   const displayName = validateDisplayName(body.displayName);
   if (displayName === null) {
-    return c.json(
-      { error: { code: "INVALID_DISPLAY_NAME", message: "displayName must be a string of 20 characters or fewer" } },
-      400,
-    );
+    return invalidDisplayNameResponse(c);
   }
 
   const raw = await c.env.KV.get<RawFamilyRecord>(
