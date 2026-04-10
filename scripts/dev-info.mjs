@@ -8,7 +8,7 @@ function readEnvValue(envPath, key) {
   try {
     const content = readFileSync(resolve(root, envPath), "utf-8");
     const match = content.match(new RegExp(`^${key}=(.*)$`, "m"));
-    return match ? match[1].trim() || "(empty, via proxy)" : "(not set)";
+    return match ? match[1].trim() || "(empty — will use fallback URL)" : "(not set)";
   } catch {
     return "(file not found)";
   }
@@ -17,9 +17,10 @@ function readEnvValue(envPath, key) {
 const isRemote = process.argv.includes("--remote");
 
 setTimeout(() => {
-  const extApi = readEnvValue(".env", "VITE_EXTENSION_API_ENDPOINT");
-  const pwaApi = readEnvValue(".env", "VITE_PWA_API_ENDPOINT");
-  const kv = isRemote ? "remote (dev)" : "local (simulated)";
+  const envFile = isRemote ? ".env.remote" : ".env";
+  const extApi = readEnvValue(envFile, "VITE_EXTENSION_API_ENDPOINT");
+  const pwaApi = readEnvValue(envFile, "VITE_PWA_API_ENDPOINT");
+  const kv = isRemote ? "deployed (dev worker)" : "local (simulated)";
 
   const lines = [
     `  Extension API:  ${extApi}`,

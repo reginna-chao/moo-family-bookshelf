@@ -7,11 +7,11 @@
  */
 
 export const DEFAULT_API_ENDPOINT: string =
-  import.meta.env.VITE_EXTENSION_API_ENDPOINT ??
+  import.meta.env.VITE_EXTENSION_API_ENDPOINT ||
   "https://moo-family-bookshelf-dev.rcwork.workers.dev";
 
 export const DEFAULT_PWA_URL: string =
-  import.meta.env.VITE_EXTENSION_PWA_URL ?? "https://moo-family-bookshelf-dev.pages.dev";
+  import.meta.env.VITE_EXTENSION_PWA_URL || "https://moo-family-bookshelf-dev.pages.dev";
 
 export const PERSONAL_BOOKS_CACHE_KEY = "personalBooksCache";
 

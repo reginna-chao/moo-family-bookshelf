@@ -77,8 +77,10 @@ moo-family-bookshelf/
 
 - Runtime: Node 20+
 - Install deps: `pnpm install`
-- Dev (extension): `pnpm dev`
+- Dev (extension + PWA, local wrangler): `pnpm dev`
+- Dev (extension + PWA, deployed dev worker): `pnpm dev:remote`
 - Build (extension): `pnpm build`
+- Build for dev worker (extension + PWA): `pnpm build:dev`
 - Type check: `pnpm typecheck`
 - Lint/format: `pnpm lint` / `pnpm format`
 - Tests (extension): `pnpm test`
@@ -140,6 +142,10 @@ Every push/PR triggers:
 | Git tag `v*` | Build Extension → `.zip` → GitHub Release |
 
 ### Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+
+### Dev Script Maintenance Note
+
+`extension/package.json` 的 `dev` 和 `dev:remote` 使用明確的 `concurrently` 列表而非 `pnpm:dev:*` 通配符，以避免 `dev:remote:*` 子腳本被重複抓取。新增 Vite 入口（新的 content script 或 vite config 檔案）時，需同步更新 `dev` 和 `dev:remote` 兩個腳本的列表。
 
 ## Coding Style
 

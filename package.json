@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "concurrently -n ext,worker,pwa,info -c blue,green,magenta,yellow \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev\" \"pnpm --filter moo-family-bookshelf-pwa dev\" \"node scripts/dev-info.mjs\"",
-    "dev:remote": "concurrently -n ext,worker,pwa,info -c blue,green,magenta,yellow \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev:remote\" \"pnpm --filter moo-family-bookshelf-pwa dev\" \"node scripts/dev-info.mjs --remote\"",
+    "dev:remote": "concurrently -n ext,pwa,info -c blue,magenta,yellow \"pnpm --filter moo-family-bookshelf-extension dev:remote\" \"pnpm --filter moo-family-bookshelf-pwa dev:remote\" \"node scripts/dev-info.mjs --remote\"",
     "deploy:dev": "pnpm --filter moo-family-bookshelf-worker deploy:dev",
     "deploy:prod": "pnpm --filter moo-family-bookshelf-worker deploy",
     "dev:extension": "pnpm --filter moo-family-bookshelf-extension dev",
