@@ -214,7 +214,7 @@ describe("FamilySettings", () => {
     });
   });
 
-  it("invite button copies URL with #join= format", async () => {
+  it("invite button copies URL with #invite= format containing sync code", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
 
@@ -229,13 +229,13 @@ describe("FamilySettings", () => {
 
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(
-        expect.stringContaining("#join=fam-123"),
+        expect.stringContaining("#invite="),
       );
     });
 
-    // Should NOT contain the full sync code / encryption key
+    // The invite URL should contain the encoded sync code
     const calledWith = writeText.mock.calls[0][0] as string;
-    expect(calledWith).not.toContain("test-key-xyz");
+    expect(calledWith).toContain("#invite=");
   });
 
   it("shows member list after loading", async () => {

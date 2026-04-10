@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Pencil, Check, X, Eye, EyeOff } from "lucide-react";
+import { Pencil, Check, X, Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-react";
 import { reportLinks } from "moo-family-bookshelf-shared/config/links";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
@@ -29,6 +29,10 @@ export function SettingsPage({
   onLogout,
   onForceLogout,
 }: SettingsPageProps) {
+  // --- Collapsible sections ---
+  const [personalOpen, setPersonalOpen] = useState(true);
+  const [familyOpen, setFamilyOpen] = useState(true);
+
   // --- Sync archived setting ---
   const syncArchivedKey = namespacedKey(userId, "syncArchived");
   const [syncArchived, setSyncArchived] = useState<BoolFlag>(() => {
@@ -81,7 +85,7 @@ export function SettingsPage({
   }
 
   async function handleInvite() {
-    const inviteUrl = `${window.location.origin}${window.location.pathname}#join=${encodeURIComponent(familyId)}`;
+    const inviteUrl = `${window.location.origin}${window.location.pathname}#invite=${encodeURIComponent(syncCode)}`;
     if (navigator.share) {
       try {
         await navigator.share({ title: "加入墨家書櫃", url: inviteUrl });
@@ -220,152 +224,174 @@ export function SettingsPage({
 
       {/* Personal settings */}
       <section className="mb-6">
-        <h3 className="text-sm font-medium text-gray-500 mb-3">個人設定</h3>
+        <button
+          onClick={() => setPersonalOpen(!personalOpen)}
+          aria-expanded={personalOpen}
+          className="flex items-center gap-1.5 text-sm font-medium text-gray-500 w-full"
+        >
+          {personalOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          個人設定
+        </button>
 
-        <div className="mb-4">
-          <p className="text-xs text-gray-500 mb-1">顯示名稱</p>
-          {editingName ? (
-            <div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  maxLength={20}
-                  placeholder="輸入顯示名稱"
-                  aria-label="顯示名稱"
-                  className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-                <button
-                  onClick={() => void handleSaveName()}
-                  disabled={nameSaving}
-                  aria-label="確認修改名稱"
-                  className="p-1.5 text-blue-600 hover:text-blue-800 disabled:opacity-50"
-                >
-                  <Check size={16} />
-                </button>
-                <button
-                  onClick={() => { setEditingName(false); setNameError(null); }}
-                  disabled={nameSaving}
-                  aria-label="取消修改名稱"
-                  className="p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-50"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              {nameError && (
-                <p role="alert" className="text-red-500 text-xs mt-1">{nameError}</p>
+        {personalOpen && (
+          <div className="mt-3">
+            <div className="mb-4">
+              <p className="text-xs text-gray-500 mb-1">顯示名稱</p>
+              {editingName ? (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={nameInput}
+                      onChange={(e) => setNameInput(e.target.value)}
+                      maxLength={20}
+                      placeholder="輸入顯示名稱"
+                      aria-label="顯示名稱"
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                    />
+                    <button
+                      onClick={() => void handleSaveName()}
+                      disabled={nameSaving}
+                      aria-label="確認修改名稱"
+                      className="p-1.5 text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                    >
+                      <Check size={16} />
+                    </button>
+                    <button
+                      onClick={() => { setEditingName(false); setNameError(null); }}
+                      disabled={nameSaving}
+                      aria-label="取消修改名稱"
+                      className="p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  {nameError && (
+                    <p role="alert" className="text-red-500 text-xs mt-1">{nameError}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-700">
+                    {currentName || userId.slice(0, 8)}
+                  </span>
+                  <button
+                    onClick={() => { setNameInput(currentName); setEditingName(true); }}
+                    aria-label="編輯顯示名稱"
+                    className="p-1 text-gray-400 hover:text-gray-600"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </div>
               )}
             </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-700">
-                {currentName || userId.slice(0, 8)}
-              </span>
-              <button
-                onClick={() => { setNameInput(currentName); setEditingName(true); }}
-                aria-label="編輯顯示名稱"
-                className="p-1 text-gray-400 hover:text-gray-600"
-              >
-                <Pencil size={14} />
-              </button>
-            </div>
-          )}
-        </div>
 
-        <button
-          role="switch"
-          aria-checked={syncArchived === BoolFlag.TRUE}
-          aria-label="顯示封存書籍"
-          onClick={handleToggleSyncArchived}
-          className="flex items-center gap-2 text-sm text-gray-700"
-        >
-          <span
-            className={`relative inline-block w-8 h-[18px] rounded-full transition-colors ${
-              syncArchived === BoolFlag.TRUE ? "bg-blue-600" : "bg-gray-300"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 block w-3.5 h-3.5 rounded-full bg-white transition-[left] ${
-                syncArchived === BoolFlag.TRUE ? "left-[16px]" : "left-0.5"
-              }`}
-            />
-          </span>
-          顯示封存書籍
-        </button>
-        <p className="text-gray-400 text-xs mt-1.5">
-          啟用後，個人書櫃會顯示已封存的書籍分頁
-        </p>
+            <button
+              role="switch"
+              aria-checked={syncArchived === BoolFlag.TRUE}
+              aria-label="顯示封存書籍"
+              onClick={handleToggleSyncArchived}
+              className="flex items-center gap-2 text-sm text-gray-700"
+            >
+              <span
+                className={`relative inline-block w-8 h-[18px] rounded-full transition-colors ${
+                  syncArchived === BoolFlag.TRUE ? "bg-blue-600" : "bg-gray-300"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 block w-3.5 h-3.5 rounded-full bg-white transition-[left] ${
+                    syncArchived === BoolFlag.TRUE ? "left-[16px]" : "left-0.5"
+                  }`}
+                />
+              </span>
+              顯示封存書籍
+            </button>
+            <p className="text-gray-400 text-xs mt-1.5">
+              啟用後，個人書櫃會顯示已封存的書籍分頁
+            </p>
+          </div>
+        )}
 
       </section>
 
       {/* Family settings */}
       <section className="mb-6 pt-6 border-t border-gray-200">
-        <h3 className="text-sm font-medium text-gray-500 mb-3">家庭設定</h3>
-
-        <p className="text-xs text-gray-500 mb-1">家庭同步碼</p>
-        <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs break-all mb-2 flex items-center gap-2">
-          <span className="flex-1">
-            moo-{familyId}-{showSyncCode ? encryptionKey : "••••••••••••"}{syncCode.includes("@") ? `@${syncCode.split("@")[1]}` : ""}
-          </span>
-          <button
-            onClick={() => setShowSyncCode(!showSyncCode)}
-            className="flex-shrink-0 text-gray-400 hover:text-gray-600 p-1"
-            aria-label={showSyncCode ? "隱藏同步碼" : "顯示同步碼"}
-          >
-            {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
-        </div>
         <button
-          onClick={() => void handleCopy()}
-          className={`w-full rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-600 ${
-            copied ? "bg-blue-50" : "bg-transparent hover:bg-blue-50"
-          } transition-colors`}
+          onClick={() => setFamilyOpen(!familyOpen)}
+          aria-expanded={familyOpen}
+          className="flex items-center gap-1.5 text-sm font-medium text-gray-500 w-full"
         >
-          {copied ? "已複製" : "複製同步碼"}
+          {familyOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          家庭設定
         </button>
-        <button
-          onClick={() => void handleInvite()}
-          className={`w-full rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-600 mt-2 ${
-            inviteCopied ? "bg-green-50" : "bg-transparent hover:bg-green-50"
-          } transition-colors`}
-        >
-          {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
-        </button>
-        <p className="text-gray-400 text-xs mt-1.5 mb-4">
-          將此代碼或邀請連結分享給家人即可加入書櫃
-        </p>
 
-        <p className="text-xs text-gray-500 mb-1">
-          成員{!membersLoading && !membersError ? ` (${members.length})` : ""}
-        </p>
-        {membersLoading && (
-          <p className="text-gray-400 text-sm">載入中...</p>
-        )}
-        {membersError && (
-          <div>
-            <p role="alert" className="text-red-500 text-sm mb-2">{membersError}</p>
+        {familyOpen && (
+          <div className="mt-3">
+            <p className="text-xs text-gray-500 mb-1">家庭同步碼</p>
+            <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs break-all mb-2 flex items-center gap-2">
+              <span className="flex-1">
+                moo-{familyId}-{showSyncCode ? encryptionKey : "••••••••••••"}{syncCode.includes("@") ? `@${syncCode.split("@")[1]}` : ""}
+              </span>
+              <button
+                onClick={() => setShowSyncCode(!showSyncCode)}
+                className="flex-shrink-0 text-gray-400 hover:text-gray-600 p-1"
+                aria-label={showSyncCode ? "隱藏同步碼" : "顯示同步碼"}
+              >
+                {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
             <button
-              onClick={() => void loadMembers()}
-              className="text-sm font-semibold text-blue-600"
+              onClick={() => void handleCopy()}
+              className={`w-full rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-600 ${
+                copied ? "bg-blue-50" : "bg-transparent hover:bg-blue-50"
+              } transition-colors`}
             >
-              重試
+              {copied ? "已複製" : "複製同步碼"}
             </button>
+            <button
+              onClick={() => void handleInvite()}
+              className={`w-full rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-600 mt-2 ${
+                inviteCopied ? "bg-green-50" : "bg-transparent hover:bg-green-50"
+              } transition-colors`}
+            >
+              {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
+            </button>
+            <p className="text-gray-400 text-xs mt-1.5 mb-4">
+              將此代碼或邀請連結分享給家人即可加入書櫃
+            </p>
+
+            <p className="text-xs text-gray-500 mb-1">
+              成員{!membersLoading && !membersError ? ` (${members.length})` : ""}
+            </p>
+            {membersLoading && (
+              <p className="text-gray-400 text-sm">載入中...</p>
+            )}
+            {membersError && (
+              <div>
+                <p role="alert" className="text-red-500 text-sm mb-2">{membersError}</p>
+                <button
+                  onClick={() => void loadMembers()}
+                  className="text-sm font-semibold text-blue-600"
+                >
+                  重試
+                </button>
+              </div>
+            )}
+            {!membersLoading && !membersError && (
+              <MemberList
+                members={members}
+                ownerId={ownerId}
+                userId={userId}
+                familyId={familyId}
+                apiClient={apiClient}
+                onMembersChanged={() => { void loadMembers(); void refreshBookshelf(); }}
+              />
+            )}
+            <p className="text-gray-400 text-xs mt-1.5">
+              基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
+            </p>
           </div>
         )}
-        {!membersLoading && !membersError && (
-          <MemberList
-            members={members}
-            ownerId={ownerId}
-            userId={userId}
-            familyId={familyId}
-            apiClient={apiClient}
-            onMembersChanged={() => { void loadMembers(); void refreshBookshelf(); }}
-          />
-        )}
-        <p className="text-gray-400 text-xs mt-1.5">
-          基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
-        </p>
 
       </section>
 

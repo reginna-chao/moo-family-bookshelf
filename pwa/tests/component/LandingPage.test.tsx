@@ -72,10 +72,9 @@ describe("LandingPage", () => {
   });
 
   describe("renders form", () => {
-    it("should show family ID, encryption key, email inputs, and submit button", () => {
+    it("should show sync code, email inputs, and submit button", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      expect(screen.getByLabelText("家庭 ID")).toBeInTheDocument();
       expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
       expect(screen.getByLabelText("讀墨帳號 Email")).toBeInTheDocument();
       expect(
@@ -86,8 +85,7 @@ describe("LandingPage", () => {
     it("should show placeholders", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      expect(screen.getByPlaceholderText("abc1-def2")).toBeInTheDocument();
-      expect(screen.getByPlaceholderText("同步碼")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("moo-xxxxxxxx-xxxxxxxxxxxx")).toBeInTheDocument();
       expect(
         screen.getByPlaceholderText("your@email.com"),
       ).toBeInTheDocument();
@@ -95,20 +93,20 @@ describe("LandingPage", () => {
   });
 
   describe("empty form submission", () => {
-    it("should show validation error when family ID is empty", async () => {
+    it("should show validation error when sync code is empty", async () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       submitForm();
 
       await waitFor(() => {
         expect(
-          screen.getByText("請輸入家庭 ID。"),
+          screen.getByText("請輸入同步碼。"),
         ).toBeInTheDocument();
       });
       expect(mockOnAuth).not.toHaveBeenCalled();
     });
 
-    it("should show email validation error when fields are valid but email is empty", async () => {
+    it("should show email validation error when sync code is valid but email is empty", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
         encryptionKey: "key-1",
@@ -116,8 +114,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       submitForm();
 
       await waitFor(() => {
@@ -135,8 +132,8 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "bad");
-      fillInput("同步碼", "code");
+      fillInput("同步碼", "bad-code");
+      fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
       await waitFor(() => {
@@ -153,8 +150,8 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "bad");
-      fillInput("同步碼", "code");
+      fillInput("同步碼", "bad-code");
+      fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
       await waitFor(() => {
@@ -164,15 +161,15 @@ describe("LandingPage", () => {
       });
     });
 
-    it("should clear error when user types in family ID field", async () => {
+    it("should clear error when user types in sync code field", async () => {
       mockDecodeSyncCode.mockImplementation(() => {
         throw new SyncCodeError("Invalid sync code");
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "bad");
-      fillInput("同步碼", "code");
+      fillInput("同步碼", "bad");
+      fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
       await waitFor(() => {
@@ -181,7 +178,7 @@ describe("LandingPage", () => {
         ).toBeInTheDocument();
       });
 
-      fillInput("家庭 ID", "m");
+      fillInput("同步碼", "m");
 
       expect(
         screen.queryByText("同步碼格式不正確，請確認後重新輸入。"),
@@ -198,8 +195,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "not-an-email");
       submitForm();
 
@@ -219,8 +215,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "bad");
       submitForm();
 
@@ -273,8 +268,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "test@test.com");
       submitForm();
 
@@ -305,8 +299,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -334,8 +327,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -357,8 +349,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -384,8 +375,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -411,8 +401,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -425,12 +414,7 @@ describe("LandingPage", () => {
   });
 
   describe("initialSyncCode prop", () => {
-    it("should pre-fill both fields from initialSyncCode prop", () => {
-      mockDecodeSyncCode.mockReturnValue({
-        familyId: "abc1-def2",
-        encryptionKey: "key123",
-      });
-
+    it("should pre-fill sync code field from initialSyncCode prop", () => {
       render(
         <LandingPage
           onAuth={mockOnAuth}
@@ -438,10 +422,8 @@ describe("LandingPage", () => {
         />,
       );
 
-      const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
-      expect(familyIdInput.value).toBe("abc1-def2");
-      expect(keyInput.value).toBe("key123");
+      const syncCodeInput = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(syncCodeInput.value).toBe("moo-abc1-def2-key123");
     });
 
     it("should not pre-fill when initialSyncCode is empty", () => {
@@ -452,95 +434,27 @@ describe("LandingPage", () => {
         />,
       );
 
-      const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
-      expect(familyIdInput.value).toBe("");
-      expect(keyInput.value).toBe("");
+      const syncCodeInput = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(syncCodeInput.value).toBe("");
     });
   });
 
   describe("remembered sync code from localStorage", () => {
-    it("should pre-fill both fields from REMEMBERED_LOGOUT_KEY on mount", () => {
+    it("should pre-fill sync code from REMEMBERED_LOGOUT_KEY on mount", () => {
       localStorage.setItem("moo:rememberedLogout", "moo-fam1-key1@custom.host.com");
-      mockDecodeSyncCode.mockReturnValue({
-        familyId: "fam1",
-        encryptionKey: "key1",
-        apiHost: "custom.host.com",
-      });
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
-      expect(familyIdInput.value).toBe("fam1");
-      expect(keyInput.value).toBe("key1");
+      const syncCodeInput = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(syncCodeInput.value).toBe("moo-fam1-key1@custom.host.com");
       expect(localStorage.getItem("moo:rememberedLogout")).toBeNull();
     });
 
     it("should not pre-fill when REMEMBERED_LOGOUT_KEY is absent", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
-      expect(familyIdInput.value).toBe("");
-      expect(keyInput.value).toBe("");
-    });
-  });
-
-  describe("initialJoinFamilyId prop", () => {
-    it("should pre-fill family ID from initialJoinFamilyId prop", () => {
-      render(
-        <LandingPage
-          onAuth={mockOnAuth}
-          initialJoinFamilyId="abc-join-123"
-        />,
-      );
-
-      const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
-      expect(familyIdInput.value).toBe("abc-join-123");
-      expect(keyInput.value).toBe("");
-    });
-  });
-
-  describe("smart paste", () => {
-    it("should auto-split full sync code pasted into family ID field", () => {
-      mockDecodeSyncCode.mockReturnValue({
-        familyId: "abc1-def2",
-        encryptionKey: "key123secret",
-        apiHost: "custom.api.com",
-      });
-
-      render(<LandingPage onAuth={mockOnAuth} />);
-
-      const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-
-      fireEvent.paste(familyIdInput, {
-        clipboardData: { getData: () => "moo-abc1-def2-key123secret@custom.api.com" },
-      });
-
-      expect(familyIdInput.value).toBe("abc1-def2");
-      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
-      expect(keyInput.value).toBe("key123secret");
-    });
-
-    it("should not auto-split when pasted text is not a valid sync code", () => {
-      mockDecodeSyncCode.mockImplementation(() => {
-        throw new Error("Invalid");
-      });
-
-      render(<LandingPage onAuth={mockOnAuth} />);
-
-      const familyIdInput = screen.getByLabelText("家庭 ID") as HTMLInputElement;
-
-      // Paste something that is NOT a valid sync code — should not prevent default
-      fireEvent.paste(familyIdInput, {
-        clipboardData: { getData: () => "just-some-text" },
-      });
-
-      // decodeSyncCode threw, so fillFromSyncCode returned false; paste proceeds normally
-      // The input value won't change because fireEvent.paste doesn't actually insert text
-      expect(mockDecodeSyncCode).toHaveBeenCalledWith("just-some-text");
+      const syncCodeInput = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(syncCodeInput.value).toBe("");
     });
   });
 
@@ -574,8 +488,7 @@ describe("LandingPage", () => {
       fireEvent.change(checkbox, { target: { checked: false } });
       expect(checkbox.checked).toBe(false);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -587,26 +500,26 @@ describe("LandingPage", () => {
     });
   });
 
-  describe("encryption key eye toggle", () => {
-    it("should default to password type for encryption key input", () => {
+  describe("sync code eye toggle", () => {
+    it("should default to password type for sync code input", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
-      expect(keyInput.type).toBe("password");
+      const syncInput = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(syncInput.type).toBe("password");
     });
 
-    it("should toggle encryption key visibility with eye button", () => {
+    it("should toggle sync code visibility with eye button", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      const keyInput = screen.getByLabelText("同步碼") as HTMLInputElement;
-      expect(keyInput.type).toBe("password");
+      const syncInput = screen.getByLabelText("同步碼") as HTMLInputElement;
+      expect(syncInput.type).toBe("password");
 
       fireEvent.click(screen.getByRole("button", { name: "顯示同步碼" }));
-      expect(keyInput.type).toBe("text");
+      expect(syncInput.type).toBe("text");
       expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "隱藏同步碼" }));
-      expect(keyInput.type).toBe("password");
+      expect(syncInput.type).toBe("password");
     });
   });
 
@@ -635,8 +548,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -657,8 +569,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -678,8 +589,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -700,8 +610,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -712,7 +621,7 @@ describe("LandingPage", () => {
       fireEvent.click(screen.getByText("取消"));
 
       await waitFor(() => {
-        expect(screen.getByLabelText("家庭 ID")).toBeInTheDocument();
+        expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
       });
     });
 
@@ -728,8 +637,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -758,8 +666,7 @@ describe("LandingPage", () => {
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      fillInput("家庭 ID", "fam-1");
-      fillInput("同步碼", "key-1");
+      fillInput("同步碼", "moo-fam1-key1");
       fillInput("讀墨帳號 Email", "user@example.com");
       submitForm();
 
@@ -856,7 +763,7 @@ describe("LandingPage", () => {
       );
 
       // Should show the normal form
-      expect(screen.getByLabelText("家庭 ID")).toBeInTheDocument();
+      expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
       expect(mockGetVerifyMethod).not.toHaveBeenCalled();
     });
   });

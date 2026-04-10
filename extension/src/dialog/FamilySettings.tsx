@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
 import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
-import { DEFAULT_API_ENDPOINT, DEFAULT_PWA_URL } from "../constants";
+import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "../constants";
 import { QrCodeLink } from "./QrCodeLink";
+import { InviteQrCode } from "./InviteQrCode";
 import { VerificationSettings } from "./VerificationSettings";
 import { useFamilyData } from "./FamilyDataContext";
 import { reportLinks } from "moo-family-bookshelf-shared/config/links";
@@ -34,6 +35,9 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [encryptionKey, setEncryptionKey] = useState<string | null>(null);
   const [showSyncCode, setShowSyncCode] = useState(false);
+  const [personalOpen, setPersonalOpen] = useState(true);
+  const [familyOpen, setFamilyOpen] = useState(true);
+  const [mobileOpen, setMobileOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
@@ -104,8 +108,8 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   };
 
   const handleInviteCopy = async () => {
-    const inviteUrl = `${DEFAULT_PWA_URL}/#join=${encodeURIComponent(familyId)}`;
-    await navigator.clipboard.writeText(inviteUrl);
+    if (!syncCode) return;
+    await navigator.clipboard.writeText(buildInviteUrl(syncCode));
     setInviteCopied(true);
     setTimeout(() => setInviteCopied(false), 2000);
   };
@@ -113,6 +117,13 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const dangerBtnBase: React.CSSProperties = { width: "100%", padding: 12,
     border: "1px solid #ef4444", borderRadius: 8, background: "transparent",
     color: "#ef4444", fontWeight: 600, fontSize: 14 };
+
+  const sectionHeaderStyle: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 6,
+    fontSize: 16, fontWeight: 600,
+    background: "none", border: "none", cursor: "pointer", padding: 0,
+    color: "#1e293b", width: "100%",
+  };
 
   const handleLeaveConfirm = async () => {
     setLeaveState("leaving");
@@ -157,144 +168,169 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
 
   return (
     <div>
-      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>個人設定</h3>
-      <DisplayNameEditor {...displayNameState} userId={userId} />
-      <div style={{ marginBottom: 20 }}>
-        <button
-          role="switch"
-          aria-checked={syncArchived === BoolFlag.TRUE}
-          aria-label="同步封存書籍"
-          onClick={handleToggleSyncArchived}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 14,
-            color: "#334155",
-            cursor: "pointer",
-            background: "transparent",
-            border: "none",
-            padding: 0,
-          }}
-        >
-          <span style={{
-            display: "inline-block",
-            width: 32,
-            height: 18,
-            borderRadius: 9,
-            background: syncArchived === BoolFlag.TRUE ? "#2563eb" : "#cbd5e1",
-            position: "relative",
-            transition: "background 0.2s",
-            flexShrink: 0,
-          }}>
-            <span style={{
-              display: "block",
-              width: 14,
-              height: 14,
-              borderRadius: 7,
-              background: "#fff",
-              position: "absolute",
-              top: 2,
-              left: syncArchived === BoolFlag.TRUE ? 16 : 2,
-              transition: "left 0.2s",
-            }} />
-          </span>
-          同步封存書籍
-        </button>
-        <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6, marginBottom: 0 }}>
-          啟用後，同步時會一併讀取已封存的書籍
-        </div>
-      </div>
-      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 4 }} />
-      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>家庭設定</h3>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 6 }}>家庭同步碼</div>
-        <div style={{
-          padding: 12, background: "#f8fafc", borderRadius: 8, marginBottom: 8,
-          display: "flex", alignItems: "center", gap: 8,
-        }}>
-          <span style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
-            {encryptionKey
-              ? `moo-${familyId}-${showSyncCode ? encryptionKey : "••••••••••••"}${syncCode && syncCode.includes("@") ? `@${syncCode.split("@")[1]}` : ""}`
-              : "載入中..."}
-          </span>
-          {encryptionKey && (
+      <button
+        onClick={() => setPersonalOpen(!personalOpen)}
+        aria-expanded={personalOpen}
+        style={{ ...sectionHeaderStyle, marginBottom: personalOpen ? 12 : 0 }}
+      >
+        {personalOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        個人設定
+      </button>
+      {personalOpen && (
+        <>
+          <DisplayNameEditor {...displayNameState} userId={userId} />
+          <div style={{ marginBottom: 20 }}>
             <button
-              onClick={() => setShowSyncCode(!showSyncCode)}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
-              aria-label={showSyncCode ? "隱藏同步碼" : "顯示同步碼"}
-            >
-              {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-          <button
-            onClick={handleCopy}
-            disabled={!syncCode}
-            style={{
-              flex: 1, padding: 10, border: "1px solid #2563eb", borderRadius: 8,
-              background: copied ? "#eff6ff" : "transparent", color: "#2563eb",
-              fontWeight: 600, cursor: syncCode ? "pointer" : "not-allowed",
-              opacity: syncCode ? 1 : 0.5, fontSize: 14,
-            }}
-          >
-            {copied ? "已複製" : "複製同步碼"}
-          </button>
-          <button
-            onClick={() => void handleInviteCopy()}
-            style={{
-              flex: 1, padding: 10, border: "1px solid #10b981", borderRadius: 8,
-              background: inviteCopied ? "#ecfdf5" : "transparent", color: "#10b981",
-              fontWeight: 600, cursor: "pointer", fontSize: 14,
-            }}
-          >
-            {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
-          </button>
-        </div>
-        <div style={{ color: "#94a3b8", fontSize: 12 }}>
-          將同步碼或邀請連結分享給家人即可加入書櫃
-        </div>
-      </div>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
-          家庭成員{!membersLoading && !membersError ? ` (${members.length})` : ""}
-        </div>
-        {membersLoading && (
-          <div style={{ color: "#94a3b8", fontSize: 14, textAlign: "center", padding: 12 }}>
-            載入中...
-          </div>
-        )}
-        {!membersLoading && membersError && (
-          <div style={{ textAlign: "center", padding: 12 }}>
-            <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{membersError}</div>
-            <button
-              onClick={() => void fetchMembers()}
+              role="switch"
+              aria-checked={syncArchived === BoolFlag.TRUE}
+              aria-label="同步封存書籍"
+              onClick={handleToggleSyncArchived}
               style={{
-                padding: "6px 16px", border: "1px solid #2563eb", borderRadius: 6,
-                background: "transparent", color: "#2563eb", fontWeight: 600,
-                cursor: "pointer", fontSize: 13,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 14,
+                color: "#334155",
+                cursor: "pointer",
+                background: "transparent",
+                border: "none",
+                padding: 0,
               }}
             >
-              重試
+              <span style={{
+                display: "inline-block",
+                width: 32,
+                height: 18,
+                borderRadius: 9,
+                background: syncArchived === BoolFlag.TRUE ? "#2563eb" : "#cbd5e1",
+                position: "relative",
+                transition: "background 0.2s",
+                flexShrink: 0,
+              }}>
+                <span style={{
+                  display: "block",
+                  width: 14,
+                  height: 14,
+                  borderRadius: 7,
+                  background: "#fff",
+                  position: "absolute",
+                  top: 2,
+                  left: syncArchived === BoolFlag.TRUE ? 16 : 2,
+                  transition: "left 0.2s",
+                }} />
+              </span>
+              同步封存書籍
             </button>
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6, marginBottom: 0 }}>
+              啟用後，同步時會一併讀取已封存的書籍
+            </div>
           </div>
-        )}
-        {!membersLoading && !membersError && (
-          <MemberList
-            members={members}
-            ownerId={ownerId}
-            userId={userId}
-            familyId={familyId}
-            apiClient={apiClient}
-            onMembersChanged={() => { void fetchMembers(); void refreshBookshelf(); }}
-            familyEndpoint={familyEndpoint}
-          />
-        )}
-        <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
-          基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
-        </div>
-      </div>
+        </>
+      )}
+      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 4 }} />
+      <button
+        onClick={() => setFamilyOpen(!familyOpen)}
+        aria-expanded={familyOpen}
+        style={{ ...sectionHeaderStyle, marginBottom: familyOpen ? 12 : 0 }}
+      >
+        {familyOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        家庭設定
+      </button>
+      {familyOpen && (
+        <>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 6 }}>家庭同步碼</div>
+            <div style={{
+              padding: 12, background: "#f8fafc", borderRadius: 8, marginBottom: 8,
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <span style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
+                {encryptionKey
+                  ? `moo-${familyId}-${showSyncCode ? encryptionKey : "••••••••••••"}${syncCode && syncCode.includes("@") ? `@${syncCode.split("@")[1]}` : ""}`
+                  : "載入中..."}
+              </span>
+              {encryptionKey && (
+                <button
+                  onClick={() => setShowSyncCode(!showSyncCode)}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
+                  aria-label={showSyncCode ? "隱藏同步碼" : "顯示同步碼"}
+                >
+                  {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+              <button
+                onClick={handleCopy}
+                disabled={!syncCode}
+                style={{
+                  flex: 1, padding: 10, border: "1px solid #2563eb", borderRadius: 8,
+                  background: copied ? "#eff6ff" : "transparent", color: "#2563eb",
+                  fontWeight: 600, cursor: syncCode ? "pointer" : "not-allowed",
+                  opacity: syncCode ? 1 : 0.5, fontSize: 14,
+                }}
+              >
+                {copied ? "已複製" : "複製同步碼"}
+              </button>
+              <button
+                onClick={() => void handleInviteCopy()}
+                disabled={!syncCode}
+                style={{
+                  flex: 1, padding: 10, border: "1px solid #10b981", borderRadius: 8,
+                  background: inviteCopied ? "#ecfdf5" : "transparent", color: "#10b981",
+                  fontWeight: 600, cursor: syncCode ? "pointer" : "not-allowed",
+                  opacity: syncCode ? 1 : 0.5, fontSize: 14,
+                }}
+              >
+                {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
+              </button>
+            </div>
+            <div style={{ color: "#94a3b8", fontSize: 12 }}>
+              將同步碼或邀請連結分享給家人即可加入書櫃
+            </div>
+            {syncCode && <InviteQrCode syncCode={syncCode} />}
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
+              家庭成員{!membersLoading && !membersError ? ` (${members.length})` : ""}
+            </div>
+            {membersLoading && (
+              <div style={{ color: "#94a3b8", fontSize: 14, textAlign: "center", padding: 12 }}>
+                載入中...
+              </div>
+            )}
+            {!membersLoading && membersError && (
+              <div style={{ textAlign: "center", padding: 12 }}>
+                <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{membersError}</div>
+                <button
+                  onClick={() => void fetchMembers()}
+                  style={{
+                    padding: "6px 16px", border: "1px solid #2563eb", borderRadius: 6,
+                    background: "transparent", color: "#2563eb", fontWeight: 600,
+                    cursor: "pointer", fontSize: 13,
+                  }}
+                >
+                  重試
+                </button>
+              </div>
+            )}
+            {!membersLoading && !membersError && (
+              <MemberList
+                members={members}
+                ownerId={ownerId}
+                userId={userId}
+                familyId={familyId}
+                apiClient={apiClient}
+                onMembersChanged={() => { void fetchMembers(); void refreshBookshelf(); }}
+                familyEndpoint={familyEndpoint}
+              />
+            )}
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
+              基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
+            </div>
+          </div>
+        </>
+      )}
       <div style={{ marginBottom: 20 }}>
         {leaveError && (
           <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{leaveError}</div>
@@ -340,11 +376,22 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         )}
       </div>
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginBottom: 16 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>手機版登入</h3>
-        {syncCode && (
-          <QrCodeLink syncCode={syncCode} userId={userId} />
+        <button
+          onClick={() => setMobileOpen(!mobileOpen)}
+          aria-expanded={mobileOpen}
+          style={{ ...sectionHeaderStyle, marginBottom: mobileOpen ? 12 : 0 }}
+        >
+          {mobileOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          手機版登入
+        </button>
+        {mobileOpen && (
+          <>
+            {syncCode && (
+              <QrCodeLink syncCode={syncCode} userId={userId} />
+            )}
+            <VerificationSettings userId={userId} apiClient={apiClient} />
+          </>
         )}
-        <VerificationSettings userId={userId} apiClient={apiClient} />
       </div>
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 16 }}>
         {deleteError && (

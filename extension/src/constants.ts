@@ -22,3 +22,11 @@ export const PERSONAL_BOOKS_CACHE_KEY = "personalBooksCache";
 export function buildPwaUrl(syncCode: string, userId: string): string {
   return `${DEFAULT_PWA_URL}/#code=${encodeURIComponent(syncCode)}&uid=${encodeURIComponent(userId)}`;
 }
+
+/**
+ * Build PWA invite URL with sync code in the fragment (never sent to server).
+ * Format: https://pwa.example.com/#invite={syncCode}
+ */
+export function buildInviteUrl(syncCode: string): string {
+  return `${DEFAULT_PWA_URL}/#invite=${encodeURIComponent(syncCode)}`;
+}

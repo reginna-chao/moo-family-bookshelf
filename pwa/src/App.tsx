@@ -49,7 +49,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export default function App() {
-  const { auth, isLoading, login, logout, forceLogout, initialSyncCode, initialJoinFamilyId, qrUserId } = useAuth();
+  const { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>(() => pageFromHash() ?? "family-shelf");
   const [familyFullError, setFamilyFullError] = useState("");
   const [verifySetupDone, setVerifySetupDone] = useState(false);
@@ -161,7 +161,6 @@ export default function App() {
           login(data);
         }}
         initialSyncCode={initialSyncCode}
-        initialJoinFamilyId={initialJoinFamilyId}
         qrUserId={qrUserId}
         externalError={familyFullError}
       />

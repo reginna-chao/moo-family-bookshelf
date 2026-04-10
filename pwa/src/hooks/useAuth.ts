@@ -17,10 +17,8 @@ export interface UseAuthReturn {
   logout: () => void;
   /** Clears everything unconditionally, ignoring rememberSyncCode. Used by delete account. */
   forceLogout: () => void;
-  /** Pre-filled sync code from QR code or remembered logout. */
+  /** Pre-filled sync code from QR code, invite link, or remembered logout. */
   initialSyncCode: string;
-  /** Pre-filled familyId from #join= invite link. */
-  initialJoinFamilyId: string;
   /** Pre-hashed userId from QR code (#code=…&uid=…). Skips email entry on LandingPage. */
   qrUserId: string;
 }
@@ -134,7 +132,7 @@ export function forceClearStorage(): void {
 
 function clearUrlParams(): void {
   // Preserve page routing hashes (#family-shelf, #personal-shelf, #settings);
-  // only clear auth-related hashes (#code=…&uid=…, #join=…) and query params.
+  // only clear auth-related hashes (#code=…&uid=…, #invite=…) and query params.
   if (PAGE_HASHES.has(window.location.hash)) return;
   if (window.location.hash || window.location.search) {
     window.history.replaceState({}, "", window.location.pathname);
@@ -170,27 +168,36 @@ function tryParseQrParams(): QrParams | null {
 }
 
 /**
- * Parse #join={familyId} from URL hash (invite link flow).
- * Returns the familyId string if found, null otherwise.
+ * Parse #invite={syncCode} from URL hash (invite link flow).
+ * Returns the full sync code string if found and valid, null otherwise.
  */
-function tryParseJoinParam(): string | null {
+function tryParseInviteParam(): string | null {
   const hash = window.location.hash.slice(1);
   const params = new URLSearchParams(hash);
-  return params.get("join");
+  const code = params.get("invite");
+  if (!code) return null;
+
+  // Validate that the sync code is decodable
+  try {
+    decodeSyncCode(code);
+  } catch {
+    console.warn("邀請連結同步碼解析失敗");
+    return null;
+  }
+  return code;
 }
 
 export function useAuth(): UseAuthReturn {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [initialSyncCode, setInitialSyncCode] = useState("");
-  const [initialJoinFamilyId, setInitialJoinFamilyId] = useState("");
   const [qrUserId, setQrUserId] = useState("");
 
   useEffect(() => {
-    // 0. If URL contains "join=" param key, clear auth state to start fresh for invite.
+    // 0. If URL contains "invite=" param key, clear auth state to start fresh for invite.
     const preCheckHashParams = new URLSearchParams(window.location.hash.slice(1));
     const preCheckSearchParams = new URLSearchParams(window.location.search);
-    if (preCheckHashParams.has("join") || preCheckSearchParams.has("join")) {
+    if (preCheckHashParams.has("invite") || preCheckSearchParams.has("invite")) {
       forceClearStorage();
     }
 
@@ -199,8 +206,8 @@ export function useAuth(): UseAuthReturn {
     //    verification flow instead of auto-logging in.
     const qrParams = tryParseQrParams();
 
-    // 2. Parse #join={familyId} invite link (separate from QR flow)
-    const joinFamilyId = tryParseJoinParam();
+    // 2. Parse #invite={syncCode} invite link (separate from QR flow)
+    const inviteSyncCode = tryParseInviteParam();
 
     // Always clear URL params to avoid leaving encryption key in address bar
     clearUrlParams();
@@ -214,9 +221,9 @@ export function useAuth(): UseAuthReturn {
       return;
     }
 
-    // Pre-fill familyId from invite link (don't auto-submit)
-    if (joinFamilyId) {
-      setInitialJoinFamilyId(joinFamilyId);
+    // Pre-fill sync code from invite link (don't auto-submit)
+    if (inviteSyncCode) {
+      setInitialSyncCode(inviteSyncCode);
     }
 
     // 3. Check localStorage for existing session
@@ -238,7 +245,6 @@ export function useAuth(): UseAuthReturn {
     clearStorage();
     setAuth(null);
     setQrUserId("");
-    setInitialJoinFamilyId("");
     if (code) {
       setInitialSyncCode(code);
     }
@@ -249,8 +255,7 @@ export function useAuth(): UseAuthReturn {
     setAuth(null);
     setQrUserId("");
     setInitialSyncCode("");
-    setInitialJoinFamilyId("");
   }, []);
 
-  return { auth, isLoading, login, logout, forceLogout, initialSyncCode, initialJoinFamilyId, qrUserId };
+  return { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId };
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { decodeSyncCode, encodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
+import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 import { deriveUserId } from "@/crypto/encrypt";
 import { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/client";
@@ -12,10 +12,8 @@ import { PatternLock } from "@/components/PatternLock";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
-  /** Pre-filled sync code from QR code or remembered logout. */
+  /** Pre-filled sync code from QR code, invite link, or remembered logout. */
   initialSyncCode?: string;
-  /** Pre-filled familyId from invite link (#join= URL param). */
-  initialJoinFamilyId?: string;
   /** Pre-hashed userId from QR code. Skips email entry and auto-triggers login. */
   qrUserId?: string;
   /** External error (e.g., FAMILY_FULL from token refresh). */
@@ -34,11 +32,9 @@ interface PendingAuth {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_ENV = getAppEnv();
 
-export function LandingPage({ onAuth, initialSyncCode = "", initialJoinFamilyId = "", qrUserId = "", externalError = "" }: LandingPageProps) {
-  const [familyIdInput, setFamilyIdInput] = useState("");
-  const [encryptionKeyInput, setEncryptionKeyInput] = useState("");
-  const [apiHost, setApiHost] = useState<string | undefined>();
-  const [showKey, setShowKey] = useState(false);
+export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", externalError = "" }: LandingPageProps) {
+  const [syncCodeInput, setSyncCodeInput] = useState("");
+  const [showCode, setShowCode] = useState(false);
   const [email, setEmail] = useState("");
   const [rememberSyncCode, setRememberSyncCode] = useState(() => {
     return localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0";
@@ -55,41 +51,21 @@ export function LandingPage({ onAuth, initialSyncCode = "", initialJoinFamilyId 
     return client;
   }
 
-  /** Decode a full sync code and fill both fields. */
-  function fillFromSyncCode(code: string): boolean {
-    try {
-      const decoded = decodeSyncCode(code);
-      setFamilyIdInput(decoded.familyId);
-      setEncryptionKeyInput(decoded.encryptionKey);
-      setApiHost(decoded.apiHost);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   // Pick up remembered sync code from localStorage (logout with "remember" enabled)
   useEffect(() => {
     const remembered = localStorage.getItem(REMEMBERED_LOGOUT_KEY);
     if (remembered) {
       localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
-      fillFromSyncCode(remembered);
+      setSyncCodeInput(remembered);
     }
   }, []);
 
-  // Update fields if initialSyncCode changes (QR code or remembered logout via state)
+  // Update field if initialSyncCode changes (QR code, invite link, or remembered logout via state)
   useEffect(() => {
     if (initialSyncCode) {
-      fillFromSyncCode(initialSyncCode);
+      setSyncCodeInput(initialSyncCode);
     }
   }, [initialSyncCode]);
-
-  // Pre-fill familyId from invite link (#join=)
-  useEffect(() => {
-    if (initialJoinFamilyId) {
-      setFamilyIdInput(initialJoinFamilyId);
-    }
-  }, [initialJoinFamilyId]);
 
   const [syncCodeError, setSyncCodeError] = useState("");
   const [emailError, setEmailError] = useState("");
@@ -101,37 +77,23 @@ export function LandingPage({ onAuth, initialSyncCode = "", initialJoinFamilyId 
   const [verifyError, setVerifyError] = useState("");
   const [codeInput, setCodeInput] = useState("");
 
-  /** Smart paste: detect a full sync code pasted into familyId field and auto-split. */
-  function handleFamilyIdPaste(e: React.ClipboardEvent<HTMLInputElement>) {
-    const pasted = e.clipboardData.getData("text").trim();
-    if (fillFromSyncCode(pasted)) {
-      e.preventDefault();
-    }
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSyncCodeError("");
     setEmailError("");
     setGeneralError("");
 
-    const trimmedFamilyId = familyIdInput.trim();
-    const trimmedKey = encryptionKeyInput.trim();
+    const trimmedCode = syncCodeInput.trim();
 
-    if (!trimmedFamilyId) {
-      setSyncCodeError("請輸入家庭 ID。");
-      return;
-    }
-    if (!trimmedKey) {
+    if (!trimmedCode) {
       setSyncCodeError("請輸入同步碼。");
       return;
     }
 
-    // Reconstruct and validate sync code from two fields
+    // Decode sync code
     let decoded;
     try {
-      const syncCode = encodeSyncCode({ familyId: trimmedFamilyId, encryptionKey: trimmedKey, apiHost });
-      decoded = decodeSyncCode(syncCode);
+      decoded = decodeSyncCode(trimmedCode);
     } catch (err) {
       if (err instanceof SyncCodeError) {
         setSyncCodeError("同步碼格式不正確，請確認後重新輸入。");
@@ -380,57 +342,33 @@ export function LandingPage({ onAuth, initialSyncCode = "", initialJoinFamilyId 
 
         <div>
           <label
-            htmlFor="family-id"
-            className="block text-sm font-medium text-gray-700 mb-1"
-          >
-            家庭 ID
-          </label>
-          <input
-            id="family-id"
-            type="text"
-            autoComplete="off"
-            value={familyIdInput}
-            onChange={(e) => {
-              setFamilyIdInput(e.target.value);
-              if (syncCodeError) setSyncCodeError("");
-            }}
-            onPaste={handleFamilyIdPaste}
-            placeholder="abc1-def2"
-            aria-invalid={!!syncCodeError || undefined}
-            aria-describedby={syncCodeError ? "sync-code-error" : undefined}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-          />
-        </div>
-
-        <div>
-          <label
-            htmlFor="encryption-key"
+            htmlFor="sync-code"
             className="block text-sm font-medium text-gray-700 mb-1"
           >
             同步碼
           </label>
           <div className="relative">
             <input
-              id="encryption-key"
-              type={showKey ? "text" : "password"}
+              id="sync-code"
+              type={showCode ? "text" : "password"}
               autoComplete="off"
-              value={encryptionKeyInput}
+              value={syncCodeInput}
               onChange={(e) => {
-                setEncryptionKeyInput(e.target.value);
+                setSyncCodeInput(e.target.value);
                 if (syncCodeError) setSyncCodeError("");
               }}
-              placeholder="同步碼"
+              placeholder="moo-xxxxxxxx-xxxxxxxxxxxx"
               aria-invalid={!!syncCodeError || undefined}
               aria-describedby={syncCodeError ? "sync-code-error" : undefined}
               className="w-full rounded-lg border border-gray-300 px-3 py-2.5 pr-10 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
             />
             <button
               type="button"
-              onClick={() => setShowKey(!showKey)}
+              onClick={() => setShowCode(!showCode)}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5"
-              aria-label={showKey ? "隱藏同步碼" : "顯示同步碼"}
+              aria-label={showCode ? "隱藏同步碼" : "顯示同步碼"}
             >
-              {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              {showCode ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
           {syncCodeError && (

@@ -352,34 +352,41 @@ describe("useAuth", () => {
     });
   });
 
-  describe("#join= invite link parsing", () => {
-    it("should set initialJoinFamilyId from #join= URL param", () => {
+  describe("#invite= invite link parsing", () => {
+    it("should set initialSyncCode from #invite= URL param", () => {
       vi.stubGlobal("location", {
         search: "",
-        hash: "#join=abc1-def2",
+        hash: "#invite=moo-abc1-def2-key123",
         pathname: "/",
-        href: "http://localhost/#join=abc1-def2",
+        href: "http://localhost/#invite=moo-abc1-def2-key123",
+      });
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "abc1-def2",
+        encryptionKey: "key123",
       });
 
       const { result } = renderHook(() => useAuth());
 
-      expect(result.current.initialJoinFamilyId).toBe("abc1-def2");
-      expect(result.current.initialSyncCode).toBe("");
+      expect(result.current.initialSyncCode).toBe("moo-abc1-def2-key123");
       expect(result.current.auth).toBeNull();
     });
 
-    it("should return empty initialJoinFamilyId when no #join= param", () => {
+    it("should return empty initialSyncCode when no #invite= param", () => {
       const { result } = renderHook(() => useAuth());
 
-      expect(result.current.initialJoinFamilyId).toBe("");
+      expect(result.current.initialSyncCode).toBe("");
     });
 
-    it("should clear URL when hash contains #join= param", () => {
+    it("should clear URL when hash contains #invite= param", () => {
       vi.stubGlobal("location", {
         search: "",
-        hash: "#join=some-family-id",
+        hash: "#invite=moo-fam1-key1",
         pathname: "/",
-        href: "http://localhost/#join=some-family-id",
+        href: "http://localhost/#invite=moo-fam1-key1",
+      });
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam1",
+        encryptionKey: "key1",
       });
 
       renderHook(() => useAuth());
@@ -387,7 +394,7 @@ describe("useAuth", () => {
       expect(replaceStateSpy).toHaveBeenCalledWith({}, "", "/");
     });
 
-    it("should clear existing auth when #join= is present in URL", () => {
+    it("should clear existing auth when #invite= is present in URL", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
@@ -396,15 +403,37 @@ describe("useAuth", () => {
 
       vi.stubGlobal("location", {
         search: "",
-        hash: "#join=new-family-id",
+        hash: "#invite=moo-new-family-newkey",
         pathname: "/",
-        href: "http://localhost/#join=new-family-id",
+        href: "http://localhost/#invite=moo-new-family-newkey",
+      });
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "new-family",
+        encryptionKey: "newkey",
       });
 
       const { result } = renderHook(() => useAuth());
 
       expect(result.current.auth).toBeNull();
-      expect(result.current.initialJoinFamilyId).toBe("new-family-id");
+      expect(result.current.initialSyncCode).toBe("moo-new-family-newkey");
+    });
+
+    it("should ignore invalid sync code in #invite= param", () => {
+      vi.stubGlobal("location", {
+        search: "",
+        hash: "#invite=bad-code",
+        pathname: "/",
+        href: "http://localhost/#invite=bad-code",
+      });
+      mockDecodeSyncCode.mockImplementation(() => {
+        throw new Error("Invalid sync code");
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      // Invalid sync code should be ignored
+      expect(result.current.initialSyncCode).toBe("");
+      expect(result.current.auth).toBeNull();
     });
   });
 
@@ -704,7 +733,7 @@ describe("useAuth", () => {
       expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
     });
 
-    it("should clear qrUserId and initialJoinFamilyId on forceLogout", () => {
+    it("should clear qrUserId and initialSyncCode on forceLogout", () => {
       vi.stubGlobal("location", {
         search: "",
         hash: "#code=moo-fam99-secretKey&uid=user-abc",
@@ -729,7 +758,6 @@ describe("useAuth", () => {
       // All transient state must be cleared
       expect(result.current.qrUserId).toBe("");
       expect(result.current.initialSyncCode).toBe("");
-      expect(result.current.initialJoinFamilyId).toBe("");
     });
 
     it("should clear everything even with rememberSyncCode=1", () => {

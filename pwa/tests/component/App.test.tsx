@@ -17,7 +17,6 @@ vi.mock("@/hooks/useAuth", () => ({
     logout: mockLogout,
     forceLogout: mockForceLogout,
     initialSyncCode: "",
-    initialJoinFamilyId: "",
     qrUserId: "",
   }),
   namespacedKey: (userId: string, suffix: string) => `moo:${userId}:${suffix}`,
