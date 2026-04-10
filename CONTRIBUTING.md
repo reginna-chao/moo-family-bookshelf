@@ -29,7 +29,7 @@ cp worker/.dev.vars.example worker/.dev.vars
 ```
 
 - `.env` — gitignored, personal dev config
-- `.env.production` — committed, prod URLs
+- `.env.production` — committed, prod URLs **only** (no secrets; see [Security Notes](#security-notes))
 - `.env.example` — committed, dev defaults template
 
 ## Project Structure
@@ -272,7 +272,8 @@ Every push/PR triggers:
 - All book data defaults to not-shared; users must explicitly opt-in.
 - Data is encrypted client-side (AES-256-GCM) before upload.
 - Never hardcode keys or sensitive information in source code.
-- `.env`, `.dev.vars`, and files containing secrets must not be committed to git. (`.env.production` is committed because it only contains public URLs.)
+- `.env`, `.dev.vars`, and files containing secrets must not be committed to git.
+- **`.env.production` policy**: this file IS committed, but only because it contains values that will ship inside the public bundle anyway (production API endpoint, PWA URL). **Never** add API keys, tokens, analytics/Sentry DSNs, or any other secret to `.env.production`. If you need to inject a secret at build time, use GitHub Actions Secrets and write them to `.env.production` during the CI build step. For Worker runtime secrets, use `wrangler secret put` (see [worker/DEPLOY.md](worker/DEPLOY.md)).
 - Content Script only reads publicly visible book information — never touch account credentials.
 
 ## Self-Hosting
