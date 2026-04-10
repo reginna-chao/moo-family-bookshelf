@@ -160,6 +160,58 @@ describe("CreatedView", () => {
     expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
   });
 
+  it("preserves @host suffix in masked display when sync code has custom apiHost", () => {
+    mockDecodeSyncCode.mockReturnValue({
+      familyId: "abc123",
+      encryptionKey: "keydata",
+      apiHost: "http://localhost:8787",
+    });
+
+    render(
+      <CreatedView
+        {...defaultProps}
+        generatedSyncCode="moo-abc123-keydata@http://localhost:8787"
+      />,
+    );
+
+    expect(
+      screen.getByText("moo-abc123-••••••••••••@http://localhost:8787"),
+    ).toBeInTheDocument();
+
+    // Restore default mock for subsequent tests
+    mockDecodeSyncCode.mockReturnValue({
+      familyId: "abc123",
+      encryptionKey: "keydata",
+    });
+  });
+
+  it("preserves @host suffix when eye toggle reveals the real key", () => {
+    mockDecodeSyncCode.mockReturnValue({
+      familyId: "abc123",
+      encryptionKey: "keydata",
+      apiHost: "http://localhost:8787",
+    });
+
+    render(
+      <CreatedView
+        {...defaultProps}
+        generatedSyncCode="moo-abc123-keydata@http://localhost:8787"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "顯示同步碼" }));
+
+    expect(
+      screen.getByText("moo-abc123-keydata@http://localhost:8787"),
+    ).toBeInTheDocument();
+
+    // Restore default mock for subsequent tests
+    mockDecodeSyncCode.mockReturnValue({
+      familyId: "abc123",
+      encryptionKey: "keydata",
+    });
+  });
+
   it("should show raw sync code without garbled prefix when decode fails", () => {
     mockDecodeSyncCode.mockImplementation(() => {
       throw new Error("Invalid sync code");

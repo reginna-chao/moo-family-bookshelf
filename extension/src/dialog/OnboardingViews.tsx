@@ -57,11 +57,15 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
 
   let displayFamilyId = "";
   let displayKey = "";
+  let displayHostSuffix = "";
   let decodeFailed = false;
   try {
     const decoded = decodeSyncCode(generatedSyncCode);
     displayFamilyId = decoded.familyId;
     displayKey = decoded.encryptionKey;
+    if (decoded.apiHost) {
+      displayHostSuffix = `@${decoded.apiHost}`;
+    }
   } catch {
     decodeFailed = true;
   }
@@ -88,7 +92,7 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
         <span data-testid="sync-code" style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
           {decodeFailed
             ? generatedSyncCode
-            : `moo-${displayFamilyId}-${showCode ? displayKey : "••••••••••••"}`}
+            : `moo-${displayFamilyId}-${showCode ? displayKey : "••••••••••••"}${displayHostSuffix}`}
         </span>
         {!decodeFailed && (
           <button
