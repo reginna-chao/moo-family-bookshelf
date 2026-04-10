@@ -35,4 +35,4 @@ setTimeout(() => {
   }
   console.log("└" + "─".repeat(width) + "┘");
   console.log("");
-}, 6500);
+}, 8000);

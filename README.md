@@ -2,7 +2,7 @@
 
 讓讀墨家庭帳號成員，輕鬆瀏覽彼此選擇分享的書籍。
 
-<img src="assets/brand/og-image.svg" alt="MooFamily Bookshelf - Share your bookshelf" height="40">
+<img src="assets/brand/og-image.svg" alt="MooFamily Bookshelf - Share your bookshelf">
 
 ## 功能
 
