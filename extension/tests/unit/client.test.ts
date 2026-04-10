@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ApiClient } from "@/api/client";
+import { ApiClient, validateEndpointUrl } from "@/api/client";
 
 // Mock the constants module so we don't depend on import.meta.env
 vi.mock("@/constants", () => ({
@@ -59,6 +59,31 @@ describe("ApiClient", () => {
     it("setEndpoint updates the base URL", () => {
       client.setEndpoint("https://new.workers.dev/");
       expect(client.getEndpoint()).toBe("https://new.workers.dev");
+    });
+  });
+
+  describe("validateEndpointUrl", () => {
+    it.each([
+      ["https://api.example.com", "https://api.example.com"],
+      ["https://api.example.com/", "https://api.example.com"],
+      ["http://localhost:8787", "http://localhost:8787"],
+      ["http://127.0.0.1:8787", "http://127.0.0.1:8787"],
+      ["http://192.168.1.100:3000", "http://192.168.1.100:3000"],
+      ["http://10.0.0.5:8080", "http://10.0.0.5:8080"],
+      ["http://172.16.0.1:8080", "http://172.16.0.1:8080"],
+      ["http://mynas.local:8787", "http://mynas.local:8787"],
+    ])("accepts %s", (input, expected) => {
+      expect(validateEndpointUrl(input)).toBe(expected);
+    });
+
+    it.each([
+      "http://evil.com",
+      "ftp://files.example.com",
+      "javascript:alert(1)",
+      "not-a-url",
+      "",
+    ])("rejects %s", (input) => {
+      expect(() => validateEndpointUrl(input)).toThrow();
     });
   });
 

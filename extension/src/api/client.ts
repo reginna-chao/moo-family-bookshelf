@@ -5,22 +5,23 @@
 
 import { DEFAULT_API_ENDPOINT } from "../constants";
 
-/** Validate API endpoint URL: must be HTTPS (or HTTP for localhost in dev). */
-function validateEndpointUrl(raw: string): string {
+/** Hostname patterns allowed over plain HTTP (dev / LAN self-hosting). */
+const PRIVATE_HOST_RE =
+  /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|.*\.local)$/;
+
+/** Validate API endpoint URL: must be HTTPS, or HTTP on a private/LAN host. */
+export function validateEndpointUrl(raw: string): string {
   const url = raw.replace(/\/+$/, "");
   try {
     const parsed = new URL(url);
     if (parsed.protocol === "https:") return url;
-    if (
-      parsed.protocol === "http:" &&
-      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")
-    ) {
+    if (parsed.protocol === "http:" && PRIVATE_HOST_RE.test(parsed.hostname)) {
       return url;
     }
   } catch {
     throw new Error(`Invalid API endpoint URL: ${raw}`);
   }
-  throw new Error(`Unsafe API endpoint scheme — only HTTPS is allowed: ${raw}`);
+  throw new Error(`Unsafe API endpoint scheme — only HTTPS or private-network HTTP is allowed: ${raw}`);
 }
 
 import type {
