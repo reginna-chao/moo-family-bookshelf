@@ -8,6 +8,7 @@ import {
   decrypt,
   sha256Hex,
   deriveUserId,
+  computeKeyFingerprint,
   bufferToBase62,
   base62ToBuffer,
 } from "@/crypto/encrypt";
@@ -291,6 +292,56 @@ describe("bufferToBase62 + base62ToBuffer roundtrip", () => {
       );
       expect(decodedVal).toBe(originalVal);
     }
+  });
+});
+
+describe("computeKeyFingerprint", () => {
+  it("should return a 64-character lowercase hex string", async () => {
+    const fp = await computeKeyFingerprint("hello");
+    expect(fp).toHaveLength(64);
+    expect(fp).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("should return the correct SHA-256 digest for a known input", async () => {
+    // SHA-256 of "hello" (no normalization applied — raw input hashed as-is)
+    const expected = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+    const fp = await computeKeyFingerprint("hello");
+    expect(fp).toBe(expected);
+  });
+
+  it("should be case-sensitive — 'KEY' and 'key' produce different fingerprints", async () => {
+    const fpUpper = await computeKeyFingerprint("KEY");
+    const fpLower = await computeKeyFingerprint("key");
+    expect(fpUpper).not.toBe(fpLower);
+  });
+
+  it("should be deterministic — same input always produces same output", async () => {
+    const input = "SomeBase62EncodedKey";
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => computeKeyFingerprint(input)),
+    );
+    const unique = new Set(results);
+    expect(unique.size).toBe(1);
+  });
+
+  it("should produce different fingerprints for different inputs", async () => {
+    const fp1 = await computeKeyFingerprint("key-A");
+    const fp2 = await computeKeyFingerprint("key-B");
+    expect(fp1).not.toBe(fp2);
+  });
+
+  it("generate → export → computeKeyFingerprint roundtrip: output is 64-char hex", async () => {
+    const key = await generateKey();
+    const keyString = await exportKey(key);
+    const fp = await computeKeyFingerprint(keyString);
+    expect(fp).toHaveLength(64);
+    expect(fp).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("does not normalize input (whitespace is significant)", async () => {
+    const fp1 = await computeKeyFingerprint("abc");
+    const fp2 = await computeKeyFingerprint("  abc  ");
+    expect(fp1).not.toBe(fp2);
   });
 });
 

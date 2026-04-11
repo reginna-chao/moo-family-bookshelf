@@ -119,6 +119,23 @@ export function base62ToBuffer(str: string): ArrayBuffer {
 }
 
 /**
+ * Compute a keyFingerprint from an encryption key string.
+ * Returns the SHA-256 hex digest of the raw key string (no normalization).
+ * Used as a trust anchor: server stores the fingerprint and uses it to
+ * silently re-authenticate a reinstalled Extension that has the same key.
+ *
+ * Security: pure computation — no logging, no caching, no side effects.
+ */
+export async function computeKeyFingerprint(keyString: string): Promise<string> {
+  const encoded = new TextEncoder().encode(keyString);
+  const hash = await crypto.subtle.digest("SHA-256", encoded);
+  const bytes = new Uint8Array(hash);
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
  * Derive a userId from email with an app-specific salt.
  * Prevents rainbow table attacks against plain SHA-256 of email.
  */

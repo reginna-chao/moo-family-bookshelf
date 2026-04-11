@@ -49,6 +49,10 @@ export interface FamilyGroup {
   maxMembers: number;
   createdAt: string;
   apiEndpoint?: string | null;
+  /** Auth token issued alongside family create/join responses. */
+  authToken?: string;
+  /** Unix millis when authToken expires. */
+  expiresAt?: number;
 }
 
 export interface VersionInfo {

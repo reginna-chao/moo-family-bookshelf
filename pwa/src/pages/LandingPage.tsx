@@ -157,7 +157,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
     setIsSubmitting(true);
     try {
       const joinClient = getJoinClient(apiHost);
-      const joinRes = await joinClient.joinFamily(familyId, userId, verifySecret);
+      const joinRes = await joinClient.joinFamily(familyId, userId, { verifySecret });
       if (joinRes.error) {
         const code = joinRes.error.code;
         if (code === "FAMILY_FULL") {
@@ -176,14 +176,13 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
         return;
       }
 
-      const joinData = joinRes.data as unknown as { authToken?: string };
       setPendingAuth(null);
       onAuth({
         userId,
         familyId,
         encryptionKey,
         apiHost,
-        authToken: joinData?.authToken,
+        authToken: joinRes.data?.authToken,
       });
     } catch {
       setGeneralError("處理失敗，請重試。");

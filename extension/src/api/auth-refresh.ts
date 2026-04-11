@@ -3,6 +3,7 @@
  */
 
 import type { ApiResponse } from "./types";
+import { computeKeyFingerprint } from "../crypto/encrypt";
 
 interface RefreshDeps {
   request: <T>(path: string, init?: RequestInit, skipRefresh?: boolean) => Promise<ApiResponse<T>>;
@@ -78,16 +79,29 @@ export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
 }
 
 async function attemptJoinRecovery(deps: RefreshDeps): Promise<boolean> {
+  // Read encryptionKey in the same get() call to avoid redundant I/O
   const recoveryStorage = await chrome.storage.local.get([
     "familyId",
     "userId",
-    "displayName",
+    "encryptionKey",
   ]);
   const familyId = recoveryStorage.familyId as string | undefined;
   const userId = recoveryStorage.userId as string | undefined;
-  const displayName = (recoveryStorage.displayName as string | undefined) ?? "";
+  const encryptionKey = recoveryStorage.encryptionKey as string | undefined;
 
   if (!familyId || !userId) return false;
+
+  // Build join body — omit displayName so the backend preserves the existing
+  // member record (silent recovery must not overwrite the user's chosen name).
+  // Include keyFingerprint when we have the key (bypasses the verify gate).
+  const joinBody: Record<string, string> = { userId };
+  if (encryptionKey) {
+    try {
+      joinBody.keyFingerprint = await computeKeyFingerprint(encryptionKey);
+    } catch {
+      // fingerprint computation failed — proceed without it (verify flow)
+    }
+  }
 
   const joinResult = await deps.request<{
     familyId: string;
@@ -101,7 +115,7 @@ async function attemptJoinRecovery(deps: RefreshDeps): Promise<boolean> {
     `/api/family/${familyId}/join`,
     {
       method: "POST",
-      body: JSON.stringify({ userId, displayName }),
+      body: JSON.stringify(joinBody),
     },
     true,
   );

@@ -2,6 +2,11 @@ import React, { useState } from "react";
 import { Lock, Eye, EyeOff } from "lucide-react";
 import { decodeSyncCode } from "../crypto/syncCode";
 
+// Shared brand colors used across Onboarding views.
+const PRIMARY_BLUE = "#2563eb";
+const ERROR_RED = "#ef4444";
+const ERROR_MESSAGE_ID = "onboarding-error-view-message";
+
 // --- WelcomeView ---
 
 export interface WelcomeViewProps {
@@ -27,7 +32,7 @@ export function WelcomeView({ onStart, hasUsedBefore }: WelcomeViewProps) {
           padding: 14,
           border: "none",
           borderRadius: 8,
-          background: "#2563eb",
+          background: PRIMARY_BLUE,
           color: "white",
           fontWeight: 600,
           fontSize: 16,
@@ -110,10 +115,10 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
           width: "100%",
           padding: 12,
           marginBottom: 12,
-          border: "1px solid #2563eb",
+          border: `1px solid ${PRIMARY_BLUE}`,
           borderRadius: 8,
           background: copied ? "#eff6ff" : "transparent",
-          color: "#2563eb",
+          color: PRIMARY_BLUE,
           fontWeight: 600,
           cursor: "pointer",
         }}
@@ -127,7 +132,7 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
           padding: 12,
           border: "none",
           borderRadius: 8,
-          background: "#2563eb",
+          background: PRIMARY_BLUE,
           color: "white",
           fontWeight: 600,
           cursor: "pointer",
@@ -141,35 +146,50 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
 
 // --- ErrorView ---
 
-export interface ErrorViewProps {
-  errorMessage: string;
-  onRetry: () => void;
+export interface ErrorAction {
+  label: string;
+  variant?: "primary" | "secondary";
+  onClick: () => void;
 }
 
-export function ErrorView({ errorMessage, onRetry }: ErrorViewProps) {
+export interface ErrorViewProps {
+  errorMessage: string;
+  actions: ErrorAction[];
+}
+
+export function ErrorView({ errorMessage, actions }: ErrorViewProps) {
   return (
     <div style={{ padding: 24 }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, color: "#ef4444" }}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, color: ERROR_RED }}>
         發生錯誤
       </h2>
-      <p style={{ color: "#64748b", marginBottom: 24, fontSize: 14 }}>
+      <p id={ERROR_MESSAGE_ID} style={{ color: "#64748b", marginBottom: 24, fontSize: 14 }}>
         {errorMessage}
       </p>
-      <button
-        onClick={onRetry}
-        style={{
-          width: "100%",
-          padding: 12,
-          border: "none",
-          borderRadius: 8,
-          background: "#2563eb",
-          color: "white",
-          fontWeight: 600,
-          cursor: "pointer",
-        }}
-      >
-        重試
-      </button>
+      <div role="group" aria-describedby={ERROR_MESSAGE_ID}>
+        {actions.map((action) => {
+          const isSecondary = action.variant === "secondary";
+          return (
+            <button
+              key={action.label}
+              onClick={action.onClick}
+              style={{
+                width: "100%",
+                padding: 12,
+                marginBottom: 8,
+                border: isSecondary ? `1px solid ${PRIMARY_BLUE}` : "none",
+                borderRadius: 8,
+                background: isSecondary ? "transparent" : PRIMARY_BLUE,
+                color: isSecondary ? PRIMARY_BLUE : "white",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {action.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -214,7 +234,7 @@ export function IdleView({
           marginBottom: 12,
           border: "none",
           borderRadius: 8,
-          background: isProcessing ? "#93c5fd" : "#2563eb",
+          background: isProcessing ? "#93c5fd" : PRIMARY_BLUE,
           color: "white",
           fontWeight: 600,
           cursor: isProcessing ? "not-allowed" : "pointer",
@@ -258,10 +278,10 @@ export function IdleView({
         style={{
           width: "100%",
           padding: 12,
-          border: "1px solid #2563eb",
+          border: `1px solid ${PRIMARY_BLUE}`,
           borderRadius: 8,
           background: "transparent",
-          color: "#2563eb",
+          color: PRIMARY_BLUE,
           fontWeight: 600,
           cursor: !syncCodeInput.trim() || isProcessing ? "not-allowed" : "pointer",
           opacity: !syncCodeInput.trim() || isProcessing ? 0.5 : 1,

@@ -97,22 +97,36 @@ describe("ApiClient verification methods", () => {
   });
 
   describe("joinFamily with verifySecret", () => {
-    it("should include verifySecret in request body when provided", async () => {
+    it("should include verifySecret in request body when provided via opts", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
 
-      await client.joinFamily("fam-1", USER_1, "1234");
+      await client.joinFamily("fam-1", USER_1, { verifySecret: "1234" });
 
       const [, init] = mockFetch.mock.calls[0];
-      expect(JSON.parse(init.body)).toEqual({ userId: USER_1, verifySecret: "1234" });
+      const body = JSON.parse(init.body);
+      expect(body.userId).toBe(USER_1);
+      expect(body.verifySecret).toBe("1234");
     });
 
-    it("should not include verifySecret when not provided", async () => {
+    it("should not include verifySecret when opts not provided", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
 
       await client.joinFamily("fam-1", USER_1);
 
       const [, init] = mockFetch.mock.calls[0];
-      expect(JSON.parse(init.body)).toEqual({ userId: USER_1 });
+      const body = JSON.parse(init.body);
+      expect(body.userId).toBe(USER_1);
+      expect(body.verifySecret).toBeUndefined();
+    });
+
+    it("should not include verifySecret when opts is empty object", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+
+      await client.joinFamily("fam-1", USER_1, {});
+
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init.body);
+      expect(body.verifySecret).toBeUndefined();
     });
   });
 });

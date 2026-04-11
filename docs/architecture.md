@@ -376,6 +376,24 @@ moo-{family_id_short}-{encryption_key_encoded}@{api_host_encoded}
 | `POST` | `/api/user/:id/verify/otp` | 產生一次性驗證碼 | 本人 |
 | `POST` | `/api/user/:id/verify/prompted` | 標記已提醒 | 公開 |
 
+### Extension 信任根（keyFingerprint）
+
+#### 設計目標
+Extension 重灌後（例如更換電腦或重新安裝），若同步金鑰仍存在（透過 `chrome.storage.sync` 同步），Extension 應能靜默恢復，無需使用者再次輸入 PIN/OTP。
+
+#### 機制
+- **信任根定義**：`keyFingerprint = sha256_hex(encryptionKeyString)`，64 字元小寫十六進位。
+- **Extension 建立家庭時**：先在本地產生加密金鑰，計算 fingerprint，再連同 fingerprint 送出建立請求。
+- **Extension 加入家庭時**（含自動恢復）：帶入 fingerprint，後端比對吻合則跳過 verify 流程。
+- **PWA 加入時**：不傳 fingerprint，保留 PIN/Pattern/OTP 驗證門禁（人對裝置的身份確認）。
+- **後端**：只儲存 fingerprint，永遠不見明文加密金鑰。fingerprint 僅出現在 request body，不記錄日誌，不回傳至前端。
+
+#### 兩種驗證機制的定位
+| 機制 | 驗證對象 | 情境 |
+|------|---------|------|
+| keyFingerprint | 裝置持有金鑰（裝置對家庭） | Extension 重灌後靜默恢復 |
+| PIN / Pattern / OTP | 人的身份（人對裝置） | PWA 新裝置登入，防冒用 |
+
 ---
 
 ## 六、可設定 API 端點（BYO Backend）

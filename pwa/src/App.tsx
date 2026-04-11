@@ -96,7 +96,7 @@ export default function App() {
     if (current.authToken) {
       tempClient.setAuthToken(current.authToken);
     }
-    const res = await tempClient.joinFamily(current.familyId, current.userId);
+    const res = await tempClient.joinFamily(current.familyId, current.userId, {});
     if (res.error) {
       if (res.error.code === "FAMILY_FULL") {
         setFamilyFullError("家庭成員已達上限（每個家庭最多 2 位成員）");
@@ -117,12 +117,9 @@ export default function App() {
       logout();
       return null;
     }
-    if (res.data) {
-      const data = res.data as unknown as { authToken?: string };
-      if (data.authToken) {
-        login({ ...current, authToken: data.authToken });
-        return data.authToken;
-      }
+    if (res.data?.authToken) {
+      login({ ...current, authToken: res.data.authToken });
+      return res.data.authToken;
     }
     return null;
   }, [login, logout]);

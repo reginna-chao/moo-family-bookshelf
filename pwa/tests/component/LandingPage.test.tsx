@@ -697,7 +697,7 @@ describe("LandingPage", () => {
         expect(mockJoinFamily).toHaveBeenCalledWith(
           "fam-qr",
           "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-          undefined,
+          expect.objectContaining({ verifySecret: undefined }),
         );
         expect(mockOnAuth).toHaveBeenCalledWith({
           userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",

@@ -77,6 +77,10 @@ export interface FamilyGroup {
   maxMembers: number;
   createdAt: string;
   apiEndpoint?: string | null;
+  /** Auth token issued alongside family create/join responses. */
+  authToken?: string;
+  /** Unix millis when authToken expires. */
+  expiresAt?: number;
 }
 
 export interface VersionInfo {
@@ -208,20 +212,37 @@ export class ApiClient {
 
   // --- Family Group ---
 
-  async createFamily(userId: string): Promise<ApiResponse<FamilyGroup>> {
+  /**
+   * Create a new family.
+   * NOTE: PWA MUST NOT call this — PWA can only join families (Phase 1 Q2).
+   * Family creation requires a keyFingerprint, which only the Extension computes.
+   */
+  async createFamily(
+    userId: string,
+    displayName?: string,
+    keyFingerprint?: string,
+  ): Promise<ApiResponse<FamilyGroup>> {
     this.validateHexId(userId, "userId");
-    return this.post("/api/family", { userId });
+    const body: Record<string, string> = { userId, displayName: displayName ?? "" };
+    if (keyFingerprint !== undefined) {
+      body.keyFingerprint = keyFingerprint;
+    }
+    return this.post("/api/family", body);
   }
 
   async joinFamily(
     familyId: string,
     userId: string,
-    verifySecret?: string,
-  ): Promise<ApiResponse<{ ok: boolean }>> {
+    opts?: { verifySecret?: string; keyFingerprint?: string },
+  ): Promise<ApiResponse<{ ok: boolean; authToken?: string; expiresAt?: number }>> {
     this.validateHexId(userId, "userId");
     const body: Record<string, string> = { userId };
-    if (verifySecret !== undefined) {
-      body.verifySecret = verifySecret;
+    if (opts?.verifySecret !== undefined) {
+      body.verifySecret = opts.verifySecret;
+    }
+    // PWA does not pass keyFingerprint in production (preserves verify gate — Phase 1 Q2)
+    if (opts?.keyFingerprint !== undefined) {
+      body.keyFingerprint = opts.keyFingerprint;
     }
     return this.post(`/api/family/${familyId}/join`, body);
   }

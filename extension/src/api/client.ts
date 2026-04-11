@@ -161,17 +161,26 @@ export class ApiClient {
 
   async createFamily(
     userId: string,
-    displayName?: string,
+    displayName: string | undefined,
+    keyFingerprint: string,
   ): Promise<ApiResponse<FamilyGroup>> {
-    return this.post("/api/family", { userId, displayName: displayName ?? "" });
+    return this.post("/api/family", { userId, displayName: displayName ?? "", keyFingerprint });
   }
 
   async joinFamily(
     familyId: string,
     userId: string,
     displayName?: string,
+    opts?: { keyFingerprint?: string; verifySecret?: string },
   ): Promise<ApiResponse<FamilyGroup>> {
-    return this.post(`/api/family/${familyId}/join`, { userId, displayName: displayName ?? "" });
+    const body: Record<string, string> = { userId, displayName: displayName ?? "" };
+    if (opts?.keyFingerprint !== undefined) {
+      body.keyFingerprint = opts.keyFingerprint;
+    }
+    if (opts?.verifySecret !== undefined) {
+      body.verifySecret = opts.verifySecret;
+    }
+    return this.post(`/api/family/${familyId}/join`, body);
   }
 
   async updateDisplayName(

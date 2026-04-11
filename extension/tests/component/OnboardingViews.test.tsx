@@ -235,7 +235,7 @@ describe("CreatedView", () => {
 
 describe("ErrorView", () => {
   it("renders error heading with red color", () => {
-    render(<ErrorView errorMessage="測試錯誤" onRetry={() => {}} />);
+    render(<ErrorView errorMessage="測試錯誤" actions={[{ label: "重試", onClick: () => {} }]} />);
 
     const heading = screen.getByText("發生錯誤");
     expect(heading).toBeInTheDocument();
@@ -243,23 +243,89 @@ describe("ErrorView", () => {
   });
 
   it("renders error message text", () => {
-    render(<ErrorView errorMessage="伺服器無回應" onRetry={() => {}} />);
+    render(<ErrorView errorMessage="伺服器無回應" actions={[{ label: "重試", onClick: () => {} }]} />);
 
     expect(screen.getByText("伺服器無回應")).toBeInTheDocument();
   });
 
-  it("renders retry button", () => {
-    render(<ErrorView errorMessage="錯誤" onRetry={() => {}} />);
+  it("renders single action button", () => {
+    render(<ErrorView errorMessage="錯誤" actions={[{ label: "重試", onClick: () => {} }]} />);
 
     expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 
-  it("calls onRetry when retry button clicked", () => {
-    const onRetry = vi.fn();
-    render(<ErrorView errorMessage="錯誤" onRetry={onRetry} />);
+  it("calls onClick when action button is clicked", () => {
+    const onClick = vi.fn();
+    render(<ErrorView errorMessage="錯誤" actions={[{ label: "重試", onClick }]} />);
 
     fireEvent.click(screen.getByText("重試"));
-    expect(onRetry).toHaveBeenCalledOnce();
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it("renders multiple actions", () => {
+    const onPrimary = vi.fn();
+    const onSecondary = vi.fn();
+    render(
+      <ErrorView
+        errorMessage="錯誤"
+        actions={[
+          { label: "改用同步碼", variant: "primary", onClick: onPrimary },
+          { label: "重試", variant: "secondary", onClick: onSecondary },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "改用同步碼" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+  });
+
+  it("primary variant renders filled blue button", () => {
+    render(
+      <ErrorView
+        errorMessage="錯誤"
+        actions={[{ label: "確認", variant: "primary", onClick: () => {} }]}
+      />,
+    );
+
+    const btn = screen.getByRole("button", { name: "確認" });
+    // primary: background blue (#2563eb), no separate border (border="none" is the default/empty)
+    expect(btn.style.background).toBe("rgb(37, 99, 235)");
+    // JSDOM normalizes border:"none" to empty string — verify button exists with correct bg
+    expect(btn.style.color).toBe("white");
+  });
+
+  it("secondary variant renders outlined button", () => {
+    render(
+      <ErrorView
+        errorMessage="錯誤"
+        actions={[{ label: "取消", variant: "secondary", onClick: () => {} }]}
+      />,
+    );
+
+    const btn = screen.getByRole("button", { name: "取消" });
+    // secondary: transparent background, blue border
+    expect(btn.style.background).toBe("transparent");
+    expect(btn.style.border).toBe("1px solid rgb(37, 99, 235)");
+  });
+
+  it("triggers correct onClick for each action independently", () => {
+    const onFirst = vi.fn();
+    const onSecond = vi.fn();
+    render(
+      <ErrorView
+        errorMessage="錯誤"
+        actions={[
+          { label: "第一個", variant: "primary", onClick: onFirst },
+          { label: "第二個", variant: "secondary", onClick: onSecond },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("第二個"));
+    expect(onSecond).toHaveBeenCalledOnce();
+    expect(onFirst).not.toHaveBeenCalled();
   });
 });
 
