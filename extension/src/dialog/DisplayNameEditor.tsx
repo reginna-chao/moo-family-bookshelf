@@ -31,6 +31,8 @@ export function DisplayNameEditor({
     }
   };
 
+  const saving = nameSaveState === "saving";
+
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 4 }}>顯示名稱</div>
@@ -39,7 +41,7 @@ export function DisplayNameEditor({
       </div>
       {editing ? (
         <>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }} aria-busy={saving}>
             <input
               ref={inputRef}
               type="text"
@@ -47,14 +49,15 @@ export function DisplayNameEditor({
               onChange={(e) => setDisplayName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
-                if (e.key === "Enter" && nameSaveState !== "saving") {
+                if (e.key === "Enter" && !saving) {
                   void handleConfirm();
-                } else if (e.key === "Escape" && nameSaveState !== "saving") {
+                } else if (e.key === "Escape" && !saving) {
                   handleCancel();
                 }
               }}
               maxLength={20}
               placeholder="輸入顯示名稱"
+              disabled={saving}
               style={{
                 flex: 1, padding: 10, border: "1px solid #e2e8f0", borderRadius: 8,
                 fontSize: 14, boxSizing: "border-box",
@@ -62,17 +65,34 @@ export function DisplayNameEditor({
             />
             <button
               onClick={() => void handleConfirm()}
-              disabled={nameSaveState === "saving"}
-              aria-label="確認儲存"
-              style={{ background: "transparent", border: "none", padding: 4, cursor: "pointer" }}
+              disabled={saving}
+              aria-label={saving ? "儲存中" : "確認儲存"}
+              style={{
+                background: "transparent", border: "none", padding: 4,
+                cursor: saving ? "not-allowed" : "pointer",
+              }}
             >
-              <Check size={16} style={{ color: "#2563eb" }} />
+              {saving ? (
+                <div style={{
+                  width: 16, height: 16,
+                  border: "2px solid #e2e8f0",
+                  borderTopColor: "#2563eb",
+                  borderRadius: "50%",
+                  animation: "moo-spin 0.8s linear infinite",
+                }} />
+              ) : (
+                <Check size={16} style={{ color: "#2563eb" }} />
+              )}
             </button>
             <button
               onClick={handleCancel}
-              disabled={nameSaveState === "saving"}
+              disabled={saving}
               aria-label="取消編輯"
-              style={{ background: "transparent", border: "none", padding: 4, cursor: "pointer" }}
+              style={{
+                background: "transparent", border: "none", padding: 4,
+                cursor: saving ? "not-allowed" : "pointer",
+                opacity: saving ? 0.5 : 1,
+              }}
             >
               <X size={16} style={{ color: "#94a3b8" }} />
             </button>
@@ -82,6 +102,7 @@ export function DisplayNameEditor({
               {nameSaveError}
             </div>
           )}
+          <style>{`@keyframes moo-spin { to { transform: rotate(360deg); } }`}</style>
         </>
       ) : (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

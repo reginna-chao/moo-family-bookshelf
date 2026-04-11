@@ -1,6 +1,7 @@
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, renderHook } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DisplayNameEditor } from "@/dialog/DisplayNameEditor";
+import { useDisplayName } from "@/dialog/useDisplayName";
 
 describe("DisplayNameEditor", () => {
   beforeEach(() => {
@@ -203,5 +204,74 @@ describe("DisplayNameEditor", () => {
     expect(handleSave).toHaveBeenCalled();
     // Should exit edit mode — input gone
     expect(screen.queryByPlaceholderText("輸入顯示名稱")).not.toBeInTheDocument();
+  });
+
+  it("disables input field during saving state", () => {
+    render(<DisplayNameEditor {...baseProps} nameSaveState="saving" />);
+
+    fireEvent.click(screen.getAllByRole("button")[0]);
+
+    const input = screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement;
+    expect(input).toBeDisabled();
+  });
+
+  it("does not call handleSaveDisplayName on Enter when already saving", () => {
+    const handleSave = vi.fn();
+    render(
+      <DisplayNameEditor
+        {...baseProps}
+        nameSaveState="saving"
+        handleSaveDisplayName={handleSave}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button")[0]);
+
+    const input = screen.getByPlaceholderText("輸入顯示名稱");
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(handleSave).not.toHaveBeenCalled();
+  });
+
+  it("does not call handleSaveDisplayName on submit click when already saving", () => {
+    const handleSave = vi.fn();
+    render(
+      <DisplayNameEditor
+        {...baseProps}
+        nameSaveState="saving"
+        handleSaveDisplayName={handleSave}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button")[0]);
+
+    const buttons = screen.getAllByRole("button");
+    fireEvent.click(buttons[0]);
+
+    expect(handleSave).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDisplayName in-flight guard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls storage.local.set only once when handleSaveDisplayName is invoked twice concurrently", async () => {
+    const { result } = renderHook(() => useDisplayName());
+
+    // Flush the initial chrome.storage.local.get in useEffect
+    await act(async () => {});
+
+    // Fire both calls without awaiting between them — second should be blocked by inFlightRef
+    let p1: Promise<boolean>;
+    let p2: Promise<boolean>;
+    await act(async () => {
+      p1 = result.current.handleSaveDisplayName();
+      p2 = result.current.handleSaveDisplayName();
+      await Promise.all([p1!, p2!]);
+    });
+
+    expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
   });
 });

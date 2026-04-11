@@ -24,6 +24,7 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
   const [nameSaveState, setNameSaveState] = useState<NameSaveState>("idle");
   const [nameSaveError, setNameSaveError] = useState("");
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     chrome.storage.local.get(["displayName"], (result) => {
@@ -38,6 +39,9 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
   }, []);
 
   const handleSaveDisplayName = useCallback(async (): Promise<boolean> => {
+    if (inFlightRef.current) return false;
+    inFlightRef.current = true;
+
     const trimmed = displayName.trim();
     setNameSaveState("saving");
     setNameSaveError("");
@@ -68,6 +72,8 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
       setNameSaveError(err instanceof Error ? err.message : "儲存失敗");
       setNameSaveState("error");
       return false;
+    } finally {
+      inFlightRef.current = false;
     }
   }, [displayName, options?.apiClient, options?.familyId, options?.userId]);
 
