@@ -1,10 +1,10 @@
 /**
- * Vite plugin that rewrites manifest.json and index.html for dev builds:
- * - Appends " (dev)" to manifest name and short_name
+ * Vite plugin that rewrites manifest.json and index.html for non-production builds:
+ * - Appends " (dev)" to manifest name, short_name, and HTML <title>
  * - Swaps icon paths to dev/ variants in both manifest and HTML
- * - Updates HTML <title> with (dev) suffix
  *
- * Only active when mode === "dev" or "development" (i.e., pnpm build:dev / pnpm dev).
+ * Active for modes: "development" (pnpm dev), "dev", "remote" (pnpm dev:remote, pnpm build:dev).
+ * Inactive for "production" (pnpm build).
  */
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
@@ -18,7 +18,8 @@ export function devManifest(): Plugin {
     name: "dev-manifest",
     configResolved(config) {
       outDir = resolve(config.root, config.build.outDir);
-      isDev = config.mode === "dev" || config.mode === "development";
+      isDev =
+        config.mode === "dev" || config.mode === "development" || config.mode === "remote";
     },
 
     // Rewrite index.html icon links and title for dev builds

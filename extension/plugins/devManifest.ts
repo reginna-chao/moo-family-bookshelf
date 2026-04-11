@@ -1,9 +1,10 @@
 /**
- * Vite plugin that rewrites manifest.json for dev builds:
+ * Vite plugin that rewrites manifest.json for non-production builds:
  * - Appends " (dev)" to the extension name
  * - Swaps icon paths to icons-dev/ variants
  *
- * Only active when mode === "dev" (i.e., pnpm build:dev).
+ * Active for modes: "development" (pnpm dev), "dev", "remote" (pnpm dev:remote, pnpm build:dev).
+ * Inactive for "production" (pnpm build).
  */
 import { readFileSync, writeFileSync, cpSync } from "fs";
 import { resolve } from "path";
@@ -17,7 +18,8 @@ export function devManifest(): Plugin {
     name: "dev-manifest",
     configResolved(config) {
       outDir = config.build.outDir;
-      isDev = config.mode === "dev" || config.mode === "development";
+      isDev =
+        config.mode === "dev" || config.mode === "development" || config.mode === "remote";
     },
     closeBundle() {
       if (!isDev) return;
