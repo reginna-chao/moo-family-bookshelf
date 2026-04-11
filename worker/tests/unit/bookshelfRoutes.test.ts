@@ -19,7 +19,7 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
 }
 
 async function createFamilyAndGetToken(userId = "user1") {
-  const res = await request("POST", "/api/family", { userId });
+  const res = await request("POST", "/api/family", { userId, keyFingerprint: "a".repeat(64) });
   const json = (await res.json()) as Json;
   return {
     familyId: json.data.familyId as string,

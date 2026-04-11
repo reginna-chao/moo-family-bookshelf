@@ -6,6 +6,8 @@ import { kvKeys } from "../../src/kv/schema";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
+const VALID_FP = "a".repeat(64);
+
 // ---------------------------------------------------------------------------
 // Shared helpers (DRY — Finding #14)
 // ---------------------------------------------------------------------------
@@ -39,7 +41,7 @@ function rawRequest(method: string, path: string, rawBody: string) {
 }
 
 async function createFamily(userId = "user1", displayName?: string) {
-  const body: Record<string, string> = { userId };
+  const body: Record<string, string> = { userId, keyFingerprint: VALID_FP };
   if (displayName !== undefined) body.displayName = displayName;
   const res = await request("POST", "/api/family", body);
   const json = (await res.json()) as Json;
@@ -56,6 +58,7 @@ async function createFamilyWithTwoMembers() {
   const { familyId, authToken: token1 } = await createFamily("user1");
   const joinRes = await request("POST", `/api/family/${familyId}/join`, {
     userId: "user2",
+    keyFingerprint: VALID_FP,
   });
   const joinJson = (await joinRes.json()) as Json;
   const token2 = joinJson.data.authToken as string;
@@ -76,7 +79,7 @@ beforeEach(() => {
 
 describe("Family Lifecycle", () => {
   it("should create a family with default empty displayName", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1" });
+    const res = await request("POST", "/api/family", { userId: "user1", keyFingerprint: VALID_FP });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.familyId).toBeDefined();
@@ -87,7 +90,7 @@ describe("Family Lifecycle", () => {
   });
 
   it("should create a family with a custom displayName", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1", displayName: "Alice" });
+    const res = await request("POST", "/api/family", { userId: "user1", displayName: "Alice", keyFingerprint: VALID_FP });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.members).toEqual([{ userId: "user1", displayName: "Alice" }]);
@@ -106,7 +109,7 @@ describe("Family Lifecycle", () => {
     const joinRes = await request(
       "POST",
       `/api/family/${familyId}/join`,
-      { userId: "user2", displayName: "Bob" },
+      { userId: "user2", displayName: "Bob", keyFingerprint: VALID_FP },
     );
     expect(joinRes.status).toBe(200);
     const joinJson = (await joinRes.json()) as Json;
@@ -148,6 +151,7 @@ describe("Family Lifecycle", () => {
     // Re-joining returns a new auth token (old one is invalidated)
     const rejoinRes = await request("POST", `/api/family/${familyId}/join`, {
       userId: "user1",
+      keyFingerprint: VALID_FP,
     });
     const rejoinJson = (await rejoinRes.json()) as Json;
     const newToken = rejoinJson.data.authToken as string;
@@ -194,14 +198,14 @@ describe("Family Lifecycle", () => {
 
 describe("Family creation response fields", () => {
   it("should include ownerId matching the creator", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1" });
+    const res = await request("POST", "/api/family", { userId: "user1", keyFingerprint: VALID_FP });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.ownerId).toBe("user1");
   });
 
   it("should include maxMembers defaulting to 2", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1" });
+    const res = await request("POST", "/api/family", { userId: "user1", keyFingerprint: VALID_FP });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.maxMembers).toBe(2);
@@ -219,7 +223,7 @@ describe("Family member limit", () => {
     const joinRes = await request(
       "POST",
       `/api/family/${familyId}/join`,
-      { userId: "user2" },
+      { userId: "user2", keyFingerprint: VALID_FP },
     );
     expect(joinRes.status).toBe(200);
   });
@@ -229,6 +233,7 @@ describe("Family member limit", () => {
 
     const joinRes = await request("POST", `/api/family/${familyId}/join`, {
       userId: "user3",
+      keyFingerprint: VALID_FP,
     });
     expect(joinRes.status).toBe(409);
     const json = (await joinRes.json()) as Json;
@@ -531,6 +536,7 @@ describe("GET /api/family/:id/members response", () => {
         { userId: "bob", displayName: "Bob" },
       ],
       createdAt: "2025-01-01T00:00:00.000Z",
+      keyFingerprint: VALID_FP,
     };
     await kv.put(kvKeys.family("abcd-ef01"), JSON.stringify(legacyRecord));
     // Insert member reverse lookup so auth membership check passes
@@ -578,13 +584,14 @@ describe("Join edge cases", () => {
     // user2 joins family A
     await request("POST", `/api/family/${familyA.familyId}/join`, {
       userId: "user2",
+      keyFingerprint: VALID_FP,
     });
 
     // user2 tries to join family B → should be rejected
     const res = await request(
       "POST",
       `/api/family/${familyB.familyId}/join`,
-      { userId: "user2" },
+      { userId: "user2", keyFingerprint: VALID_FP },
     );
     expect(res.status).toBe(409);
     const json = (await res.json()) as Json;
@@ -638,6 +645,7 @@ describe("Input validation", () => {
     const res = await request("POST", "/api/family", {
       userId: "user1",
       displayName: "  Alice  ",
+      keyFingerprint: VALID_FP,
     });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
@@ -732,6 +740,7 @@ describe("Family Bookshelf Aggregation", () => {
     const joinRes = await request("POST", `/api/family/${familyId}/join`, {
       userId: "user2",
       displayName: "Bob",
+      keyFingerprint: VALID_FP,
     });
     const token2 = ((await joinRes.json()) as Json).data.authToken;
 

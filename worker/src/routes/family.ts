@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../utils/env";
-import { kvKeys, type FamilyMember, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
-import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName } from "../utils/validation";
+import { kvKeys, type FamilyMember, type FamilyRecord, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName, isValidKeyFingerprint } from "../utils/validation";
 import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 import { validateVerification } from "./verify";
 
@@ -16,11 +16,20 @@ function invalidDisplayNameResponse(c: Context<{ Bindings: Env }>) {
   );
 }
 
+// Strip server-only fields before sending family record to clients.
+// keyFingerprint is a trust credential — it must not be redistributed.
+type PublicFamilyRecord = Omit<FamilyRecord, "keyFingerprint">;
+function toPublicRecord(record: FamilyRecord): PublicFamilyRecord {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { keyFingerprint, ...pub } = record;
+  return pub;
+}
+
 // POST /api/family — create new family
 familyRoutes.post("/", async (c) => {
   const familyId = generateFamilyId();
 
-  let body: { userId: string; displayName?: string } | null;
+  let body: { userId: string; displayName?: string; keyFingerprint?: string } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -47,6 +56,20 @@ familyRoutes.post("/", async (c) => {
   const displayName = sanitizeDisplayName(body.displayName);
   if (displayName === null) {
     return invalidDisplayNameResponse(c);
+  }
+
+  if (!body.keyFingerprint || typeof body.keyFingerprint !== "string") {
+    return c.json(
+      { error: { code: "MISSING_KEY_FINGERPRINT", message: "keyFingerprint is required" } },
+      400,
+    );
+  }
+
+  if (!isValidKeyFingerprint(body.keyFingerprint)) {
+    return c.json(
+      { error: { code: "INVALID_KEY_FINGERPRINT", message: "keyFingerprint format is invalid" } },
+      400,
+    );
   }
 
   // Prevent duplicate family creation — user must leave existing family first
@@ -71,6 +94,7 @@ familyRoutes.post("/", async (c) => {
     members: [member],
     maxMembers: 2,
     createdAt: new Date().toISOString(),
+    keyFingerprint: body.keyFingerprint,
   };
 
   await Promise.all([
@@ -81,7 +105,7 @@ familyRoutes.post("/", async (c) => {
   const authToken = await generateAuthToken(c.env.KV, body.userId);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
-  return c.json({ data: { ...record, authToken, expiresAt } }, 201);
+  return c.json({ data: { ...toPublicRecord(record), authToken, expiresAt } }, 201);
 });
 
 // POST /api/family/:id/join
@@ -95,7 +119,7 @@ familyRoutes.post("/:id/join", async (c) => {
     );
   }
 
-  let body: { userId: string; displayName?: string; verifySecret?: string } | null;
+  let body: { userId: string; displayName?: string; verifySecret?: string; keyFingerprint?: string } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -124,16 +148,14 @@ familyRoutes.post("/:id/join", async (c) => {
     return invalidDisplayNameResponse(c);
   }
 
-  // Verify PWA login verification (PIN / pattern / OTP) if user has it set
-  const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
-  if (!verification.valid && verification.error) {
+  if (body.keyFingerprint !== undefined && !isValidKeyFingerprint(body.keyFingerprint)) {
     return c.json(
-      { error: { code: verification.error.code, message: verification.error.message } },
-      verification.error.status as 403 | 429,
+      { error: { code: "INVALID_KEY_FINGERPRINT", message: "keyFingerprint format is invalid" } },
+      400,
     );
   }
 
-  // Finding #5: Check if user already belongs to a different family
+  // Check if user already belongs to a different family (before verify to avoid leaking membership info)
   const existingFamily = await c.env.KV.get(kvKeys.member(body.userId));
   if (existingFamily && existingFamily !== familyId) {
     return c.json(
@@ -155,6 +177,19 @@ familyRoutes.post("/:id/join", async (c) => {
   }
 
   const record = normalizeFamilyRecord(raw);
+
+  // Skip verify if client provides matching keyFingerprint (trusted client with prior key possession)
+  const fingerprintMatches = body.keyFingerprint !== undefined && body.keyFingerprint === record.keyFingerprint;
+  if (!fingerprintMatches) {
+    // Verify PWA login verification (PIN / pattern / OTP) if user has it set
+    const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
+    if (!verification.valid && verification.error) {
+      return c.json(
+        { error: { code: verification.error.code, message: verification.error.message } },
+        verification.error.status as 403 | 429,
+      );
+    }
+  }
 
   const isExistingMember = hasMember(record.members, body.userId);
 
@@ -182,7 +217,7 @@ familyRoutes.post("/:id/join", async (c) => {
     : await generateAuthToken(c.env.KV, body.userId);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
-  return c.json({ data: { ...record, authToken, expiresAt } });
+  return c.json({ data: { ...toPublicRecord(record), authToken, expiresAt } });
 });
 
 // DELETE /api/family/:id/member/:uid
@@ -270,7 +305,7 @@ familyRoutes.delete("/:id/member/:uid", async (c) => {
     deleteAuthToken(c.env.KV, targetUserId),
   ]);
 
-  return c.json({ data: record });
+  return c.json({ data: toPublicRecord(record) });
 });
 
 // GET /api/family/:id/members
@@ -315,7 +350,7 @@ familyRoutes.get("/:id/members", async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  return c.json({ data: record });
+  return c.json({ data: toPublicRecord(record) });
 });
 
 // PUT /api/family/:id/member/:uid/displayName — update display name
@@ -489,7 +524,7 @@ familyRoutes.put("/:id/transfer", async (c) => {
   }
   await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
 
-  return c.json({ data: record });
+  return c.json({ data: toPublicRecord(record) });
 });
 
 // PUT /api/family/:id/endpoint — update family API endpoint
@@ -625,7 +660,7 @@ familyRoutes.put("/:id/endpoint", async (c) => {
 
   await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
 
-  return c.json({ data: record });
+  return c.json({ data: toPublicRecord(record) });
 });
 
 function generateFamilyId(): string {

@@ -47,6 +47,16 @@ export function validateDisplayName(name: unknown): string | null {
   return cleaned;
 }
 
+/** Validate 64-char lowercase hex string (SHA-256 output). */
+export function isValidSha256Hex(value: string): boolean {
+  return /^[a-f0-9]{64}$/.test(value);
+}
+
+/** Validate key fingerprint (SHA-256 hex of encryption key). */
+export function isValidKeyFingerprint(value: string): boolean {
+  return isValidSha256Hex(value);
+}
+
 const VALID_VERIFY_METHODS: VerifyMethod[] = ["pin", "pattern", "code", "none"];
 
 export function isValidVerifyMethod(method: unknown): method is VerifyMethod {

@@ -40,7 +40,7 @@ async function createFamily(userId: string): Promise<{ familyId: string; authTok
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, keyFingerprint: "a".repeat(64) }),
     },
     { KV: kv, DEV_MODE: "1" },
   );

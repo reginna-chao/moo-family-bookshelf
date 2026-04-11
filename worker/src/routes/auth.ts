@@ -1,15 +1,10 @@
 import { Hono } from "hono";
 import type { Env } from "../utils/env";
 import { kvKeys, TOKEN_TTL_SECONDS, type RawFamilyRecord, normalizeFamilyRecord } from "../kv/schema";
-import { isValidFamilyId } from "../utils/validation";
+import { isValidFamilyId, isValidSha256Hex } from "../utils/validation";
 import { getOrGenerateAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 
 export const authRoutes = new Hono<{ Bindings: Env }>();
-
-/** Validate 64-char lowercase hex string (SHA-256 output). */
-function isValidSha256Hex(value: string): boolean {
-  return /^[a-f0-9]{64}$/.test(value);
-}
 
 // POST /api/auth/lookup — look up family membership by userId (public, no auth required)
 authRoutes.post("/lookup", async (c) => {

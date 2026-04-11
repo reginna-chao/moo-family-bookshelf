@@ -29,10 +29,11 @@ export interface FamilyRecord {
   maxMembers: number;
   createdAt: string;
   apiEndpoint?: string;
+  keyFingerprint: string;
 }
 
 /** Raw family record from KV — may lack fields added after initial release. */
-export type RawFamilyRecord = Partial<FamilyRecord> & Pick<FamilyRecord, 'familyId' | 'members' | 'createdAt'>;
+export type RawFamilyRecord = Partial<FamilyRecord> & Pick<FamilyRecord, 'familyId' | 'members' | 'createdAt' | 'keyFingerprint'>;
 
 /** Find a member by userId in the members array. */
 export function findMember(members: FamilyMember[], userId: string): FamilyMember | undefined {
@@ -47,6 +48,9 @@ export function hasMember(members: FamilyMember[], userId: string): boolean {
 export function normalizeFamilyRecord(record: RawFamilyRecord): FamilyRecord {
   if (record.members.length === 0) {
     throw new Error("Corrupted family record: members array is empty");
+  }
+  if (!record.keyFingerprint) {
+    throw new Error("Corrupted family record: keyFingerprint missing");
   }
   const firstMember = record.members[0];
   const ownerId = record.ownerId ?? (typeof firstMember === 'string' ? firstMember : firstMember.userId);
