@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../utils/env";
 import { kvKeys, type FamilyMember, type FamilyRecord, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
-import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName, isValidKeyFingerprint } from "../utils/validation";
+import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName, isValidKeyFingerprint, timingSafeEqualHex } from "../utils/validation";
 import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 import { validateVerification } from "./verify";
 
@@ -179,7 +179,9 @@ familyRoutes.post("/:id/join", async (c) => {
   const record = normalizeFamilyRecord(raw);
 
   // Skip verify if client provides matching keyFingerprint (trusted client with prior key possession)
-  const fingerprintMatches = body.keyFingerprint !== undefined && body.keyFingerprint === record.keyFingerprint;
+  const fingerprintMatches =
+    body.keyFingerprint !== undefined &&
+    timingSafeEqualHex(body.keyFingerprint, record.keyFingerprint);
   if (!fingerprintMatches) {
     // Verify PWA login verification (PIN / pattern / OTP) if user has it set
     const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);

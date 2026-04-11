@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidSha256Hex, isValidKeyFingerprint } from "../../src/utils/validation";
+import { isValidSha256Hex, isValidKeyFingerprint, timingSafeEqualHex } from "../../src/utils/validation";
 
 describe("isValidSha256Hex", () => {
   it("accepts valid 64-char lowercase hex", () => {
@@ -45,5 +45,32 @@ describe("isValidKeyFingerprint", () => {
     expect(isValidKeyFingerprint("a".repeat(63))).toBe(false);
     expect(isValidKeyFingerprint("")).toBe(false);
     expect(isValidKeyFingerprint("not-hex")).toBe(false);
+  });
+});
+
+describe("timingSafeEqualHex", () => {
+  it("returns true for identical strings", () => {
+    expect(timingSafeEqualHex("a".repeat(64), "a".repeat(64))).toBe(true);
+  });
+
+  it("returns false for differing strings of equal length", () => {
+    const a = "a".repeat(64);
+    const b = "a".repeat(63) + "b";
+    expect(timingSafeEqualHex(a, b)).toBe(false);
+  });
+
+  it("returns false when first byte differs", () => {
+    const a = "a".repeat(64);
+    const b = "b" + "a".repeat(63);
+    expect(timingSafeEqualHex(a, b)).toBe(false);
+  });
+
+  it("returns false for different-length inputs", () => {
+    expect(timingSafeEqualHex("a".repeat(64), "a".repeat(63))).toBe(false);
+    expect(timingSafeEqualHex("", "a")).toBe(false);
+  });
+
+  it("returns true for two empty strings", () => {
+    expect(timingSafeEqualHex("", "")).toBe(true);
   });
 });

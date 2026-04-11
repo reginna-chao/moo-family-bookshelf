@@ -57,6 +57,20 @@ export function isValidKeyFingerprint(value: string): boolean {
   return isValidSha256Hex(value);
 }
 
+/**
+ * Constant-time equality for equal-length hex strings.
+ * Used for comparing keyFingerprint on join to avoid leaking match-prefix
+ * via response-time timing.
+ */
+export function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 const VALID_VERIFY_METHODS: VerifyMethod[] = ["pin", "pattern", "code", "none"];
 
 export function isValidVerifyMethod(method: unknown): method is VerifyMethod {
