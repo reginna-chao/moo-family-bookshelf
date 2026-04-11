@@ -1,0 +1,258 @@
+/**
+ * useOnboardingFlow — owns the state machine, handlers, and business state
+ * for the Onboarding dialog. Keeps Onboarding.tsx focused on rendering and
+ * lightweight UI chrome state (copied flag, hasUsedBefore).
+ */
+
+import { useCallback, useRef, useState } from "react";
+import { ApiClient } from "../api/client";
+import { deriveUserId } from "../crypto/encrypt";
+import { SyncCodeError } from "../crypto/syncCode";
+import { useAutoSetup } from "./useAutoSetup";
+import type { ErrorAction } from "./OnboardingViews";
+import {
+  createNewFamily,
+  performJoin,
+  tryAutoRecovery,
+} from "./onboardingFlow";
+
+export type OnboardingState =
+  | "welcome"
+  | "idle"
+  | "creating"
+  | "recovering"
+  | "created"
+  | "joining"
+  | "syncing-books"
+  | "error";
+
+export interface UseOnboardingFlowOptions {
+  apiClient: ApiClient;
+  onFamilyJoined: (familyId: string, userId: string) => void;
+  autoSetup: ReturnType<typeof useAutoSetup>;
+}
+
+export interface UseOnboardingFlowResult {
+  state: OnboardingState;
+  errorMessage: string;
+  errorActions: ErrorAction[];
+  userEmail: string | null;
+  userDisplayName: string;
+  syncCodeInput: string;
+  setSyncCodeInput: (value: string) => void;
+  generatedSyncCode: string;
+  createdFamilyId: string;
+  createdUserId: string;
+  handleStart: () => Promise<void>;
+  handleCreate: () => Promise<void>;
+  handleJoin: () => Promise<void>;
+  handleContinueAfterCreate: () => Promise<void>;
+  handleRetry: () => void;
+}
+
+export function useOnboardingFlow(
+  opts: UseOnboardingFlowOptions,
+): UseOnboardingFlowResult {
+  const { apiClient, onFamilyJoined, autoSetup } = opts;
+
+  const [state, setState] = useState<OnboardingState>("welcome");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [errorActions, setErrorActions] = useState<ErrorAction[]>([]);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userDisplayName, setUserDisplayName] = useState("");
+  const [syncCodeInput, setSyncCodeInput] = useState("");
+  const [generatedSyncCode, setGeneratedSyncCode] = useState("");
+  const [createdFamilyId, setCreatedFamilyId] = useState("");
+  const [createdUserId, setCreatedUserId] = useState("");
+
+  // Refs mirror the latest state so handlers can read fresh values without
+  // being recreated on every render (keeps stable identity for consumers).
+  const userEmailRef = useRef<string | null>(null);
+  const userDisplayNameRef = useRef("");
+  const syncCodeInputRef = useRef("");
+  const createdFamilyIdRef = useRef("");
+  const createdUserIdRef = useRef("");
+
+  userEmailRef.current = userEmail;
+  userDisplayNameRef.current = userDisplayName;
+  syncCodeInputRef.current = syncCodeInput;
+  createdFamilyIdRef.current = createdFamilyId;
+  createdUserIdRef.current = createdUserId;
+
+  const handleRetry = useCallback(() => {
+    autoSetup.reset();
+    setState(userEmailRef.current ? "idle" : "welcome");
+    setErrorMessage("");
+    setErrorActions([]);
+  }, [autoSetup]);
+
+  const handleUseSyncCode = useCallback(() => {
+    setState("idle");
+  }, []);
+
+  const handleStart = useCallback(async () => {
+    const result = await autoSetup.scrapeProfile();
+    if (!result) return;
+
+    setUserEmail(result.email);
+    setUserDisplayName(result.displayName);
+
+    // Attempt silent auto-recovery using the synced encryption key
+    try {
+      const userId = await deriveUserId(result.email);
+      const lookupRes = await apiClient.lookupUser(userId);
+      if (!lookupRes.error && lookupRes.data) {
+        const { existingFamilyId, memberCount } = lookupRes.data;
+        if (existingFamilyId && memberCount > 0) {
+          setState("recovering");
+          const { recovered } = await tryAutoRecovery({
+            familyId: existingFamilyId,
+            userId,
+            displayName: result.displayName,
+            apiClient,
+            autoSetup,
+            onFamilyJoined,
+          });
+          if (recovered) return;
+          // Recovery failed (no sync key) — fall through to idle so user can enter sync code
+        }
+      }
+    } catch {
+      // Recovery failed — fall through to normal onboarding
+    }
+
+    setState("idle");
+  }, [apiClient, autoSetup, onFamilyJoined]);
+
+  const handleCreate = useCallback(async () => {
+    const email = userEmailRef.current;
+    if (!email) return;
+    setState("creating");
+    setErrorMessage("");
+    setErrorActions([]);
+
+    try {
+      const userId = await deriveUserId(email);
+      const lookupRes = await apiClient.lookupUser(userId);
+      if (lookupRes.error) {
+        setErrorMessage("無法驗證帳號，請重試。");
+        setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+        setState("error");
+        return;
+      }
+      const existingFamilyId = lookupRes.data?.existingFamilyId ?? null;
+      const memberCount = lookupRes.data?.memberCount ?? 0;
+
+      // User already belongs to a family — attempt silent recovery
+      if (existingFamilyId && memberCount > 0) {
+        setState("recovering");
+        const { recovered } = await tryAutoRecovery({
+          familyId: existingFamilyId,
+          userId,
+          displayName: userDisplayNameRef.current,
+          apiClient,
+          autoSetup,
+          onFamilyJoined,
+        });
+        if (recovered) return;
+
+        setErrorMessage("你已有家庭群組，請向家人索取同步碼加入，或輸入已有的同步碼。");
+        setErrorActions([
+          { label: "改用同步碼", variant: "primary", onClick: handleUseSyncCode },
+          { label: "重試", variant: "secondary", onClick: handleRetry },
+        ]);
+        setState("error");
+        return;
+      }
+
+      const created = await createNewFamily({
+        userId,
+        displayName: userDisplayNameRef.current,
+        apiClient,
+      });
+
+      setGeneratedSyncCode(created.syncCode);
+      setCreatedFamilyId(created.familyId);
+      setCreatedUserId(created.userId);
+      setState("created");
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
+      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setState("error");
+    }
+  }, [apiClient, autoSetup, handleRetry, handleUseSyncCode, onFamilyJoined]);
+
+  const handleJoin = useCallback(async () => {
+    const email = userEmailRef.current;
+    if (!email) return;
+    setState("joining");
+    setErrorMessage("");
+    setErrorActions([]);
+
+    try {
+      const userId = await deriveUserId(email);
+      const result = await performJoin({
+        syncCodeInput: syncCodeInputRef.current,
+        userId,
+        displayName: userDisplayNameRef.current,
+        apiClient,
+      });
+
+      if (!result.ok) {
+        if (result.errorCode === "VERIFICATION_REQUIRED") {
+          setErrorMessage(
+            "此家庭需要使用手機 App 完成驗證後才能加入。請先在手機 App 中登入並設定驗證，或向家人取得新的同步碼。",
+          );
+          setErrorActions([{ label: "我知道了", variant: "primary", onClick: handleRetry }]);
+        } else {
+          setErrorMessage(result.errorMessage);
+          setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+        }
+        setState("error");
+        return;
+      }
+
+      // Auto-sync books after joining; sync is best-effort, proceed regardless
+      setState("syncing-books");
+      await autoSetup.syncBooks({ userId: result.userId, apiClient });
+      onFamilyJoined(result.familyId, result.userId);
+    } catch (err) {
+      if (err instanceof SyncCodeError) {
+        setErrorMessage(`同步碼格式錯誤：${err.message}`);
+      } else {
+        setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
+      }
+      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setState("error");
+    }
+  }, [apiClient, autoSetup, handleRetry, onFamilyJoined]);
+
+  const handleContinueAfterCreate = useCallback(async () => {
+    setState("syncing-books");
+    // Book sync is best-effort; regardless of success we proceed to the main
+    // view because the family itself was created successfully.
+    await autoSetup.syncBooks({
+      userId: createdUserIdRef.current,
+      apiClient,
+    });
+    onFamilyJoined(createdFamilyIdRef.current, createdUserIdRef.current);
+  }, [apiClient, autoSetup, onFamilyJoined]);
+
+  return {
+    state,
+    errorMessage,
+    errorActions,
+    userEmail,
+    userDisplayName,
+    syncCodeInput,
+    setSyncCodeInput,
+    generatedSyncCode,
+    createdFamilyId,
+    createdUserId,
+    handleStart,
+    handleCreate,
+    handleJoin,
+    handleContinueAfterCreate,
+    handleRetry,
+  };
+}

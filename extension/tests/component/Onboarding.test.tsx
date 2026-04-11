@@ -12,12 +12,26 @@ beforeAll(() => {
   }
 });
 
-// Partially mock crypto module — override deriveUserId for deterministic & fast resolution
+// Partially mock crypto module — override async functions that depend on
+// crypto.subtle, for deterministic & fast resolution in fake-timer environment.
+// 說明：這裡把 computeKeyFingerprint 固定成 "f".repeat(64) 僅是為了在 fake-timer
+// 環境下避免觸發真實的 crypto.subtle 運算；真實的 fingerprint 正確性（encode、
+// format、roundtrip）由 extension/tests/unit/crypto/encrypt.test.ts 負責驗證。
 vi.mock("@/crypto/encrypt", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/crypto/encrypt")>();
   return {
     ...actual,
     deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
+    computeKeyFingerprint: vi.fn().mockResolvedValue("f".repeat(64)),
+    // importKey is called in handleJoin and syncBooks; mock for speed in fake-timer env
+    importKey: vi.fn().mockResolvedValue({
+      type: "secret",
+      algorithm: { name: "AES-GCM" },
+      extractable: true,
+      usages: ["encrypt", "decrypt"],
+    } as unknown as CryptoKey),
+    // encrypt is called in syncBooks; return a stable string
+    encrypt: vi.fn().mockResolvedValue("mock-encrypted-payload"),
   };
 });
 
@@ -864,27 +878,85 @@ describe("Onboarding", () => {
         expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", expect.any(String));
       });
 
-      // Should have called joinFamily with the existing family
+      // Should have called joinFamily with the existing family and fingerprint in opts
       expect(mockApi.joinFamily).toHaveBeenCalledWith(
         "fam-existing",
-        expect.any(String),
-        expect.any(String),
+        expect.any(String), // userId
+        expect.any(String), // displayName
+        expect.objectContaining({ keyFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) }),
       );
     });
 
-    it("rejoins existing family for solo member without encryption key", async () => {
+    it("passes keyFingerprint in tryAutoRecovery joinFamily call", async () => {
+      const onFamilyJoined = vi.fn();
+      const mockApi = createMockApiClient({
+        lookupUser: vi.fn().mockResolvedValue({
+          data: { existingFamilyId: "fam-fp-test", memberCount: 2 },
+        }),
+        joinFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-fp-test",
+            members: [],
+            createdAt: "2026-01-01",
+            authToken: "fp-token",
+          },
+        }),
+      });
+
+      mockEncryptionKeyMessage("myBase62KeyData");
+
+      renderOnboarding({ onFamilyJoined, apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(onFamilyJoined).toHaveBeenCalled();
+      });
+
+      const joinCall = vi.mocked(mockApi.joinFamily).mock.calls[0];
+      // 4th argument is opts
+      const opts = joinCall[3] as Record<string, string> | undefined;
+      expect(opts?.keyFingerprint).toBeDefined();
+      expect(opts?.keyFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("sets familyId in sync storage (overwriting stale value) on successful auto-recovery", async () => {
+      const onFamilyJoined = vi.fn();
+      const mockApi = createMockApiClient({
+        lookupUser: vi.fn().mockResolvedValue({
+          data: { existingFamilyId: "fam-new-sync", memberCount: 2 },
+        }),
+        joinFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-new-sync",
+            members: [],
+            createdAt: "2026-01-01",
+            authToken: "sync-token",
+          },
+        }),
+      });
+
+      mockEncryptionKeyMessage("freshKey");
+
+      renderOnboarding({ onFamilyJoined, apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(onFamilyJoined).toHaveBeenCalled();
+      });
+
+      // tryAutoRecovery should overwrite sync storage familyId
+      expect(chrome.storage.sync.set).toHaveBeenCalledWith(
+        expect.objectContaining({ familyId: "fam-new-sync" }),
+      );
+    });
+
+    it("falls through to idle when existing family found but no encryption key", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-solo", memberCount: 1 },
-        }),
-        joinFamily: vi.fn().mockResolvedValue({
-          data: {
-            familyId: "fam-solo",
-            members: [{ userId: "a".repeat(64), displayName: "Test" }],
-            createdAt: "2026-01-01",
-            authToken: "rejoined-token",
-          },
         }),
       });
 
@@ -894,11 +966,14 @@ describe("Onboarding", () => {
 
       await clickStartAndWait();
 
-      // Solo member + no key: handleStart rejoins existing family with fresh key
+      // No encryption key → tryAutoRecovery returns { recovered: false }
+      // → falls through to idle; user must enter sync code manually
       await waitFor(() => {
-        expect(mockApi.joinFamily).toHaveBeenCalledWith("fam-solo", expect.any(String), expect.any(String));
-        expect(onFamilyJoined).toHaveBeenCalledWith("fam-solo", expect.any(String));
+        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
       });
+
+      // onFamilyJoined should NOT have been called
+      expect(onFamilyJoined).not.toHaveBeenCalled();
     });
 
     it("shows error for multi-member family without encryption key", async () => {
@@ -927,8 +1002,137 @@ describe("Onboarding", () => {
 
       await waitFor(() => {
         expect(screen.getByText("發生錯誤")).toBeInTheDocument();
-        expect(screen.getByText("你已有家庭群組，請向家人索取同步碼重新加入，或輸入同步碼加入。")).toBeInTheDocument();
+        expect(screen.getByText("你已有家庭群組，請向家人索取同步碼加入，或輸入已有的同步碼。")).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("handleCreate with keyFingerprint", () => {
+    it("calls createFamily with keyFingerprint in the request", async () => {
+      const mockApi = createMockApiClient({
+        createFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-fp-create",
+            members: ["user-1"],
+            createdAt: "2026-01-01",
+            authToken: "auth-token-fp",
+          },
+        }),
+      });
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("建立家庭公開書櫃"));
+        await flushMicrotasks();
+      });
+
+      await waitFor(() => {
+        expect(mockApi.createFamily).toHaveBeenCalled();
+      });
+
+      const createCall = vi.mocked(mockApi.createFamily).mock.calls[0];
+      // createFamily(userId, displayName, keyFingerprint)
+      const keyFingerprint = createCall[2];
+      expect(keyFingerprint).toBeDefined();
+      expect(typeof keyFingerprint).toBe("string");
+      expect(keyFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("shows ErrorView with two actions when user already has a family (existingFamily + recovery failed)", async () => {
+      const mockApi = createMockApiClient({
+        lookupUser: vi.fn().mockResolvedValue({
+          data: { existingFamilyId: "fam-old", memberCount: 2 },
+        }),
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "FAMILY_NOT_FOUND", message: "Family not found" },
+        }),
+      });
+
+      // No encryption key → tryAutoRecovery fails
+      vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+        (...args: unknown[]) => {
+          const msg = args[0] as Record<string, unknown>;
+          const callback = args[1] as ((response: unknown) => void) | undefined;
+          if (msg.type === "GET_ENCRYPTION_KEY" && typeof callback === "function") {
+            callback({ encryptionKey: null });
+          }
+          return Promise.resolve();
+        },
+      );
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      // Wait for idle state — early recovery was skipped because no key
+      await waitFor(() => {
+        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
+      });
+
+      // Click create — triggers handleCreate, which will also fail auto-recovery
+      await act(async () => {
+        fireEvent.click(screen.getByText("建立家庭公開書櫃"));
+        for (let i = 0; i < 5; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("發生錯誤")).toBeInTheDocument();
+        expect(screen.getByText("你已有家庭群組，請向家人索取同步碼加入，或輸入已有的同步碼。")).toBeInTheDocument();
+      });
+
+      // Should show two action buttons — no fallback create
+      expect(screen.getByRole("button", { name: "改用同步碼" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
+    });
+  });
+
+  describe("handleJoin VERIFICATION_REQUIRED", () => {
+    it("shows Q5 verification notice when server returns VERIFICATION_REQUIRED", async () => {
+      const mockApi = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          error: {
+            code: "VERIFICATION_REQUIRED",
+            message: "Verification required",
+          },
+        }),
+      });
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
+        target: { value: "moo-abcd-efgh-validKey123" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("發生錯誤")).toBeInTheDocument();
+        expect(screen.getByText(
+          "此家庭需要使用手機 App 完成驗證後才能加入。請先在手機 App 中登入並設定驗證，或向家人取得新的同步碼。",
+        )).toBeInTheDocument();
+      });
+
+      // Should show single "我知道了" button instead of "重試"
+      expect(screen.getByRole("button", { name: "我知道了" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "重試" })).not.toBeInTheDocument();
     });
   });
 
