@@ -1,0 +1,37 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>MooFamily Bookshelf Icon (Local)</title>
+  <!-- Icon-only version (no text) for favicon, touch icon, extension icon -->
+  <!-- Local variant: light red background (#FEDBDB) instead of warm beige -->
+  <rect width="512" height="512" rx="64" fill="#FEDBDB"/>
+  <!-- Arch window frame -->
+  <path d="M108,430 L108,220 Q108,90 256,90 Q404,90 404,220 L404,430Z" fill="#6B4C3B"/>
+  <!-- Inner window -->
+  <path d="M130,430 L130,230 Q130,114 256,114 Q382,114 382,230 L382,430Z" fill="#FBF7F2"/>
+  <!-- Warm glow -->
+  <ellipse cx="256" cy="175" rx="65" ry="40" fill="#F5D4A0" opacity="0.25"/>
+  <!-- Upper shelf -->
+  <rect x="130" y="280" width="252" height="12" rx="1" fill="#A67B5B"/>
+  <!-- Books on upper shelf -->
+  <rect x="148" y="185" width="30" height="95" rx="4" fill="#D4836A"/>
+  <rect x="183" y="205" width="26" height="75" rx="4" fill="#C4956A"/>
+  <rect x="214" y="192" width="28" height="88" rx="4" fill="#D4A574"/>
+  <rect x="248" y="200" width="32" height="80" rx="4" fill="#B8906A"/>
+  <rect x="286" y="190" width="26" height="90" rx="4" fill="#E8C9A8"/>
+  <rect x="317" y="205" width="28" height="75" rx="4" fill="#C4956A"/>
+  <!-- Small plant on upper shelf -->
+  <g transform="translate(358, 275)">
+    <rect x="-7" y="-10" width="14" height="10" rx="3" fill="#A67B5B"/>
+    <ellipse cx="0" cy="-18" rx="10" ry="9" fill="#8B9E6B" opacity="0.8"/>
+    <ellipse cx="-7" cy="-23" rx="7" ry="6" fill="#8B9E6B" opacity="0.6"/>
+    <ellipse cx="7" cy="-22" rx="7" ry="6" fill="#9BAF7B" opacity="0.7"/>
+  </g>
+  <!-- Lower shelf -->
+  <rect x="130" y="400" width="252" height="12" rx="1" fill="#A67B5B"/>
+  <!-- Books on lower shelf -->
+  <rect x="148" y="302" width="32" height="98" rx="4" fill="#E8C9A8"/>
+  <rect x="185" y="315" width="28" height="85" rx="4" fill="#D4836A"/>
+  <rect x="218" y="298" width="30" height="102" rx="4" fill="#B8906A"/>
+  <rect x="254" y="310" width="26" height="90" rx="4" fill="#D4A574"/>
+  <rect x="285" y="302" width="30" height="98" rx="4" fill="#C4956A"/>
+  <rect x="320" y="318" width="26" height="82" rx="4" fill="#E8C9A8"/>
+</svg>

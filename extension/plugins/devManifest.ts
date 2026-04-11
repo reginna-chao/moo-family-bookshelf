@@ -1,28 +1,36 @@
 /**
  * Vite plugin that rewrites manifest.json for non-production builds:
- * - Appends " (dev)" to the extension name
- * - Swaps icon paths to icons-dev/ variants
+ * - Appends " (local)" or " (dev)" to the extension name
+ * - Swaps icon paths to the matching variant folder
  *
- * Active for modes: "development" (pnpm dev), "dev", "remote" (pnpm dev:remote, pnpm build:dev).
- * Inactive for "production" (pnpm build).
+ * Active for:
+ *   mode === "development" → local (pnpm dev)
+ *   mode === "remote"      → dev   (pnpm dev:remote, pnpm build:dev)
+ * Inactive for mode === "production" (pnpm build).
  */
 import { readFileSync, writeFileSync, cpSync } from "fs";
 import { resolve } from "path";
 import type { Plugin } from "vite";
 
+type Variant = { label: string; iconDir: string };
+
+const VARIANT_MAP: Partial<Record<string, Variant>> = {
+  development: { label: "local", iconDir: "icons-local" },
+  remote: { label: "dev", iconDir: "icons-dev" },
+};
+
 export function devManifest(): Plugin {
   let outDir: string;
-  let isDev: boolean;
+  let variant: Variant | undefined;
 
   return {
     name: "dev-manifest",
     configResolved(config) {
       outDir = config.build.outDir;
-      isDev =
-        config.mode === "dev" || config.mode === "development" || config.mode === "remote";
+      variant = VARIANT_MAP[config.mode];
     },
     closeBundle() {
-      if (!isDev) return;
+      if (!variant) return;
 
       const manifestPath = resolve(outDir, "manifest.json");
       let manifest: Record<string, unknown>;
@@ -33,26 +41,29 @@ export function devManifest(): Plugin {
         return;
       }
 
-      // Rename extension
-      manifest.name = `${manifest.name as string} (dev)`;
+      manifest.name = `${manifest.name as string} (${variant.label})`;
 
-      // Swap icons to dev variants
       const icons = manifest.icons as Record<string, string> | undefined;
       if (icons) {
         for (const size of Object.keys(icons)) {
-          icons[size] = icons[size].replace("icons/", "icons-dev/");
+          if (!icons[size].startsWith("icons/")) {
+            console.warn(
+              `[dev-manifest] Unexpected icon path format: ${icons[size]} — expected "icons/" prefix`,
+            );
+            continue;
+          }
+          icons[size] = icons[size].replace("icons/", `${variant.iconDir}/`);
         }
       }
 
       writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-      // Copy dev icons into dist/icons-dev/
-      const srcIconsDir = resolve(__dirname, "..", "public", "icons-dev");
-      const destIconsDir = resolve(outDir, "icons-dev");
+      const srcIconsDir = resolve(__dirname, "..", "public", variant.iconDir);
+      const destIconsDir = resolve(outDir, variant.iconDir);
       try {
         cpSync(srcIconsDir, destIconsDir, { recursive: true });
       } catch {
-        console.warn("[dev-manifest] Could not copy icons-dev/");
+        console.warn(`[dev-manifest] Could not copy ${variant.iconDir}/`);
       }
     },
   };
