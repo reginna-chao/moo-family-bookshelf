@@ -14,22 +14,28 @@ beforeAll(() => {
 
 // Partially mock crypto module — override async functions that depend on
 // crypto.subtle, for deterministic & fast resolution in fake-timer environment.
-// 說明：這裡把 computeKeyFingerprint 固定成 "f".repeat(64) 僅是為了在 fake-timer
-// 環境下避免觸發真實的 crypto.subtle 運算；真實的 fingerprint 正確性（encode、
-// format、roundtrip）由 extension/tests/unit/crypto/encrypt.test.ts 負責驗證。
+// 說明：generateKey、exportKey、importKey、computeKeyFingerprint 等都會觸發真實的
+// crypto.subtle 運算，在 fake-timer 環境下會與 timer advancement 競爭 microtask
+// 導致 CI flake。統一 mock 以確保穩定性；真實的 crypto 正確性由
+// extension/tests/unit/crypto/encrypt.test.ts 負責驗證。
 vi.mock("@/crypto/encrypt", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/crypto/encrypt")>();
+  const mockCryptoKey = {
+    type: "secret",
+    algorithm: { name: "AES-GCM" },
+    extractable: true,
+    usages: ["encrypt", "decrypt"],
+  } as unknown as CryptoKey;
   return {
     ...actual,
     deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
     computeKeyFingerprint: vi.fn().mockResolvedValue("f".repeat(64)),
+    // generateKey is called in solo recovery; mock to avoid real crypto.subtle in fake-timer env
+    generateKey: vi.fn().mockResolvedValue(mockCryptoKey),
+    // exportKey is called after generateKey; return a deterministic base62-like string
+    exportKey: vi.fn().mockResolvedValue("mock-exported-key-string"),
     // importKey is called in handleJoin and syncBooks; mock for speed in fake-timer env
-    importKey: vi.fn().mockResolvedValue({
-      type: "secret",
-      algorithm: { name: "AES-GCM" },
-      extractable: true,
-      usages: ["encrypt", "decrypt"],
-    } as unknown as CryptoKey),
+    importKey: vi.fn().mockResolvedValue(mockCryptoKey),
     // encrypt is called in syncBooks; return a stable string
     encrypt: vi.fn().mockResolvedValue("mock-encrypted-payload"),
   };
@@ -1215,7 +1221,7 @@ describe("Onboarding", () => {
       expect(onFamilyJoined).not.toHaveBeenCalled();
 
       // Trigger handleCreate → tryAutoRecovery fails (no key) → solo recovery succeeds
-      // (uses real crypto for generateKey/exportKey + syncBooks needs 1500ms timer)
+      // (generateKey/exportKey now mocked + syncBooks needs 1500ms timer)
       await act(async () => {
         fireEvent.click(screen.getByText("建立家庭公開書櫃"));
         await flushMicrotasks();
