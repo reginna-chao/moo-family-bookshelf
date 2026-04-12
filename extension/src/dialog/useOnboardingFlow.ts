@@ -13,6 +13,7 @@ import type { ErrorAction } from "./OnboardingViews";
 import {
   createNewFamily,
   performJoin,
+  performSoloRecovery,
   tryAutoRecovery,
 } from "./onboardingFlow";
 
@@ -114,7 +115,19 @@ export function useOnboardingFlow(
             onFamilyJoined,
           });
           if (recovered) return;
-          // Recovery failed (no sync key) — fall through to idle so user can enter sync code
+          // Recovery failed (no sync key) — try solo key rotation if only member
+          if (memberCount === 1) {
+            const solo = await performSoloRecovery({
+              familyId: existingFamilyId,
+              userId,
+              displayName: result.displayName,
+              apiClient,
+              autoSetup,
+              onFamilyJoined,
+            });
+            if (solo.recovered) return;
+          }
+          // Multi-member or solo failed — fall through to idle so user can enter sync code
         }
       }
     } catch {
@@ -156,6 +169,18 @@ export function useOnboardingFlow(
         });
         if (recovered) return;
 
+        if (memberCount === 1) {
+          const solo = await performSoloRecovery({
+            familyId: existingFamilyId,
+            userId,
+            displayName: userDisplayNameRef.current,
+            apiClient,
+            autoSetup,
+            onFamilyJoined,
+          });
+          if (solo.recovered) return;
+        }
+        // Multi-member or solo failed — show error
         setErrorMessage("你已有家庭群組，請向家人索取同步碼加入，或輸入已有的同步碼。");
         setErrorActions([
           { label: "改用同步碼", variant: "primary", onClick: handleUseSyncCode },

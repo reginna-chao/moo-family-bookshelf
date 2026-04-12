@@ -142,6 +142,64 @@ export async function tryAutoRecovery(opts: {
   return { recovered: true };
 }
 
+export interface SoloRecoveryResult {
+  recovered: boolean;
+}
+
+/**
+ * Rejoin an existing solo family with a freshly generated encryption key.
+ * Used when `tryAutoRecovery` fails (no synced key) but the user is the
+ * only member of the family — they can rotate their own key without
+ * needing the old one. The backend permits fingerprint rotation for
+ * solo families; the old ciphertext is discarded and the cached local
+ * book list is re-encrypted under the new key.
+ */
+export async function performSoloRecovery(opts: {
+  familyId: string;
+  userId: string;
+  displayName: string;
+  apiClient: ApiClient;
+  autoSetup: ReturnType<typeof useAutoSetup>;
+  onFamilyJoined: (familyId: string, userId: string) => void;
+}): Promise<SoloRecoveryResult> {
+  const key = await generateKey();
+  const keyString = await exportKey(key);
+  const keyFingerprint = await computeKeyFingerprint(keyString);
+
+  const joinRes = await opts.apiClient.joinFamily(
+    opts.familyId,
+    opts.userId,
+    opts.displayName,
+    { keyFingerprint },
+  );
+  if (joinRes.error) return { recovered: false };
+
+  const joinData = joinRes.data;
+
+  chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: opts.familyId });
+  chrome.runtime.sendMessage({ type: "SET_ENCRYPTION_KEY", encryptionKey: keyString });
+  await persistJoinCredentials({
+    userId: opts.userId,
+    encryptionKey: keyString,
+    authToken: joinData?.authToken,
+    expiresAt: joinData?.expiresAt,
+  });
+  try {
+    await chrome.storage.sync.set({ familyId: opts.familyId });
+  } catch {
+    // sync storage may be unavailable in some contexts
+  }
+  await migratePersonalBooksCache(keyString, opts.userId, opts.apiClient);
+
+  if (joinData?.authToken) {
+    opts.apiClient.setAuthToken(joinData.authToken);
+  }
+
+  await opts.autoSetup.syncBooks({ userId: opts.userId, apiClient: opts.apiClient });
+  opts.onFamilyJoined(opts.familyId, opts.userId);
+  return { recovered: true };
+}
+
 export interface CreateFamilyResult {
   familyId: string;
   userId: string;
