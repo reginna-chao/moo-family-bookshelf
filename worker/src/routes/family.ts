@@ -205,6 +205,19 @@ familyRoutes.post("/:id/join", async (c) => {
       );
     }
     record.members.push({ userId: body.userId, displayName });
+  } else if (
+    record.members.length === 1 &&
+    body.keyFingerprint !== undefined &&
+    !timingSafeEqualHex(body.keyFingerprint, record.keyFingerprint)
+  ) {
+    // Solo-member rejoin with a new fingerprint: rotate the trust anchor.
+    // This supports the silent-rejoin recovery path when the client lost its
+    // encryption key (e.g. extension reinstall) and had to regenerate it.
+    // Multi-member families intentionally disallow rotation — the fingerprint
+    // is the shared trust anchor and must not be mutated by a single member.
+    // The verify path above has already gated this request (either matched or
+    // validateVerification passed), so rotating here is safe.
+    record.keyFingerprint = body.keyFingerprint;
   }
 
   await Promise.all([

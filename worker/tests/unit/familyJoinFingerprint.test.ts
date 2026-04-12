@@ -213,6 +213,130 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
     expect(json.data.keyFingerprint).toBeUndefined();
   });
 
+  // =========================================================================
+  // Solo-member fingerprint rotation on rejoin
+  // =========================================================================
+
+  it("(j) solo member rejoin with new fingerprint + no verify set → 200 OK + KV fingerprint updated", async () => {
+    const { familyId } = await createFamily("user1", VALID_FP);
+
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user1",
+      keyFingerprint: ALT_FP,
+    });
+    expect(res.status).toBe(200);
+
+    const raw = await kv.get<{ keyFingerprint: string; members: unknown[] }>(
+      kvKeys.family(familyId),
+      "json",
+    );
+    expect(raw?.keyFingerprint).toBe(ALT_FP);
+    expect(raw?.members).toHaveLength(1);
+  });
+
+  it("(k) solo member rejoin with matching fingerprint → 200 OK + KV fingerprint unchanged", async () => {
+    const { familyId } = await createFamily("user1", VALID_FP);
+
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user1",
+      keyFingerprint: VALID_FP,
+    });
+    expect(res.status).toBe(200);
+
+    const raw = await kv.get<{ keyFingerprint: string }>(kvKeys.family(familyId), "json");
+    expect(raw?.keyFingerprint).toBe(VALID_FP);
+  });
+
+  it("(l) solo member rejoin without fingerprint in body → 200 OK + KV fingerprint unchanged", async () => {
+    const { familyId } = await createFamily("user1", VALID_FP);
+
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user1",
+    });
+    expect(res.status).toBe(200);
+
+    const raw = await kv.get<{ keyFingerprint: string }>(kvKeys.family(familyId), "json");
+    expect(raw?.keyFingerprint).toBe(VALID_FP);
+  });
+
+  it("(m) multi-member family: existing member rejoin with new fingerprint → KV fingerprint UNCHANGED", async () => {
+    const { familyId } = await createFamily("user1", VALID_FP);
+    // user2 joins with matching fingerprint → becomes 2-member family
+    const joinRes = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user2",
+      keyFingerprint: VALID_FP,
+    });
+    expect(joinRes.status).toBe(200);
+
+    // Now user1 (existing member) rejoins with a mismatching fingerprint
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user1",
+      keyFingerprint: ALT_FP,
+    });
+    // Multi-member family: fingerprint mismatches → verify path runs.
+    // user1 has no verify record, so validateVerification returns valid → 200 OK.
+    expect(res.status).toBe(200);
+
+    const raw = await kv.get<{ keyFingerprint: string; members: unknown[] }>(
+      kvKeys.family(familyId),
+      "json",
+    );
+    // Critical regression guard: multi-member family fingerprint MUST NOT rotate
+    expect(raw?.keyFingerprint).toBe(VALID_FP);
+    expect(raw?.members).toHaveLength(2);
+  });
+
+  it("(n) solo member rejoin with new fingerprint + PIN verify set + no verifySecret → 403", async () => {
+    const { familyId } = await createFamily("user1", VALID_FP);
+    await seedVerifyRecord("user1", "pin");
+
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user1",
+      keyFingerprint: ALT_FP,
+    });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_REQUIRED");
+
+    // Fingerprint must remain unchanged since verify gate blocked the request
+    const raw = await kv.get<{ keyFingerprint: string }>(kvKeys.family(familyId), "json");
+    expect(raw?.keyFingerprint).toBe(VALID_FP);
+  });
+
+  it("(o) solo member rejoin with new fingerprint + PIN verify set + correct verifySecret → 200 OK + fingerprint updated", async () => {
+    const { familyId } = await createFamily("user1", VALID_FP);
+
+    // Seed a PIN verify record by computing the hash with the same algorithm
+    // used by the verify route (SHA-256 of salt + secret).
+    const pin = "123456";
+    const salt = "0123456789abcdef0123456789abcdef";
+    const data = new TextEncoder().encode(salt + pin);
+    const buf = await crypto.subtle.digest("SHA-256", data);
+    const hash = Array.from(new Uint8Array(buf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    const verifyRecord: VerifyRecord = {
+      method: "pin",
+      hash,
+      salt,
+      prompted: 1,
+      failCount: 0,
+      lockedUntil: null,
+    };
+    await kv.put(kvKeys.verify("user1"), JSON.stringify(verifyRecord));
+
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user1",
+      keyFingerprint: ALT_FP,
+      verifySecret: pin,
+    });
+    expect(res.status).toBe(200);
+
+    const raw = await kv.get<{ keyFingerprint: string }>(kvKeys.family(familyId), "json");
+    expect(raw?.keyFingerprint).toBe(ALT_FP);
+  });
+
   it("should return 500 when family record in KV is missing keyFingerprint (corruption guard)", async () => {
     const familyId = "corr-0001";
     // Seed a family record without keyFingerprint — simulates corrupted/legacy KV data.
