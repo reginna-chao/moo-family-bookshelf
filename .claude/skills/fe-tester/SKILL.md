@@ -7,7 +7,7 @@ description: >
   DO NOT TRIGGER when: user is writing production code, reviewing code, or running E2E tests.
 argument-hint: <target file or component to test>
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cd extension*), Bash(pnpm test*), Bash(git diff*), Bash(git log*), Agent
-model: claude-sonnet-4-6
+model: claude-opus-4-6
 ---
 
 # Frontend Tester
