@@ -4,9 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./config/*": "./src/config/*"
-  },
-  "dependencies": {
-    "simple-icons": "^16.15.0"
+    "./config/*": "./src/config/*",
+    "./icons/*": "./src/icons/*"
   }
 }
