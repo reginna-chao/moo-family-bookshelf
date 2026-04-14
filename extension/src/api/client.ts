@@ -171,7 +171,7 @@ export class ApiClient {
     familyId: string,
     userId: string,
     displayName?: string,
-    opts?: { keyFingerprint?: string; verifySecret?: string; recoverySource?: "extension" },
+    opts?: { keyFingerprint?: string; verifySecret?: string },
   ): Promise<ApiResponse<FamilyGroup>> {
     const body: Record<string, string> = { userId, displayName: displayName ?? "" };
     if (opts?.keyFingerprint !== undefined) {
@@ -179,11 +179,6 @@ export class ApiClient {
     }
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
-    }
-    // Only set by the solo-recovery path: signals the backend that the caller is an
-    // Extension user rotating their own key, allowing it to bypass PWA verification.
-    if (opts?.recoverySource !== undefined) {
-      body.recoverySource = opts.recoverySource;
     }
     return this.post(`/api/family/${familyId}/join`, body);
   }

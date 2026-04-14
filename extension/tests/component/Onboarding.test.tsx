@@ -1166,12 +1166,12 @@ describe("Onboarding", () => {
           expect.any(String),
         );
       });
-      // Solo recovery signals extension recoverySource to bypass PWA verification
+      // Solo recovery sends keyFingerprint only — recoverySource removed (C1 security fix)
       expect(joinFamilyMock).toHaveBeenCalledWith(
         "fam-confirm-solo",
         expect.any(String),
         expect.any(String),
-        expect.objectContaining({ recoverySource: "extension" }),
+        expect.not.objectContaining({ recoverySource: expect.anything() }),
       );
     });
   });

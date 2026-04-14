@@ -48,6 +48,13 @@ beforeEach(() => {
 // ===========================================================================
 
 describe("GET /api/user/:id/books", () => {
+  it("should return 401 UNAUTHORIZED when no auth token is provided", async () => {
+    const res = await request("GET", "/api/user/user1/books");
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("UNAUTHORIZED");
+  });
+
   it("should return 400 INVALID_USER_ID for invalid userId", async () => {
     const { authToken } = await createFamilyAndGetToken("user1");
 
@@ -86,6 +93,13 @@ describe("GET /api/user/:id/books", () => {
 // ===========================================================================
 
 describe("PUT /api/user/:id/books", () => {
+  it("should return 401 UNAUTHORIZED when no auth token is provided", async () => {
+    const res = await request("PUT", "/api/user/user1/books", { payload: "data" });
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("UNAUTHORIZED");
+  });
+
   it("should return 400 INVALID_USER_ID for invalid userId on PUT", async () => {
     const { authToken } = await createFamilyAndGetToken("user1");
 

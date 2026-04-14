@@ -124,7 +124,6 @@ familyRoutes.post("/:id/join", async (c) => {
     displayName?: string;
     verifySecret?: string;
     keyFingerprint?: string;
-    recoverySource?: "extension";
   } | null;
   try {
     body = await c.req.json();
@@ -161,6 +160,23 @@ familyRoutes.post("/:id/join", async (c) => {
     );
   }
 
+  // Per-userId rate limit: max 10 join attempts per userId per hour across all IPs.
+  // Complements the per-IP rate limit; prevents distributed-IP abuse targeting a single user.
+  // Known limitation: KV get-then-put is not atomic — same caveat as rateLimit middleware.
+  const userJoinBucket = Math.floor(Date.now() / 3600000);
+  const userJoinKey = `ratelimit:join:user:${body.userId}:${userJoinBucket}`;
+  const userJoinCount = await c.env.KV.get(userJoinKey);
+  const joinAttempts = userJoinCount ? parseInt(userJoinCount, 10) : 0;
+  if (joinAttempts >= 10) {
+    const retryAfter = 3600 - (Math.floor(Date.now() / 1000) % 3600);
+    return c.json(
+      { error: { code: "RATE_LIMITED", message: "Too many requests" } },
+      429,
+      { "Retry-After": String(retryAfter) },
+    );
+  }
+  await c.env.KV.put(userJoinKey, String(joinAttempts + 1), { expirationTtl: 7200 });
+
   // Check if user already belongs to a different family (before verify to avoid leaking membership info)
   const existingFamily = await c.env.KV.get(kvKeys.member(body.userId));
   if (existingFamily && existingFamily !== familyId) {
@@ -189,30 +205,14 @@ familyRoutes.post("/:id/join", async (c) => {
     body.keyFingerprint !== undefined &&
     timingSafeEqualHex(body.keyFingerprint, record.keyFingerprint);
   if (!fingerprintMatches) {
-    // Extension solo recovery bypasses verification. The Extension runs in a
-    // browser with an active Readmoo session — the same trust level used when
-    // the family was originally created. An attacker who forges this flag would
-    // still need the victim's Readmoo email to derive userId; at that point they
-    // can read the victim's bookshelf directly on Readmoo, which is the data we
-    // actually protect. Strictly limited to existing-member + solo +
-    // fingerprint-rotation rejoin to preserve multi-member trust anchors.
-    // Defense-in-depth: the solo-rotation branch below independently re-checks
-    // `record.members.length === 1`. Keep both guards aligned — do not remove
-    // the lower check when refactoring this block.
-    const isExtensionSoloRecovery =
-      body.recoverySource === "extension" &&
-      hasMember(record.members, body.userId) &&
-      record.members.length === 1;
-
-    if (!isExtensionSoloRecovery) {
-      // Verify PWA login verification (PIN / pattern / OTP) if user has it set
-      const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
-      if (!verification.valid && verification.error) {
-        return c.json(
-          { error: { code: verification.error.code, message: verification.error.message } },
-          verification.error.status as 403 | 429,
-        );
-      }
+    // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
+    // Users with no verification record (method: "none") pass automatically.
+    const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
+    if (!verification.valid && verification.error) {
+      return c.json(
+        { error: { code: verification.error.code, message: verification.error.message } },
+        verification.error.status as 403 | 429,
+      );
     }
   }
 

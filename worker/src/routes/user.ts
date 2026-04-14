@@ -17,9 +17,14 @@ userRoutes.get("/:id/books", async (c) => {
     );
   }
 
-  // If authenticated, only allow access to own data
   const authUserId = getAuthenticatedUserId(c);
-  if (authUserId && authUserId !== userId) {
+  if (!authUserId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+  if (authUserId !== userId) {
     return c.json(
       { error: { code: "FORBIDDEN", message: "Cannot access another user's data" } },
       403,
@@ -47,9 +52,14 @@ userRoutes.put("/:id/books", async (c) => {
     );
   }
 
-  // If authenticated, only allow modifying own data
   const authUserId = getAuthenticatedUserId(c);
-  if (authUserId && authUserId !== userId) {
+  if (!authUserId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+  if (authUserId !== userId) {
     return c.json(
       { error: { code: "FORBIDDEN", message: "Cannot modify another user's data" } },
       403,

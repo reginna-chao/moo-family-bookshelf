@@ -114,7 +114,7 @@ describe("performSoloRecovery", () => {
     );
   });
 
-  it("passes recoverySource: 'extension' to joinFamily so backend bypasses PWA verification", async () => {
+  it("passes only keyFingerprint to joinFamily (recoverySource removed in C1 security fix)", async () => {
     const apiClient = createMockApiClient();
     const autoSetup = createMockAutoSetup();
 
@@ -133,7 +133,6 @@ describe("performSoloRecovery", () => {
       "Test User",
       {
         keyFingerprint: "f".repeat(64),
-        recoverySource: "extension",
       },
     );
   });

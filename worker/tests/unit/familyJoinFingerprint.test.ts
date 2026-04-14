@@ -351,21 +351,22 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
   });
 
   // =========================================================================
-  // recoverySource: "extension" — solo recovery verification bypass
+  // Security regression guard: recoverySource bypass REMOVED (C1 fix)
   //
-  // Threat model: the Extension runs in a browser with an active Readmoo
-  // session (the same trust level used when the family was created), so solo
-  // existing-member rejoin is permitted to rotate the fingerprint without
-  // satisfying PWA verification. The bypass is strictly limited to
-  // existing-member + solo + fingerprint-rotation rejoin.
+  // recoverySource: "extension" was a client-declared trust flag that allowed
+  // solo Extension recovery to bypass PWA verification. It was removed as a
+  // CRITICAL security issue — any client can send that field, enabling account
+  // takeover without knowledge of the victim's PIN/pattern.
   //
-  // Regression guard for the scenario where a user reinstalls the Extension
-  // after setting up PWA verification and would otherwise be locked out.
-  // Cross-ref: test (n) covers the negative baseline without recoverySource.
+  // After the fix, recoverySource is silently ignored by the backend.
+  // All join attempts go through the standard fingerprint-check +
+  // validateVerification path. Users with method: "none" pass automatically;
+  // users with PIN/pattern must supply a verifySecret.
+  // Cross-ref: test (n) is the baseline (no recoverySource, same result).
   // =========================================================================
 
-  describe("recoverySource extension bypass", () => {
-    it("(p) solo existing + PIN verify + new fp + recoverySource=extension → 200 + fp rotated", async () => {
+  describe("recoverySource bypass removed (security regression guard)", () => {
+    it("(p) solo existing + PIN verify + new fp + recoverySource=extension → 403 VERIFICATION_REQUIRED (no bypass)", async () => {
       const { familyId } = await createFamily("user1", VALID_FP);
       await seedVerifyRecord("user1", "pin");
 
@@ -374,17 +375,20 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
         keyFingerprint: ALT_FP,
         recoverySource: "extension",
       });
-      expect(res.status).toBe(200);
+      // recoverySource is silently ignored — PIN verify blocks the request
+      expect(res.status).toBe(403);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("VERIFICATION_REQUIRED");
 
       const raw = await kv.get<{ keyFingerprint: string; members: unknown[] }>(
         kvKeys.family(familyId),
         "json",
       );
-      expect(raw?.keyFingerprint).toBe(ALT_FP);
+      expect(raw?.keyFingerprint).toBe(VALID_FP);
       expect(raw?.members).toHaveLength(1);
     });
 
-    it("(q) solo existing + PATTERN verify + new fp + recoverySource=extension → 200 + fp rotated", async () => {
+    it("(q) solo existing + PATTERN verify + new fp + recoverySource=extension → 403 VERIFICATION_REQUIRED (no bypass)", async () => {
       const { familyId } = await createFamily("user1", VALID_FP);
       await seedVerifyRecord("user1", "pattern");
 
@@ -393,13 +397,15 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
         keyFingerprint: ALT_FP,
         recoverySource: "extension",
       });
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("VERIFICATION_REQUIRED");
 
       const raw = await kv.get<{ keyFingerprint: string }>(kvKeys.family(familyId), "json");
-      expect(raw?.keyFingerprint).toBe(ALT_FP);
+      expect(raw?.keyFingerprint).toBe(VALID_FP);
     });
 
-    it("(r) solo existing + CODE verify + new fp + recoverySource=extension → 200 + fp rotated", async () => {
+    it("(r) solo existing + CODE verify + new fp + recoverySource=extension → 403 (no bypass)", async () => {
       const { familyId } = await createFamily("user1", VALID_FP);
       await seedVerifyRecord("user1", "code");
 
@@ -408,16 +414,16 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
         keyFingerprint: ALT_FP,
         recoverySource: "extension",
       });
-      expect(res.status).toBe(200);
+      // CODE method with no OTP present: verification required
+      expect(res.status).toBe(403);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("VERIFICATION_REQUIRED");
 
       const raw = await kv.get<{ keyFingerprint: string }>(kvKeys.family(familyId), "json");
-      expect(raw?.keyFingerprint).toBe(ALT_FP);
+      expect(raw?.keyFingerprint).toBe(VALID_FP);
     });
 
-    it("(s) solo existing + LOCKED verify + recoverySource=extension → 200 (bypass is unconditional)", async () => {
-      // Critical: the bypass short-circuits the entire validateVerification
-      // call, so even an actively locked-out verify record must not block a
-      // legitimate Extension reinstall recovery.
+    it("(s) solo existing + LOCKED verify + recoverySource=extension → verify gate runs → error (no bypass)", async () => {
       const { familyId } = await createFamily("user1", VALID_FP);
       await seedLockedVerifyRecord("user1");
 
@@ -426,10 +432,11 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
         keyFingerprint: ALT_FP,
         recoverySource: "extension",
       });
-      expect(res.status).toBe(200);
+      // Verify gate runs — locked account returns an error
+      expect(res.status).not.toBe(200);
 
       const raw = await kv.get<{ keyFingerprint: string }>(kvKeys.family(familyId), "json");
-      expect(raw?.keyFingerprint).toBe(ALT_FP);
+      expect(raw?.keyFingerprint).toBe(VALID_FP);
     });
 
     it("(t) NON-member + recoverySource=extension + verify set → 403 + fp unchanged + not added", async () => {
@@ -456,7 +463,6 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
 
     it("(u) MULTI-member + existing + new fp + recoverySource=extension → 403 + fp unchanged", async () => {
       const { familyId } = await createFamily("user1", VALID_FP);
-      // user2 joins with matching fp → 2-member family
       const joinRes = await request("POST", `/api/family/${familyId}/join`, {
         userId: "user2",
         keyFingerprint: VALID_FP,
@@ -464,9 +470,6 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
       expect(joinRes.status).toBe(200);
       await seedVerifyRecord("user1", "pin");
 
-      // user1 tries to rotate fingerprint with recoverySource — multi-member
-      // families are NOT solo, so the bypass does not apply. validateVerification
-      // runs, user1 has PIN set without a secret → 403.
       const res = await request("POST", `/api/family/${familyId}/join`, {
         userId: "user1",
         keyFingerprint: ALT_FP,
@@ -484,14 +487,16 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
       expect(raw?.members).toHaveLength(2);
     });
 
-    // (v) non-whitelisted recoverySource values must NOT trigger the bypass.
-    // Only the exact literal "extension" is accepted.
+    // (v) Any recoverySource value — including the previously privileged "extension" —
+    // is now silently ignored. The fingerprint-check + validateVerification path
+    // always runs regardless of what is sent in the field.
     describe.each([
+      ["extension"],
       ["pwa"],
       [""],
       ["EXTENSION"],
       ["extension "],
-    ])("(v) recoverySource=%j → not bypassed", (value) => {
+    ])("(v) recoverySource=%j is silently ignored → verify runs normally", (value) => {
       it("returns 403 VERIFICATION_REQUIRED and fp unchanged", async () => {
         const { familyId } = await createFamily("user1", VALID_FP);
         await seedVerifyRecord("user1", "pin");
@@ -510,10 +515,8 @@ describe("POST /api/family/:id/join — fingerprint bypass verify", () => {
       });
     });
 
-    it("(w) solo existing + MATCHING fp + recoverySource=extension → 200 + fp unchanged (no rotation)", async () => {
-      // Orthogonal guard: when fingerprint matches, verify is already skipped
-      // by the prior branch; recoverySource must not accidentally trigger
-      // rotation when fingerprints are identical.
+    it("(w) solo existing + MATCHING fp + recoverySource=extension → 200 + fp unchanged (fingerprint check wins)", async () => {
+      // Matching fingerprint bypasses verify unconditionally — recoverySource is irrelevant.
       const { familyId } = await createFamily("user1", VALID_FP);
       await seedVerifyRecord("user1", "pin");
 

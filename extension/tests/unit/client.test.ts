@@ -314,27 +314,7 @@ describe("ApiClient", () => {
       expect(body.verifySecret).toBe("5678");
     });
 
-    it("includes recoverySource in body when opts.recoverySource is 'extension'", async () => {
-      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      await client.joinFamily("fam-1", "u1", "Bob", { recoverySource: "extension" });
-
-      const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
-      );
-      expect(body.recoverySource).toBe("extension");
-    });
-
-    it("does not include recoverySource when opts is undefined", async () => {
-      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      await client.joinFamily("fam-1", "u1", "Bob");
-
-      const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
-      );
-      expect("recoverySource" in body).toBe(false);
-    });
-
-    it("does not include recoverySource when opts has other fields but no recoverySource", async () => {
+    it("never includes recoverySource in request body (field removed in C1 security fix)", async () => {
       globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
       await client.joinFamily("fam-1", "u1", "Bob", { keyFingerprint: "e".repeat(64) });
 
@@ -344,19 +324,29 @@ describe("ApiClient", () => {
       expect("recoverySource" in body).toBe(false);
     });
 
-    it("includes both keyFingerprint and recoverySource when both provided (solo recovery shape)", async () => {
+    it("does not include optional fields when opts is undefined", async () => {
+      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
+      await client.joinFamily("fam-1", "u1", "Bob");
+
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+      );
+      expect(body.keyFingerprint).toBeUndefined();
+      expect(body.verifySecret).toBeUndefined();
+      expect("recoverySource" in body).toBe(false);
+    });
+
+    it("solo recovery shape includes keyFingerprint only (no recoverySource)", async () => {
+      // performSoloRecovery now sends { keyFingerprint } without recoverySource (C1 fix).
       globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
       const fingerprint = "f".repeat(64);
-      await client.joinFamily("fam-1", "u1", "Bob", {
-        keyFingerprint: fingerprint,
-        recoverySource: "extension",
-      });
+      await client.joinFamily("fam-1", "u1", "Bob", { keyFingerprint: fingerprint });
 
       const body = JSON.parse(
         (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
       );
       expect(body.keyFingerprint).toBe(fingerprint);
-      expect(body.recoverySource).toBe("extension");
+      expect("recoverySource" in body).toBe(false);
     });
   });
 
