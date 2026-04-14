@@ -4,6 +4,11 @@ import { LoadingOverlay } from "./LoadingOverlay";
 import { useAutoSetup } from "./useAutoSetup";
 import { WelcomeView, CreatedView, ErrorView, IdleView } from "./OnboardingViews";
 import type { ErrorAction } from "./OnboardingViews";
+import {
+  RecoveryChoiceView,
+  RecoveryJoinView,
+  SoloRecoveryConfirmView,
+} from "./OnboardingRecoveryViews";
 import { useOnboardingFlow } from "./useOnboardingFlow";
 
 export interface OnboardingProps {
@@ -42,7 +47,9 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         ? "正在同步書單..."
         : flow.state === "recovering"
           ? "正在恢復家庭資料..."
-          : "";
+          : flow.state === "joining"
+            ? "正在加入家庭..."
+            : "";
 
   const effectiveState = autoSetup.phase === "error" ? "error" : flow.state;
   const effectiveError = autoSetup.phase === "error" ? autoSetup.errorMessage : flow.errorMessage;
@@ -80,6 +87,34 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         />
       );
     }
+    if (effectiveState === "recovery-choice") {
+      return (
+        <RecoveryChoiceView
+          userEmail={flow.userEmail ?? ""}
+          onUseSyncCode={flow.handleRecoveryChoiceUseSyncCode}
+          onSkip={flow.handleRecoveryChoiceSkip}
+        />
+      );
+    }
+    if (effectiveState === "recovery-join") {
+      return (
+        <RecoveryJoinView
+          syncCodeInput={flow.syncCodeInput}
+          isProcessing={isProcessing}
+          onSetSyncCodeInput={flow.setSyncCodeInput}
+          onJoin={flow.handleJoin}
+          onBack={flow.handleRecoveryJoinBack}
+        />
+      );
+    }
+    if (effectiveState === "solo-recovery-confirm") {
+      return (
+        <SoloRecoveryConfirmView
+          onConfirm={flow.handleSoloRecoveryConfirm}
+          onBack={flow.handleSoloRecoveryBack}
+        />
+      );
+    }
     return (
       <IdleView
         state={effectiveState}
@@ -94,7 +129,10 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
 
   return (
     <div style={{ position: "relative", minHeight: 200 }}>
-      {(isAutoSetupActive || flow.state === "syncing-books" || flow.state === "recovering") &&
+      {(isAutoSetupActive ||
+        flow.state === "syncing-books" ||
+        flow.state === "recovering" ||
+        flow.state === "joining") &&
         overlayMessage && <LoadingOverlay message={overlayMessage} />}
       {renderContent()}
     </div>

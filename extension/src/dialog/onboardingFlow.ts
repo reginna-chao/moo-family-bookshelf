@@ -53,7 +53,11 @@ export async function migratePersonalBooksCache(
   }
 }
 
-/** Retrieve the encryption key from sync storage (falls back to local). */
+/**
+ * Retrieve the encryption key from sync storage (falls back to local).
+ * Exported so `useOnboardingFlow` can pre-check key availability before
+ * deciding whether to auto-recover or prompt the user for a sync code.
+ */
 export function getSyncedEncryptionKey(): Promise<string | null> {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(

@@ -4,7 +4,7 @@
  * lightweight UI chrome state (copied flag, hasUsedBefore).
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClient } from "../api/client";
 import { deriveUserId } from "../crypto/encrypt";
 import { SyncCodeError } from "../crypto/syncCode";
@@ -12,6 +12,7 @@ import { useAutoSetup } from "./useAutoSetup";
 import type { ErrorAction } from "./OnboardingViews";
 import {
   createNewFamily,
+  getSyncedEncryptionKey,
   performJoin,
   performSoloRecovery,
   tryAutoRecovery,
@@ -25,7 +26,17 @@ export type OnboardingState =
   | "created"
   | "joining"
   | "syncing-books"
+  | "recovery-choice"
+  | "recovery-join"
+  | "solo-recovery-confirm"
   | "error";
+
+/** States where the user is actively on a recovery-flow view. */
+const RECOVERY_STATES = new Set<OnboardingState>([
+  "recovery-choice",
+  "recovery-join",
+  "solo-recovery-confirm",
+]);
 
 export interface UseOnboardingFlowOptions {
   apiClient: ApiClient;
@@ -49,6 +60,16 @@ export interface UseOnboardingFlowResult {
   handleJoin: () => Promise<void>;
   handleContinueAfterCreate: () => Promise<void>;
   handleRetry: () => void;
+  /** From recovery-choice: user chose to enter a sync code → recovery-join */
+  handleRecoveryChoiceUseSyncCode: () => void;
+  /** From recovery-choice: user chose to skip → solo-recovery-confirm */
+  handleRecoveryChoiceSkip: () => void;
+  /** From recovery-join: user wants to go back to the choice screen */
+  handleRecoveryJoinBack: () => void;
+  /** From solo-recovery-confirm: user confirmed → runs performSoloRecovery */
+  handleSoloRecoveryConfirm: () => Promise<void>;
+  /** From solo-recovery-confirm: user wants to go back to the choice screen */
+  handleSoloRecoveryBack: () => void;
 }
 
 export function useOnboardingFlow(
@@ -73,6 +94,17 @@ export function useOnboardingFlow(
   const syncCodeInputRef = useRef("");
   const createdFamilyIdRef = useRef("");
   const createdUserIdRef = useRef("");
+  /** Tracks the familyId discovered during lookup so the recovery-choice /
+   *  solo-recovery-confirm handlers can run `performSoloRecovery` later. */
+  const recoveryFamilyIdRef = useRef("");
+  /** Mirrors the latest state so handleRetry can distinguish "user is currently
+   *  on a recovery view" (→ welcome) from "user hit an error while in a recovery
+   *  flow" (→ recovery-choice). Updated via useEffect on every state change. */
+  const stateRef = useRef<OnboardingState>("welcome");
+  /** Becomes true when the user first enters the recovery-choice screen.
+   *  Lets handleRetry navigate back to recovery-choice after an error that
+   *  occurred mid-recovery-flow, even though stateRef is now "error". */
+  const recoveryActiveRef = useRef(false);
 
   userEmailRef.current = userEmail;
   userDisplayNameRef.current = userDisplayName;
@@ -80,16 +112,26 @@ export function useOnboardingFlow(
   createdFamilyIdRef.current = createdFamilyId;
   createdUserIdRef.current = createdUserId;
 
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   const handleRetry = useCallback(() => {
     autoSetup.reset();
-    setState(userEmailRef.current ? "idle" : "welcome");
+    if (RECOVERY_STATES.has(stateRef.current)) {
+      // User is on a recovery view directly — restart from welcome.
+      // Clear the recovery flag so subsequent errors don't loop back here.
+      recoveryActiveRef.current = false;
+      setState("welcome");
+    } else if (recoveryActiveRef.current) {
+      // User hit an error mid-recovery-flow — return to the recovery-choice screen.
+      setState("recovery-choice");
+    } else {
+      setState(userEmailRef.current ? "idle" : "welcome");
+    }
     setErrorMessage("");
     setErrorActions([]);
   }, [autoSetup]);
-
-  const handleUseSyncCode = useCallback(() => {
-    setState("idle");
-  }, []);
 
   const handleStart = useCallback(async () => {
     const result = await autoSetup.scrapeProfile();
@@ -98,26 +140,21 @@ export function useOnboardingFlow(
     setUserEmail(result.email);
     setUserDisplayName(result.displayName);
 
-    // Attempt silent auto-recovery using the synced encryption key
+    // Look up existing family; decide between silent auto-recovery and the
+    // user-facing recovery-choice screen based on whether we have an
+    // encryption key on this device.
     try {
       const userId = await deriveUserId(result.email);
       const lookupRes = await apiClient.lookupUser(userId);
       if (!lookupRes.error && lookupRes.data) {
         const { existingFamilyId, memberCount } = lookupRes.data;
         if (existingFamilyId && memberCount > 0) {
-          setState("recovering");
-          const { recovered } = await tryAutoRecovery({
-            familyId: existingFamilyId,
-            userId,
-            displayName: result.displayName,
-            apiClient,
-            autoSetup,
-            onFamilyJoined,
-          });
-          if (recovered) return;
-          // Recovery failed (no sync key) — try solo key rotation if only member
-          if (memberCount === 1) {
-            const solo = await performSoloRecovery({
+          recoveryFamilyIdRef.current = existingFamilyId;
+
+          const syncedKey = await getSyncedEncryptionKey();
+          if (syncedKey) {
+            setState("recovering");
+            const { recovered } = await tryAutoRecovery({
               familyId: existingFamilyId,
               userId,
               displayName: result.displayName,
@@ -125,9 +162,19 @@ export function useOnboardingFlow(
               autoSetup,
               onFamilyJoined,
             });
-            if (solo.recovered) return;
+            if (recovered) return;
+            // Auto-recovery attempted but failed (e.g. backend join error).
+            // Surface the recovery-choice screen so the user can decide.
+            recoveryActiveRef.current = true;
+            setState("recovery-choice");
+            return;
           }
-          // Multi-member or solo failed — fall through to idle so user can enter sync code
+
+          // No key on this device — show the recovery-choice screen directly
+          // so the user can paste a sync code or opt into a solo rotation.
+          recoveryActiveRef.current = true;
+          setState("recovery-choice");
+          return;
         }
       }
     } catch {
@@ -156,21 +203,15 @@ export function useOnboardingFlow(
       const existingFamilyId = lookupRes.data?.existingFamilyId ?? null;
       const memberCount = lookupRes.data?.memberCount ?? 0;
 
-      // User already belongs to a family — attempt silent recovery
+      // User already belongs to a family — decide between silent recovery
+      // and the user-facing recovery-choice screen.
       if (existingFamilyId && memberCount > 0) {
-        setState("recovering");
-        const { recovered } = await tryAutoRecovery({
-          familyId: existingFamilyId,
-          userId,
-          displayName: userDisplayNameRef.current,
-          apiClient,
-          autoSetup,
-          onFamilyJoined,
-        });
-        if (recovered) return;
+        recoveryFamilyIdRef.current = existingFamilyId;
 
-        if (memberCount === 1) {
-          const solo = await performSoloRecovery({
+        const syncedKey = await getSyncedEncryptionKey();
+        if (syncedKey) {
+          setState("recovering");
+          const { recovered } = await tryAutoRecovery({
             familyId: existingFamilyId,
             userId,
             displayName: userDisplayNameRef.current,
@@ -178,15 +219,11 @@ export function useOnboardingFlow(
             autoSetup,
             onFamilyJoined,
           });
-          if (solo.recovered) return;
+          if (recovered) return;
         }
-        // Multi-member or solo failed — show error
-        setErrorMessage("你已有家庭群組，請向家人索取同步碼加入，或輸入已有的同步碼。");
-        setErrorActions([
-          { label: "改用同步碼", variant: "primary", onClick: handleUseSyncCode },
-          { label: "重試", variant: "secondary", onClick: handleRetry },
-        ]);
-        setState("error");
+        // No key, or auto-recovery failed — let the user choose how to proceed.
+        recoveryActiveRef.current = true;
+        setState("recovery-choice");
         return;
       }
 
@@ -205,7 +242,7 @@ export function useOnboardingFlow(
       setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
       setState("error");
     }
-  }, [apiClient, autoSetup, handleRetry, handleUseSyncCode, onFamilyJoined]);
+  }, [apiClient, autoSetup, handleRetry, onFamilyJoined]);
 
   const handleJoin = useCallback(async () => {
     const email = userEmailRef.current;
@@ -263,6 +300,56 @@ export function useOnboardingFlow(
     onFamilyJoined(createdFamilyIdRef.current, createdUserIdRef.current);
   }, [apiClient, autoSetup, onFamilyJoined]);
 
+  const handleRecoveryChoiceUseSyncCode = useCallback(() => {
+    setSyncCodeInput("");
+    setState("recovery-join");
+  }, []);
+
+  const handleRecoveryChoiceSkip = useCallback(() => {
+    setState("solo-recovery-confirm");
+  }, []);
+
+  const handleRecoveryJoinBack = useCallback(() => {
+    setState("recovery-choice");
+  }, []);
+
+  const handleSoloRecoveryBack = useCallback(() => {
+    setState("recovery-choice");
+  }, []);
+
+  const handleSoloRecoveryConfirm = useCallback(async () => {
+    const email = userEmailRef.current;
+    const familyId = recoveryFamilyIdRef.current;
+    if (!email || !familyId) {
+      setErrorMessage("恢復資料遺失，請重新開始。");
+      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setState("error");
+      return;
+    }
+    setState("recovering");
+    setErrorMessage("");
+    setErrorActions([]);
+    try {
+      const userId = await deriveUserId(email);
+      const solo = await performSoloRecovery({
+        familyId,
+        userId,
+        displayName: userDisplayNameRef.current,
+        apiClient,
+        autoSetup,
+        onFamilyJoined,
+      });
+      if (solo.recovered) return;
+      setErrorMessage("恢復失敗，請重試。");
+      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setState("error");
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
+      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setState("error");
+    }
+  }, [apiClient, autoSetup, handleRetry, onFamilyJoined]);
+
   return {
     state,
     errorMessage,
@@ -279,5 +366,10 @@ export function useOnboardingFlow(
     handleJoin,
     handleContinueAfterCreate,
     handleRetry,
+    handleRecoveryChoiceUseSyncCode,
+    handleRecoveryChoiceSkip,
+    handleRecoveryJoinBack,
+    handleSoloRecoveryConfirm,
+    handleSoloRecoveryBack,
   };
 }

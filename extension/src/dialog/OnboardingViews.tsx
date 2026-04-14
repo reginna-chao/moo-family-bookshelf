@@ -3,7 +3,7 @@ import { Lock, Eye, EyeOff } from "lucide-react";
 import { decodeSyncCode } from "../crypto/syncCode";
 
 // Shared brand colors used across Onboarding views.
-const PRIMARY_BLUE = "#2563eb";
+export const PRIMARY_BLUE = "#2563eb";
 const ERROR_RED = "#ef4444";
 const ERROR_MESSAGE_ID = "onboarding-error-view-message";
 
@@ -289,9 +289,9 @@ export function IdleView({
       >
         {state === "joining" ? "加入中..." : "加入家庭公開書櫃"}
       </button>
-      <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 16, textAlign: "center" }}>
+      <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 16, textAlign: "center", lineHeight: 1.6 }}>
         <Lock size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
-        本工具採端對端加密，伺服器無法讀取你的資料。
+        本工具採端對端加密，伺服器無法讀取你的資料。同步碼包含加密金鑰，請妥善保存以便跨裝置或重新安裝後還原書架設定。
       </p>
     </div>
   );

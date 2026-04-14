@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef } from "react";
 import { scrapeUserEmail, scrapeDisplayName, scrapeBooks } from "../content/scraper";
-import { importKey, encrypt } from "../crypto/encrypt";
+import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { mergeBooks } from "./mergeBooks";
-import { ApiClient } from "../api/client";
+import { ApiClient, BookEntry } from "../api/client";
 
 export type AutoSetupPhase =
   | "idle"
@@ -24,6 +24,36 @@ const NAV_SETTLE_MS = 1500;
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Extract saved books from the personal books API response.
+ * Handles the encrypted `{ payload }` shape and a legacy `{ books }` fallback.
+ * Returns an empty list on decrypt failure (expected after solo recovery key
+ * rotation) so the caller can continue with a fresh merge + upload.
+ */
+async function extractSavedBooks(
+  data: unknown,
+  key: CryptoKey,
+): Promise<BookEntry[]> {
+  if (!data || typeof data !== "object") return [];
+  const record = data as Record<string, unknown>;
+  if (typeof record.payload === "string") {
+    try {
+      const decrypted = await decrypt(record.payload, key);
+      const parsed = JSON.parse(decrypted) as Record<string, unknown>;
+      if (Array.isArray(parsed.books)) return parsed.books as BookEntry[];
+      return [];
+    } catch {
+      // Key mismatch (e.g., after solo recovery fingerprint rotation).
+      // Falling back to empty means the caller will upload a fresh list
+      // encrypted under the current key — the old ciphertext is discarded.
+      console.debug("[AutoSetup] Decrypt failed, continuing with empty saved books");
+      return [];
+    }
+  }
+  if (Array.isArray(record.books)) return record.books as BookEntry[];
+  return [];
 }
 
 /**
@@ -120,14 +150,18 @@ export function useAutoSetup(): UseAutoSetupReturn {
         const encKeyString = storageResult.encryptionKey as string | undefined;
         if (!encKeyString) throw new Error("找不到加密金鑰");
 
-        // Fetch existing saved books for merging
+        // Import the key once and share it between decrypt (for existing saved
+        // books) and encrypt (for the merged upload).
+        const key = await importKey(encKeyString);
+
+        // Fetch existing saved books for merging. The server stores data as
+        // `{ payload: "<ciphertext>" }` — decrypt before merging so that
+        // previously-set `isShared` flags are preserved.
         const apiResponse = await apiClient.getPersonalBooks(userId);
-        let savedBooks = apiResponse.data?.books ?? [];
-        if (!Array.isArray(savedBooks)) savedBooks = [];
+        const savedBooks = await extractSavedBooks(apiResponse.data, key);
 
         const merged = mergeBooks(scrapedBooks, savedBooks);
 
-        const key = await importKey(encKeyString);
         const payload = JSON.stringify({
           userId,
           displayName: "",
