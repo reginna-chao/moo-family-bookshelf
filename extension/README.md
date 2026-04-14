@@ -1,26 +1,21 @@
-# 墨家書櫃 MooFamily Bookshelf（Chrome Extension）
+# MooFamily Bookshelf (Chrome Extension)
 
-## 簡介
+## Introduction
 
-本擴充套件會在讀墨（readmoo.com）的網頁中注入一個「家庭共享書櫃」Dialog，讓同一個讀墨家庭帳號下的成員，可以瀏覽彼此主動選擇分享的書籍。所有分享都採用 Opt-in，預設不分享任何書。
+This extension injects a "Family Bookshelf" Dialog into Readmoo (readmoo.com) web pages, allowing members under the same Readmoo family account to browse books that others have chosen to share. All sharing is opt-in — no books are shared by default.
 
-## 為什麼需要 host_permissions
+## Why host_permissions Are Required
 
 ```
 "host_permissions": ["https://read.readmoo.com/*"]
 ```
 
-此權限限定於 `read.readmoo.com`，且僅用於下列用途：
+This permission is scoped to `read.readmoo.com` and is used exclusively for the following purposes:
 
-- 注入家庭書櫃 Dialog UI 到讀墨頁面，讓使用者不離開讀墨就能瀏覽家人分享的書
-- 從讀墨頁面 DOM 抓取目前登入帳號的書櫃清單（僅讀取頁面上公開可見的書名、封面、作者等書籍資訊；不讀取、不儲存、也不傳送任何帳號憑證或 Cookie）
-- 維持 Content Script 與背景 Service Worker 之間的訊息橋接，用於同步個人分享設定與家庭書櫃查詢
+- Injecting the Family Bookshelf Dialog UI into Readmoo pages so users can browse shared books without leaving the site
+- Scraping the current logged-in user's book list from the Readmoo page DOM (only publicly visible book information such as title, cover, and author is read; no account credentials or cookies are read, stored, or transmitted)
+- Maintaining a message bridge between the Content Script and the background Service Worker for syncing personal sharing settings and family bookshelf queries
 
-## 隱私聲明
+## Privacy Statement
 
-本擴充套件不蒐集任何個人識別資訊（PII）；所有使用者資料皆於瀏覽器端以 AES-256-GCM 進行端到端加密後才上傳，Server 端零知識，無法讀取明文書籍資料。
-
-## 相關連結
-
-- 專案官網：https://reginna-chao.github.io/moo-family-bookshelf/
-- 原始碼（GitHub）：https://github.com/reginna-chao/moo-family-bookshelf
+This extension does not collect any personally identifiable information (PII). All user data is end-to-end encrypted with AES-256-GCM in the browser before upload. The server is zero-knowledge and cannot read plaintext book data.
