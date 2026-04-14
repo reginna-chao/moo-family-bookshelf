@@ -394,6 +394,19 @@ Extension 重灌後（例如更換電腦或重新安裝），若同步金鑰仍�
 | keyFingerprint | 裝置持有金鑰（裝置對家庭） | Extension 重灌後靜默恢復 |
 | PIN / Pattern / OTP | 人的身份（人對裝置） | PWA 新裝置登入，防冒用 |
 
+#### chrome.storage.sync 資安取捨
+
+**儲存於 `chrome.storage.sync` 的資料**：`encryptionKey`、`familyId`（其他非敏感偏好如 `displayName` 亦同步）。
+
+**目的**：同一 Chrome 個人檔案（profile）下的多台裝置或重新安裝後，Extension 可從 `chrome.storage.sync` 取得加密金鑰，執行靜默自動恢復（`tryAutoRecovery`），無需手動輸入同步碼。
+
+**取捨說明**：
+- `chrome.storage.sync` 透過 Google 帳號同步，**由 Google 負責傳輸與靜態加密，但並非端對端加密** — Google 在技術上可存取明文金鑰值。
+- 本工具的「端對端加密」保證對象是：**Worker 後端無法讀取明文書籍資料**。對 Google 本身則不適用。
+- 若使用者在不同 Google 帳號或不同 Chrome profile 間操作，`chrome.storage.sync` **不會跨帳號共享**；此時必須透過同步碼（手動貼上）完成還原。
+
+**使用者端限制**：更換 Google 帳號、重建 Chrome profile、或在未登入同一 Google 帳號的電腦上操作時，靜默恢復不適用，應引導使用者透過同步碼還原個人書架設定（Extension recovery-choice 畫面已涵蓋此流程）。
+
 ---
 
 ## 六、可設定 API 端點（BYO Backend）
