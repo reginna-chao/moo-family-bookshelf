@@ -351,9 +351,13 @@ jobs:
     needs: [extension-check, e2e]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v5
         with:
@@ -371,7 +375,18 @@ jobs:
       - name: Package Extension
         run: cd extension/dist && zip -r ../../moo-family-bookshelf-${{ github.ref_name }}.zip .
 
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v2
-        with:
-          files: moo-family-bookshelf-${{ github.ref_name }}.zip
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s" --no-merges)
+          else
+            NOTES="Initial release"
+          fi
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes "$NOTES" \
+            "moo-family-bookshelf-${TAG}.zip"
