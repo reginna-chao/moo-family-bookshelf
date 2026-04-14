@@ -17,7 +17,7 @@ vi.mock("@/crypto/encrypt", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
 }));
 
-import { performSoloRecovery } from "@/dialog/onboardingFlow";
+import { performSoloRecovery, tryAutoRecovery } from "@/dialog/onboardingFlow";
 import { generateKey, exportKey, computeKeyFingerprint } from "@/crypto/encrypt";
 import type { ApiClient } from "@/api/client";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
@@ -111,6 +111,30 @@ describe("performSoloRecovery", () => {
       "user-abc",
       "Test User",
       expect.objectContaining({ keyFingerprint: "f".repeat(64) }),
+    );
+  });
+
+  it("passes recoverySource: 'extension' to joinFamily so backend bypasses PWA verification", async () => {
+    const apiClient = createMockApiClient();
+    const autoSetup = createMockAutoSetup();
+
+    await performSoloRecovery({
+      familyId: "fam-solo-1",
+      userId: "user-abc",
+      displayName: "Test User",
+      apiClient,
+      autoSetup,
+      onFamilyJoined: vi.fn(),
+    });
+
+    expect(apiClient.joinFamily).toHaveBeenCalledWith(
+      "fam-solo-1",
+      "user-abc",
+      "Test User",
+      {
+        keyFingerprint: "f".repeat(64),
+        recoverySource: "extension",
+      },
     );
   });
 
@@ -247,5 +271,111 @@ describe("performSoloRecovery", () => {
     // sync storage failure is swallowed; recovery still succeeds
     expect(result).toEqual({ recovered: true });
     expect(onFamilyJoined).toHaveBeenCalled();
+  });
+});
+
+describe("tryAutoRecovery", () => {
+  /**
+   * Wire chrome.runtime.sendMessage so GET_ENCRYPTION_KEY returns the given key.
+   * Mirrors the helper used in component tests.
+   */
+  function mockEncryptionKeyMessage(encryptionKey: string | null) {
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      (...args: unknown[]) => {
+        const msg = args[0] as Record<string, unknown>;
+        const callback = args[1] as ((response: unknown) => void) | undefined;
+        if (msg.type === "GET_ENCRYPTION_KEY" && typeof callback === "function") {
+          callback({ encryptionKey });
+        }
+        return Promise.resolve();
+      },
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.mocked(generateKey).mockResolvedValue({} as CryptoKey);
+    vi.mocked(exportKey).mockResolvedValue("fresh-key-string");
+    vi.mocked(computeKeyFingerprint).mockResolvedValue("f".repeat(64));
+
+    vi.mocked(chrome.storage.local.set).mockImplementation(
+      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+    );
+    vi.mocked(chrome.storage.local.get).mockImplementation(
+      (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        if (typeof callback === "function") callback({});
+        return Promise.resolve({}) as unknown as void;
+      },
+    );
+    vi.mocked(chrome.storage.sync.set).mockImplementation(
+      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("regression guard: does NOT pass recoverySource to joinFamily (only keyFingerprint)", async () => {
+    // tryAutoRecovery uses a synced key from another device. It must NOT
+    // signal `recoverySource: "extension"` — that flag is reserved for the
+    // solo-recovery path where a fresh key is generated. Widening this flag
+    // would let any auto-recovery bypass PWA verification, breaking trust.
+    mockEncryptionKeyMessage("synced-key-from-other-device");
+    const apiClient = createMockApiClient();
+    const autoSetup = createMockAutoSetup();
+
+    await tryAutoRecovery({
+      familyId: "fam-existing",
+      userId: "user-abc",
+      displayName: "Test User",
+      apiClient,
+      autoSetup,
+      onFamilyJoined: vi.fn(),
+    });
+
+    expect(apiClient.joinFamily).toHaveBeenCalledTimes(1);
+    const fourthArg = vi.mocked(apiClient.joinFamily).mock.calls[0][3];
+    expect(fourthArg).toBeDefined();
+    expect(fourthArg).toHaveProperty("keyFingerprint");
+    expect(fourthArg).not.toHaveProperty("recoverySource");
+  });
+
+  it("returns { recovered: false } when no synced encryption key is available", async () => {
+    mockEncryptionKeyMessage(null);
+    const apiClient = createMockApiClient();
+    const autoSetup = createMockAutoSetup();
+
+    const result = await tryAutoRecovery({
+      familyId: "fam-existing",
+      userId: "user-abc",
+      displayName: "Test User",
+      apiClient,
+      autoSetup,
+      onFamilyJoined: vi.fn(),
+    });
+
+    expect(result).toEqual({ recovered: false });
+    expect(apiClient.joinFamily).not.toHaveBeenCalled();
+  });
+
+  it("returns { recovered: true } and calls onFamilyJoined on successful auto-recovery", async () => {
+    mockEncryptionKeyMessage("synced-key-from-other-device");
+    const onFamilyJoined = vi.fn();
+    const apiClient = createMockApiClient();
+    const autoSetup = createMockAutoSetup();
+
+    const result = await tryAutoRecovery({
+      familyId: "fam-existing",
+      userId: "user-abc",
+      displayName: "Test User",
+      apiClient,
+      autoSetup,
+      onFamilyJoined,
+    });
+
+    expect(result).toEqual({ recovered: true });
+    expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", "user-abc");
   });
 });

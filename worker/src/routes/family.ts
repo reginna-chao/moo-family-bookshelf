@@ -119,7 +119,13 @@ familyRoutes.post("/:id/join", async (c) => {
     );
   }
 
-  let body: { userId: string; displayName?: string; verifySecret?: string; keyFingerprint?: string } | null;
+  let body: {
+    userId: string;
+    displayName?: string;
+    verifySecret?: string;
+    keyFingerprint?: string;
+    recoverySource?: "extension";
+  } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -183,13 +189,30 @@ familyRoutes.post("/:id/join", async (c) => {
     body.keyFingerprint !== undefined &&
     timingSafeEqualHex(body.keyFingerprint, record.keyFingerprint);
   if (!fingerprintMatches) {
-    // Verify PWA login verification (PIN / pattern / OTP) if user has it set
-    const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
-    if (!verification.valid && verification.error) {
-      return c.json(
-        { error: { code: verification.error.code, message: verification.error.message } },
-        verification.error.status as 403 | 429,
-      );
+    // Extension solo recovery bypasses verification. The Extension runs in a
+    // browser with an active Readmoo session — the same trust level used when
+    // the family was originally created. An attacker who forges this flag would
+    // still need the victim's Readmoo email to derive userId; at that point they
+    // can read the victim's bookshelf directly on Readmoo, which is the data we
+    // actually protect. Strictly limited to existing-member + solo +
+    // fingerprint-rotation rejoin to preserve multi-member trust anchors.
+    // Defense-in-depth: the solo-rotation branch below independently re-checks
+    // `record.members.length === 1`. Keep both guards aligned — do not remove
+    // the lower check when refactoring this block.
+    const isExtensionSoloRecovery =
+      body.recoverySource === "extension" &&
+      hasMember(record.members, body.userId) &&
+      record.members.length === 1;
+
+    if (!isExtensionSoloRecovery) {
+      // Verify PWA login verification (PIN / pattern / OTP) if user has it set
+      const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
+      if (!verification.valid && verification.error) {
+        return c.json(
+          { error: { code: verification.error.code, message: verification.error.message } },
+          verification.error.status as 403 | 429,
+        );
+      }
     }
   }
 

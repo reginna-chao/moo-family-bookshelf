@@ -166,11 +166,13 @@ export async function performSoloRecovery(opts: {
   const keyString = await exportKey(key);
   const keyFingerprint = await computeKeyFingerprint(keyString);
 
+  // Solo recovery: fresh key + fingerprint rotation. Flag the backend so it can bypass
+  // PWA verification — the Extension is already trusted via its Readmoo login session.
   const joinRes = await opts.apiClient.joinFamily(
     opts.familyId,
     opts.userId,
     opts.displayName,
-    { keyFingerprint },
+    { keyFingerprint, recoverySource: "extension" },
   );
   if (joinRes.error) return { recovered: false };
 

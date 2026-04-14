@@ -136,6 +136,20 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
       <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
         目前方式：{METHOD_LABELS[currentMethod ?? "none"]}
       </div>
+      <div
+        style={{
+          background: "#f1f5f9",
+          border: "1px solid #e2e8f0",
+          borderRadius: 8,
+          padding: "8px 12px",
+          fontSize: 12,
+          color: "#64748b",
+          lineHeight: 1.5,
+          marginBottom: 12,
+        }}
+      >
+        提示：此驗證僅用於 PWA 登入時保護你的書櫃資料。Extension 重裝後的恢復流程會透過你已登入的 Readmoo 帳號自動驗證身份，不會受此設定影響。
+      </div>
 
       {/* Method selection buttons */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
