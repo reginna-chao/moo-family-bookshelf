@@ -2,6 +2,11 @@ name = "moo-family-bookshelf-dev"
 main = "src/index.ts"
 compatibility_date = "2024-12-30"
 
+# Workers Observability (free tier: 200k log events/day, 3-day retention)
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Dev environment KV (default for wrangler dev / wrangler deploy)
 # Replace with your own KV namespace ID (see worker/DEPLOY.md)
 [[kv_namespaces]]
@@ -14,6 +19,10 @@ preview_id = "YOUR_DEV_KV_NAMESPACE_ID"
 # Production environment
 [env.production]
 name = "moo-family-bookshelf"
+
+[env.production.observability]
+enabled = true
+head_sampling_rate = 1
 
 # Replace with your own KV namespace ID (see worker/DEPLOY.md)
 [[env.production.kv_namespaces]]
