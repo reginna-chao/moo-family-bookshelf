@@ -262,15 +262,20 @@ export function useOnboardingFlow(
       });
 
       if (!result.ok) {
-        if (result.errorCode === "VERIFICATION_REQUIRED") {
-          setErrorMessage(
-            "此家庭需要使用手機 App 完成驗證後才能加入。請先在手機 App 中登入並設定驗證，或向家人取得新的同步碼。",
-          );
-          setErrorActions([{ label: "我知道了", variant: "primary", onClick: handleRetry }]);
+        if (
+          result.errorCode === "VERIFICATION_REQUIRED" ||
+          result.errorCode === "VERIFICATION_FAILED" ||
+          result.errorCode === "VERIFICATION_LOCKED"
+        ) {
+          const message =
+            result.errorCode === "VERIFICATION_LOCKED"
+              ? "此家庭的驗證已暫時鎖定，請稍後再試，或向家人索取新的同步碼。"
+              : "同步碼可能不正確或已失效，請確認後重試，或向家人索取最新的同步碼。";
+          setErrorMessage(message);
         } else {
           setErrorMessage(result.errorMessage);
-          setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
         }
+        setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
         setState("error");
         return;
       }

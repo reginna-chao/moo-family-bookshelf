@@ -353,11 +353,13 @@ export async function performJoin(opts: {
   }
 
   await importKey(decoded.encryptionKey);
+  const keyFingerprint = await computeKeyFingerprint(decoded.encryptionKey);
 
   const response = await opts.apiClient.joinFamily(
     decoded.familyId,
     opts.userId,
     opts.displayName,
+    { keyFingerprint },
   );
   if (response.error) {
     return {

@@ -17,8 +17,16 @@ vi.mock("@/crypto/encrypt", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
 }));
 
-import { performSoloRecovery, tryAutoRecovery } from "@/dialog/onboardingFlow";
+// Mock sync code codec — tests set return values per case to simulate decoding.
+vi.mock("@/crypto/syncCode", () => ({
+  SyncCodeError: class SyncCodeError extends Error {},
+  decodeSyncCode: vi.fn(),
+  encodeSyncCode: vi.fn(),
+}));
+
+import { performJoin, performSoloRecovery, tryAutoRecovery } from "@/dialog/onboardingFlow";
 import { generateKey, exportKey, computeKeyFingerprint } from "@/crypto/encrypt";
+import { decodeSyncCode } from "@/crypto/syncCode";
 import type { ApiClient } from "@/api/client";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
 
@@ -376,5 +384,148 @@ describe("tryAutoRecovery", () => {
 
     expect(result).toEqual({ recovered: true });
     expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", "user-abc");
+  });
+});
+
+describe("performJoin", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    // Re-apply crypto mock implementations cleared by clearAllMocks
+    vi.mocked(computeKeyFingerprint).mockResolvedValue("f".repeat(64));
+
+    // Default sync-code decode: plain local host, no apiHost override.
+    vi.mocked(decodeSyncCode).mockReturnValue({
+      familyId: "fam-join-1",
+      encryptionKey: "decoded-key",
+    });
+
+    vi.mocked(chrome.storage.local.set).mockImplementation(
+      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+    );
+    vi.mocked(chrome.storage.local.get).mockImplementation(
+      (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        if (typeof callback === "function") callback({});
+        return Promise.resolve({}) as unknown as void;
+      },
+    );
+    vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("calls joinFamily with keyFingerprint derived from decoded sync code", async () => {
+    const apiClient = createMockApiClient();
+
+    await performJoin({
+      syncCodeInput: "moo-fam-join-1-decodedkey",
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+    });
+
+    // computeKeyFingerprint must be applied to the key extracted from the sync code,
+    // not a freshly generated one — this is the invariant that unlocks server-side
+    // fingerprint-based verification bypass for the manual-paste recovery path.
+    expect(computeKeyFingerprint).toHaveBeenCalledWith("decoded-key");
+
+    expect(apiClient.joinFamily).toHaveBeenCalledWith(
+      "fam-join-1",
+      "user-x",
+      "Name",
+      { keyFingerprint: "f".repeat(64) },
+    );
+  });
+
+  it("returns ok:true with familyId and userId on success", async () => {
+    const apiClient = createMockApiClient();
+
+    const result = await performJoin({
+      syncCodeInput: "moo-fam-join-1-decodedkey",
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      familyId: "fam-join-1",
+      userId: "user-x",
+    });
+  });
+
+  it("returns ok:false with errorCode and errorMessage when joinFamily fails", async () => {
+    const apiClient = createMockApiClient({
+      joinFamily: vi.fn().mockResolvedValue({
+        error: { code: "VERIFICATION_REQUIRED", message: "此帳號需要驗證才能登入" },
+      }),
+    });
+
+    const result = await performJoin({
+      syncCodeInput: "moo-fam-join-1-decodedkey",
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: "VERIFICATION_REQUIRED",
+      errorMessage: "此帳號需要驗證才能登入",
+    });
+  });
+
+  it("updates api endpoint and sends SET_API_ENDPOINT when decoded.apiHost is set", async () => {
+    vi.mocked(decodeSyncCode).mockReturnValue({
+      familyId: "fam-join-1",
+      encryptionKey: "decoded-key",
+      apiHost: "https://custom.example.com",
+    });
+
+    const apiClient = createMockApiClient();
+
+    await performJoin({
+      syncCodeInput: "moo-fam-join-1-decodedkey@custom",
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+    });
+
+    expect(apiClient.setEndpoint).toHaveBeenCalledWith("https://custom.example.com");
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "SET_API_ENDPOINT",
+        apiEndpoint: "https://custom.example.com",
+      }),
+    );
+  });
+
+  it("persists credentials and sends SET_FAMILY_ID / SET_ENCRYPTION_KEY on success", async () => {
+    const apiClient = createMockApiClient();
+
+    await performJoin({
+      syncCodeInput: "moo-fam-join-1-decodedkey",
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+    });
+
+    expect(chrome.storage.local.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-x",
+        encryptionKey: "decoded-key",
+        authToken: "tok",
+        tokenExpiresAt: 9999999999,
+      }),
+    );
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "SET_FAMILY_ID", familyId: "fam-join-1" }),
+    );
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "SET_ENCRYPTION_KEY", encryptionKey: "decoded-key" }),
+    );
   });
 });

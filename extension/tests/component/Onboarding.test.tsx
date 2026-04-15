@@ -433,11 +433,11 @@ describe("Onboarding", () => {
 
       await act(async () => {
         fireEvent.click(screen.getByText("加入家庭公開書櫃"));
-        // Let the join + sync flow complete
-        for (let i = 0; i < 10; i++) {
-          vi.advanceTimersByTime(500);
-          await flushMicrotasks();
-        }
+        // Drain the full handleJoin → performJoin → autoSetup.syncBooks chain
+        // (including the keyFingerprint computation) in one pass, without
+        // relying on a fixed iteration count that grows fragile as awaits
+        // are added to production code.
+        await vi.runAllTimersAsync();
       });
 
       await waitFor(() => {
@@ -633,10 +633,7 @@ describe("Onboarding", () => {
 
       await act(async () => {
         fireEvent.click(screen.getByText("加入家庭公開書櫃"));
-        for (let i = 0; i < 10; i++) {
-          vi.advanceTimersByTime(500);
-          await flushMicrotasks();
-        }
+        await vi.runAllTimersAsync();
       });
 
       await waitFor(() => {
@@ -1216,44 +1213,55 @@ describe("Onboarding", () => {
 
   });
 
-  describe("handleJoin VERIFICATION_REQUIRED", () => {
-    it("shows Q5 verification notice when server returns VERIFICATION_REQUIRED", async () => {
-      const mockApi = createMockApiClient({
-        joinFamily: vi.fn().mockResolvedValue({
-          error: {
-            code: "VERIFICATION_REQUIRED",
-            message: "Verification required",
-          },
-        }),
-      });
+  describe("handleJoin sync code error responses", () => {
+    // After the keyFingerprint fix, VERIFICATION_REQUIRED / VERIFICATION_FAILED
+    // from this path no longer mean "go set up PWA verification" — they mean
+    // the sync code the user pasted is wrong or the family anchor has rotated.
+    // VERIFICATION_LOCKED is a distinct condition (rate-limit lockout from
+    // failed verify attempts elsewhere, e.g. PWA) and shows a different message.
+    const SYNC_CODE_ERROR_MESSAGE =
+      "同步碼可能不正確或已失效，請確認後重試，或向家人索取最新的同步碼。";
+    const LOCKED_MESSAGE =
+      "此家庭的驗證已暫時鎖定，請稍後再試，或向家人索取新的同步碼。";
 
-      renderOnboarding({ apiClient: mockApi });
+    it.each([
+      ["VERIFICATION_REQUIRED", "Verification required", SYNC_CODE_ERROR_MESSAGE],
+      ["VERIFICATION_FAILED", "Verification failed", SYNC_CODE_ERROR_MESSAGE],
+      ["VERIFICATION_LOCKED", "驗證已鎖定，請稍後再試", LOCKED_MESSAGE],
+    ] as const)(
+      "maps server error %s to a user-facing message",
+      async (code, backendMessage, expectedUiMessage) => {
+        const mockApi = createMockApiClient({
+          joinFamily: vi.fn().mockResolvedValue({
+            error: { code, message: backendMessage },
+          }),
+        });
 
-      await clickStartAndWait();
+        renderOnboarding({ apiClient: mockApi });
 
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
-      });
+        await clickStartAndWait();
 
-      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
-        target: { value: "moo-abcd-efgh-validKey123" },
-      });
+        await waitFor(() => {
+          expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+        });
 
-      await act(async () => {
-        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
-      });
+        fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
+          target: { value: "moo-abcd-efgh-validKey123" },
+        });
 
-      await waitFor(() => {
-        expect(screen.getByText("發生錯誤")).toBeInTheDocument();
-        expect(screen.getByText(
-          "此家庭需要使用手機 App 完成驗證後才能加入。請先在手機 App 中登入並設定驗證，或向家人取得新的同步碼。",
-        )).toBeInTheDocument();
-      });
+        await act(async () => {
+          fireEvent.click(screen.getByText("加入家庭公開書櫃"));
+        });
 
-      // Should show single "我知道了" button instead of "重試"
-      expect(screen.getByRole("button", { name: "我知道了" })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "重試" })).not.toBeInTheDocument();
-    });
+        await waitFor(() => {
+          expect(screen.getByText("發生錯誤")).toBeInTheDocument();
+          expect(screen.getByText(expectedUiMessage)).toBeInTheDocument();
+        });
+
+        expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "我知道了" })).not.toBeInTheDocument();
+      },
+    );
   });
 
   describe("copy sync code", () => {
