@@ -47,6 +47,9 @@ export function namespacedKey(userId: string, suffix: string): string {
 function saveToStorage(data: AuthState): void {
   localStorage.setItem(USER_ID_KEY, data.userId);
   localStorage.setItem(namespacedKey(data.userId, "familyId"), data.familyId);
+  // This encryption key is derived from the sync code issued by the Extension.
+  // PWA cannot self-recover or regenerate this key — if the Extension rotates
+  // its key, the PWA must re-login with the new sync code.
   localStorage.setItem(namespacedKey(data.userId, "encryptionKey"), data.encryptionKey);
   if (data.apiHost) {
     localStorage.setItem(namespacedKey(data.userId, "apiHost"), data.apiHost);

@@ -201,7 +201,14 @@ function listenForBackgroundSync(): void {
           }
 
           const result = await syncBooks({ navigate: true, userId, apiClient });
-          sendResponse({ success: result.success, error: result.error });
+          if (result.decryptMismatch) {
+            chrome.runtime.sendMessage({ type: "SET_SYNC_ERROR_BADGE" });
+          }
+          sendResponse({
+            success: result.success,
+            error: result.error,
+            decryptMismatch: result.decryptMismatch,
+          });
         })
         .catch((err) => {
           console.error("[MooFamily] Failed to load sync module:", err);

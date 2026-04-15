@@ -34,6 +34,8 @@ export interface MemberBooks {
   userId: string;
   displayName: string;
   books: BookEntry[];
+  /** True when decryption failed — member data is inaccessible, not empty */
+  decryptFailed?: boolean;
 }
 
 type LoadState = "loading" | "ready" | "error";
@@ -62,6 +64,8 @@ interface FamilyDataState {
   hasBookshelfUpdates: boolean;
   /** Mark current bookshelf as seen: clears red dot, preserves chips for 24h */
   markBookshelfSeen: () => void;
+  /** True when any member's payload could not be decrypted (key mismatch) */
+  hasDecryptError: boolean;
 }
 
 const FamilyDataContext = createContext<FamilyDataState | null>(null);
@@ -141,6 +145,7 @@ export function FamilyDataProvider({
   }, [freshUpdateBookIds, chipBookIds]);
 
   const hasBookshelfUpdates = freshUpdateBookIds.size > 0;
+  const hasDecryptError = bookshelfMembers.some((m) => m.decryptFailed === true);
 
   const mountedRef = useRef(true);
   const membersRef = useRef<FamilyMember[]>([]);
@@ -229,6 +234,7 @@ export function FamilyDataProvider({
             userId: member.userId,
             displayName: familyDisplayName,
             books: [],
+            decryptFailed: true,
           });
         }
       }
@@ -360,6 +366,7 @@ export function FamilyDataProvider({
       updatedBookIds,
       hasBookshelfUpdates,
       markBookshelfSeen,
+      hasDecryptError,
     }),
     [
       members,
@@ -376,6 +383,7 @@ export function FamilyDataProvider({
       updatedBookIds,
       hasBookshelfUpdates,
       markBookshelfSeen,
+      hasDecryptError,
     ],
   );
 

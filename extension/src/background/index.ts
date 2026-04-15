@@ -58,6 +58,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         console.log("[bookSync] Background sync completed successfully");
       } else {
         console.warn("[bookSync] Background sync failed:", response?.error);
+        if (response?.decryptMismatch) {
+          chrome.action.setBadgeText({ text: "!" });
+          chrome.action.setBadgeBackgroundColor({ color: "#EF4444" });
+        }
       }
     });
   } catch (err) {
@@ -142,6 +146,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     chrome.storage.local.set({ syncArchived: value }, () => {
       sendResponse({ ok: true });
     });
+    return true;
+  }
+
+  if (message.type === "SET_SYNC_ERROR_BADGE") {
+    chrome.action.setBadgeText({ text: "!" });
+    chrome.action.setBadgeBackgroundColor({ color: "#EF4444" });
+    sendResponse({ ok: true });
     return true;
   }
 

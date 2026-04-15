@@ -16,6 +16,7 @@ import {
   performJoin,
   performSoloRecovery,
   tryAutoRecovery,
+  tryExistingKeyRecovery,
 } from "./onboardingFlow";
 
 export type OnboardingState =
@@ -305,9 +306,36 @@ export function useOnboardingFlow(
     setState("recovery-join");
   }, []);
 
-  const handleRecoveryChoiceSkip = useCallback(() => {
+  const handleRecoveryChoiceSkip = useCallback(async () => {
+    const email = userEmailRef.current;
+    const familyId = recoveryFamilyIdRef.current;
+    if (!email || !familyId) {
+      setState("solo-recovery-confirm");
+      return;
+    }
+
+    // Try reusing existing key — if it works, skip the confirmation dialog
+    setState("recovering");
+    try {
+      const userId = await deriveUserId(email);
+      const check = await tryExistingKeyRecovery(userId, apiClient);
+      if (check.canReuse) {
+        const solo = await performSoloRecovery({
+          familyId,
+          userId,
+          displayName: userDisplayNameRef.current,
+          apiClient,
+          autoSetup,
+          onFamilyJoined,
+        });
+        if (solo.recovered) return;
+      }
+    } catch {
+      // Existing key check failed — fall through to confirmation
+    }
+
     setState("solo-recovery-confirm");
-  }, []);
+  }, [apiClient, autoSetup, onFamilyJoined]);
 
   const handleRecoveryJoinBack = useCallback(() => {
     setState("recovery-choice");
@@ -339,7 +367,18 @@ export function useOnboardingFlow(
         autoSetup,
         onFamilyJoined,
       });
-      if (solo.recovered) return;
+      if (solo.recovered) {
+        if (solo.keyRotated) {
+          window.dispatchEvent(
+            new CustomEvent("keyRotationNotice", {
+              detail: {
+                message: "同步代碼已更新。已登入的 PWA 需要使用新的同步代碼重新登入。",
+              },
+            }),
+          );
+        }
+        return;
+      }
       setErrorMessage("恢復失敗，請重試。");
       setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
       setState("error");

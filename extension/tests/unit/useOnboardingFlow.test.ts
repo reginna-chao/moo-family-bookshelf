@@ -28,6 +28,7 @@ vi.mock("@/dialog/onboardingFlow", () => ({
   }),
   performSoloRecovery: vi.fn().mockResolvedValue({ recovered: true }),
   tryAutoRecovery: vi.fn().mockResolvedValue({ recovered: false }),
+  tryExistingKeyRecovery: vi.fn().mockResolvedValue({ canReuse: false }),
 }));
 
 // Mock syncCode for handleJoin path (not exercised here, but required for import graph)
@@ -207,8 +208,8 @@ describe("useOnboardingFlow", () => {
     it("handleRecoveryChoiceSkip → state 'solo-recovery-confirm'", async () => {
       const { result } = await driveToRecoveryChoice();
 
-      act(() => {
-        result.current.handleRecoveryChoiceSkip();
+      await act(async () => {
+        await result.current.handleRecoveryChoiceSkip();
       });
 
       expect(result.current.state).toBe("solo-recovery-confirm");
@@ -232,8 +233,8 @@ describe("useOnboardingFlow", () => {
     it("handleSoloRecoveryBack → state 'recovery-choice'", async () => {
       const { result } = await driveToRecoveryChoice();
 
-      act(() => {
-        result.current.handleRecoveryChoiceSkip();
+      await act(async () => {
+        await result.current.handleRecoveryChoiceSkip();
       });
       expect(result.current.state).toBe("solo-recovery-confirm");
 
@@ -253,8 +254,8 @@ describe("useOnboardingFlow", () => {
         return { recovered: true };
       });
 
-      act(() => {
-        result.current.handleRecoveryChoiceSkip();
+      await act(async () => {
+        await result.current.handleRecoveryChoiceSkip();
       });
 
       await act(async () => {
@@ -271,8 +272,8 @@ describe("useOnboardingFlow", () => {
       const { result } = await driveToRecoveryChoice();
       vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
 
-      act(() => {
-        result.current.handleRecoveryChoiceSkip();
+      await act(async () => {
+        await result.current.handleRecoveryChoiceSkip();
       });
 
       await act(async () => {
@@ -289,8 +290,8 @@ describe("useOnboardingFlow", () => {
         new Error("network down"),
       );
 
-      act(() => {
-        result.current.handleRecoveryChoiceSkip();
+      await act(async () => {
+        await result.current.handleRecoveryChoiceSkip();
       });
 
       await act(async () => {
@@ -343,8 +344,8 @@ describe("useOnboardingFlow", () => {
 
     it("returns to 'welcome' when called from 'solo-recovery-confirm'", async () => {
       const { result } = await driveToRecoveryChoice();
-      act(() => {
-        result.current.handleRecoveryChoiceSkip();
+      await act(async () => {
+        await result.current.handleRecoveryChoiceSkip();
       });
       expect(result.current.state).toBe("solo-recovery-confirm");
 

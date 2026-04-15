@@ -407,6 +407,16 @@ Extension 重灌後（例如更換電腦或重新安裝），若同步金鑰仍�
 
 **使用者端限制**：更換 Google 帳號、重建 Chrome profile、或在未登入同一 Google 帳號的電腦上操作時，靜默恢復不適用，應引導使用者透過同步碼還原個人書架設定（Extension recovery-choice 畫面已涵蓋此流程）。
 
+### 金鑰管理與 PWA 可用性取捨
+
+**不變式 1**：加密金鑰只透過「同步代碼」這一個載體傳遞。QR code、手動貼上、PWA URL 分享都是同一個載體的不同 UI。
+
+**不變式 2**：Extension 是同步代碼（也就是金鑰）的唯一產生源。PWA 不會產生金鑰，也不能從 server 復原金鑰。
+
+**不變式 3**：任何讓 Extension 靜默 rotate 金鑰的行為 = 讓所有已流出的同步代碼全部失效 = 直接破壞 PWA 可用性。因此 Extension rotate 金鑰必須：(a) 必要時才 rotate，(b) 經使用者明確確認，(c) rotate 後提供「重新產生同步代碼」的明顯入口，並提醒使用者 PWA 需要重新登入。
+
+任何未來的資安 review 若提議更嚴格的金鑰輪替，必須同時設計 PWA 的通知或重新 onboarding 流程，否則不得接受。
+
 ---
 
 ## 六、可設定 API 端點（BYO Backend）

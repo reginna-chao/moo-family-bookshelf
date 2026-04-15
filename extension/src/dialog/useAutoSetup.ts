@@ -3,6 +3,7 @@ import { scrapeUserEmail, scrapeDisplayName, scrapeBooks } from "../content/scra
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { mergeBooks } from "./mergeBooks";
 import { ApiClient, BookEntry } from "../api/client";
+import { DecryptMismatchError } from "../errors";
 
 export type AutoSetupPhase =
   | "idle"
@@ -29,8 +30,8 @@ function wait(ms: number): Promise<void> {
 /**
  * Extract saved books from the personal books API response.
  * Handles the encrypted `{ payload }` shape and a legacy `{ books }` fallback.
- * Returns an empty list on decrypt failure (expected after solo recovery key
- * rotation) so the caller can continue with a fresh merge + upload.
+ * Throws DecryptMismatchError on decrypt failure so callers can abort the
+ * sync and avoid overwriting server data with a differently-encrypted payload.
  */
 async function extractSavedBooks(
   data: unknown,
@@ -45,11 +46,8 @@ async function extractSavedBooks(
       if (Array.isArray(parsed.books)) return parsed.books as BookEntry[];
       return [];
     } catch {
-      // Key mismatch (e.g., after solo recovery fingerprint rotation).
-      // Falling back to empty means the caller will upload a fresh list
-      // encrypted under the current key — the old ciphertext is discarded.
-      console.debug("[AutoSetup] Decrypt failed, continuing with empty saved books");
-      return [];
+      // Server has data we cannot decrypt — abort to prevent data loss.
+      throw new DecryptMismatchError();
     }
   }
   if (Array.isArray(record.books)) return record.books as BookEntry[];
@@ -182,7 +180,11 @@ export function useAutoSetup(): UseAutoSetupReturn {
         setPhase("done");
         return true;
       } catch (err) {
-        setErrorMessage(err instanceof Error ? err.message : "同步書單失敗");
+        if (err instanceof DecryptMismatchError) {
+          setErrorMessage("偵測到加密金鑰不符，同步已暫停。請確認同步代碼是否正確。");
+        } else {
+          setErrorMessage(err instanceof Error ? err.message : "同步書單失敗");
+        }
         setPhase("error");
         restoreHash();
         return false;

@@ -13,6 +13,9 @@ export { ApiClient } from "../api/client";
 import { ScrapedBook, scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { mergeBooks } from "./mergeBooks";
+import { DecryptMismatchError } from "../errors";
+
+export { DecryptMismatchError } from "../errors";
 
 /** Minimum interval (ms) for rate-limited auto-sync */
 export const AUTO_SYNC_MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -79,6 +82,8 @@ export interface SyncBooksResult {
   success: boolean;
   books: BookEntry[];
   error?: string;
+  /** True when sync aborted due to encryption key mismatch with server data */
+  decryptMismatch?: boolean;
 }
 
 /**
@@ -142,9 +147,9 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
         savedBooks = result.books;
         savedRawPayload = result.raw;
       } catch {
-        // Decryption failed — treat as no saved data
-        console.warn("[syncBooks] Decrypt failed, ignoring saved data");
-        savedBooks = [];
+        // Server has data we cannot decrypt — abort to prevent overwriting
+        // valid ciphertext with data encrypted under a different key.
+        throw new DecryptMismatchError();
       }
     }
 
@@ -181,6 +186,15 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     // Restore navigation on error
     if (navigate && !isOnLibrary) {
       window.location.hash = originalHash || "#/";
+    }
+    if (err instanceof DecryptMismatchError) {
+      console.warn("[syncBooks] Encryption key mismatch — sync aborted to prevent data loss");
+      return {
+        success: false,
+        books: [],
+        error: err.message,
+        decryptMismatch: true,
+      };
     }
     return {
       success: false,

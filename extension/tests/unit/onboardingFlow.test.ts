@@ -89,7 +89,7 @@ describe("performSoloRecovery", () => {
       onFamilyJoined,
     });
 
-    expect(result).toEqual({ recovered: true });
+    expect(result).toEqual({ recovered: true, keyRotated: true });
     expect(onFamilyJoined).toHaveBeenCalledWith("fam-solo-1", "user-abc");
   });
 
@@ -268,7 +268,7 @@ describe("performSoloRecovery", () => {
     });
 
     // sync storage failure is swallowed; recovery still succeeds
-    expect(result).toEqual({ recovered: true });
+    expect(result).toEqual({ recovered: true, keyRotated: true });
     expect(onFamilyJoined).toHaveBeenCalled();
   });
 });

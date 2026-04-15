@@ -220,9 +220,7 @@ describe("useAutoSetup", () => {
       );
     });
 
-    it("passes empty savedBooks to mergeBooks when decrypt throws (solo recovery key rotation)", async () => {
-      // Solo recovery rotates the fingerprint; old ciphertext can't be
-      // decrypted with the new key. syncBooks must swallow this and continue.
+    it("aborts sync and shows error when decrypt throws (R1 invariant: never overwrite)", async () => {
       vi.mocked(decrypt).mockRejectedValueOnce(new Error("OperationError"));
 
       const mockApi = {
@@ -239,9 +237,11 @@ describe("useAutoSetup", () => {
       await vi.advanceTimersByTimeAsync(1500);
       await promise;
 
-      // syncBooks should NOT have thrown — merge should still run
-      expect(mergeBooks).toHaveBeenCalledWith(expect.any(Array), []);
-      expect(result.current.phase).toBe("done");
+      // Decrypt failure must abort — no merge, no upload, show error
+      expect(mergeBooks).not.toHaveBeenCalled();
+      expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
+      expect(result.current.phase).toBe("error");
+      expect(result.current.errorMessage).toContain("金鑰不符");
     });
 
     it("reads legacy {books: [...]} shape when payload is absent", async () => {

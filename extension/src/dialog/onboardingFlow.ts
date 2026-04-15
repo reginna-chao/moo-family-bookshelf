@@ -13,6 +13,7 @@ import {
   exportKey,
   importKey,
   encrypt,
+  decrypt,
   computeKeyFingerprint,
 } from "../crypto/encrypt";
 import { decodeSyncCode, encodeSyncCode } from "../crypto/syncCode";
@@ -146,17 +147,55 @@ export async function tryAutoRecovery(opts: {
   return { recovered: true };
 }
 
-export interface SoloRecoveryResult {
-  recovered: boolean;
+export interface ExistingKeyCheckResult {
+  canReuse: boolean;
+  encryptionKey?: string;
 }
 
 /**
- * Rejoin an existing solo family with a freshly generated encryption key.
- * Used when `tryAutoRecovery` fails (no synced key) but the user is the
- * only member of the family — they can rotate their own key without
- * needing the old one. The backend permits fingerprint rotation for
- * solo families; the old ciphertext is discarded and the cached local
- * book list is re-encrypted under the new key.
+ * Check whether the existing local encryption key can still decrypt
+ * the server payload. If so, there is no need to rotate the key.
+ */
+export async function tryExistingKeyRecovery(
+  userId: string,
+  apiClient: ApiClient,
+): Promise<ExistingKeyCheckResult> {
+  try {
+    const storage = await chrome.storage.local.get(["encryptionKey"]);
+    const existingKey = storage.encryptionKey as string | undefined;
+    if (!existingKey) return { canReuse: false };
+
+    const response = await apiClient.getPersonalBooks(userId);
+    const data = response.data as Record<string, unknown> | null | undefined;
+
+    // No server data — existing key is fine (nothing to conflict with)
+    if (!data || typeof data.payload !== "string") {
+      return { canReuse: true, encryptionKey: existingKey };
+    }
+
+    // Attempt decrypt with existing key
+    const key = await importKey(existingKey);
+    await decrypt(data.payload, key);
+    return { canReuse: true, encryptionKey: existingKey };
+  } catch {
+    return { canReuse: false };
+  }
+}
+
+export interface SoloRecoveryResult {
+  recovered: boolean;
+  /** True when a new key was generated (existing key could not be reused) */
+  keyRotated?: boolean;
+}
+
+/**
+ * INVARIANT: This is the ONLY allowed encryption key rotation entry point.
+ * Key rotation MUST require explicit user confirmation because it invalidates
+ * all previously issued sync codes and breaks PWA sessions.
+ *
+ * Rejoin an existing solo family. First attempts to reuse the existing local
+ * encryption key; only generates a fresh key when the existing one cannot
+ * decrypt the server payload (or no local key exists).
  */
 export async function performSoloRecovery(opts: {
   familyId: string;
@@ -166,8 +205,20 @@ export async function performSoloRecovery(opts: {
   autoSetup: ReturnType<typeof useAutoSetup>;
   onFamilyJoined: (familyId: string, userId: string) => void;
 }): Promise<SoloRecoveryResult> {
-  const key = await generateKey();
-  const keyString = await exportKey(key);
+  // Try to reuse the existing key before generating a new one
+  const existingCheck = await tryExistingKeyRecovery(opts.userId, opts.apiClient);
+
+  let keyString: string;
+  let keyRotated = false;
+
+  if (existingCheck.canReuse && existingCheck.encryptionKey) {
+    keyString = existingCheck.encryptionKey;
+  } else {
+    const key = await generateKey();
+    keyString = await exportKey(key);
+    keyRotated = true;
+  }
+
   const keyFingerprint = await computeKeyFingerprint(keyString);
 
   // Solo recovery: fresh key + fingerprint rotation.
@@ -204,7 +255,7 @@ export async function performSoloRecovery(opts: {
 
   await opts.autoSetup.syncBooks({ userId: opts.userId, apiClient: opts.apiClient });
   opts.onFamilyJoined(opts.familyId, opts.userId);
-  return { recovered: true };
+  return { recovered: true, keyRotated };
 }
 
 export interface CreateFamilyResult {

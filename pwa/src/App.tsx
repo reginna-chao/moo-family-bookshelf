@@ -231,7 +231,7 @@ function MainContent({
       <InstallPrompt userId={auth.userId} />
       <main className="flex-1 overflow-y-auto pb-16">
         {currentPage === "family-shelf" && (
-          <FamilyShelfPage userId={auth.userId} />
+          <FamilyShelfPage userId={auth.userId} onRelogin={forceLogout} />
         )}
         {currentPage === "personal-shelf" && (
           <PersonalShelfPage userId={auth.userId} apiClient={apiClient} encryptionKey={auth.encryptionKey} />

@@ -352,8 +352,10 @@ describe("syncBooks — full flow", () => {
       apiClient,
     });
 
-    // Should succeed despite decrypt failure (treat as empty saved data)
-    expect(result.success).toBe(true);
+    // Decrypt failure must abort sync to prevent overwriting server data (R1 invariant)
+    expect(result.success).toBe(false);
+    expect(result.decryptMismatch).toBe(true);
+    expect(apiClient.updatePersonalBooks).not.toHaveBeenCalled();
   });
 
   it("navigates to #/library and restores hash when navigate=true", async () => {
