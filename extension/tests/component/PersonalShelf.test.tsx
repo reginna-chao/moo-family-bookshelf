@@ -554,9 +554,12 @@ describe("PersonalShelf", () => {
 
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
-      // Should still render books (from scrape), ignoring failed decryption
-      await waitForBooksLoaded();
-      expect(screen.getByText("測試書籍一")).toBeInTheDocument();
+      // R1 invariant: decrypt failure aborts to prevent overwriting server
+      // data with a differently-encrypted payload. Shows error instead of books.
+      await waitFor(() => {
+        expect(screen.getByText("偵測到加密金鑰不符，無法載入書籍設定。請確認同步代碼是否正確。")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("測試書籍一")).not.toBeInTheDocument();
     });
   });
 

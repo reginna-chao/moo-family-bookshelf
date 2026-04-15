@@ -18,6 +18,7 @@ vi.mock("@/crypto/encrypt", () => ({
 // Mock mergeBooks so tests can inspect what savedBooks gets passed in
 vi.mock("@/dialog/mergeBooks", () => ({
   mergeBooks: vi.fn((scraped: unknown[], _saved: unknown[]) => scraped),
+  asDecryptedBooks: vi.fn((books: unknown[]) => books),
 }));
 
 import { useAutoSetup } from "@/dialog/useAutoSetup";

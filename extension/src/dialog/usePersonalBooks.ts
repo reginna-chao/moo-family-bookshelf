@@ -3,7 +3,9 @@ import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from ".
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
 import { scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "../constants";
-import { mergeBooks } from "./mergeBooks";
+import { mergeBooks, asDecryptedBooks } from "./mergeBooks";
+import type { DecryptedBooks } from "./mergeBooks";
+import { DecryptMismatchError } from "../errors";
 
 export type PersonalBooksStatus = "scraping" | "ready" | "saving" | "saved" | "error";
 
@@ -14,7 +16,7 @@ export interface UsePersonalBooksParams {
 }
 
 interface LoadSavedResult {
-  books: BookEntry[];
+  books: DecryptedBooks;
   /** Full decrypted payload — preserved so save can merge back unknown fields */
   raw: Record<string, unknown> | null;
 }
@@ -28,12 +30,12 @@ async function loadSavedBooks(
     const decrypted = await decrypt(data.payload, key);
     const parsed = JSON.parse(decrypted) as Record<string, unknown>;
     const books = Array.isArray(parsed.books) ? (parsed.books as BookEntry[]) : [];
-    return { books, raw: parsed };
+    return { books: asDecryptedBooks(books), raw: parsed };
   }
   if (Array.isArray(data.books)) {
-    return { books: data.books as BookEntry[], raw: null };
+    return { books: asDecryptedBooks(data.books as BookEntry[]), raw: null };
   }
-  return { books: [], raw: null };
+  return { books: asDecryptedBooks([]), raw: null };
 }
 
 export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePersonalBooksParams) {
@@ -68,7 +70,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
 
         if (cancelled) return;
 
-        let savedBooks: BookEntry[] = [];
+        let savedBooks: DecryptedBooks = asDecryptedBooks([]);
         if (apiResponse.data && encKeyString) {
           try {
             const result = await loadSavedBooks(
@@ -78,8 +80,9 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
             savedBooks = result.books;
             savedRawPayload.current = result.raw;
           } catch {
-            console.warn("[PersonalShelf] Decrypt failed, ignoring saved data");
-            savedBooks = [];
+            // Server has data we cannot decrypt — abort to prevent overwriting
+            // valid ciphertext with data encrypted under a different key.
+            throw new DecryptMismatchError();
           }
         }
         if (cancelled) return;
@@ -92,7 +95,11 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
       } catch (err) {
         console.error("[PersonalShelf] Error:", err);
         if (cancelled) return;
-        setErrorMessage(err instanceof Error ? err.message : "載入失敗");
+        if (err instanceof DecryptMismatchError) {
+          setErrorMessage("偵測到加密金鑰不符，無法載入書籍設定。請確認同步代碼是否正確。");
+        } else {
+          setErrorMessage(err instanceof Error ? err.message : "載入失敗");
+        }
         setStatus("error");
       }
     }
@@ -114,7 +121,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
           category: b.category,
           isArchived: b.isArchived ?? BoolFlag.FALSE,
         })),
-        prev,
+        asDecryptedBooks(prev),
       ));
     }
   }, [lastSyncBooks, status]);

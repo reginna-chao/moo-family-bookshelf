@@ -8,7 +8,7 @@ import {
   decrypt,
 } from "@/crypto/encrypt";
 import { encodeSyncCode, decodeSyncCode } from "@/crypto/syncCode";
-import { mergeBooks } from "@/dialog/mergeBooks";
+import { mergeBooks, asDecryptedBooks } from "@/sync/mergeBooks";
 import { BoolFlag, type BookEntry } from "@/api/client";
 import type { ScrapedBook } from "@/content/scraper";
 
@@ -262,7 +262,7 @@ describe("mergeBooks", () => {
     const scraped: ScrapedBook[] = [
       makeScrapedBook({ bookId: "new-1", title: "New Book" }),
     ];
-    const saved: BookEntry[] = [];
+    const saved = asDecryptedBooks([]);
 
     const merged = mergeBooks(scraped, saved);
 
@@ -275,9 +275,9 @@ describe("mergeBooks", () => {
     const scraped: ScrapedBook[] = [
       makeScrapedBook({ bookId: "b1", title: "Updated Title" }),
     ];
-    const saved: BookEntry[] = [
+    const saved = asDecryptedBooks([
       makeBookEntry({ bookId: "b1", title: "Old Title", isShared: BoolFlag.TRUE }),
-    ];
+    ]);
 
     const merged = mergeBooks(scraped, saved);
 
@@ -291,10 +291,10 @@ describe("mergeBooks", () => {
     const scraped: ScrapedBook[] = [
       makeScrapedBook({ bookId: "b1", title: "On Page" }),
     ];
-    const saved: BookEntry[] = [
+    const saved = asDecryptedBooks([
       makeBookEntry({ bookId: "b1", title: "On Page", isShared: BoolFlag.TRUE }),
       makeBookEntry({ bookId: "b2", title: "Off Page Book", isShared: BoolFlag.TRUE }),
-    ];
+    ]);
 
     const merged = mergeBooks(scraped, saved);
 
@@ -307,9 +307,9 @@ describe("mergeBooks", () => {
 
   it("should handle empty scraped and non-empty saved", () => {
     const scraped: ScrapedBook[] = [];
-    const saved: BookEntry[] = [
+    const saved = asDecryptedBooks([
       makeBookEntry({ bookId: "b1", title: "Saved Book" }),
-    ];
+    ]);
 
     const merged = mergeBooks(scraped, saved);
 
@@ -321,7 +321,7 @@ describe("mergeBooks", () => {
     const scraped: ScrapedBook[] = [
       makeScrapedBook({ bookId: "b1", title: "New Book" }),
     ];
-    const saved: BookEntry[] = [];
+    const saved = asDecryptedBooks([]);
 
     const merged = mergeBooks(scraped, saved);
 
@@ -330,7 +330,7 @@ describe("mergeBooks", () => {
   });
 
   it("should handle both empty", () => {
-    const merged = mergeBooks([], []);
+    const merged = mergeBooks([], asDecryptedBooks([]));
     expect(merged).toHaveLength(0);
   });
 
@@ -339,10 +339,10 @@ describe("mergeBooks", () => {
       makeScrapedBook({ bookId: "b1", title: "Book", author: "New Author" }),
       makeScrapedBook({ bookId: "b2", title: "Book 2", author: "" }),
     ];
-    const saved: BookEntry[] = [
+    const saved = asDecryptedBooks([
       makeBookEntry({ bookId: "b1", author: "Old Author" }),
       makeBookEntry({ bookId: "b2", author: "Saved Author" }),
-    ];
+    ]);
 
     const merged = mergeBooks(scraped, saved);
 
@@ -358,9 +358,9 @@ describe("mergeBooks", () => {
     const scraped: ScrapedBook[] = [
       makeScrapedBook({ bookId: "b1", title: "Book" }),
     ];
-    const saved: BookEntry[] = [
+    const saved = asDecryptedBooks([
       makeBookEntry({ bookId: "b1", isbn: "978-1234567890" }),
-    ];
+    ]);
 
     const merged = mergeBooks(scraped, saved);
     expect(merged[0].isbn).toBe("978-1234567890");
@@ -370,7 +370,7 @@ describe("mergeBooks", () => {
     const scraped: ScrapedBook[] = Array.from({ length: 5 }, (_, i) =>
       makeScrapedBook({ bookId: `scraped-${i}`, title: `Scraped ${i}` }),
     );
-    const saved: BookEntry[] = [
+    const saved = asDecryptedBooks([
       // 2 overlap with scraped
       makeBookEntry({ bookId: "scraped-0", title: "Old Scraped 0", isShared: BoolFlag.TRUE }),
       makeBookEntry({ bookId: "scraped-1", title: "Old Scraped 1", isShared: BoolFlag.TRUE }),
@@ -378,7 +378,7 @@ describe("mergeBooks", () => {
       ...Array.from({ length: 3 }, (_, i) =>
         makeBookEntry({ bookId: `saved-${i}`, title: `Saved ${i}`, isShared: BoolFlag.TRUE }),
       ),
-    ];
+    ]);
 
     const merged = mergeBooks(scraped, saved);
 

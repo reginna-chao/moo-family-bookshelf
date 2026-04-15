@@ -12,7 +12,8 @@ import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from ".
 export { ApiClient } from "../api/client";
 import { ScrapedBook, scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
-import { mergeBooks } from "./mergeBooks";
+import { mergeBooks, asDecryptedBooks } from "./mergeBooks";
+import type { DecryptedBooks } from "./mergeBooks";
 import { DecryptMismatchError } from "../errors";
 
 export { DecryptMismatchError } from "../errors";
@@ -47,7 +48,7 @@ export async function canAutoSync(): Promise<boolean> {
  * Decrypt and parse saved books from the API response.
  */
 interface LoadSavedResult {
-  books: BookEntry[];
+  books: DecryptedBooks;
   /** Full decrypted payload — preserved so save can merge back unknown fields */
   raw: Record<string, unknown> | null;
 }
@@ -61,12 +62,12 @@ async function loadSavedBooks(
     const decrypted = await decrypt(data.payload, key);
     const parsed = JSON.parse(decrypted) as Record<string, unknown>;
     const books = Array.isArray(parsed.books) ? (parsed.books as BookEntry[]) : [];
-    return { books, raw: parsed };
+    return { books: asDecryptedBooks(books), raw: parsed };
   }
   if (Array.isArray(data.books)) {
-    return { books: data.books as BookEntry[], raw: null };
+    return { books: asDecryptedBooks(data.books as BookEntry[]), raw: null };
   }
-  return { books: [], raw: null };
+  return { books: asDecryptedBooks([]), raw: null };
 }
 
 export interface SyncBooksOptions {
@@ -135,7 +136,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
       throw new Error("找不到加密金鑰");
     }
 
-    let savedBooks: BookEntry[] = [];
+    let savedBooks: DecryptedBooks = asDecryptedBooks([]);
     let savedRawPayload: Record<string, unknown> | null = null;
     const apiResponse = await apiClient.getPersonalBooks(userId);
     if (apiResponse.data) {

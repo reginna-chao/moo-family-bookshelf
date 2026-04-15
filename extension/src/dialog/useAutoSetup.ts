@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef } from "react";
 import { scrapeUserEmail, scrapeDisplayName, scrapeBooks } from "../content/scraper";
 import { importKey, encrypt, decrypt } from "../crypto/encrypt";
-import { mergeBooks } from "./mergeBooks";
+import { mergeBooks, asDecryptedBooks } from "./mergeBooks";
+import type { DecryptedBooks } from "./mergeBooks";
 import { ApiClient, BookEntry } from "../api/client";
 import { DecryptMismatchError } from "../errors";
 
@@ -36,22 +37,22 @@ function wait(ms: number): Promise<void> {
 async function extractSavedBooks(
   data: unknown,
   key: CryptoKey,
-): Promise<BookEntry[]> {
-  if (!data || typeof data !== "object") return [];
+): Promise<DecryptedBooks> {
+  if (!data || typeof data !== "object") return asDecryptedBooks([]);
   const record = data as Record<string, unknown>;
   if (typeof record.payload === "string") {
     try {
       const decrypted = await decrypt(record.payload, key);
       const parsed = JSON.parse(decrypted) as Record<string, unknown>;
-      if (Array.isArray(parsed.books)) return parsed.books as BookEntry[];
-      return [];
+      if (Array.isArray(parsed.books)) return asDecryptedBooks(parsed.books as BookEntry[]);
+      return asDecryptedBooks([]);
     } catch {
       // Server has data we cannot decrypt — abort to prevent data loss.
       throw new DecryptMismatchError();
     }
   }
-  if (Array.isArray(record.books)) return record.books as BookEntry[];
-  return [];
+  if (Array.isArray(record.books)) return asDecryptedBooks(record.books as BookEntry[]);
+  return asDecryptedBooks([]);
 }
 
 /**

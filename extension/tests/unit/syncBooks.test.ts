@@ -22,6 +22,7 @@ vi.mock("@/sync/mergeBooks", () => ({
       isShared: BoolFlag.FALSE,
     })),
   ),
+  asDecryptedBooks: vi.fn((books: unknown[]) => books),
 }));
 
 import { syncBooks, type SyncBooksOptions } from "@/sync/syncBooks";
