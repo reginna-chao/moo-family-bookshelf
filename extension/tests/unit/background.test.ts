@@ -245,4 +245,38 @@ describe("background service worker", () => {
       expect(chrome.storage.sync.set).not.toHaveBeenCalled();
     });
   });
+
+  describe("sync error badge messages", () => {
+    it("SET_SYNC_ERROR_BADGE sets badge text to '!'", async () => {
+      await sendMessage({ type: "SET_SYNC_ERROR_BADGE" });
+
+      expect(chrome.action.setBadgeText).toHaveBeenCalledWith({ text: "!" });
+    });
+
+    it("SET_SYNC_ERROR_BADGE sets red background color", async () => {
+      await sendMessage({ type: "SET_SYNC_ERROR_BADGE" });
+
+      expect(chrome.action.setBadgeBackgroundColor).toHaveBeenCalledWith({
+        color: "#EF4444",
+      });
+    });
+
+    it("SET_SYNC_ERROR_BADGE responds ok: true", async () => {
+      const response = await sendMessage({ type: "SET_SYNC_ERROR_BADGE" });
+
+      expect(response).toEqual({ ok: true });
+    });
+
+    it("CLEAR_SYNC_ERROR_BADGE sets badge text to empty string", async () => {
+      await sendMessage({ type: "CLEAR_SYNC_ERROR_BADGE" });
+
+      expect(chrome.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
+    });
+
+    it("CLEAR_SYNC_ERROR_BADGE responds ok: true", async () => {
+      const response = await sendMessage({ type: "CLEAR_SYNC_ERROR_BADGE" });
+
+      expect(response).toEqual({ ok: true });
+    });
+  });
 });
