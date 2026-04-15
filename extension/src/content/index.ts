@@ -203,6 +203,8 @@ function listenForBackgroundSync(): void {
           const result = await syncBooks({ navigate: true, userId, apiClient });
           if (result.decryptMismatch) {
             chrome.runtime.sendMessage({ type: "SET_SYNC_ERROR_BADGE" });
+          } else if (result.success) {
+            chrome.runtime.sendMessage({ type: "CLEAR_SYNC_ERROR_BADGE" });
           }
           sendResponse({
             success: result.success,

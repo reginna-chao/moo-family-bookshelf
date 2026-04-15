@@ -93,6 +93,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
           userEmail={flow.userEmail ?? ""}
           onUseSyncCode={flow.handleRecoveryChoiceUseSyncCode}
           onSkip={flow.handleRecoveryChoiceSkip}
+          isLoading={isProcessing}
         />
       );
     }
@@ -112,6 +113,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         <SoloRecoveryConfirmView
           onConfirm={flow.handleSoloRecoveryConfirm}
           onBack={flow.handleSoloRecoveryBack}
+          isLoading={isProcessing}
         />
       );
     }

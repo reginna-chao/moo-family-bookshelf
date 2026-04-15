@@ -7,11 +7,13 @@ const WARNING_BG = "#fef3c7";
 export interface SoloRecoveryConfirmViewProps {
   onConfirm: () => void;
   onBack: () => void;
+  isLoading?: boolean;
 }
 
 export function SoloRecoveryConfirmView({
   onConfirm,
   onBack,
+  isLoading = false,
 }: SoloRecoveryConfirmViewProps): React.JSX.Element {
   return (
     <div style={{ padding: 24 }}>
@@ -38,6 +40,7 @@ export function SoloRecoveryConfirmView({
       <button
         type="button"
         onClick={onConfirm}
+        disabled={isLoading}
         style={{
           width: "100%",
           padding: 12,
@@ -48,10 +51,11 @@ export function SoloRecoveryConfirmView({
           color: "white",
           fontWeight: 600,
           fontSize: 14,
-          cursor: "pointer",
+          cursor: isLoading ? "not-allowed" : "pointer",
+          opacity: isLoading ? 0.6 : 1,
         }}
       >
-        確認重新同步
+        {isLoading ? "處理中..." : "確認重新同步"}
       </button>
       <button
         type="button"

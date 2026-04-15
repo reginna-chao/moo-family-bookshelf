@@ -327,6 +327,7 @@ export function useOnboardingFlow(
           apiClient,
           autoSetup,
           onFamilyJoined,
+          existingKeyCheck: check,
         });
         if (solo.recovered) return;
       }

@@ -56,6 +56,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       }
       if (response?.success) {
         console.log("[bookSync] Background sync completed successfully");
+        chrome.action.setBadgeText({ text: "" });
       } else {
         console.warn("[bookSync] Background sync failed:", response?.error);
         if (response?.decryptMismatch) {
@@ -115,6 +116,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "SET_ENCRYPTION_KEY") {
     chrome.storage.sync.set({ encryptionKey: message.encryptionKey }, () => {
       chrome.storage.local.set({ encryptionKey: message.encryptionKey }, () => {
+        chrome.action.setBadgeText({ text: "" });
         sendResponse({ ok: true });
       });
     });
@@ -152,6 +154,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "SET_SYNC_ERROR_BADGE") {
     chrome.action.setBadgeText({ text: "!" });
     chrome.action.setBadgeBackgroundColor({ color: "#EF4444" });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message.type === "CLEAR_SYNC_ERROR_BADGE") {
+    chrome.action.setBadgeText({ text: "" });
     sendResponse({ ok: true });
     return true;
   }

@@ -5,12 +5,14 @@ export interface RecoveryChoiceViewProps {
   userEmail: string;
   onUseSyncCode: () => void;
   onSkip: () => void;
+  isLoading?: boolean;
 }
 
 export function RecoveryChoiceView({
   userEmail,
   onUseSyncCode,
   onSkip,
+  isLoading = false,
 }: RecoveryChoiceViewProps): React.JSX.Element {
   return (
     <div style={{ padding: 24 }}>
@@ -47,6 +49,7 @@ export function RecoveryChoiceView({
       <button
         type="button"
         onClick={onSkip}
+        disabled={isLoading}
         style={{
           width: "100%",
           padding: 12,
@@ -56,10 +59,11 @@ export function RecoveryChoiceView({
           color: PRIMARY_BLUE,
           fontWeight: 600,
           fontSize: 14,
-          cursor: "pointer",
+          cursor: isLoading ? "not-allowed" : "pointer",
+          opacity: isLoading ? 0.6 : 1,
         }}
       >
-        略過，重新同步書籍資料
+        {isLoading ? "處理中..." : "略過，重新同步書籍資料"}
       </button>
     </div>
   );

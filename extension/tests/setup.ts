@@ -73,4 +73,8 @@ function createStorageAreaMock(store: Record<string, unknown>) {
     query: vi.fn().mockResolvedValue([]),
     sendMessage: vi.fn(),
   },
+  action: {
+    setBadgeText: vi.fn(),
+    setBadgeBackgroundColor: vi.fn(),
+  },
 } as unknown as typeof chrome;

@@ -204,9 +204,12 @@ export async function performSoloRecovery(opts: {
   apiClient: ApiClient;
   autoSetup: ReturnType<typeof useAutoSetup>;
   onFamilyJoined: (familyId: string, userId: string) => void;
+  /** Pre-computed result from tryExistingKeyRecovery to avoid redundant API call */
+  existingKeyCheck?: ExistingKeyCheckResult;
 }): Promise<SoloRecoveryResult> {
-  // Try to reuse the existing key before generating a new one
-  const existingCheck = await tryExistingKeyRecovery(opts.userId, opts.apiClient);
+  const existingCheck =
+    opts.existingKeyCheck ??
+    (await tryExistingKeyRecovery(opts.userId, opts.apiClient));
 
   let keyString: string;
   let keyRotated = false;
