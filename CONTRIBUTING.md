@@ -23,9 +23,7 @@ pnpm install
 `.env.example` contains dev defaults. Copy to `.env` to start developing:
 
 ```bash
-cp extension/.env.example extension/.env
-cp pwa/.env.example pwa/.env
-cp worker/.dev.vars.example worker/.dev.vars
+cp .env.example .env
 ```
 
 - `.env` — gitignored, personal dev config
