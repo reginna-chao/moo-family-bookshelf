@@ -52,7 +52,6 @@
      │                                 │
      │  個人開放設定 (per user)          │
      │  家庭書櫃聚合 (per family)       │
-     │  E2EE 加密儲存                   │
      └─────────────────────────────────┘
 ```
 
@@ -63,7 +62,7 @@
 | **Frontend** | React + TypeScript + Vite | Chrome Extension，Dialog UI 注入讀墨頁面 |
 | **Backend** | Cloudflare Workers | Serverless API，免費額度每日 10 萬次 |
 | **Storage** | Cloudflare KV | Key-Value 儲存，低延遲 |
-| **加密** | Web Crypto API (E2EE) | 端對端加密，伺服器僅存亂碼 |
+| **雜湊** | Web Crypto API (SHA-256) | 使用者識別碼雜湊 |
 
 ### 為何選擇 Cloudflare Workers + KV？
 
@@ -125,7 +124,7 @@
 | `chrome.storage.sync` | Chrome 自動同步到同 Google 帳號的所有裝置 | 主要方式，零操作恢復 |
 | 同步碼（Sync Code） | 手動輸入同步碼恢復 | 備用方式，不同 Google 帳號時使用 |
 
-- `encryptionKey` + `familyId` 同時存入 `chrome.storage.sync` 和 `chrome.storage.local`
+- `familyId` 同時存入 `chrome.storage.sync` 和 `chrome.storage.local`
 - 新裝置安裝 Extension 後，自動從 sync storage 讀取，無感恢復
 - `chrome.storage.sync` 上限 100KB，我們的資料不到 1KB，綽綽有餘
 
@@ -151,7 +150,7 @@
 #### 換裝置恢復
 
 1. 在新裝置安裝 Extension，使用相同 Google 帳號登入 Chrome
-2. `chrome.storage.sync` 自動同步 `familyId` + `encryptionKey`
+2. `chrome.storage.sync` 自動同步 `familyId`
 3. 開啟 Dialog 即可直接使用，無需重新設定
 4. 若使用不同 Google 帳號，可手動輸入同步碼恢復
 
@@ -195,7 +194,7 @@
 
 ```json
 {
-  "user_id": "user_encrypted_id",
+  "user_id": "user_hashed_id",
   "display_name": "顯示名稱",
   "books": [
     {
@@ -209,7 +208,6 @@
     }
   ],
   "last_updated": "2026-03-25T00:00:00Z",
-  "encrypted": true
 }
 ```
 
@@ -218,8 +216,8 @@
 ```json
 {
   "family_id": "family_sync_code",
-  "owner_id": "user_encrypted_id_1",
-  "members": ["user_encrypted_id_1", "user_encrypted_id_2"],
+  "owner_id": "user_hashed_id_1",
+  "members": ["user_hashed_id_1", "user_hashed_id_2"],
   "max_members": 2,
   "created_at": "2026-03-25T00:00:00Z"
 }
@@ -243,15 +241,11 @@
 
 ## 四、資安與隱私機制
 
-### 端對端加密 (E2EE) — Zero-Knowledge 架構
+### 安全架構
 
-```
-瀏覽器端加密 ──▶ 傳輸密文 ──▶ 伺服器儲存密文（無法解密）
-```
-
-1. **端對端加密**：資料在離開瀏覽器前即完成加密（Web Crypto API）
-2. **Zero-Knowledge**：伺服器端僅存儲加密後的亂碼，開發者無法讀取內容
-3. **高熵同步碼**：使用 UUID v4 等高隨機性字串，防止暴力猜測
+1. **傳輸安全**：所有 API 通訊透過 HTTPS 加密傳輸
+2. **存取控制**：以 auth token 驗證每次請求，確保只有授權使用者可存取資料
+3. **高熵同步碼**：使用高隨機性字串，防止暴力猜測
 4. **權限分離**：家庭成員僅能瀏覽他人已開放的書籍，無法修改他人設定
 5. **預設不開放**：所有書籍（含新購入）預設為不開放，由使用者主動選擇
 
@@ -263,7 +257,7 @@
 
 ### 隱私政策聲明
 
-> 🔒 **隱私與安全**：本工具採開源設計，所有書單資料均經端對端加密後儲存。伺服器無法解密您的資料，亦不收集任何個人識別資訊。
+> 🔒 **隱私與安全**：本工具採開源設計，所有資料透過 HTTPS 安全傳輸並以 auth token 控管存取權限，不收集任何個人識別資訊。
 
 ### 自訂 API 端點 (BYO Backend)
 
@@ -351,13 +345,13 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 |------|---------|------|
 | 違反讀墨 ToS（自動化存取） | ⚠️ 中 | 個人合理使用、不營利，法律風險相對低 |
 | 商標侵權 | 🔴 高（若使用全名） | 命名避開 `Readmoo` 全稱即可降低 |
-| 個資法規 | ✅ 低 | E2EE 加密 + 不收集個資 |
+| 個資法規 | ✅ 低 | 不收集個資 |
 
 ### 避險策略
 
 1. 以「個人開發」心態完成，不商業化
 2. 命名使用 `MooFamily Bookshelf`，避免直接使用 `Readmoo` 商標
-3. 實作 E2EE 加密，降低資料外洩風險
+3. 以 TLS + auth token 保護資料存取
 4. 撰寫白話隱私政策，增加透明度
 
 ---
@@ -390,13 +384,13 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 
 | 測試層級 | 工具 | 測試範圍 | 範例 |
 |---------|------|---------|------|
-| **Unit** | Vitest | 純邏輯模組：加密/解密、同步碼解析、API client、資料合併 | `crypto/encrypt.test.ts`、`api/parseSyncCode.test.ts` |
+| **Unit** | Vitest | 純邏輯模組：雜湊、同步碼解析、API client、資料合併 | `crypto/hash.test.ts`、`api/parseSyncCode.test.ts` |
 | **Component** | Vitest + React Testing Library | Dialog UI 元件：狀態切換、開關互動、表單驗證 | `dialog/PersonalShelf.test.tsx`、`dialog/Onboarding.test.tsx` |
 | **E2E** | Playwright + Chrome Extension testing | 完整流程：安裝 Extension → 開啟 Dialog → 建立家庭 → 設定開放書籍 | `e2e/family-flow.spec.ts` |
 
 #### 前端測試重點
 
-- **Crypto 模組**：加密 → 解密 roundtrip 驗證、金鑰生成、同步碼編碼/解碼（含 `@host` 格式）
+- **Crypto 模組**：deriveUserId 雜湊、同步碼編碼/解碼（含 `@host` 格式）
 - **Dialog 狀態機**：無家庭 → 引導畫面、有家庭 → 主畫面、解綁 → 回到引導畫面
 - **個人書櫃管理**：預設全部不開放、切換開關、儲存前不同步、新書預設不開放
 - **API client**：可切換 endpoint、錯誤處理、重試邏輯
@@ -411,7 +405,7 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 #### 後端測試重點
 
 - **家庭生命週期**：建立 → 加入 → 聚合查詢 → 離開 → 聚合不再包含該成員
-- **個人設定 CRUD**：儲存 / 讀取 / 更新開放設定，驗證加密資料正確儲存
+- **個人設定 CRUD**：儲存 / 讀取 / 更新開放設定，驗證資料正確儲存
 - **權限隔離**：非家庭成員無法存取家庭書櫃、無法修改他人設定
 - **Rate Limiting**：超頻請求回傳 429
 - **Edge cases**：同步碼格式錯誤、family_id 不存在、重複加入
@@ -430,7 +424,6 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 
 | 範圍 | 目標 |
 |------|------|
-| `extension/src/crypto/` | ≥ 90%（安全關鍵模組） |
 | `extension/src/api/` | ≥ 80% |
 | `extension/src/dialog/` | ≥ 70% |
 | `worker/src/` | ≥ 80% |
@@ -512,7 +505,7 @@ jobs:
 - [x] Chrome Extension Manifest V3 設定
 - [x] Content Script：在讀墨頁面注入「家庭書櫃」入口按鈕 + Dialog 框架
 - [x] Dialog UI：狀態機骨架（引導畫面 → 主畫面分頁切換）
-- [x] E2EE 加密模組（AES-256-GCM encrypt/decrypt + Base62 encoding）
+- [x] Crypto 雜湊工具（SHA-256 deriveUserId）
 - [x] 同步碼 encode/decode（含 `@host` 自訂端點支援）
 - [x] API Client（可切換 endpoint）
 - [x] Background Service Worker（chrome.storage messaging）
@@ -523,7 +516,7 @@ jobs:
 - [x] KV schema 定義（`user:`, `family:`, `member:` key patterns）
 - [x] 前端測試環境建置（Vitest + React Testing Library + chrome mock）
 - [x] 後端測試環境建置（Vitest + mock KV）
-- [x] Crypto / Sync Code unit tests（11 tests passing）
+- [x] Crypto / Sync Code unit tests（passing）
 - [x] Worker API unit + integration tests（15 tests passing）
 - [x] GitHub Actions CI 設定（extension-check + worker-check）
 - [x] GitHub Actions CD 設定（Worker deploy、GitHub Pages、Extension release）
@@ -542,7 +535,7 @@ jobs:
 - [x] Dialog UI：家庭開放書櫃功能完善（從 API 載入聚合書單、按成員分組顯示）
 - [x] Dialog UI：家庭同步碼建立/加入（串接 API、同步碼顯示/複製/輸入）
 - [x] Dialog UI：家庭設定頁完善（成員列表、離開家庭、同步碼再次查看）
-- [x] E2EE 整合：個人書單加密後儲存 / 聚合書單解密後顯示
+- [x] 個人書單儲存 / 聚合書單載入顯示
 - [x] 儲存變更後才同步機制（dirty state tracking + 明確儲存按鈕）
 - [x] 新書預設不開放邏輯（合併爬取結果 vs 已儲存設定）
 - [x] Cloudflare KV namespace 建立 + wrangler.toml 更新
@@ -553,13 +546,12 @@ jobs:
 
 ### Phase 2：安全性強化與測試補齊
 
-- [x] 完整 E2EE 端對端加密流程驗證（53 tests：encrypt.test.ts 29 + e2ee-flow.test.ts 24）
 - [x] 家庭解綁/重新綁定流程處理（chrome.storage 清理 + 重新引導）
 - [x] Rate Limiting 中介層（防濫用）（60 req/min/IP，worker/src/middleware/rateLimit.ts）
 - [x] 隱私政策頁面（site/privacy-policy.html，繁體中文完整版）
 - [x] Dialog 元件測試補齊（React Testing Library）（16 tests：FamilySettings 6 + Onboarding 6 + PersonalShelf 4）
 - [x] E2E 測試建置（Playwright + Chrome Extension 載入）— 15 個測試（4 個 spec）：家庭生命週期（含多用戶）、書籍分享、Dialog 狀態機、自訂端點 + 選擇器驗證工具 + CI 整合
-- [x] Crypto 模組完整覆蓋率達 ≥ 90% — 94.61%（encrypt.ts 95.72% + syncCode.ts 92%），全部 8 個導出函數皆有測試覆蓋
+- [x] Crypto 模組測試覆蓋
 
 ### Phase 2.5：桌面版 UX 改善（v1.0 前必要）✅ 已完成
 
@@ -574,7 +566,6 @@ jobs:
 
 #### 多裝置同步
 - [x] `chrome.storage.sync` 支援（自動同步 familyId）— 寫入 sync + local，讀取 sync 優先
-- [x] 加密金鑰僅存 `chrome.storage.local`（Phase 3 安全修復：不再同步到 Google Cloud）
 - [x] 保留 Sync Code 作為備用恢復方式
 
 #### 顯示名稱
@@ -611,14 +602,14 @@ jobs:
 ### Phase 3：行動端支援與自訂後端 ✅ 已完成
 
 #### PWA 認證設計
-- [x] Extension 設定頁：「連結手機」按鈕，產生 QR Code（PWA URL + familyId + encKey + userId，使用 URL fragment 保護金鑰）
-- [x] PWA Landing Page：掃碼自動解析 URL fragment → 儲存至 localStorage → 自動 join 取得 auth token
+- [x] Extension 設定頁：「連結手機」按鈕，產生 QR Code（PWA URL + familyId + userId）
+- [x] PWA Landing Page：掃碼自動解析 URL params → 儲存至 localStorage → 自動 join 取得 auth token
 - [x] PWA 備用入口：手動輸入同步碼 + 讀墨 Email（前端 deriveUserId → userId，不上傳伺服器）
 
 #### PWA 核心功能
-- [x] PWA 專案建置（React + TypeScript + Vite + Tailwind，複製 crypto/ 和 api/ 模組）
-- [x] PWA 家庭書櫃瀏覽（解密 + 成員篩選 + debounce 搜尋 + 2 欄書籍卡片）
-- [x] PWA 個人書櫃管理（開關已同步書籍的開放狀態 + 加密儲存，無法新增書籍）
+- [x] PWA 專案建置（React + TypeScript + Vite + Tailwind，共用 api/ 模組）
+- [x] PWA 家庭書櫃瀏覽（成員篩選 + debounce 搜尋 + 2 欄書籍卡片）
+- [x] PWA 個人書櫃管理（開關已同步書籍的開放狀態，無法新增書籍）
 - [x] PWA 家庭設定（成員列表、Owner 管理（轉移/移除）、離開家庭、同步碼複製）
 - [x] 響應式 UI 設計（手機優先，底部導覽列，Tailwind CSS）
 
@@ -631,12 +622,10 @@ jobs:
 - [x] API 認證 middleware（Bearer token，建立/加入家庭時產生 token）
 - [x] familyId 路徑參數驗證（`^[a-z0-9]{4}-[a-z0-9]{4}$`）
 - [x] 家庭成員授權檢查（非成員回傳 403）
-- [x] 加密金鑰從 chrome.storage.sync 移至 .local（不再同步到 Google Cloud）
 - [x] .env 檔案從 git 移除 + .gitignore 修正
 - [x] Sync code 解析器修復（正確處理含 dash 的 familyId）
 - [x] Auth token 端對端整合（Extension + PWA + Worker）
 - [x] Token TTL 90 天 + 格式驗證 + 離開時清除
-- [x] QR Code URL 使用 fragment（#）避免金鑰洩漏到伺服器 log
 - [x] 移除 production console.log 中的敏感資料
 
 #### 部署與發布
@@ -695,7 +684,7 @@ jobs:
 - 公開書櫃的書 = 個人書櫃中 `is_shared: true` 的同一組書，不另外標記
 - 不需加入家庭也可使用公開書櫃功能
 - share_token 格式：UUID 32 碼（無連字號）
-- 伺服器需儲存明文書單供公開查詢（E2EE 例外：使用者主動選擇公開）
+- 伺服器儲存明文書單供公開查詢
 - 封面圖片 hotlink 讀墨 CDN，需測試可用性
 - 重設網址 = 刪除舊 `public:{old_token}` + 建立新 `public:{new_token}`
 - 關閉公開分享 = 刪除 `public:{token}` + 更新 `user:{id}.public_sharing.enabled = 0`
@@ -719,7 +708,7 @@ moo-family-bookshelf/
 │   │   ├── settings/        # Extension 設定頁（自訂 API 端點等）
 │   │   ├── content/         # Content Script (書單爬取 + Dialog 注入)
 │   │   ├── background/      # Service Worker
-│   │   ├── crypto/          # E2EE 加密模組
+│   │   ├── crypto/          # 雜湊工具（SHA-256）
 │   │   └── api/             # API 呼叫層（支援可設定的 endpoint）
 │   ├── tests/               # 前端測試
 │   │   ├── unit/            # Unit tests (crypto, api, utils)
@@ -741,7 +730,7 @@ moo-family-bookshelf/
 │   ├── wrangler.toml        # Cloudflare 設定
 │   └── DEPLOY.md            # 自建部署教學
 ├── pwa/                     # PWA 行動端（Phase 3）
-│   ├── src/                 # 與 Extension 共用 api/ 和 crypto/ 模組
+│   ├── src/                 # 與 Extension 共用 api/ 模組
 │   └── package.json
 ├── site/                    # GitHub Pages 說明頁面
 │   └── index.html           # 靜態單頁，專案介紹與使用說明

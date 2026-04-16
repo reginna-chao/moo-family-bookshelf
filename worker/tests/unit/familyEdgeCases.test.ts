@@ -6,8 +6,6 @@ import { kvKeys } from "../../src/kv/schema";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
-const VALID_FP = "a".repeat(64);
-
 let kv: KVNamespace;
 
 function request(method: string, path: string, body?: unknown, authToken?: string) {
@@ -33,7 +31,7 @@ function rawRequest(method: string, path: string, rawBody: string, authToken?: s
 }
 
 async function createFamily(userId = "user1") {
-  const res = await request("POST", "/api/family", { userId, keyFingerprint: VALID_FP });
+  const res = await request("POST", "/api/family", { userId });
   const json = (await res.json()) as Json;
   return {
     familyId: json.data.familyId as string,
@@ -291,7 +289,7 @@ describe("Index fallback routes", () => {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: "user1", keyFingerprint: VALID_FP }),
+        body: JSON.stringify({ userId: "user1" }),
       },
       { KV: brokenKv },
     );

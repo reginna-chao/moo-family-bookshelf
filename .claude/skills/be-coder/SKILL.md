@@ -51,4 +51,4 @@ Write or modify TypeScript production code for the Cloudflare Worker backend.
 - Touch test files.
 - Add dependencies without confirming with the user.
 - Change KV key patterns without explicit instruction.
-- Decrypt data on the server (zero-knowledge architecture).
+- Expose raw user data without auth token validation.

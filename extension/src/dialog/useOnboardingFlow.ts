@@ -6,17 +6,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClient } from "../api/client";
-import { deriveUserId } from "../crypto/encrypt";
+import { deriveUserId } from "../crypto/hash";
 import { SyncCodeError } from "../crypto/syncCode";
 import { useAutoSetup } from "./useAutoSetup";
 import type { ErrorAction } from "./OnboardingViews";
 import {
   createNewFamily,
-  getSyncedEncryptionKey,
   performJoin,
   performSoloRecovery,
   tryAutoRecovery,
-  tryExistingKeyRecovery,
 } from "./onboardingFlow";
 
 export type OnboardingState =
@@ -141,9 +139,7 @@ export function useOnboardingFlow(
     setUserEmail(result.email);
     setUserDisplayName(result.displayName);
 
-    // Look up existing family; decide between silent auto-recovery and the
-    // user-facing recovery-choice screen based on whether we have an
-    // encryption key on this device.
+    // Look up existing family; attempt auto-recovery or show recovery-choice.
     try {
       const userId = await deriveUserId(result.email);
       const lookupRes = await apiClient.lookupUser(userId);
@@ -152,27 +148,19 @@ export function useOnboardingFlow(
         if (existingFamilyId && memberCount > 0) {
           recoveryFamilyIdRef.current = existingFamilyId;
 
-          const syncedKey = await getSyncedEncryptionKey();
-          if (syncedKey) {
-            setState("recovering");
-            const { recovered } = await tryAutoRecovery({
-              familyId: existingFamilyId,
-              userId,
-              displayName: result.displayName,
-              apiClient,
-              autoSetup,
-              onFamilyJoined,
-            });
-            if (recovered) return;
-            // Auto-recovery attempted but failed (e.g. backend join error).
-            // Surface the recovery-choice screen so the user can decide.
-            recoveryActiveRef.current = true;
-            setState("recovery-choice");
-            return;
-          }
-
-          // No key on this device — show the recovery-choice screen directly
-          // so the user can paste a sync code or opt into a solo rotation.
+          // Attempt auto-recovery directly (no key needed anymore)
+          setState("recovering");
+          const { recovered } = await tryAutoRecovery({
+            familyId: existingFamilyId,
+            userId,
+            displayName: result.displayName,
+            apiClient,
+            autoSetup,
+            onFamilyJoined,
+          });
+          if (recovered) return;
+          // Auto-recovery attempted but failed (e.g. backend join error).
+          // Surface the recovery-choice screen so the user can decide.
           recoveryActiveRef.current = true;
           setState("recovery-choice");
           return;
@@ -204,25 +192,21 @@ export function useOnboardingFlow(
       const existingFamilyId = lookupRes.data?.existingFamilyId ?? null;
       const memberCount = lookupRes.data?.memberCount ?? 0;
 
-      // User already belongs to a family — decide between silent recovery
-      // and the user-facing recovery-choice screen.
+      // User already belongs to a family — attempt recovery.
       if (existingFamilyId && memberCount > 0) {
         recoveryFamilyIdRef.current = existingFamilyId;
 
-        const syncedKey = await getSyncedEncryptionKey();
-        if (syncedKey) {
-          setState("recovering");
-          const { recovered } = await tryAutoRecovery({
-            familyId: existingFamilyId,
-            userId,
-            displayName: userDisplayNameRef.current,
-            apiClient,
-            autoSetup,
-            onFamilyJoined,
-          });
-          if (recovered) return;
-        }
-        // No key, or auto-recovery failed — let the user choose how to proceed.
+        setState("recovering");
+        const { recovered } = await tryAutoRecovery({
+          familyId: existingFamilyId,
+          userId,
+          displayName: userDisplayNameRef.current,
+          apiClient,
+          autoSetup,
+          onFamilyJoined,
+        });
+        if (recovered) return;
+        // Auto-recovery failed — let the user choose how to proceed.
         recoveryActiveRef.current = true;
         setState("recovery-choice");
         return;
@@ -319,25 +303,21 @@ export function useOnboardingFlow(
       return;
     }
 
-    // Try reusing existing key — if it works, skip the confirmation dialog
+    // Try direct solo recovery
     setState("recovering");
     try {
       const userId = await deriveUserId(email);
-      const check = await tryExistingKeyRecovery(userId, apiClient);
-      if (check.canReuse) {
-        const solo = await performSoloRecovery({
-          familyId,
-          userId,
-          displayName: userDisplayNameRef.current,
-          apiClient,
-          autoSetup,
-          onFamilyJoined,
-          existingKeyCheck: check,
-        });
-        if (solo.recovered) return;
-      }
+      const solo = await performSoloRecovery({
+        familyId,
+        userId,
+        displayName: userDisplayNameRef.current,
+        apiClient,
+        autoSetup,
+        onFamilyJoined,
+      });
+      if (solo.recovered) return;
     } catch {
-      // Existing key check failed — fall through to confirmation
+      // Solo recovery failed — fall through to confirmation
     }
 
     setState("solo-recovery-confirm");
@@ -373,18 +353,7 @@ export function useOnboardingFlow(
         autoSetup,
         onFamilyJoined,
       });
-      if (solo.recovered) {
-        if (solo.keyRotated) {
-          window.dispatchEvent(
-            new CustomEvent("keyRotationNotice", {
-              detail: {
-                message: "同步代碼已更新。已登入的 PWA 需要使用新的同步代碼重新登入。",
-              },
-            }),
-          );
-        }
-        return;
-      }
+      if (solo.recovered) return;
       setErrorMessage("恢復失敗，請重試。");
       setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
       setState("error");

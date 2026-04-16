@@ -18,4 +18,4 @@ This permission is scoped to `read.readmoo.com` and is used exclusively for the 
 
 ## Privacy Statement
 
-This extension does not collect any personally identifiable information (PII). All user data is end-to-end encrypted with AES-256-GCM in the browser before upload. The server is zero-knowledge and cannot read plaintext book data.
+This extension does not collect any personally identifiable information (PII). All data is transmitted over TLS and protected by auth tokens for access control. No account registration, email collection, or tracking is involved.

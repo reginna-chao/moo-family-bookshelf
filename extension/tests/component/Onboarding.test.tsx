@@ -12,34 +12,12 @@ beforeAll(() => {
   }
 });
 
-// Partially mock crypto module — override async functions that depend on
-// crypto.subtle, for deterministic & fast resolution in fake-timer environment.
-// 說明：generateKey、exportKey、importKey、computeKeyFingerprint 等都會觸發真實的
-// crypto.subtle 運算，在 fake-timer 環境下會與 timer advancement 競爭 microtask
-// 導致 CI flake。統一 mock 以確保穩定性；真實的 crypto 正確性由
-// extension/tests/unit/crypto/encrypt.test.ts 負責驗證。
-vi.mock("@/crypto/encrypt", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/crypto/encrypt")>();
-  const mockCryptoKey = {
-    type: "secret",
-    algorithm: { name: "AES-GCM" },
-    extractable: true,
-    usages: ["encrypt", "decrypt"],
-  } as unknown as CryptoKey;
-  return {
-    ...actual,
-    deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
-    computeKeyFingerprint: vi.fn().mockResolvedValue("f".repeat(64)),
-    // generateKey is called in solo recovery; mock to avoid real crypto.subtle in fake-timer env
-    generateKey: vi.fn().mockResolvedValue(mockCryptoKey),
-    // exportKey is called after generateKey; return a deterministic base62-like string
-    exportKey: vi.fn().mockResolvedValue("mock-exported-key-string"),
-    // importKey is called in handleJoin and syncBooks; mock for speed in fake-timer env
-    importKey: vi.fn().mockResolvedValue(mockCryptoKey),
-    // encrypt is called in syncBooks; return a stable string
-    encrypt: vi.fn().mockResolvedValue("mock-encrypted-payload"),
-  };
-});
+// Mock crypto/hash — deriveUserId uses crypto.subtle which competes with
+// fake timers in the test environment, causing CI flakes.
+vi.mock("@/crypto/hash", () => ({
+  deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
+  sha256Hex: vi.fn().mockResolvedValue("b".repeat(64)),
+}));
 
 // Mock the scraper module
 vi.mock("@/content/scraper", () => ({
@@ -702,10 +680,13 @@ describe("Onboarding", () => {
         expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
       });
 
-      // Migration should have called updatePersonalBooks with userId and encrypted payload
+      // Migration should have called updatePersonalBooks with userId and a PersonalBooks object
       expect(mockApi.updatePersonalBooks).toHaveBeenCalledWith(
         expect.any(String), // userId (hashed)
-        expect.any(String), // encrypted payload
+        expect.objectContaining({
+          schemaVersion: 1,
+          books: expect.any(Array),
+        }),
       );
 
       // Cache should be removed after successful migration
@@ -752,8 +733,11 @@ describe("Onboarding", () => {
 
       // Migration should have uploaded cached books
       expect(mockApi.updatePersonalBooks).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.any(String),
+        expect.any(String), // userId (hashed)
+        expect.objectContaining({
+          schemaVersion: 1,
+          books: expect.any(Array),
+        }),
       );
 
       // Cache should be removed
@@ -836,24 +820,7 @@ describe("Onboarding", () => {
   });
 
   describe("auto-recovery flow", () => {
-    /**
-     * Helper to mock chrome.runtime.sendMessage so GET_ENCRYPTION_KEY
-     * returns a given encryptionKey value.
-     */
-    function mockEncryptionKeyMessage(encryptionKey: string | null) {
-      vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-        (...args: unknown[]) => {
-          const msg = args[0] as Record<string, unknown>;
-          const callback = args[1] as ((response: unknown) => void) | undefined;
-          if (msg.type === "GET_ENCRYPTION_KEY" && typeof callback === "function") {
-            callback({ encryptionKey });
-          }
-          return Promise.resolve();
-        },
-      );
-    }
-
-    it("auto-recovers when existingFamilyId is returned and encryption key is available", async () => {
+    it("auto-recovers when existingFamilyId is returned from lookup", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
         lookupUser: vi.fn().mockResolvedValue({
@@ -869,58 +836,21 @@ describe("Onboarding", () => {
         }),
       });
 
-      mockEncryptionKeyMessage("synced-key-abc");
-
       renderOnboarding({ onFamilyJoined, apiClient: mockApi });
 
       await clickStartAndWait();
 
-      // Wait for the create button in case early recovery did not trigger
       // The early recovery in handleStart should fire and call onFamilyJoined
       await waitFor(() => {
         expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", expect.any(String));
       });
 
-      // Should have called joinFamily with the existing family and fingerprint in opts
+      // Should have called joinFamily with the existing family (no keyFingerprint opts)
       expect(mockApi.joinFamily).toHaveBeenCalledWith(
         "fam-existing",
         expect.any(String), // userId
         expect.any(String), // displayName
-        expect.objectContaining({ keyFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) }),
       );
-    });
-
-    it("passes keyFingerprint in tryAutoRecovery joinFamily call", async () => {
-      const onFamilyJoined = vi.fn();
-      const mockApi = createMockApiClient({
-        lookupUser: vi.fn().mockResolvedValue({
-          data: { existingFamilyId: "fam-fp-test", memberCount: 2 },
-        }),
-        joinFamily: vi.fn().mockResolvedValue({
-          data: {
-            familyId: "fam-fp-test",
-            members: [],
-            createdAt: "2026-01-01",
-            authToken: "fp-token",
-          },
-        }),
-      });
-
-      mockEncryptionKeyMessage("myBase62KeyData");
-
-      renderOnboarding({ onFamilyJoined, apiClient: mockApi });
-
-      await clickStartAndWait();
-
-      await waitFor(() => {
-        expect(onFamilyJoined).toHaveBeenCalled();
-      });
-
-      const joinCall = vi.mocked(mockApi.joinFamily).mock.calls[0];
-      // 4th argument is opts
-      const opts = joinCall[3] as Record<string, string> | undefined;
-      expect(opts?.keyFingerprint).toBeDefined();
-      expect(opts?.keyFingerprint).toMatch(/^[0-9a-f]{64}$/);
     });
 
     it("sets familyId in sync storage (overwriting stale value) on successful auto-recovery", async () => {
@@ -939,8 +869,6 @@ describe("Onboarding", () => {
         }),
       });
 
-      mockEncryptionKeyMessage("freshKey");
-
       renderOnboarding({ onFamilyJoined, apiClient: mockApi });
 
       await clickStartAndWait();
@@ -955,48 +883,22 @@ describe("Onboarding", () => {
       );
     });
 
-    it("handleStart: solo-member family, no sync key → shows recovery-choice screen (no silent solo rotation)", async () => {
+    it("handleStart: auto-recovery failure shows recovery-choice screen", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-solo", memberCount: 1 },
         }),
         joinFamily: vi.fn().mockResolvedValue({
-          data: { authToken: "tok", expiresAt: 9999999999 },
+          error: { code: "UNKNOWN", message: "Server error" },
         }),
       });
-
-      mockEncryptionKeyMessage(null);
 
       renderOnboarding({ apiClient: mockApi, onFamilyJoined });
 
       await clickStartAndWait();
 
-      // No encryption key → no auto-solo-recovery; user must decide via recovery-choice
-      await waitFor(() => {
-        expect(screen.getByText("發現您的家庭書架帳號")).toBeInTheDocument();
-      });
-
-      // joinFamily (performSoloRecovery) must NOT have fired silently
-      expect(mockApi.joinFamily).not.toHaveBeenCalled();
-      expect(onFamilyJoined).not.toHaveBeenCalled();
-    });
-
-    it("handleStart: multi-member family, no sync key → shows recovery-choice screen", async () => {
-      const onFamilyJoined = vi.fn();
-      const mockApi = createMockApiClient({
-        lookupUser: vi.fn().mockResolvedValue({
-          data: { existingFamilyId: "fam-multi-2", memberCount: 2 },
-        }),
-      });
-
-      mockEncryptionKeyMessage(null);
-
-      renderOnboarding({ apiClient: mockApi, onFamilyJoined });
-
-      await clickStartAndWait();
-
-      // Multi-member + no key → recovery-choice (unified path)
+      // Auto-recovery failed → user must decide via recovery-choice
       await waitFor(() => {
         expect(screen.getByText("發現您的家庭書架帳號")).toBeInTheDocument();
       });
@@ -1009,9 +911,10 @@ describe("Onboarding", () => {
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-email-check", memberCount: 1 },
         }),
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "UNKNOWN", message: "fail" },
+        }),
       });
-
-      mockEncryptionKeyMessage(null);
 
       renderOnboarding({ apiClient: mockApi });
 
@@ -1029,9 +932,10 @@ describe("Onboarding", () => {
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-to-recover", memberCount: 2 },
         }),
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "UNKNOWN", message: "fail" },
+        }),
       });
-
-      mockEncryptionKeyMessage(null);
 
       renderOnboarding({ apiClient: mockApi });
 
@@ -1059,9 +963,13 @@ describe("Onboarding", () => {
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-to-skip", memberCount: 1 },
         }),
+        // 1st call (tryAutoRecovery) fails → recovery-choice
+        // 2nd call (performSoloRecovery in handleRecoveryChoiceSkip) fails → solo-recovery-confirm
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "FAIL", message: "recovery failed" },
+        }),
       });
 
-      mockEncryptionKeyMessage(null);
 
       renderOnboarding({ apiClient: mockApi });
 
@@ -1073,10 +981,15 @@ describe("Onboarding", () => {
 
       await act(async () => {
         fireEvent.click(screen.getByText("略過，重新同步書籍資料"));
-        await flushMicrotasks();
+        for (let i = 0; i < 5; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
       });
 
-      expect(screen.getByText("確認重新同步書籍資料？")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText("確認重新同步書籍資料？")).toBeInTheDocument();
+      });
       expect(
         screen.getByRole("button", { name: "確認重新同步" }),
       ).toBeInTheDocument();
@@ -1090,9 +1003,12 @@ describe("Onboarding", () => {
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-back", memberCount: 1 },
         }),
+        // All joinFamily calls fail → forces recovery-choice then solo-recovery-confirm
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "FAIL", message: "recovery failed" },
+        }),
       });
 
-      mockEncryptionKeyMessage(null);
 
       renderOnboarding({ apiClient: mockApi });
 
@@ -1105,9 +1021,14 @@ describe("Onboarding", () => {
       // choice → confirm → back → choice
       await act(async () => {
         fireEvent.click(screen.getByText("略過，重新同步書籍資料"));
-        await flushMicrotasks();
+        for (let i = 0; i < 5; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
       });
-      expect(screen.getByText("確認重新同步書籍資料？")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText("確認重新同步書籍資料？")).toBeInTheDocument();
+      });
 
       await act(async () => {
         fireEvent.click(screen.getByText("返回，輸入同步碼"));
@@ -1119,9 +1040,13 @@ describe("Onboarding", () => {
 
     it("solo-recovery-confirm: '確認重新同步' triggers performSoloRecovery and calls onFamilyJoined on success", async () => {
       const onFamilyJoined = vi.fn();
-      const joinFamilyMock = vi.fn().mockResolvedValue({
-        data: { authToken: "tok-solo", expiresAt: 9999999999 },
-      });
+      // 1st call (tryAutoRecovery in handleStart) fails → recovery-choice
+      // 2nd call (performSoloRecovery in handleRecoveryChoiceSkip) fails → solo-recovery-confirm
+      // 3rd call (performSoloRecovery in handleSoloRecoveryConfirm) succeeds
+      const joinFamilyMock = vi.fn()
+        .mockResolvedValueOnce({ error: { code: "FAIL", message: "auto recovery failed" } })
+        .mockResolvedValueOnce({ error: { code: "FAIL", message: "solo recovery failed" } })
+        .mockResolvedValue({ data: { authToken: "tok-solo", expiresAt: 9999999999 } });
       const mockApi = createMockApiClient({
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-confirm-solo", memberCount: 1 },
@@ -1129,7 +1054,6 @@ describe("Onboarding", () => {
         joinFamily: joinFamilyMock,
       });
 
-      mockEncryptionKeyMessage(null);
 
       renderOnboarding({ apiClient: mockApi, onFamilyJoined });
 
@@ -1141,7 +1065,15 @@ describe("Onboarding", () => {
 
       await act(async () => {
         fireEvent.click(screen.getByText("略過，重新同步書籍資料"));
-        await flushMicrotasks();
+        for (let i = 0; i < 5; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
+      });
+
+      // Wait for async handleRecoveryChoiceSkip to finish and show solo-recovery-confirm
+      await waitFor(() => {
+        expect(screen.getByText("確認重新同步書籍資料？")).toBeInTheDocument();
       });
 
       await act(async () => {
@@ -1163,62 +1095,16 @@ describe("Onboarding", () => {
           expect.any(String),
         );
       });
-      // Solo recovery sends keyFingerprint only — recoverySource removed (C1 security fix)
+      // Solo recovery calls joinFamily without opts
       expect(joinFamilyMock).toHaveBeenCalledWith(
         "fam-confirm-solo",
         expect.any(String),
         expect.any(String),
-        expect.not.objectContaining({ recoverySource: expect.anything() }),
       );
     });
   });
 
-  describe("handleCreate with keyFingerprint", () => {
-    it("calls createFamily with keyFingerprint in the request", async () => {
-      const mockApi = createMockApiClient({
-        createFamily: vi.fn().mockResolvedValue({
-          data: {
-            familyId: "fam-fp-create",
-            members: ["user-1"],
-            createdAt: "2026-01-01",
-            authToken: "auth-token-fp",
-          },
-        }),
-      });
-
-      renderOnboarding({ apiClient: mockApi });
-
-      await clickStartAndWait();
-
-      await waitFor(() => {
-        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
-      });
-
-      await act(async () => {
-        fireEvent.click(screen.getByText("建立家庭公開書櫃"));
-        await flushMicrotasks();
-      });
-
-      await waitFor(() => {
-        expect(mockApi.createFamily).toHaveBeenCalled();
-      });
-
-      const createCall = vi.mocked(mockApi.createFamily).mock.calls[0];
-      // createFamily(userId, displayName, keyFingerprint)
-      const keyFingerprint = createCall[2];
-      expect(keyFingerprint).toBeDefined();
-      expect(typeof keyFingerprint).toBe("string");
-      expect(keyFingerprint).toMatch(/^[0-9a-f]{64}$/);
-    });
-
-  });
-
   describe("handleJoin sync code error responses", () => {
-    // After the keyFingerprint fix, VERIFICATION_REQUIRED / VERIFICATION_FAILED
-    // from this path no longer mean "go set up PWA verification" — they mean
-    // the sync code the user pasted is wrong or the family anchor has rotated.
-    // VERIFICATION_LOCKED is a distinct condition (rate-limit lockout from
-    // failed verify attempts elsewhere, e.g. PWA) and shows a different message.
     const SYNC_CODE_ERROR_MESSAGE =
       "同步碼可能不正確或已失效，請確認後重試，或向家人索取最新的同步碼。";
     const LOCKED_MESSAGE =

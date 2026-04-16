@@ -137,11 +137,11 @@ describe("background service worker", () => {
 
       expect(response).toEqual({ ok: true });
       expect(chrome.storage.sync.remove).toHaveBeenCalledWith(
-        ["familyId", "encryptionKey"],
+        ["familyId"],
         expect.any(Function),
       );
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        ["familyId", "encryptionKey", "authToken", "tokenExpiresAt"],
+        ["familyId", "authToken", "tokenExpiresAt"],
         expect.any(Function),
       );
     });
@@ -155,63 +155,6 @@ describe("background service worker", () => {
         const keys = call[0] as string[];
         expect(keys).not.toContain("personalBooksCache");
       }
-    });
-  });
-
-  describe("GET_ENCRYPTION_KEY", () => {
-    it("returns encryptionKey from sync storage when available", async () => {
-      vi.mocked(chrome.storage.sync.get).mockImplementation(
-        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ encryptionKey: "key-from-sync" });
-        },
-      );
-
-      const response = await sendMessage({ type: "GET_ENCRYPTION_KEY" });
-
-      expect(response).toEqual({ encryptionKey: "key-from-sync" });
-      expect(chrome.storage.local.get).not.toHaveBeenCalled();
-    });
-
-    it("falls back to local storage when sync has no encryptionKey", async () => {
-      vi.mocked(chrome.storage.sync.get).mockImplementation(
-        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({});
-        },
-      );
-      vi.mocked(chrome.storage.local.get).mockImplementation(
-        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ encryptionKey: "key-from-local" });
-        },
-      );
-
-      const response = await sendMessage({ type: "GET_ENCRYPTION_KEY" });
-
-      expect(response).toEqual({ encryptionKey: "key-from-local" });
-    });
-
-    it("returns null when neither sync nor local has encryptionKey", async () => {
-      const response = await sendMessage({ type: "GET_ENCRYPTION_KEY" });
-
-      expect(response).toEqual({ encryptionKey: null });
-    });
-  });
-
-  describe("SET_ENCRYPTION_KEY", () => {
-    it("writes encryptionKey to both sync and local storage", async () => {
-      const response = await sendMessage({
-        type: "SET_ENCRYPTION_KEY",
-        encryptionKey: "test-key-123",
-      });
-
-      expect(response).toEqual({ ok: true });
-      expect(chrome.storage.sync.set).toHaveBeenCalledWith(
-        { encryptionKey: "test-key-123" },
-        expect.any(Function),
-      );
-      expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        { encryptionKey: "test-key-123" },
-        expect.any(Function),
-      );
     });
   });
 

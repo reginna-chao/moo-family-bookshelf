@@ -26,10 +26,10 @@ export function validateEndpointUrl(raw: string): string {
 
 import type {
   ApiResponse,
+  FamilyBookshelf,
   FamilyGroup,
   OtpInfo,
   PersonalBooks,
-  RawFamilyBookshelf,
   VerifyInfo,
   VersionInfo,
 } from "./types";
@@ -46,7 +46,6 @@ export type {
   FamilyMember,
   OtpInfo,
   PersonalBooks,
-  RawFamilyBookshelf,
   VerifyInfo,
   VerifyMethod,
   VersionInfo,
@@ -152,9 +151,9 @@ export class ApiClient {
 
   async updatePersonalBooks(
     userId: string,
-    payload: string, // encrypted
+    data: PersonalBooks,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    return this.put(`/api/user/${userId}/books`, { payload });
+    return this.put(`/api/user/${userId}/books`, data);
   }
 
   // --- Family Group ---
@@ -162,21 +161,17 @@ export class ApiClient {
   async createFamily(
     userId: string,
     displayName: string | undefined,
-    keyFingerprint: string,
   ): Promise<ApiResponse<FamilyGroup>> {
-    return this.post("/api/family", { userId, displayName: displayName ?? "", keyFingerprint });
+    return this.post("/api/family", { userId, displayName: displayName ?? "" });
   }
 
   async joinFamily(
     familyId: string,
     userId: string,
     displayName?: string,
-    opts?: { keyFingerprint?: string; verifySecret?: string },
+    opts?: { verifySecret?: string },
   ): Promise<ApiResponse<FamilyGroup>> {
     const body: Record<string, string> = { userId, displayName: displayName ?? "" };
-    if (opts?.keyFingerprint !== undefined) {
-      body.keyFingerprint = opts.keyFingerprint;
-    }
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
     }
@@ -239,7 +234,7 @@ export class ApiClient {
 
   async getFamilyBookshelf(
     familyId: string,
-  ): Promise<ApiResponse<RawFamilyBookshelf>> {
+  ): Promise<ApiResponse<FamilyBookshelf>> {
     return this.get(`/api/family/${familyId}/bookshelf`);
   }
 

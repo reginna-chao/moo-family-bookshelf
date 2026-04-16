@@ -10,7 +10,7 @@ Easily browse books shared by family members on your Readmoo family account.
 
 - **Family Bookshelf** — See your family's shared books at a glance, no account sharing needed
 - **You decide what to share** — All books are private by default; only books you manually enable will appear on the family bookshelf
-- **Data security** — Your book list is encrypted in the browser before upload; even the server cannot read it
+- **Data security** — All data is transmitted over TLS and protected by auth tokens for access control
 - **Settings persist across families** — Leaving or switching families won't reset your sharing preferences
 - **Mobile friendly** — Browse the family bookshelf on your phone via the mobile web app
 
@@ -43,7 +43,7 @@ Mobile users can browse the family bookshelf via the mobile web app (we recommen
 
 ## Privacy
 
-- **Encrypted data** — Your book list is encrypted before upload; even the server cannot read it
+- **Secure access** — All data is transmitted over TLS and protected by auth tokens
 - **No personal data collected** — No accounts, no email, no user tracking
 - **Instant isolation on leave** — After leaving a family, other members can no longer see your books
 

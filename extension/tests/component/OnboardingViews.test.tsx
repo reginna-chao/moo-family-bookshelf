@@ -10,7 +10,6 @@ import {
 vi.mock("@/crypto/syncCode", () => ({
   decodeSyncCode: vi.fn().mockReturnValue({
     familyId: "abc123",
-    encryptionKey: "keydata",
   }),
 }));
 
@@ -84,17 +83,16 @@ describe("WelcomeView", () => {
 
 describe("CreatedView", () => {
   const defaultProps = {
-    generatedSyncCode: "moo-abc123-keydata",
+    generatedSyncCode: "moo-abc123",
     copied: false,
     onCopy: vi.fn(),
     onContinue: vi.fn(),
   };
 
-  it("renders masked sync code by default", () => {
+  it("renders sync code", () => {
     render(<CreatedView {...defaultProps} />);
 
-    expect(screen.getByText(/moo-abc123-••••/)).toBeInTheDocument();
-    expect(screen.queryByText("moo-abc123-keydata")).not.toBeInTheDocument();
+    expect(screen.getByText(/moo-abc123/)).toBeInTheDocument();
   });
 
   it("renders heading", () => {
@@ -146,69 +144,30 @@ describe("CreatedView", () => {
   it("sync code is displayed in monospace font", () => {
     render(<CreatedView {...defaultProps} />);
 
-    const codeEl = screen.getByText(/moo-abc123-••••/);
+    const codeEl = screen.getByText(/moo-abc123/);
     expect(codeEl.style.fontFamily).toBe("monospace");
   });
 
-  it("should show full key when eye toggle is clicked", () => {
-    render(<CreatedView {...defaultProps} />);
-
-    const toggleBtn = screen.getByRole("button", { name: "顯示同步碼" });
-    fireEvent.click(toggleBtn);
-
-    expect(screen.getByText(/moo-abc123-keydata/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
-  });
-
-  it("preserves @host suffix in masked display when sync code has custom apiHost", () => {
+  it("renders sync code with @host suffix when present", () => {
     mockDecodeSyncCode.mockReturnValue({
       familyId: "abc123",
-      encryptionKey: "keydata",
       apiHost: "http://localhost:8787",
     });
 
     render(
       <CreatedView
         {...defaultProps}
-        generatedSyncCode="moo-abc123-keydata@http://localhost:8787"
+        generatedSyncCode="moo-abc123@http://localhost:8787"
       />,
     );
 
     expect(
-      screen.getByText("moo-abc123-••••••••••••@http://localhost:8787"),
+      screen.getByText("moo-abc123@http://localhost:8787"),
     ).toBeInTheDocument();
 
     // Restore default mock for subsequent tests
     mockDecodeSyncCode.mockReturnValue({
       familyId: "abc123",
-      encryptionKey: "keydata",
-    });
-  });
-
-  it("preserves @host suffix when eye toggle reveals the real key", () => {
-    mockDecodeSyncCode.mockReturnValue({
-      familyId: "abc123",
-      encryptionKey: "keydata",
-      apiHost: "http://localhost:8787",
-    });
-
-    render(
-      <CreatedView
-        {...defaultProps}
-        generatedSyncCode="moo-abc123-keydata@http://localhost:8787"
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "顯示同步碼" }));
-
-    expect(
-      screen.getByText("moo-abc123-keydata@http://localhost:8787"),
-    ).toBeInTheDocument();
-
-    // Restore default mock for subsequent tests
-    mockDecodeSyncCode.mockReturnValue({
-      familyId: "abc123",
-      encryptionKey: "keydata",
     });
   });
 
@@ -219,16 +178,11 @@ describe("CreatedView", () => {
 
     render(<CreatedView {...defaultProps} generatedSyncCode="raw-bad-code" />);
 
-    // Should show the raw code as-is, NOT "moo-raw-bad-code-••••"
     expect(screen.getByText("raw-bad-code")).toBeInTheDocument();
-    expect(screen.queryByText(/moo-raw-bad-code/)).not.toBeInTheDocument();
-    // Eye toggle should NOT be shown
-    expect(screen.queryByRole("button", { name: "顯示同步碼" })).not.toBeInTheDocument();
 
     // Restore default mock
     mockDecodeSyncCode.mockReturnValue({
       familyId: "abc123",
-      encryptionKey: "keydata",
     });
   });
 });
@@ -440,35 +394,16 @@ describe("IdleView", () => {
     expect(screen.getByText("加入中...")).toBeInTheDocument();
   });
 
-  it("renders encryption notice", () => {
-    render(<IdleView {...defaultProps} />);
-
-    expect(screen.getByText(/本工具採端對端加密/)).toBeInTheDocument();
-  });
-
   it("renders '或' separator between create and join", () => {
     render(<IdleView {...defaultProps} />);
 
     expect(screen.getByText("或")).toBeInTheDocument();
   });
 
-  it("sync code input defaults to password type", () => {
+  it("sync code input is text type", () => {
     render(<IdleView {...defaultProps} />);
 
     const input = screen.getByPlaceholderText("輸入家庭同步碼");
-    expect(input).toHaveAttribute("type", "password");
-  });
-
-  it("eye toggle switches input between password and text", () => {
-    render(<IdleView {...defaultProps} />);
-
-    const input = screen.getByPlaceholderText("輸入家庭同步碼");
-    expect(input).toHaveAttribute("type", "password");
-
-    const toggleBtn = screen.getByRole("button", { name: "顯示同步碼" });
-    fireEvent.click(toggleBtn);
-
     expect(input).toHaveAttribute("type", "text");
-    expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
   });
 });

@@ -21,7 +21,7 @@ extension/src/
 ├── settings/        # Extension settings page
 ├── content/         # Content Script (scrape + inject)
 ├── background/      # Service Worker
-├── crypto/          # E2EE module (Web Crypto API)
+├── crypto/          # Hashing utilities (SHA-256)
 └── api/             # API client (configurable endpoint)
 ```
 

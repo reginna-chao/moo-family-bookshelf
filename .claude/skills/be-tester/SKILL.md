@@ -62,4 +62,4 @@ Write unit and integration tests for the Cloudflare Worker using Vitest + Minifl
 
 - Modify production code.
 - Connect to real Cloudflare services (always use Miniflare).
-- Test encryption/decryption logic (that's client-side; server only stores ciphertext).
+- Test client-side hashing logic (that belongs to the frontend crypto module).

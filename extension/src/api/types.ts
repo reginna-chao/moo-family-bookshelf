@@ -34,7 +34,7 @@ export interface PersonalBooks {
   [key: string]: unknown;
 }
 
-/** Current schema version for PersonalBooks encrypted payload */
+/** Current schema version for PersonalBooks personal books data */
 export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 
 export interface FamilyMember {
@@ -78,14 +78,4 @@ export interface VerifyInfo {
 export interface OtpInfo {
   code: string;
   expiresAt: number;
-}
-
-/** Raw server response — members have encrypted payloads */
-export interface RawFamilyBookshelf {
-  familyId: string;
-  members: Array<{
-    userId: string;
-    payload: string | null;
-    lastUpdated: string | null;
-  }>;
 }

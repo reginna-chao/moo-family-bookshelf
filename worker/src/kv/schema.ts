@@ -2,7 +2,7 @@
  * KV key patterns and helpers.
  *
  * Key patterns:
- *   user:{userId}    → encrypted personal book list + sharing settings
+ *   user:{userId}    → personal book list + sharing settings (JSON)
  *   family:{familyId} → family member list (JSON)
  *   member:{userId}  → familyId (reverse lookup)
  */
@@ -29,11 +29,10 @@ export interface FamilyRecord {
   maxMembers: number;
   createdAt: string;
   apiEndpoint?: string;
-  keyFingerprint: string;
 }
 
 /** Raw family record from KV — may lack fields added after initial release. */
-export type RawFamilyRecord = Partial<FamilyRecord> & Pick<FamilyRecord, 'familyId' | 'members' | 'createdAt' | 'keyFingerprint'>;
+export type RawFamilyRecord = Partial<FamilyRecord> & Pick<FamilyRecord, 'familyId' | 'members' | 'createdAt'>;
 
 /** Find a member by userId in the members array. */
 export function findMember(members: FamilyMember[], userId: string): FamilyMember | undefined {
@@ -49,9 +48,6 @@ export function normalizeFamilyRecord(record: RawFamilyRecord): FamilyRecord {
   if (record.members.length === 0) {
     throw new Error("Corrupted family record: members array is empty");
   }
-  if (!record.keyFingerprint) {
-    throw new Error("Corrupted family record: keyFingerprint missing");
-  }
   const firstMember = record.members[0];
   const ownerId = record.ownerId ?? (typeof firstMember === 'string' ? firstMember : firstMember.userId);
   const normalized: FamilyRecord = {
@@ -62,9 +58,25 @@ export function normalizeFamilyRecord(record: RawFamilyRecord): FamilyRecord {
   return normalized;
 }
 
+export interface BookEntry {
+  bookId: string;
+  title: string;
+  author: string;
+  isbn: string;
+  coverUrl: string;
+  readmooUrl: string;
+  category: string;
+  isShared: number; // BoolFlag: 0 = false, 1 = true
+  isArchived?: number;
+}
+
 export interface UserBooksRecord {
-  payload: string; // encrypted
+  schemaVersion: number;
+  userId: string;
+  displayName: string;
+  books: BookEntry[];
   lastUpdated: string;
+  [key: string]: unknown;
 }
 
 export interface AuthRecord {

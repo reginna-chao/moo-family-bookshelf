@@ -100,7 +100,7 @@ Evaluate every item and only report findings — do not list items that pass.
 - Are `dangerouslySetInnerHTML` usages justified and sanitized?
 - No secrets in code, `chrome.storage`, or URL params?
 - Content Script only reads publicly visible info — never touch account credentials?
-- E2EE: encryption happens in browser before upload?
+- Auth tokens properly stored and sent with API requests?
 
 ---
 
@@ -113,7 +113,7 @@ When business logic context is available, follow this structured analysis before
 1. Identify the primary success flow described in the business logic.
 2. Trace from the Dialog component through hooks, API calls, to rendered output.
 3. Verify every step of the happy path produces the correct UI state.
-4. Confirm data transformations (API response → decrypted data → component props → rendered output) preserve correctness.
+4. Confirm data transformations (API response → component props → rendered output) preserve correctness.
 
 ### Phase 2: Scenario Expansion
 

@@ -49,7 +49,6 @@ async function seedFamily(userId: string, familyId: string) {
       members: [{ userId, displayName: "Test" }],
       maxMembers: 2,
       createdAt: new Date().toISOString(),
-      keyFingerprint: "a".repeat(64),
     }),
   );
 }

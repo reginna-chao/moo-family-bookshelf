@@ -6,13 +6,6 @@ vi.mock("@/content/scraper", () => ({
   scrapeArchivedBooks: vi.fn().mockResolvedValue([]),
 }));
 
-// Mock crypto module
-vi.mock("@/crypto/encrypt", () => ({
-  importKey: vi.fn().mockResolvedValue({} as CryptoKey),
-  encrypt: vi.fn().mockResolvedValue("encrypted-payload"),
-  decrypt: vi.fn().mockResolvedValue(JSON.stringify({ books: [] })),
-}));
-
 // Mock mergeBooks — pass through by returning scraped as BookEntry[]
 vi.mock("@/sync/mergeBooks", () => ({
   mergeBooks: vi.fn((scraped: unknown[]) =>
@@ -22,7 +15,6 @@ vi.mock("@/sync/mergeBooks", () => ({
       isShared: BoolFlag.FALSE,
     })),
   ),
-  asDecryptedBooks: vi.fn((books: unknown[]) => books),
 }));
 
 import { syncBooks, type SyncBooksOptions } from "@/sync/syncBooks";
@@ -38,7 +30,6 @@ function createMockApiClient(): ApiClient {
 
 function makeStorageData(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    encryptionKey: "test-enc-key",
     displayName: "Test User",
     syncArchived: 0,
     ...overrides,
@@ -283,27 +274,8 @@ describe("syncBooks — full flow", () => {
     );
   }
 
-  it("returns error when encryptionKey is missing", async () => {
-    setupStorage({ syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
-
-    const apiClient: ApiClient = {
-      getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
-      updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
-    } as unknown as ApiClient;
-
-    const result = await syncBooks({
-      navigate: false,
-      userId: "user-123",
-      apiClient,
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("找不到加密金鑰");
-  });
-
   it("returns error when upload fails", async () => {
-    setupStorage({ encryptionKey: "test-key", displayName: "Test", syncArchived: 0 });
+    setupStorage({ displayName: "Test", syncArchived: 0 });
     vi.mocked(scrapeBooks).mockResolvedValue([]);
 
     const apiClient: ApiClient = {
@@ -323,49 +295,13 @@ describe("syncBooks — full flow", () => {
     expect(result.error).toBe("Upload error");
   });
 
-  it("handles decryption failure of saved books gracefully", async () => {
-    setupStorage({ encryptionKey: "test-key", displayName: "Test", syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([
-      {
-        bookId: "b1",
-        title: "New Book",
-        author: "",
-        coverUrl: "",
-        readmooUrl: "https://readmoo.com/book/b1",
-        category: "",
-      },
-    ]);
-
-    // decrypt will throw because payload is not valid
-    const { decrypt } = await import("@/crypto/encrypt");
-    vi.mocked(decrypt).mockRejectedValueOnce(new Error("Decrypt failed"));
-
-    const apiClient: ApiClient = {
-      getPersonalBooks: vi.fn().mockResolvedValue({
-        data: { payload: "invalid-encrypted-data" },
-      }),
-      updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
-    } as unknown as ApiClient;
-
-    const result = await syncBooks({
-      navigate: false,
-      userId: "user-123",
-      apiClient,
-    });
-
-    // Decrypt failure must abort sync to prevent overwriting server data (R1 invariant)
-    expect(result.success).toBe(false);
-    expect(result.decryptMismatch).toBe(true);
-    expect(apiClient.updatePersonalBooks).not.toHaveBeenCalled();
-  });
-
   it("navigates to #/library and restores hash when navigate=true", async () => {
     Object.defineProperty(window, "location", {
       writable: true,
       value: { hash: "#/settings" },
     });
 
-    setupStorage({ encryptionKey: "test-key", displayName: "Test", syncArchived: 0 });
+    setupStorage({ displayName: "Test", syncArchived: 0 });
     vi.mocked(scrapeBooks).mockResolvedValue([]);
 
     const apiClient: ApiClient = {
@@ -384,33 +320,8 @@ describe("syncBooks — full flow", () => {
     expect(window.location.hash).toBe("#/settings");
   });
 
-  it("restores hash on error when navigate=true", async () => {
-    Object.defineProperty(window, "location", {
-      writable: true,
-      value: { hash: "#/me" },
-    });
-
-    setupStorage({ syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
-
-    const apiClient: ApiClient = {
-      getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
-      updatePersonalBooks: vi.fn(),
-    } as unknown as ApiClient;
-
-    const result = await syncBooks({
-      navigate: true,
-      userId: "user-123",
-      apiClient,
-    });
-
-    // Should fail (no encryption key) but hash should be restored
-    expect(result.success).toBe(false);
-    expect(window.location.hash).toBe("#/me");
-  });
-
   it("updates lastSyncAt on success", async () => {
-    setupStorage({ encryptionKey: "test-key", displayName: "Test", syncArchived: 0 });
+    setupStorage({ displayName: "Test", syncArchived: 0 });
     vi.mocked(scrapeBooks).mockResolvedValue([]);
 
     const apiClient: ApiClient = {
@@ -429,39 +340,8 @@ describe("syncBooks — full flow", () => {
     );
   });
 
-  it("loads saved books from encrypted payload", async () => {
-    setupStorage({ encryptionKey: "test-key", displayName: "Test", syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
-
-    const { decrypt, importKey } = await import("@/crypto/encrypt");
-    vi.mocked(importKey).mockResolvedValue({} as CryptoKey);
-    vi.mocked(decrypt).mockResolvedValue(
-      JSON.stringify({
-        books: [
-          { bookId: "saved-1", title: "Saved Book", isShared: BoolFlag.TRUE },
-        ],
-      }),
-    );
-
-    const apiClient: ApiClient = {
-      getPersonalBooks: vi.fn().mockResolvedValue({
-        data: { payload: "encrypted-data-string" },
-      }),
-      updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
-    } as unknown as ApiClient;
-
-    const result = await syncBooks({
-      navigate: false,
-      userId: "user-123",
-      apiClient,
-    });
-
-    expect(result.success).toBe(true);
-    expect(decrypt).toHaveBeenCalledWith("encrypted-data-string", expect.anything());
-  });
-
   it("loads saved books from plain books array", async () => {
-    setupStorage({ encryptionKey: "test-key", displayName: "Test", syncArchived: 0 });
+    setupStorage({ displayName: "Test", syncArchived: 0 });
     vi.mocked(scrapeBooks).mockResolvedValue([]);
 
     const apiClient: ApiClient = {
@@ -495,7 +375,7 @@ describe("syncBooks — full flow", () => {
       value: { hash: "#/library" },
     });
 
-    setupStorage({ encryptionKey: "test-key", displayName: "Test", syncArchived: 0 });
+    setupStorage({ displayName: "Test", syncArchived: 0 });
     vi.mocked(scrapeBooks).mockResolvedValue([]);
 
     const apiClient: ApiClient = {
@@ -515,7 +395,7 @@ describe("syncBooks — full flow", () => {
   });
 
   it("returns generic error message for non-Error exceptions", async () => {
-    setupStorage({ encryptionKey: "test-key", displayName: "Test", syncArchived: 0 });
+    setupStorage({ displayName: "Test", syncArchived: 0 });
     vi.mocked(scrapeBooks).mockRejectedValue("string error");
 
     const apiClient: ApiClient = {

@@ -66,7 +66,7 @@ userRoutes.put("/:id/books", async (c) => {
     );
   }
 
-  let body: { payload: string } | null;
+  let body: Record<string, unknown> | null;
   try {
     body = await c.req.json();
   } catch {
@@ -76,15 +76,19 @@ userRoutes.put("/:id/books", async (c) => {
     );
   }
 
-  if (!body?.payload || typeof body.payload !== "string") {
+  if (!body || !Array.isArray(body.books)) {
     return c.json(
-      { error: { code: "INVALID_PAYLOAD", message: "payload is required" } },
+      { error: { code: "INVALID_PAYLOAD", message: "books array is required" } },
       400,
     );
   }
 
   const record: UserBooksRecord = {
-    payload: body.payload,
+    ...body,
+    books: body.books,
+    schemaVersion: typeof body.schemaVersion === "number" ? body.schemaVersion : 1,
+    userId: typeof body.userId === "string" ? body.userId : userId,
+    displayName: typeof body.displayName === "string" ? body.displayName : "",
     lastUpdated: new Date().toISOString(),
   };
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Pencil, Check, X, Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-react";
+import { Pencil, Check, X, ChevronDown, ChevronRight } from "lucide-react";
 import { reportLinks } from "moo-family-bookshelf-shared/config/links";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
@@ -13,7 +13,6 @@ interface SettingsPageProps {
   familyId: string;
   userId: string;
   apiClient: ApiClient;
-  encryptionKey: string;
   onLogout: () => void;
   onForceLogout: () => void;
 }
@@ -25,7 +24,6 @@ export function SettingsPage({
   familyId,
   userId,
   apiClient,
-  encryptionKey,
   onLogout,
   onForceLogout,
 }: SettingsPageProps) {
@@ -53,15 +51,13 @@ export function SettingsPage({
     () =>
       encodeSyncCode({
         familyId,
-        encryptionKey,
         apiHost:
           apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT
             ? apiClient.getEndpoint()
             : undefined,
       }),
-    [familyId, encryptionKey, apiClient],
+    [familyId, apiClient],
   );
-  const [showSyncCode, setShowSyncCode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -328,17 +324,8 @@ export function SettingsPage({
         {familyOpen && (
           <div className="mt-3">
             <p className="text-xs text-gray-500 mb-1">家庭同步碼</p>
-            <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs break-all mb-2 flex items-center gap-2">
-              <span className="flex-1">
-                moo-{familyId}-{showSyncCode ? encryptionKey : "••••••••••••"}{syncCode.includes("@") ? `@${syncCode.split("@")[1]}` : ""}
-              </span>
-              <button
-                onClick={() => setShowSyncCode(!showSyncCode)}
-                className="flex-shrink-0 text-gray-400 hover:text-gray-600 p-1"
-                aria-label={showSyncCode ? "隱藏同步碼" : "顯示同步碼"}
-              >
-                {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
+            <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs break-all mb-2">
+              <span>{syncCode}</span>
             </div>
             <button
               onClick={() => void handleCopy()}

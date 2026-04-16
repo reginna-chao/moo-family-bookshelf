@@ -19,7 +19,7 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
 }
 
 async function createFamilyAndGetToken(userId = "user1") {
-  const res = await request("POST", "/api/family", { userId, keyFingerprint: "a".repeat(64) });
+  const res = await request("POST", "/api/family", { userId });
   const json = (await res.json()) as Json;
   return {
     familyId: json.data.familyId as string,
@@ -62,13 +62,13 @@ describe("GET /api/family/:id/bookshelf validation", () => {
     expect(json.error.code).toBe("FAMILY_NOT_FOUND");
   });
 
-  it("should return members with null payload when no books saved", async () => {
+  it("should return members with empty books array when no books saved", async () => {
     const { familyId, authToken } = await createFamilyAndGetToken("user1");
 
     const res = await request("GET", `/api/family/${familyId}/bookshelf`, undefined, authToken);
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.members[0].payload).toBeNull();
+    expect(json.data.members[0].books).toEqual([]);
     expect(json.data.members[0].lastUpdated).toBeNull();
   });
 });

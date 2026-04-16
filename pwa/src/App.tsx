@@ -100,14 +100,13 @@ export default function App() {
     if (res.error) {
       if (res.error.code === "FAMILY_FULL") {
         setFamilyFullError("家庭成員已達上限（每個家庭最多 2 位成員）");
-      } else if (res.error.code === "VERIFICATION_REQUIRED" && current.familyId && current.encryptionKey) {
+      } else if (res.error.code === "VERIFICATION_REQUIRED" && current.familyId) {
         // Preserve sync code so LandingPage can pre-fill and show verification UI.
         // Respect the user's "remember sync code" preference.
         if (localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0") {
           try {
             const code = encodeSyncCode({
               familyId: current.familyId,
-              encryptionKey: current.encryptionKey,
               apiHost: current.apiHost,
             });
             localStorage.setItem(REMEMBERED_LOGOUT_KEY, code);
@@ -172,7 +171,6 @@ export default function App() {
       familyId={auth.familyId}
       userId={auth.userId}
       apiClient={apiClient}
-      encryptionKey={auth.encryptionKey}
     >
       {!verifySetupDone && (
         <VerifySetupPrompt
@@ -231,17 +229,16 @@ function MainContent({
       <InstallPrompt userId={auth.userId} />
       <main className="flex-1 overflow-y-auto pb-16">
         {currentPage === "family-shelf" && (
-          <FamilyShelfPage userId={auth.userId} onRelogin={forceLogout} />
+          <FamilyShelfPage userId={auth.userId} />
         )}
         {currentPage === "personal-shelf" && (
-          <PersonalShelfPage userId={auth.userId} apiClient={apiClient} encryptionKey={auth.encryptionKey} />
+          <PersonalShelfPage userId={auth.userId} apiClient={apiClient} />
         )}
         {currentPage === "settings" && (
           <SettingsPage
             familyId={auth.familyId}
             userId={auth.userId}
             apiClient={apiClient}
-            encryptionKey={auth.encryptionKey}
             onLogout={logout}
             onForceLogout={forceLogout}
           />

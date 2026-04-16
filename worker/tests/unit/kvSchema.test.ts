@@ -21,7 +21,6 @@ describe("normalizeFamilyRecord", () => {
       familyId: "abcd-1234",
       members: [],
       createdAt: "2025-01-01T00:00:00.000Z",
-      keyFingerprint: "a".repeat(64),
     };
     expect(() => normalizeFamilyRecord(corrupted)).toThrow(
       "Corrupted family record: members array is empty",
@@ -34,7 +33,6 @@ describe("normalizeFamilyRecord", () => {
       familyId: "abcd-1234",
       members: ["alice"] as unknown as { userId: string; displayName: string }[],
       createdAt: "2025-01-01T00:00:00.000Z",
-      keyFingerprint: "a".repeat(64),
     };
     const result = normalizeFamilyRecord(legacy);
     // When ownerId is missing and first member is a string, ownerId falls back to that string

@@ -15,12 +15,6 @@ vi.mock("@/dialog/useBookSync", () => ({
   useBookSync: (...args: unknown[]) => mockUseBookSync(...args),
 }));
 
-vi.mock("@/crypto/encrypt", () => ({
-  importKey: vi.fn().mockResolvedValue("mock-key"),
-  encrypt: vi.fn().mockResolvedValue("encrypted-payload"),
-  decrypt: vi.fn().mockResolvedValue(JSON.stringify({ books: [] })),
-}));
-
 vi.mock("@/content/scraper", () => ({
   scrapeBooks: vi.fn().mockResolvedValue([
     {
@@ -90,7 +84,7 @@ describe("PersonalShelf", () => {
     });
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-        const result = { encryptionKey: "fake-enc-key-abc", displayName: "小明" };
+        const result = { displayName: "小明" };
         if (typeof callback === "function") {
           callback(result);
         }
@@ -505,28 +499,23 @@ describe("PersonalShelf", () => {
     });
   });
 
-  describe("decryption path", () => {
-    it("loads and merges encrypted saved books from API", async () => {
-      const { decrypt } = await import("@/crypto/encrypt");
-      vi.mocked(decrypt).mockResolvedValue(
-        JSON.stringify({
-          books: [
-            {
-              bookId: "book-1",
-              title: "測試書籍一",
-              author: "作者A",
-              coverUrl: "https://example.com/cover1.jpg",
-              readmooUrl: "https://readmoo.com/book/book-1",
-              isShared: BoolFlag.TRUE,
-              isbn: "",
-            },
-          ],
-        }),
-      );
-
+  describe("saved books from API", () => {
+    it("loads and merges saved books from API", async () => {
       const apiClient = createMockApiClient({
         getPersonalBooks: vi.fn().mockResolvedValue({
-          data: { payload: "encrypted-data" },
+          data: {
+            books: [
+              {
+                bookId: "book-1",
+                title: "測試書籍一",
+                author: "作者A",
+                coverUrl: "https://example.com/cover1.jpg",
+                readmooUrl: "https://readmoo.com/book/book-1",
+                isShared: BoolFlag.TRUE,
+                isbn: "",
+              },
+            ],
+          },
         }),
       });
 
@@ -537,29 +526,8 @@ describe("PersonalShelf", () => {
       });
 
       // The book should have preserved its isShared=1 from saved data
-      // Check by looking for "開放" badge (at least one)
       const openBadges = screen.queryAllByText("開放");
       expect(openBadges.length).toBeGreaterThanOrEqual(1);
-    });
-
-    it("handles decryption failure gracefully", async () => {
-      const { decrypt } = await import("@/crypto/encrypt");
-      vi.mocked(decrypt).mockRejectedValueOnce(new Error("Bad key"));
-
-      const apiClient = createMockApiClient({
-        getPersonalBooks: vi.fn().mockResolvedValue({
-          data: { payload: "corrupted-data" },
-        }),
-      });
-
-      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
-
-      // R1 invariant: decrypt failure aborts to prevent overwriting server
-      // data with a differently-encrypted payload. Shows error instead of books.
-      await waitFor(() => {
-        expect(screen.getByText("偵測到加密金鑰不符，無法載入書籍設定。請確認同步代碼是否正確。")).toBeInTheDocument();
-      });
-      expect(screen.queryByText("測試書籍一")).not.toBeInTheDocument();
     });
   });
 
@@ -609,31 +577,6 @@ describe("PersonalShelf", () => {
       });
     });
 
-    it("shows error when encryption key is missing during save", async () => {
-      vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          // Return no encryptionKey
-          const result = { displayName: "小明" };
-          if (typeof callback === "function") {
-            callback(result);
-          }
-          return Promise.resolve(result) as unknown as void;
-        },
-      );
-
-      renderPersonalShelf();
-      await waitForBooksLoaded();
-
-      const checkboxes = screen.getAllByRole("checkbox");
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
-
-      fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("找不到加密金鑰")).toBeInTheDocument();
-      });
-    });
   });
 
   describe("sync button", () => {
@@ -866,26 +809,21 @@ describe("PersonalShelf", () => {
 
   describe("personalBooksCache", () => {
     it("caches books to chrome.storage.local after successful load", async () => {
-      const { decrypt } = await import("@/crypto/encrypt");
-      vi.mocked(decrypt).mockResolvedValue(
-        JSON.stringify({
-          books: [
-            {
-              bookId: "book-1",
-              title: "測試書籍一",
-              author: "作者A",
-              coverUrl: "https://example.com/cover1.jpg",
-              readmooUrl: "https://readmoo.com/book/book-1",
-              isShared: BoolFlag.TRUE,
-              isbn: "",
-            },
-          ],
-        }),
-      );
-
       const apiClient = createMockApiClient({
         getPersonalBooks: vi.fn().mockResolvedValue({
-          data: { payload: "encrypted-data" },
+          data: {
+            books: [
+              {
+                bookId: "book-1",
+                title: "測試書籍一",
+                author: "作者A",
+                coverUrl: "https://example.com/cover1.jpg",
+                readmooUrl: "https://readmoo.com/book/book-1",
+                isShared: BoolFlag.TRUE,
+                isbn: "",
+              },
+            ],
+          },
         }),
       });
 
@@ -1005,26 +943,21 @@ describe("PersonalShelf", () => {
 
   describe("lastSyncBooks merge preserves isShared", () => {
     it("preserves existing isShared state when lastSyncBooks arrives", async () => {
-      const { decrypt } = await import("@/crypto/encrypt");
-      vi.mocked(decrypt).mockResolvedValue(
-        JSON.stringify({
-          books: [
-            {
-              bookId: "book-1",
-              title: "測試書籍一",
-              author: "作者A",
-              coverUrl: "https://example.com/cover1.jpg",
-              readmooUrl: "https://readmoo.com/book/book-1",
-              isShared: BoolFlag.TRUE,
-              isbn: "",
-            },
-          ],
-        }),
-      );
-
       const apiClient = createMockApiClient({
         getPersonalBooks: vi.fn().mockResolvedValue({
-          data: { payload: "encrypted-data" },
+          data: {
+            books: [
+              {
+                bookId: "book-1",
+                title: "測試書籍一",
+                author: "作者A",
+                coverUrl: "https://example.com/cover1.jpg",
+                readmooUrl: "https://readmoo.com/book/book-1",
+                isShared: BoolFlag.TRUE,
+                isbn: "",
+              },
+            ],
+          },
         }),
       });
 

@@ -5,7 +5,6 @@ import { PAGE_HASHES } from "@/routes";
 export interface AuthState {
   userId: string;
   familyId: string;
-  encryptionKey: string;
   apiHost?: string;
   authToken?: string;
 }
@@ -37,20 +36,9 @@ export function namespacedKey(userId: string, suffix: string): string {
   return `moo:${userId}:${suffix}`;
 }
 
-/**
- * ACCEPTED RISK: encryptionKey is stored in localStorage as plaintext.
- * PWA has no access to chrome.storage, and sessionStorage would lose state
- * on tab close (unacceptable UX for mobile). Any same-origin script can read
- * localStorage, so an XSS vulnerability could expose the key.
- * Mitigations: strict CSP, no inline scripts, no third-party dependencies at runtime.
- */
 function saveToStorage(data: AuthState): void {
   localStorage.setItem(USER_ID_KEY, data.userId);
   localStorage.setItem(namespacedKey(data.userId, "familyId"), data.familyId);
-  // This encryption key is derived from the sync code issued by the Extension.
-  // PWA cannot self-recover or regenerate this key — if the Extension rotates
-  // its key, the PWA must re-login with the new sync code.
-  localStorage.setItem(namespacedKey(data.userId, "encryptionKey"), data.encryptionKey);
   if (data.apiHost) {
     localStorage.setItem(namespacedKey(data.userId, "apiHost"), data.apiHost);
   } else {
@@ -68,18 +56,16 @@ function loadFromStorage(): AuthState | null {
   if (!userId) return null;
 
   const familyId = localStorage.getItem(namespacedKey(userId, "familyId"));
-  const encryptionKey = localStorage.getItem(namespacedKey(userId, "encryptionKey"));
   const apiHost = localStorage.getItem(namespacedKey(userId, "apiHost"));
   const authToken = localStorage.getItem(namespacedKey(userId, "authToken"));
 
-  if (!familyId || !encryptionKey) {
+  if (!familyId) {
     return null;
   }
 
   return {
     userId,
     familyId,
-    encryptionKey,
     ...(apiHost ? { apiHost } : {}),
     ...(authToken ? { authToken } : {}),
   };
@@ -94,11 +80,10 @@ function buildRememberedSyncCode(): string {
   if (!userId) return "";
 
   const familyId = localStorage.getItem(namespacedKey(userId, "familyId"));
-  const encryptionKey = localStorage.getItem(namespacedKey(userId, "encryptionKey"));
   const apiHost = localStorage.getItem(namespacedKey(userId, "apiHost"));
-  if (!familyId || !encryptionKey) return "";
+  if (!familyId) return "";
 
-  return encodeSyncCode({ familyId, encryptionKey, apiHost: apiHost || undefined });
+  return encodeSyncCode({ familyId, apiHost: apiHost || undefined });
 }
 
 /** Remove all namespaced auth keys for the current user. */
@@ -106,7 +91,6 @@ function removeUserKeys(): void {
   const userId = localStorage.getItem(USER_ID_KEY);
   if (userId) {
     localStorage.removeItem(namespacedKey(userId, "familyId"));
-    localStorage.removeItem(namespacedKey(userId, "encryptionKey"));
     localStorage.removeItem(namespacedKey(userId, "apiHost"));
     localStorage.removeItem(namespacedKey(userId, "authToken"));
     localStorage.removeItem(namespacedKey(userId, "syncArchived"));
@@ -149,7 +133,7 @@ interface QrParams {
 
 function tryParseQrParams(): QrParams | null {
   // Read from URL fragment (#) — fragments are never sent to the server,
-  // keeping the encryption key out of access logs and referrer headers.
+  // keeping the sync code out of access logs and referrer headers.
   const hash = window.location.hash.slice(1); // remove leading #
   const params = new URLSearchParams(hash);
   const code = params.get("code");
@@ -212,7 +196,7 @@ export function useAuth(): UseAuthReturn {
     // 2. Parse #invite={syncCode} invite link (separate from QR flow)
     const inviteSyncCode = tryParseInviteParam();
 
-    // Always clear URL params to avoid leaving encryption key in address bar
+    // Always clear URL params to avoid leaving sync code in address bar
     clearUrlParams();
 
     if (qrParams) {

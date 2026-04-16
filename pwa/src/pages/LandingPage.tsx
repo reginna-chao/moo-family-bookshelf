@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
-import { deriveUserId } from "@/crypto/encrypt";
+import { deriveUserId } from "@/crypto/hash";
 import { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
@@ -24,7 +24,6 @@ interface LandingPageProps {
 interface PendingAuth {
   userId: string;
   familyId: string;
-  encryptionKey: string;
   apiHost?: string;
   verifyMethod: VerifyMethod;
 }
@@ -131,7 +130,6 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
         setPendingAuth({
           userId,
           familyId: decoded.familyId,
-          encryptionKey: decoded.encryptionKey,
           apiHost: decoded.apiHost,
           verifyMethod: method,
         });
@@ -140,7 +138,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
       }
 
       // No verification needed — join directly
-      await completeJoin(decoded.familyId, userId, decoded.encryptionKey, decoded.apiHost);
+      await completeJoin(decoded.familyId, userId, decoded.apiHost);
     } catch {
       setGeneralError("處理失敗，請重試。");
       setIsSubmitting(false);
@@ -150,7 +148,6 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
   async function completeJoin(
     familyId: string,
     userId: string,
-    encryptionKey: string,
     apiHost?: string,
     verifySecret?: string,
   ) {
@@ -180,7 +177,6 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
       onAuth({
         userId,
         familyId,
-        encryptionKey,
         apiHost,
         authToken: joinRes.data?.authToken,
       });
@@ -196,7 +192,6 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
     void completeJoin(
       pendingAuth.familyId,
       pendingAuth.userId,
-      pendingAuth.encryptionKey,
       pendingAuth.apiHost,
       secret,
     );
@@ -233,7 +228,6 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
         setPendingAuth({
           userId: qrUserId,
           familyId: decoded.familyId,
-          encryptionKey: decoded.encryptionKey,
           apiHost: decoded.apiHost,
           verifyMethod: method,
         });
@@ -242,7 +236,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
       }
 
       // No verification needed — join directly
-      void completeJoin(decoded.familyId, qrUserId, decoded.encryptionKey, decoded.apiHost);
+      void completeJoin(decoded.familyId, qrUserId, decoded.apiHost);
     }).catch(() => {
       setGeneralError("處理失敗，請重試。");
       setIsSubmitting(false);

@@ -1,11 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
-import { importKey, encrypt, decrypt } from "../crypto/encrypt";
+import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 import { scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "../constants";
-import { mergeBooks, asDecryptedBooks } from "./mergeBooks";
-import type { DecryptedBooks } from "./mergeBooks";
-import { DecryptMismatchError } from "../errors";
+import { mergeBooks } from "./mergeBooks";
 
 export type PersonalBooksStatus = "scraping" | "ready" | "saving" | "saved" | "error";
 
@@ -16,32 +13,24 @@ export interface UsePersonalBooksParams {
 }
 
 interface LoadSavedResult {
-  books: DecryptedBooks;
-  /** Full decrypted payload — preserved so save can merge back unknown fields */
+  books: BookEntry[];
+  /** Full payload — preserved so save can merge back unknown fields */
   raw: Record<string, unknown> | null;
 }
 
-async function loadSavedBooks(
+function loadSavedBooks(
   data: Record<string, unknown>,
-  encKeyString: string,
-): Promise<LoadSavedResult> {
-  if (typeof data.payload === "string") {
-    const key = await importKey(encKeyString);
-    const decrypted = await decrypt(data.payload, key);
-    const parsed = JSON.parse(decrypted) as Record<string, unknown>;
-    const books = Array.isArray(parsed.books) ? (parsed.books as BookEntry[]) : [];
-    return { books: asDecryptedBooks(books), raw: parsed };
-  }
+): LoadSavedResult {
   if (Array.isArray(data.books)) {
-    return { books: asDecryptedBooks(data.books as BookEntry[]), raw: null };
+    return { books: data.books as BookEntry[], raw: data };
   }
-  return { books: asDecryptedBooks([]), raw: null };
+  return { books: [], raw: null };
 }
 
 export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePersonalBooksParams) {
   const [books, setBooks] = useState<BookEntry[]>([]);
   const originalBooks = useRef<BookEntry[]>([]);
-  /** Raw decrypted payload — kept so save can spread back unknown fields from future versions */
+  /** Raw payload — kept so save can spread back unknown fields from future versions */
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
   const [status, setStatus] = useState<PersonalBooksStatus>("scraping");
   const [errorMessage, setErrorMessage] = useState("");
@@ -53,9 +42,6 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
 
     async function load() {
       try {
-        const storageResult = await chrome.storage.local.get(["encryptionKey"]);
-        const encKeyString = storageResult.encryptionKey as string | undefined;
-
         const scrapedBooks = await scrapeBooks();
 
         const archiveResult = await chrome.storage.local.get(["syncArchived"]);
@@ -70,20 +56,13 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
 
         if (cancelled) return;
 
-        let savedBooks: DecryptedBooks = asDecryptedBooks([]);
-        if (apiResponse.data && encKeyString) {
-          try {
-            const result = await loadSavedBooks(
-              apiResponse.data as unknown as Record<string, unknown>,
-              encKeyString,
-            );
-            savedBooks = result.books;
-            savedRawPayload.current = result.raw;
-          } catch {
-            // Server has data we cannot decrypt — abort to prevent overwriting
-            // valid ciphertext with data encrypted under a different key.
-            throw new DecryptMismatchError();
-          }
+        let savedBooks: BookEntry[] = [];
+        if (apiResponse.data) {
+          const result = loadSavedBooks(
+            apiResponse.data as unknown as Record<string, unknown>,
+          );
+          savedBooks = result.books;
+          savedRawPayload.current = result.raw;
         }
         if (cancelled) return;
 
@@ -95,11 +74,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
       } catch (err) {
         console.error("[PersonalShelf] Error:", err);
         if (cancelled) return;
-        if (err instanceof DecryptMismatchError) {
-          setErrorMessage("偵測到加密金鑰不符，無法載入書籍設定。請確認同步代碼是否正確。");
-        } else {
-          setErrorMessage(err instanceof Error ? err.message : "載入失敗");
-        }
+        setErrorMessage(err instanceof Error ? err.message : "載入失敗");
         setStatus("error");
       }
     }
@@ -121,7 +96,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
           category: b.category,
           isArchived: b.isArchived ?? BoolFlag.FALSE,
         })),
-        asDecryptedBooks(prev),
+        prev,
       ));
     }
   }, [lastSyncBooks, status]);
@@ -137,22 +112,18 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
     setStatus("saving");
     setErrorMessage("");
     try {
-      const storageResult = await chrome.storage.local.get(["encryptionKey", "displayName"]);
-      const encKeyString = storageResult.encryptionKey as string | undefined;
-      if (!encKeyString) throw new Error("找不到加密金鑰");
+      const storageResult = await chrome.storage.local.get(["displayName"]);
       const storedDisplayName = (storageResult.displayName as string | undefined) ?? "";
 
-      const key = await importKey(encKeyString);
-      const payload = JSON.stringify({
+      const personalBooks: PersonalBooks = {
         ...savedRawPayload.current,
         schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
         userId,
         displayName: storedDisplayName,
         books,
         lastUpdated: new Date().toISOString(),
-      });
-      const encrypted = await encrypt(payload, key);
-      const response = await apiClient.updatePersonalBooks(userId, encrypted);
+      };
+      const response = await apiClient.updatePersonalBooks(userId, personalBooks);
       if (response.error) {
         setErrorMessage(response.error.message);
         setStatus("error");

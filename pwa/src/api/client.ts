@@ -46,7 +46,6 @@ export interface BookEntry {
   isArchived?: BoolFlag;
 }
 
-/** Decrypted view (used by UI after decryption) */
 export interface PersonalBooks {
   schemaVersion: number;
   userId: string;
@@ -57,13 +56,8 @@ export interface PersonalBooks {
   [key: string]: unknown;
 }
 
-/** Current schema version for PersonalBooks encrypted payload */
+/** Current schema version for PersonalBooks */
 export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
-
-/** Raw server response — encrypted payload */
-export interface RawPersonalBooks {
-  payload: string | null;
-}
 
 export interface FamilyMember {
   userId: string;
@@ -88,21 +82,12 @@ export interface VersionInfo {
   serverVersion: string;
 }
 
-/** Decrypted view (used by UI after decryption) */
 export interface FamilyBookshelf {
+  familyId: string;
   members: Array<{
     userId: string;
     displayName: string;
     books: BookEntry[];
-  }>;
-}
-
-/** Raw server response — members have encrypted payloads */
-export interface RawFamilyBookshelf {
-  familyId: string;
-  members: Array<{
-    userId: string;
-    payload: string | null;
     lastUpdated: string | null;
   }>;
 }
@@ -197,17 +182,17 @@ export class ApiClient {
 
   async getPersonalBooks(
     userId: string,
-  ): Promise<ApiResponse<RawPersonalBooks>> {
+  ): Promise<ApiResponse<PersonalBooks>> {
     this.validateHexId(userId, "userId");
     return this.get(`/api/user/${userId}/books`);
   }
 
   async updatePersonalBooks(
     userId: string,
-    payload: string, // encrypted
+    data: PersonalBooks,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
-    return this.put(`/api/user/${userId}/books`, { payload });
+    return this.put(`/api/user/${userId}/books`, data);
   }
 
   // --- Family Group ---
@@ -215,34 +200,25 @@ export class ApiClient {
   /**
    * Create a new family.
    * NOTE: PWA MUST NOT call this — PWA can only join families (Phase 1 Q2).
-   * Family creation requires a keyFingerprint, which only the Extension computes.
    */
   async createFamily(
     userId: string,
     displayName?: string,
-    keyFingerprint?: string,
   ): Promise<ApiResponse<FamilyGroup>> {
     this.validateHexId(userId, "userId");
     const body: Record<string, string> = { userId, displayName: displayName ?? "" };
-    if (keyFingerprint !== undefined) {
-      body.keyFingerprint = keyFingerprint;
-    }
     return this.post("/api/family", body);
   }
 
   async joinFamily(
     familyId: string,
     userId: string,
-    opts?: { verifySecret?: string; keyFingerprint?: string },
+    opts?: { verifySecret?: string },
   ): Promise<ApiResponse<{ ok: boolean; authToken?: string; expiresAt?: number }>> {
     this.validateHexId(userId, "userId");
     const body: Record<string, string> = { userId };
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
-    }
-    // PWA does not pass keyFingerprint in production (preserves verify gate — Phase 1 Q2)
-    if (opts?.keyFingerprint !== undefined) {
-      body.keyFingerprint = opts.keyFingerprint;
     }
     return this.post(`/api/family/${familyId}/join`, body);
   }
@@ -301,7 +277,7 @@ export class ApiClient {
 
   async getFamilyBookshelf(
     familyId: string,
-  ): Promise<ApiResponse<RawFamilyBookshelf>> {
+  ): Promise<ApiResponse<FamilyBookshelf>> {
     return this.get(`/api/family/${familyId}/bookshelf`);
   }
 

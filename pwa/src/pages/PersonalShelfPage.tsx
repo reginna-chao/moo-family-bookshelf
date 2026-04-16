@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { BookOpen } from "lucide-react";
 import { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
-import type { ApiClient, BookEntry } from "@/api/client";
-import { importKey, encrypt, decrypt } from "@/crypto/encrypt";
+import type { ApiClient, BookEntry, PersonalBooks } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
 import { FloatingActionBar } from "@/components/FloatingActionBar";
 import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
@@ -11,7 +10,6 @@ import { namespacedKey } from "@/hooks/useAuth";
 interface PersonalShelfPageProps {
   userId: string;
   apiClient: ApiClient;
-  encryptionKey: string;
 }
 
 type LoadState = "loading" | "ready" | "saving" | "saved" | "error";
@@ -20,7 +18,6 @@ type StatusFilter = "all" | "shared" | "not-shared";
 export function PersonalShelfPage({
   userId,
   apiClient,
-  encryptionKey,
 }: PersonalShelfPageProps) {
   const [books, setBooks] = useState<BookEntry[]>([]);
   const [displayName, setDisplayName] = useState("");
@@ -32,7 +29,7 @@ export function PersonalShelfPage({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const originalBooksRef = useRef<BookEntry[]>([]);
-  /** Raw decrypted payload — kept so save can spread back unknown fields from future versions */
+  /** Raw server response — kept so save can spread back unknown fields from future versions */
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
 
   const loadBooks = useCallback(async () => {
@@ -46,26 +43,16 @@ export function PersonalShelfPage({
         return;
       }
 
-      if (!response.data?.payload) {
+      if (!response.data) {
         setBooks([]);
         setState("ready");
         return;
       }
 
-      const key = await importKey(encryptionKey);
-      const decrypted = await decrypt(response.data.payload, key);
-      const parsed: unknown = JSON.parse(decrypted);
-
-      if (typeof parsed !== "object" || parsed === null) {
-        setBooks([]);
-        setState("ready");
-        return;
-      }
-
-      const obj = parsed as Record<string, unknown>;
-      savedRawPayload.current = obj;
-      setDisplayName(typeof obj.displayName === "string" ? obj.displayName : "");
-      const rawBooks = Array.isArray(obj.books) ? (obj.books as BookEntry[]) : [];
+      const data = response.data;
+      savedRawPayload.current = data as Record<string, unknown>;
+      setDisplayName(data.displayName ?? "");
+      const rawBooks = Array.isArray(data.books) ? data.books : [];
       // Normalize: Extension may store boolean for isShared/isArchived, PWA uses BoolFlag
       const normalized = rawBooks.map((b) => ({
         ...b,
@@ -81,7 +68,7 @@ export function PersonalShelfPage({
       setErrorMessage(err instanceof Error ? err.message : "載入失敗");
       setState("error");
     }
-  }, [userId, apiClient, encryptionKey]);
+  }, [userId, apiClient]);
 
   useEffect(() => {
     void loadBooks();
@@ -90,17 +77,15 @@ export function PersonalShelfPage({
   const handleSave = useCallback(async () => {
     setState("saving");
     try {
-      const key = await importKey(encryptionKey);
-      const payload = JSON.stringify({
+      const personalBooks: PersonalBooks = {
         ...savedRawPayload.current,
         schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
         userId,
         displayName,
         books,
         lastUpdated: new Date().toISOString(),
-      });
-      const encrypted = await encrypt(payload, key);
-      const response = await apiClient.updatePersonalBooks(userId, encrypted);
+      };
+      const response = await apiClient.updatePersonalBooks(userId, personalBooks);
       if (response.error) {
         setErrorMessage(response.error.message);
         setState("error");
@@ -116,7 +101,7 @@ export function PersonalShelfPage({
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setState("error");
     }
-  }, [encryptionKey, userId, displayName, books, apiClient]);
+  }, [userId, displayName, books, apiClient]);
 
   const handleCancelChanges = useCallback(() => {
     setBooks(originalBooksRef.current);

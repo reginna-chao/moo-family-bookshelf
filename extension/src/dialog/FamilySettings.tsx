@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
@@ -33,8 +33,6 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   } = useFamilyData();
 
   const [syncCode, setSyncCode] = useState<string | null>(null);
-  const [encryptionKey, setEncryptionKey] = useState<string | null>(null);
-  const [showSyncCode, setShowSyncCode] = useState(false);
   const [personalOpen, setPersonalOpen] = useState(true);
   const [familyOpen, setFamilyOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(true);
@@ -80,20 +78,15 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   }, [syncArchived]);
 
   useEffect(() => {
-    chrome.storage.local.get(["encryptionKey"], (result) => {
-      const ek = result.encryptionKey as string | undefined;
-      if (!ek) return;
-      setEncryptionKey(ek);
-      let apiHost: string | undefined;
-      if (familyEndpoint) {
-        apiHost = familyEndpoint;
-      } else {
-        const isCustom = apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
-        apiHost = isCustom ? apiClient.getEndpoint() : undefined;
-      }
-      const code = encodeSyncCode({ familyId, encryptionKey: ek, apiHost });
-      setSyncCode(code);
-    });
+    let apiHost: string | undefined;
+    if (familyEndpoint) {
+      apiHost = familyEndpoint;
+    } else {
+      const isCustom = apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
+      apiHost = isCustom ? apiClient.getEndpoint() : undefined;
+    }
+    const code = encodeSyncCode({ familyId, apiHost });
+    setSyncCode(code);
   }, [familyId, apiClient, familyEndpoint]);
 
   // Sync API endpoint from family record (when members data refreshes)
@@ -256,19 +249,8 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
               display: "flex", alignItems: "center", gap: 8,
             }}>
               <span data-testid="sync-code" style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
-                {encryptionKey
-                  ? `moo-${familyId}-${showSyncCode ? encryptionKey : "••••••••••••"}${syncCode && syncCode.includes("@") ? `@${syncCode.split("@")[1]}` : ""}`
-                  : "載入中..."}
+                {syncCode ?? "載入中..."}
               </span>
-              {encryptionKey && (
-                <button
-                  onClick={() => setShowSyncCode(!showSyncCode)}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
-                  aria-label={showSyncCode ? "隱藏同步碼" : "顯示同步碼"}
-                >
-                  {showSyncCode ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              )}
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
               <button

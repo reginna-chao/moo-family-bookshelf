@@ -19,7 +19,7 @@
 ### 為什麼之前 Gemini 上線準備報告 (`docs/launch-readiness-report.md`) 提到這一點不算緊急
 
 - 目前沒有實際用戶流量，「失去的資料」主要是測試資料
-- `user:*` 是 E2EE 密文，即使 KV 被外洩也不會 PII 外流，降低了備份的迫切性
+- `user:*` 不含 PII（僅書單與分享設定），降低了備份的迫切性
 - 其他 key（auth/otp/ratelimit）本身就有 TTL，備份也沒意義
 
 → 因此本計畫是「上線後盡快做」而非「上線前必做」。
@@ -40,7 +40,7 @@
 | 手動觸發 | 加一個 `POST /api/admin/backup` 端點，需 `BACKUP_TRIGGER_TOKEN` | 上線 / migration 前可一鍵 snapshot |
 | 失敗告警 | **v1 不做**，依賴 Cloudflare Dashboard Cron Trigger 紀錄 | YAGNI，真有需要再加 webhook |
 | 備份 metadata | **不備份**（worker 全部 source 沒用到 KV metadata，已 grep 驗證） | 無意義 |
-| 備份內容額外加密 | **不加**（R2 預設 private + 多數資料本來就是密文 / 雜湊 / UUID） | 降低實作複雜度 |
+| 備份內容額外加密 | **不加**（R2 預設 private + 資料為明文 JSON / 雜湊 / UUID，不含 PII） | 降低實作複雜度 |
 | 單一 region | **OK**（不做 multi-region 備份） | 初期不需要 |
 
 ---
@@ -51,7 +51,7 @@
 
 | Key Pattern | 內容型態 | 備份理由 |
 |---|---|---|
-| `user:{userId}` | E2EE 密文（JSON payload） | 核心資料：書櫃與分享設定 |
+| `user:{userId}` | 明文 JSON（書櫃與分享設定） | 核心資料：書櫃與分享設定 |
 | `family:{familyId}` | 明文 JSON | 家庭群組（成員 UUID 列表，非 PII） |
 | `member:{userId}` | 明文字串（familyId） | 反向查找，restore 必需 |
 | `verify:{userId}` | 明文 JSON（雜湊 + salt） | PWA 登入驗證設定；雜湊過的非 PII |

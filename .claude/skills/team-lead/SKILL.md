@@ -66,11 +66,11 @@ If the user explicitly says something like "skip review", "just write the code",
 3. Break the requirement into:
    - **Frontend tasks** (Extension UI, Content Script, crypto, etc.)
    - **Backend tasks** (Worker API, KV schema, middleware, etc.)
-   - **Shared concerns** (sync code format, E2EE contract, API interface)
+   - **Shared concerns** (sync code format, API interface)
 4. **Proactively identify gaps and risks:**
    - List all **assumptions** you are making about the requirement.
    - Point out **missing or ambiguous** aspects of the spec (edge cases, error states, UX flows, concurrency, data migration).
-   - Flag **security concerns** (auth, E2EE, input validation, data exposure).
+   - Flag **security concerns** (auth, input validation, data exposure).
    - Flag **performance concerns** (KV read/write patterns, payload sizes).
    - Raise **open questions** that need the user's decision.
 5. Present the full analysis. **Wait for user confirmation before proceeding.**

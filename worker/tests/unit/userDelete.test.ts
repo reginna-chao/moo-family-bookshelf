@@ -19,7 +19,7 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
 }
 
 async function createFamilyAndGetToken(userId = "user1") {
-  const res = await request("POST", "/api/family", { userId, keyFingerprint: "a".repeat(64) });
+  const res = await request("POST", "/api/family", { userId });
   const json = (await res.json()) as Json;
   return {
     familyId: json.data.familyId as string,
@@ -28,7 +28,7 @@ async function createFamilyAndGetToken(userId = "user1") {
 }
 
 async function joinFamily(familyId: string, userId: string) {
-  const res = await request("POST", `/api/family/${familyId}/join`, { userId, keyFingerprint: "a".repeat(64) });
+  const res = await request("POST", `/api/family/${familyId}/join`, { userId });
   const json = (await res.json()) as Json;
   return { authToken: json.data.authToken as string };
 }
@@ -59,7 +59,7 @@ describe("DELETE /api/user/:id", () => {
     await request("DELETE", `/api/family/${familyId}/member/user2`, undefined, user2Token);
 
     // Save some books for user2
-    await request("PUT", "/api/user/user2/books", { payload: "encrypted-data" }, user2Token);
+    await request("PUT", "/api/user/user2/books", { schemaVersion: 1, userId: "user2", displayName: "User2", books: [] }, user2Token);
 
     // Now user2 has no family but has books and auth token
     // Re-generate token since leaving family deletes it
@@ -71,7 +71,7 @@ describe("DELETE /api/user/:id", () => {
     const { authToken: freshToken } = await createFamilyAndGetToken("user2");
 
     // Save books
-    await request("PUT", "/api/user/user2/books", { payload: "encrypted-data" }, freshToken);
+    await request("PUT", "/api/user/user2/books", { schemaVersion: 1, userId: "user2", displayName: "User2", books: [] }, freshToken);
 
     // Transfer ownership is not possible with single member. Let's just test with a user
     // who was never in a family — but they need an auth token.
@@ -87,7 +87,7 @@ describe("DELETE /api/user/:id", () => {
     const tokenHex = "a".repeat(64);
     await kv.put(kvKeys.auth("solo-user"), JSON.stringify({ token: tokenHex, createdAt: new Date().toISOString() }));
     await kv.put(kvKeys.authToken(tokenHex), "solo-user");
-    await kv.put(kvKeys.user("solo-user"), JSON.stringify({ payload: "my-books", lastUpdated: new Date().toISOString() }));
+    await kv.put(kvKeys.user("solo-user"), JSON.stringify({ schemaVersion: 1, userId: "solo-user", displayName: "Solo", books: [], lastUpdated: new Date().toISOString() }));
 
     const res = await request("DELETE", "/api/user/solo-user", undefined, tokenHex);
     expect(res.status).toBe(200);
@@ -105,7 +105,7 @@ describe("DELETE /api/user/:id", () => {
     const { authToken: user2Token } = await joinFamily(familyId, "user2");
 
     // Save user2 books
-    await request("PUT", "/api/user/user2/books", { payload: "user2-books" }, user2Token);
+    await request("PUT", "/api/user/user2/books", { schemaVersion: 1, userId: "user2", displayName: "User2", books: [] }, user2Token);
 
     // Delete user2 account
     const res = await request("DELETE", "/api/user/user2", undefined, user2Token);
@@ -161,7 +161,7 @@ describe("DELETE /api/user/:id", () => {
     const { familyId, authToken } = await createFamilyAndGetToken("owner1");
 
     // Save books for owner1
-    await request("PUT", "/api/user/owner1/books", { payload: "owner-books" }, authToken);
+    await request("PUT", "/api/user/owner1/books", { schemaVersion: 1, userId: "owner1", displayName: "Owner", books: [] }, authToken);
 
     // Verify family exists
     expect(await kv.get(kvKeys.family(familyId))).not.toBeNull();
@@ -192,7 +192,7 @@ describe("DELETE /api/user/:id", () => {
     const { authToken: user2Token } = await joinFamily(familyId, "user2");
 
     // Save user2 books
-    await request("PUT", "/api/user/user2/books", { payload: "encrypted" }, user2Token);
+    await request("PUT", "/api/user/user2/books", { schemaVersion: 1, userId: "user2", displayName: "User2", books: [] }, user2Token);
 
     // Verify keys exist before deletion
     expect(await kv.get(kvKeys.user("user2"))).not.toBeNull();

@@ -2,20 +2,19 @@
  * Sync code encode/decode.
  *
  * Format:
- *   moo-{familyId}-{encryptionKey}          (default API)
- *   moo-{familyId}-{encryptionKey}@{host}   (custom API endpoint)
+ *   moo-{familyId}          (default API)
+ *   moo-{familyId}@{host}   (custom API endpoint)
  */
 
 export interface SyncCodeData {
   familyId: string;
-  encryptionKey: string;
   apiHost?: string;
 }
 
 const SYNC_CODE_PREFIX = "moo";
 
 export function encodeSyncCode(data: SyncCodeData): string {
-  const base = `${SYNC_CODE_PREFIX}-${data.familyId}-${data.encryptionKey}`;
+  const base = `${SYNC_CODE_PREFIX}-${data.familyId}`;
   if (data.apiHost) {
     return `${base}@${data.apiHost}`;
   }
@@ -40,19 +39,19 @@ export function decodeSyncCode(code: string): SyncCodeData {
     main = trimmed;
   }
 
-  // Format: moo-{xxxx}-{xxxx}-{encryptionKey}
+  // Format: moo-{xxxx}-{xxxx}
   // familyId contains a dash (xxxx-xxxx), so we parse positionally:
-  // prefix = parts[0], familyId = parts[1]-parts[2], key = parts[3..]
+  // prefix = parts[0], familyId = parts[1]-parts[2]
+  // Backward compat: old format had parts[3..] as encryptionKey — ignored
   const parts = main.split("-");
-  if (parts.length < 4) {
+  if (parts.length < 3) {
     throw new SyncCodeError(
-      "Invalid sync code format: expected moo-{familyId}-{key}",
+      "Invalid sync code format: expected moo-{familyId}",
     );
   }
 
   const prefix = parts[0];
   const familyId = `${parts[1]}-${parts[2]}`;
-  const encryptionKey = parts.slice(3).join("-");
 
   if (prefix !== SYNC_CODE_PREFIX) {
     throw new SyncCodeError("Invalid sync code format");
@@ -62,11 +61,7 @@ export function decodeSyncCode(code: string): SyncCodeData {
     throw new SyncCodeError("Family ID is empty");
   }
 
-  if (!encryptionKey) {
-    throw new SyncCodeError("Encryption key is empty");
-  }
-
-  return { familyId, encryptionKey, apiHost };
+  return { familyId, apiHost };
 }
 
 export class SyncCodeError extends Error {

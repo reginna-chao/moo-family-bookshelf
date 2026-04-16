@@ -5,14 +5,6 @@ import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { BoolFlag, type ApiClient } from "@/api/client";
 
-// Mock crypto module
-vi.mock("@/crypto/encrypt", () => ({
-  importKey: vi.fn().mockResolvedValue("mock-crypto-key"),
-  decrypt: vi.fn().mockImplementation((payload: string) => {
-    // Return the payload directly — test data is pre-formatted JSON
-    return Promise.resolve(payload);
-  }),
-}));
 
 // Mock useSearch to avoid debounce complexity in tests
 vi.mock("@/dialog/useSearch", () => ({
@@ -61,18 +53,18 @@ function renderWithProvider(
   );
 }
 
-function makeMemberPayload(displayName: string, books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>) {
-  return JSON.stringify({ displayName, books });
+function makeMemberBooks(books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>) {
+  return books;
 }
 
 describe("FamilyShelf", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Default chrome.storage.local.get mock — returns encryption key
+    // Default chrome.storage.local.get mock — returns empty state
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-        const result = { encryptionKey: "fake-encryption-key" };
+        const result = {};
         if (typeof callback === "function") callback(result);
         return Promise.resolve(result) as unknown as void;
       },
@@ -119,7 +111,8 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-2",
-              payload: makeMemberPayload("Alice", [
+              displayName: "Alice",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "Book 1", author: "Author", isShared: BoolFlag.FALSE },
               ]),
               lastUpdated: "2024-01-01",
@@ -147,7 +140,8 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-2",
-              payload: makeMemberPayload("Alice", [
+              displayName: "Alice",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "共享書籍一", author: "作者A", isShared: BoolFlag.TRUE },
                 { bookId: "b2", title: "私密書籍", author: "作者B", isShared: BoolFlag.FALSE },
               ]),
@@ -196,7 +190,8 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-2",
-              payload: makeMemberPayload("Alice", [
+              displayName: "Alice",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "重試成功書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
@@ -240,7 +235,7 @@ describe("FamilyShelf", () => {
     });
   });
 
-  it("handles member with null payload gracefully", async () => {
+  it("handles member with null books gracefully", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
         data: { familyId: "fam-1", ownerId: "user-1", members: [
@@ -252,10 +247,11 @@ describe("FamilyShelf", () => {
         data: {
           familyId: "fam-1",
           members: [
-            { userId: "user-2", payload: null, lastUpdated: null },
+            { userId: "user-2", displayName: "", books: null, lastUpdated: null },
             {
               userId: "user-3",
-              payload: makeMemberPayload("Bob", [
+              displayName: "Bob",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "Bob的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
@@ -272,11 +268,7 @@ describe("FamilyShelf", () => {
     });
   });
 
-  it("handles decryption failure gracefully — shows empty books for that member", async () => {
-    // Override decrypt to fail for specific payload
-    const { decrypt } = await import("@/crypto/encrypt");
-    vi.mocked(decrypt).mockRejectedValueOnce(new Error("Decryption failed"));
-
+  it("handles member with empty books gracefully — shows other member's books", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
         data: { familyId: "fam-1", ownerId: "user-1", members: [
@@ -290,12 +282,14 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-2",
-              payload: "corrupted-data",
+              displayName: "",
+              books: [],
               lastUpdated: "2024-01-01",
             },
             {
               userId: "user-3",
-              payload: makeMemberPayload("Carol", [
+              displayName: "Carol",
+              books: makeMemberBooks([
                 { bookId: "b2", title: "Carol的書", author: "C", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
@@ -323,7 +317,8 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "abcdefghijklmnop",
-              payload: makeMemberPayload("", [
+              displayName: "",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "匿名的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
@@ -353,7 +348,8 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-2",
-              payload: makeMemberPayload("Alice", [
+              displayName: "Alice",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "Alice的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
@@ -384,14 +380,16 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-1",
-              payload: makeMemberPayload("Me", [
+              displayName: "Me",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
             {
               userId: "user-2",
-              payload: makeMemberPayload("Alice", [
+              displayName: "Alice",
+              books: makeMemberBooks([
                 { bookId: "b2", title: "Alice的書", author: "B", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
@@ -429,7 +427,8 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-2",
-              payload: makeMemberPayload("Alice", [
+              displayName: "Alice",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
                 { bookId: "b2", title: "書二", author: "B", isShared: BoolFlag.TRUE },
               ]),
@@ -458,7 +457,8 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-2",
-              payload: makeMemberPayload("Alice", [
+              displayName: "Alice",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
@@ -475,22 +475,13 @@ describe("FamilyShelf", () => {
     });
   });
 
-  it("handles missing encryptionKey in storage gracefully", async () => {
-    // Override storage to return no encryption key
-    vi.mocked(chrome.storage.local.get).mockImplementation(
-      (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-        const result = {};
-        if (typeof callback === "function") callback(result);
-        return Promise.resolve(result) as unknown as void;
-      },
-    );
-
+  it("handles member with empty books array from server", async () => {
     const apiClient = createMockApiClient({
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
           members: [
-            { userId: "user-2", payload: "encrypted-data", lastUpdated: "2024-01-01" },
+            { userId: "user-2", displayName: "User2", books: [], lastUpdated: "2024-01-01" },
           ],
         },
       }),
@@ -498,7 +489,7 @@ describe("FamilyShelf", () => {
 
     renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
-    // Should still render without crashing — member gets empty books
+    // No shared books → empty state
     await waitFor(() => {
       expect(screen.getByText("尚無家人分享書籍")).toBeInTheDocument();
     });
@@ -532,14 +523,16 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-1",
-              payload: makeMemberPayload("小明", [
+              displayName: "小明",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
             },
             {
               userId: "user-2",
-              payload: makeMemberPayload("Alice", [
+              displayName: "Alice",
+              books: makeMemberBooks([
                 { bookId: "b2", title: "Alice的書", author: "B", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",
@@ -590,7 +583,8 @@ describe("FamilyShelf", () => {
           members: [
             {
               userId: "user-1",
-              payload: makeMemberPayload("小明", [
+              displayName: "小明",
+              books: makeMemberBooks([
                 { bookId: "b1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
               ]),
               lastUpdated: "2024-01-01",

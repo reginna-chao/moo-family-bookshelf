@@ -5,14 +5,6 @@ import { FamilySettings, FamilySettingsProps } from "@/dialog/FamilySettings";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import type { ApiClient } from "@/api/client";
 
-// Mock crypto module (needed by FamilyDataProvider's refreshBookshelf)
-vi.mock("@/crypto/encrypt", () => ({
-  importKey: vi.fn().mockResolvedValue("mock-crypto-key"),
-  decrypt: vi.fn().mockImplementation((payload: string) => {
-    return Promise.resolve(payload);
-  }),
-}));
-
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     createFamily: vi.fn(),
@@ -70,7 +62,7 @@ describe("FamilySettings", () => {
     // Return an encryption key and display name from storage
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-        const result = { encryptionKey: "test-key-xyz", displayName: "小明" };
+        const result = { displayName: "小明" };
         if (typeof callback === "function") {
           callback(result);
         }
@@ -176,31 +168,14 @@ describe("FamilySettings", () => {
     });
   });
 
-  it("shows sync code section with masked display", async () => {
+  it("shows sync code section", async () => {
     renderFamilySettings();
 
     expect(screen.getByText("家庭同步碼")).toBeInTheDocument();
-    // Wait for sync code to load and show masked format
+    // Wait for sync code to load
     await waitFor(() => {
-      expect(screen.getByText(/moo-fam-123-••••/)).toBeInTheDocument();
+      expect(screen.getByText(/moo-fam-123/)).toBeInTheDocument();
     });
-  });
-
-  it("should toggle sync code visibility with eye button", async () => {
-    renderFamilySettings();
-
-    // Wait for encryption key to load
-    await waitFor(() => {
-      expect(screen.getByText(/moo-fam-123-••••/)).toBeInTheDocument();
-    });
-
-    // Click the eye toggle button
-    const toggleBtn = screen.getByRole("button", { name: "顯示同步碼" });
-    fireEvent.click(toggleBtn);
-
-    // Full sync code should now be visible
-    expect(screen.getByText(/moo-fam-123-test-key-xyz/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
   });
 
   it("shows copy sync code button", async () => {

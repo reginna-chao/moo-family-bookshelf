@@ -26,7 +26,6 @@
 
 | Scope | Target |
 |-------|--------|
-| `extension/src/crypto/` | >= 90% |
 | `extension/src/api/` | >= 80% |
 | `extension/src/dialog/` | >= 70% |
 | `worker/src/` | >= 80% |

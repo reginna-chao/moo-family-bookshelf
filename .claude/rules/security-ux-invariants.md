@@ -2,18 +2,20 @@
 
 These invariants MUST be respected by all security audits and code reviews.
 
-### Key Management & PWA Usability
+### Auth Token Management
 
-**Invariant 1**: The encryption key is transmitted through exactly ONE carrier: the sync code. QR code, manual paste, and PWA URL sharing are different UI surfaces for the same carrier.
+**Invariant 1**: Auth tokens MUST be validated on every API request that accesses user or family data. Unauthenticated requests MUST be rejected with 401.
 
-**Invariant 2**: The Extension is the sole generator of sync codes (and therefore keys). The PWA does not generate keys and cannot recover keys from the server.
+**Invariant 2**: Auth tokens are issued on family create/join and refreshed transparently. Token expiry or invalidation MUST NOT silently drop data; the client MUST prompt re-authentication.
 
-**Invariant 3**: Any behavior that silently rotates the Extension's encryption key = invalidates all previously issued sync codes = directly breaks PWA usability. Therefore, Extension key rotation MUST: (a) only happen when necessary, (b) require explicit user confirmation, (c) provide a clear "regenerate sync code" entry point after rotation, and remind the user that PWA sessions need to re-login.
+### Data Integrity
 
-Any future security review that proposes stricter key rotation MUST simultaneously design a PWA notification or re-onboarding flow; otherwise the proposal MUST be rejected.
+**Invariant 3**: The save-before-sync pattern MUST be enforced. Local changes to sharing preferences are NOT uploaded until the user explicitly presses "Save". No background auto-sync of unsaved state.
 
-### Decrypt Failure Handling
+### Unbind Isolation
 
-**Invariant 4**: When the Extension cannot decrypt an existing server payload, it MUST abort the sync operation. It MUST NOT overwrite the server data with a payload encrypted under a different key.
+**Invariant 4**: When a user leaves a family, their userId MUST be removed from the family member list immediately. Subsequent family bookshelf queries MUST NOT include the former member's books. This removal is non-reversible without re-joining.
 
-**Invariant 5**: When the PWA cannot decrypt a member's payload, it MUST show an explicit error message. It MUST NOT silently show an empty bookshelf or "0 books" for that member.
+### Settings Persistence
+
+**Invariant 5**: Personal sharing preferences (`user:{userId}`) are tied to the user, NOT the family. Unbinding from a family MUST NOT delete or reset the user's sharing settings. Re-joining a different family MUST automatically reflect the user's existing sharing preferences.

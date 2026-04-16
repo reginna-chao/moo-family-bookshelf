@@ -191,50 +191,54 @@ describe("ApiClient", () => {
   });
 
   describe("updatePersonalBooks", () => {
-    it("sends PUT to /api/user/:id/books with encrypted payload", async () => {
+    it("sends PUT to /api/user/:id/books with PersonalBooks object", async () => {
       globalThis.fetch = mockFetchSuccess({ ok: true });
-      await client.updatePersonalBooks("u1", "encrypted-data");
+      const personalBooks = {
+        schemaVersion: 1,
+        userId: "u1",
+        displayName: "Test",
+        books: [],
+        lastUpdated: "2026-01-01T00:00:00.000Z",
+      };
+      await client.updatePersonalBooks("u1", personalBooks);
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
         `${MOCK_ENDPOINT}/api/user/u1/books`,
         expect.objectContaining({
           method: "PUT",
-          body: JSON.stringify({ payload: "encrypted-data" }),
+          body: JSON.stringify(personalBooks),
         }),
       );
     });
   });
 
   describe("createFamily", () => {
-    it("sends POST to /api/family with userId, displayName and keyFingerprint", async () => {
+    it("sends POST to /api/family with userId and displayName", async () => {
       globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      const fingerprint = "a".repeat(64);
-      await client.createFamily("u1", "Alice", fingerprint);
+      await client.createFamily("u1", "Alice");
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
         `${MOCK_ENDPOINT}/api/family`,
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ userId: "u1", displayName: "Alice", keyFingerprint: fingerprint }),
+          body: JSON.stringify({ userId: "u1", displayName: "Alice" }),
         }),
       );
     });
 
-    it("includes keyFingerprint in request body", async () => {
+    it("does not include keyFingerprint in request body", async () => {
       globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      const fingerprint = "f".repeat(64);
-      await client.createFamily("u1", undefined, fingerprint);
+      await client.createFamily("u1", "Alice");
 
       const body = JSON.parse(
         (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
       );
-      expect(body.keyFingerprint).toBe(fingerprint);
+      expect(body.keyFingerprint).toBeUndefined();
     });
 
     it("defaults displayName to empty string when undefined", async () => {
       globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      const fingerprint = "b".repeat(64);
-      await client.createFamily("u1", undefined, fingerprint);
+      await client.createFamily("u1", undefined);
 
       const body = JSON.parse(
         (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
@@ -267,17 +271,6 @@ describe("ApiClient", () => {
       expect(body.displayName).toBe("");
     });
 
-    it("includes keyFingerprint in body when opts.keyFingerprint is provided", async () => {
-      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      const fingerprint = "c".repeat(64);
-      await client.joinFamily("fam-1", "u1", "Bob", { keyFingerprint: fingerprint });
-
-      const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
-      );
-      expect(body.keyFingerprint).toBe(fingerprint);
-    });
-
     it("includes verifySecret in body when opts.verifySecret is provided", async () => {
       globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
       await client.joinFamily("fam-1", "u1", "Bob", { verifySecret: "1234" });
@@ -297,56 +290,6 @@ describe("ApiClient", () => {
       );
       expect(body.keyFingerprint).toBeUndefined();
       expect(body.verifySecret).toBeUndefined();
-    });
-
-    it("includes both keyFingerprint and verifySecret when both provided in opts", async () => {
-      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      const fingerprint = "d".repeat(64);
-      await client.joinFamily("fam-1", "u1", "Bob", {
-        keyFingerprint: fingerprint,
-        verifySecret: "5678",
-      });
-
-      const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
-      );
-      expect(body.keyFingerprint).toBe(fingerprint);
-      expect(body.verifySecret).toBe("5678");
-    });
-
-    it("never includes recoverySource in request body (field removed in C1 security fix)", async () => {
-      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      await client.joinFamily("fam-1", "u1", "Bob", { keyFingerprint: "e".repeat(64) });
-
-      const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
-      );
-      expect("recoverySource" in body).toBe(false);
-    });
-
-    it("does not include optional fields when opts is undefined", async () => {
-      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      await client.joinFamily("fam-1", "u1", "Bob");
-
-      const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
-      );
-      expect(body.keyFingerprint).toBeUndefined();
-      expect(body.verifySecret).toBeUndefined();
-      expect("recoverySource" in body).toBe(false);
-    });
-
-    it("solo recovery shape includes keyFingerprint only (no recoverySource)", async () => {
-      // performSoloRecovery now sends { keyFingerprint } without recoverySource (C1 fix).
-      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
-      const fingerprint = "f".repeat(64);
-      await client.joinFamily("fam-1", "u1", "Bob", { keyFingerprint: fingerprint });
-
-      const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
-      );
-      expect(body.keyFingerprint).toBe(fingerprint);
-      expect("recoverySource" in body).toBe(false);
     });
   });
 
@@ -757,58 +700,6 @@ describe("ApiClient", () => {
       expect(joinBody).not.toHaveProperty("displayName");
     });
 
-    it("sends keyFingerprint in joinFamily recovery request when encryptionKey is available", async () => {
-      const fetchMock = vi.fn()
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Token expired" } }),
-        })
-        // joinFamily recovery → success
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({
-            data: {
-              familyId: "fam-1",
-              ownerId: "owner-1",
-              members: [],
-              maxMembers: 6,
-              createdAt: "2026-01-01",
-              authToken: "new-token",
-            },
-          }),
-        })
-        // Retry → success
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ data: { ok: true } }),
-        });
-      globalThis.fetch = fetchMock;
-
-      vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1", displayName: "小明", encryptionKey: "TestKey123" };
-          if (typeof callback === "function") callback(result);
-          return Promise.resolve(result) as unknown as void;
-        },
-      );
-
-      await client.getPersonalBooks("u1");
-
-      // The third fetch call is the joinFamily recovery
-      const joinCall = fetchMock.mock.calls[2];
-      const joinBody = JSON.parse(joinCall[1].body as string);
-      // keyFingerprint should be a 64-char hex string derived from encryptionKey
-      expect(joinBody.keyFingerprint).toMatch(/^[0-9a-f]{64}$/);
-    });
-
     it("does not attempt joinFamily recovery when familyId/userId missing from storage", async () => {
       let getCallCount = 0;
       const fetchMock = vi.fn()
@@ -944,7 +835,7 @@ describe("ApiClient", () => {
       );
       // Then: clear family data after recovery fails
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        ["familyId", "encryptionKey"],
+        ["familyId"],
       );
     });
   });

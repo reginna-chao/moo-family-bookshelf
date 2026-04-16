@@ -8,7 +8,6 @@ import {
 } from "@/dialog/updateTracking";
 import type { MemberBooks } from "@/dialog/FamilyDataContext";
 import { BoolFlag } from "@/api/client";
-import type { RawFamilyBookshelf } from "@/api/client";
 
 function makeBook(bookId: string, title = bookId) {
   return {
@@ -34,8 +33,8 @@ function makeMember(userId: string, bookIds: string[]): MemberBooks {
 function makeRawMember(
   userId: string,
   lastUpdated: string | null,
-): RawFamilyBookshelf["members"][number] {
-  return { userId, payload: null, lastUpdated };
+): { userId: string; lastUpdated: string | null } {
+  return { userId, lastUpdated };
 }
 
 describe("computeFreshBookIds", () => {

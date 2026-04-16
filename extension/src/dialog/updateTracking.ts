@@ -1,4 +1,3 @@
-import type { RawFamilyBookshelf } from "../api/client";
 import type { MemberBooks } from "./FamilyDataContext";
 
 export interface BookshelfSeenRecord {
@@ -13,6 +12,12 @@ export interface BookshelfChipsRecord {
   expiresAt: string;
 }
 
+/** Raw member metadata used for update tracking */
+interface RawMemberInfo {
+  userId: string;
+  lastUpdated: string | null;
+}
+
 export function seenKey(userId: string): string {
   return `familyBookshelfSeen:${userId}`;
 }
@@ -24,7 +29,7 @@ export function chipsKey(userId: string): string {
 /** Compare current bookshelf with stored baseline to find newly added bookIds. */
 export function computeFreshBookIds(
   decryptedMembers: MemberBooks[],
-  rawMembers: RawFamilyBookshelf["members"],
+  rawMembers: RawMemberInfo[],
   currentUserId: string,
   seenData: BookshelfSeenRecord,
 ): Set<string> {
@@ -77,7 +82,7 @@ export function loadValidChipBookIds(
  */
 export function buildSeenBaseline(
   decryptedMembers: MemberBooks[],
-  rawMembers: RawFamilyBookshelf["members"],
+  rawMembers: RawMemberInfo[],
 ): BookshelfSeenRecord {
   const baseline: BookshelfSeenRecord = {};
   for (const member of decryptedMembers) {

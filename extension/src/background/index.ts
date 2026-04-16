@@ -6,9 +6,6 @@
  * - familyId: written to BOTH chrome.storage.sync and chrome.storage.local.
  *   Read from sync first, falling back to local. This enables multi-device sync
  *   for users signed into the same Google account.
- * - encryptionKey: written to BOTH chrome.storage.sync and chrome.storage.local.
- *   Read from sync first, falling back to local. This enables automatic recovery
- *   after extension reinstall (sync storage survives uninstall/reinstall).
  * - apiEndpoint: local only (different devices may use different endpoints).
  */
 
@@ -16,7 +13,7 @@ import { BoolFlag } from "../api/client";
 import { showSyncErrorBadge, clearSyncErrorBadge } from "./badge";
 
 /** Keys that are synced across devices via chrome.storage.sync */
-const SYNCED_KEYS = ["familyId", "encryptionKey"] as const;
+const SYNCED_KEYS = ["familyId"] as const;
 
 /** Alarm name for scheduled background book sync */
 const BOOK_SYNC_ALARM_NAME = "bookSync";
@@ -60,9 +57,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         clearSyncErrorBadge();
       } else {
         console.warn("[bookSync] Background sync failed:", response?.error);
-        if (response?.decryptMismatch) {
-          showSyncErrorBadge();
-        }
       }
     });
   } catch (err) {
@@ -100,23 +94,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "SET_FAMILY_ID") {
     chrome.storage.sync.set({ familyId: message.familyId }, () => {
       chrome.storage.local.set({ familyId: message.familyId }, () => {
-        sendResponse({ ok: true });
-      });
-    });
-    return true;
-  }
-
-  if (message.type === "GET_ENCRYPTION_KEY") {
-    getWithSyncFallback("encryptionKey", (value) => {
-      sendResponse({ encryptionKey: value ?? null });
-    });
-    return true;
-  }
-
-  if (message.type === "SET_ENCRYPTION_KEY") {
-    chrome.storage.sync.set({ encryptionKey: message.encryptionKey }, () => {
-      chrome.storage.local.set({ encryptionKey: message.encryptionKey }, () => {
-        clearSyncErrorBadge();
         sendResponse({ ok: true });
       });
     });

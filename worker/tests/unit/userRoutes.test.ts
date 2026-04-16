@@ -31,7 +31,7 @@ function rawRequest(method: string, path: string, rawBody: string, authToken?: s
 }
 
 async function createFamilyAndGetToken(userId = "user1") {
-  const res = await request("POST", "/api/family", { userId, keyFingerprint: "a".repeat(64) });
+  const res = await request("POST", "/api/family", { userId });
   const json = (await res.json()) as Json;
   return {
     familyId: json.data.familyId as string,
@@ -77,13 +77,20 @@ describe("GET /api/user/:id/books", () => {
     const { authToken } = await createFamilyAndGetToken("user1");
 
     // Save books first
-    await request("PUT", "/api/user/user1/books", { payload: "encrypted" }, authToken);
+    const personalBooks = {
+      schemaVersion: 1,
+      userId: "user1",
+      displayName: "Test",
+      books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 0 }],
+    };
+    await request("PUT", "/api/user/user1/books", personalBooks, authToken);
 
     // Then retrieve
     const res = await request("GET", "/api/user/user1/books", undefined, authToken);
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.payload).toBe("encrypted");
+    expect(json.data.books).toHaveLength(1);
+    expect(json.data.books[0].bookId).toBe("b1");
     expect(json.data.lastUpdated).toBeDefined();
   });
 });
@@ -94,7 +101,7 @@ describe("GET /api/user/:id/books", () => {
 
 describe("PUT /api/user/:id/books", () => {
   it("should return 401 UNAUTHORIZED when no auth token is provided", async () => {
-    const res = await request("PUT", "/api/user/user1/books", { payload: "data" });
+    const res = await request("PUT", "/api/user/user1/books", { books: [] });
     expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("UNAUTHORIZED");
@@ -103,7 +110,7 @@ describe("PUT /api/user/:id/books", () => {
   it("should return 400 INVALID_USER_ID for invalid userId on PUT", async () => {
     const { authToken } = await createFamilyAndGetToken("user1");
 
-    const res = await request("PUT", "/api/user/user<script>/books", { payload: "data" }, authToken);
+    const res = await request("PUT", "/api/user/user<script>/books", { books: [] }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_USER_ID");
@@ -112,7 +119,7 @@ describe("PUT /api/user/:id/books", () => {
   it("should return 403 FORBIDDEN when modifying another user's books", async () => {
     const { authToken } = await createFamilyAndGetToken("user1");
 
-    const res = await request("PUT", "/api/user/user2/books", { payload: "data" }, authToken);
+    const res = await request("PUT", "/api/user/user2/books", { books: [] }, authToken);
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("FORBIDDEN");
@@ -127,16 +134,16 @@ describe("PUT /api/user/:id/books", () => {
     expect(json.error.code).toBe("INVALID_JSON");
   });
 
-  it("should return 400 INVALID_PAYLOAD when payload is not a string", async () => {
+  it("should return 400 INVALID_PAYLOAD when books is not an array", async () => {
     const { authToken } = await createFamilyAndGetToken("user1");
 
-    const res = await request("PUT", "/api/user/user1/books", { payload: 123 }, authToken);
+    const res = await request("PUT", "/api/user/user1/books", { books: "not-array" }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
-  it("should return 400 INVALID_PAYLOAD when payload is missing", async () => {
+  it("should return 400 INVALID_PAYLOAD when books is missing", async () => {
     const { authToken } = await createFamilyAndGetToken("user1");
 
     const res = await request("PUT", "/api/user/user1/books", {}, authToken);

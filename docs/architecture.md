@@ -20,7 +20,7 @@
 │                          │  │  (同步碼建立/加入)       │  │  │
 │                          │  ├────────────────────────┤  │  │
 │                          │  │  Crypto Module          │  │  │
-│                          │  │  (Web Crypto API E2EE)  │  │  │
+│                          │  │  (SHA-256 雜湊工具)      │  │  │
 │                          │  └────────────────────────┘  │  │
 │                          └──────────┬───────────────────┘  │
 │                                     │ HTTPS                │
@@ -124,16 +124,14 @@
     - 「本功能由第三方開發，非 Readmoo 官方提供」
     - 版本號（`v0.x.x`）
 
-### 2.3 Crypto Module (E2EE)
+### 2.3 Crypto Module（雜湊工具）
 
-- **職責**：端對端加密與解密
-- **技術**：Web Crypto API
+- **職責**：使用者識別碼雜湊（deriveUserId）
+- **技術**：Web Crypto API（SHA-256）
 - **流程**：
   ```
-  加密：明文書單/設定 → AES-GCM 加密 → 密文 → 上傳至 Server
-  解密：下載密文 → AES-GCM 解密 → 明文 → 顯示在 UI
+  使用者 Email → 加鹽 SHA-256 雜湊 → userId → 用於 API 識別
   ```
-- **金鑰管理**：加密金鑰嵌入同步碼中，伺服器永遠不接觸金鑰
 
 ### 2.4 Cloudflare Workers (API)
 
@@ -173,12 +171,12 @@
 
 ### 2.5 Cloudflare KV Store
 
-- **職責**：儲存加密後的資料
+- **職責**：儲存資料（明文 JSON）
 - **Key 設計**：
 
 | Key Pattern | Value | 說明 |
 |-------------|-------|------|
-| `user:{user_id}` | 加密的個人書單 + 開放設定 | 歸屬個人，不隨家庭變動 |
+| `user:{user_id}` | 個人書單 + 開放設定（JSON） | 歸屬個人，不隨家庭變動 |
 | `family:{family_id}` | `{ owner_id, members[], max_members, created_at }` | 記錄家庭組成 + 管理者 |
 | `member:{user_id}` | 所屬 family_id | 反向查詢用 |
 | `public:{share_token}` | `{ user_id, title, books[], created_at, expires_at }` | 公開書櫃明文書單（v1.2.0） |
@@ -213,7 +211,7 @@
 4. 抓取使用者名稱（.me-nickname）+ email
 5. 用 deriveUserId（加鹽 SHA-256, `moo:` prefix）產生 userId
 6. 查詢 API（GET /api/member/:userId）是否已有家庭資料
-   → 有：從 chrome.storage.sync 恢復 familyId + encryptionKey
+   → 有：從 chrome.storage.sync 恢復 familyId
    → 無：移除遮罩，顯示「建立新家庭」/「加入家庭」選擇
 7. 建立或加入家庭完成後
 8. 自動導航到 #/library，爬取個人書單並同步
@@ -225,10 +223,10 @@
 
 ```
 1. 使用者選擇「建立新家庭」
-2. 系統生成 family_id + 加密金鑰
+2. 系統生成 family_id
 3. POST /api/family → 建立家庭群組（owner_id = 當前使用者，max_members = 2）
-4. 組合同步碼（family_id + 金鑰）
-5. 儲存 family_id + encryptionKey 至 chrome.storage.sync + local
+4. 組合同步碼（family_id）
+5. 儲存 family_id 至 chrome.storage.sync + local
 6. 顯示同步碼供複製分享
 7. 進入書單同步流程
 ```
@@ -237,10 +235,10 @@
 
 ```
 1. 使用者貼上同步碼
-2. 解析同步碼 → family_id + 金鑰
+2. 解析同步碼 → family_id（+可選 API 端點）
 3. POST /api/family/:id/join → 加入家庭
    → 若成員已滿（>= max_members）：回傳 403，提示家庭已滿
-4. 儲存 family_id + encryptionKey 至 chrome.storage.sync + local
+4. 儲存 family_id 至 chrome.storage.sync + local
 5. 進入書單同步流程
 ```
 
@@ -263,8 +261,7 @@
 4. 合併：新書預設不開放，已有設定保留
 5. 使用者切換各書的開放/關閉
 6. 點擊「儲存變更」
-7. Crypto Module 加密更新後的設定
-8. PUT /api/user/:id/books → 儲存至 KV
+7. PUT /api/user/:id/books → 儲存至 KV
 ```
 
 ### 家庭書櫃瀏覽流程
@@ -275,8 +272,7 @@
 2. GET /api/family/:id/bookshelf
 3. Worker 查詢家庭成員列表
 4. Worker 聚合各成員 is_shared=true 的書籍
-5. 回傳加密的聚合結果
-6. Crypto Module 解密 → 顯示家庭書櫃
+5. 回傳聚合結果 → 顯示家庭書櫃
 ```
 
 ### 家庭解綁流程
@@ -301,17 +297,16 @@
 使用預設 API 端點時：
 
 ```
-moo-{family_id_short}-{encryption_key_encoded}
+moo-{family_id_short}
 ```
 
 使用自訂 API 端點時，額外編碼端點資訊：
 
 ```
-moo-{family_id_short}-{encryption_key_encoded}@{api_host_encoded}
+moo-{family_id_short}@{api_host_encoded}
 ```
 
 - `family_id_short`：家庭群組 ID 短碼
-- `encryption_key_encoded`：Base62 編碼的加密金鑰
 - `api_host_encoded`（可選）：自訂 API 端點的 host，無此段則使用預設端點
 
 受邀者貼上含 `@` 的同步碼時，Extension / PWA 自動切換至對應的 API 端點，無需手動設定。
@@ -319,8 +314,8 @@ moo-{family_id_short}-{encryption_key_encoded}@{api_host_encoded}
 ### 安全性
 
 - 高熵隨機字串，防止暴力猜測
-- 同步碼 = 家庭識別 + 解密金鑰 +（可選）API 端點
-- 不持有同步碼就無法加入家庭亦無法解密資料
+- 同步碼 = 家庭識別 +（可選）API 端點
+- 不持有同步碼就無法加入家庭
 
 ---
 
@@ -329,8 +324,8 @@ moo-{family_id_short}-{encryption_key_encoded}@{api_host_encoded}
 | 層面 | 措施 |
 |------|------|
 | **傳輸安全** | HTTPS 強制加密 |
-| **儲存安全** | E2EE，伺服器儲存密文 |
-| **存取控制** | 高熵同步碼作為家庭存取憑證 |
+| **儲存安全** | 明文 JSON 儲存於 KV，以 auth token 控管存取 |
+| **存取控制** | 高熵同步碼作為家庭存取憑證 + auth token 驗證每次請求 |
 | **隱私預設** | 所有書籍預設不開放，使用者主動選擇 |
 | **防濫用** | Rate Limiting（Cloudflare 內建） |
 | **資料獨立** | 個人設定不隨家庭解綁而消失 |
@@ -354,7 +349,7 @@ moo-{family_id_short}-{encryption_key_encoded}@{api_host_encoded}
 | 不設定驗證 | 現有行為，接受風險 | 低 |
 
 #### 安全措施
-- PIN/Pattern hash 以 SHA-256(salt + secret) 儲存於 `verify:{userId}`（非 E2EE，server 需驗證）
+- PIN/Pattern hash 以 SHA-256(salt + secret) 儲存於 `verify:{userId}`（server 端驗證）
 - 連續 5 次驗證失敗 → 鎖定 15 分鐘
 - OTP 使用後立即刪除（一次性）
 - Token refresh 改為 protected route（需有效 Bearer token），防止 userId + familyId 直接取得新 token
@@ -376,46 +371,13 @@ moo-{family_id_short}-{encryption_key_encoded}@{api_host_encoded}
 | `POST` | `/api/user/:id/verify/otp` | 產生一次性驗證碼 | 本人 |
 | `POST` | `/api/user/:id/verify/prompted` | 標記已提醒 | 公開 |
 
-### Extension 信任根（keyFingerprint）
+### chrome.storage.sync 多裝置同步
 
-#### 設計目標
-Extension 重灌後（例如更換電腦或重新安裝），若同步金鑰仍存在（透過 `chrome.storage.sync` 同步），Extension 應能靜默恢復，無需使用者再次輸入 PIN/OTP。
+**儲存於 `chrome.storage.sync` 的資料**：`familyId`（其他非敏感偏好如 `displayName` 亦同步）。
 
-#### 機制
-- **信任根定義**：`keyFingerprint = sha256_hex(encryptionKeyString)`，64 字元小寫十六進位。
-- **Extension 建立家庭時**：先在本地產生加密金鑰，計算 fingerprint，再連同 fingerprint 送出建立請求。
-- **Extension 加入家庭時**（含自動恢復）：帶入 fingerprint，後端比對吻合則跳過 verify 流程。
-- **PWA 加入時**：不傳 fingerprint，保留 PIN/Pattern/OTP 驗證門禁（人對裝置的身份確認）。
-- **後端**：只儲存 fingerprint，永遠不見明文加密金鑰。fingerprint 僅出現在 request body，不記錄日誌，不回傳至前端。
+**目的**：同一 Chrome 個人檔案（profile）下的多台裝置或重新安裝後，Extension 可從 `chrome.storage.sync` 取得 familyId，執行靜默自動恢復（`tryAutoRecovery`），無需手動輸入同步碼。
 
-#### 兩種驗證機制的定位
-| 機制 | 驗證對象 | 情境 |
-|------|---------|------|
-| keyFingerprint | 裝置持有金鑰（裝置對家庭） | Extension 重灌後靜默恢復 |
-| PIN / Pattern / OTP | 人的身份（人對裝置） | PWA 新裝置登入，防冒用 |
-
-#### chrome.storage.sync 資安取捨
-
-**儲存於 `chrome.storage.sync` 的資料**：`encryptionKey`、`familyId`（其他非敏感偏好如 `displayName` 亦同步）。
-
-**目的**：同一 Chrome 個人檔案（profile）下的多台裝置或重新安裝後，Extension 可從 `chrome.storage.sync` 取得加密金鑰，執行靜默自動恢復（`tryAutoRecovery`），無需手動輸入同步碼。
-
-**取捨說明**：
-- `chrome.storage.sync` 透過 Google 帳號同步，**由 Google 負責傳輸與靜態加密，但並非端對端加密** — Google 在技術上可存取明文金鑰值。
-- 本工具的「端對端加密」保證對象是：**Worker 後端無法讀取明文書籍資料**。對 Google 本身則不適用。
-- 若使用者在不同 Google 帳號或不同 Chrome profile 間操作，`chrome.storage.sync` **不會跨帳號共享**；此時必須透過同步碼（手動貼上）完成還原。
-
-**使用者端限制**：更換 Google 帳號、重建 Chrome profile、或在未登入同一 Google 帳號的電腦上操作時，靜默恢復不適用，應引導使用者透過同步碼還原個人書架設定（Extension recovery-choice 畫面已涵蓋此流程）。
-
-### 金鑰管理與 PWA 可用性取捨
-
-**不變式 1**：加密金鑰只透過「同步代碼」這一個載體傳遞。QR code、手動貼上、PWA URL 分享都是同一個載體的不同 UI。
-
-**不變式 2**：Extension 是同步代碼（也就是金鑰）的唯一產生源。PWA 不會產生金鑰，也不能從 server 復原金鑰。
-
-**不變式 3**：任何讓 Extension 靜默 rotate 金鑰的行為 = 讓所有已流出的同步代碼全部失效 = 直接破壞 PWA 可用性。因此 Extension rotate 金鑰必須：(a) 必要時才 rotate，(b) 經使用者明確確認，(c) rotate 後提供「重新產生同步代碼」的明顯入口，並提醒使用者 PWA 需要重新登入。
-
-任何未來的資安 review 若提議更嚴格的金鑰輪替，必須同時設計 PWA 的通知或重新 onboarding 流程，否則不得接受。
+**限制**：若使用者在不同 Google 帳號或不同 Chrome profile 間操作，`chrome.storage.sync` **不會跨帳號共享**；此時必須透過同步碼（手動貼上）完成還原。
 
 ---
 
@@ -487,7 +449,7 @@ PWA 無法爬取讀墨頁面，因此無法自動取得 email。提供兩種認�
 Extension 設定頁 → 「連結手機」按鈕
        ↓
   產生 QR Code，內容為 PWA URL + query params：
-  https://pwa.example.com/?code=moo-{familyId}-{encKey}&uid={userId}[@host]
+  https://pwa.example.com/?code=moo-{familyId}&uid={userId}[@host]
        ↓
   手機掃碼 → PWA 自動解析 → 儲存至 localStorage → 完成
 ```
@@ -500,7 +462,7 @@ Extension 設定頁 → 「連結手機」按鈕
 ```
 PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
        ↓
-  同步碼 → familyId + encryptionKey
+  同步碼 → familyId（+ 可選 API 端點）
   Email → 前端 deriveUserId（加鹽 SHA-256）→ userId（不上傳伺服器）
        ↓
   儲存至 localStorage → 完成
@@ -654,7 +616,7 @@ export const reportLinks = [
 ### 設計重點
 
 - **書單來源**：與家庭分享相同（`is_shared: true` 的書），不另外標記
-- **明文儲存**：公開書櫃為使用者主動公開，伺服器以明文儲存（E2EE 例外）
+- **明文儲存**：公開書櫃為使用者主動公開，伺服器以明文儲存
 - **不依賴家庭**：不需加入家庭也能使用此功能
 - **預設關閉**：公開分享預設不啟用，使用者需手動開啟
 - **過期管理**：7 / 30 / 60 / 90 天 / 永久（預設 30 天），透過 KV TTL 自動清理

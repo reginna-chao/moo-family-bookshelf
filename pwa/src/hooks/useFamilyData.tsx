@@ -14,9 +14,8 @@ import type {
   ApiClient,
   BookEntry,
   FamilyMember,
-  RawFamilyBookshelf,
+  FamilyBookshelf,
 } from "@/api/client";
-import { importKey, decrypt } from "@/crypto/encrypt";
 import {
   seenKey,
   chipsKey,
@@ -29,13 +28,11 @@ import {
   type BookshelfChipsRecord,
 } from "./updateTracking";
 
-/** Decrypted member bookshelf for family shelf display */
+/** Member bookshelf for family shelf display */
 export interface MemberBooks {
   userId: string;
   displayName: string;
   books: BookEntry[];
-  /** True when decryption failed — member data is inaccessible, not empty */
-  decryptFailed?: boolean;
 }
 
 type LoadState = "loading" | "ready" | "error";
@@ -64,8 +61,6 @@ interface FamilyDataState {
   hasBookshelfUpdates: boolean;
   /** Mark current bookshelf as seen: clears red dot, preserves chips for 24h */
   markBookshelfSeen: () => void;
-  /** True when any member's payload could not be decrypted (key mismatch) */
-  hasDecryptError: boolean;
 }
 
 const FamilyDataContext = createContext<FamilyDataState | null>(null);
@@ -82,32 +77,13 @@ interface FamilyDataProviderProps {
   familyId: string;
   userId: string;
   apiClient: ApiClient;
-  encryptionKey: string;
   children: React.ReactNode;
-}
-
-async function decryptPayload(
-  payload: string,
-  encKey: string,
-): Promise<{ displayName: string; books: BookEntry[] }> {
-  const key = await importKey(encKey);
-  const decrypted = await decrypt(payload, key);
-  const parsed: unknown = JSON.parse(decrypted);
-  if (typeof parsed !== "object" || parsed === null) {
-    return { displayName: "", books: [] };
-  }
-  const obj = parsed as Record<string, unknown>;
-  return {
-    displayName: typeof obj.displayName === "string" ? obj.displayName : "",
-    books: Array.isArray(obj.books) ? (obj.books as BookEntry[]) : [],
-  };
 }
 
 export function FamilyDataProvider({
   familyId,
   userId,
   apiClient,
-  encryptionKey,
   children,
 }: FamilyDataProviderProps) {
   // --- Members state ---
@@ -134,8 +110,8 @@ export function FamilyDataProvider({
   const chipBookIdsRef = useRef<Set<string>>(new Set());
   chipBookIdsRef.current = chipBookIds;
   const rawMembersDataRef = useRef<{
-    decrypted: MemberBooks[];
-    raw: RawFamilyBookshelf["members"];
+    members: MemberBooks[];
+    raw: FamilyBookshelf["members"];
   } | null>(null);
 
   const updatedBookIds = useMemo(() => {
@@ -145,7 +121,6 @@ export function FamilyDataProvider({
   }, [freshUpdateBookIds, chipBookIds]);
 
   const hasBookshelfUpdates = freshUpdateBookIds.size > 0;
-  const hasDecryptError = bookshelfMembers.some((m) => m.decryptFailed === true);
 
   const mountedRef = useRef(true);
   const membersRef = useRef<FamilyMember[]>([]);
@@ -196,48 +171,18 @@ export function FamilyDataProvider({
         return;
       }
 
-      const data: RawFamilyBookshelf | undefined = response.data;
+      const data: FamilyBookshelf | undefined = response.data;
       if (!data) {
         setBookshelfState("ready");
         return;
       }
 
-      // Build name map from current members state (S1-orig: no extra API call)
-      const memberNameMap = new Map<string, string>();
-      for (const m of membersRef.current) {
-        if (m.displayName) memberNameMap.set(m.userId, m.displayName);
-      }
-
-      const decryptedMembers: MemberBooks[] = [];
-      for (const member of data.members) {
-        const familyDisplayName =
-          memberNameMap.get(member.userId) || member.userId.slice(0, 8);
-
-        if (!member.payload || !encryptionKey) {
-          decryptedMembers.push({
-            userId: member.userId,
-            displayName: familyDisplayName,
-            books: [],
-          });
-          continue;
-        }
-
-        try {
-          const { books } = await decryptPayload(member.payload, encryptionKey);
-          decryptedMembers.push({
-            userId: member.userId,
-            displayName: familyDisplayName,
-            books: books.filter((b) => b.isShared === BoolFlag.TRUE),
-          });
-        } catch {
-          decryptedMembers.push({
-            userId: member.userId,
-            displayName: familyDisplayName,
-            books: [],
-            decryptFailed: true,
-          });
-        }
-      }
+      // Server returns decoded books per member directly
+      const memberBooks: MemberBooks[] = data.members.map((member) => ({
+        userId: member.userId,
+        displayName: member.displayName || member.userId.slice(0, 8),
+        books: (member.books ?? []).filter((b) => b.isShared === BoolFlag.TRUE),
+      }));
 
       // --- Update tracking ---
       const seenData =
@@ -246,30 +191,30 @@ export function FamilyDataProvider({
         readLocalJson<BookshelfChipsRecord>(chipsKey(userId));
 
       const freshIds = computeFreshBookIds(
-        decryptedMembers,
+        memberBooks,
         data.members,
         userId,
         seenData,
       );
 
       const allCurrentBookIds = new Set(
-        decryptedMembers.flatMap((m) => m.books.map((b) => b.bookId)),
+        memberBooks.flatMap((m) => m.books.map((b) => b.bookId)),
       );
       const chipIds = loadValidChipBookIds(chipsData, allCurrentBookIds);
 
       // First use: silently initialize baseline
       if (Object.keys(seenData).length === 0) {
-        const baseline = buildSeenBaseline(decryptedMembers, data.members);
+        const baseline = buildSeenBaseline(memberBooks, data.members);
         writeLocalJson(seenKey(userId), baseline);
       }
 
       rawMembersDataRef.current = {
-        decrypted: decryptedMembers,
+        members: memberBooks,
         raw: data.members,
       };
 
       if (!mountedRef.current) return;
-      setBookshelfMembers(decryptedMembers);
+      setBookshelfMembers(memberBooks);
       setFreshUpdateBookIds(freshIds);
       setChipBookIds(chipIds);
       setBookshelfState("ready");
@@ -278,7 +223,7 @@ export function FamilyDataProvider({
       setBookshelfError(err instanceof Error ? err.message : "載入失敗");
       setBookshelfState("error");
     }
-  }, [familyId, apiClient, encryptionKey, userId]);
+  }, [familyId, apiClient, userId]);
 
   const updateMemberDisplayName = useCallback(
     (targetUserId: string, displayName: string) => {
@@ -303,7 +248,7 @@ export function FamilyDataProvider({
     if (!raw) return;
 
     // Update baseline
-    const baseline = buildSeenBaseline(raw.decrypted, raw.raw);
+    const baseline = buildSeenBaseline(raw.members, raw.raw);
 
     // Merge fresh IDs into chips with 24h expiry
     const mergedChips = new Set(chipBookIdsRef.current);
@@ -366,7 +311,6 @@ export function FamilyDataProvider({
       updatedBookIds,
       hasBookshelfUpdates,
       markBookshelfSeen,
-      hasDecryptError,
     }),
     [
       members,
@@ -383,7 +327,6 @@ export function FamilyDataProvider({
       updatedBookIds,
       hasBookshelfUpdates,
       markBookshelfSeen,
-      hasDecryptError,
     ],
   );
 

@@ -246,10 +246,10 @@
       <h2>專案總覽</h2>
       <p>
         墨家書櫃由三個部分組成：一個注入到讀墨網頁的 Chrome 擴充功能（Extension）、一個可在手機瀏覽家庭書櫃的 PWA，
-        以及一個可自建的 Cloudflare Workers 後端。三者共用同一組 API 與加密協定。
+        以及一個可自建的 Cloudflare Workers 後端。三者共用同一組 API。
       </p>
       <p>
-        所有核心資料在上傳前都會在使用者瀏覽器端以 AES-256-GCM 加密，伺服器採零知識設計，只儲存密文。
+        所有資料透過 HTTPS 安全傳輸，以認證 Token 控管存取權限。
       </p>
     </section>
 
@@ -283,9 +283,9 @@
             <td>個人設定（per user）+ 家庭群組（per family）</td>
           </tr>
           <tr>
-            <td>加密</td>
-            <td>Web Crypto API（AES-256-GCM）</td>
-            <td>端對端加密，伺服器零知識</td>
+            <td>雜湊</td>
+            <td>Web Crypto API（SHA-256）</td>
+            <td>使用者識別碼雜湊</td>
           </tr>
           <tr>
             <td>測試</td>
@@ -325,9 +325,9 @@
     <!-- Sync Code -->
     <section>
       <h2>同步碼格式</h2>
-      <p>同步碼同時傳遞三件事：家庭 ID、加密金鑰，以及（可選的）API 端點。</p>
-      <pre><code>moo-{family_id_short}-{encryption_key_encoded}            # 使用預設 API
-moo-{family_id_short}-{encryption_key_encoded}@{host}     # 使用自訂 API 端點</code></pre>
+      <p>同步碼傳遞家庭 ID，以及（可選的）API 端點。</p>
+      <pre><code>moo-{family_id_short}            # 使用預設 API
+moo-{family_id_short}@{host}     # 使用自訂 API 端點</code></pre>
       <p>
         當使用自建後端時，<code>@{host}</code> 後綴會自動帶入 API 端點設定，家人收到同步碼後無需手動設定，
         確保同一家庭所有成員使用相同的後端。
@@ -430,8 +430,7 @@ wrangler deploy</code></pre>
     <section>
       <h2>安全與隱私設計</h2>
       <ul>
-        <li><strong>端對端加密</strong> — 所有個人書單與分享設定，在瀏覽器端以 AES-256-GCM 加密後才上傳，伺服器只看得到密文</li>
-        <li><strong>零知識伺服器</strong> — 加密金鑰從不傳送至伺服器，開發者與伺服器管理者皆無法解密</li>
+        <li><strong>安全存取控制</strong> — 所有資料透過 HTTPS 安全傳輸，以認證 Token 嚴格控管誰能存取資料</li>
         <li><strong>預設不公開</strong> — 所有書籍預設 <code>is_shared: false</code>，永不自動分享</li>
         <li><strong>明確儲存</strong> — 變更必須經使用者按下「儲存」才會上傳</li>
         <li><strong>離開即隔離</strong> — 退出家庭立刻從 member list 移除，其他成員即刻無法存取其資料</li>

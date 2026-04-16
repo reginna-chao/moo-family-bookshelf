@@ -61,7 +61,7 @@ Evaluate every item and only report findings — do not list items that pass.
 ### 4. Security
 
 - Auth checks on all protected routes? Token validation correct?
-- No plaintext sensitive data stored in KV? (Server is zero-knowledge for E2EE data)
+- Auth token validation on all protected routes?
 - Rate limiting applied where needed?
 - No KV key injection via user-controlled input?
 - Constant-time comparison for security-sensitive values (tokens, fingerprints)?

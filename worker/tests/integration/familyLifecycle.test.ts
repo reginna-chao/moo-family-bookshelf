@@ -6,8 +6,6 @@ import { kvKeys } from "../../src/kv/schema";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
-const VALID_FP = "a".repeat(64);
-
 // ---------------------------------------------------------------------------
 // Shared helpers (DRY — Finding #14)
 // ---------------------------------------------------------------------------
@@ -41,7 +39,7 @@ function rawRequest(method: string, path: string, rawBody: string) {
 }
 
 async function createFamily(userId = "user1", displayName?: string) {
-  const body: Record<string, string> = { userId, keyFingerprint: VALID_FP };
+  const body: Record<string, string> = { userId };
   if (displayName !== undefined) body.displayName = displayName;
   const res = await request("POST", "/api/family", body);
   const json = (await res.json()) as Json;
@@ -58,7 +56,6 @@ async function createFamilyWithTwoMembers() {
   const { familyId, authToken: token1 } = await createFamily("user1");
   const joinRes = await request("POST", `/api/family/${familyId}/join`, {
     userId: "user2",
-    keyFingerprint: VALID_FP,
   });
   const joinJson = (await joinRes.json()) as Json;
   const token2 = joinJson.data.authToken as string;
@@ -79,7 +76,7 @@ beforeEach(() => {
 
 describe("Family Lifecycle", () => {
   it("should create a family with default empty displayName", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1", keyFingerprint: VALID_FP });
+    const res = await request("POST", "/api/family", { userId: "user1" });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.familyId).toBeDefined();
@@ -90,7 +87,7 @@ describe("Family Lifecycle", () => {
   });
 
   it("should create a family with a custom displayName", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1", displayName: "Alice", keyFingerprint: VALID_FP });
+    const res = await request("POST", "/api/family", { userId: "user1", displayName: "Alice" });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.members).toEqual([{ userId: "user1", displayName: "Alice" }]);
@@ -109,7 +106,7 @@ describe("Family Lifecycle", () => {
     const joinRes = await request(
       "POST",
       `/api/family/${familyId}/join`,
-      { userId: "user2", displayName: "Bob", keyFingerprint: VALID_FP },
+      { userId: "user2", displayName: "Bob" },
     );
     expect(joinRes.status).toBe(200);
     const joinJson = (await joinRes.json()) as Json;
@@ -151,7 +148,6 @@ describe("Family Lifecycle", () => {
     // Re-joining returns a new auth token (old one is invalidated)
     const rejoinRes = await request("POST", `/api/family/${familyId}/join`, {
       userId: "user1",
-      keyFingerprint: VALID_FP,
     });
     const rejoinJson = (await rejoinRes.json()) as Json;
     const newToken = rejoinJson.data.authToken as string;
@@ -198,14 +194,14 @@ describe("Family Lifecycle", () => {
 
 describe("Family creation response fields", () => {
   it("should include ownerId matching the creator", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1", keyFingerprint: VALID_FP });
+    const res = await request("POST", "/api/family", { userId: "user1" });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.ownerId).toBe("user1");
   });
 
   it("should include maxMembers defaulting to 2", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1", keyFingerprint: VALID_FP });
+    const res = await request("POST", "/api/family", { userId: "user1" });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.maxMembers).toBe(2);
@@ -223,7 +219,7 @@ describe("Family member limit", () => {
     const joinRes = await request(
       "POST",
       `/api/family/${familyId}/join`,
-      { userId: "user2", keyFingerprint: VALID_FP },
+      { userId: "user2" },
     );
     expect(joinRes.status).toBe(200);
   });
@@ -233,7 +229,6 @@ describe("Family member limit", () => {
 
     const joinRes = await request("POST", `/api/family/${familyId}/join`, {
       userId: "user3",
-      keyFingerprint: VALID_FP,
     });
     expect(joinRes.status).toBe(409);
     const json = (await joinRes.json()) as Json;
@@ -536,7 +531,6 @@ describe("GET /api/family/:id/members response", () => {
         { userId: "bob", displayName: "Bob" },
       ],
       createdAt: "2025-01-01T00:00:00.000Z",
-      keyFingerprint: VALID_FP,
     };
     await kv.put(kvKeys.family("abcd-ef01"), JSON.stringify(legacyRecord));
     // Insert member reverse lookup so auth membership check passes
@@ -584,14 +578,13 @@ describe("Join edge cases", () => {
     // user2 joins family A
     await request("POST", `/api/family/${familyA.familyId}/join`, {
       userId: "user2",
-      keyFingerprint: VALID_FP,
     });
 
     // user2 tries to join family B → should be rejected
     const res = await request(
       "POST",
       `/api/family/${familyB.familyId}/join`,
-      { userId: "user2", keyFingerprint: VALID_FP },
+      { userId: "user2" },
     );
     expect(res.status).toBe(409);
     const json = (await res.json()) as Json;
@@ -645,7 +638,6 @@ describe("Input validation", () => {
     const res = await request("POST", "/api/family", {
       userId: "user1",
       displayName: "  Alice  ",
-      keyFingerprint: VALID_FP,
     });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
@@ -668,35 +660,42 @@ describe("Personal Books", () => {
     expect(json.data).toBeNull();
   });
 
-  it("should save and retrieve encrypted books, returning updated record", async () => {
+  it("should save and retrieve books, returning updated record", async () => {
     const { authToken: token1 } = await createFamily("user1");
-    const payload = "encrypted-data-here";
+    const personalBooks = {
+      schemaVersion: 1,
+      userId: "user1",
+      displayName: "Test",
+      books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 0 }],
+    };
 
     const putRes = await request(
       "PUT",
       "/api/user/user1/books",
-      { payload },
+      personalBooks,
       token1,
     );
     expect(putRes.status).toBe(200);
     const putJson = (await putRes.json()) as Json;
     // Mutation returns the UserBooksRecord
-    expect(putJson.data.payload).toBe(payload);
+    expect(putJson.data.books).toHaveLength(1);
+    expect(putJson.data.books[0].bookId).toBe("b1");
     expect(putJson.data.lastUpdated).toBeDefined();
 
     const getRes = await request("GET", "/api/user/user1/books", undefined, token1);
     const json = (await getRes.json()) as Json;
-    expect(json.data.payload).toBe(payload);
+    expect(json.data.books).toHaveLength(1);
+    expect(json.data.books[0].bookId).toBe("b1");
     expect(json.data.lastUpdated).toBeDefined();
   });
 
-  it("should reject empty payload", async () => {
+  it("should reject missing books array", async () => {
     const { authToken: token1 } = await createFamily("user1");
 
     const res = await request(
       "PUT",
       "/api/user/user1/books",
-      { payload: "" },
+      {},
       token1,
     );
     expect(res.status).toBe(400);
@@ -713,13 +712,15 @@ describe("Family Bookshelf Aggregation", () => {
 
     // Both members save books (each with their own token)
     await request("PUT", "/api/user/user1/books", {
-      payload: "user1-encrypted",
+      schemaVersion: 1, userId: "user1", displayName: "User1",
+      books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
     }, token1);
     await request("PUT", "/api/user/user2/books", {
-      payload: "user2-encrypted",
+      schemaVersion: 1, userId: "user2", displayName: "User2",
+      books: [{ bookId: "b2", title: "Book 2", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
     }, token2);
 
-    // Get family bookshelf
+    // Get family bookshelf (only shared books are returned)
     const res = await request(
       "GET",
       `/api/family/${familyId}/bookshelf`,
@@ -729,8 +730,10 @@ describe("Family Bookshelf Aggregation", () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.members).toHaveLength(2);
-    expect(json.data.members[0].payload).toBe("user1-encrypted");
-    expect(json.data.members[1].payload).toBe("user2-encrypted");
+    expect(json.data.members[0].books).toHaveLength(1);
+    expect(json.data.members[0].books[0].bookId).toBe("b1");
+    expect(json.data.members[1].books).toHaveLength(1);
+    expect(json.data.members[1].books[0].bookId).toBe("b2");
   });
 
   it("should include displayName in bookshelf response", async () => {
@@ -740,12 +743,17 @@ describe("Family Bookshelf Aggregation", () => {
     const joinRes = await request("POST", `/api/family/${familyId}/join`, {
       userId: "user2",
       displayName: "Bob",
-      keyFingerprint: VALID_FP,
     });
     const token2 = ((await joinRes.json()) as Json).data.authToken;
 
-    await request("PUT", "/api/user/user1/books", { payload: "data1" }, token1);
-    await request("PUT", "/api/user/user2/books", { payload: "data2" }, token2);
+    await request("PUT", "/api/user/user1/books", {
+      schemaVersion: 1, userId: "user1", displayName: "Alice",
+      books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
+    }, token1);
+    await request("PUT", "/api/user/user2/books", {
+      schemaVersion: 1, userId: "user2", displayName: "Bob",
+      books: [{ bookId: "b2", title: "Book 2", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
+    }, token2);
 
     const res = await request(
       "GET",
@@ -784,7 +792,8 @@ describe("Family Bookshelf Aggregation", () => {
     const { familyId, token1, token2 } = await createFamilyWithTwoMembers();
 
     await request("PUT", "/api/user/user2/books", {
-      payload: "user2-data",
+      schemaVersion: 1, userId: "user2", displayName: "User2",
+      books: [{ bookId: "b2", title: "Book 2", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 0 }],
     }, token2);
 
     // user2 leaves

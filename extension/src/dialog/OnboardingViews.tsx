@@ -1,6 +1,4 @@
-import React, { useState } from "react";
-import { Lock, Eye, EyeOff } from "lucide-react";
-import { decodeSyncCode } from "../crypto/syncCode";
+import React from "react";
 
 // Shared brand colors used across Onboarding views.
 export const PRIMARY_BLUE = "#2563eb";
@@ -58,23 +56,6 @@ export interface CreatedViewProps {
 }
 
 export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: CreatedViewProps) {
-  const [showCode, setShowCode] = useState(false);
-
-  let displayFamilyId = "";
-  let displayKey = "";
-  let displayHostSuffix = "";
-  let decodeFailed = false;
-  try {
-    const decoded = decodeSyncCode(generatedSyncCode);
-    displayFamilyId = decoded.familyId;
-    displayKey = decoded.encryptionKey;
-    if (decoded.apiHost) {
-      displayHostSuffix = `@${decoded.apiHost}`;
-    }
-  } catch {
-    decodeFailed = true;
-  }
-
   return (
     <div style={{ padding: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
@@ -95,19 +76,8 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
         }}
       >
         <span data-testid="sync-code" style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
-          {decodeFailed
-            ? generatedSyncCode
-            : `moo-${displayFamilyId}-${showCode ? displayKey : "••••••••••••"}${displayHostSuffix}`}
+          {generatedSyncCode}
         </span>
-        {!decodeFailed && (
-          <button
-            onClick={() => setShowCode(!showCode)}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4, flexShrink: 0 }}
-            aria-label={showCode ? "隱藏同步碼" : "顯示同步碼"}
-          >
-            {showCode ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
-        )}
       </div>
       <button
         onClick={onCopy}
@@ -215,8 +185,6 @@ export function IdleView({
   onCreate,
   onJoin,
 }: IdleViewProps) {
-  const [showInput, setShowInput] = useState(false);
-
   return (
     <div style={{ padding: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
@@ -245,9 +213,9 @@ export function IdleView({
       <div style={{ textAlign: "center", margin: "12px 0", color: "#94a3b8" }}>
         或
       </div>
-      <div style={{ position: "relative", marginBottom: 12 }}>
+      <div style={{ marginBottom: 12 }}>
         <input
-          type={showInput ? "text" : "password"}
+          type="text"
           autoComplete="off"
           placeholder="輸入家庭同步碼"
           value={syncCodeInput}
@@ -256,21 +224,12 @@ export function IdleView({
           style={{
             width: "100%",
             padding: 12,
-            paddingRight: 40,
             border: "1px solid #e2e8f0",
             borderRadius: 8,
             boxSizing: "border-box",
             fontSize: 14,
           }}
         />
-        <button
-          type="button"
-          onClick={() => setShowInput(!showInput)}
-          style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 4 }}
-          aria-label={showInput ? "隱藏同步碼" : "顯示同步碼"}
-        >
-          {showInput ? <EyeOff size={16} /> : <Eye size={16} />}
-        </button>
       </div>
       <button
         onClick={onJoin}
@@ -290,8 +249,7 @@ export function IdleView({
         {state === "joining" ? "加入中..." : "加入家庭公開書櫃"}
       </button>
       <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 16, textAlign: "center", lineHeight: 1.6 }}>
-        <Lock size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
-        本工具採端對端加密，伺服器無法讀取你的資料。同步碼包含加密金鑰，請妥善保存以便跨裝置或重新安裝後還原書架設定。
+        將同步碼分享給家人即可加入書櫃。
       </p>
     </div>
   );

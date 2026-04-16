@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { BookOpen, AlertTriangle } from "lucide-react";
+import { BookOpen } from "lucide-react";
 import { BoolFlag } from "@/api/client";
 import type { BookEntry } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
@@ -8,8 +8,6 @@ import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
 
 export interface FamilyShelfPageProps {
   userId: string;
-  /** Called when user needs to re-login due to encryption key mismatch */
-  onRelogin?: () => void;
 }
 
 interface BookWithMember extends BookEntry {
@@ -33,7 +31,6 @@ function toBookWithMember(
 
 export function FamilyShelfPage({
   userId,
-  onRelogin,
 }: FamilyShelfPageProps) {
   const {
     bookshelfMembers: members,
@@ -41,7 +38,6 @@ export function FamilyShelfPage({
     bookshelfError: errorMessage,
     refreshBookshelf: loadBookshelf,
     updatedBookIds,
-    hasDecryptError,
   } = useFamilyData();
   const [filterMember, setFilterMember] =
     useState<MemberFilterValue>("all-except-self");
@@ -98,27 +94,6 @@ export function FamilyShelfPage({
         >
           重試
         </button>
-      </div>
-    );
-  }
-
-  if (hasDecryptError) {
-    return (
-      <div className="p-4 text-center">
-        <div className="mx-auto mb-4 w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
-          <AlertTriangle className="text-amber-500" size={24} aria-hidden="true" />
-        </div>
-        <p className="text-amber-700 text-sm mb-4">
-          偵測到書籍資料已被重新加密，請從 Extension 取得新的同步代碼後重新登入。
-        </p>
-        {onRelogin && (
-          <button
-            onClick={onRelogin}
-            className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700"
-          >
-            重新登入
-          </button>
-        )}
       </div>
     );
   }

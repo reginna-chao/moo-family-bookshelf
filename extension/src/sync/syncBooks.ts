@@ -5,18 +5,13 @@
  * C) Manual sync button
  */
 
-import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 
 // Re-export ApiClient so the content script can import it from content-sync.js
 // instead of needing a separate content-api.js entry point.
 export { ApiClient } from "../api/client";
 import { ScrapedBook, scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
-import { importKey, encrypt, decrypt } from "../crypto/encrypt";
-import { mergeBooks, asDecryptedBooks } from "./mergeBooks";
-import type { DecryptedBooks } from "./mergeBooks";
-import { DecryptMismatchError } from "../errors";
-
-export { DecryptMismatchError } from "../errors";
+import { mergeBooks } from "./mergeBooks";
 
 /** Minimum interval (ms) for rate-limited auto-sync */
 export const AUTO_SYNC_MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -45,29 +40,21 @@ export async function canAutoSync(): Promise<boolean> {
 }
 
 /**
- * Decrypt and parse saved books from the API response.
+ * Parse saved books from the API response (now plaintext JSON).
  */
 interface LoadSavedResult {
-  books: DecryptedBooks;
-  /** Full decrypted payload — preserved so save can merge back unknown fields */
+  books: BookEntry[];
+  /** Full payload — preserved so save can merge back unknown fields */
   raw: Record<string, unknown> | null;
 }
 
-async function loadSavedBooks(
+function loadSavedBooks(
   data: Record<string, unknown>,
-  encKeyString: string,
-): Promise<LoadSavedResult> {
-  if (typeof data.payload === "string") {
-    const key = await importKey(encKeyString);
-    const decrypted = await decrypt(data.payload, key);
-    const parsed = JSON.parse(decrypted) as Record<string, unknown>;
-    const books = Array.isArray(parsed.books) ? (parsed.books as BookEntry[]) : [];
-    return { books: asDecryptedBooks(books), raw: parsed };
-  }
+): LoadSavedResult {
   if (Array.isArray(data.books)) {
-    return { books: asDecryptedBooks(data.books as BookEntry[]), raw: null };
+    return { books: data.books as BookEntry[], raw: data };
   }
-  return { books: asDecryptedBooks([]), raw: null };
+  return { books: [], raw: null };
 }
 
 export interface SyncBooksOptions {
@@ -83,8 +70,6 @@ export interface SyncBooksResult {
   success: boolean;
   books: BookEntry[];
   error?: string;
-  /** True when sync aborted due to encryption key mismatch with server data */
-  decryptMismatch?: boolean;
 }
 
 /**
@@ -94,7 +79,7 @@ export interface SyncBooksResult {
  * 2. Wait for render
  * 3. Scrape books
  * 4. Merge with saved books (preserve isShared settings)
- * 5. Encrypt and upload
+ * 5. Upload as plaintext JSON
  * 6. Navigate back if needed
  * 7. Update lastSyncAt
  */
@@ -130,45 +115,32 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     }
 
     // Step 4: Fetch existing saved books for merge
-    const storageResult = await chrome.storage.local.get(["encryptionKey", "displayName"]);
-    const encKeyString = storageResult.encryptionKey as string | undefined;
-    if (!encKeyString) {
-      throw new Error("找不到加密金鑰");
-    }
+    const storageResult = await chrome.storage.local.get(["displayName"]);
 
-    let savedBooks: DecryptedBooks = asDecryptedBooks([]);
+    let savedBooks: BookEntry[] = [];
     let savedRawPayload: Record<string, unknown> | null = null;
     const apiResponse = await apiClient.getPersonalBooks(userId);
     if (apiResponse.data) {
-      try {
-        const result = await loadSavedBooks(
-          apiResponse.data as unknown as Record<string, unknown>,
-          encKeyString,
-        );
-        savedBooks = result.books;
-        savedRawPayload = result.raw;
-      } catch {
-        // Server has data we cannot decrypt — abort to prevent overwriting
-        // valid ciphertext with data encrypted under a different key.
-        throw new DecryptMismatchError();
-      }
+      const result = loadSavedBooks(
+        apiResponse.data as unknown as Record<string, unknown>,
+      );
+      savedBooks = result.books;
+      savedRawPayload = result.raw;
     }
 
     const merged = mergeBooks(allScrapedBooks, savedBooks);
 
-    // Step 5: Encrypt and upload (spread savedRawPayload to preserve unknown fields from future versions)
-    const key = await importKey(encKeyString);
+    // Step 5: Build PersonalBooks object and upload as plaintext JSON
     const displayName = (storageResult.displayName as string | undefined) ?? "";
-    const payload = JSON.stringify({
+    const personalBooks: PersonalBooks = {
       ...savedRawPayload,
       schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
       userId,
       displayName,
       books: merged,
       lastUpdated: new Date().toISOString(),
-    });
-    const encrypted = await encrypt(payload, key);
-    const uploadResponse = await apiClient.updatePersonalBooks(userId, encrypted);
+    };
+    const uploadResponse = await apiClient.updatePersonalBooks(userId, personalBooks);
 
     if (uploadResponse.error) {
       throw new Error(uploadResponse.error.message);
@@ -187,15 +159,6 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     // Restore navigation on error
     if (navigate && !isOnLibrary) {
       window.location.hash = originalHash || "#/";
-    }
-    if (err instanceof DecryptMismatchError) {
-      console.warn("[syncBooks] Encryption key mismatch — sync aborted to prevent data loss");
-      return {
-        success: false,
-        books: [],
-        error: err.message,
-        decryptMismatch: true,
-      };
     }
     return {
       success: false,

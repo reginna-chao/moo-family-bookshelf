@@ -49,7 +49,6 @@ cp .env.example .env
 | Mobile | PWA | Shares the same Workers API; cannot scrape Readmoo |
 | Backend | Cloudflare Workers | Serverless; free tier sufficient; self-hostable |
 | Storage | Cloudflare KV | `user:{id}` for personal settings, `family:{id}` for groups |
-| Encryption | Web Crypto API (AES-256-GCM) | E2EE; server stores ciphertext only |
 
 ## Development Commands
 
@@ -268,7 +267,7 @@ Every push/PR triggers:
 ## Security Notes
 
 - All book data defaults to not-shared; users must explicitly opt-in.
-- Data is encrypted client-side (AES-256-GCM) before upload.
+- Data is protected by TLS in transit and auth tokens for access control.
 - Never hardcode keys or sensitive information in source code.
 - `.env`, `.dev.vars`, and files containing secrets must not be committed to git.
 - **`.env.production` policy**: this file IS committed, but only because it contains values that will ship inside the public bundle anyway (production API endpoint, PWA URL). **Never** add API keys, tokens, analytics/Sentry DSNs, or any other secret to `.env.production`. If you need to inject a secret at build time, use GitHub Actions Secrets and write them to `.env.production` during the CI build step. For Worker runtime secrets, use `wrangler secret put` (see [worker/DEPLOY.md](worker/DEPLOY.md)).

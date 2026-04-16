@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>隱私政策 — 墨家書櫃 MooFamily Bookshelf</title>
-  <meta name="description" content="墨家書櫃 MooFamily Bookshelf 隱私政策：端對端加密、不收集個資、預設不公開。">
+  <meta name="description" content="墨家書櫃 MooFamily Bookshelf 隱私政策：安全存取控制、不收集個資、預設不公開。">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <style>
     :root {
@@ -174,7 +174,7 @@
     <div class="tldr">
       <h2>白話版（TL;DR）</h2>
       <ol>
-        <li><strong>我們不知道你的書單內容</strong> — 所有資料在你的瀏覽器中加密後才上傳，伺服器只存亂碼</li>
+        <li><strong>你的資料受安全保護</strong> — 所有資料透過 HTTPS 安全傳輸，以認證 Token 控管存取權限</li>
         <li><strong>我們不收集個人資料</strong> — 不需要帳號、不記錄 Email、不追蹤你是誰</li>
         <li><strong>你的書預設都不公開</strong> — 只有你主動開放的書才會出現在家庭書櫃</li>
         <li><strong>程式碼完全公開</strong> — 你可以自己檢查，也可以自己架設</li>
@@ -196,7 +196,7 @@
       <ul class="policy-list">
         <li><span class="icon yes">&#10003;</span> 您主動選擇開放的書單資料（書名、作者、ISBN）</li>
         <li><span class="icon yes">&#10003;</span> 您的開放/關閉偏好設定</li>
-        <li><span class="icon yes">&#10003;</span> 上述資料在上傳前已經端對端加密</li>
+        <li><span class="icon yes">&#10003;</span> 上述資料透過 HTTPS 安全傳輸，以認證 Token 控管存取</li>
       </ul>
     </section>
 
@@ -212,12 +212,10 @@
     <!-- 三、資料儲存 -->
     <section>
       <h2>三、資料儲存</h2>
-      <p>所有書單資料與開放設定均經 <strong>AES-256-GCM 端對端加密</strong>後儲存。</p>
-      <p>伺服器（Cloudflare KV）僅儲存加密後的密文。</p>
-      <p>開發者及伺服器管理員<strong>無法解密</strong>您的資料。</p>
-      <p><strong>例外：顯示名稱</strong> — 為了讓家庭成員能看到彼此的名稱，顯示名稱以明文儲存於家庭群組記錄中。顯示名稱由使用者自行設定，不包含讀墨帳號資訊。</p>
+      <p>所有書單資料與開放設定以明文 JSON 格式儲存於 Cloudflare KV，透過認證 Token 控管存取權限。</p>
+      <p>顯示名稱以明文儲存於家庭群組記錄中。顯示名稱由使用者自行設定，不包含讀墨帳號資訊。</p>
       <p>個人開放設定持久保存，不因家庭帳號解綁而刪除。</p>
-      <p>加密金鑰可透過 Chrome 瀏覽器的同步功能（chrome.storage.sync）在同一 Google 帳號的裝置間同步，以便跨裝置使用。此同步由 Chrome 瀏覽器原生提供，資料不經由本專案伺服器。</p>
+      <p>家庭 ID 可透過 Chrome 瀏覽器的同步功能（chrome.storage.sync）在同一 Google 帳號的裝置間同步，以便跨裝置使用。此同步由 Chrome 瀏覽器原生提供，資料不經由本專案伺服器。</p>
       <p>家庭群組資料可設有 <strong>TTL 過期機制</strong>。</p>
     </section>
 
@@ -246,8 +244,8 @@
     <section>
       <h2>六、資料刪除</h2>
       <p><strong>離開家庭</strong>：退出家庭群組後，伺服器端的家庭成員關聯會立即移除，其他成員無法再存取您的書籍資料。</p>
-      <p><strong>個人設定</strong>：您的個人書籍開放設定儲存於伺服器端（加密狀態）；如需刪除，可透過 GitHub Issues 聯繫，或自行部署後端直接刪除 KV 資料。</p>
-      <p><strong>本機資料</strong>：瀏覽器中的本機資料（Email 等）可透過擴充功能管理頁面移除。加密金鑰同時儲存於 Chrome 同步儲存空間（chrome.storage.sync），會隨 Google 帳號保留以便跨裝置或重新安裝後恢復使用；如需徹底清除，可登出 Google 帳號或在 Chrome 設定中清除同步資料。</p>
+      <p><strong>個人設定</strong>：您的個人書籍開放設定儲存於伺服器端；如需刪除，可透過 GitHub Issues 聯繫，或自行部署後端直接刪除 KV 資料。</p>
+      <p><strong>本機資料</strong>：瀏覽器中的本機資料（Email 等）可透過擴充功能管理頁面移除。家庭 ID 同時儲存於 Chrome 同步儲存空間（chrome.storage.sync），會隨 Google 帳號保留以便跨裝置或重新安裝後恢復使用；如需徹底清除，可登出 Google 帳號或在 Chrome 設定中清除同步資料。</p>
     </section>
 
     <!-- 七、Cookie 與追蹤 -->

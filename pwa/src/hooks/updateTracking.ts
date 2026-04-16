@@ -1,4 +1,4 @@
-import type { RawFamilyBookshelf } from "@/api/client";
+import type { FamilyBookshelf } from "@/api/client";
 import type { MemberBooks } from "./useFamilyData";
 
 export interface BookshelfSeenRecord {
@@ -40,15 +40,15 @@ export function writeLocalJson(key: string, value: unknown): void {
 
 /** Compare current bookshelf with stored baseline to find newly added bookIds. */
 export function computeFreshBookIds(
-  decryptedMembers: MemberBooks[],
-  rawMembers: RawFamilyBookshelf["members"],
+  membersList: MemberBooks[],
+  rawMembers: FamilyBookshelf["members"],
   currentUserId: string,
   seenData: BookshelfSeenRecord,
 ): Set<string> {
   if (Object.keys(seenData).length === 0) return new Set(); // first use
 
   const freshIds = new Set<string>();
-  for (const member of decryptedMembers) {
+  for (const member of membersList) {
     if (member.userId === currentUserId) continue; // exclude self
 
     const rawMember = rawMembers.find((m) => m.userId === member.userId);
@@ -93,11 +93,11 @@ export function loadValidChipBookIds(
  * Only includes current members — stale entries from departed members are dropped.
  */
 export function buildSeenBaseline(
-  decryptedMembers: MemberBooks[],
-  rawMembers: RawFamilyBookshelf["members"],
+  membersList: MemberBooks[],
+  rawMembers: FamilyBookshelf["members"],
 ): BookshelfSeenRecord {
   const baseline: BookshelfSeenRecord = {};
-  for (const member of decryptedMembers) {
+  for (const member of membersList) {
     const rawMember = rawMembers.find((m) => m.userId === member.userId);
     baseline[member.userId] = {
       lastUpdated: rawMember?.lastUpdated ?? "",

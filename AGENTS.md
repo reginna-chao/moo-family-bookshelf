@@ -31,7 +31,7 @@ moo-family-bookshelf/
 │   │   ├── settings/            # Extension settings (custom API endpoint, etc.)
 │   │   ├── content/             # Content Script (scrape book list + inject Dialog)
 │   │   ├── background/         # Service Worker
-│   │   ├── crypto/             # E2EE module (Web Crypto API, AES-256-GCM)
+│   │   ├── crypto/             # Hashing utilities (SHA-256)
 │   │   └── api/                # API client (configurable endpoint)
 │   ├── tests/
 │   │   ├── unit/              # Unit tests (crypto, api, utils)
@@ -71,7 +71,6 @@ moo-family-bookshelf/
 | Mobile | PWA | Shares the same Workers API; cannot scrape Readmoo |
 | Backend | Cloudflare Workers | Serverless; free tier sufficient; self-hostable |
 | Storage | Cloudflare KV | `user:{id}` for personal settings, `family:{id}` for groups |
-| Encryption | Web Crypto API (AES-256-GCM) | E2EE; server stores ciphertext only |
 
 ## Build & Development Commands
 
@@ -110,14 +109,14 @@ moo-family-bookshelf/
 ### Conventions
 
 - Run `pnpm test` before pushing; CI will gate on this.
-- Coverage targets: crypto ≥ 90%, api/worker ≥ 80%, dialog ≥ 70%, overall ≥ 70%.
+- Coverage targets: api/worker ≥ 80%, dialog ≥ 70%, overall ≥ 70%.
 - Tests must clean up state (no leaked timers, mocks, or KV entries).
 - Integration tests use Miniflare to simulate KV locally — never connect to real Cloudflare in CI.
 - E2E tests load the built Extension into a real Chrome instance via Playwright.
 
 ### Key Test Scenarios
 
-- **Crypto**: encrypt → decrypt roundtrip, key generation, sync code encode/decode (with/without `@host`).
+- **Crypto**: deriveUserId hashing, sync code encode/decode (with/without `@host`).
 - **Dialog state machine**: no family → onboarding, has family → main view, unbind → back to onboarding.
 - **Personal shelf**: all books default to not-shared, toggle works, save-before-sync enforced.
 - **Family lifecycle** (Worker): create → join → query → leave → query excludes former member.
@@ -158,7 +157,7 @@ Every push/PR triggers:
 
 ### Boolean Convention
 
-- All boolean-like fields in API payloads, KV storage, and encrypted data **must** use the `BoolFlag` enum, never `true | false` or raw `0 | 1` literals.
+- All boolean-like fields in API payloads and KV storage **must** use the `BoolFlag` enum, never `true | false` or raw `0 | 1` literals.
 - `BoolFlag` is defined in both `extension/src/api/client.ts` and `pwa/src/api/client.ts`:
   ```typescript
   export enum BoolFlag {
@@ -188,8 +187,8 @@ Two-layer data architecture:
 ## Sync Code Format
 
 ```
-moo-{family_id_short}-{encryption_key_encoded}            # default API
-moo-{family_id_short}-{encryption_key_encoded}@{host}     # custom API endpoint
+moo-{family_id_short}            # default API
+moo-{family_id_short}@{host}     # custom API endpoint
 ```
 
 The `@host` segment auto-configures the API endpoint for invited members, ensuring all family members use the same backend.
@@ -233,7 +232,7 @@ Family membership is the gate for all features. Without a family, only onboardin
 
 ## Security & Privacy Rules
 
-- **E2EE**: all data encrypted in browser before upload. Server is zero-knowledge.
+- **Transport security**: all data protected by TLS in transit and auth tokens for access control.
 - **Default closed**: every book defaults to not-shared. Never auto-share.
 - **Save to sync**: changes only upload after explicit save action.
 - **Unbind isolation**: leaving a family immediately removes user from member list; other members can no longer see their books.

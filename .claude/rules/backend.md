@@ -33,15 +33,14 @@ worker/src/
 
 - RESTful JSON API. All responses wrapped in `{ data, error }` envelope.
 - Prefix: `/api/`
-- Authentication: token-based (derived from sync code encryption key).
-- All data stored encrypted in KV; Worker never sees plaintext book data.
-- Exception: public bookshelf data (v1.2.0) stored in plaintext since it is user-chosen public content.
+- Authentication: token-based (issued on family create/join).
+- All data stored as plaintext JSON in KV; access controlled by auth tokens.
 
 ### KV Key Patterns
 
 | Key | Value | TTL |
 |-----|-------|-----|
-| `user:{user_id}` | Encrypted personal book list + sharing settings | None (persistent) |
+| `user:{user_id}` | Personal book list + sharing settings (JSON) | None (persistent) |
 | `family:{family_id}` | Family member list | Configurable |
 | `member:{user_id}` | `family_id` (reverse lookup) | Follows family TTL |
 | `public:{share_token}` | Plaintext public bookshelf (v1.2.0) | User-configured (7/30/60/90 days or none) |

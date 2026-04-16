@@ -7,16 +7,6 @@ beforeAll(() => {
   }
 });
 
-// Mock crypto module — deterministic values for unit tests
-vi.mock("@/crypto/encrypt", () => ({
-  generateKey: vi.fn().mockResolvedValue({} as CryptoKey),
-  exportKey: vi.fn().mockResolvedValue("fresh-key-string"),
-  computeKeyFingerprint: vi.fn().mockResolvedValue("f".repeat(64)),
-  importKey: vi.fn().mockResolvedValue({} as CryptoKey),
-  encrypt: vi.fn().mockResolvedValue("mock-encrypted-payload"),
-  deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
-}));
-
 // Mock sync code codec — tests set return values per case to simulate decoding.
 vi.mock("@/crypto/syncCode", () => ({
   SyncCodeError: class SyncCodeError extends Error {},
@@ -25,7 +15,6 @@ vi.mock("@/crypto/syncCode", () => ({
 }));
 
 import { performJoin, performSoloRecovery, tryAutoRecovery } from "@/dialog/onboardingFlow";
-import { generateKey, exportKey, computeKeyFingerprint } from "@/crypto/encrypt";
 import { decodeSyncCode } from "@/crypto/syncCode";
 import type { ApiClient } from "@/api/client";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
@@ -57,11 +46,6 @@ function createMockAutoSetup(): ReturnType<typeof useAutoSetup> {
 describe("performSoloRecovery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    // Re-apply crypto mock implementations cleared by clearAllMocks
-    vi.mocked(generateKey).mockResolvedValue({} as CryptoKey);
-    vi.mocked(exportKey).mockResolvedValue("fresh-key-string");
-    vi.mocked(computeKeyFingerprint).mockResolvedValue("f".repeat(64));
 
     // Reset chrome.storage mocks
     vi.mocked(chrome.storage.local.set).mockImplementation(
@@ -97,11 +81,11 @@ describe("performSoloRecovery", () => {
       onFamilyJoined,
     });
 
-    expect(result).toEqual({ recovered: true, keyRotated: true });
+    expect(result).toEqual({ recovered: true });
     expect(onFamilyJoined).toHaveBeenCalledWith("fam-solo-1", "user-abc");
   });
 
-  it("calls joinFamily with the freshly generated keyFingerprint", async () => {
+  it("calls joinFamily without keyFingerprint", async () => {
     const apiClient = createMockApiClient();
     const autoSetup = createMockAutoSetup();
 
@@ -118,30 +102,6 @@ describe("performSoloRecovery", () => {
       "fam-solo-1",
       "user-abc",
       "Test User",
-      expect.objectContaining({ keyFingerprint: "f".repeat(64) }),
-    );
-  });
-
-  it("passes only keyFingerprint to joinFamily (recoverySource removed in C1 security fix)", async () => {
-    const apiClient = createMockApiClient();
-    const autoSetup = createMockAutoSetup();
-
-    await performSoloRecovery({
-      familyId: "fam-solo-1",
-      userId: "user-abc",
-      displayName: "Test User",
-      apiClient,
-      autoSetup,
-      onFamilyJoined: vi.fn(),
-    });
-
-    expect(apiClient.joinFamily).toHaveBeenCalledWith(
-      "fam-solo-1",
-      "user-abc",
-      "Test User",
-      {
-        keyFingerprint: "f".repeat(64),
-      },
     );
   });
 
@@ -162,7 +122,6 @@ describe("performSoloRecovery", () => {
     expect(chrome.storage.local.set).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-abc",
-        encryptionKey: "fresh-key-string",
         authToken: "tok",
         tokenExpiresAt: 9999999999,
       }),
@@ -176,9 +135,6 @@ describe("performSoloRecovery", () => {
     // Background messages sent
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "SET_FAMILY_ID", familyId: "fam-solo-1" }),
-    );
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "SET_ENCRYPTION_KEY", encryptionKey: "fresh-key-string" }),
     );
   });
 
@@ -276,35 +232,14 @@ describe("performSoloRecovery", () => {
     });
 
     // sync storage failure is swallowed; recovery still succeeds
-    expect(result).toEqual({ recovered: true, keyRotated: true });
+    expect(result).toEqual({ recovered: true });
     expect(onFamilyJoined).toHaveBeenCalled();
   });
 });
 
 describe("tryAutoRecovery", () => {
-  /**
-   * Wire chrome.runtime.sendMessage so GET_ENCRYPTION_KEY returns the given key.
-   * Mirrors the helper used in component tests.
-   */
-  function mockEncryptionKeyMessage(encryptionKey: string | null) {
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      (...args: unknown[]) => {
-        const msg = args[0] as Record<string, unknown>;
-        const callback = args[1] as ((response: unknown) => void) | undefined;
-        if (msg.type === "GET_ENCRYPTION_KEY" && typeof callback === "function") {
-          callback({ encryptionKey });
-        }
-        return Promise.resolve();
-      },
-    );
-  }
-
   beforeEach(() => {
     vi.clearAllMocks();
-
-    vi.mocked(generateKey).mockResolvedValue({} as CryptoKey);
-    vi.mocked(exportKey).mockResolvedValue("fresh-key-string");
-    vi.mocked(computeKeyFingerprint).mockResolvedValue("f".repeat(64));
 
     vi.mocked(chrome.storage.local.set).mockImplementation(
       (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
@@ -318,57 +253,14 @@ describe("tryAutoRecovery", () => {
     vi.mocked(chrome.storage.sync.set).mockImplementation(
       (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
     );
+    vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("regression guard: does NOT pass recoverySource to joinFamily (only keyFingerprint)", async () => {
-    // tryAutoRecovery uses a synced key from another device. It must NOT
-    // signal `recoverySource: "extension"` — that flag is reserved for the
-    // solo-recovery path where a fresh key is generated. Widening this flag
-    // would let any auto-recovery bypass PWA verification, breaking trust.
-    mockEncryptionKeyMessage("synced-key-from-other-device");
-    const apiClient = createMockApiClient();
-    const autoSetup = createMockAutoSetup();
-
-    await tryAutoRecovery({
-      familyId: "fam-existing",
-      userId: "user-abc",
-      displayName: "Test User",
-      apiClient,
-      autoSetup,
-      onFamilyJoined: vi.fn(),
-    });
-
-    expect(apiClient.joinFamily).toHaveBeenCalledTimes(1);
-    const fourthArg = vi.mocked(apiClient.joinFamily).mock.calls[0][3];
-    expect(fourthArg).toBeDefined();
-    expect(fourthArg).toHaveProperty("keyFingerprint");
-    expect(fourthArg).not.toHaveProperty("recoverySource");
-  });
-
-  it("returns { recovered: false } when no synced encryption key is available", async () => {
-    mockEncryptionKeyMessage(null);
-    const apiClient = createMockApiClient();
-    const autoSetup = createMockAutoSetup();
-
-    const result = await tryAutoRecovery({
-      familyId: "fam-existing",
-      userId: "user-abc",
-      displayName: "Test User",
-      apiClient,
-      autoSetup,
-      onFamilyJoined: vi.fn(),
-    });
-
-    expect(result).toEqual({ recovered: false });
-    expect(apiClient.joinFamily).not.toHaveBeenCalled();
-  });
-
   it("returns { recovered: true } and calls onFamilyJoined on successful auto-recovery", async () => {
-    mockEncryptionKeyMessage("synced-key-from-other-device");
     const onFamilyJoined = vi.fn();
     const apiClient = createMockApiClient();
     const autoSetup = createMockAutoSetup();
@@ -391,13 +283,9 @@ describe("performJoin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Re-apply crypto mock implementations cleared by clearAllMocks
-    vi.mocked(computeKeyFingerprint).mockResolvedValue("f".repeat(64));
-
     // Default sync-code decode: plain local host, no apiHost override.
     vi.mocked(decodeSyncCode).mockReturnValue({
       familyId: "fam-join-1",
-      encryptionKey: "decoded-key",
     });
 
     vi.mocked(chrome.storage.local.set).mockImplementation(
@@ -416,26 +304,20 @@ describe("performJoin", () => {
     vi.restoreAllMocks();
   });
 
-  it("calls joinFamily with keyFingerprint derived from decoded sync code", async () => {
+  it("calls joinFamily without keyFingerprint", async () => {
     const apiClient = createMockApiClient();
 
     await performJoin({
-      syncCodeInput: "moo-fam-join-1-decodedkey",
+      syncCodeInput: "moo-fam-join-1",
       userId: "user-x",
       displayName: "Name",
       apiClient,
     });
 
-    // computeKeyFingerprint must be applied to the key extracted from the sync code,
-    // not a freshly generated one — this is the invariant that unlocks server-side
-    // fingerprint-based verification bypass for the manual-paste recovery path.
-    expect(computeKeyFingerprint).toHaveBeenCalledWith("decoded-key");
-
     expect(apiClient.joinFamily).toHaveBeenCalledWith(
       "fam-join-1",
       "user-x",
       "Name",
-      { keyFingerprint: "f".repeat(64) },
     );
   });
 
@@ -443,7 +325,7 @@ describe("performJoin", () => {
     const apiClient = createMockApiClient();
 
     const result = await performJoin({
-      syncCodeInput: "moo-fam-join-1-decodedkey",
+      syncCodeInput: "moo-fam-join-1",
       userId: "user-x",
       displayName: "Name",
       apiClient,
@@ -464,7 +346,7 @@ describe("performJoin", () => {
     });
 
     const result = await performJoin({
-      syncCodeInput: "moo-fam-join-1-decodedkey",
+      syncCodeInput: "moo-fam-join-1",
       userId: "user-x",
       displayName: "Name",
       apiClient,
@@ -480,14 +362,13 @@ describe("performJoin", () => {
   it("updates api endpoint and sends SET_API_ENDPOINT when decoded.apiHost is set", async () => {
     vi.mocked(decodeSyncCode).mockReturnValue({
       familyId: "fam-join-1",
-      encryptionKey: "decoded-key",
       apiHost: "https://custom.example.com",
     });
 
     const apiClient = createMockApiClient();
 
     await performJoin({
-      syncCodeInput: "moo-fam-join-1-decodedkey@custom",
+      syncCodeInput: "moo-fam-join-1@https://custom.example.com",
       userId: "user-x",
       displayName: "Name",
       apiClient,
@@ -502,11 +383,11 @@ describe("performJoin", () => {
     );
   });
 
-  it("persists credentials and sends SET_FAMILY_ID / SET_ENCRYPTION_KEY on success", async () => {
+  it("persists credentials and sends SET_FAMILY_ID on success", async () => {
     const apiClient = createMockApiClient();
 
     await performJoin({
-      syncCodeInput: "moo-fam-join-1-decodedkey",
+      syncCodeInput: "moo-fam-join-1",
       userId: "user-x",
       displayName: "Name",
       apiClient,
@@ -515,7 +396,6 @@ describe("performJoin", () => {
     expect(chrome.storage.local.set).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-x",
-        encryptionKey: "decoded-key",
         authToken: "tok",
         tokenExpiresAt: 9999999999,
       }),
@@ -523,9 +403,6 @@ describe("performJoin", () => {
 
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "SET_FAMILY_ID", familyId: "fam-join-1" }),
-    );
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "SET_ENCRYPTION_KEY", encryptionKey: "decoded-key" }),
     );
   });
 });

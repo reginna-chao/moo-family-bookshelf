@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../utils/env";
 import { kvKeys, type FamilyMember, type FamilyRecord, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
-import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName, isValidKeyFingerprint, timingSafeEqualHex } from "../utils/validation";
+import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName } from "../utils/validation";
 import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 import { validateVerification } from "./verify";
 
@@ -16,20 +16,15 @@ function invalidDisplayNameResponse(c: Context<{ Bindings: Env }>) {
   );
 }
 
-// Strip server-only fields before sending family record to clients.
-// keyFingerprint is a trust credential — it must not be redistributed.
-type PublicFamilyRecord = Omit<FamilyRecord, "keyFingerprint">;
-function toPublicRecord(record: FamilyRecord): PublicFamilyRecord {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { keyFingerprint, ...pub } = record;
-  return pub;
+function toPublicRecord(record: FamilyRecord): FamilyRecord {
+  return record;
 }
 
 // POST /api/family — create new family
 familyRoutes.post("/", async (c) => {
   const familyId = generateFamilyId();
 
-  let body: { userId: string; displayName?: string; keyFingerprint?: string } | null;
+  let body: { userId: string; displayName?: string } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -58,20 +53,6 @@ familyRoutes.post("/", async (c) => {
     return invalidDisplayNameResponse(c);
   }
 
-  if (!body.keyFingerprint || typeof body.keyFingerprint !== "string") {
-    return c.json(
-      { error: { code: "MISSING_KEY_FINGERPRINT", message: "keyFingerprint is required" } },
-      400,
-    );
-  }
-
-  if (!isValidKeyFingerprint(body.keyFingerprint)) {
-    return c.json(
-      { error: { code: "INVALID_KEY_FINGERPRINT", message: "keyFingerprint format is invalid" } },
-      400,
-    );
-  }
-
   // Prevent duplicate family creation — user must leave existing family first
   const existingFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
   if (existingFamilyId) {
@@ -94,7 +75,6 @@ familyRoutes.post("/", async (c) => {
     members: [member],
     maxMembers: 2,
     createdAt: new Date().toISOString(),
-    keyFingerprint: body.keyFingerprint,
   };
 
   await Promise.all([
@@ -123,7 +103,6 @@ familyRoutes.post("/:id/join", async (c) => {
     userId: string;
     displayName?: string;
     verifySecret?: string;
-    keyFingerprint?: string;
   } | null;
   try {
     body = await c.req.json();
@@ -151,13 +130,6 @@ familyRoutes.post("/:id/join", async (c) => {
   const displayName = sanitizeDisplayName(body.displayName);
   if (displayName === null) {
     return invalidDisplayNameResponse(c);
-  }
-
-  if (body.keyFingerprint !== undefined && !isValidKeyFingerprint(body.keyFingerprint)) {
-    return c.json(
-      { error: { code: "INVALID_KEY_FINGERPRINT", message: "keyFingerprint format is invalid" } },
-      400,
-    );
   }
 
   // Per-userId rate limit: max 10 join attempts per userId per hour across all IPs.
@@ -200,20 +172,14 @@ familyRoutes.post("/:id/join", async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Skip verify if client provides matching keyFingerprint (trusted client with prior key possession)
-  const fingerprintMatches =
-    body.keyFingerprint !== undefined &&
-    timingSafeEqualHex(body.keyFingerprint, record.keyFingerprint);
-  if (!fingerprintMatches) {
-    // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
-    // Users with no verification record (method: "none") pass automatically.
-    const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
-    if (!verification.valid && verification.error) {
-      return c.json(
-        { error: { code: verification.error.code, message: verification.error.message } },
-        verification.error.status as 403 | 429,
-      );
-    }
+  // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
+  // Users with no verification record (method: "none") pass automatically.
+  const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
+  if (!verification.valid && verification.error) {
+    return c.json(
+      { error: { code: verification.error.code, message: verification.error.message } },
+      verification.error.status as 403 | 429,
+    );
   }
 
   const isExistingMember = hasMember(record.members, body.userId);
@@ -228,19 +194,6 @@ familyRoutes.post("/:id/join", async (c) => {
       );
     }
     record.members.push({ userId: body.userId, displayName });
-  } else if (
-    record.members.length === 1 &&
-    body.keyFingerprint !== undefined &&
-    !timingSafeEqualHex(body.keyFingerprint, record.keyFingerprint)
-  ) {
-    // Solo-member rejoin with a new fingerprint: rotate the trust anchor.
-    // This supports the silent-rejoin recovery path when the client lost its
-    // encryption key (e.g. extension reinstall) and had to regenerate it.
-    // Multi-member families intentionally disallow rotation — the fingerprint
-    // is the shared trust anchor and must not be mutated by a single member.
-    // The verify path above has already gated this request (either matched or
-    // validateVerification passed), so rotating here is safe.
-    record.keyFingerprint = body.keyFingerprint;
   }
 
   await Promise.all([

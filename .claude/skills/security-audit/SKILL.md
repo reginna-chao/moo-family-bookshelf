@@ -2,7 +2,7 @@
 name: security-audit
 description: >
   Scan the repository for security risks across 7 dimensions: secrets leakage, dependency vulnerabilities,
-  code-level OWASP issues, Chrome Extension permissions, E2EE implementation, API security, and pre-publish readiness.
+  code-level OWASP issues, Chrome Extension permissions, hashing & auth token handling, API security, and pre-publish readiness.
   Read-only analysis; does NOT modify code.
   TRIGGER when: user explicitly invokes /security-audit, or asks to check for security issues, secrets, or pre-publish safety.
   DO NOT TRIGGER when: user wants code written, tests added, or code reviewed for non-security concerns.
@@ -32,7 +32,7 @@ Scan the entire repository for security risks. Read-only — never modify code, 
 | `deps` | Dimension 2 only — dependency vulnerabilities |
 | `code` | Dimension 3 only — code-level OWASP issues |
 | `extension` | Dimension 4 only — Chrome Extension security |
-| `crypto` | Dimension 5 only — E2EE implementation |
+| `crypto` | Dimension 5 only — Hashing implementation |
 | `api` | Dimension 6 only — API & Worker security |
 | `publish` | Dimension 7 only — pre-publish readiness |
 
@@ -98,19 +98,16 @@ Review extension-specific security concerns.
 - No `executeScript` with dynamic code strings
 - No remote code loading (`fetch` + `eval`, dynamic `import()` from external URLs)
 
-### Dimension 5: E2EE Implementation Review
+### Dimension 5: Hashing & Auth Token Review
 
-Verify the end-to-end encryption module follows cryptographic best practices.
+Verify the hashing module and auth token handling follow best practices.
 
 **Checks:**
-- Algorithm: using AES-GCM (or equivalent AEAD)? Key size >= 256 bits?
-- IV/Nonce: unique per encryption operation? Never reused with the same key?
-- Key derivation: if deriving from sync code, using PBKDF2/HKDF with sufficient iterations?
-- Key storage: encryption key never sent to server, never logged, never in error messages
-- Plaintext leakage: no plaintext data passed to API calls or stored in KV
-- Timing attacks: no string comparison on keys/tokens using `===` (should use constant-time comparison)
-- Web Crypto API usage: using `crypto.subtle` (not a JS polyfill) for all crypto operations
-- Error handling: crypto errors don't leak key material or plaintext in error messages
+- Hashing: using SHA-256 via `crypto.subtle` for deriveUserId? Salt applied correctly?
+- Auth tokens: never logged, never in error messages, never in URL params
+- Token validation: constant-time comparison for security-sensitive values (tokens, hashes)
+- Web Crypto API usage: using `crypto.subtle` (not a JS polyfill) for all hash operations
+- Error handling: errors don't leak token material or sensitive data in error messages
 
 ### Dimension 6: API & Worker Security
 
@@ -148,7 +145,7 @@ Review backend API for security vulnerabilities. Go beyond "does it exist" — c
 **6F. Response security:**
 - Error messages: no internal details leaked (stack traces, KV keys, etc.).
 - HTTP headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Strict-Transport-Security`, `X-XSS-Protection: 0` set on all responses.
-- Zero-knowledge: Worker never accesses plaintext book data — only stores/retrieves ciphertext.
+- Data access: Worker stores plaintext JSON; verify auth tokens are validated before returning data.
 
 **6G. Enumeration & abuse:**
 - Family IDs or user IDs not easily enumerable.
@@ -201,7 +198,7 @@ After all dimensions are checked, output a summary table:
 | 2. Dependency Vulnerabilities | ... | ... | ... | ... |
 | 3. Code-Level OWASP | ... | ... | ... | ... |
 | 4. Chrome Extension Security | ... | ... | ... | ... |
-| 5. E2EE Implementation | ... | ... | ... | ... |
+| 5. Hashing & Auth Token | ... | ... | ... | ... |
 | 6. API & Worker Security | ... | ... | ... | ... |
 | 7. Pre-Publish Readiness | ... | ... | ... | ... |
 

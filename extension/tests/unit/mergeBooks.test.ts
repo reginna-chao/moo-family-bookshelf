@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeBooks, asDecryptedBooks } from "@/sync/mergeBooks";
+import { mergeBooks } from "@/sync/mergeBooks";
 import { BoolFlag, type BookEntry } from "@/api/client";
 import type { ScrapedBook } from "@/content/scraper";
 
@@ -32,7 +32,7 @@ function makeSaved(overrides: Partial<BookEntry> = {}): BookEntry {
 describe("mergeBooks — isArchived", () => {
   it("scraped book with isArchived=0 merged with no saved → isArchived=0", () => {
     const scraped = [makeScraped({ bookId: "b1", isArchived: BoolFlag.FALSE })];
-    const saved = asDecryptedBooks([]);
+    const saved: BookEntry[] = [];
 
     const result = mergeBooks(scraped, saved);
 
@@ -42,7 +42,7 @@ describe("mergeBooks — isArchived", () => {
 
   it("scraped book with isArchived=1 merged with no saved → isArchived=1", () => {
     const scraped = [makeScraped({ bookId: "b1", isArchived: BoolFlag.TRUE })];
-    const saved = asDecryptedBooks([]);
+    const saved: BookEntry[] = [];
 
     const result = mergeBooks(scraped, saved);
 
@@ -52,7 +52,7 @@ describe("mergeBooks — isArchived", () => {
 
   it("scraped book (isArchived=1) merged with saved (isArchived=0) → uses scraped value (1)", () => {
     const scraped = [makeScraped({ bookId: "b1", isArchived: BoolFlag.TRUE })];
-    const saved = asDecryptedBooks([makeSaved({ bookId: "b1", isArchived: BoolFlag.FALSE })]);
+    const saved = [makeSaved({ bookId: "b1", isArchived: BoolFlag.FALSE })];
 
     const result = mergeBooks(scraped, saved);
 
@@ -62,7 +62,7 @@ describe("mergeBooks — isArchived", () => {
 
   it("scraped book (no isArchived) merged with saved (isArchived=1) → preserves saved value (1)", () => {
     const scraped = [makeScraped({ bookId: "b1", isArchived: undefined })];
-    const saved = asDecryptedBooks([makeSaved({ bookId: "b1", isArchived: BoolFlag.TRUE })]);
+    const saved = [makeSaved({ bookId: "b1", isArchived: BoolFlag.TRUE })];
 
     const result = mergeBooks(scraped, saved);
 
@@ -72,7 +72,7 @@ describe("mergeBooks — isArchived", () => {
 
   it("saved-only book with isArchived=1 stays as-is", () => {
     const scraped: ScrapedBook[] = [];
-    const saved = asDecryptedBooks([makeSaved({ bookId: "b1", isArchived: 1, isShared: BoolFlag.TRUE })]);
+    const saved = [makeSaved({ bookId: "b1", isArchived: 1, isShared: BoolFlag.TRUE })];
 
     const result = mergeBooks(scraped, saved);
 
@@ -86,7 +86,7 @@ describe("mergeBooks — isArchived", () => {
 describe("mergeBooks — category", () => {
   it("scraped category takes priority over saved", () => {
     const scraped = [makeScraped({ bookId: "b1", category: "奇幻冒險" })];
-    const saved = asDecryptedBooks([makeSaved({ bookId: "b1", category: "文學小說" })]);
+    const saved = [makeSaved({ bookId: "b1", category: "文學小說" })];
 
     const result = mergeBooks(scraped, saved);
 
@@ -95,7 +95,7 @@ describe("mergeBooks — category", () => {
 
   it("falls back to saved category when scraped is empty", () => {
     const scraped = [makeScraped({ bookId: "b1", category: "" })];
-    const saved = asDecryptedBooks([makeSaved({ bookId: "b1", category: "韓國耽美" })]);
+    const saved = [makeSaved({ bookId: "b1", category: "韓國耽美" })];
 
     const result = mergeBooks(scraped, saved);
 
@@ -104,7 +104,7 @@ describe("mergeBooks — category", () => {
 
   it("scraped-only book keeps its category", () => {
     const scraped = [makeScraped({ bookId: "b1", category: "軍事\\戰略" })];
-    const saved = asDecryptedBooks([]);
+    const saved: BookEntry[] = [];
 
     const result = mergeBooks(scraped, saved);
 
@@ -113,7 +113,7 @@ describe("mergeBooks — category", () => {
 
   it("saved-only book keeps its category", () => {
     const scraped: ScrapedBook[] = [];
-    const saved = asDecryptedBooks([makeSaved({ bookId: "b1", category: "西洋羅曼史" })]);
+    const saved = [makeSaved({ bookId: "b1", category: "西洋羅曼史" })];
 
     const result = mergeBooks(scraped, saved);
 

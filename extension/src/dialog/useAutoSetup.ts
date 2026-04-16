@@ -1,10 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { scrapeUserEmail, scrapeDisplayName, scrapeBooks } from "../content/scraper";
-import { importKey, encrypt, decrypt } from "../crypto/encrypt";
-import { mergeBooks, asDecryptedBooks } from "./mergeBooks";
-import type { DecryptedBooks } from "./mergeBooks";
-import { ApiClient, BookEntry } from "../api/client";
-import { DecryptMismatchError } from "../errors";
+import { mergeBooks } from "./mergeBooks";
+import { ApiClient, BookEntry, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 
 export type AutoSetupPhase =
   | "idle"
@@ -30,29 +27,15 @@ function wait(ms: number): Promise<void> {
 
 /**
  * Extract saved books from the personal books API response.
- * Handles the encrypted `{ payload }` shape and a legacy `{ books }` fallback.
- * Throws DecryptMismatchError on decrypt failure so callers can abort the
- * sync and avoid overwriting server data with a differently-encrypted payload.
+ * Parses the API response as plain JSON — returns BookEntry[] directly.
  */
-async function extractSavedBooks(
+function extractSavedBooks(
   data: unknown,
-  key: CryptoKey,
-): Promise<DecryptedBooks> {
-  if (!data || typeof data !== "object") return asDecryptedBooks([]);
+): BookEntry[] {
+  if (!data || typeof data !== "object") return [];
   const record = data as Record<string, unknown>;
-  if (typeof record.payload === "string") {
-    try {
-      const decrypted = await decrypt(record.payload, key);
-      const parsed = JSON.parse(decrypted) as Record<string, unknown>;
-      if (Array.isArray(parsed.books)) return asDecryptedBooks(parsed.books as BookEntry[]);
-      return asDecryptedBooks([]);
-    } catch {
-      // Server has data we cannot decrypt — abort to prevent data loss.
-      throw new DecryptMismatchError();
-    }
-  }
-  if (Array.isArray(record.books)) return asDecryptedBooks(record.books as BookEntry[]);
-  return asDecryptedBooks([]);
+  if (Array.isArray(record.books)) return record.books as BookEntry[];
+  return [];
 }
 
 /**
@@ -81,7 +64,7 @@ export interface UseAutoSetupReturn {
   errorMessage: string;
   /** Step 1: auto-navigate to #/me and scrape profile */
   scrapeProfile: () => Promise<AutoSetupResult | null>;
-  /** Step 2: after family setup, auto-navigate to #/library, scrape + encrypt + upload */
+  /** Step 2: after family setup, auto-navigate to #/library, scrape + upload */
   syncBooks: (params: AutoBookSyncParams) => Promise<boolean>;
   /** Reset to idle */
   reset: () => void;
@@ -145,30 +128,20 @@ export function useAutoSetup(): UseAutoSetupReturn {
       try {
         const scrapedBooks = await navigateAndRun("#/library", () => scrapeBooks());
 
-        const storageResult = await chrome.storage.local.get(["encryptionKey"]);
-        const encKeyString = storageResult.encryptionKey as string | undefined;
-        if (!encKeyString) throw new Error("找不到加密金鑰");
-
-        // Import the key once and share it between decrypt (for existing saved
-        // books) and encrypt (for the merged upload).
-        const key = await importKey(encKeyString);
-
-        // Fetch existing saved books for merging. The server stores data as
-        // `{ payload: "<ciphertext>" }` — decrypt before merging so that
-        // previously-set `isShared` flags are preserved.
+        // Fetch existing saved books for merging (plain JSON)
         const apiResponse = await apiClient.getPersonalBooks(userId);
-        const savedBooks = await extractSavedBooks(apiResponse.data, key);
+        const savedBooks = extractSavedBooks(apiResponse.data);
 
         const merged = mergeBooks(scrapedBooks, savedBooks);
 
-        const payload = JSON.stringify({
+        const personalBooks: PersonalBooks = {
+          schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
           userId,
           displayName: "",
           books: merged,
           lastUpdated: new Date().toISOString(),
-        });
-        const encrypted = await encrypt(payload, key);
-        const uploadResponse = await apiClient.updatePersonalBooks(userId, encrypted);
+        };
+        const uploadResponse = await apiClient.updatePersonalBooks(userId, personalBooks);
 
         if (uploadResponse.error) {
           setErrorMessage(uploadResponse.error.message);
@@ -181,11 +154,7 @@ export function useAutoSetup(): UseAutoSetupReturn {
         setPhase("done");
         return true;
       } catch (err) {
-        if (err instanceof DecryptMismatchError) {
-          setErrorMessage("偵測到加密金鑰不符，同步已暫停。請確認同步代碼是否正確。");
-        } else {
-          setErrorMessage(err instanceof Error ? err.message : "同步書單失敗");
-        }
+        setErrorMessage(err instanceof Error ? err.message : "同步書單失敗");
         setPhase("error");
         restoreHash();
         return false;

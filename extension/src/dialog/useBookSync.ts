@@ -9,8 +9,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { ApiClient, BookEntry } from "../api/client";
 import { syncBooks, canAutoSync } from "../sync/syncBooks";
 
-const DECRYPT_MISMATCH_MSG = "偵測到加密金鑰不符，同步已暫停。請確認同步代碼是否正確。";
-
 export type SyncStatus = "idle" | "syncing" | "done" | "error";
 
 export interface UseBookSyncOptions {
@@ -63,7 +61,7 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
           if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
           statusTimerRef.current = setTimeout(() => setSyncStatus("idle"), 2000);
         } else {
-          setSyncError(result.decryptMismatch ? DECRYPT_MISMATCH_MSG : (result.error ?? "自動同步失敗"));
+          setSyncError(result.error ?? "自動同步失敗");
           setSyncStatus("error");
         }
       } catch (err) {
@@ -87,7 +85,7 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
       if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
       statusTimerRef.current = setTimeout(() => setSyncStatus("idle"), 2000);
     } else {
-      setSyncError(result.decryptMismatch ? DECRYPT_MISMATCH_MSG : (result.error ?? "同步失敗"));
+      setSyncError(result.error ?? "同步失敗");
       setSyncStatus("error");
     }
   }, [userId, apiClient]);

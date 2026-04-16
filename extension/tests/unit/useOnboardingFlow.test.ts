@@ -9,7 +9,7 @@ beforeAll(() => {
 });
 
 // Mock crypto.deriveUserId — deterministic hex for tests
-vi.mock("@/crypto/encrypt", () => ({
+vi.mock("@/crypto/hash", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
 }));
 
@@ -20,7 +20,6 @@ vi.mock("@/dialog/onboardingFlow", () => ({
     userId: "u",
     syncCode: "moo-sync-code",
   }),
-  getSyncedEncryptionKey: vi.fn().mockResolvedValue(null),
   performJoin: vi.fn().mockResolvedValue({
     ok: true,
     familyId: "fam-joined",
@@ -28,7 +27,6 @@ vi.mock("@/dialog/onboardingFlow", () => ({
   }),
   performSoloRecovery: vi.fn().mockResolvedValue({ recovered: true }),
   tryAutoRecovery: vi.fn().mockResolvedValue({ recovered: false }),
-  tryExistingKeyRecovery: vi.fn().mockResolvedValue({ canReuse: false }),
 }));
 
 // Mock syncCode for handleJoin path (not exercised here, but required for import graph)
@@ -39,9 +37,8 @@ vi.mock("@/crypto/syncCode", () => ({
 }));
 
 import { useOnboardingFlow } from "@/dialog/useOnboardingFlow";
-import { deriveUserId } from "@/crypto/encrypt";
+import { deriveUserId } from "@/crypto/hash";
 import {
-  getSyncedEncryptionKey,
   performSoloRecovery,
   tryAutoRecovery,
 } from "@/dialog/onboardingFlow";
@@ -102,7 +99,6 @@ async function driveToRecoveryChoice(
   autoSetup: ReturnType<typeof useAutoSetup> = createMockAutoSetup(),
   onFamilyJoined: (familyId: string, userId: string) => void = vi.fn(),
 ) {
-  vi.mocked(getSyncedEncryptionKey).mockResolvedValueOnce(null);
   const { result } = renderFlow(apiClient, autoSetup, onFamilyJoined);
   await act(async () => {
     await result.current.handleStart();
@@ -115,7 +111,6 @@ describe("useOnboardingFlow", () => {
     vi.clearAllMocks();
     // vi.clearAllMocks wipes implementations — re-apply defaults
     vi.mocked(deriveUserId).mockResolvedValue("a".repeat(64));
-    vi.mocked(getSyncedEncryptionKey).mockResolvedValue(null);
     vi.mocked(tryAutoRecovery).mockResolvedValue({ recovered: false });
     vi.mocked(performSoloRecovery).mockResolvedValue({ recovered: true });
   });
@@ -130,13 +125,12 @@ describe("useOnboardingFlow", () => {
   });
 
   describe("handleStart → recovery-choice", () => {
-    it("routes to 'recovery-choice' when family exists and no encryption key is synced", async () => {
+    it("routes to 'recovery-choice' when family exists", async () => {
       const apiClient = createMockApiClient({
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-existing", memberCount: 2 },
         }),
       });
-      vi.mocked(getSyncedEncryptionKey).mockResolvedValueOnce(null);
 
       const { result } = renderFlow(apiClient);
       await act(async () => {
@@ -144,18 +138,15 @@ describe("useOnboardingFlow", () => {
       });
 
       expect(result.current.state).toBe("recovery-choice");
-      // Should NOT have attempted auto-recovery when there's no synced key
-      expect(tryAutoRecovery).not.toHaveBeenCalled();
     });
 
-    it("calls onFamilyJoined when auto-recovery succeeds with a synced key", async () => {
+    it("calls onFamilyJoined when auto-recovery succeeds", async () => {
       const onFamilyJoined = vi.fn();
       const apiClient = createMockApiClient({
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-existing", memberCount: 2 },
         }),
       });
-      vi.mocked(getSyncedEncryptionKey).mockResolvedValueOnce("synced-key");
       vi.mocked(tryAutoRecovery).mockImplementationOnce(async (opts) => {
         opts.onFamilyJoined(opts.familyId, opts.userId);
         return { recovered: true };
@@ -169,13 +160,12 @@ describe("useOnboardingFlow", () => {
       expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", expect.any(String));
     });
 
-    it("falls back to 'recovery-choice' when synced key is present but auto-recovery fails", async () => {
+    it("falls back to 'recovery-choice' when auto-recovery fails", async () => {
       const apiClient = createMockApiClient({
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-existing", memberCount: 2 },
         }),
       });
-      vi.mocked(getSyncedEncryptionKey).mockResolvedValueOnce("synced-key");
       vi.mocked(tryAutoRecovery).mockResolvedValueOnce({ recovered: false });
 
       const { result } = renderFlow(apiClient);
@@ -205,13 +195,15 @@ describe("useOnboardingFlow", () => {
       expect(result.current.syncCodeInput).toBe("");
     });
 
-    it("handleRecoveryChoiceSkip → state 'solo-recovery-confirm'", async () => {
+    it("handleRecoveryChoiceSkip → tries solo recovery, then state 'solo-recovery-confirm' on failure", async () => {
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
       const { result } = await driveToRecoveryChoice();
 
       await act(async () => {
         await result.current.handleRecoveryChoiceSkip();
       });
 
+      expect(performSoloRecovery).toHaveBeenCalled();
       expect(result.current.state).toBe("solo-recovery-confirm");
     });
 
@@ -231,6 +223,7 @@ describe("useOnboardingFlow", () => {
     });
 
     it("handleSoloRecoveryBack → state 'recovery-choice'", async () => {
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
       const { result } = await driveToRecoveryChoice();
 
       await act(async () => {
@@ -247,34 +240,40 @@ describe("useOnboardingFlow", () => {
   });
 
   describe("handleSoloRecoveryConfirm", () => {
+    /** Drive to solo-recovery-confirm by making handleRecoveryChoiceSkip's attempt fail */
+    async function driveToSoloRecoveryConfirm() {
+      // Make the first performSoloRecovery call (from handleRecoveryChoiceSkip) fail
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
+      const driven = await driveToRecoveryChoice();
+
+      await act(async () => {
+        await driven.result.current.handleRecoveryChoiceSkip();
+      });
+      expect(driven.result.current.state).toBe("solo-recovery-confirm");
+      return driven;
+    }
+
     it("calls performSoloRecovery with the familyId captured during lookup", async () => {
-      const { result, apiClient } = await driveToRecoveryChoice();
+      const { result, apiClient } = await driveToSoloRecoveryConfirm();
       vi.mocked(performSoloRecovery).mockImplementationOnce(async (opts) => {
         opts.onFamilyJoined(opts.familyId, opts.userId);
         return { recovered: true };
       });
 
       await act(async () => {
-        await result.current.handleRecoveryChoiceSkip();
-      });
-
-      await act(async () => {
         await result.current.handleSoloRecoveryConfirm();
       });
 
-      expect(performSoloRecovery).toHaveBeenCalledOnce();
-      const arg = vi.mocked(performSoloRecovery).mock.calls[0][0];
+      // Called twice: once by handleRecoveryChoiceSkip (failed), once by handleSoloRecoveryConfirm
+      expect(performSoloRecovery).toHaveBeenCalledTimes(2);
+      const arg = vi.mocked(performSoloRecovery).mock.calls[1][0];
       expect(arg.familyId).toBe("fam-existing");
       expect(arg.apiClient).toBe(apiClient);
     });
 
     it("sets state to 'error' when performSoloRecovery returns { recovered: false }", async () => {
-      const { result } = await driveToRecoveryChoice();
+      const { result } = await driveToSoloRecoveryConfirm();
       vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
-
-      await act(async () => {
-        await result.current.handleRecoveryChoiceSkip();
-      });
 
       await act(async () => {
         await result.current.handleSoloRecoveryConfirm();
@@ -285,14 +284,10 @@ describe("useOnboardingFlow", () => {
     });
 
     it("sets state to 'error' when performSoloRecovery throws", async () => {
-      const { result } = await driveToRecoveryChoice();
+      const { result } = await driveToSoloRecoveryConfirm();
       vi.mocked(performSoloRecovery).mockRejectedValueOnce(
         new Error("network down"),
       );
-
-      await act(async () => {
-        await result.current.handleRecoveryChoiceSkip();
-      });
 
       await act(async () => {
         await result.current.handleSoloRecoveryConfirm();
@@ -343,6 +338,7 @@ describe("useOnboardingFlow", () => {
     });
 
     it("returns to 'welcome' when called from 'solo-recovery-confirm'", async () => {
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
       const { result } = await driveToRecoveryChoice();
       await act(async () => {
         await result.current.handleRecoveryChoiceSkip();

@@ -13,9 +13,8 @@ import {
   BoolFlag,
   FamilyMember,
   FamilyGroup,
-  RawFamilyBookshelf,
+  FamilyBookshelf,
 } from "../api/client";
-import { importKey, decrypt } from "../crypto/encrypt";
 import {
   seenKey,
   chipsKey,
@@ -26,7 +25,7 @@ import {
   type BookshelfChipsRecord,
 } from "./updateTracking";
 
-/** Decrypted member bookshelf for family shelf display */
+/** Member bookshelf for family shelf display */
 export interface MemberBooks {
   userId: string;
   displayName: string;
@@ -43,7 +42,7 @@ interface FamilyDataState {
   membersError: string;
   familyEndpoint: string | undefined;
 
-  /** Decrypted bookshelf data from getFamilyBookshelf */
+  /** Bookshelf data from getFamilyBookshelf */
   bookshelfMembers: MemberBooks[];
   bookshelfState: LoadState;
   bookshelfError: string;
@@ -78,22 +77,6 @@ interface FamilyDataProviderProps {
   children: React.ReactNode;
 }
 
-async function decryptPayload(
-  payload: string,
-  encryptionKey: string,
-): Promise<{ displayName: string; books: BookEntry[] }> {
-  const key = await importKey(encryptionKey);
-  const decrypted = await decrypt(payload, key);
-  const parsed = JSON.parse(decrypted) as {
-    displayName?: string;
-    books?: BookEntry[];
-  };
-  return {
-    displayName: parsed.displayName ?? "",
-    books: parsed.books ?? [],
-  };
-}
-
 export function FamilyDataProvider({
   familyId,
   userId,
@@ -124,8 +107,7 @@ export function FamilyDataProvider({
   const chipBookIdsRef = useRef<Set<string>>(new Set());
   chipBookIdsRef.current = chipBookIds;
   const rawMembersDataRef = useRef<{
-    decrypted: MemberBooks[];
-    raw: RawFamilyBookshelf["members"];
+    members: MemberBooks[];
   } | null>(null);
 
   const updatedBookIds = useMemo(() => {
@@ -188,52 +170,33 @@ export function FamilyDataProvider({
         return;
       }
 
-      const data: RawFamilyBookshelf | undefined = response.data;
+      const data: FamilyBookshelf | undefined = response.data;
       if (!data) {
         setBookshelfState("ready");
         return;
       }
 
-      const storageResult = await chrome.storage.local.get(["encryptionKey"]);
-      const encKey = storageResult.encryptionKey as string | undefined;
-
-      // Build name map from current members state (S1-orig: no extra API call)
+      // Build name map from current members state
       const memberNameMap = new Map<string, string>();
       for (const m of membersRef.current) {
         if (m.displayName) memberNameMap.set(m.userId, m.displayName);
       }
 
-      const decryptedMembers: MemberBooks[] = [];
-      for (const member of data.members) {
-        const familyDisplayName =
-          memberNameMap.get(member.userId) || member.userId.slice(0, 8);
-
-        if (!member.payload || !encKey) {
-          decryptedMembers.push({
-            userId: member.userId,
-            displayName: familyDisplayName,
-            books: [],
-          });
-          continue;
-        }
-
-        try {
-          const { books } = await decryptPayload(member.payload, encKey);
-          decryptedMembers.push({
-            userId: member.userId,
-            displayName: familyDisplayName,
-            books: books.filter((b) => b.isShared === BoolFlag.TRUE),
-          });
-        } catch {
-          decryptedMembers.push({
-            userId: member.userId,
-            displayName: familyDisplayName,
-            books: [],
-          });
-        }
-      }
+      // Server now returns decoded book data per member directly
+      const parsedMembers: MemberBooks[] = data.members.map((member) => ({
+        userId: member.userId,
+        displayName: memberNameMap.get(member.userId) || member.displayName || member.userId.slice(0, 8),
+        books: (member.books ?? []).filter((b) => b.isShared === BoolFlag.TRUE),
+      }));
 
       // --- Update tracking ---
+      // Build raw-like structure for update tracking compatibility
+      const rawMembers = data.members.map((m) => ({
+        userId: m.userId,
+        payload: null as string | null,
+        lastUpdated: null as string | null,
+      }));
+
       const sk = seenKey(userId);
       const ck = chipsKey(userId);
       let storageData: Record<string, unknown> = {};
@@ -246,20 +209,20 @@ export function FamilyDataProvider({
       const chipsData = (storageData[ck] ?? null) as BookshelfChipsRecord | null;
 
       const freshIds = computeFreshBookIds(
-        decryptedMembers,
-        data.members,
+        parsedMembers,
+        rawMembers,
         userId,
         seenData,
       );
 
       const allCurrentBookIds = new Set(
-        decryptedMembers.flatMap((m) => m.books.map((b) => b.bookId)),
+        parsedMembers.flatMap((m) => m.books.map((b) => b.bookId)),
       );
       const chipIds = loadValidChipBookIds(chipsData, allCurrentBookIds);
 
       // First use: silently initialize baseline
       if (Object.keys(seenData).length === 0) {
-        const baseline = buildSeenBaseline(decryptedMembers, data.members);
+        const baseline = buildSeenBaseline(parsedMembers, rawMembers);
         try {
           chrome.storage.local.set({ [sk]: baseline });
         } catch {
@@ -268,12 +231,11 @@ export function FamilyDataProvider({
       }
 
       rawMembersDataRef.current = {
-        decrypted: decryptedMembers,
-        raw: data.members,
+        members: parsedMembers,
       };
 
       if (!mountedRef.current) return;
-      setBookshelfMembers(decryptedMembers);
+      setBookshelfMembers(parsedMembers);
       setFreshUpdateBookIds(freshIds);
       setChipBookIds(chipIds);
       setBookshelfState("ready");
@@ -304,8 +266,13 @@ export function FamilyDataProvider({
     const raw = rawMembersDataRef.current;
     if (!raw) return;
 
-    // Update baseline
-    const baseline = buildSeenBaseline(raw.decrypted, raw.raw);
+    // Update baseline — build raw-like structure
+    const rawMembers = raw.members.map((m) => ({
+      userId: m.userId,
+      payload: null as string | null,
+      lastUpdated: null as string | null,
+    }));
+    const baseline = buildSeenBaseline(raw.members, rawMembers);
 
     // Merge fresh IDs into chips with 24h expiry
     const mergedChips = new Set(chipBookIdsRef.current);
@@ -327,7 +294,7 @@ export function FamilyDataProvider({
     setFreshUpdateBookIds(new Set());
   }, [userId]);
 
-  // Fetch on mount: members first, then bookshelf (S1-orig: sequential to avoid redundant API call)
+  // Fetch on mount: members first, then bookshelf
   useEffect(() => {
     void (async () => {
       await refreshMembers();
