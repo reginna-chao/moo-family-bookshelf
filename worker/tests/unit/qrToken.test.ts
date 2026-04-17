@@ -197,7 +197,7 @@ describe("Join with QR token bypass", () => {
     expect(stored).toBeNull();
   });
 
-  it("should fall through to normal verification when qrToken is reused", async () => {
+  it("should succeed on reused qrToken because existing members skip verification", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
     const userAuthToken = await seedAuthToken(VALID_USER_ID);
@@ -214,19 +214,20 @@ describe("Join with QR token bypass", () => {
     const qrJson = (await qrRes.json()) as Json;
     const qrToken = qrJson.data.token;
 
-    // First use succeeds
+    // First use succeeds (new member join via QR bypass)
     await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
       body: JSON.stringify({ userId: VALID_USER_ID, qrToken }),
     });
 
-    // Second use — token is deleted, falls through to verification
+    // Second use — token is deleted, but user is now an existing member
+    // so verification is skipped entirely (auto-recovery / multi-device flow)
     const secondRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
       body: JSON.stringify({ userId: VALID_USER_ID, qrToken }),
     });
 
-    expect(secondRes.status).toBe(403);
+    expect(secondRes.status).toBe(200);
     const json = (await secondRes.json()) as Json;
-    expect(json.error.code).toBe("VERIFICATION_REQUIRED");
+    expect(json.data.authToken).toBeDefined();
   });
 
   it("should fall through to verification when qrToken has wrong userId", async () => {

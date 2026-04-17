@@ -173,6 +173,27 @@ familyRoutes.post("/:id/join", async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
+  // Existing members are reconnecting from a new device, not joining for the first time.
+  // They were already verified when they originally joined. The Extension authenticates
+  // via the user's Readmoo login (scraping email → deriving userId), which is sufficient
+  // proof of identity. Skip verification and maxMembers check for them.
+  const isExistingMember = hasMember(record.members, body.userId);
+
+  if (isExistingMember) {
+    // Update displayName if changed
+    const member = findMember(record.members, body.userId);
+    if (member && displayName !== "" && member.displayName !== displayName) {
+      member.displayName = displayName;
+      await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+    }
+
+    const authToken = await getOrGenerateAuthToken(c.env.KV, body.userId);
+    const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
+    return c.json({ data: { ...toPublicRecord(record), authToken, expiresAt } });
+  }
+
+  // --- New member flow: verification + capacity check ---
+
   // QR token bypass: if a valid one-time QR token is provided, skip verification.
   let skipVerification = false;
   if (body.qrToken && typeof body.qrToken === "string") {
@@ -197,30 +218,22 @@ familyRoutes.post("/:id/join", async (c) => {
     }
   }
 
-  const isExistingMember = hasMember(record.members, body.userId);
-
-  if (!isExistingMember) {
-    // NOTE: No atomic compare-and-swap in KV. Concurrent joins could bypass
-    // maxMembers limit. Acceptable for 2-person families with low concurrency.
-    if (record.members.length >= record.maxMembers) {
-      return c.json(
-        { error: { code: "FAMILY_FULL", message: "家庭成員已達上限" } },
-        409,
-      );
-    }
-    record.members.push({ userId: body.userId, displayName });
+  // NOTE: No atomic compare-and-swap in KV. Concurrent joins could bypass
+  // maxMembers limit. Acceptable for 2-person families with low concurrency.
+  if (record.members.length >= record.maxMembers) {
+    return c.json(
+      { error: { code: "FAMILY_FULL", message: "家庭成員已達上限" } },
+      409,
+    );
   }
+  record.members.push({ userId: body.userId, displayName });
 
   await Promise.all([
     c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
     c.env.KV.put(kvKeys.member(body.userId), familyId),
   ]);
 
-  // Existing members reuse their current token to avoid invalidating other devices.
-  // New members always get a fresh token.
-  const authToken = isExistingMember
-    ? await getOrGenerateAuthToken(c.env.KV, body.userId)
-    : await generateAuthToken(c.env.KV, body.userId);
+  const authToken = await generateAuthToken(c.env.KV, body.userId);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { ...toPublicRecord(record), authToken, expiresAt } });

@@ -1,8 +1,8 @@
 import React from "react";
 import { PRIMARY_BLUE } from "./OnboardingViews";
 
-const WARNING_AMBER = "#b45309";
-const WARNING_BG = "#fef3c7";
+const INFO_BLUE = "#1e40af";
+const INFO_BG = "#dbeafe";
 
 export interface SoloRecoveryConfirmViewProps {
   onConfirm: () => void;
@@ -25,17 +25,17 @@ export function SoloRecoveryConfirmView({
           padding: 12,
           marginBottom: 16,
           borderRadius: 8,
-          background: WARNING_BG,
-          color: WARNING_AMBER,
+          background: INFO_BG,
+          color: INFO_BLUE,
           fontSize: 13,
           lineHeight: 1.6,
         }}
       >
-        ⚠️ 繼續後，先前設定的個人書架分享設定（哪些書公開）將無法還原。
-        書籍列表會根據目前讀墨帳號重新同步。
+        將以目前的讀墨帳號重新同步書籍資料。
+        您先前的分享設定（哪些書公開）會自動保留。
       </div>
       <p style={{ color: "#64748b", marginBottom: 24, fontSize: 13, lineHeight: 1.6 }}>
-        若你另一台裝置仍可使用，建議按「返回」後改用同步碼來保留書架設定。
+        同步完成後即可查看家庭書架。
       </p>
       <button
         type="button"
@@ -72,7 +72,7 @@ export function SoloRecoveryConfirmView({
           cursor: "pointer",
         }}
       >
-        返回，輸入同步碼
+        返回
       </button>
     </div>
   );

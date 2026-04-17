@@ -946,7 +946,7 @@ describe("Onboarding", () => {
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByText("輸入同步碼，保留書架設定"));
+        fireEvent.click(screen.getByText("輸入同步碼重新加入"));
         await flushMicrotasks();
       });
 
@@ -994,7 +994,7 @@ describe("Onboarding", () => {
         screen.getByRole("button", { name: "確認重新同步" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole("button", { name: "返回，輸入同步碼" }),
+        screen.getByRole("button", { name: "返回" }),
       ).toBeInTheDocument();
     });
 
@@ -1031,7 +1031,7 @@ describe("Onboarding", () => {
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByText("返回，輸入同步碼"));
+        fireEvent.click(screen.getByRole("button", { name: "返回" }));
         await flushMicrotasks();
       });
 

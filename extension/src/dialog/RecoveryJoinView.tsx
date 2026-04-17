@@ -26,7 +26,7 @@ export function RecoveryJoinView({
         輸入同步碼
       </h2>
       <p style={{ color: "#64748b", marginBottom: 16, fontSize: 14, lineHeight: 1.6 }}>
-        請貼上另一台裝置的家庭同步碼，以還原個人書架設定。
+        請輸入家庭同步碼以重新加入家庭。
       </p>
       <div style={{ position: "relative", marginBottom: 12 }}>
         <input

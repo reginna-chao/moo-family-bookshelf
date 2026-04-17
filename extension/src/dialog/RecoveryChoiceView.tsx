@@ -25,8 +25,8 @@ export function RecoveryChoiceView({
         </p>
       )}
       <p style={{ color: "#64748b", marginBottom: 24, fontSize: 14, lineHeight: 1.6 }}>
-        在此瀏覽器找不到加密金鑰，無法自動還原個人分享設定（哪些書公開／不公開）。
-        若您有另一台裝置可存取，建議先複製同步碼再繼續。
+        自動恢復未成功。若您有家庭同步碼，可輸入同步碼重新加入。
+        或直接略過，系統會重新同步您的書籍資料。
       </p>
       <button
         type="button"
@@ -44,7 +44,7 @@ export function RecoveryChoiceView({
           cursor: "pointer",
         }}
       >
-        輸入同步碼，保留書架設定
+        輸入同步碼重新加入
       </button>
       <button
         type="button"

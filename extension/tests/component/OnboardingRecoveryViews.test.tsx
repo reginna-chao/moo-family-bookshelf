@@ -31,11 +31,11 @@ describe("RecoveryChoiceView", () => {
     expect(screen.queryByText(/帳號：/)).not.toBeInTheDocument();
   });
 
-  it("renders explanation about missing encryption key", () => {
+  it("renders explanation about recovery options", () => {
     render(<RecoveryChoiceView {...defaultProps} />);
 
     expect(
-      screen.getByText(/在此瀏覽器找不到加密金鑰/),
+      screen.getByText(/自動恢復未成功/),
     ).toBeInTheDocument();
   });
 
@@ -43,7 +43,7 @@ describe("RecoveryChoiceView", () => {
     render(<RecoveryChoiceView {...defaultProps} />);
 
     expect(
-      screen.getByRole("button", { name: "輸入同步碼，保留書架設定" }),
+      screen.getByRole("button", { name: "輸入同步碼重新加入" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "略過，重新同步書籍資料" }),
@@ -61,7 +61,7 @@ describe("RecoveryChoiceView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("輸入同步碼，保留書架設定"));
+    fireEvent.click(screen.getByText("輸入同步碼重新加入"));
 
     expect(onUseSyncCode).toHaveBeenCalledOnce();
     expect(onSkip).not.toHaveBeenCalled();
@@ -99,7 +99,7 @@ describe("RecoveryJoinView", () => {
 
     expect(screen.getByText("輸入同步碼")).toBeInTheDocument();
     expect(
-      screen.getByText(/請貼上另一台裝置的家庭同步碼/),
+      screen.getByText(/請輸入家庭同步碼以重新加入家庭/),
     ).toBeInTheDocument();
   });
 
@@ -231,20 +231,20 @@ describe("SoloRecoveryConfirmView", () => {
     expect(screen.getByText("確認重新同步書籍資料？")).toBeInTheDocument();
   });
 
-  it("renders warning about losing sharing settings", () => {
+  it("renders info about sync and settings preservation", () => {
     render(<SoloRecoveryConfirmView {...defaultProps} />);
 
     expect(
-      screen.getByText(/先前設定的個人書架分享設定/),
+      screen.getByText(/將以目前的讀墨帳號重新同步書籍資料/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/將無法還原/)).toBeInTheDocument();
+    expect(screen.getByText(/分享設定.*會自動保留/)).toBeInTheDocument();
   });
 
-  it("renders suggestion to go back and use sync code", () => {
+  it("renders note about sync completion", () => {
     render(<SoloRecoveryConfirmView {...defaultProps} />);
 
     expect(
-      screen.getByText(/建議按「返回」後改用同步碼/),
+      screen.getByText(/同步完成後即可查看家庭書架/),
     ).toBeInTheDocument();
   });
 
@@ -255,7 +255,7 @@ describe("SoloRecoveryConfirmView", () => {
       screen.getByRole("button", { name: "確認重新同步" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "返回，輸入同步碼" }),
+      screen.getByRole("button", { name: "返回" }),
     ).toBeInTheDocument();
   });
 
@@ -287,7 +287,7 @@ describe("SoloRecoveryConfirmView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("返回，輸入同步碼"));
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
 
     expect(onBack).toHaveBeenCalledOnce();
     expect(onConfirm).not.toHaveBeenCalled();
