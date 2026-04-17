@@ -98,7 +98,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    expect(screen.getByText(/moo-fam-001-••••/)).toBeInTheDocument();
+    expect(screen.getByText("moo-fam1-key1")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "複製同步碼" }),
     ).toBeInTheDocument();
@@ -534,7 +534,7 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("should show @host suffix in masked sync code when custom API is used", async () => {
+  it("should show @host suffix in sync code when custom API is used", async () => {
     mockEncodeSyncCode.mockReturnValue("moo-fam1-key1@custom.api.com");
 
     renderWithMembers([defaultProps.userId], defaultProps.userId);
@@ -543,35 +543,10 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    // Masked display should include @host suffix
-    expect(screen.getByText(/moo-fam-001-••••.*@custom\.api\.com/)).toBeInTheDocument();
+    expect(screen.getByText("moo-fam1-key1@custom.api.com")).toBeInTheDocument();
 
     // Restore default mock
     mockEncodeSyncCode.mockReturnValue("moo-fam1-key1");
-  });
-
-  // --- Sync code visibility toggle ---
-
-  it("should toggle sync code visibility with eye button", async () => {
-    renderWithMembers([defaultProps.userId], defaultProps.userId);
-
-    await waitFor(() => {
-      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
-    });
-
-    // Initially masked
-    expect(screen.getByText(/moo-fam-001-••••/)).toBeInTheDocument();
-
-    // Click eye button to reveal
-    const showButton = screen.getByRole("button", { name: "顯示同步碼" });
-    fireEvent.click(showButton);
-
-    // Now should show full key
-    expect(screen.getByText(/moo-fam-001-enc-key-123/)).toBeInTheDocument();
-    // Button label should change
-    expect(
-      screen.getByRole("button", { name: "隱藏同步碼" }),
-    ).toBeInTheDocument();
   });
 
   // --- Delete account ---

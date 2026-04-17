@@ -129,20 +129,18 @@ test.describe("Custom API Endpoint", () => {
 
     const syncCode = await createFamilyAndGetSyncCode(page, extensionId);
 
-    // Parse the sync code format: moo-{part1}-{part2}-{key}[@host]
+    // Parse the sync code format: moo-{part1}-{part2}[@host]
     const atIndex = syncCode.indexOf("@");
     const mainPart = atIndex !== -1 ? syncCode.slice(0, atIndex) : syncCode;
     const hostPart = atIndex !== -1 ? syncCode.slice(atIndex + 1) : null;
 
     const segments = mainPart.split("-");
-    // At minimum: moo, familyId part 1, familyId part 2, encryption key
-    expect(segments.length).toBeGreaterThanOrEqual(4);
+    // At minimum: moo, familyId part 1, familyId part 2
+    expect(segments.length).toBeGreaterThanOrEqual(3);
     expect(segments[0]).toBe("moo");
     // Family ID parts should not be empty
     expect(segments[1].length).toBeGreaterThan(0);
     expect(segments[2].length).toBeGreaterThan(0);
-    // Encryption key should not be empty
-    expect(segments.slice(3).join("-").length).toBeGreaterThan(0);
 
     // If host is present, it should be a valid URL
     if (hostPart) {
