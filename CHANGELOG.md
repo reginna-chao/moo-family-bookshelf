@@ -57,4 +57,4 @@
 - 可編輯顯示名稱（不影響讀墨帳號）
 - 登出時可選擇記住同步碼，方便重新登入
 - 重新安裝 Extension 時自動恢復家庭資料
-- 問題回報連結（GitHub / Plurk / Discord）
+- 問題回報連結（GitHub / Plurk）

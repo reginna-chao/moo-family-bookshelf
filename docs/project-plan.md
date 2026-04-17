@@ -590,7 +590,7 @@ jobs:
 #### Dialog UI 補充
 - [x] Footer 標註「本功能由第三方開發，非 Readmoo 官方提供」— `DialogFooter` 元件
 - [x] Footer 顯示版本號（`v0.x.x`）
-- [x] 問題回報連結（GitHub / Plurk / Discord icons）— `config/links.ts` 配置檔管理
+- [x] 問題回報連結（GitHub / Plurk icons）— `config/links.ts` 配置檔管理
 
 #### 版本管理
 - [x] 版本格式：Semantic Versioning（MAJOR.MINOR.PATCH）

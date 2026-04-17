@@ -93,36 +93,38 @@
 ```
 
 #### 引導畫面（未加入家庭時）
-  - 顯示「開始使用」按鈕
-  - 按下後顯示 Loading 遮罩（半透明背景 + 進度提示）
-  - 自動導航到 `#/me` 抓取使用者名稱 + email
-  - 查詢 API 是否已有既有資料
-  - 若無：提供兩個選項「建立新家庭」/「加入家庭（輸入同步碼）」
-  - 完成後自動導航到書櫃頁面同步書單，再返回原始頁面
+
+- 顯示「開始使用」按鈕
+- 按下後顯示 Loading 遮罩（半透明背景 + 進度提示）
+- 自動導航到 `#/me` 抓取使用者名稱 + email
+- 查詢 API 是否已有既有資料
+- 若無：提供兩個選項「建立新家庭」/「加入家庭（輸入同步碼）」
+- 完成後自動導航到書櫃頁面同步書單，再返回原始頁面
 
 #### 主畫面分頁（已加入家庭後）
-  - **家庭開放書櫃**（預設分頁）：
-    - 顯示所有家庭成員已開放的書籍（聚合檢視）
-    - Dropdown 篩選成員（預設顯示其他成員的書籍）
-    - 搜尋功能（書名 + 作者，純前端即時過濾）
-    - 可查看書籍詳情、前往讀墨頁面
-  - **個人書櫃管理**：
-    - 顯示使用者所有書籍，每本旁邊有開放/關閉開關
-    - 預設全部關閉（不開放）
-    - 搜尋功能（書名 + 作者，純前端即時過濾）
-    - Filter 切換：全部 / 開放 / 不開放
-    - 新購買書籍自動顯示為關閉
-    - 變更後需點擊「儲存變更」才同步至伺服器
-  - **設定**：
-    - 編輯顯示名稱（預設為讀墨使用者名稱，標註不影響讀墨帳號）
-    - 查看家庭同步碼（可再次複製分享）
-    - 查看家庭成員列表（標示 Owner）
-    - Owner：可移除其他成員、轉移管理權
-    - 離開家庭（Owner 須先轉移管理權）
-    - 問題回報連結（GitHub / Plurk / Discord）
-  - **Dialog Footer**：
-    - 「本功能由第三方開發，非 Readmoo 官方提供」
-    - 版本號（`v0.x.x`）
+
+- **家庭開放書櫃**（預設分頁）：
+  - 顯示所有家庭成員已開放的書籍（聚合檢視）
+  - Dropdown 篩選成員（預設顯示其他成員的書籍）
+  - 搜尋功能（書名 + 作者，純前端即時過濾）
+  - 可查看書籍詳情、前往讀墨頁面
+- **個人書櫃管理**：
+  - 顯示使用者所有書籍，每本旁邊有開放/關閉開關
+  - 預設全部關閉（不開放）
+  - 搜尋功能（書名 + 作者，純前端即時過濾）
+  - Filter 切換：全部 / 開放 / 不開放
+  - 新購買書籍自動顯示為關閉
+  - 變更後需點擊「儲存變更」才同步至伺服器
+- **設定**：
+  - 編輯顯示名稱（預設為讀墨使用者名稱，標註不影響讀墨帳號）
+  - 查看家庭同步碼（可再次複製分享）
+  - 查看家庭成員列表（標示 Owner）
+  - Owner：可移除其他成員、轉移管理權
+  - 離開家庭（Owner 須先轉移管理權）
+  - 問題回報連結（GitHub / Plurk）
+- **Dialog Footer**：
+  - 「本功能由第三方開發，非 Readmoo 官方提供」
+  - 版本號（`v0.x.x`）
 
 ### 2.3 Crypto Module（雜湊工具）
 
@@ -140,48 +142,48 @@
 
 #### 個人公開書櫃 API（v1.2.0）
 
-| Method | Path | 說明 | 權限 |
-|--------|------|------|------|
-| `POST` | `/api/user/:id/public-shelf` | 建立或更新公開書櫃設定 | 本人 |
-| `DELETE` | `/api/user/:id/public-shelf` | 關閉公開分享 | 本人 |
-| `GET` | `/api/public/:token` | 查詢公開書櫃（明文） | 無（公開） |
+| Method   | Path                         | 說明                   | 權限       |
+| -------- | ---------------------------- | ---------------------- | ---------- |
+| `POST`   | `/api/user/:id/public-shelf` | 建立或更新公開書櫃設定 | 本人       |
+| `DELETE` | `/api/user/:id/public-shelf` | 關閉公開分享           | 本人       |
+| `GET`    | `/api/public/:token`         | 查詢公開書櫃（明文）   | 無（公開） |
 
 #### 個人開放設定 API
 
-| Method | Path | 說明 | 權限 |
-|--------|------|------|------|
-| `GET` | `/api/user/:id/books` | 取得個人書單及開放設定 | 本人 |
-| `PUT` | `/api/user/:id/books` | 更新個人開放設定 | 本人 |
+| Method | Path                  | 說明                   | 權限 |
+| ------ | --------------------- | ---------------------- | ---- |
+| `GET`  | `/api/user/:id/books` | 取得個人書單及開放設定 | 本人 |
+| `PUT`  | `/api/user/:id/books` | 更新個人開放設定       | 本人 |
 
 #### 家庭群組 API
 
-| Method | Path | 說明 | 權限 |
-|--------|------|------|------|
-| `POST` | `/api/family` | 建立新家庭群組，回傳同步碼 | 任何使用者 |
-| `POST` | `/api/family/:id/join` | 以同步碼加入家庭 | 任何使用者 |
-| `DELETE` | `/api/family/:id/member/:uid` | 移除成員或離開家庭 | Owner（移除他人）或本人（離開） |
-| `PUT` | `/api/family/:id/transfer` | 轉移 Owner 管理權 | Owner |
-| `GET` | `/api/family/:id/members` | 取得家庭成員列表 | 家庭成員 |
+| Method   | Path                          | 說明                       | 權限                            |
+| -------- | ----------------------------- | -------------------------- | ------------------------------- |
+| `POST`   | `/api/family`                 | 建立新家庭群組，回傳同步碼 | 任何使用者                      |
+| `POST`   | `/api/family/:id/join`        | 以同步碼加入家庭           | 任何使用者                      |
+| `DELETE` | `/api/family/:id/member/:uid` | 移除成員或離開家庭         | Owner（移除他人）或本人（離開） |
+| `PUT`    | `/api/family/:id/transfer`    | 轉移 Owner 管理權          | Owner                           |
+| `GET`    | `/api/family/:id/members`     | 取得家庭成員列表           | 家庭成員                        |
 
 #### 家庭書櫃聚合 API
 
-| Method | Path | 說明 | 權限 |
-|--------|------|------|------|
-| `GET` | `/api/family/:id/bookshelf` | 取得家庭所有成員的開放書籍 | 家庭成員 |
+| Method | Path                        | 說明                       | 權限     |
+| ------ | --------------------------- | -------------------------- | -------- |
+| `GET`  | `/api/family/:id/bookshelf` | 取得家庭所有成員的開放書籍 | 家庭成員 |
 
 ### 2.5 Cloudflare KV Store
 
 - **職責**：儲存資料（明文 JSON）
 - **Key 設計**：
 
-| Key Pattern | Value | 說明 |
-|-------------|-------|------|
-| `user:{user_id}` | 個人書單 + 開放設定（JSON） | 歸屬個人，不隨家庭變動 |
-| `family:{family_id}` | `{ owner_id, members[], max_members, created_at }` | 記錄家庭組成 + 管理者 |
-| `member:{user_id}` | 所屬 family_id | 反向查詢用 |
-| `public:{share_token}` | `{ user_id, title, books[], created_at, expires_at }` | 公開書櫃明文書單（v1.2.0） |
-| `verify:{user_id}` | `{ method, hash, salt, prompted, failCount, lockedUntil }` | PWA 登入驗證設定 |
-| `otp:{user_id}` | `{ code, createdAt }` | 一次性驗證碼（TTL 5 分鐘） |
+| Key Pattern            | Value                                                      | 說明                       |
+| ---------------------- | ---------------------------------------------------------- | -------------------------- |
+| `user:{user_id}`       | 個人書單 + 開放設定（JSON）                                | 歸屬個人，不隨家庭變動     |
+| `family:{family_id}`   | `{ owner_id, members[], max_members, created_at }`         | 記錄家庭組成 + 管理者      |
+| `member:{user_id}`     | 所屬 family_id                                             | 反向查詢用                 |
+| `public:{share_token}` | `{ user_id, title, books[], created_at, expires_at }`      | 公開書櫃明文書單（v1.2.0） |
+| `verify:{user_id}`     | `{ method, hash, salt, prompted, failCount, lockedUntil }` | PWA 登入驗證設定           |
+| `otp:{user_id}`        | `{ code, createdAt }`                                      | 一次性驗證碼（TTL 5 分鐘） |
 
 - **TTL**：個人開放設定不設過期（持久化）；家庭群組可設定過期時間；公開書櫃依使用者設定（7/30/60/90 天或永久）
 - **家庭人數上限**：`max_members` 預設為 2（配合讀墨官方限制）
@@ -321,34 +323,37 @@ moo-{family_id_short}@{api_host_encoded}
 
 ## 五、安全機制
 
-| 層面 | 措施 |
-|------|------|
-| **傳輸安全** | HTTPS 強制加密 |
-| **儲存安全** | 明文 JSON 儲存於 KV，以 auth token 控管存取 |
-| **存取控制** | 高熵同步碼作為家庭存取憑證 + auth token 驗證每次請求 |
-| **隱私預設** | 所有書籍預設不開放，使用者主動選擇 |
-| **防濫用** | Rate Limiting（Cloudflare 內建） |
-| **資料獨立** | 個人設定不隨家庭解綁而消失 |
-| **權限分離** | 家庭成員僅可瀏覽他人已開放書籍，無法修改 |
-| **解綁隔離** | 離開家庭後，其他成員立即無法存取該使用者的書籍 |
+| 層面             | 措施                                                        |
+| ---------------- | ----------------------------------------------------------- |
+| **傳輸安全**     | HTTPS 強制加密                                              |
+| **儲存安全**     | 明文 JSON 儲存於 KV，以 auth token 控管存取                 |
+| **存取控制**     | 高熵同步碼作為家庭存取憑證 + auth token 驗證每次請求        |
+| **隱私預設**     | 所有書籍預設不開放，使用者主動選擇                          |
+| **防濫用**       | Rate Limiting（Cloudflare 內建）                            |
+| **資料獨立**     | 個人設定不隨家庭解綁而消失                                  |
+| **權限分離**     | 家庭成員僅可瀏覽他人已開放書籍，無法修改                    |
+| **解綁隔離**     | 離開家庭後，其他成員立即無法存取該使用者的書籍              |
 | **PWA 登入驗證** | 可選式驗證機制（PIN / 圖形 / 隨機碼），防止家庭成員冒用身份 |
 
 ### PWA 登入驗證機制
 
 #### 問題
+
 同步碼為家庭共享秘密，家人間通常知道彼此的 Email。若不設驗證，家庭成員可用「共享同步碼 + 對方 Email」在 PWA 冒充他人登入。
 
 #### 解決方案
+
 使用者可選擇設定 PWA 登入驗證方式：
 
-| 方式 | 說明 | 安全性 |
-|------|------|--------|
-| PIN 碼 | 4-6 位數字 | 中（需搭配暴力破解鎖定） |
-| 圖形驗證 | 九宮格至少連 4 點 | 中（同上） |
-| 隨機驗證碼 | Extension 產生 6 位數，有效期 5 分鐘 | 高（需要電腦在旁） |
-| 不設定驗證 | 現有行為，接受風險 | 低 |
+| 方式       | 說明                                 | 安全性                   |
+| ---------- | ------------------------------------ | ------------------------ |
+| PIN 碼     | 4-6 位數字                           | 中（需搭配暴力破解鎖定） |
+| 圖形驗證   | 九宮格至少連 4 點                    | 中（同上）               |
+| 隨機驗證碼 | Extension 產生 6 位數，有效期 5 分鐘 | 高（需要電腦在旁）       |
+| 不設定驗證 | 現有行為，接受風險                   | 低                       |
 
 #### 安全措施
+
 - PIN/Pattern hash 以 SHA-256(salt + secret) 儲存於 `verify:{userId}`（server 端驗證）
 - 連續 5 次驗證失敗 → 鎖定 15 分鐘
 - OTP 使用後立即刪除（一次性）
@@ -357,19 +362,19 @@ moo-{family_id_short}@{api_host_encoded}
 
 #### KV Key 設計
 
-| Key Pattern | Value | TTL |
-|-------------|-------|-----|
-| `verify:{userId}` | `{ method, hash, salt, prompted, failCount, lockedUntil }` | None |
-| `otp:{userId}` | `{ code, createdAt }` | 300 秒 |
+| Key Pattern       | Value                                                      | TTL    |
+| ----------------- | ---------------------------------------------------------- | ------ |
+| `verify:{userId}` | `{ method, hash, salt, prompted, failCount, lockedUntil }` | None   |
+| `otp:{userId}`    | `{ code, createdAt }`                                      | 300 秒 |
 
 #### API 端點
 
-| Method | Path | 說明 | 權限 |
-|--------|------|------|------|
-| `GET` | `/api/user/:id/verify` | 查詢驗證方式（不回傳 hash） | 公開 |
-| `PUT` | `/api/user/:id/verify` | 設定/變更驗證方式 | 本人 |
-| `POST` | `/api/user/:id/verify/otp` | 產生一次性驗證碼 | 本人 |
-| `POST` | `/api/user/:id/verify/prompted` | 標記已提醒 | 公開 |
+| Method | Path                            | 說明                        | 權限 |
+| ------ | ------------------------------- | --------------------------- | ---- |
+| `GET`  | `/api/user/:id/verify`          | 查詢驗證方式（不回傳 hash） | 公開 |
+| `PUT`  | `/api/user/:id/verify`          | 設定/變更驗證方式           | 本人 |
+| `POST` | `/api/user/:id/verify/otp`      | 產生一次性驗證碼            | 本人 |
+| `POST` | `/api/user/:id/verify/prompted` | 標記已提醒                  | 公開 |
 
 ### chrome.storage.sync 多裝置同步
 
@@ -406,11 +411,11 @@ moo-{family_id_short}@{api_host_encoded}
 
 ### 設定方式
 
-| 入口 | 說明 |
-|------|------|
-| Extension 設定頁 | 手動填入自訂 Worker URL |
-| PWA 設定頁 | 手動填入自訂 Worker URL |
-| 同步碼自動帶入 | 貼上含 `@host` 的同步碼時自動切換 |
+| 入口             | 說明                              |
+| ---------------- | --------------------------------- |
+| Extension 設定頁 | 手動填入自訂 Worker URL           |
+| PWA 設定頁       | 手動填入自訂 Worker URL           |
+| 同步碼自動帶入   | 貼上含 `@host` 的同步碼時自動切換 |
 
 ### 限制
 
@@ -472,13 +477,13 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 
 ### PWA 功能範圍
 
-| 功能 | PWA 支援 | 備註 |
-|------|---------|------|
-| 瀏覽家庭書櫃 | ✅ | 核心功能 |
-| 個人書櫃開關 | ✅ | 書籍須先由 Extension 同步過一次 |
-| 加入/建立家庭 | ✅ | |
-| 新增書籍 | ❌ | 無法爬取讀墨頁面 |
-| 借閱功能（未來）| ✅ | 發送/接收借閱請求 |
+| 功能             | PWA 支援 | 備註                            |
+| ---------------- | -------- | ------------------------------- |
+| 瀏覽家庭書櫃     | ✅       | 核心功能                        |
+| 個人書櫃開關     | ✅       | 書籍須先由 Extension 同步過一次 |
+| 加入/建立家庭    | ✅       |                                 |
+| 新增書籍         | ❌       | 無法爬取讀墨頁面                |
+| 借閱功能（未來） | ✅       | 發送/接收借閱請求               |
 
 ### PWA 特有限制
 
@@ -498,6 +503,7 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 ### 設計原則
 
 所有搜尋與篩選功能均在**前端完成**，不額外呼叫 API。原因：
+
 - 書籍資料已全部載入前端（家庭書櫃從 API 一次拉回、個人書櫃從頁面 scrape）
 - 資料量有限（單一家庭數百到數千本書），前端完全能處理
 - 減少 Cloudflare Workers API 呼叫，節省免費額度
@@ -511,10 +517,10 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 
 ### 篩選
 
-| 頁面 | 篩選方式 | 選項 | 預設 |
-|------|---------|------|------|
+| 頁面     | 篩選方式         | 選項                                | 預設             |
+| -------- | ---------------- | ----------------------------------- | ---------------- |
 | 家庭書櫃 | Dropdown（單選） | 全部（不含自己）/ 全部 / 各成員名稱 | 全部（不含自己） |
-| 個人書櫃 | Filter buttons | 全部 / 開放 / 不開放 | 全部 |
+| 個人書櫃 | Filter buttons   | 全部 / 開放 / 不開放                | 全部             |
 
 ---
 
@@ -524,11 +530,11 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 
 Semantic Versioning：`MAJOR.MINOR.PATCH`
 
-| 類型 | 說明 | 範例 |
-|------|------|------|
-| PATCH | Bug fix | 0.1.1 |
-| MINOR | 新功能 | 0.2.0（搜尋功能）、1.1.0（借閱功能）、1.2.0（公開書櫃） |
-| MAJOR | Breaking change（API 不相容、資料格式變更） | 1.0.0（首次公開版） |
+| 類型  | 說明                                        | 範例                                                    |
+| ----- | ------------------------------------------- | ------------------------------------------------------- |
+| PATCH | Bug fix                                     | 0.1.1                                                   |
+| MINOR | 新功能                                      | 0.2.0（搜尋功能）、1.1.0（借閱功能）、1.2.0（公開書櫃） |
+| MAJOR | Breaking change（API 不相容、資料格式變更） | 1.0.0（首次公開版）                                     |
 
 ### Single Source of Truth
 
@@ -548,12 +554,12 @@ extension/package.json (version: "0.2.0")
 
 ### 版本策略
 
-| 階段 | 版本範圍 | 說明 |
-|------|---------|------|
-| Pre-release | v0.x.x | 目前階段，功能開發中 |
-| 首次公開版 | v1.0.0 | Chrome Web Store 上架 |
-| 借閱功能 | v1.1.0 | v1.0 之後的新功能 |
-| 個人公開書櫃分享 | v1.2.0 | 獨立網址對外分享個人開放書單 |
+| 階段             | 版本範圍 | 說明                         |
+| ---------------- | -------- | ---------------------------- |
+| Pre-release      | v0.x.x   | 目前階段，功能開發中         |
+| 首次公開版       | v1.0.0   | Chrome Web Store 上架        |
+| 借閱功能         | v1.1.0   | v1.0 之後的新功能            |
+| 個人公開書櫃分享 | v1.2.0   | 獨立網址對外分享個人開放書單 |
 
 ---
 
@@ -564,9 +570,12 @@ extension/package.json (version: "0.2.0")
 ```typescript
 // extension/src/config/links.ts
 export const reportLinks = [
-  { name: 'GitHub', icon: 'github', url: 'https://github.com/<owner>/moo-family-bookshelf' },
-  { name: 'Plurk',  icon: 'plurk',  url: 'https://www.plurk.com' },
-  { name: 'Discord', icon: 'discord', url: 'https://discord.gg/placeholder' },
+  {
+    name: "GitHub",
+    icon: "github",
+    url: "https://github.com/<owner>/moo-family-bookshelf",
+  },
+  { name: "Plurk", icon: "plurk", url: "https://www.plurk.com" },
 ] as const;
 ```
 
@@ -651,24 +660,26 @@ Client                          Worker
 ```
 
 **伺服器端**：
+
 - `API_VERSION`（整數）定義於 `worker/src/index.ts`，僅在**破壞性變更**時遞增
 - `SERVER_VERSION`（語意版本）用於追蹤部署版本
 - `/api/version` 端點回傳兩者，供客戶端查詢
 
 **客戶端**：
+
 - `MIN_API_VERSION` 定義客戶端所需的最低 API 版本（Extension: `VersionWarning.tsx`，PWA: `VersionWarning.tsx`）
 - 啟動時呼叫 `/api/version`，若 `apiVersion < MIN_API_VERSION` 則顯示非阻斷式警告
 - 警告僅針對自架伺服器（官方 Worker 永遠是最新版）
 
 ### 何時遞增 API_VERSION
 
-| 變更類型 | 是否遞增 | 範例 |
-|---------|---------|------|
-| 新增端點 | 否 | 新增 `GET /api/user/:id/stats` |
-| 新增可選欄位 | 否 | Response 多回傳 `createdAt` |
-| 移除或重新命名端點 | **是** | `GET /api/books` → `GET /api/bookshelf` |
-| 變更必要欄位格式 | **是** | `is_shared: boolean` → `is_shared: BoolFlag` |
-| 變更認證機制 | **是** | Token 格式變更 |
+| 變更類型           | 是否遞增 | 範例                                         |
+| ------------------ | -------- | -------------------------------------------- |
+| 新增端點           | 否       | 新增 `GET /api/user/:id/stats`               |
+| 新增可選欄位       | 否       | Response 多回傳 `createdAt`                  |
+| 移除或重新命名端點 | **是**   | `GET /api/books` → `GET /api/bookshelf`      |
+| 變更必要欄位格式   | **是**   | `is_shared: boolean` → `is_shared: BoolFlag` |
+| 變更認證機制       | **是**   | Token 格式變更                               |
 
 ### 遷移 SOP
 
@@ -676,4 +687,4 @@ Client                          Worker
 2. 發布客戶端更新，使用新格式
 3. 確認所有客戶端已更新後，下一版移除舊格式並遞增 `API_VERSION`
 
-*最後更新：2026-04-08*
+_最後更新：2026-04-08_
