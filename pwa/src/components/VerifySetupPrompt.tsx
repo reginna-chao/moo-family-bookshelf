@@ -160,7 +160,7 @@ function ChooseMethodView({
         保護你的帳號，防止他人在手機版未經授權登入。
       </p>
       <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-5 leading-relaxed">
-        提示：此驗證僅用於 PWA 登入時保護你的書櫃資料。Extension 重裝後的恢復流程會透過你已登入的 Readmoo 帳號自動驗證身份，不會受此設定影響。
+        提示：此驗證僅用於手機版登入時保護你的書櫃資料。
       </p>
       <div className="space-y-3">
         <button

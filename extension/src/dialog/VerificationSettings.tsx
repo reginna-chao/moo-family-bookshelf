@@ -148,7 +148,7 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
           marginBottom: 12,
         }}
       >
-        提示：此驗證僅用於 PWA 登入時保護你的書櫃資料。Extension 重裝後的恢復流程會透過你已登入的 Readmoo 帳號自動驗證身份，不會受此設定影響。
+        提示：此驗證僅用於手機版登入時保護你的書櫃資料。
       </div>
 
       {/* Method selection buttons */}
