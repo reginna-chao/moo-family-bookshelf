@@ -22,17 +22,9 @@ vi.mock("@/api/client", async (importOriginal) => {
   };
 });
 
-// Mock crypto
-vi.mock("@/crypto/encrypt", () => ({
-  importKey: vi.fn().mockResolvedValue("mock-key"),
-  decrypt: vi.fn(),
-}));
-
-import { decrypt } from "@/crypto/encrypt";
 import { BoolFlag, type ApiClient } from "@/api/client";
 
-function makePayload(
-  displayName: string,
+function makeBooks(
   books: Array<{
     bookId: string;
     title: string;
@@ -40,22 +32,19 @@ function makePayload(
     isShared: BoolFlag;
     readmooUrl?: string;
   }>,
-): string {
-  return JSON.stringify({
-    displayName,
-    books: books.map((b) => ({
-      bookId: b.bookId,
-      title: b.title,
-      author: b.author,
-      isbn: "",
-      coverUrl: "",
-      readmooUrl: b.readmooUrl ?? `https://readmoo.com/${b.bookId}`,
-      isShared: b.isShared,
-    })),
-  });
+) {
+  return books.map((b) => ({
+    bookId: b.bookId,
+    title: b.title,
+    author: b.author,
+    isbn: "",
+    coverUrl: "",
+    readmooUrl: b.readmooUrl ?? `https://readmoo.com/${b.bookId}`,
+    category: "",
+    isShared: b.isShared,
+  }));
 }
 
-const mockDecrypt = vi.mocked(decrypt);
 const mockGetFamilyBookshelf = vi.fn();
 const mockGetFamilyMembers = vi.fn().mockResolvedValue({
   data: { familyId: "fam-1", ownerId: "user-self", members: [] },
@@ -69,7 +58,6 @@ function createProps() {
       getFamilyBookshelf: mockGetFamilyBookshelf,
       getFamilyMembers: mockGetFamilyMembers,
     } as unknown as ApiClient,
-    encryptionKey: "test-key",
   };
 }
 
@@ -79,7 +67,6 @@ function renderWithProvider(props: ReturnType<typeof createProps>) {
       familyId={props.familyId}
       userId={props.userId}
       apiClient={props.apiClient}
-      encryptionKey={props.encryptionKey}
     >
       <FamilyShelfPage userId={props.userId} />
     </FamilyDataProvider>,
@@ -90,7 +77,6 @@ describe("FamilyShelfPage", () => {
   let defaultProps: ReturnType<typeof createProps>;
 
   beforeEach(() => {
-    mockDecrypt.mockReset();
     mockGetFamilyBookshelf.mockReset();
     mockGetFamilyMembers.mockReset();
     mockGetFamilyMembers.mockResolvedValue({
@@ -147,16 +133,18 @@ describe("FamilyShelfPage", () => {
     });
 
     // Set up success response for retry
-    mockDecrypt.mockResolvedValue(
-      makePayload("Alice", [
-        { bookId: "b1", title: "Book 1", author: "Author 1", isShared: BoolFlag.TRUE },
-      ]),
-    );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-alice", payload: "encrypted", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              { bookId: "b1", title: "Book 1", author: "Author 1", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });
@@ -173,16 +161,18 @@ describe("FamilyShelfPage", () => {
     mockGetFamilyMembers.mockResolvedValue({
       data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
     });
-    mockDecrypt.mockResolvedValue(
-      makePayload("Alice", [
-        { bookId: "b1", title: "Hidden Book", author: "Author", isShared: BoolFlag.FALSE },
-      ]),
-    );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-alice", payload: "encrypted", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              { bookId: "b1", title: "Hidden Book", author: "Author", isShared: BoolFlag.FALSE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });
@@ -194,12 +184,12 @@ describe("FamilyShelfPage", () => {
     });
   });
 
-  it("shows empty state when members have no payload", async () => {
+  it("shows empty state when members have no books", async () => {
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-alice", payload: null, lastUpdated: null },
+          { userId: "user-alice", displayName: "Alice", books: [], lastUpdated: null },
         ],
       },
     });
@@ -211,21 +201,23 @@ describe("FamilyShelfPage", () => {
     });
   });
 
-  it("renders books after successful load and decrypt", async () => {
+  it("renders books after successful load", async () => {
     mockGetFamilyMembers.mockResolvedValue({
       data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
     });
-    mockDecrypt.mockResolvedValue(
-      makePayload("Alice", [
-        { bookId: "b1", title: "React 深入淺出", author: "作者一", isShared: BoolFlag.TRUE },
-        { bookId: "b2", title: "TypeScript 指南", author: "作者二", isShared: BoolFlag.TRUE },
-      ]),
-    );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-alice", payload: "encrypted", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              { bookId: "b1", title: "React 深入淺出", author: "作者一", isShared: BoolFlag.TRUE },
+              { bookId: "b2", title: "TypeScript 指南", author: "作者二", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });
@@ -244,17 +236,19 @@ describe("FamilyShelfPage", () => {
     mockGetFamilyMembers.mockResolvedValue({
       data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
     });
-    mockDecrypt.mockResolvedValue(
-      makePayload("Alice", [
-        { bookId: "b1", title: "Shared Book", author: "Author", isShared: BoolFlag.TRUE },
-        { bookId: "b2", title: "Private Book", author: "Author", isShared: BoolFlag.FALSE },
-      ]),
-    );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-alice", payload: "encrypted", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              { bookId: "b1", title: "Shared Book", author: "Author", isShared: BoolFlag.TRUE },
+              { bookId: "b2", title: "Private Book", author: "Author", isShared: BoolFlag.FALSE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });
@@ -274,24 +268,26 @@ describe("FamilyShelfPage", () => {
         { userId: "user-alice", displayName: "Alice" },
       ] },
     });
-    // decrypt is called per member; return different payloads per call
-    mockDecrypt
-      .mockResolvedValueOnce(
-        makePayload("Me", [
-          { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
-        ]),
-      )
-      .mockResolvedValueOnce(
-        makePayload("Alice", [
-          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
-        ]),
-      );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-self", payload: "encrypted-self", lastUpdated: "2026-01-01" },
-          { userId: "user-alice", payload: "encrypted-alice", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-self",
+            displayName: "Me",
+            books: makeBooks([
+              { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });
@@ -312,23 +308,26 @@ describe("FamilyShelfPage", () => {
         { userId: "user-alice", displayName: "Alice" },
       ] },
     });
-    mockDecrypt
-      .mockResolvedValueOnce(
-        makePayload("Me", [
-          { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
-        ]),
-      )
-      .mockResolvedValueOnce(
-        makePayload("Alice", [
-          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
-        ]),
-      );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-self", payload: "encrypted-self", lastUpdated: "2026-01-01" },
-          { userId: "user-alice", payload: "encrypted-alice", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-self",
+            displayName: "Me",
+            books: makeBooks([
+              { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });
@@ -354,17 +353,19 @@ describe("FamilyShelfPage", () => {
     mockGetFamilyMembers.mockResolvedValue({
       data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
     });
-    mockDecrypt.mockResolvedValue(
-      makePayload("Alice", [
-        { bookId: "b1", title: "React 入門", author: "Author A", isShared: BoolFlag.TRUE },
-        { bookId: "b2", title: "Vue 入門", author: "Author B", isShared: BoolFlag.TRUE },
-      ]),
-    );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-alice", payload: "encrypted", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              { bookId: "b1", title: "React 入門", author: "Author A", isShared: BoolFlag.TRUE },
+              { bookId: "b2", title: "Vue 入門", author: "Author B", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });
@@ -402,22 +403,24 @@ describe("FamilyShelfPage", () => {
       data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
     });
     const readmooUrl = "https://readmoo.com/book-123";
-    mockDecrypt.mockResolvedValue(
-      makePayload("Alice", [
-        {
-          bookId: "book-123",
-          title: "Linked Book",
-          author: "Author",
-          isShared: BoolFlag.TRUE,
-          readmooUrl,
-        },
-      ]),
-    );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-alice", payload: "encrypted", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              {
+                bookId: "book-123",
+                title: "Linked Book",
+                author: "Author",
+                isShared: BoolFlag.TRUE,
+                readmooUrl,
+              },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });
@@ -441,23 +444,26 @@ describe("FamilyShelfPage", () => {
         { userId: "user-alice", displayName: "Alice" },
       ] },
     });
-    mockDecrypt
-      .mockResolvedValueOnce(
-        makePayload("Me", [
-          { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
-        ]),
-      )
-      .mockResolvedValueOnce(
-        makePayload("Alice", [
-          { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
-        ]),
-      );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-self", payload: "encrypted-self", lastUpdated: "2026-01-01" },
-          { userId: "user-alice", payload: "encrypted-alice", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-self",
+            displayName: "Me",
+            books: makeBooks([
+              { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });
@@ -503,24 +509,27 @@ describe("FamilyShelfPage", () => {
         { userId: "user-bob", displayName: "Bob" },
       ] },
     });
-    mockDecrypt
-      .mockResolvedValueOnce(
-        makePayload("Alice", [
-          { bookId: "b1", title: "Book 1", author: "A", isShared: BoolFlag.TRUE },
-        ]),
-      )
-      .mockResolvedValueOnce(
-        makePayload("Bob", [
-          { bookId: "b2", title: "Book 2", author: "B", isShared: BoolFlag.TRUE },
-          { bookId: "b3", title: "Book 3", author: "C", isShared: BoolFlag.TRUE },
-        ]),
-      );
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-alice", payload: "enc1", lastUpdated: "2026-01-01" },
-          { userId: "user-bob", payload: "enc2", lastUpdated: "2026-01-01" },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              { bookId: "b1", title: "Book 1", author: "A", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
+          {
+            userId: "user-bob",
+            displayName: "Bob",
+            books: makeBooks([
+              { bookId: "b2", title: "Book 2", author: "B", isShared: BoolFlag.TRUE },
+              { bookId: "b3", title: "Book 3", author: "C", isShared: BoolFlag.TRUE },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
         ],
       },
     });

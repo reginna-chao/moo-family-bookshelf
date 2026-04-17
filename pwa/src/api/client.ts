@@ -213,12 +213,15 @@ export class ApiClient {
   async joinFamily(
     familyId: string,
     userId: string,
-    opts?: { verifySecret?: string },
+    opts?: { verifySecret?: string; qrToken?: string },
   ): Promise<ApiResponse<{ ok: boolean; authToken?: string; expiresAt?: number }>> {
     this.validateHexId(userId, "userId");
     const body: Record<string, string> = { userId };
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
+    }
+    if (opts?.qrToken !== undefined) {
+      body.qrToken = opts.qrToken;
     }
     return this.post(`/api/family/${familyId}/join`, body);
   }

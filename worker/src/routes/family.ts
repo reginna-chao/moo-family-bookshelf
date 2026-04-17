@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../utils/env";
-import { kvKeys, type FamilyMember, type FamilyRecord, type RawFamilyRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { kvKeys, type FamilyMember, type FamilyRecord, type RawFamilyRecord, type QrTokenRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName } from "../utils/validation";
 import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 import { validateVerification } from "./verify";
@@ -103,6 +103,7 @@ familyRoutes.post("/:id/join", async (c) => {
     userId: string;
     displayName?: string;
     verifySecret?: string;
+    qrToken?: string;
   } | null;
   try {
     body = await c.req.json();
@@ -172,14 +173,28 @@ familyRoutes.post("/:id/join", async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
+  // QR token bypass: if a valid one-time QR token is provided, skip verification.
+  let skipVerification = false;
+  if (body.qrToken && typeof body.qrToken === "string") {
+    const qrRecord = await c.env.KV.get<QrTokenRecord>(kvKeys.qrToken(body.qrToken), "json");
+    if (qrRecord && qrRecord.userId === body.userId) {
+      skipVerification = true;
+      // One-time use: delete immediately
+      await c.env.KV.delete(kvKeys.qrToken(body.qrToken));
+    }
+    // If token invalid/expired/wrong-user, fall through to normal verification
+  }
+
   // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
   // Users with no verification record (method: "none") pass automatically.
-  const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
-  if (!verification.valid && verification.error) {
-    return c.json(
-      { error: { code: verification.error.code, message: verification.error.message } },
-      verification.error.status as 403 | 429,
-    );
+  if (!skipVerification) {
+    const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
+    if (!verification.valid && verification.error) {
+      return c.json(
+        { error: { code: verification.error.code, message: verification.error.message } },
+        verification.error.status as 403 | 429,
+      );
+    }
   }
 
   const isExistingMember = hasMember(record.members, body.userId);

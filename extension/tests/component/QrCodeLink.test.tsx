@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { QrCodeLink } from "@/dialog/QrCodeLink";
 import { buildPwaUrl } from "@/constants";
+import type { ApiClient } from "@/api/client";
 
 const mockToDataURL = vi.fn();
 
@@ -11,6 +12,16 @@ vi.mock("qrcode", () => ({
   },
 }));
 
+function createMockApiClient(
+  overrides?: Partial<{ createQrToken: ApiClient["createQrToken"] }>,
+): ApiClient {
+  return {
+    createQrToken: overrides?.createQrToken ?? vi.fn().mockResolvedValue({
+      data: { token: "mock-qr-token-abc", expiresIn: 300 },
+    }),
+  } as unknown as ApiClient;
+}
+
 describe("QrCodeLink", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -19,15 +30,19 @@ describe("QrCodeLink", () => {
 
   it("shows loading state initially", () => {
     mockToDataURL.mockReturnValue(new Promise(() => {})); // never resolves
-    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
+    const apiClient = createMockApiClient({
+      createQrToken: vi.fn().mockReturnValue(new Promise(() => {})),
+    });
+    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" apiClient={apiClient} />);
     expect(screen.getByText("產生 QR Code 中...")).toBeInTheDocument();
   });
 
   it("renders QR code image after generation", async () => {
     const fakeDataUrl = "data:image/png;base64,fakepng";
     mockToDataURL.mockResolvedValue(fakeDataUrl);
+    const apiClient = createMockApiClient();
 
-    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
+    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" apiClient={apiClient} />);
 
     const img = await screen.findByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃");
     expect(img).toBeInTheDocument();
@@ -38,8 +53,9 @@ describe("QrCodeLink", () => {
 
   it("hides loading state after QR code is generated", async () => {
     mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+    const apiClient = createMockApiClient();
 
-    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
+    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" apiClient={apiClient} />);
 
     await screen.findByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃");
     expect(screen.queryByText("產生 QR Code 中...")).not.toBeInTheDocument();
@@ -47,7 +63,10 @@ describe("QrCodeLink", () => {
 
   it("shows hint text", () => {
     mockToDataURL.mockReturnValue(new Promise(() => {}));
-    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
+    const apiClient = createMockApiClient({
+      createQrToken: vi.fn().mockReturnValue(new Promise(() => {})),
+    });
+    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" apiClient={apiClient} />);
     expect(
       screen.getByText("用手機掃描 QR Code 或複製連結，即可在行動裝置上使用墨家書櫃"),
     ).toBeInTheDocument();
@@ -55,30 +74,36 @@ describe("QrCodeLink", () => {
 
   it("shows section title", () => {
     mockToDataURL.mockReturnValue(new Promise(() => {}));
-    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
+    const apiClient = createMockApiClient({
+      createQrToken: vi.fn().mockReturnValue(new Promise(() => {})),
+    });
+    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" apiClient={apiClient} />);
     expect(screen.getByText("連結手機")).toBeInTheDocument();
   });
 
-  it("constructs the correct URL with fragment params", async () => {
+  it("constructs the correct URL with fragment params including qrToken", async () => {
     mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
     const syncCode = "moo-abc-key123@custom.host";
     const userId = "user1";
+    const apiClient = createMockApiClient();
 
-    render(<QrCodeLink syncCode={syncCode} userId={userId} />);
+    render(<QrCodeLink syncCode={syncCode} userId={userId} apiClient={apiClient} />);
 
-    await screen.findByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃");
-
-    const expectedUrl = buildPwaUrl(syncCode, userId);
-    expect(mockToDataURL).toHaveBeenCalledWith(expectedUrl, {
-      width: 200,
-      margin: 2,
+    // Wait for the token to be fetched and the QR code to regenerate with it
+    const expectedUrl = buildPwaUrl(syncCode, userId, "mock-qr-token-abc");
+    await waitFor(() => {
+      expect(mockToDataURL).toHaveBeenCalledWith(expectedUrl, {
+        width: 200,
+        margin: 2,
+      });
     });
   });
 
   it("shows error message when QR code generation fails", async () => {
     mockToDataURL.mockRejectedValue(new Error("Canvas not available"));
+    const apiClient = createMockApiClient();
 
-    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
+    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" apiClient={apiClient} />);
 
     await waitFor(() => {
       expect(screen.getByText("Canvas not available")).toBeInTheDocument();
@@ -88,8 +113,9 @@ describe("QrCodeLink", () => {
 
   it("shows fallback error message for non-Error rejections", async () => {
     mockToDataURL.mockRejectedValue("something went wrong");
+    const apiClient = createMockApiClient();
 
-    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
+    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" apiClient={apiClient} />);
 
     await waitFor(() => {
       expect(screen.getByText("QR Code 產生失敗")).toBeInTheDocument();
@@ -99,48 +125,180 @@ describe("QrCodeLink", () => {
   it("regenerates QR code when syncCode changes", async () => {
     const dataUrl1 = "data:image/png;base64,first";
     const dataUrl2 = "data:image/png;base64,second";
-    mockToDataURL.mockResolvedValueOnce(dataUrl1).mockResolvedValueOnce(dataUrl2);
+    // Use mockImplementation to always resolve (token fetch may trigger extra QR generations)
+    let callCount = 0;
+    mockToDataURL.mockImplementation(() => {
+      callCount++;
+      return Promise.resolve(callCount <= 1 ? dataUrl1 : dataUrl2);
+    });
+    const apiClient = createMockApiClient();
 
     const { rerender } = render(
-      <QrCodeLink syncCode="moo-abc-key1" userId="user1" />,
+      <QrCodeLink syncCode="moo-abc-key1" userId="user1" apiClient={apiClient} />,
     );
 
     await waitFor(() => {
-      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toHaveAttribute("src", dataUrl1);
+      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toBeInTheDocument();
     });
 
-    rerender(<QrCodeLink syncCode="moo-abc-key2" userId="user1" />);
+    // Reset call count before rerender so the new QR code gets a different data URL
+    callCount = 0;
+    mockToDataURL.mockImplementation(() => Promise.resolve(dataUrl2));
+
+    rerender(<QrCodeLink syncCode="moo-abc-key2" userId="user1" apiClient={apiClient} />);
 
     await waitFor(() => {
       expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toHaveAttribute("src", dataUrl2);
     });
-    expect(mockToDataURL).toHaveBeenCalledTimes(2);
   });
 
   it("regenerates QR code when userId changes", async () => {
     const dataUrl1 = "data:image/png;base64,first";
     const dataUrl2 = "data:image/png;base64,second";
-    mockToDataURL.mockResolvedValueOnce(dataUrl1).mockResolvedValueOnce(dataUrl2);
+    mockToDataURL.mockImplementation(() => Promise.resolve(dataUrl1));
+    const apiClient = createMockApiClient();
 
     const { rerender } = render(
-      <QrCodeLink syncCode="moo-abc-key1" userId="userA" />,
+      <QrCodeLink syncCode="moo-abc-key1" userId="userA" apiClient={apiClient} />,
     );
 
     await waitFor(() => {
-      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toHaveAttribute("src", dataUrl1);
+      expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toBeInTheDocument();
     });
 
-    rerender(<QrCodeLink syncCode="moo-abc-key1" userId="userB" />);
+    mockToDataURL.mockImplementation(() => Promise.resolve(dataUrl2));
+
+    rerender(<QrCodeLink syncCode="moo-abc-key1" userId="userB" apiClient={apiClient} />);
 
     await waitFor(() => {
       expect(screen.getByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃")).toHaveAttribute("src", dataUrl2);
     });
-    expect(mockToDataURL).toHaveBeenCalledTimes(2);
   });
 
   it("shows copy link button", () => {
     mockToDataURL.mockReturnValue(new Promise(() => {}));
-    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" />);
+    const apiClient = createMockApiClient({
+      createQrToken: vi.fn().mockReturnValue(new Promise(() => {})),
+    });
+    render(<QrCodeLink syncCode="moo-abc-key123" userId="user1" apiClient={apiClient} />);
     expect(screen.getByText("複製連結")).toBeInTheDocument();
+  });
+
+  // --- QR Token tests ---
+
+  it("fetches QR token on mount and includes it in QR code URL", async () => {
+    const createQrToken = vi.fn().mockResolvedValue({
+      data: { token: "test-token-xyz", expiresIn: 300 },
+    });
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    render(<QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />);
+
+    await screen.findByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃");
+
+    expect(createQrToken).toHaveBeenCalledWith("uid123");
+    const expectedUrl = buildPwaUrl("moo-sync", "uid123", "test-token-xyz");
+    expect(mockToDataURL).toHaveBeenCalledWith(expectedUrl, { width: 200, margin: 2 });
+  });
+
+  it("generates QR code without token when token fetch fails", async () => {
+    const createQrToken = vi.fn().mockRejectedValue(new Error("Network error"));
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    render(<QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />);
+
+    await screen.findByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃");
+
+    // Should still generate QR code with URL without token
+    const expectedUrl = buildPwaUrl("moo-sync", "uid123");
+    expect(mockToDataURL).toHaveBeenCalledWith(expectedUrl, { width: 200, margin: 2 });
+  });
+
+  it("generates QR code without token when API returns no data", async () => {
+    const createQrToken = vi.fn().mockResolvedValue({
+      error: { code: "UNAUTHORIZED", message: "Auth failed" },
+    });
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    render(<QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />);
+
+    await screen.findByAltText("掃描此 QR Code 以在手機上開啟墨家書櫃");
+
+    const expectedUrl = buildPwaUrl("moo-sync", "uid123");
+    expect(mockToDataURL).toHaveBeenCalledWith(expectedUrl, { width: 200, margin: 2 });
+  });
+
+  it("refreshes QR token before expiry", async () => {
+    vi.useFakeTimers();
+
+    // Use a deferred promise so we control when the first token resolves
+    let resolveFirst!: (v: unknown) => void;
+    const firstCall = new Promise((r) => { resolveFirst = r; });
+    let resolveSecond!: (v: unknown) => void;
+    const secondCall = new Promise((r) => { resolveSecond = r; });
+
+    const createQrToken = vi.fn()
+      .mockReturnValueOnce(firstCall)
+      .mockReturnValueOnce(secondCall);
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    render(<QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />);
+
+    // Resolve first token fetch
+    await act(async () => {
+      resolveFirst({ data: { token: "token-1", expiresIn: 300 } });
+    });
+
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    // Advance timer to trigger refresh (expiresIn=300, refresh at 300-60=240s)
+    await act(async () => {
+      vi.advanceTimersByTime(240_000);
+    });
+
+    expect(createQrToken).toHaveBeenCalledTimes(2);
+
+    // Resolve second to prevent warnings
+    await act(async () => {
+      resolveSecond({ data: { token: "token-2", expiresIn: 300 } });
+    });
+
+    vi.useRealTimers();
+  });
+
+  it("cleans up refresh timer on unmount", async () => {
+    vi.useFakeTimers();
+
+    let resolveFirst!: (v: unknown) => void;
+    const firstCall = new Promise((r) => { resolveFirst = r; });
+
+    const createQrToken = vi.fn().mockReturnValueOnce(firstCall);
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    const { unmount } = render(
+      <QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />,
+    );
+
+    await act(async () => {
+      resolveFirst({ data: { token: "token-1", expiresIn: 300 } });
+    });
+
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    unmount();
+
+    // Advance past refresh interval — should NOT trigger another call
+    await act(async () => {
+      vi.advanceTimersByTime(300_000);
+    });
+
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
   });
 });

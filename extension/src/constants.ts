@@ -17,10 +17,14 @@ export const PERSONAL_BOOKS_CACHE_KEY = "personalBooksCache";
 
 /**
  * Build PWA URL with auth data in the fragment (never sent to server).
- * Format: https://pwa.example.com/#code={syncCode}&uid={userId}
+ * Format: https://pwa.example.com/#code={syncCode}&uid={userId}[&qrt={qrToken}]
  */
-export function buildPwaUrl(syncCode: string, userId: string): string {
-  return `${DEFAULT_PWA_URL}/#code=${encodeURIComponent(syncCode)}&uid=${encodeURIComponent(userId)}`;
+export function buildPwaUrl(syncCode: string, userId: string, qrToken?: string): string {
+  let url = `${DEFAULT_PWA_URL}/#code=${encodeURIComponent(syncCode)}&uid=${encodeURIComponent(userId)}`;
+  if (qrToken) {
+    url += `&qrt=${encodeURIComponent(qrToken)}`;
+  }
+  return url;
 }
 
 /**

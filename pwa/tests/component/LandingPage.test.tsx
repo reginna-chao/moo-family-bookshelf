@@ -8,8 +8,8 @@ import { LandingPage } from "@/pages/LandingPage";
 // Mock crypto modules
 vi.mock("@/crypto/syncCode", () => ({
   decodeSyncCode: vi.fn(),
-  encodeSyncCode: vi.fn((data: { familyId: string; encryptionKey: string; apiHost?: string }) => {
-    const base = `moo-${data.familyId}-${data.encryptionKey}`;
+  encodeSyncCode: vi.fn((data: { familyId: string; apiHost?: string }) => {
+    const base = `moo-${data.familyId}`;
     return data.apiHost ? `${base}@${data.apiHost}` : base;
   }),
   SyncCodeError: class SyncCodeError extends Error {
@@ -109,7 +109,6 @@ describe("LandingPage", () => {
     it("should show email validation error when sync code is valid but email is empty", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -190,7 +189,6 @@ describe("LandingPage", () => {
     it("should show email format error for invalid email", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -210,7 +208,6 @@ describe("LandingPage", () => {
     it("should clear email error when user types in email field", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -235,7 +232,6 @@ describe("LandingPage", () => {
     it("should call onAuth with correct AuthState (userId hashed client-side)", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
         apiHost: "custom.api.com",
       });
 
@@ -253,7 +249,6 @@ describe("LandingPage", () => {
         expect(mockOnAuth).toHaveBeenCalledWith({
           userId: expect.stringMatching(/^[a-f0-9]{64}$/),
           familyId: "fam-1",
-          encryptionKey: "key-1",
           apiHost: "custom.api.com",
           authToken: "tok-123",
         });
@@ -263,7 +258,6 @@ describe("LandingPage", () => {
     it("should call onAuth without apiHost when not present", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -276,7 +270,6 @@ describe("LandingPage", () => {
         expect(mockOnAuth).toHaveBeenCalledWith({
           userId: expect.stringMatching(/^[a-f0-9]{64}$/),
           familyId: "fam-1",
-          encryptionKey: "key-1",
           apiHost: undefined,
           authToken: "tok-123",
         });
@@ -288,7 +281,6 @@ describe("LandingPage", () => {
     it("should show '處理中...' and disable button during submission", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       let resolveJoin!: (value: { data: { ok: boolean } }) => void;
       mockJoinFamily.mockReturnValue(
@@ -319,7 +311,6 @@ describe("LandingPage", () => {
     it("should re-enable button when joinFamily returns an error", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockJoinFamily.mockResolvedValue({
         error: { code: "NOT_FOUND", message: "Family not found" },
@@ -343,7 +334,6 @@ describe("LandingPage", () => {
     it("should re-enable button when joinFamily throws", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockJoinFamily.mockRejectedValue(new Error("network error"));
 
@@ -367,7 +357,6 @@ describe("LandingPage", () => {
     it("should show family full error when joinFamily returns FAMILY_FULL", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockJoinFamily.mockResolvedValue({
         error: { code: "FAMILY_FULL", message: "Family is full" },
@@ -393,7 +382,6 @@ describe("LandingPage", () => {
     it("should show joinFamily error message for non-FAMILY_FULL errors", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockJoinFamily.mockResolvedValue({
         error: { code: "NOT_FOUND", message: "Family not found" },
@@ -478,7 +466,6 @@ describe("LandingPage", () => {
     it("should persist remember preference to localStorage on submit", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -542,7 +529,6 @@ describe("LandingPage", () => {
     it("should show PIN verification when method is pin", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockGetVerifyMethod.mockResolvedValue({ data: { method: "pin", prompted: 1 } });
 
@@ -563,7 +549,6 @@ describe("LandingPage", () => {
     it("should show pattern verification when method is pattern", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockGetVerifyMethod.mockResolvedValue({ data: { method: "pattern", prompted: 1 } });
 
@@ -583,7 +568,6 @@ describe("LandingPage", () => {
     it("should show code input when method is code", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockGetVerifyMethod.mockResolvedValue({ data: { method: "code", prompted: 1 } });
 
@@ -604,7 +588,6 @@ describe("LandingPage", () => {
     it("should go back to form when cancelling verification", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockGetVerifyMethod.mockResolvedValue({ data: { method: "pin", prompted: 1 } });
 
@@ -628,7 +611,6 @@ describe("LandingPage", () => {
     it("should show VERIFICATION_FAILED error from joinFamily", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockGetVerifyMethod.mockResolvedValue({ data: { method: "code", prompted: 1 } });
       mockJoinFamily.mockResolvedValue({
@@ -660,7 +642,6 @@ describe("LandingPage", () => {
     it("should proceed directly when method is none", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       mockGetVerifyMethod.mockResolvedValue({ data: { method: "none", prompted: 1 } });
 
@@ -680,7 +661,6 @@ describe("LandingPage", () => {
     it("should auto-join when qrUserId is provided and no verification needed", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-qr",
-        encryptionKey: "key-qr",
         apiHost: "qr.host.com",
       });
       mockGetVerifyMethod.mockResolvedValue({ data: { method: "none", prompted: 1 } });
@@ -702,7 +682,6 @@ describe("LandingPage", () => {
         expect(mockOnAuth).toHaveBeenCalledWith({
           userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
           familyId: "fam-qr",
-          encryptionKey: "key-qr",
           apiHost: "qr.host.com",
           authToken: "tok-123",
         });
@@ -712,7 +691,6 @@ describe("LandingPage", () => {
     it("should show PIN verification when qrUserId is provided and verification required", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-qr",
-        encryptionKey: "key-qr",
       });
       mockGetVerifyMethod.mockResolvedValue({ data: { method: "pin", prompted: 1 } });
 

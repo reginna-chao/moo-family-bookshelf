@@ -10,8 +10,8 @@ import {
 // Mock syncCode module
 vi.mock("@/crypto/syncCode", () => ({
   decodeSyncCode: vi.fn(),
-  encodeSyncCode: vi.fn((data: { familyId: string; encryptionKey: string; apiHost?: string }) => {
-    const base = `moo-${data.familyId}-${data.encryptionKey}`;
+  encodeSyncCode: vi.fn((data: { familyId: string; apiHost?: string }) => {
+    const base = `moo-${data.familyId}`;
     return data.apiHost ? `${base}@${data.apiHost}` : base;
   }),
   SyncCodeError: class SyncCodeError extends Error {
@@ -29,15 +29,12 @@ const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
 function seedStorage(data: {
   userId?: string;
   familyId?: string;
-  encryptionKey?: string;
   apiHost?: string;
 }) {
   if (data.userId) {
     localStorage.setItem("moo:userId", data.userId);
     if (data.familyId)
       localStorage.setItem(namespacedKey(data.userId, "familyId"), data.familyId);
-    if (data.encryptionKey)
-      localStorage.setItem(namespacedKey(data.userId, "encryptionKey"), data.encryptionKey);
     if (data.apiHost)
       localStorage.setItem(namespacedKey(data.userId, "apiHost"), data.apiHost);
   }
@@ -68,7 +65,7 @@ describe("useAuth", () => {
   describe("namespacedKey", () => {
     it("should build namespaced key with userId", () => {
       expect(namespacedKey("user-1", "familyId")).toBe("moo:user-1:familyId");
-      expect(namespacedKey("user-1", "encryptionKey")).toBe("moo:user-1:encryptionKey");
+      expect(namespacedKey("user-1", "apiHost")).toBe("moo:user-1:apiHost");
     });
   });
 
@@ -77,7 +74,6 @@ describe("useAuth", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       const { result } = renderHook(() => useAuth());
@@ -85,7 +81,6 @@ describe("useAuth", () => {
       expect(result.current.auth).toEqual({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
       expect(result.current.isLoading).toBe(false);
     });
@@ -94,7 +89,6 @@ describe("useAuth", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
         apiHost: "custom.host.com",
       });
 
@@ -103,7 +97,6 @@ describe("useAuth", () => {
       expect(result.current.auth).toEqual({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
         apiHost: "custom.host.com",
       });
     });
@@ -120,16 +113,6 @@ describe("useAuth", () => {
 
     it("should return null auth when familyId is missing", () => {
       localStorage.setItem("moo:userId", "user-1");
-      localStorage.setItem(namespacedKey("user-1", "encryptionKey"), "key-1");
-
-      const { result } = renderHook(() => useAuth());
-
-      expect(result.current.auth).toBeNull();
-    });
-
-    it("should return null auth when encryptionKey is missing", () => {
-      localStorage.setItem("moo:userId", "user-1");
-      localStorage.setItem(namespacedKey("user-1", "familyId"), "fam-1");
 
       const { result } = renderHook(() => useAuth());
 
@@ -194,7 +177,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
-        encryptionKey: "secretKey",
       });
 
       renderHook(() => useAuth());
@@ -239,7 +221,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
-        encryptionKey: "secretKey",
       });
 
       const { result } = renderHook(() => useAuth());
@@ -261,7 +242,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
-        encryptionKey: "secretKey",
         apiHost: "custom.host",
       });
 
@@ -281,7 +261,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
-        encryptionKey: "secretKey",
       });
 
       renderHook(() => useAuth());
@@ -298,7 +277,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
-        encryptionKey: "secretKey",
       });
 
       renderHook(() => useAuth());
@@ -362,7 +340,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "abc1-def2",
-        encryptionKey: "key123",
       });
 
       const { result } = renderHook(() => useAuth());
@@ -386,7 +363,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam1",
-        encryptionKey: "key1",
       });
 
       renderHook(() => useAuth());
@@ -398,7 +374,6 @@ describe("useAuth", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       vi.stubGlobal("location", {
@@ -409,7 +384,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "new-family",
-        encryptionKey: "newkey",
       });
 
       const { result } = renderHook(() => useAuth());
@@ -445,7 +419,6 @@ describe("useAuth", () => {
         result.current.login({
           userId: "user-new",
           familyId: "fam-new",
-          encryptionKey: "key-new",
           apiHost: "api.example.com",
         });
       });
@@ -453,12 +426,10 @@ describe("useAuth", () => {
       expect(result.current.auth).toEqual({
         userId: "user-new",
         familyId: "fam-new",
-        encryptionKey: "key-new",
         apiHost: "api.example.com",
       });
       expect(localStorage.getItem("moo:userId")).toBe("user-new");
       expect(localStorage.getItem(namespacedKey("user-new", "familyId"))).toBe("fam-new");
-      expect(localStorage.getItem(namespacedKey("user-new", "encryptionKey"))).toBe("key-new");
       expect(localStorage.getItem(namespacedKey("user-new", "apiHost"))).toBe("api.example.com");
     });
 
@@ -473,7 +444,6 @@ describe("useAuth", () => {
         result.current.login({
           userId: "user-new",
           familyId: "fam-new",
-          encryptionKey: "key-new",
         });
       });
 
@@ -486,7 +456,6 @@ describe("useAuth", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
         apiHost: "host.com",
       });
 
@@ -502,7 +471,6 @@ describe("useAuth", () => {
       expect(result.current.auth).toBeNull();
       expect(localStorage.getItem("moo:userId")).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBeNull();
     });
   });
@@ -519,14 +487,12 @@ describe("useAuth", () => {
         result.current.login({
           userId: "user-cycle",
           familyId: "fam-cycle",
-          encryptionKey: "key-cycle",
         });
       });
 
       expect(result.current.auth).toEqual({
         userId: "user-cycle",
         familyId: "fam-cycle",
-        encryptionKey: "key-cycle",
       });
       expect(localStorage.getItem("moo:userId")).toBe("user-cycle");
 
@@ -538,7 +504,6 @@ describe("useAuth", () => {
       expect(result.current.auth).toBeNull();
       expect(localStorage.getItem("moo:userId")).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-cycle", "familyId"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-cycle", "encryptionKey"))).toBeNull();
     });
   });
 
@@ -548,7 +513,6 @@ describe("useAuth", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
         apiHost: "custom.host.com",
       });
       // Also set authToken
@@ -565,11 +529,10 @@ describe("useAuth", () => {
       // ALL auth keys cleared (including identity keys)
       expect(localStorage.getItem("moo:userId")).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "authToken"))).toBeNull();
       // REMEMBERED_LOGOUT_KEY stores the sync code string
-      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1-key-1@custom.host.com");
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1@custom.host.com");
     });
 
     it("should remember sync code when rememberSyncCode is not set (default to remember)", () => {
@@ -577,7 +540,6 @@ describe("useAuth", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       const { result } = renderHook(() => useAuth());
@@ -591,11 +553,10 @@ describe("useAuth", () => {
       // All auth keys should still be cleared
       expect(localStorage.getItem("moo:userId")).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
       // REMEMBERED_LOGOUT_KEY should be set (default is remember)
-      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1-key-1");
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1");
       // initialSyncCode should be set
-      expect(result.current.initialSyncCode).toBe("moo-fam-1-key-1");
+      expect(result.current.initialSyncCode).toBe("moo-fam-1");
     });
 
     it("should NOT remember sync code when rememberSyncCode is explicitly set to 0", () => {
@@ -603,7 +564,6 @@ describe("useAuth", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       const { result } = renderHook(() => useAuth());
@@ -638,7 +598,6 @@ describe("useAuth", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
         apiHost: "custom.host.com",
       });
 
@@ -651,7 +610,7 @@ describe("useAuth", () => {
 
       // initialSyncCode should be set immediately (no refresh needed)
       expect(result.current.auth).toBeNull();
-      expect(result.current.initialSyncCode).toBe("moo-fam-1-key-1@custom.host.com");
+      expect(result.current.initialSyncCode).toBe("moo-fam-1@custom.host.com");
     });
 
     it("should clear qrUserId on logout to prevent auto-re-login", () => {
@@ -665,7 +624,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
-        encryptionKey: "secretKey",
       });
 
       const { result } = renderHook(() => useAuth());
@@ -679,7 +637,6 @@ describe("useAuth", () => {
         result.current.login({
           userId: "user-abc",
           familyId: "fam99",
-          encryptionKey: "secretKey",
         });
       });
       expect(result.current.auth).not.toBeNull();
@@ -713,7 +670,6 @@ describe("useAuth", () => {
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
         apiHost: "custom.host.com",
       });
 
@@ -727,7 +683,6 @@ describe("useAuth", () => {
       expect(result.current.auth).toBeNull();
       expect(localStorage.getItem("moo:userId")).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "encryptionKey"))).toBeNull();
       expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBeNull();
       expect(localStorage.getItem(REMEMBER_SYNC_CODE_KEY)).toBeNull();
       expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
@@ -742,7 +697,6 @@ describe("useAuth", () => {
       });
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam99",
-        encryptionKey: "secretKey",
       });
 
       const { result } = renderHook(() => useAuth());
@@ -762,11 +716,10 @@ describe("useAuth", () => {
 
     it("should clear everything even with rememberSyncCode=1", () => {
       localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "1");
-      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "moo-fam-1-key-1");
+      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "moo-fam-1");
       seedStorage({
         userId: "user-1",
         familyId: "fam-1",
-        encryptionKey: "key-1",
       });
 
       const { result } = renderHook(() => useAuth());

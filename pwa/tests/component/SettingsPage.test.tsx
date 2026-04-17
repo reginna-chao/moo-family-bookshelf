@@ -15,14 +15,6 @@ vi.mock("@/crypto/syncCode", () => ({
   encodeSyncCode: mockEncodeSyncCode,
 }));
 
-// Mock crypto module (needed by FamilyDataProvider's refreshBookshelf)
-vi.mock("@/crypto/encrypt", () => ({
-  importKey: vi.fn().mockResolvedValue("mock-crypto-key"),
-  decrypt: vi.fn().mockImplementation((payload: string) => {
-    return Promise.resolve(payload);
-  }),
-}));
-
 // Mock constants to match the default endpoint used in the mock
 vi.mock("@/constants", () => ({
   DEFAULT_API_ENDPOINT: "https://default-api.example.com",
@@ -48,7 +40,6 @@ const defaultProps = {
   familyId: "fam-001",
   userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
   apiClient: mockApiClient,
-  encryptionKey: "enc-key-123",
   onLogout: vi.fn(),
   onForceLogout: vi.fn(),
 };
@@ -59,7 +50,6 @@ function renderWithProvider(props = defaultProps) {
       familyId={props.familyId}
       userId={props.userId}
       apiClient={props.apiClient}
-      encryptionKey={props.encryptionKey}
     >
       <SettingsPage {...props} />
     </FamilyDataProvider>,

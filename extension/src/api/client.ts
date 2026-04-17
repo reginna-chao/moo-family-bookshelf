@@ -255,6 +255,13 @@ export class ApiClient {
     return this.post(`/api/user/${userId}/verify/otp`);
   }
 
+  // --- QR Token ---
+
+  /** Create a short-lived QR token for PWA auto-login (bypasses verification). */
+  async createQrToken(userId: string): Promise<ApiResponse<{ token: string; expiresIn: number }>> {
+    return this.post(`/api/user/${userId}/qr-token`);
+  }
+
   // --- Internal ---
 
   private async request<T>(

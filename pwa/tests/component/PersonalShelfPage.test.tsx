@@ -9,18 +9,8 @@ import {
 } from "@testing-library/react";
 import { PersonalShelfPage } from "@/pages/PersonalShelfPage";
 
-// Mock crypto
-vi.mock("@/crypto/encrypt", () => ({
-  importKey: vi.fn().mockResolvedValue("mock-key"),
-  decrypt: vi.fn(),
-  encrypt: vi.fn(),
-}));
+import { BoolFlag, type PersonalBooks, type ApiClient } from "@/api/client";
 
-import { decrypt, encrypt } from "@/crypto/encrypt";
-import { BoolFlag, type ApiClient } from "@/api/client";
-
-const mockDecrypt = vi.mocked(decrypt);
-const mockEncrypt = vi.mocked(encrypt);
 const mockGetPersonalBooks = vi.fn();
 const mockUpdatePersonalBooks = vi.fn();
 
@@ -29,7 +19,7 @@ const mockApiClient = {
   updatePersonalBooks: mockUpdatePersonalBooks,
 } as unknown as ApiClient;
 
-function makePayload(
+function makePersonalBooks(
   displayName: string,
   books: Array<{
     bookId: string;
@@ -37,8 +27,10 @@ function makePayload(
     author: string;
     isShared: BoolFlag;
   }>,
-): string {
-  return JSON.stringify({
+): PersonalBooks {
+  return {
+    schemaVersion: 1,
+    userId: "user-1",
     displayName,
     books: books.map((b) => ({
       bookId: b.bookId,
@@ -47,16 +39,17 @@ function makePayload(
       isbn: "",
       coverUrl: "",
       readmooUrl: `https://readmoo.com/${b.bookId}`,
+      category: "",
       isShared: b.isShared,
     })),
-  });
+    lastUpdated: new Date().toISOString(),
+  };
 }
 
 function createProps() {
   return {
     userId: "user-1",
     apiClient: mockApiClient,
-    encryptionKey: "test-key",
   };
 }
 
@@ -64,9 +57,8 @@ async function renderWithBooks(
   books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>,
   displayName = "TestUser",
 ) {
-  mockDecrypt.mockResolvedValue(makePayload(displayName, books));
   mockGetPersonalBooks.mockResolvedValue({
-    data: { payload: "encrypted-string" },
+    data: makePersonalBooks(displayName, books),
   });
   render(<PersonalShelfPage {...createProps()} />);
   await waitFor(() => {
@@ -78,8 +70,6 @@ describe("PersonalShelfPage", () => {
   let defaultProps: ReturnType<typeof createProps>;
 
   beforeEach(() => {
-    mockDecrypt.mockReset();
-    mockEncrypt.mockReset();
     mockGetPersonalBooks.mockReset();
     mockUpdatePersonalBooks.mockReset();
     defaultProps = createProps();
@@ -128,13 +118,10 @@ describe("PersonalShelfPage", () => {
     });
 
     // Set up success response for retry
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", [
+    mockGetPersonalBooks.mockResolvedValue({
+      data: makePersonalBooks("TestUser", [
         { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },
       ]),
-    );
-    mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
     });
 
     fireEvent.click(screen.getByText("重試"));
@@ -146,11 +133,8 @@ describe("PersonalShelfPage", () => {
   });
 
   it("shows empty state when books array is empty", async () => {
-    mockDecrypt.mockResolvedValue(
-      makePayload("TestUser", []),
-    );
     mockGetPersonalBooks.mockResolvedValue({
-      data: { payload: "encrypted-string" },
+      data: makePersonalBooks("TestUser", []),
     });
 
     render(<PersonalShelfPage {...defaultProps} />);
@@ -298,12 +282,11 @@ describe("PersonalShelfPage", () => {
     expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
-  it("save flow calls encrypt then updatePersonalBooks", async () => {
+  it("save flow calls updatePersonalBooks with PersonalBooks object", async () => {
     await renderWithBooks([
       { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
     ]);
 
-    mockEncrypt.mockResolvedValue("new-encrypted-payload");
     mockUpdatePersonalBooks.mockResolvedValue({ data: { ok: true } });
 
     // Batch share to make dirty
@@ -314,12 +297,16 @@ describe("PersonalShelfPage", () => {
     fireEvent.click(screen.getByText("儲存變更"));
 
     await waitFor(() => {
-      expect(mockEncrypt).toHaveBeenCalledTimes(1);
+      expect(mockUpdatePersonalBooks).toHaveBeenCalledWith(
+        "user-1",
+        expect.objectContaining({
+          userId: "user-1",
+          books: expect.arrayContaining([
+            expect.objectContaining({ bookId: "b1", isShared: BoolFlag.TRUE }),
+          ]),
+        }),
+      );
     });
-    expect(mockUpdatePersonalBooks).toHaveBeenCalledWith(
-      "user-1",
-      "new-encrypted-payload",
-    );
 
     await waitFor(() => {
       expect(screen.getByText("已儲存")).toBeInTheDocument();
@@ -430,7 +417,6 @@ describe("PersonalShelfPage", () => {
       { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
     ]);
 
-    mockEncrypt.mockResolvedValue("encrypted");
     mockUpdatePersonalBooks.mockRejectedValue(new Error("儲存失敗"));
 
     // Batch share to make dirty

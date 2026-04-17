@@ -380,7 +380,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         {mobileOpen && (
           <>
             {syncCode && (
-              <QrCodeLink syncCode={syncCode} userId={userId} />
+              <QrCodeLink syncCode={syncCode} userId={userId} apiClient={apiClient} />
             )}
             <VerificationSettings userId={userId} apiClient={apiClient} />
           </>

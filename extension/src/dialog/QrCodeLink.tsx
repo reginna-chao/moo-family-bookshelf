@@ -1,18 +1,59 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { buildPwaUrl } from "../constants";
+import type { ApiClient } from "../api/client";
+
+/** Default refresh interval: 4 minutes (token typically expires at 5 min). */
+const TOKEN_REFRESH_INTERVAL_MS = 240_000;
 
 interface QrCodeLinkProps {
   syncCode: string;
   userId: string;
+  apiClient: ApiClient;
 }
 
-export function QrCodeLink({ syncCode, userId }: QrCodeLinkProps) {
+export function QrCodeLink({ syncCode, userId, apiClient }: QrCodeLinkProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [qrToken, setQrToken] = useState<string | undefined>(undefined);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
 
-  const pwaUrl = buildPwaUrl(syncCode, userId);
+  const pwaUrl = buildPwaUrl(syncCode, userId, qrToken);
+
+  const fetchQrToken = useCallback(async () => {
+    try {
+      const res = await apiClient.createQrToken(userId);
+      if (!mountedRef.current) return;
+      if (res.data?.token) {
+        setQrToken(res.data.token);
+        // Schedule next refresh before expiry (use server expiresIn or default 4 min)
+        const refreshMs = res.data.expiresIn
+          ? Math.max((res.data.expiresIn - 60) * 1000, 30_000)
+          : TOKEN_REFRESH_INTERVAL_MS;
+        refreshTimerRef.current = setTimeout(() => {
+          void fetchQrToken();
+        }, refreshMs);
+      }
+      // If token fetch fails, qrToken stays undefined — fallback to URL without token
+    } catch {
+      // Graceful degradation: QR code still works without token
+    }
+  }, [apiClient, userId]);
+
+  // Fetch QR token on mount and clean up timer on unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    void fetchQrToken();
+    return () => {
+      mountedRef.current = false;
+      if (refreshTimerRef.current !== null) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
+  }, [fetchQrToken]);
 
   useEffect(() => {
     let cancelled = false;

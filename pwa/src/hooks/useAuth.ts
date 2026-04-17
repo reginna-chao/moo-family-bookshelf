@@ -20,6 +20,8 @@ export interface UseAuthReturn {
   initialSyncCode: string;
   /** Pre-hashed userId from QR code (#code=…&uid=…). Skips email entry on LandingPage. */
   qrUserId: string;
+  /** Short-lived QR token from Extension (#qrt=…). Bypasses PWA verification when valid. */
+  qrToken: string;
 }
 
 /** Global key for "remember sync code on logout" preference. */
@@ -129,6 +131,7 @@ function clearUrlParams(): void {
 interface QrParams {
   syncCode: string;
   userId: string;
+  qrToken?: string;
 }
 
 function tryParseQrParams(): QrParams | null {
@@ -138,6 +141,7 @@ function tryParseQrParams(): QrParams | null {
   const params = new URLSearchParams(hash);
   const code = params.get("code");
   const uid = params.get("uid");
+  const qrt = params.get("qrt");
 
   if (!code || !uid) {
     return null;
@@ -151,7 +155,7 @@ function tryParseQrParams(): QrParams | null {
     return null;
   }
 
-  return { syncCode: code, userId: uid };
+  return { syncCode: code, userId: uid, qrToken: qrt || undefined };
 }
 
 /**
@@ -179,6 +183,7 @@ export function useAuth(): UseAuthReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [initialSyncCode, setInitialSyncCode] = useState("");
   const [qrUserId, setQrUserId] = useState("");
+  const [qrToken, setQrToken] = useState("");
 
   useEffect(() => {
     // 0. If URL contains "invite=" param key, clear auth state to start fresh for invite.
@@ -204,6 +209,9 @@ export function useAuth(): UseAuthReturn {
       forceClearStorage();
       setInitialSyncCode(qrParams.syncCode);
       setQrUserId(qrParams.userId);
+      if (qrParams.qrToken) {
+        setQrToken(qrParams.qrToken);
+      }
       setIsLoading(false);
       return;
     }
@@ -232,6 +240,7 @@ export function useAuth(): UseAuthReturn {
     clearStorage();
     setAuth(null);
     setQrUserId("");
+    setQrToken("");
     if (code) {
       setInitialSyncCode(code);
     }
@@ -241,8 +250,9 @@ export function useAuth(): UseAuthReturn {
     forceClearStorage();
     setAuth(null);
     setQrUserId("");
+    setQrToken("");
     setInitialSyncCode("");
   }, []);
 
-  return { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId };
+  return { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId, qrToken };
 }

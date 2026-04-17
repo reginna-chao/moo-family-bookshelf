@@ -112,24 +112,31 @@ describe("ApiClient", () => {
   });
 
   describe("updatePersonalBooks", () => {
-    it("should call PUT /api/user/:id/books with encrypted payload", async () => {
+    it("should call PUT /api/user/:id/books with PersonalBooks object", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({ data: { ok: true } }),
       );
 
-      const result = await client.updatePersonalBooks(USER_1, "encrypted-data");
+      const personalBooks = {
+        schemaVersion: 1,
+        userId: USER_1,
+        displayName: "Alice",
+        books: [],
+        lastUpdated: "2026-01-01T00:00:00Z",
+      };
+      const result = await client.updatePersonalBooks(USER_1, personalBooks);
 
       expect(mockFetch).toHaveBeenCalledOnce();
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toBe(`https://api.example.com/api/user/${USER_1}/books`);
       expect(init.method).toBe("PUT");
-      expect(JSON.parse(init.body)).toEqual({ payload: "encrypted-data" });
+      expect(JSON.parse(init.body)).toEqual(personalBooks);
       expect(result.data).toEqual({ ok: true });
     });
   });
 
   describe("createFamily", () => {
-    it("should call POST /api/family with userId only when no displayName or keyFingerprint", async () => {
+    it("should call POST /api/family with userId only when no displayName", async () => {
       const familyData = {
         familyId: "fam-1",
         ownerId: USER_1,
@@ -160,17 +167,6 @@ describe("ApiClient", () => {
       expect(body.displayName).toBe("Alice");
     });
 
-    it("should include keyFingerprint when provided", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { familyId: "fam-1" } }));
-      const fingerprint = "a".repeat(64);
-
-      await client.createFamily(USER_1, "Alice", fingerprint);
-
-      const [, init] = mockFetch.mock.calls[0];
-      const body = JSON.parse(init.body);
-      expect(body.keyFingerprint).toBe(fingerprint);
-    });
-
     it("should reject invalid userId", async () => {
       await expect(client.createFamily("invalid")).rejects.toThrow("Invalid userId");
     });
@@ -192,7 +188,7 @@ describe("ApiClient", () => {
       expect(result.data).toEqual({ ok: true });
     });
 
-    it("should not include verifySecret or keyFingerprint when opts is empty", async () => {
+    it("should not include verifySecret when opts is empty", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
 
       await client.joinFamily("fam-1", USER_2, {});
@@ -200,7 +196,6 @@ describe("ApiClient", () => {
       const [, init] = mockFetch.mock.calls[0];
       const body = JSON.parse(init.body);
       expect(body.verifySecret).toBeUndefined();
-      expect(body.keyFingerprint).toBeUndefined();
     });
 
     it("should include verifySecret in body when opts.verifySecret is provided", async () => {
@@ -211,18 +206,6 @@ describe("ApiClient", () => {
       const [, init] = mockFetch.mock.calls[0];
       const body = JSON.parse(init.body);
       expect(body.verifySecret).toBe("9999");
-    });
-
-    it("should not include keyFingerprint in production join path (PWA does not pass it)", async () => {
-      // PWA's production flow does NOT pass keyFingerprint — this test documents that
-      // LandingPage and App call joinFamily without keyFingerprint
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
-
-      await client.joinFamily("fam-1", USER_2, { verifySecret: "0000" });
-
-      const [, init] = mockFetch.mock.calls[0];
-      const body = JSON.parse(init.body);
-      expect(body.keyFingerprint).toBeUndefined();
     });
 
     it("should reject invalid userId", async () => {

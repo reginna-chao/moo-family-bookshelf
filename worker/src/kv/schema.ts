@@ -5,6 +5,7 @@
  *   user:{userId}    → personal book list + sharing settings (JSON)
  *   family:{familyId} → family member list (JSON)
  *   member:{userId}  → familyId (reverse lookup)
+ *   qr:{token}       → QrTokenRecord (one-time QR login bypass, TTL 300s)
  */
 
 export const kvKeys = {
@@ -15,6 +16,7 @@ export const kvKeys = {
   authToken: (token: string) => `token:${token}`,
   verify: (userId: string) => `verify:${userId}`,
   otp: (userId: string) => `otp:${userId}`,
+  qrToken: (token: string) => `qr:${token}`,
 } as const;
 
 export interface FamilyMember {
@@ -89,6 +91,13 @@ export const TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 /** OTP TTL: 5 minutes in seconds. */
 export const OTP_TTL_SECONDS = 5 * 60;
+
+/** QR token TTL: 5 minutes in seconds. */
+export const QR_TOKEN_TTL_SECONDS = 5 * 60;
+
+export interface QrTokenRecord {
+  userId: string;
+}
 
 /** Verification method for PWA login. */
 export type VerifyMethod = "pin" | "pattern" | "code" | "none";

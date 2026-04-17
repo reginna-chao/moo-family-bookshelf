@@ -3,10 +3,12 @@ import type { Env } from "../utils/env";
 import {
   kvKeys,
   OTP_TTL_SECONDS,
+  QR_TOKEN_TTL_SECONDS,
   VERIFY_MAX_FAILURES,
   VERIFY_LOCKOUT_MS,
   type VerifyRecord,
   type OtpRecord,
+  type QrTokenRecord,
 } from "../kv/schema";
 import { isValidUserId, isValidVerifyMethod, isValidPin, isValidPattern } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
@@ -239,6 +241,51 @@ verifyRoutes.post("/:id/verify/prompted", async (c) => {
   await c.env.KV.put(kvKeys.verify(userId), JSON.stringify(record));
 
   return c.json({ data: { method: record.method, prompted: record.prompted } });
+});
+
+/** Generate a 32-byte random hex token (64 hex chars). */
+function generateQrToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// POST /:id/qr-token — generate a one-time QR token for verification bypass (protected)
+verifyRoutes.post("/:id/qr-token", async (c) => {
+  const userId = c.req.param("id");
+
+  if (!isValidUserId(userId)) {
+    return c.json(
+      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  const callerId = getAuthenticatedUserId(c);
+  if (!callerId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
+  if (callerId !== userId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "只能為自己產生 QR Token" } },
+      403,
+    );
+  }
+
+  const token = generateQrToken();
+  const record: QrTokenRecord = { userId };
+
+  await c.env.KV.put(kvKeys.qrToken(token), JSON.stringify(record), {
+    expirationTtl: QR_TOKEN_TTL_SECONDS,
+  });
+
+  return c.json({ data: { token, expiresIn: QR_TOKEN_TTL_SECONDS } });
 });
 
 /**

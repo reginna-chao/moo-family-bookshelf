@@ -12,7 +12,7 @@ import {
 } from "@/hooks/updateTracking";
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import { BoolFlag } from "@/api/client";
-import type { RawFamilyBookshelf } from "@/api/client";
+import type { FamilyBookshelf } from "@/api/client";
 
 function makeBook(bookId: string, title = bookId) {
   return {
@@ -38,8 +38,8 @@ function makeMember(userId: string, bookIds: string[]): MemberBooks {
 function makeRawMember(
   userId: string,
   lastUpdated: string | null,
-): RawFamilyBookshelf["members"][number] {
-  return { userId, payload: null, lastUpdated };
+): FamilyBookshelf["members"][number] {
+  return { userId, displayName: userId, books: [], lastUpdated };
 }
 
 describe("seenKey / chipsKey", () => {

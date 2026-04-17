@@ -16,6 +16,8 @@ interface LandingPageProps {
   initialSyncCode?: string;
   /** Pre-hashed userId from QR code. Skips email entry and auto-triggers login. */
   qrUserId?: string;
+  /** Short-lived QR token from Extension. Bypasses verification when valid. */
+  qrToken?: string;
   /** External error (e.g., FAMILY_FULL from token refresh). */
   externalError?: string;
 }
@@ -31,7 +33,7 @@ interface PendingAuth {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_ENV = getAppEnv();
 
-export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", externalError = "" }: LandingPageProps) {
+export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", qrToken = "", externalError = "" }: LandingPageProps) {
   const [syncCodeInput, setSyncCodeInput] = useState("");
   const [showCode, setShowCode] = useState(false);
   const [email, setEmail] = useState("");
@@ -150,19 +152,35 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
     userId: string,
     apiHost?: string,
     verifySecret?: string,
+    tokenFromQr?: string,
   ) {
     setIsSubmitting(true);
     try {
       const joinClient = getJoinClient(apiHost);
-      const joinRes = await joinClient.joinFamily(familyId, userId, { verifySecret });
+      const joinRes = await joinClient.joinFamily(familyId, userId, { verifySecret, qrToken: tokenFromQr });
       if (joinRes.error) {
         const code = joinRes.error.code;
         if (code === "FAMILY_FULL") {
           setGeneralError("家庭成員已達上限（每個家庭最多 2 位成員）");
-        } else if (code === "VERIFICATION_REQUIRED") {
-          setVerifyError("需要驗證才能登入。");
-        } else if (code === "VERIFICATION_FAILED") {
-          setVerifyError("驗證失敗，請重新輸入。");
+        } else if (code === "VERIFICATION_REQUIRED" || code === "VERIFICATION_FAILED") {
+          // If QR token was used but rejected, fall back to verification UI
+          if (tokenFromQr && !pendingAuth) {
+            const verifyRes = await joinClient.getVerifyMethod(userId);
+            const method: VerifyMethod = verifyRes.data?.method ?? "none";
+            if (method !== "none") {
+              setPendingAuth({ userId, familyId, apiHost, verifyMethod: method });
+              if (code === "VERIFICATION_FAILED") {
+                setVerifyError("QR 驗證碼已過期，請手動驗證。");
+              }
+              setIsSubmitting(false);
+              return;
+            }
+          }
+          if (code === "VERIFICATION_REQUIRED") {
+            setVerifyError("需要驗證才能登入。");
+          } else {
+            setVerifyError("驗證失敗，請重新輸入。");
+          }
         } else if (code === "VERIFICATION_LOCKED") {
           setVerifyError("驗證錯誤次數過多，請稍後再試。");
           setPendingAuth(null);
@@ -204,7 +222,9 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
   }
 
   // Auto-trigger login when QR code provides both sync code and userId.
-  // Routes through the same verification flow as manual login.
+  // When a qrToken is present, skip verification and join directly with the token.
+  // If the token is invalid/expired, the server returns VERIFICATION_REQUIRED/FAILED
+  // and we fall back to showing the normal verification UI.
   const qrTriggered = useRef(false);
   useEffect(() => {
     if (!qrUserId || !initialSyncCode || qrTriggered.current) return;
@@ -219,6 +239,16 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
     }
 
     setIsSubmitting(true);
+
+    // When qrToken is available, skip the verification check and join directly
+    if (qrToken) {
+      void completeJoin(decoded.familyId, qrUserId, decoded.apiHost, undefined, qrToken)
+        .catch(() => {
+          setGeneralError("處理失敗，請重試。");
+          setIsSubmitting(false);
+        });
+      return;
+    }
 
     const joinClient = getJoinClient(decoded.apiHost);
     void joinClient.getVerifyMethod(qrUserId).then((verifyRes) => {
@@ -242,7 +272,7 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", exter
       setIsSubmitting(false);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qrUserId, initialSyncCode]);
+  }, [qrUserId, initialSyncCode, qrToken]);
 
   // Show verification UI
   if (pendingAuth) {
