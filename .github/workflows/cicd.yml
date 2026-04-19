@@ -341,7 +341,7 @@ jobs:
         run: pnpm --filter moo-family-bookshelf-pwa build
 
       - name: Deploy to Cloudflare Pages (Prod)
-        run: npx wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf
+        run: npx wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf --branch=main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
