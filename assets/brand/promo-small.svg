@@ -1,0 +1,54 @@
+<svg viewBox="0 0 440 280" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>MooFamily Bookshelf — Chrome Web Store Small Promo (440x280)</title>
+  <rect width="440" height="280" fill="#F5EDE3"/>
+
+  <!-- Left: Mini arch bookshelf -->
+  <g transform="translate(100, 20)">
+    <!-- Arch frame -->
+    <path d="M0,180 L0,70 Q0,0 60,0 Q120,0 120,70 L120,180Z" fill="#6B4C3B"/>
+    <!-- Inner window -->
+    <path d="M10,180 L10,74 Q10,14 60,14 Q110,14 110,74 L110,180Z" fill="#FBF7F2"/>
+    <!-- Warm glow -->
+    <ellipse cx="60" cy="50" rx="30" ry="18" fill="#F5D4A0" opacity="0.25"/>
+    <!-- Upper shelf -->
+    <rect x="10" y="100" width="100" height="6" rx="1" fill="#A67B5B"/>
+    <!-- Books on upper shelf -->
+    <rect x="18" y="58" width="14" height="42" rx="2" fill="#D4836A"/>
+    <rect x="35" y="65" width="12" height="35" rx="2" fill="#C4956A"/>
+    <rect x="50" y="60" width="13" height="40" rx="2" fill="#D4A574"/>
+    <rect x="66" y="63" width="14" height="37" rx="2" fill="#B8906A"/>
+    <rect x="83" y="58" width="12" height="42" rx="2" fill="#E8C9A8"/>
+    <!-- Plant on upper shelf -->
+    <g transform="translate(99, 97)">
+      <rect x="-4" y="-6" width="8" height="6" rx="2" fill="#A67B5B"/>
+      <ellipse cx="0" cy="-10" rx="6" ry="5" fill="#8B9E6B" opacity="0.8"/>
+      <ellipse cx="-4" cy="-13" rx="4" ry="4" fill="#8B9E6B" opacity="0.6"/>
+      <ellipse cx="4" cy="-12" rx="4" ry="4" fill="#9BAF7B" opacity="0.7"/>
+    </g>
+    <!-- Lower shelf -->
+    <rect x="10" y="160" width="100" height="6" rx="1" fill="#A67B5B"/>
+    <!-- Books on lower shelf -->
+    <rect x="18" y="115" width="15" height="45" rx="2" fill="#E8C9A8"/>
+    <rect x="36" y="122" width="12" height="38" rx="2" fill="#D4836A"/>
+    <rect x="51" y="113" width="14" height="47" rx="2" fill="#B8906A"/>
+    <rect x="68" y="118" width="12" height="42" rx="2" fill="#D4A574"/>
+    <rect x="83" y="115" width="14" height="45" rx="2" fill="#C4956A"/>
+  </g>
+
+  <!-- Right: Text -->
+  <text x="300" y="105" text-anchor="middle" font-family="sans-serif" font-size="28" font-weight="700" fill="#6B4C3B">MooFamily</text>
+  <text x="300" y="138" text-anchor="middle" font-family="sans-serif" font-size="28" font-weight="700" fill="#6B4C3B">Bookshelf</text>
+  <!-- Accent line -->
+  <rect x="270" y="152" width="60" height="3" rx="1.5" fill="#D4836A"/>
+  <!-- Tagline -->
+  <text x="300" y="180" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="400" fill="#A68B7B">與家人分享你的書架</text>
+
+  <!-- Bottom decorative books row -->
+  <rect x="0" y="240" width="440" height="8" rx="1" fill="#A67B5B" opacity="0.3"/>
+  <rect x="20" y="218" width="16" height="22" rx="2" fill="#D4836A" opacity="0.4"/>
+  <rect x="40" y="222" width="14" height="18" rx="2" fill="#C4956A" opacity="0.4"/>
+  <rect x="58" y="219" width="15" height="21" rx="2" fill="#D4A574" opacity="0.4"/>
+  <rect x="365" y="220" width="14" height="20" rx="2" fill="#E8C9A8" opacity="0.4"/>
+  <rect x="383" y="218" width="16" height="22" rx="2" fill="#B8906A" opacity="0.4"/>
+  <rect x="403" y="221" width="14" height="19" rx="2" fill="#D4836A" opacity="0.4"/>
+</svg>
