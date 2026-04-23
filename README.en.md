@@ -18,7 +18,7 @@ Easily browse books shared by family members on your Readmoo family account.
 
 ### Chrome Web Store (Recommended)
 
-> Coming soon — link will be updated once the review is approved
+[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/ogclfjfjdiminibemhbckobeapnohjnk?utm_source=github)
 
 <details>
 

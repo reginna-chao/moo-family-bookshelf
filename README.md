@@ -18,7 +18,7 @@
 
 ### Chrome Web Store（推薦）
 
-> Coming soon — 審核通過後會更新連結
+[前往 Chrome 線上應用程式商店安裝](https://chromewebstore.google.com/detail/ogclfjfjdiminibemhbckobeapnohjnk?utm_source=github)
 
 <details>
 
