@@ -1,3 +1,4 @@
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { type Env, isDevMode } from "../utils/env";
 import { isPublicRoute, isSensitivePublicRoute } from "../utils/routes";
@@ -62,3 +63,48 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
     await next();
   },
 );
+
+/**
+ * Per-userId rate limit helper (distinct from the per-IP `rateLimit` middleware).
+ *
+ * Enforces a configurable ceiling on requests tied to an identifier (typically
+ * the authenticated userId) to prevent single-account abuse across rotating IPs.
+ * Returns a 429 Response when the limit is exceeded, otherwise increments the
+ * counter and returns `null` to let the handler proceed.
+ *
+ * KV key format: `ratelimit:user:{scope}:{userId}:{bucket}` where
+ * `bucket = floor(Date.now() / windowMs)`.
+ *
+ * Known limitation: KV get-then-put is not atomic. Concurrent bursts may exceed
+ * `max` by ~2x. Acceptable at current scale — identical caveat to the per-IP
+ * `rateLimit` middleware. For strict enforcement, use Durable Objects.
+ */
+export async function enforcePerUserRateLimit(
+  c: Context<{ Bindings: Env }>,
+  opts: { userId: string; scope: string; max: number; windowSec: number },
+): Promise<Response | null> {
+  if (isDevMode(c.env)) return null;
+
+  const windowMs = opts.windowSec * 1000;
+  const now = Date.now();
+  const bucket = Math.floor(now / windowMs);
+  const key = `ratelimit:user:${opts.scope}:${opts.userId}:${bucket}`;
+
+  const current = await c.env.KV.get(key);
+  const count = current ? parseInt(current, 10) : 0;
+
+  if (count >= opts.max) {
+    const retryAfter = Math.max(1, Math.ceil(((bucket + 1) * windowMs - now) / 1000));
+    return c.json(
+      { error: { code: "RATE_LIMITED", message: "Too many requests" } },
+      429,
+      { "Retry-After": String(retryAfter) },
+    );
+  }
+
+  await c.env.KV.put(key, String(count + 1), {
+    expirationTtl: opts.windowSec * 2,
+  });
+
+  return null;
+}

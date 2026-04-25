@@ -3,6 +3,7 @@ import type { Env } from "../utils/env";
 import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord } from "../kv/schema";
 import { isValidUserId } from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
+import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 
 export const userRoutes = new Hono<{ Bindings: Env }>();
 
@@ -65,6 +66,17 @@ userRoutes.put("/:id/books", async (c) => {
       403,
     );
   }
+
+  // Per-userId write rate limit: max 30 saves per userId per hour.
+  // Layered on top of per-IP rate limit; prevents compromised-account abuse
+  // from draining the daily 1000 KV write quota.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId: authUserId,
+    scope: "put-books",
+    max: 30,
+    windowSec: 3600,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   let body: Record<string, unknown> | null;
   try {

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { kvKeys } from "../../src/kv/schema";
+import { generateAuthToken } from "../../src/middleware/auth";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -150,5 +151,83 @@ describe("PUT /api/user/:id/books", () => {
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
+  });
+});
+
+// ===========================================================================
+// PUT /api/user/:id/books — per-user rate limit (non-dev mode)
+// ===========================================================================
+
+describe("PUT /:id/books per-user rate limit", () => {
+  const TEST_USER = "a".repeat(64);
+  const validBody = { books: [] };
+
+  function prodRequest(method: string, path: string, body?: unknown, authToken?: string) {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
+    const init: RequestInit = { method, headers };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    return app.request(path, init, { KV: kv });
+  }
+
+  async function seedAuth(userId: string): Promise<string> {
+    return generateAuthToken(kv, userId);
+  }
+
+  it("should return 429 after 30 PUTs per user per hour", async () => {
+    const token = await seedAuth(TEST_USER);
+
+    for (let i = 0; i < 30; i++) {
+      const res = await prodRequest("PUT", `/api/user/${TEST_USER}/books`, validBody, token);
+      expect(res.status).toBe(200);
+    }
+
+    const res = await prodRequest("PUT", `/api/user/${TEST_USER}/books`, validBody, token);
+    expect(res.status).toBe(429);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("RATE_LIMITED");
+    expect(res.headers.get("Retry-After")).toBeTruthy();
+  });
+
+  it("should count independently per userId", async () => {
+    const userA = "a".repeat(64);
+    const userB = "b".repeat(64);
+    const tokenA = await seedAuth(userA);
+    const tokenB = await seedAuth(userB);
+
+    // Exhaust userA's limit
+    for (let i = 0; i < 30; i++) {
+      await prodRequest("PUT", `/api/user/${userA}/books`, validBody, tokenA);
+    }
+    const blockedA = await prodRequest("PUT", `/api/user/${userA}/books`, validBody, tokenA);
+    expect(blockedA.status).toBe(429);
+
+    // userB should still work
+    const resB = await prodRequest("PUT", `/api/user/${userB}/books`, validBody, tokenB);
+    expect(resB.status).toBe(200);
+  });
+
+  it("should not consume per-user quota on unauthenticated requests", async () => {
+    // No auth → 401 (before per-user rate limit runs)
+    const res = await prodRequest("PUT", `/api/user/${TEST_USER}/books`, validBody);
+    expect(res.status).toBe(401);
+
+    // Verify no rate limit key was created
+    const keys = await kv.list();
+    const rateLimitKeys = keys.keys.filter(
+      (k: { name: string }) => k.name.startsWith("ratelimit:user:put-books:"),
+    );
+    expect(rateLimitKeys).toHaveLength(0);
+  });
+
+  it("should bypass per-user rate limit in dev mode", async () => {
+    // Use the existing dev-mode request helper (has DEV_MODE: "1")
+    const { authToken } = await createFamilyAndGetToken("user1");
+    for (let i = 0; i < 31; i++) {
+      const res = await request("PUT", "/api/user/user1/books", validBody, authToken);
+      expect(res.status).toBe(200);
+    }
   });
 });
