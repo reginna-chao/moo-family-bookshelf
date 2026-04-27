@@ -1,7 +1,8 @@
 /**
  * Vite plugin that rewrites manifest.json for non-production builds:
- * - Appends " (local)" or " (dev)" to the extension name
- * - Swaps icon paths to the matching variant folder
+ * - Appends " (local)" or " (dev)" to the extension name (idempotent)
+ * - Swaps icon paths in both manifest.icons and manifest.action.default_icon
+ *   to the matching variant folder
  *
  * Active for:
  *   mode === "development" → local (pnpm dev)
@@ -18,6 +19,31 @@ const VARIANT_MAP: Partial<Record<string, Variant>> = {
   development: { label: "local", iconDir: "icons-local" },
   remote: { label: "dev", iconDir: "icons-dev" },
 };
+
+const KNOWN_LABELS = Object.values(VARIANT_MAP)
+  .filter((v): v is Variant => v !== undefined)
+  .map((v) => v.label);
+
+const STRIP_SUFFIX_PATTERN = new RegExp(
+  `\\s\\((?:${KNOWN_LABELS.map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\)$`,
+);
+
+function rewriteIconPaths(
+  icons: Record<string, string> | undefined,
+  iconDir: string,
+  fieldName: string,
+): void {
+  if (!icons) return;
+  for (const size of Object.keys(icons)) {
+    if (!icons[size].startsWith("icons/")) {
+      console.warn(
+        `[dev-manifest] Unexpected icon path format in ${fieldName}: ${icons[size]} — expected "icons/" prefix`,
+      );
+      continue;
+    }
+    icons[size] = icons[size].replace("icons/", `${iconDir}/`);
+  }
+}
 
 export function devManifest(): Plugin {
   let outDir: string;
@@ -41,20 +67,17 @@ export function devManifest(): Plugin {
         return;
       }
 
-      manifest.name = `${manifest.name as string} (${variant.label})`;
+      const baseName = (manifest.name as string).replace(STRIP_SUFFIX_PATTERN, "");
+      manifest.name = `${baseName} (${variant.label})`;
 
-      const icons = manifest.icons as Record<string, string> | undefined;
-      if (icons) {
-        for (const size of Object.keys(icons)) {
-          if (!icons[size].startsWith("icons/")) {
-            console.warn(
-              `[dev-manifest] Unexpected icon path format: ${icons[size]} — expected "icons/" prefix`,
-            );
-            continue;
-          }
-          icons[size] = icons[size].replace("icons/", `${variant.iconDir}/`);
-        }
-      }
+      rewriteIconPaths(
+        manifest.icons as Record<string, string> | undefined,
+        variant.iconDir,
+        "manifest.icons",
+      );
+
+      const action = manifest.action as { default_icon?: Record<string, string> } | undefined;
+      rewriteIconPaths(action?.default_icon, variant.iconDir, "manifest.action.default_icon");
 
       writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
