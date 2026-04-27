@@ -9,10 +9,12 @@ import React, {
 } from "react";
 import {
   BoolFlag,
+  BorrowStatus,
 } from "@/api/client";
 import type {
   ApiClient,
   BookEntry,
+  BorrowRequest,
   FamilyMember,
   FamilyBookshelf,
 } from "@/api/client";
@@ -36,8 +38,14 @@ export interface MemberBooks {
 }
 
 type LoadState = "loading" | "ready" | "error";
+type BorrowLoadState = "idle" | "loading" | "loaded" | "error";
 
 interface FamilyDataState {
+  /** Identity / API access — exposed for borrow flow consumers. */
+  familyId: string;
+  userId: string;
+  apiClient: ApiClient;
+
   /** Family members list from getFamilyMembers */
   members: FamilyMember[];
   ownerId: string;
@@ -49,6 +57,14 @@ interface FamilyDataState {
   bookshelfMembers: MemberBooks[];
   bookshelfState: LoadState;
   bookshelfError: string;
+
+  /** Borrow requests list (v1.1.0) */
+  borrowRequests: BorrowRequest[];
+  borrowRequestsState: BorrowLoadState;
+  borrowRequestsError: string | null;
+  refreshBorrowRequests: () => Promise<void>;
+  /** Count of incoming PENDING requests for the current user (drives borrow tab badge). */
+  incomingPendingCount: number;
 
   /** Refresh functions for child components */
   refreshMembers: () => Promise<void>;
@@ -99,6 +115,14 @@ export function FamilyDataProvider({
   const [bookshelfMembers, setBookshelfMembers] = useState<MemberBooks[]>([]);
   const [bookshelfState, setBookshelfState] = useState<LoadState>("loading");
   const [bookshelfError, setBookshelfError] = useState("");
+
+  // --- Borrow requests state ---
+  const [borrowRequests, setBorrowRequests] = useState<BorrowRequest[]>([]);
+  const [borrowRequestsState, setBorrowRequestsState] =
+    useState<BorrowLoadState>("idle");
+  const [borrowRequestsError, setBorrowRequestsError] = useState<string | null>(
+    null,
+  );
 
   // --- Update tracking state ---
   const [freshUpdateBookIds, setFreshUpdateBookIds] = useState<Set<string>>(
@@ -225,6 +249,33 @@ export function FamilyDataProvider({
     }
   }, [familyId, apiClient, userId]);
 
+  const refreshBorrowRequests = useCallback(async () => {
+    setBorrowRequestsState((prev) =>
+      prev === "loaded" ? "loaded" : "loading",
+    );
+    setBorrowRequestsError(null);
+    try {
+      const requests = await apiClient.listBorrowRequests(familyId);
+      if (!mountedRef.current) return;
+      setBorrowRequests(requests);
+      setBorrowRequestsState("loaded");
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setBorrowRequestsError(
+        err instanceof Error ? err.message : "載入失敗",
+      );
+      setBorrowRequestsState("error");
+    }
+  }, [familyId, apiClient]);
+
+  const incomingPendingCount = useMemo(() => {
+    let count = 0;
+    for (const r of borrowRequests) {
+      if (r.ownerId === userId && r.status === BorrowStatus.PENDING) count++;
+    }
+    return count;
+  }, [borrowRequests, userId]);
+
   const updateMemberDisplayName = useCallback(
     (targetUserId: string, displayName: string) => {
       setMembers((prev) =>
@@ -268,13 +319,14 @@ export function FamilyDataProvider({
     setFreshUpdateBookIds(new Set());
   }, [userId]);
 
-  // Fetch on mount: members first, then bookshelf (sequential to avoid redundant API call)
+  // Fetch on mount: members first, then bookshelf + borrow requests
   useEffect(() => {
     void (async () => {
       await refreshMembers();
       void refreshBookshelf();
+      void refreshBorrowRequests();
     })();
-  }, [refreshMembers, refreshBookshelf]);
+  }, [refreshMembers, refreshBookshelf, refreshBorrowRequests]);
 
   // Cross-component sync: re-fetch bookshelf when PersonalShelf saves
   useEffect(() => {
@@ -297,6 +349,9 @@ export function FamilyDataProvider({
 
   const value = useMemo<FamilyDataState>(
     () => ({
+      familyId,
+      userId,
+      apiClient,
       members,
       ownerId,
       membersState,
@@ -305,6 +360,11 @@ export function FamilyDataProvider({
       bookshelfMembers,
       bookshelfState,
       bookshelfError,
+      borrowRequests,
+      borrowRequestsState,
+      borrowRequestsError,
+      refreshBorrowRequests,
+      incomingPendingCount,
       refreshMembers,
       refreshBookshelf,
       updateMemberDisplayName,
@@ -313,6 +373,9 @@ export function FamilyDataProvider({
       markBookshelfSeen,
     }),
     [
+      familyId,
+      userId,
+      apiClient,
       members,
       ownerId,
       membersState,
@@ -321,6 +384,11 @@ export function FamilyDataProvider({
       bookshelfMembers,
       bookshelfState,
       bookshelfError,
+      borrowRequests,
+      borrowRequestsState,
+      borrowRequestsError,
+      refreshBorrowRequests,
+      incomingPendingCount,
       refreshMembers,
       refreshBookshelf,
       updateMemberDisplayName,

@@ -62,6 +62,10 @@ export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 export interface FamilyMember {
   userId: string;
   displayName: string;
+  /** Optional for backward compat with old API responses; treat missing/undefined as TRUE. */
+  canLend?: BoolFlag;
+  /** Readmoo display name for lending automation (v1.1.0). */
+  readmooName?: string;
 }
 
 export interface FamilyGroup {
@@ -103,6 +107,44 @@ export interface SetVerifyBody {
   method: VerifyMethod;
   secret?: string;
   prompted?: number;
+}
+
+export enum BorrowStatus {
+  PENDING = 0,
+  LENT = 1,
+  RETURNED = 2,
+  REJECTED = 3,
+  CANCELLED = 4,
+}
+
+export interface BorrowRequest {
+  requestId: string;
+  familyId: string;
+  borrowerId: string;
+  borrowerName: string;
+  ownerId: string;
+  bookId: string;
+  bookTitle: string;
+  bookAuthor: string;
+  bookCoverUrl: string;
+  status: BorrowStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Payload for creating a borrow request. */
+export interface CreateBorrowPayload {
+  bookId: string;
+  bookTitle: string;
+  bookAuthor: string;
+  bookCoverUrl: string;
+  ownerId: string;
+}
+
+/** Settings updatable on a family member via PATCH /api/family/:id/member/:uid. */
+export interface MemberSettingsPayload {
+  canLend?: BoolFlag;
+  readmooName?: string;
 }
 
 export class ApiClient {
@@ -168,6 +210,24 @@ export class ApiClient {
 
   private del<T>(path: string): Promise<ApiResponse<T>> {
     return this.request(path, { method: "DELETE" });
+  }
+
+  private patch<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request(path, {
+      method: "PATCH",
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  /** Unwrap an envelope response or throw an Error built from `error`. */
+  private unwrap<T>(res: ApiResponse<T>): T {
+    if (res.error) {
+      throw new Error(`${res.error.code}: ${res.error.message}`);
+    }
+    if (res.data === undefined) {
+      throw new Error("EMPTY_RESPONSE: response body missing data");
+    }
+    return res.data;
   }
 
   // --- Auth ---
@@ -282,6 +342,49 @@ export class ApiClient {
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
     return this.get(`/api/family/${familyId}/bookshelf`);
+  }
+
+  // --- Borrow Requests (v1.1.0) ---
+
+  async createBorrowRequest(
+    familyId: string,
+    payload: CreateBorrowPayload,
+  ): Promise<BorrowRequest> {
+    const res = await this.post<BorrowRequest>(
+      `/api/family/${familyId}/borrow`,
+      payload,
+    );
+    return this.unwrap(res);
+  }
+
+  async listBorrowRequests(familyId: string): Promise<BorrowRequest[]> {
+    const res = await this.get<BorrowRequest[]>(
+      `/api/family/${familyId}/borrow`,
+    );
+    return this.unwrap(res);
+  }
+
+  async updateBorrowStatus(
+    requestId: string,
+    status: BorrowStatus,
+  ): Promise<BorrowRequest> {
+    const res = await this.patch<BorrowRequest>(
+      `/api/borrow/${requestId}`,
+      { status },
+    );
+    return this.unwrap(res);
+  }
+
+  async updateMemberSettings(
+    familyId: string,
+    uid: string,
+    settings: MemberSettingsPayload,
+  ): Promise<FamilyMember> {
+    const res = await this.patch<FamilyMember>(
+      `/api/family/${familyId}/member/${uid}`,
+      settings,
+    );
+    return this.unwrap(res);
   }
 
   // --- Verification ---

@@ -422,3 +422,78 @@ describe("Security headers", () => {
     expect(res.headers.get("X-XSS-Protection")).toBe("0");
   });
 });
+
+// ===========================================================================
+// OPTIONS preflight short-circuit (regression guard)
+// ===========================================================================
+
+describe("OPTIONS preflight short-circuit", () => {
+  const ALLOWED_ORIGIN = "https://readmoo.com";
+  const DISALLOWED_ORIGIN = "https://evil.example.com";
+
+  function optionsRequest(path: string, origin: string) {
+    return request("OPTIONS", path, {
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "PUT",
+        "Access-Control-Request-Headers": "Content-Type, Authorization",
+      },
+    });
+  }
+
+  it("should return 204 with full CORS headers for allowed origins", async () => {
+    const res = await optionsRequest("/api/user/test/books", ALLOWED_ORIGIN);
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED_ORIGIN);
+
+    const methods = res.headers.get("Access-Control-Allow-Methods") ?? "";
+    expect(methods).toContain("GET");
+    expect(methods).toContain("POST");
+    expect(methods).toContain("PUT");
+    expect(methods).toContain("DELETE");
+
+    const allowHeaders = res.headers.get("Access-Control-Allow-Headers") ?? "";
+    expect(allowHeaders.toLowerCase()).toContain("content-type");
+    expect(allowHeaders.toLowerCase()).toContain("authorization");
+
+    expect(res.headers.get("Access-Control-Max-Age")).toBe("86400");
+  });
+
+  it("should NOT trigger rate limit KV writes", async () => {
+    // Fire a GET first to create a known rate limit counter
+    await request("GET", "/api/user/test/books");
+    const keysBefore = await kv.list();
+    const rateLimitBefore = keysBefore.keys.filter(
+      (k: { name: string }) => k.name.startsWith("ratelimit"),
+    );
+    const countsBefore = new Map<string, string | null>();
+    for (const k of rateLimitBefore) {
+      countsBefore.set(k.name, await kv.get(k.name));
+    }
+
+    // Fire OPTIONS
+    await optionsRequest("/api/user/test/books", ALLOWED_ORIGIN);
+
+    // Snapshot after — must be identical
+    const keysAfter = await kv.list();
+    const rateLimitAfter = keysAfter.keys.filter(
+      (k: { name: string }) => k.name.startsWith("ratelimit"),
+    );
+    expect(rateLimitAfter.length).toBe(rateLimitBefore.length);
+    for (const k of rateLimitAfter) {
+      expect(await kv.get(k.name)).toBe(countsBefore.get(k.name));
+    }
+  });
+
+  it("should not require Authorization header (auth middleware skipped)", async () => {
+    // No Authorization header — should still get 204 (not 401)
+    const res = await optionsRequest("/api/user/test/books", ALLOWED_ORIGIN);
+    expect(res.status).toBe(204);
+  });
+
+  it("should not set Access-Control-Allow-Origin for disallowed origins", async () => {
+    const res = await optionsRequest("/api/user/test/books", DISALLOWED_ORIGIN);
+    const corsHeader = res.headers.get("Access-Control-Allow-Origin");
+    expect(corsHeader === null || corsHeader === "").toBe(true);
+  });
+});

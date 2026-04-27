@@ -1,8 +1,9 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../utils/env";
-import { kvKeys, type FamilyMember, type FamilyRecord, type RawFamilyRecord, type QrTokenRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
-import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName } from "../utils/validation";
+import { kvKeys, BoolFlag, BorrowStatus, type BorrowRequest, type FamilyMember, type FamilyRecord, type RawFamilyRecord, type QrTokenRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName, sanitizeShortString } from "../utils/validation";
 import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
+import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { validateVerification } from "./verify";
 
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
@@ -67,7 +68,7 @@ familyRoutes.post("/", async (c) => {
     await c.env.KV.delete(kvKeys.member(body.userId));
   }
 
-  const member: FamilyMember = { userId: body.userId, displayName };
+  const member: FamilyMember = { userId: body.userId, displayName, canLend: BoolFlag.TRUE };
 
   const record = {
     familyId,
@@ -135,20 +136,13 @@ familyRoutes.post("/:id/join", async (c) => {
 
   // Per-userId rate limit: max 10 join attempts per userId per hour across all IPs.
   // Complements the per-IP rate limit; prevents distributed-IP abuse targeting a single user.
-  // Known limitation: KV get-then-put is not atomic — same caveat as rateLimit middleware.
-  const userJoinBucket = Math.floor(Date.now() / 3600000);
-  const userJoinKey = `ratelimit:join:user:${body.userId}:${userJoinBucket}`;
-  const userJoinCount = await c.env.KV.get(userJoinKey);
-  const joinAttempts = userJoinCount ? parseInt(userJoinCount, 10) : 0;
-  if (joinAttempts >= 10) {
-    const retryAfter = 3600 - (Math.floor(Date.now() / 1000) % 3600);
-    return c.json(
-      { error: { code: "RATE_LIMITED", message: "Too many requests" } },
-      429,
-      { "Retry-After": String(retryAfter) },
-    );
-  }
-  await c.env.KV.put(userJoinKey, String(joinAttempts + 1), { expirationTtl: 7200 });
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId: body.userId,
+    scope: "join",
+    max: 10,
+    windowSec: 3600,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   // Check if user already belongs to a different family (before verify to avoid leaking membership info)
   const existingFamily = await c.env.KV.get(kvKeys.member(body.userId));
@@ -226,7 +220,7 @@ familyRoutes.post("/:id/join", async (c) => {
       409,
     );
   }
-  record.members.push({ userId: body.userId, displayName });
+  record.members.push({ userId: body.userId, displayName, canLend: BoolFlag.TRUE });
 
   await Promise.all([
     c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
@@ -313,6 +307,19 @@ familyRoutes.delete("/:id/member/:uid", async (c) => {
     return c.json(
       { error: { code: "MEMBER_NOT_FOUND", message: "目標使用者不是家庭成員" } },
       404,
+    );
+  }
+
+  // Auto-cancel PENDING borrow requests involving the removed member FIRST,
+  // before mutating the family record. If this throws, the family record is
+  // untouched and the caller can retry safely without leaving partial state.
+  try {
+    await cancelPendingBorrowsForMember(c.env.KV, familyId, targetUserId);
+  } catch (err) {
+    console.error("BORROW_CLEANUP_FAILED", { familyId, targetUserId, err });
+    return c.json(
+      { error: { code: "BORROW_CLEANUP_FAILED", message: "Failed to clean up borrow requests; member not removed" } },
+      500,
     );
   }
 
@@ -456,6 +463,128 @@ familyRoutes.put("/:id/member/:uid/displayName", async (c) => {
   await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
 
   return c.json({ data: { userId: targetUserId, displayName } });
+});
+
+// PATCH /api/family/:id/member/:uid — update member settings (canLend, readmooName)
+familyRoutes.patch("/:id/member/:uid", async (c) => {
+  const familyId = c.req.param("id");
+  const targetUserId = c.req.param("uid");
+
+  if (!isValidFamilyId(familyId)) {
+    return c.json(
+      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
+      400,
+    );
+  }
+
+  if (!isValidUserId(targetUserId)) {
+    return c.json(
+      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  const callerId = getAuthenticatedUserId(c);
+  if (!callerId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+
+  let body: { canLend?: unknown; readmooName?: unknown } | null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
+      400,
+    );
+  }
+
+  if (!body || (body.canLend === undefined && body.readmooName === undefined)) {
+    return c.json(
+      { error: { code: "MISSING_FIELDS", message: "At least one of canLend or readmooName is required" } },
+      400,
+    );
+  }
+
+  // Validate canLend if present
+  if (body.canLend !== undefined) {
+    if (body.canLend !== BoolFlag.FALSE && body.canLend !== BoolFlag.TRUE) {
+      return c.json(
+        { error: { code: "INVALID_FIELDS", message: "canLend must be 0 or 1" } },
+        400,
+      );
+    }
+  }
+
+  // Validate and sanitize readmooName if present (strips zero-width / control chars).
+  let sanitizedReadmooName: string | null = null;
+  if (body.readmooName !== undefined) {
+    sanitizedReadmooName = sanitizeShortString(body.readmooName, 50);
+    if (sanitizedReadmooName === null) {
+      return c.json(
+        { error: { code: "INVALID_FIELDS", message: "readmooName must be a non-empty string of 50 characters or fewer" } },
+        400,
+      );
+    }
+  }
+
+  const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
+  if (!raw) {
+    return c.json(
+      { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
+      404,
+    );
+  }
+
+  const record = normalizeFamilyRecord(raw);
+
+  // Verify caller is a member
+  if (!hasMember(record.members, callerId)) {
+    return c.json(
+      { error: { code: "NOT_FAMILY_MEMBER", message: "You are not a member of this family" } },
+      403,
+    );
+  }
+
+  const member = findMember(record.members, targetUserId);
+  if (!member) {
+    return c.json(
+      { error: { code: "MEMBER_NOT_FOUND", message: "Target user is not a family member" } },
+      404,
+    );
+  }
+
+  // Permission checks
+  // canLend: only owner can change
+  if (body.canLend !== undefined && callerId !== record.ownerId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "Only the family owner can change canLend" } },
+      403,
+    );
+  }
+
+  // readmooName: owner OR the member themselves
+  if (body.readmooName !== undefined && callerId !== record.ownerId && callerId !== targetUserId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "Only the family owner or the member themselves can change readmooName" } },
+      403,
+    );
+  }
+
+  // Apply updates
+  if (body.canLend !== undefined) {
+    member.canLend = body.canLend as BoolFlag;
+  }
+  if (sanitizedReadmooName !== null) {
+    member.readmooName = sanitizedReadmooName;
+  }
+
+  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+
+  return c.json({ data: member });
 });
 
 // PUT /api/family/:id/transfer — transfer ownership
@@ -681,6 +810,41 @@ familyRoutes.put("/:id/endpoint", async (c) => {
 
   return c.json({ data: toPublicRecord(record) });
 });
+
+/**
+ * Cancel all PENDING borrow requests involving a removed member.
+ * LENT requests are left as-is (the book may still be borrowed).
+ */
+async function cancelPendingBorrowsForMember(
+  kv: KVNamespace,
+  familyId: string,
+  targetUserId: string,
+): Promise<void> {
+  const indexKey = kvKeys.borrowsByFamily(familyId);
+  const requestIds = await kv.get<string[]>(indexKey, "json");
+  if (!requestIds || requestIds.length === 0) return;
+
+  const requests = await Promise.all(
+    requestIds.map((id) => kv.get<BorrowRequest>(kvKeys.borrow(id), "json")),
+  );
+
+  const now = new Date().toISOString();
+  const writeOps: Promise<void>[] = [];
+
+  for (const req of requests) {
+    if (req === null) continue;
+    if (req.status !== BorrowStatus.PENDING) continue;
+    if (req.borrowerId !== targetUserId && req.ownerId !== targetUserId) continue;
+
+    req.status = BorrowStatus.CANCELLED;
+    req.updatedAt = now;
+    writeOps.push(kv.put(kvKeys.borrow(req.requestId), JSON.stringify(req)));
+  }
+
+  if (writeOps.length > 0) {
+    await Promise.all(writeOps);
+  }
+}
 
 function generateFamilyId(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";

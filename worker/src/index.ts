@@ -5,6 +5,7 @@ import { authMiddleware } from "./middleware/auth";
 import { userRoutes } from "./routes/user";
 import { familyRoutes } from "./routes/family";
 import { bookshelfRoutes } from "./routes/bookshelf";
+import { borrowRoutes } from "./routes/borrow";
 import { authRoutes } from "./routes/auth";
 import { verifyRoutes } from "./routes/verify";
 import { isDevMode, type Env } from "./utils/env";
@@ -68,7 +69,7 @@ app.use("*", async (c, next) => {
   const devMode = isDevMode(c.env);
   const middleware = cors({
     origin: (origin) => (isAllowedOrigin(origin, devMode) ? origin : ""),
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
     maxAge: 86400,
   });
@@ -136,6 +137,7 @@ app.route("/api/user", verifyRoutes);
 app.route("/api/family", familyRoutes);
 app.route("/api/auth", authRoutes);
 app.route("/api", bookshelfRoutes);
+app.route("/api", borrowRoutes);
 
 // 404 fallback
 app.notFound((c) =>

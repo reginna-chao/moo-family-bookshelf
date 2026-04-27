@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { Library, BookOpen, Settings, type LucideIcon } from "lucide-react";
+import { Library, BookOpen, Inbox, Settings, type LucideIcon } from "lucide-react";
 import { useAuth, REMEMBER_SYNC_CODE_KEY, REMEMBERED_LOGOUT_KEY } from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
+import { BorrowPage } from "./pages/BorrowPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { PwaCreateNotice } from "./components/PwaCreateNotice";
@@ -14,17 +15,19 @@ import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
 import { encodeSyncCode } from "@/crypto/syncCode";
 
-type Page = "family-shelf" | "personal-shelf" | "settings";
+type Page = "family-shelf" | "personal-shelf" | "borrow" | "settings";
 
 const HASH_TO_PAGE: Record<string, Page> = {
   "#family-shelf": "family-shelf",
   "#personal-shelf": "personal-shelf",
+  "#borrow": "borrow",
   "#settings": "settings",
 };
 
 const PAGE_TO_HASH: Record<Page, string> = {
   "family-shelf": "#family-shelf",
   "personal-shelf": "#personal-shelf",
+  "borrow": "#borrow",
   "settings": "#settings",
 };
 
@@ -45,6 +48,7 @@ const APP_ENV = getAppEnv();
 const NAV_ITEMS: NavItem[] = [
   { page: "family-shelf", label: "家庭書櫃", icon: Library },
   { page: "personal-shelf", label: "個人書櫃", icon: BookOpen },
+  { page: "borrow", label: "借閱", icon: Inbox },
   { page: "settings", label: "設定", icon: Settings },
 ];
 
@@ -209,7 +213,10 @@ function MainContent({
   logout,
   forceLogout,
 }: MainContentProps) {
-  const { hasBookshelfUpdates, markBookshelfSeen } = useFamilyData();
+  const familyData = useFamilyData();
+  const { hasBookshelfUpdates, markBookshelfSeen } = familyData;
+  // incomingPendingCount may be missing in older test mocks — default to 0.
+  const incomingPendingCount = familyData.incomingPendingCount ?? 0;
 
   const handleNavigate = useCallback(
     (page: Page) => {
@@ -222,6 +229,7 @@ function MainContent({
   );
 
   const showRedDot = hasBookshelfUpdates;
+  const showBorrowBadge = incomingPendingCount > 0;
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50">
@@ -234,6 +242,9 @@ function MainContent({
         )}
         {currentPage === "personal-shelf" && (
           <PersonalShelfPage userId={auth.userId} apiClient={apiClient} />
+        )}
+        {currentPage === "borrow" && (
+          <BorrowPage userId={auth.userId} apiClient={apiClient} />
         )}
         {currentPage === "settings" && (
           <SettingsPage
@@ -251,27 +262,43 @@ function MainContent({
         className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200"
       >
         <div className="max-w-md mx-auto flex relative">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.page}
-              onClick={() => handleNavigate(item.page)}
-              aria-label={item.page === "family-shelf" && showRedDot ? "家庭書櫃（有新更新）" : undefined}
-              aria-current={currentPage === item.page ? "page" : undefined}
-              className={`flex-1 flex flex-col items-center py-2 text-xs transition-colors ${
-                currentPage === item.page
-                  ? "text-blue-600 font-semibold"
-                  : "text-gray-500"
-              }`}
-            >
-              <span className="relative">
-                <item.icon size={20} aria-hidden="true" className="mb-0.5" />
-                {item.page === "family-shelf" && showRedDot && (
-                  <span aria-hidden="true" className="absolute -top-0.5 -right-1 w-2 h-2 bg-red-500 rounded-full" />
-                )}
-              </span>
-              <span>{item.label}</span>
-            </button>
-          ))}
+          {NAV_ITEMS.map((item) => {
+            const ariaLabel =
+              item.page === "family-shelf" && showRedDot
+                ? "家庭書櫃（有新更新）"
+                : item.page === "borrow" && showBorrowBadge
+                  ? `借閱（${incomingPendingCount} 個待處理）`
+                  : undefined;
+            return (
+              <button
+                key={item.page}
+                onClick={() => handleNavigate(item.page)}
+                aria-label={ariaLabel}
+                aria-current={currentPage === item.page ? "page" : undefined}
+                className={`flex-1 flex flex-col items-center py-2 text-xs transition-colors ${
+                  currentPage === item.page
+                    ? "text-blue-600 font-semibold"
+                    : "text-gray-500"
+                }`}
+              >
+                <span className="relative">
+                  <item.icon size={20} aria-hidden="true" className="mb-0.5" />
+                  {item.page === "family-shelf" && showRedDot && (
+                    <span aria-hidden="true" className="absolute -top-0.5 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+                  )}
+                  {item.page === "borrow" && showBorrowBadge && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute -top-1 -right-2 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center"
+                    >
+                      {incomingPendingCount}
+                    </span>
+                  )}
+                </span>
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
           {APP_ENV !== "prod" && (
             <span
               className={`absolute -top-2 right-2 text-xs font-bold px-1.5 py-0 rounded-full leading-4 ${

@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { BookOpen } from "lucide-react";
-import { BoolFlag } from "@/api/client";
+import { BoolFlag, BorrowStatus } from "@/api/client";
 import type { BookEntry } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
 import { useFamilyData, MemberBooks } from "@/hooks/useFamilyData";
@@ -12,6 +12,7 @@ export interface FamilyShelfPageProps {
 
 interface BookWithMember extends BookEntry {
   memberName: string;
+  ownerId: string;
   isUpdated: BoolFlag;
 }
 
@@ -25,6 +26,7 @@ function toBookWithMember(
   return member.books.map((b) => ({
     ...b,
     memberName: name,
+    ownerId: member.userId,
     isUpdated: updatedBookIds.has(b.bookId) ? BoolFlag.TRUE : BoolFlag.FALSE,
   }));
 }
@@ -38,10 +40,55 @@ export function FamilyShelfPage({
     bookshelfError: errorMessage,
     refreshBookshelf: loadBookshelf,
     updatedBookIds,
+    members: familyMembers,
+    borrowRequests,
+    refreshBorrowRequests,
+    apiClient,
+    familyId,
   } = useFamilyData();
   const [filterMember, setFilterMember] =
     useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
+
+  const memberCanLendMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const m of familyMembers ?? []) {
+      // canLend missing/undefined treated as TRUE (backward-compat)
+      map.set(m.userId, m.canLend !== BoolFlag.FALSE);
+    }
+    return map;
+  }, [familyMembers]);
+
+  const viewerCanLend = memberCanLendMap.get(userId) ?? true;
+
+  const pendingBookIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of borrowRequests ?? []) {
+      if (r.borrowerId === userId && r.status === BorrowStatus.PENDING) {
+        set.add(r.bookId);
+      }
+    }
+    return set;
+  }, [borrowRequests, userId]);
+
+  const handleBorrowClick = useCallback(
+    async (book: BookWithMember) => {
+      if (!apiClient || !familyId) return;
+      try {
+        await apiClient.createBorrowRequest(familyId, {
+          bookId: book.bookId,
+          bookTitle: book.title,
+          bookAuthor: book.author,
+          bookCoverUrl: book.coverUrl,
+          ownerId: book.ownerId,
+        });
+        await refreshBorrowRequests?.();
+      } catch {
+        // Errors surface via the borrow tab; keep family shelf quiet.
+      }
+    },
+    [apiClient, familyId, refreshBorrowRequests],
+  );
 
   const totalBooks = useMemo(
     () => members.reduce((sum, m) => sum + m.books.length, 0),
@@ -162,43 +209,76 @@ export function FamilyShelfPage({
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-3">
-          {visibleBooks.map((book) => (
-            <a
-              key={`${book.memberName}-${book.bookId}`}
-              href={book.readmooUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block rounded-lg bg-white shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
-            >
-              <div className="relative">
-                {book.coverUrl ? (
-                  <img
-                    src={book.coverUrl}
-                    alt={book.title}
-                    className="w-full aspect-[3/4] object-cover"
-                  />
-                ) : (
-                  <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center">
-                    <BookOpen size={32} className="text-gray-300" aria-hidden="true" />
+          {visibleBooks.map((book) => {
+            const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
+            const isOwnBook = book.ownerId === userId;
+            const borrowRequestPending = pendingBookIds.has(book.bookId);
+            const showBorrowButton =
+              !isOwnBook &&
+              viewerCanLend &&
+              ownerCanLend &&
+              !borrowRequestPending &&
+              !!apiClient &&
+              !!familyId;
+            return (
+              <div
+                key={`${book.memberName}-${book.bookId}`}
+                className="block rounded-lg bg-white shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
+              >
+                <a
+                  href={book.readmooUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block"
+                >
+                  <div className="relative">
+                    {book.coverUrl ? (
+                      <img
+                        src={book.coverUrl}
+                        alt={book.title}
+                        className="w-full aspect-[3/4] object-cover"
+                      />
+                    ) : (
+                      <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center">
+                        <BookOpen size={32} className="text-gray-300" aria-hidden="true" />
+                      </div>
+                    )}
+                    {book.isUpdated === BoolFlag.TRUE && (
+                      <span aria-label="新分享書籍" className="absolute bottom-1 left-1 bg-green-100 text-green-600 text-xs font-semibold px-1.5 rounded-full leading-4">
+                        更新
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-2">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {book.title}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">{book.author}</p>
+                    <p className="text-xs text-blue-500 mt-1 truncate">
+                      {book.memberName}
+                    </p>
+                  </div>
+                </a>
+                {(showBorrowButton || borrowRequestPending) && !isOwnBook && (
+                  <div className="px-2 pb-2">
+                    {borrowRequestPending ? (
+                      <span className="inline-flex items-center text-[11px] text-gray-400 px-2 py-1">
+                        申請已送出
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void handleBorrowClick(book)}
+                        className="inline-flex items-center text-[11px] font-semibold text-blue-600 border border-blue-600 rounded-full px-2.5 py-1 hover:bg-blue-50 transition-colors"
+                      >
+                        申請借閱
+                      </button>
+                    )}
                   </div>
                 )}
-                {book.isUpdated === BoolFlag.TRUE && (
-                  <span aria-label="新分享書籍" className="absolute bottom-1 left-1 bg-green-100 text-green-600 text-xs font-semibold px-1.5 rounded-full leading-4">
-                    更新
-                  </span>
-                )}
               </div>
-              <div className="p-2">
-                <p className="text-sm font-medium text-gray-900 truncate">
-                  {book.title}
-                </p>
-                <p className="text-xs text-gray-500 truncate">{book.author}</p>
-                <p className="text-xs text-blue-500 mt-1 truncate">
-                  {book.memberName}
-                </p>
-              </div>
-            </a>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

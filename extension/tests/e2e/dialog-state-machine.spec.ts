@@ -3,7 +3,7 @@
  *
  * Tests the dialog state transitions:
  * - Fresh state -> Onboarding
- * - After family creation -> Main View with 3 tabs
+ * - After family creation -> Main View with 4 tabs
  * - Close & reopen -> persists on Main View
  * - Leave family -> back to Onboarding
  */
@@ -76,7 +76,7 @@ test.describe("Dialog State Machine", () => {
     await page.close();
   });
 
-  test("After family creation, shows Main View with 3 tabs", async ({
+  test("After family creation, shows Main View with 4 tabs", async ({
     context,
     extensionId,
   }) => {
@@ -96,18 +96,19 @@ test.describe("Dialog State Machine", () => {
     // Go through onboarding
     await goThroughOnboarding(page);
 
-    // Verify 3 tab buttons exist
+    // Verify 4 tab buttons exist
     const dialog = page.locator("#moo-family-bookshelf-dialog");
     const tabNav = dialog.locator("nav");
     await expect(tabNav).toBeVisible();
 
     const tabButtons = tabNav.locator("button");
-    await expect(tabButtons).toHaveCount(3);
+    await expect(tabButtons).toHaveCount(4);
 
-    // Verify tab labels
+    // Verify tab labels (借閱 tab added in v1.1.0 between 個人書櫃 and 設定)
     await expect(tabButtons.nth(0)).toHaveText("家庭書櫃");
     await expect(tabButtons.nth(1)).toHaveText("個人書櫃");
-    await expect(tabButtons.nth(2)).toHaveText("設定");
+    await expect(tabButtons.nth(2)).toHaveText("借閱");
+    await expect(tabButtons.nth(3)).toHaveText("設定");
 
     await page.close();
   });
@@ -142,7 +143,7 @@ test.describe("Dialog State Machine", () => {
     // Verify tabs are still visible
     const tabNav = page.locator("#moo-family-bookshelf-dialog nav");
     await expect(tabNav).toBeVisible();
-    await expect(tabNav.locator("button")).toHaveCount(3);
+    await expect(tabNav.locator("button")).toHaveCount(4);
 
     await page.close();
   });

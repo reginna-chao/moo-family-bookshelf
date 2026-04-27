@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ApiClient, FamilyMember } from "../api/client";
+import { ApiClient, BoolFlag, FamilyMember } from "../api/client";
 
 export interface MemberListProps {
   members: FamilyMember[];
@@ -9,6 +9,10 @@ export interface MemberListProps {
   apiClient: ApiClient;
   onMembersChanged: () => void;
   familyEndpoint?: string;
+}
+
+function canLendValue(member: FamilyMember): boolean {
+  return member.canLend !== BoolFlag.FALSE;
 }
 
 type ConfirmAction =
@@ -32,8 +36,39 @@ export function MemberList({
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState("");
   const [activeTransferAction, setActiveTransferAction] = useState<"keep" | "clear" | null>(null);
+  const [canLendUpdating, setCanLendUpdating] = useState<string | null>(null);
+  const [readmooNameEdit, setReadmooNameEdit] = useState<{ userId: string; value: string } | null>(null);
+  const [readmooNameSaving, setReadmooNameSaving] = useState(false);
 
   const isOwner = userId === ownerId;
+
+  const handleToggleCanLend = async (target: FamilyMember) => {
+    setCanLendUpdating(target.userId);
+    setActionError("");
+    const next = canLendValue(target) ? BoolFlag.FALSE : BoolFlag.TRUE;
+    try {
+      await apiClient.updateMemberSettings(familyId, target.userId, { canLend: next });
+      onMembersChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "更新失敗");
+    } finally {
+      setCanLendUpdating(null);
+    }
+  };
+
+  const handleSaveReadmooName = async (target: FamilyMember, value: string) => {
+    setReadmooNameSaving(true);
+    setActionError("");
+    try {
+      await apiClient.updateMemberSettings(familyId, target.userId, { readmooName: value.trim() });
+      onMembersChanged();
+      setReadmooNameEdit(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "更新失敗");
+    } finally {
+      setReadmooNameSaving(false);
+    }
+  };
 
   const handleRemove = async (targetId: string) => {
     setActionLoading(true);
@@ -224,42 +259,132 @@ export function MemberList({
       )}
       {renderConfirmDialog()}
       <div style={{ background: "#f8fafc", borderRadius: 8, overflow: "hidden" }}>
-        {members.map((member) => (
-          <div key={member.userId} style={{
-            padding: "10px 12px", fontSize: 14, borderBottom: "1px solid #e2e8f0",
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-          }}>
-            <span style={{ fontFamily: "monospace", fontSize: 13 }}>
-              {getMemberLabel(member)}
-              {member.userId === ownerId && (
-                <span style={{ color: "#f59e0b", fontSize: 12, fontWeight: 600, marginLeft: 4 }}>
-                  (管理員)
+        {members.map((member) => {
+          const showCanLendToggle = isOwner && member.userId !== userId;
+          const canLend = canLendValue(member);
+          const isUpdating = canLendUpdating === member.userId;
+          return (
+            <div key={member.userId} style={{
+              padding: "10px 12px", fontSize: 14, borderBottom: "1px solid #e2e8f0",
+              display: "flex", flexDirection: "column", gap: 6,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontFamily: "monospace", fontSize: 13 }}>
+                  {getMemberLabel(member)}
+                  {member.userId === ownerId && (
+                    <span style={{ color: "#f59e0b", fontSize: 12, fontWeight: 600, marginLeft: 4 }}>
+                      (管理員)
+                    </span>
+                  )}
+                  {member.userId === userId && (
+                    <span style={{ color: "#2563eb", fontSize: 12, fontWeight: 600, marginLeft: 4 }}>
+                      (你)
+                    </span>
+                  )}
                 </span>
+                {isOwner && member.userId !== userId && !confirmAction && (
+                  <span>
+                    <button
+                      onClick={() => setConfirmAction({ type: "transfer", targetId: member.userId })}
+                      style={{ ...smallBtnBase, borderColor: "#2563eb", color: "#2563eb" }}
+                    >
+                      轉移管理權
+                    </button>
+                    <button
+                      onClick={() => setConfirmAction({ type: "remove", targetId: member.userId })}
+                      style={{ ...smallBtnBase, borderColor: "#ef4444", color: "#ef4444" }}
+                    >
+                      移除
+                    </button>
+                  </span>
+                )}
+              </div>
+              {showCanLendToggle && (
+                <div>
+                  <button
+                    role="switch"
+                    aria-checked={canLend}
+                    aria-label={`允許 ${getMemberLabel(member)} 借出書籍`}
+                    disabled={isUpdating}
+                    onClick={() => void handleToggleCanLend(member)}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 8,
+                      fontSize: 13, color: "#334155",
+                      cursor: isUpdating ? "not-allowed" : "pointer",
+                      background: "transparent", border: "none", padding: 0,
+                      opacity: isUpdating ? 0.6 : 1,
+                    }}
+                  >
+                    <span style={{
+                      display: "inline-block", width: 32, height: 18, borderRadius: 9,
+                      background: canLend ? "#2563eb" : "#cbd5e1",
+                      position: "relative", transition: "background 0.2s", flexShrink: 0,
+                    }}>
+                      <span style={{
+                        display: "block", width: 14, height: 14, borderRadius: 7,
+                        background: "#fff", position: "absolute", top: 2,
+                        left: canLend ? 16 : 2, transition: "left 0.2s",
+                      }} />
+                    </span>
+                    可借出
+                  </button>
+                  <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>
+                    關閉後，該成員的書籍不會顯示「申請借閱」按鈕（用於非讀墨家庭成員）
+                  </div>
+                </div>
               )}
-              {member.userId === userId && (
-                <span style={{ color: "#2563eb", fontSize: 12, fontWeight: 600, marginLeft: 4 }}>
-                  (你)
-                </span>
+              {showCanLendToggle && canLend && (
+                <div style={{ marginTop: 6 }}>
+                  {readmooNameEdit?.userId === member.userId ? (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        type="text"
+                        value={readmooNameEdit.value}
+                        onChange={(e) => setReadmooNameEdit({ userId: member.userId, value: e.target.value })}
+                        placeholder="讀墨顯示名稱"
+                        maxLength={50}
+                        aria-label={`${getMemberLabel(member)} 的讀墨名稱`}
+                        style={{
+                          flex: 1, padding: "4px 8px", fontSize: 13,
+                          border: "1px solid #cbd5e1", borderRadius: 6,
+                        }}
+                      />
+                      <button
+                        disabled={readmooNameSaving || readmooNameEdit.value.trim().length === 0}
+                        onClick={() => void handleSaveReadmooName(member, readmooNameEdit.value)}
+                        style={{ ...smallBtnBase, borderColor: "#2563eb", color: "#2563eb" }}
+                      >
+                        {readmooNameSaving ? "儲存中..." : "儲存"}
+                      </button>
+                      <button
+                        disabled={readmooNameSaving}
+                        onClick={() => setReadmooNameEdit(null)}
+                        style={{ ...smallBtnBase, borderColor: "#94a3b8", color: "#64748b" }}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setReadmooNameEdit({
+                        userId: member.userId,
+                        value: member.readmooName ?? "",
+                      })}
+                      style={{
+                        background: "transparent", border: "none", padding: 0,
+                        fontSize: 13, color: "#2563eb", cursor: "pointer",
+                      }}
+                    >
+                      {member.readmooName
+                        ? `讀墨名稱：${member.readmooName}（編輯）`
+                        : "設定讀墨名稱（自動借書時識別此成員）"}
+                    </button>
+                  )}
+                </div>
               )}
-            </span>
-            {isOwner && member.userId !== userId && !confirmAction && (
-              <span>
-                <button
-                  onClick={() => setConfirmAction({ type: "transfer", targetId: member.userId })}
-                  style={{ ...smallBtnBase, borderColor: "#2563eb", color: "#2563eb" }}
-                >
-                  轉移管理權
-                </button>
-                <button
-                  onClick={() => setConfirmAction({ type: "remove", targetId: member.userId })}
-                  style={{ ...smallBtnBase, borderColor: "#ef4444", color: "#ef4444" }}
-                >
-                  移除
-                </button>
-              </span>
-            )}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

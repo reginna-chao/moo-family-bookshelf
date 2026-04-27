@@ -90,11 +90,11 @@ export async function isDialogOpen(page: Page): Promise<boolean> {
 
 /**
  * Navigate to a specific tab in the main view.
- * Tab labels: "家庭書櫃" | "個人書櫃" | "設定"
+ * Tab labels: "家庭書櫃" | "個人書櫃" | "借閱" | "設定"
  */
 export async function navigateToTab(
   page: Page,
-  tabLabel: "家庭書櫃" | "個人書櫃" | "設定",
+  tabLabel: "家庭書櫃" | "個人書櫃" | "借閱" | "設定",
 ): Promise<void> {
   const dialog = page.locator(DIALOG_SELECTOR);
   const tabButton = dialog.locator("nav button", { hasText: tabLabel });

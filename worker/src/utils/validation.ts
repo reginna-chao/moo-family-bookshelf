@@ -47,9 +47,30 @@ export function validateDisplayName(name: unknown): string | null {
   return cleaned;
 }
 
+const READMOO_NAME_MAX_LENGTH = 50;
+
+/**
+ * Sanitize an arbitrary short string (e.g. readmooName).
+ * Strips zero-width / control / directional override characters and trims whitespace.
+ * Returns the cleaned string, or null if invalid (non-string, empty after cleaning, or exceeds max length).
+ */
+export function sanitizeShortString(value: unknown, maxLength = READMOO_NAME_MAX_LENGTH): string | null {
+  if (typeof value !== "string") return null;
+  const cleaned = value.trim().replace(UNSAFE_UNICODE_RE, "");
+  if (cleaned.length === 0 || cleaned.length > maxLength) return null;
+  return cleaned;
+}
+
 /** Validate 64-char lowercase hex string (SHA-256 output). */
 export function isValidSha256Hex(value: string): boolean {
   return /^[a-f0-9]{64}$/.test(value);
+}
+
+/** UUID v4 format check for borrow request IDs. */
+const REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isValidRequestId(value: string): boolean {
+  return REQUEST_ID_RE.test(value);
 }
 
 

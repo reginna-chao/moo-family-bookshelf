@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from "react";
-import { BoolFlag } from "../api/client";
+import React, { useState, useCallback, useMemo } from "react";
+import { BoolFlag, BorrowStatus } from "../api/client";
 import { BookCard, BookWithMember } from "./BookCard";
 import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
 import { SearchBar } from "./SearchBar";
@@ -11,14 +11,21 @@ export interface FamilyShelfProps {
   userId: string;
 }
 
+interface BookOwnership {
+  ownerId: string;
+}
+
+type FamilyShelfBook = BookWithMember & BookOwnership;
+
 function toBookWithMember(
   member: MemberBooks,
   updatedBookIds: Set<string>,
-): BookWithMember[] {
+): FamilyShelfBook[] {
   const name = member.displayName || member.userId.slice(0, 8);
   return member.books.map((b) => ({
     ...b,
     memberName: name,
+    ownerId: member.userId,
     isUpdated: updatedBookIds.has(b.bookId) ? BoolFlag.TRUE : BoolFlag.FALSE,
   }));
 }
@@ -30,6 +37,11 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     bookshelfError: errorMessage,
     refreshBookshelf: loadBookshelf,
     updatedBookIds,
+    members: familyMembers,
+    borrowRequests,
+    refreshBorrowRequests,
+    apiClient,
+    familyId,
   } = useFamilyData();
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -59,6 +71,45 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     setCategoryOpen(false);
     resetSearch();
   }, [resetSearch]);
+
+  const memberCanLendMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const m of familyMembers) {
+      // canLend missing/undefined treated as TRUE (backward-compat)
+      map.set(m.userId, m.canLend !== BoolFlag.FALSE);
+    }
+    return map;
+  }, [familyMembers]);
+
+  const viewerCanLend = memberCanLendMap.get(userId) ?? true;
+
+  const pendingBookIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of borrowRequests) {
+      if (r.borrowerId === userId && r.status === BorrowStatus.PENDING) {
+        set.add(r.bookId);
+      }
+    }
+    return set;
+  }, [borrowRequests, userId]);
+
+  const handleBorrowClick = useCallback(
+    async (book: FamilyShelfBook) => {
+      try {
+        await apiClient.createBorrowRequest(familyId, {
+          bookId: book.bookId,
+          bookTitle: book.title,
+          bookAuthor: book.author,
+          bookCoverUrl: book.coverUrl,
+          ownerId: book.ownerId,
+        });
+        await refreshBorrowRequests();
+      } catch {
+        // Errors surface via the borrow tab; keep family shelf quiet.
+      }
+    },
+    [apiClient, familyId, refreshBorrowRequests],
+  );
 
   if (state === "loading") {
     return (
@@ -151,9 +202,21 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
           gap: 12,
         }}
       >
-        {visibleBooks.map((book) => (
-          <BookCard key={`${book.memberName}-${book.bookId}`} book={book} />
-        ))}
+        {visibleBooks.map((book) => {
+          const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
+          const isOwnBook = book.ownerId === userId;
+          const showBorrowButton = !isOwnBook && viewerCanLend && ownerCanLend;
+          const borrowRequestPending = pendingBookIds.has(book.bookId);
+          return (
+            <BookCard
+              key={`${book.memberName}-${book.bookId}`}
+              book={book}
+              showBorrowButton={showBorrowButton}
+              borrowRequestPending={borrowRequestPending}
+              onBorrowClick={() => void handleBorrowClick(book)}
+            />
+          );
+        })}
       </div>
     </div>
   );
