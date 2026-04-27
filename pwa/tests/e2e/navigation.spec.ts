@@ -8,16 +8,17 @@ test.describe("Navigation", () => {
     await loginAndNavigate(page, auth);
   });
 
-  test("should show bottom nav with 3 tabs", async ({ page }) => {
+  test("should show bottom nav with 4 tabs", async ({ page }) => {
     const nav = page.getByRole("navigation", { name: "主要導覽" });
     await expect(nav).toBeVisible();
 
     const buttons = nav.getByRole("button");
-    await expect(buttons).toHaveCount(3);
+    await expect(buttons).toHaveCount(4);
 
     await expect(buttons.nth(0)).toContainText("家庭書櫃");
     await expect(buttons.nth(1)).toContainText("個人書櫃");
-    await expect(buttons.nth(2)).toContainText("設定");
+    await expect(buttons.nth(2)).toContainText("借閱");
+    await expect(buttons.nth(3)).toContainText("設定");
   });
 
   test("should default to family shelf page after auth", async ({ page }) => {

@@ -151,6 +151,15 @@ export async function mockDefaultApiRoutes(
     });
   });
 
+  // Borrow requests — v1.1.0; empty list keeps badge hidden and BorrowPage in empty state
+  await page.route("**/api/family/*/borrow", (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: [] }),
+    });
+  });
+
   // Verify method — mark as already prompted to skip VerifySetupPrompt overlay
   await page.route("**/api/user/*/verify", (route) => {
     if (route.request().method() === "GET") {
