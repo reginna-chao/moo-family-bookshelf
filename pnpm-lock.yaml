@@ -196,8 +196,8 @@ importers:
   worker:
     dependencies:
       hono:
-        specifier: ^4.6.14
-        version: 4.12.9
+        specifier: ^4.12.15
+        version: 4.12.15
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.12.21
@@ -2821,8 +2821,8 @@ packages:
     resolution: {integrity: sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==}
     engines: {node: '>= 0.4'}
 
-  hono@4.12.9:
-    resolution: {integrity: sha512-wy3T8Zm2bsEvxKZM5w21VdHDDcwVS1yUFFY6i8UobSsKfFceT7TOwhbhfKsDyx7tYQlmRM5FLpIuYvNFyjctiA==}
+  hono@4.12.15:
+    resolution: {integrity: sha512-qM0jDhFEaCBb4TxoW7f53Qrpv9RBiayUHo0S52JudprkhvpjIrGoU1mnnr29Fvd1U335ZFPZQY1wlkqgfGXyLg==}
     engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@4.0.0:
@@ -6434,7 +6434,7 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
-  hono@4.12.9: {}
+  hono@4.12.15: {}
 
   html-encoding-sniffer@4.0.0:
     dependencies:
