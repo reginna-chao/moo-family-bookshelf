@@ -81,7 +81,7 @@ describe("Family Lifecycle", () => {
     const json = (await res.json()) as Json;
     expect(json.data.familyId).toBeDefined();
     expect(json.data.ownerId).toBe("user1");
-    expect(json.data.members).toEqual([{ userId: "user1", displayName: "" }]);
+    expect(json.data.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
     expect(json.data.maxMembers).toBe(2);
     expect(json.data.authToken).toBeDefined();
   });
@@ -90,7 +90,7 @@ describe("Family Lifecycle", () => {
     const res = await request("POST", "/api/family", { userId: "user1", displayName: "Alice" });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
-    expect(json.data.members).toEqual([{ userId: "user1", displayName: "Alice" }]);
+    expect(json.data.members).toEqual([{ userId: "user1", displayName: "Alice", canLend: 1 }]);
   });
 
   it("should reject create without userId", async () => {
@@ -113,8 +113,8 @@ describe("Family Lifecycle", () => {
     // Mutation returns updated FamilyRecord
     expect(joinJson.data.familyId).toBe(familyId);
     expect(joinJson.data.members).toEqual([
-      { userId: "user1", displayName: "" },
-      { userId: "user2", displayName: "Bob" },
+      { userId: "user1", displayName: "", canLend: 1 },
+      { userId: "user2", displayName: "Bob", canLend: 1 },
     ]);
     expect(joinJson.data.ownerId).toBe("user1");
     expect(joinJson.data.authToken).toBeDefined();
@@ -128,8 +128,8 @@ describe("Family Lifecycle", () => {
     );
     const members = ((await membersRes.json()) as Json).data;
     expect(members.members).toEqual([
-      { userId: "user1", displayName: "" },
-      { userId: "user2", displayName: "Bob" },
+      { userId: "user1", displayName: "", canLend: 1 },
+      { userId: "user2", displayName: "Bob", canLend: 1 },
     ]);
   });
 
@@ -159,7 +159,7 @@ describe("Family Lifecycle", () => {
       newToken,
     );
     const members = ((await membersRes.json()) as Json).data;
-    expect(members.members).toEqual([{ userId: "user1", displayName: "" }]);
+    expect(members.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
   });
 
   it("should allow leaving a family and return updated record", async () => {
@@ -174,7 +174,7 @@ describe("Family Lifecycle", () => {
     expect(leaveRes.status).toBe(200);
     const leaveJson = (await leaveRes.json()) as Json;
     // Mutation returns updated FamilyRecord
-    expect(leaveJson.data.members).toEqual([{ userId: "user1", displayName: "" }]);
+    expect(leaveJson.data.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
 
     // Verify via GET /members
     const membersRes = await request(
@@ -184,7 +184,7 @@ describe("Family Lifecycle", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data;
-    expect(members.members).toEqual([{ userId: "user1", displayName: "" }]);
+    expect(members.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
   });
 });
 
@@ -252,7 +252,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.members).toEqual([{ userId: "user1", displayName: "" }]);
+    expect(json.data.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
 
     const membersRes = await request(
       "GET",
@@ -261,7 +261,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data.members;
-    expect(members).toEqual([{ userId: "user1", displayName: "" }]);
+    expect(members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
   });
 
   it("should reject owner trying to remove self with OWNER_CANNOT_LEAVE", async () => {
@@ -289,7 +289,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.members).toEqual([{ userId: "user1", displayName: "" }]);
+    expect(json.data.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
 
     const membersRes = await request(
       "GET",
@@ -298,7 +298,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data.members;
-    expect(members).toEqual([{ userId: "user1", displayName: "" }]);
+    expect(members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
   });
 
   it("should reject non-owner trying to remove other member with NOT_OWNER", async () => {
@@ -369,8 +369,8 @@ describe("PUT /api/family/:id/transfer", () => {
     const json = (await res.json()) as Json;
     expect(json.data.ownerId).toBe("user2");
     expect(json.data.members).toEqual([
-      { userId: "user1", displayName: "" },
-      { userId: "user2", displayName: "" },
+      { userId: "user1", displayName: "", canLend: 1 },
+      { userId: "user2", displayName: "", canLend: 1 },
     ]);
 
     // Verify via GET /members
@@ -484,7 +484,7 @@ describe("PUT /api/family/:id/transfer", () => {
     );
     expect(leaveRes.status).toBe(200);
     const leaveJson = (await leaveRes.json()) as Json;
-    expect(leaveJson.data.members).toEqual([{ userId: "user2", displayName: "" }]);
+    expect(leaveJson.data.members).toEqual([{ userId: "user2", displayName: "", canLend: 1 }]);
     expect(leaveJson.data.ownerId).toBe("user2");
   });
 });
@@ -519,7 +519,7 @@ describe("GET /api/family/:id/members response", () => {
     );
     expect(membersRes.status).toBe(200);
     const data = ((await membersRes.json()) as Json).data;
-    expect(data.members).toEqual([{ userId: "user1", displayName: "Alice" }]);
+    expect(data.members).toEqual([{ userId: "user1", displayName: "Alice", canLend: 1 }]);
   });
 
   it("should normalize legacy record without ownerId/maxMembers", async () => {
@@ -553,8 +553,8 @@ describe("GET /api/family/:id/members response", () => {
     // maxMembers defaults to 2
     expect(data.maxMembers).toBe(2);
     expect(data.members).toEqual([
-      { userId: "alice", displayName: "Alice" },
-      { userId: "bob", displayName: "Bob" },
+      { userId: "alice", displayName: "Alice", canLend: 1 },
+      { userId: "bob", displayName: "Bob", canLend: 1 },
     ]);
   });
 

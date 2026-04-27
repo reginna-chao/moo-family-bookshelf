@@ -1,29 +1,47 @@
 {
   "manifest_version": 3,
   "name": "墨家書櫃 | MooFamily Bookshelf",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "讓讀墨家庭帳號成員輕鬆瀏覽彼此開放的書籍",
-  "permissions": ["storage", "alarms"],
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
   "homepage_url": "https://reginna-chao.github.io/moo-family-bookshelf/",
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; base-uri 'self';"
   },
-  "host_permissions": ["https://read.readmoo.com/*"],
+  "host_permissions": [
+    "https://read.readmoo.com/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["https://read.readmoo.com/*"],
-      "js": ["content.js"],
-      "css": ["assets/style.css"]
+      "matches": [
+        "https://read.readmoo.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "assets/style.css"
+      ]
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["chunks/*", "content-dialog.js", "content-sync.js", "fiber-bridge.js"],
-      "matches": ["https://read.readmoo.com/*"]
+      "resources": [
+        "chunks/*",
+        "content-dialog.js",
+        "content-sync.js",
+        "fiber-bridge.js"
+      ],
+      "matches": [
+        "https://read.readmoo.com/*"
+      ]
     }
   ],
   "action": {

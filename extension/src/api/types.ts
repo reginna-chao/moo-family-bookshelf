@@ -40,6 +40,10 @@ export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 export interface FamilyMember {
   userId: string;
   displayName: string;
+  /** Optional for backward compat with old API responses; treat missing/undefined as TRUE. */
+  canLend?: BoolFlag;
+  /** Readmoo display name for lending automation (v1.1.0). */
+  readmooName?: string;
 }
 
 export interface FamilyGroup {
@@ -78,4 +82,42 @@ export interface VerifyInfo {
 export interface OtpInfo {
   code: string;
   expiresAt: number;
+}
+
+export enum BorrowStatus {
+  PENDING = 0,
+  LENT = 1,
+  RETURNED = 2,
+  REJECTED = 3,
+  CANCELLED = 4,
+}
+
+export interface BorrowRequest {
+  requestId: string;
+  familyId: string;
+  borrowerId: string;
+  borrowerName: string;
+  ownerId: string;
+  bookId: string;
+  bookTitle: string;
+  bookAuthor: string;
+  bookCoverUrl: string;
+  status: BorrowStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Payload for creating a borrow request. */
+export interface CreateBorrowPayload {
+  bookId: string;
+  bookTitle: string;
+  bookAuthor: string;
+  bookCoverUrl: string;
+  ownerId: string;
+}
+
+/** Settings updatable on a family member via PATCH /api/family/:id/member/:uid. */
+export interface MemberSettingsPayload {
+  canLend?: BoolFlag;
+  readmooName?: string;
 }

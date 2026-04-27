@@ -1,8 +1,13 @@
 import { useState } from "react";
+import { BoolFlag } from "@/api/client";
 import type { ApiClient, FamilyMember } from "@/api/client";
 
 function getMemberLabel(member: FamilyMember): string {
   return member.displayName || member.userId.slice(0, 8);
+}
+
+function canLendValue(member: FamilyMember): boolean {
+  return member.canLend !== BoolFlag.FALSE;
 }
 
 interface MemberListProps {
@@ -31,8 +36,25 @@ export function MemberList({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [canLendUpdating, setCanLendUpdating] = useState<string | null>(null);
 
   const isOwner = userId === ownerId;
+
+  async function handleToggleCanLend(target: FamilyMember) {
+    setCanLendUpdating(target.userId);
+    setError(null);
+    const next = canLendValue(target) ? BoolFlag.FALSE : BoolFlag.TRUE;
+    try {
+      await apiClient.updateMemberSettings(familyId, target.userId, {
+        canLend: next,
+      });
+      onMembersChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新失敗");
+    } finally {
+      setCanLendUpdating(null);
+    }
+  }
 
   async function handleConfirm() {
     if (!confirmAction) return;
@@ -88,6 +110,9 @@ export function MemberList({
             confirmAction.targetId === memberId) ||
             (confirmAction.type === "transfer" &&
               confirmAction.targetId === memberId));
+        const showCanLendToggle = isOwner && memberId !== userId;
+        const canLend = canLendValue(member);
+        const isCanLendUpdating = canLendUpdating === memberId;
 
         return (
           <div key={memberId} className="px-3 py-2.5">
@@ -127,6 +152,36 @@ export function MemberList({
                 </div>
               )}
             </div>
+
+            {showCanLendToggle && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={canLend}
+                  aria-label={`允許 ${label} 借出書籍`}
+                  disabled={isCanLendUpdating}
+                  onClick={() => void handleToggleCanLend(member)}
+                  className="inline-flex items-center gap-2 text-xs text-gray-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <span
+                    className={`relative inline-block w-8 h-[18px] rounded-full transition-colors ${
+                      canLend ? "bg-blue-600" : "bg-gray-300"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 block w-3.5 h-3.5 rounded-full bg-white transition-[left] ${
+                        canLend ? "left-[16px]" : "left-0.5"
+                      }`}
+                    />
+                  </span>
+                  可借出
+                </button>
+                <p className="text-[11px] text-gray-400 mt-1 leading-relaxed">
+                  關閉後，該成員的書籍不會顯示「申請借閱」按鈕（用於非讀墨家庭成員）
+                </p>
+              </div>
+            )}
 
             {isConfirmTarget && (
               <div className={`mt-2 rounded p-2 ${confirmAction.type === "remove" ? "bg-red-50" : "bg-blue-50"}`}>

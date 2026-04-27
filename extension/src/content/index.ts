@@ -13,6 +13,8 @@ import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
 import { isExtensionContextValid, cleanupMooFamilyUI, MOO_ELEMENT_IDS } from "../utils/extensionContext";
 import { waitForPageReady } from "./pageReady";
 import { getAppEnv } from "../utils/appEnv";
+import { DEFAULT_API_ENDPOINT } from "../constants";
+import { BorrowStatus, type BorrowRequest } from "../api/types";
 
 const APP_ENV = getAppEnv();
 
@@ -81,6 +83,76 @@ function injectFamilyBookshelfButton(): void {
 
   button.addEventListener("click", toggleDialog);
   document.body.appendChild(button);
+
+  // Best-effort: query pending borrow requests and badge the button.
+  // Failures are silent — the badge is a non-essential nicety.
+  void updatePendingBorrowBadge(button);
+}
+
+/**
+ * Fetch pending incoming borrow requests and add a numeric badge to the
+ * floating button when count > 0. Silently no-ops on any error so a
+ * misconfigured backend never blocks the button from appearing.
+ */
+async function updatePendingBorrowBadge(button: HTMLElement): Promise<void> {
+  try {
+    const stored = await chrome.storage.local.get([
+      "userId",
+      "familyId",
+      "authToken",
+      "apiEndpoint",
+    ]);
+    const userId = stored.userId as string | undefined;
+    const familyId = stored.familyId as string | undefined;
+    const authToken = stored.authToken as string | undefined;
+    const apiEndpoint =
+      (stored.apiEndpoint as string | undefined) ?? DEFAULT_API_ENDPOINT;
+    if (!userId || !familyId || !authToken) return;
+
+    const url = `${apiEndpoint.replace(/\/+$/, "")}/api/family/${encodeURIComponent(familyId)}/borrow`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!res.ok) return;
+    const json = (await res.json()) as { data?: BorrowRequest[] };
+    const requests = json.data ?? [];
+    const pending = requests.filter(
+      (r) => r.status === BorrowStatus.PENDING && r.ownerId === userId,
+    ).length;
+    if (pending > 0) {
+      attachBadge(button, pending);
+    }
+  } catch {
+    // ignore — best-effort enhancement
+  }
+}
+
+function attachBadge(button: HTMLElement, count: number): void {
+  // Remove any existing badge before re-attaching
+  button.querySelector(`#${MOO_ELEMENT_IDS.button}-badge`)?.remove();
+
+  const badge = document.createElement("span");
+  badge.id = `${MOO_ELEMENT_IDS.button}-badge`;
+  badge.textContent = String(count);
+  badge.style.cssText = [
+    "position: absolute",
+    "top: -6px",
+    "right: -6px",
+    "min-width: 18px",
+    "height: 18px",
+    "padding: 0 5px",
+    "border-radius: 9px",
+    "background: #dc2626",
+    "color: white",
+    "font-size: 11px",
+    "font-weight: 700",
+    "line-height: 18px",
+    "text-align: center",
+    "box-shadow: 0 1px 3px rgba(0,0,0,0.2)",
+    "pointer-events: none",
+  ].join(";");
+  button.style.position = "fixed"; // ensure parent positioning
+  button.appendChild(badge);
 }
 
 function toggleDialog(): void {

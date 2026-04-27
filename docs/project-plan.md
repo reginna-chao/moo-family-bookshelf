@@ -641,14 +641,37 @@ jobs:
 
 ### Phase 5：借閱功能（v1.1.0）
 
-> 允許家庭成員申請借閱對方的書籍，整合讀墨原生借書功能。
+> 允許家庭成員申請借閱對方的書籍，整合讀墨原生借書功能（Scope B：Content Script 自動化）。
+> **完整規格**：見 [`docs/v1.1.0-borrow-feature.md`](./v1.1.0-borrow-feature.md)
 
-- [ ] Hover 書籍卡片顯示「申請借閱」按鈕
-- [ ] 借閱申請資料結構設計（申請人、書籍、狀態、時間戳）
-- [ ] 借閱申請/接收介面
-- [ ] 與讀墨借書功能整合研究（讀墨可主動借書出去）
-- [ ] 借閱通知機制（擁有者如何得知有人想借）
-- [ ] 借閱狀態追蹤（申請中/已借出/已歸還）
+#### 後端
+- [ ] KV schema：新增 `borrow:{requestId}` + `borrows:family:{familyId}` 索引
+- [ ] FamilyMember 擴充 `canLend` + `readmooName` 欄位（含向後相容）
+- [ ] `POST /api/family/:id/borrow`（建立申請，含 canLend 雙向檢查 + duplicate 防護）
+- [ ] `GET /api/family/:id/borrow`（家庭請求列表）
+- [ ] `PATCH /api/borrow/:requestId`（狀態轉移 + 權限驗證 + FSM）
+- [ ] `PATCH /api/family/:id/member/:uid`（更新 canLend / readmooName）
+- [ ] `DELETE /api/family/:id/member/:uid` 新增 side effect：成員移除時 PENDING 自動 CANCELLED
+- [ ] Rate limiting（POST 10/min、PATCH 30/min）
+- [ ] Unit + Integration tests（≥ 80% coverage）
+
+#### 前端 Extension
+- [ ] BookCard hover overlay「申請借閱」按鈕（僅 FamilyShelf context + 雙方 canLend）
+- [ ] 第 4 個分頁「借閱」：收件匣/寄件匣 + status FSM 操作
+- [ ] FamilySettings 新增 per-member canLend 切換（ownerId only）
+- [ ] readmooName 一次性設定 UI（同意借閱時 lazy 觸發）
+- [ ] Content Script `readmoo-lend.ts` 自動化模組（找書 → 開 modal → 借出 → 選成員 → 偵測 dialog 關閉）
+- [ ] 浮動按鈕 badge（page ready 後查 pending count）
+- [ ] Component tests（≥ 70% coverage）
+
+#### 前端 PWA
+- [ ] 借閱 tab（共用設計，無「同意借閱」按鈕）
+- [ ] 申請 / 取消 / 標記已歸還（無同意 / 拒絕）
+
+#### 共用
+- [ ] BorrowStatus enum + BorrowRequest 型別
+- [ ] API client `createBorrowRequest` / `listBorrowRequests` / `updateBorrowStatus` / `updateMemberSettings`
+- [ ] 版本 bump 至 `1.1.0`（Extension + PWA 同步）
 
 ### Phase 6：個人公開書櫃分享（v1.2.0）
 
@@ -752,4 +775,4 @@ moo-family-bookshelf/
 
 ---
 
-*最後更新：2026-03-28*
+*最後更新：2026-04-26*

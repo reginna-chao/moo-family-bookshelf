@@ -8,5 +8,6 @@
 export const PAGE_HASHES = new Set([
   "#family-shelf",
   "#personal-shelf",
+  "#borrow",
   "#settings",
 ]);

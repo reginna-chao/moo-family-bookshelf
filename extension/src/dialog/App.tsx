@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { ApiClient } from "../api/client";
+import { Inbox } from "lucide-react";
+import { ApiClient, BorrowStatus } from "../api/client";
 import { Onboarding } from "./Onboarding";
 import { PersonalShelf } from "./PersonalShelf";
 import { FamilyShelf } from "./FamilyShelf";
 import { FamilySettings } from "./FamilySettings";
+import { BorrowTab } from "./BorrowTab";
 import { DialogFooter } from "./DialogFooter";
 import { useTokenRefresh } from "./useTokenRefresh";
 import { isExtensionContextValid } from "../utils/extensionContext";
@@ -11,7 +13,7 @@ import { FamilyDataProvider, useFamilyData } from "./FamilyDataContext";
 import { VersionWarning } from "./VersionWarning";
 
 type View = "loading" | "onboarding" | "main";
-type Tab = "family-shelf" | "personal-shelf" | "settings";
+type Tab = "family-shelf" | "personal-shelf" | "borrow" | "settings";
 
 export function App() {
   const [view, setView] = useState<View>("loading");
@@ -148,7 +150,7 @@ function MainContent({
   onTabChange,
   onLeave,
 }: MainContentProps) {
-  const { hasBookshelfUpdates, markBookshelfSeen } = useFamilyData();
+  const { hasBookshelfUpdates, markBookshelfSeen, borrowRequests } = useFamilyData();
 
   const handleTabChange = useCallback(
     (tab: Tab) => {
@@ -161,18 +163,22 @@ function MainContent({
   );
 
   const showRedDot = hasBookshelfUpdates;
+  const incomingPendingCount = borrowRequests.filter(
+    (r) => r.ownerId === userId && r.status === BorrowStatus.PENDING,
+  ).length;
+
+  const tabs: Array<{ key: Tab; label: string; icon?: React.ReactNode }> = [
+    { key: "family-shelf", label: "家庭書櫃" },
+    { key: "personal-shelf", label: "個人書櫃" },
+    { key: "borrow", label: "借閱", icon: <Inbox size={14} aria-hidden="true" /> },
+    { key: "settings", label: "設定" },
+  ];
 
   return (
     <div>
       <VersionWarning apiClient={apiClient} />
       <nav role="tablist" style={{ display: "flex", borderBottom: "1px solid #e2e8f0", alignItems: "center" }}>
-        {(
-          [
-            ["family-shelf", "家庭書櫃"],
-            ["personal-shelf", "個人書櫃"],
-            ["settings", "設定"],
-          ] as const
-        ).map(([key, label]) => (
+        {tabs.map(({ key, label, icon }) => (
           <button
             key={key}
             id={`tab-${key}`}
@@ -180,7 +186,13 @@ function MainContent({
             aria-selected={activeTab === key}
             aria-controls={`panel-${key}`}
             onClick={() => handleTabChange(key)}
-            aria-label={key === "family-shelf" && showRedDot ? "家庭書櫃（有新更新）" : undefined}
+            aria-label={
+              key === "family-shelf" && showRedDot
+                ? "家庭書櫃（有新更新）"
+                : key === "borrow" && incomingPendingCount > 0
+                  ? `借閱（${incomingPendingCount} 個待處理）`
+                  : undefined
+            }
             style={{
               flex: 1,
               padding: "12px 0",
@@ -192,8 +204,13 @@ function MainContent({
               fontSize: 14,
               borderBottom:
                 activeTab === key ? "2px solid #2563eb" : "2px solid transparent",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
             }}
           >
+            {icon}
             {label}
             {key === "family-shelf" && showRedDot && (
               <span
@@ -209,6 +226,28 @@ function MainContent({
                 }}
               />
             )}
+            {key === "borrow" && incomingPendingCount > 0 && (
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minWidth: 16,
+                  height: 16,
+                  padding: "0 4px",
+                  borderRadius: 8,
+                  background: "#dc2626",
+                  color: "white",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  marginLeft: 4,
+                  lineHeight: 1,
+                }}
+              >
+                {incomingPendingCount}
+              </span>
+            )}
           </button>
         ))}
       </nav>
@@ -218,6 +257,9 @@ function MainContent({
         </div>
         <div id="panel-personal-shelf" role="tabpanel" aria-labelledby="tab-personal-shelf" style={{ display: activeTab === "personal-shelf" ? "block" : "none" }}>
           <PersonalShelf userId={userId} apiClient={apiClient} />
+        </div>
+        <div id="panel-borrow" role="tabpanel" aria-labelledby="tab-borrow" style={{ display: activeTab === "borrow" ? "block" : "none" }}>
+          <BorrowTab userId={userId} apiClient={apiClient} />
         </div>
         <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" style={{ display: activeTab === "settings" ? "block" : "none" }}>
           <FamilySettings

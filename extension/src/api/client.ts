@@ -26,24 +26,31 @@ export function validateEndpointUrl(raw: string): string {
 
 import type {
   ApiResponse,
+  BorrowRequest,
+  CreateBorrowPayload,
   FamilyBookshelf,
   FamilyGroup,
+  FamilyMember,
+  MemberSettingsPayload,
   OtpInfo,
   PersonalBooks,
   VerifyInfo,
   VersionInfo,
 } from "./types";
-import type { VerifyMethod } from "./types";
+import { BorrowStatus, type VerifyMethod } from "./types";
 import { doRefreshToken } from "./auth-refresh";
 
 // Re-export all types so existing imports from "./client" continue to work
-export { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "./types";
+export { BoolFlag, BorrowStatus, PERSONAL_BOOKS_SCHEMA_VERSION } from "./types";
 export type {
   ApiResponse,
   BookEntry,
+  BorrowRequest,
+  CreateBorrowPayload,
   FamilyBookshelf,
   FamilyGroup,
   FamilyMember,
+  MemberSettingsPayload,
   OtpInfo,
   PersonalBooks,
   VerifyInfo,
@@ -133,6 +140,24 @@ export class ApiClient {
 
   private del<T>(path: string): Promise<ApiResponse<T>> {
     return this.request(path, { method: "DELETE" });
+  }
+
+  private patch<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request(path, {
+      method: "PATCH",
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  /** Unwrap an envelope response or throw an Error built from `error`. */
+  private unwrap<T>(res: ApiResponse<T>): T {
+    if (res.error) {
+      throw new Error(`${res.error.code}: ${res.error.message}`);
+    }
+    if (res.data === undefined) {
+      throw new Error("EMPTY_RESPONSE: response body missing data");
+    }
+    return res.data;
   }
 
   // --- Auth ---
@@ -236,6 +261,49 @@ export class ApiClient {
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
     return this.get(`/api/family/${familyId}/bookshelf`);
+  }
+
+  // --- Borrow Requests (v1.1.0) ---
+
+  async createBorrowRequest(
+    familyId: string,
+    payload: CreateBorrowPayload,
+  ): Promise<BorrowRequest> {
+    const res = await this.post<BorrowRequest>(
+      `/api/family/${familyId}/borrow`,
+      payload,
+    );
+    return this.unwrap(res);
+  }
+
+  async listBorrowRequests(familyId: string): Promise<BorrowRequest[]> {
+    const res = await this.get<BorrowRequest[]>(
+      `/api/family/${familyId}/borrow`,
+    );
+    return this.unwrap(res);
+  }
+
+  async updateBorrowStatus(
+    requestId: string,
+    status: BorrowStatus,
+  ): Promise<BorrowRequest> {
+    const res = await this.patch<BorrowRequest>(
+      `/api/borrow/${requestId}`,
+      { status },
+    );
+    return this.unwrap(res);
+  }
+
+  async updateMemberSettings(
+    familyId: string,
+    uid: string,
+    settings: MemberSettingsPayload,
+  ): Promise<FamilyMember> {
+    const res = await this.patch<FamilyMember>(
+      `/api/family/${familyId}/member/${uid}`,
+      settings,
+    );
+    return this.unwrap(res);
   }
 
   // --- Verification ---

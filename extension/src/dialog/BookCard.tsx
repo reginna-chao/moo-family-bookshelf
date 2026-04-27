@@ -1,9 +1,19 @@
-import React from "react";
+import React, { useState } from "react";
 import { BookEntry, BoolFlag } from "../api/client";
 
 export interface BookWithMember extends BookEntry {
   memberName: string;
   isUpdated: BoolFlag;
+}
+
+export interface BookCardProps {
+  book: BookWithMember;
+  /** Show the "申請借閱" hover overlay (FamilyShelf context only). */
+  showBorrowButton?: boolean;
+  /** Triggered when user clicks the borrow button. */
+  onBorrowClick?: () => void;
+  /** Disables the borrow button (e.g. an existing PENDING request). */
+  borrowRequestPending?: boolean;
 }
 
 export function FilterButton({
@@ -34,9 +44,21 @@ export function FilterButton({
   );
 }
 
-export function BookCard({ book }: { book: BookWithMember }) {
+export function BookCard({
+  book,
+  showBorrowButton = false,
+  onBorrowClick,
+  borrowRequestPending = false,
+}: BookCardProps) {
+  const [hover, setHover] = useState(false);
+  const overlayVisible = showBorrowButton && hover;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+    <div
+      style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
       <a
         href={book.readmooUrl}
         target="_blank"
@@ -66,6 +88,48 @@ export function BookCard({ book }: { book: BookWithMember }) {
           >
             更新
           </span>
+        )}
+        {showBorrowButton && (
+          <div
+            aria-hidden={!overlayVisible}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "rgba(15, 23, 42, 0.55)",
+              borderRadius: 4,
+              opacity: overlayVisible ? 1 : 0,
+              pointerEvents: overlayVisible ? "auto" : "none",
+              transition: "opacity 0.15s",
+            }}
+          >
+            <button
+              type="button"
+              disabled={borrowRequestPending}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!borrowRequestPending && onBorrowClick) onBorrowClick();
+              }}
+              style={{
+                padding: "6px 10px",
+                border: "none",
+                borderRadius: 6,
+                background: borrowRequestPending ? "#94a3b8" : "#2563eb",
+                color: "white",
+                fontWeight: 600,
+                fontSize: 12,
+                cursor: borrowRequestPending ? "not-allowed" : "pointer",
+              }}
+            >
+              {borrowRequestPending ? "申請中" : "申請借閱"}
+            </button>
+          </div>
         )}
       </a>
       <a
