@@ -639,39 +639,40 @@ jobs:
 - [x] GitHub Pages 說明頁面上線驗證（品牌 Logo、OG 標籤、SVG 圖示替換 emoji、正確 GitHub URL）
 - [x] Chrome Web Store 上架（v1.0.0）— [商店頁面](https://chromewebstore.google.com/detail/ogclfjfjdiminibemhbckobeapnohjnk)
 
-### Phase 5：借閱功能（v1.1.0）
+### Phase 5：借閱功能（v1.1.0）✅ 已完成
 
 > 允許家庭成員申請借閱對方的書籍，整合讀墨原生借書功能（Scope B：Content Script 自動化）。
 > **完整規格**：見 [`docs/v1.1.0-borrow-feature.md`](./v1.1.0-borrow-feature.md)
+> **發布日期**：2026-04-28（commit `b6b5615`）
 
 #### 後端
-- [ ] KV schema：新增 `borrow:{requestId}` + `borrows:family:{familyId}` 索引
-- [ ] FamilyMember 擴充 `canLend` + `readmooName` 欄位（含向後相容）
-- [ ] `POST /api/family/:id/borrow`（建立申請，含 canLend 雙向檢查 + duplicate 防護）
-- [ ] `GET /api/family/:id/borrow`（家庭請求列表）
-- [ ] `PATCH /api/borrow/:requestId`（狀態轉移 + 權限驗證 + FSM）
-- [ ] `PATCH /api/family/:id/member/:uid`（更新 canLend / readmooName）
-- [ ] `DELETE /api/family/:id/member/:uid` 新增 side effect：成員移除時 PENDING 自動 CANCELLED
-- [ ] Rate limiting（POST 10/min、PATCH 30/min）
-- [ ] Unit + Integration tests（≥ 80% coverage）
+- [x] KV schema：新增 `borrow:{requestId}` + `borrows:family:{familyId}` 索引
+- [x] FamilyMember 擴充 `canLend` + `readmooName` 欄位（含向後相容，`normalizeFamilyRecord` 補回 legacy 紀錄的 canLend=TRUE）
+- [x] `POST /api/family/:id/borrow`（建立申請，含 canLend 雙向檢查 + duplicate 防護）
+- [x] `GET /api/family/:id/borrow`（家庭請求列表）
+- [x] `PATCH /api/borrow/:requestId`（狀態轉移 + 權限驗證 + FSM）
+- [x] `PATCH /api/family/:id/member/:uid`（更新 canLend / readmooName）
+- [x] `DELETE /api/family/:id/member/:uid` 新增 side effect：成員移除時 PENDING 自動 CANCELLED（先於 family 變更執行，確保 Invariant 4）
+- [x] Rate limiting（reusable `enforcePerUserRateLimit` helper，套用於借閱 + `PUT /api/user/:id/books`）
+- [x] Unit + Integration tests（≥ 80% coverage，新增 borrow / member-settings / rateLimit 測試）
 
 #### 前端 Extension
-- [ ] BookCard hover overlay「申請借閱」按鈕（僅 FamilyShelf context + 雙方 canLend）
-- [ ] 第 4 個分頁「借閱」：收件匣/寄件匣 + status FSM 操作
-- [ ] FamilySettings 新增 per-member canLend 切換（ownerId only）
-- [ ] readmooName 一次性設定 UI（同意借閱時 lazy 觸發）
-- [ ] Content Script `readmoo-lend.ts` 自動化模組（找書 → 開 modal → 借出 → 選成員 → 偵測 dialog 關閉）
-- [ ] 浮動按鈕 badge（page ready 後查 pending count）
-- [ ] Component tests（≥ 70% coverage）
+- [x] BookCard hover overlay「申請借閱」按鈕（僅 FamilyShelf context + 雙方 canLend）
+- [x] 第 4 個分頁「借閱」：收件匣/寄件匣 + status FSM 操作
+- [x] FamilySettings 新增 per-member canLend 切換（ownerId only）
+- [x] readmooName 一次性設定 UI（同意借閱時 lazy 觸發）
+- [x] Content Script `readmoo-lend.ts` 自動化模組（找書 → 開 modal → 借出 → 選成員 → 偵測 dialog 關閉）
+- [x] 浮動按鈕 badge（page ready 後查 pending count）+ 「借閱」分頁 PENDING badge
+- [x] Component tests（≥ 70% coverage，新增 BorrowTab / MemberList canLend / BookCard borrow button 測試）
 
 #### 前端 PWA
-- [ ] 借閱 tab（共用設計，無「同意借閱」按鈕）
-- [ ] 申請 / 取消 / 標記已歸還（無同意 / 拒絕）
+- [x] 借閱 tab（共用設計，無「同意借閱」按鈕，引導書主回到桌面 Extension 操作）
+- [x] 申請 / 取消 / 標記已歸還（無同意 / 拒絕）
 
 #### 共用
-- [ ] BorrowStatus enum + BorrowRequest 型別
-- [ ] API client `createBorrowRequest` / `listBorrowRequests` / `updateBorrowStatus` / `updateMemberSettings`
-- [ ] 版本 bump 至 `1.1.0`（Extension + PWA 同步）
+- [x] BorrowStatus enum + BorrowRequest 型別
+- [x] API client `createBorrowRequest` / `listBorrowRequests` / `updateBorrowStatus` / `updateMemberSettings`
+- [x] 版本 bump 至 `1.1.0`（Extension + PWA 同步）
 
 ### Phase 6：個人公開書櫃分享（v1.2.0）
 
@@ -775,4 +776,4 @@ moo-family-bookshelf/
 
 ---
 
-*最後更新：2026-04-26*
+*最後更新：2026-04-28*

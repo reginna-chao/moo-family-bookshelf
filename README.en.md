@@ -9,6 +9,7 @@ Easily browse books shared by family members on your Readmoo family account.
 ## Features
 
 - **Family Bookshelf** — See your family's shared books at a glance, no account sharing needed
+- **Borrow between members** — Request a family member's shared book; the owner approves with one click and the Readmoo lending flow runs automatically
 - **You decide what to share** — All books are private by default; only books you manually enable will appear on the family bookshelf
 - **Data security** — All data is transmitted over TLS and protected by auth tokens for access control
 - **Settings persist across families** — Leaving or switching families won't reset your sharing preferences
