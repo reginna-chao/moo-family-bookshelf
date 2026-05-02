@@ -677,13 +677,14 @@ jobs:
 ### Phase 6：個人公開書櫃分享（v1.2.0）
 
 > 使用者可產生獨立網址，將個人開放書櫃對外公開分享。訪客無須登入即可瀏覽。
+> **資料模型採可擴充設計**：v1.2.0 每位使用者僅允許 1 組公開書櫃，未來（v1.3+）可在不更動 schema 與 API 形狀的前提下擴充至多組（規劃上限 3 組）。
 
 #### 核心功能
 - [ ] 個人書櫃頁面新增「分享」icon，點擊開啟公開書櫃設定 Dialog
 - [ ] 公開書櫃設定 Dialog：開啟/關閉公開分享（預設關閉）
 - [ ] 公開書櫃設定 Dialog：自訂標題（預設「{display_name} 的公開書櫃」，可修改）
 - [ ] 公開書櫃設定 Dialog：設定過期時間（7 / 30 / 60 / 90 天 / 永久，預設 30 天）
-- [ ] 公開書櫃設定 Dialog：重設網址（產生新 share token，舊網址立即失效）
+- [ ] 公開書櫃設定 Dialog：重設網址（產生新 share token，舊網址立即失效；shelfId 不變）
 - [ ] 公開書櫃設定 Dialog：複製公開連結
 
 #### 公開書櫃頁面（PWA 路由 `/public/{share_token}`）
@@ -695,23 +696,50 @@ jobs:
 - [ ] 不提供借閱功能
 - [ ] 顯示封面圖片（來源：讀墨 CDN）
 
-#### 後端 API
-- [ ] `POST /api/user/:id/public-shelf` — 建立/更新公開書櫃設定
-- [ ] `DELETE /api/user/:id/public-shelf` — 關閉公開分享
-- [ ] `GET /api/public/{share_token}` — 查詢公開書櫃（不需認證）
+#### 後端 API（採「可定址」設計，從 day-1 即用 `:shelfId` 路由）
+- [ ] `GET /api/user/:id/public-shelf` — 列出所有 shelves（v1.2.0 最多 1 組）
+- [ ] `POST /api/user/:id/public-shelf` — 建立新 shelf（達上限時回 409 Conflict）
+- [ ] `PUT /api/user/:id/public-shelf/:shelfId` — 更新指定 shelf 設定（標題、過期）
+- [ ] `POST /api/user/:id/public-shelf/:shelfId/reset-token` — 重設 shareToken（shelfId 不變）
+- [ ] `DELETE /api/user/:id/public-shelf/:shelfId` — 關閉指定 shelf
+- [ ] `GET /api/public/:shareToken` — 查詢公開書櫃（不需認證）
 
 #### KV Schema 擴充
-- [ ] `public:{share_token}` → `{ user_id, title, books[], created_at, expires_at }` （明文儲存，KV TTL 管理過期）
-- [ ] `user:{id}` 擴充 `public_sharing` 欄位 → `{ enabled, share_token, title, expires_days }`
+- [ ] `public:{share_token}` → `{ userId, shelfId, title, books[], createdAt, expiresAt }` （明文快照，KV TTL 管理過期）
+- [ ] `user:{id}` 擴充 `publicSharing` 欄位（array 結構）：
+  ```typescript
+  publicSharing?: {
+    shelves: PublicShelf[];  // v1.2.0 強制 length <= 1
+  };
+  interface PublicShelf {
+    shelfId: string;          // 內部識別（UUID），重設網址後仍維持
+    shareToken: string;       // 對外網址 token（可重設）
+    title: string;
+    expiresDays: number | null;  // null = 永久
+    createdAt: number;
+    expiresAt: number | null;
+    selectionMode: "all-shared";  // v1.2.0 僅此模式；未來加 "explicit" 支援自選書籍
+    // bookIds?: string[];     // 預留：未來 "explicit" 模式啟用
+  }
+  ```
 
 #### 設計考量
-- 公開書櫃的書 = 個人書櫃中 `is_shared: true` 的同一組書，不另外標記
-- 不需加入家庭也可使用公開書櫃功能
-- share_token 格式：UUID 32 碼（無連字號）
-- 伺服器儲存明文書單供公開查詢
-- 封面圖片 hotlink 讀墨 CDN，需測試可用性
-- 重設網址 = 刪除舊 `public:{old_token}` + 建立新 `public:{new_token}`
-- 關閉公開分享 = 刪除 `public:{token}` + 更新 `user:{id}.public_sharing.enabled = 0`
+- **書單來源**：v1.2.0 公開書櫃的書 = 個人書櫃中 `isShared === BoolFlag.TRUE` 的同一組書（`selectionMode: "all-shared"`）
+- **資料同步**：採快照模式，`PUT /api/user/:id/books` 時自動更新所有 active shelves 的 `public:{token}` 快照
+- **使用前提**：曾加入過家庭以完成書單同步即可（不要求目前處於家庭中），詳見 Q2 解讀 B
+- **share_token 格式**：UUID 32 碼（無連字號），高熵防猜測
+- **shelfId 與 shareToken 分離**：shelfId 為內部識別，shareToken 為對外連結；重設網址僅替換 shareToken，shelfId 不變
+- **過期語義**：建立時 `expiresAt = createdAt + expiresDays`；更新 `expiresDays` 時 `expiresAt = 更新時間 + expiresDays`（從更新時起算，而非建立時）
+- **封面圖片**：hotlink 讀墨 CDN，需測試可用性，必要時 fallback placeholder
+- **重設網址**：刪除舊 `public:{old_token}` + 建立新 `public:{new_token}`，更新 user record 中對應 shelf 的 `shareToken`
+- **關閉公開分享**：刪除 `public:{token}` + 移除 user record 中的 shelf 元素
+- **PWA 路由**：v1.2.0 採混合路由（公開頁面 path-based `/public/:token`，其餘維持 hash routing）；全面遷移至 path-based 留待獨立 refactor
+
+#### 擴充路徑（v1.3+ 多組公開書櫃）
+- 將 worker 常數 `MAX_PUBLIC_SHELVES` 由 1 提升至 3（或設定值）
+- UI 增加 list view 管理多組 shelves
+- 啟用 `selectionMode: "explicit"` + `bookIds[]` 支援自選書籍
+- 既有 API 路由形狀無需變更
 
 ---
 

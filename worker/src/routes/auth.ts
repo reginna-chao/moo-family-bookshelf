@@ -54,7 +54,7 @@ authRoutes.post("/refresh", async (c) => {
     );
   }
 
-  let body: { userId: string; familyId: string } | null;
+  let body: { userId: string; familyId?: string } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -76,17 +76,6 @@ authRoutes.post("/refresh", async (c) => {
     );
   }
 
-  if (
-    !body?.familyId ||
-    typeof body.familyId !== "string" ||
-    !isValidFamilyId(body.familyId)
-  ) {
-    return c.json(
-      { error: { code: "INVALID_INPUT", message: "familyId must match format xxxx-xxxx" } },
-      400,
-    );
-  }
-
   // Ensure the authenticated user matches the requested userId
   if (callerId !== body.userId) {
     return c.json(
@@ -95,13 +84,21 @@ authRoutes.post("/refresh", async (c) => {
     );
   }
 
-  // Verify user is a member of the requested family
-  const storedFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
-  if (!storedFamilyId || storedFamilyId !== body.familyId) {
-    return c.json(
-      { error: { code: "REFRESH_FAILED", message: "Token refresh failed" } },
-      401,
-    );
+  // If familyId is provided, verify membership (backward-compatible path)
+  if (body.familyId !== undefined) {
+    if (typeof body.familyId !== "string" || !isValidFamilyId(body.familyId)) {
+      return c.json(
+        { error: { code: "INVALID_INPUT", message: "familyId must match format xxxx-xxxx" } },
+        400,
+      );
+    }
+    const storedFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
+    if (!storedFamilyId || storedFamilyId !== body.familyId) {
+      return c.json(
+        { error: { code: "REFRESH_FAILED", message: "Token refresh failed" } },
+        401,
+      );
+    }
   }
 
   const newToken = await getOrGenerateAuthToken(c.env.KV, body.userId);

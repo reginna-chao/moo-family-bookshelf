@@ -8,6 +8,7 @@ import { bookshelfRoutes } from "./routes/bookshelf";
 import { borrowRoutes } from "./routes/borrow";
 import { authRoutes } from "./routes/auth";
 import { verifyRoutes } from "./routes/verify";
+import { publicShelfRoutes, publicQueryRoutes } from "./routes/publicShelf";
 import { isDevMode, type Env } from "./utils/env";
 
 export type { Env } from "./utils/env";
@@ -134,10 +135,12 @@ app.get("/api/version", (c) =>
 // Routes
 app.route("/api/user", userRoutes);
 app.route("/api/user", verifyRoutes);
+app.route("/api/user", publicShelfRoutes);
 app.route("/api/family", familyRoutes);
 app.route("/api/auth", authRoutes);
 app.route("/api", bookshelfRoutes);
 app.route("/api", borrowRoutes);
+app.route("/api", publicQueryRoutes);
 
 // 404 fallback
 app.notFound((c) =>

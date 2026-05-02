@@ -14,6 +14,8 @@ export function isPublicRoute(method: string, path: string): boolean {
   if (method === "POST" && /^\/api\/auth\/lookup\/?$/.test(path)) return true;
   // GET /api/user/:id/verify — check verification method (needed before login)
   if (method === "GET" && /^\/api\/user\/[^/]+\/verify\/?$/.test(path)) return true;
+  // GET /api/public/:shareToken — public bookshelf query
+  if (method === "GET" && /^\/api\/public\/[^/]+\/?$/.test(path)) return true;
   return false;
 }
 
