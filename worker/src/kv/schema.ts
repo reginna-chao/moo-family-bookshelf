@@ -8,6 +8,7 @@
  *   qr:{token}       → QrTokenRecord (one-time QR login bypass, TTL 300s)
  *   borrow:{requestId} → BorrowRequest (JSON)
  *   borrows:family:{familyId} → string[] (requestId index)
+ *   public:{shareToken} → PublicShelfSnapshot (plaintext public bookshelf, optional TTL)
  */
 
 export enum BoolFlag {
@@ -49,6 +50,7 @@ export const kvKeys = {
   qrToken: (token: string) => `qr:${token}`,
   borrow: (requestId: string) => `borrow:${requestId}`,
   borrowsByFamily: (familyId: string) => `borrows:family:${familyId}`,
+  publicShelf: (token: string) => `public:${token}`,
 } as const;
 
 export interface FamilyMember {
@@ -127,12 +129,36 @@ export interface BookEntry {
   isArchived?: number;
 }
 
+export type SelectionMode = "all-shared";
+
+export interface PublicShelf {
+  shelfId: string;
+  shareToken: string;
+  title: string;
+  expiresDays: number | null;
+  createdAt: number;
+  expiresAt: number | null;
+  selectionMode: SelectionMode;
+}
+
+export interface PublicShelfSnapshot {
+  userId: string;
+  shelfId: string;
+  title: string;
+  books: BookEntry[];
+  createdAt: number;
+  expiresAt: number | null;
+}
+
+export const MAX_PUBLIC_SHELVES = 1;
+
 export interface UserBooksRecord {
   schemaVersion: number;
   userId: string;
   displayName: string;
   books: BookEntry[];
   lastUpdated: string;
+  publicSharing?: { shelves: PublicShelf[] };
   [key: string]: unknown;
 }
 

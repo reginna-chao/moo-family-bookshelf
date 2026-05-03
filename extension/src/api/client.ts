@@ -34,6 +34,7 @@ import type {
   MemberSettingsPayload,
   OtpInfo,
   PersonalBooks,
+  PublicShelf,
   VerifyInfo,
   VersionInfo,
 } from "./types";
@@ -53,10 +54,15 @@ export type {
   MemberSettingsPayload,
   OtpInfo,
   PersonalBooks,
+  PublicShelf,
+  PublicShelfData,
+  SelectionMode,
   VerifyInfo,
   VerifyMethod,
   VersionInfo,
 } from "./types";
+
+import { DEFAULT_PWA_URL } from "../constants";
 
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
@@ -328,6 +334,47 @@ export class ApiClient {
   /** Create a short-lived QR token for PWA auto-login (bypasses verification). */
   async createQrToken(userId: string): Promise<ApiResponse<{ token: string; expiresIn: number }>> {
     return this.post(`/api/user/${userId}/qr-token`);
+  }
+
+  // --- Public Shelf (v1.2.0) ---
+
+  getPublicShelfUrl(shareToken: string, pwaOriginOverride?: string): string {
+    const origin = pwaOriginOverride ?? DEFAULT_PWA_URL;
+    return `${origin}/public/${shareToken}`;
+  }
+
+  async listPublicShelves(userId: string): Promise<{ shelves: PublicShelf[] }> {
+    const res = await this.get<{ shelves: PublicShelf[] }>(`/api/user/${userId}/public-shelf`);
+    return this.unwrap(res);
+  }
+
+  async createPublicShelf(
+    userId: string,
+    body: { title: string; expiresDays: number | null },
+  ): Promise<{ shelf: PublicShelf }> {
+    const res = await this.post<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf`, body);
+    return this.unwrap(res);
+  }
+
+  async updatePublicShelf(
+    userId: string,
+    shelfId: string,
+    body: { title?: string; expiresDays?: number | null },
+  ): Promise<{ shelf: PublicShelf }> {
+    const res = await this.put<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf/${shelfId}`, body);
+    return this.unwrap(res);
+  }
+
+  async resetPublicShelfToken(
+    userId: string,
+    shelfId: string,
+  ): Promise<{ shelf: PublicShelf }> {
+    const res = await this.post<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf/${shelfId}/reset-token`);
+    return this.unwrap(res);
+  }
+
+  async deletePublicShelf(userId: string, shelfId: string): Promise<void> {
+    await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
   }
 
   // --- Internal ---

@@ -7,6 +7,7 @@ import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
 import { BorrowPage } from "./pages/BorrowPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { PublicShelfPage } from "./pages/PublicShelfPage";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { PwaCreateNotice } from "./components/PwaCreateNotice";
 import { VerifySetupPrompt } from "./components/VerifySetupPrompt";
@@ -52,7 +53,18 @@ const NAV_ITEMS: NavItem[] = [
   { page: "settings", label: "設定", icon: Settings },
 ];
 
+const PUBLIC_PATH_RE = /^\/public\/([a-f0-9]{32})\/?$/;
+
 export default function App() {
+  // Path-based route: /public/{shareToken} bypasses all auth/hash routing
+  const publicMatch = window.location.pathname.match(PUBLIC_PATH_RE);
+  if (publicMatch) {
+    return <PublicShelfPage shareToken={publicMatch[1]} />;
+  }
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId, qrToken } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>(() => pageFromHash() ?? "family-shelf");
   const [familyFullError, setFamilyFullError] = useState("");

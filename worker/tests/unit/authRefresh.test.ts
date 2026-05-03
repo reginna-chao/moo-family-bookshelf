@@ -158,18 +158,19 @@ describe("POST /api/auth/refresh", () => {
     expect(json.error.code).toBe("INVALID_INPUT");
   });
 
-  it("should return 400 for missing familyId", async () => {
+  it("should succeed without familyId (v1.2.0: familyId is optional)", async () => {
     const token = "e".repeat(64);
     await kv.put(`token:${token}`, VALID_USER_ID);
+    await kv.put(`auth:${VALID_USER_ID}`, JSON.stringify({ token, createdAt: "2026-01-01T00:00:00Z" }));
 
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("INVALID_INPUT");
+    expect(json.data.token).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("should return 400 for empty familyId", async () => {

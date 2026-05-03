@@ -1,9 +1,22 @@
 import { Hono } from "hono";
 import type { Env } from "../utils/env";
-import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord } from "../kv/schema";
+import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord, type PublicShelf, type BookEntry } from "../kv/schema";
+import { writePublicSnapshot } from "./publicShelf";
 import { isValidUserId } from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
+
+async function updateAllPublicSnapshots(
+  kv: KVNamespace,
+  userId: string,
+  shelves: PublicShelf[],
+  books: BookEntry[],
+): Promise<void> {
+  if (shelves.length === 0) return;
+  await Promise.all(
+    shelves.map((shelf) => writePublicSnapshot(kv, userId, shelf, books)),
+  );
+}
 
 export const userRoutes = new Hono<{ Bindings: Env }>();
 
@@ -95,6 +108,9 @@ userRoutes.put("/:id/books", async (c) => {
     );
   }
 
+  // Read existing record to preserve server-managed fields (publicSharing)
+  const existing = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
+
   const record: UserBooksRecord = {
     ...body,
     books: body.books,
@@ -102,9 +118,14 @@ userRoutes.put("/:id/books", async (c) => {
     userId: typeof body.userId === "string" ? body.userId : userId,
     displayName: typeof body.displayName === "string" ? body.displayName : "",
     lastUpdated: new Date().toISOString(),
+    publicSharing: existing?.publicSharing,
   };
 
   await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
+
+  // Update public shelf snapshots for all active shelves
+  const shelves = record.publicSharing?.shelves ?? [];
+  await updateAllPublicSnapshots(c.env.KV, userId, shelves, record.books);
 
   return c.json({ data: record });
 });
@@ -166,11 +187,16 @@ userRoutes.delete("/:id", async (c) => {
     }
   }
 
+  // Collect public shelf tokens for cleanup
+  const userRecord = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
+  const publicTokens = userRecord?.publicSharing?.shelves?.map((s) => s.shareToken) ?? [];
+
   // Delete all user data in parallel
   await Promise.all([
     c.env.KV.delete(kvKeys.user(userId)),
     c.env.KV.delete(kvKeys.member(userId)),
     deleteAuthToken(c.env.KV, userId),
+    ...publicTokens.map((token) => c.env.KV.delete(kvKeys.publicShelf(token))),
   ]);
 
   return c.json({ data: { ok: true } });

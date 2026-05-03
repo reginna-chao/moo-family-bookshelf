@@ -141,6 +141,25 @@ export interface CreateBorrowPayload {
   ownerId: string;
 }
 
+export type SelectionMode = "all-shared";
+
+export interface PublicShelf {
+  shelfId: string;
+  shareToken: string;
+  title: string;
+  expiresDays: number | null;
+  createdAt: number;
+  expiresAt: number | null;
+  selectionMode: SelectionMode;
+}
+
+export interface PublicShelfData {
+  title: string;
+  books: BookEntry[];
+  createdAt: number;
+  expiresAt: number | null;
+}
+
 /** Settings updatable on a family member via PATCH /api/family/:id/member/:uid. */
 export interface MemberSettingsPayload {
   canLend?: BoolFlag;
@@ -408,6 +427,64 @@ export class ApiClient {
   async markVerifyPrompted(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
     return this.post(`/api/user/${userId}/verify/prompted`);
+  }
+
+  // --- Public Shelf (v1.2.0) ---
+
+  async listPublicShelves(userId: string): Promise<{ shelves: PublicShelf[] }> {
+    this.validateHexId(userId, "userId");
+    const res = await this.get<{ shelves: PublicShelf[] }>(`/api/user/${userId}/public-shelf`);
+    return this.unwrap(res);
+  }
+
+  async createPublicShelf(
+    userId: string,
+    body: { title: string; expiresDays: number | null },
+  ): Promise<{ shelf: PublicShelf }> {
+    this.validateHexId(userId, "userId");
+    const res = await this.post<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf`, body);
+    return this.unwrap(res);
+  }
+
+  async updatePublicShelf(
+    userId: string,
+    shelfId: string,
+    body: { title?: string; expiresDays?: number | null },
+  ): Promise<{ shelf: PublicShelf }> {
+    this.validateHexId(userId, "userId");
+    const res = await this.put<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf/${shelfId}`, body);
+    return this.unwrap(res);
+  }
+
+  async resetPublicShelfToken(
+    userId: string,
+    shelfId: string,
+  ): Promise<{ shelf: PublicShelf }> {
+    this.validateHexId(userId, "userId");
+    const res = await this.post<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf/${shelfId}/reset-token`);
+    return this.unwrap(res);
+  }
+
+  async deletePublicShelf(userId: string, shelfId: string): Promise<void> {
+    this.validateHexId(userId, "userId");
+    await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
+  }
+
+  async getPublicShelf(shareToken: string): Promise<PublicShelfData> {
+    const url = `${this.baseUrl}/api/public/${shareToken}`;
+    const response = await fetch(url, {
+      headers: { "Content-Type": "application/json" },
+    });
+    const json = (await response.json()) as ApiResponse<PublicShelfData>;
+    if (json.error) {
+      const err = new Error(`${json.error.code}: ${json.error.message}`);
+      (err as Error & { status: number }).status = response.status;
+      throw err;
+    }
+    if (!json.data) {
+      throw new Error("EMPTY_RESPONSE: response body missing data");
+    }
+    return json.data;
   }
 
   // --- Internal ---

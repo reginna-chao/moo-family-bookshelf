@@ -103,3 +103,23 @@ export function isValidPattern(value: string): boolean {
   }
   return true;
 }
+
+const SHARE_TOKEN_RE = /^[a-f0-9]{32}$/;
+
+export function isValidShareToken(value: unknown): value is string {
+  return typeof value === "string" && SHARE_TOKEN_RE.test(value);
+}
+
+const PUBLIC_SHELF_TITLE_MAX_LENGTH = 60;
+
+export function sanitizePublicShelfTitle(value: unknown): string | null {
+  return sanitizeShortString(value, PUBLIC_SHELF_TITLE_MAX_LENGTH);
+}
+
+const VALID_EXPIRES_DAYS = [7, 30, 60, 90];
+
+export function isValidExpiresDays(value: unknown): value is number | null {
+  if (value === null) return true;
+  if (typeof value !== "number") return false;
+  return VALID_EXPIRES_DAYS.includes(value);
+}
