@@ -150,7 +150,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         </h3>
         <div style={{ display: "flex", gap: 6 }}>
           <button onClick={() => setShowPublicShare(true)} style={{
-            padding: "6px 12px", border: "1px solid #8b5cf6", borderRadius: 6, color: "#8b5cf6",
+            padding: "6px 12px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
             background: "transparent", fontWeight: 500, fontSize: 13, cursor: "pointer",
             whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4,
           }}><Share2 size={13} />公開分享</button>
