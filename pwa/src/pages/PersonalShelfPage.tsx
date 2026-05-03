@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Share2 } from "lucide-react";
 import { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
 import type { ApiClient, BookEntry, PersonalBooks } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
 import { FloatingActionBar } from "@/components/FloatingActionBar";
 import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
+import { PublicShareDialog } from "@/components/PublicShareDialog";
 import { namespacedKey } from "@/hooks/useAuth";
 
 interface PersonalShelfPageProps {
@@ -28,6 +29,7 @@ export function PersonalShelfPage({
   const [categoryFilter, setCategoryFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
+  const [showPublicShare, setShowPublicShare] = useState(false);
   const originalBooksRef = useRef<BookEntry[]>([]);
   /** Raw server response — kept so save can spread back unknown fields from future versions */
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
@@ -210,10 +212,18 @@ export function PersonalShelfPage({
   return (
     <div className="flex flex-col min-h-0">
       <div className="p-4 flex-1">
-        <h2 className="text-xl font-bold text-gray-900 mb-3">
-          個人書櫃
-          <span className="text-gray-400 text-sm font-normal ml-2">({currentViewBooks.length} 本)</span>
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xl font-bold text-gray-900">
+            個人書櫃
+            <span className="text-gray-400 text-sm font-normal ml-2">({currentViewBooks.length} 本)</span>
+          </h2>
+          <button
+            onClick={() => setShowPublicShare(true)}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-purple-600 border border-purple-300 rounded-lg hover:bg-purple-50"
+          >
+            <Share2 size={13} /> 公開分享
+          </button>
+        </div>
 
         {showArchiveTabs && (
           <div role="tablist" className="flex border-b border-gray-200 mb-3">
@@ -363,6 +373,15 @@ export function PersonalShelfPage({
         onCancelChanges={handleCancelChanges}
         onSave={() => void handleSave()}
       />
+
+      {showPublicShare && (
+        <PublicShareDialog
+          userId={userId}
+          apiClient={apiClient}
+          defaultDisplayName={displayName || "我"}
+          onClose={() => setShowPublicShare(false)}
+        />
+      )}
     </div>
   );
 }
