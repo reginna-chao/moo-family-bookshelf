@@ -219,7 +219,7 @@ export function PersonalShelfPage({
           </h2>
           <button
             onClick={() => setShowPublicShare(true)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-purple-600 border border-purple-300 rounded-lg hover:bg-purple-50"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50"
           >
             <Share2 size={13} /> 公開分享
           </button>
