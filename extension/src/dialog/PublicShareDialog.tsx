@@ -7,7 +7,8 @@ export interface PublicShareDialogProps {
   userId: string;
   apiClient: ApiClient;
   defaultDisplayName: string;
-  pwaOrigin: string;
+  /** Override default PWA origin (for self-hosters). Empty string is treated as unset. */
+  pwaOrigin?: string;
   onClose: () => void;
 }
 
