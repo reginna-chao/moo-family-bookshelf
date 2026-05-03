@@ -339,7 +339,9 @@ export class ApiClient {
   // --- Public Shelf (v1.2.0) ---
 
   getPublicShelfUrl(shareToken: string, pwaOriginOverride?: string): string {
-    const origin = pwaOriginOverride ?? DEFAULT_PWA_URL;
+    const origin = pwaOriginOverride && pwaOriginOverride.length > 0
+      ? pwaOriginOverride
+      : DEFAULT_PWA_URL;
     return `${origin}/public/${shareToken}`;
   }
 

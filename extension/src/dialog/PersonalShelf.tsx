@@ -225,7 +225,6 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
           userId={userId}
           apiClient={apiClient}
           defaultDisplayName={displayName || "我"}
-          pwaOrigin=""
           onClose={() => setShowPublicShare(false)}
         />
       )}
