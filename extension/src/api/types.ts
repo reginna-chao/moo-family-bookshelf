@@ -121,3 +121,22 @@ export interface MemberSettingsPayload {
   canLend?: BoolFlag;
   readmooName?: string;
 }
+
+export type SelectionMode = "all-shared";
+
+export interface PublicShelf {
+  shelfId: string;
+  shareToken: string;
+  title: string;
+  expiresDays: number | null;
+  createdAt: number;
+  expiresAt: number | null;
+  selectionMode: SelectionMode;
+}
+
+export interface PublicShelfData {
+  title: string;
+  books: BookEntry[];
+  createdAt: number;
+  expiresAt: number | null;
+}

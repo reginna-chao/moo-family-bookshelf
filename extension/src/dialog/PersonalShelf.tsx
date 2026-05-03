@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, CSSProperties } from "react";
+import { Share2 } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { BookRow } from "./BookRow";
 import { StatusFilterBar, StatusFilter } from "./StatusFilterBar";
@@ -8,6 +9,7 @@ import { useBookSync } from "./useBookSync";
 import { FloatingActionBar } from "./FloatingActionBar";
 import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
 import { usePersonalBooks } from "./usePersonalBooks";
+import { PublicShareDialog } from "./PublicShareDialog";
 
 export interface PersonalShelfProps {
   userId: string;
@@ -30,6 +32,15 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const [syncArchived, setSyncArchived] = useState<number>(0);
+  const [showPublicShare, setShowPublicShare] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+
+  useEffect(() => {
+    chrome.storage.local.get("displayName").then((r) => {
+      setDisplayName((r.displayName as string) ?? "");
+    });
+  }, []);
+
   const { syncStatus, syncError, triggerManualSync, lastSyncBooks } = useBookSync({
     userId,
     apiClient,
@@ -137,11 +148,18 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>個人書櫃管理
           <span style={{ fontWeight: 400, color: "#94a3b8", marginLeft: 8, fontSize: 13 }}>({currentViewBooks.length} 本)</span>
         </h3>
-        <button onClick={triggerManualSync} disabled={isSyncing} style={{
-          padding: "6px 12px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
-          background: isSyncing ? "#93c5fd" : "transparent", fontWeight: 500, fontSize: 13,
-          cursor: isSyncing ? "not-allowed" : "pointer", whiteSpace: "nowrap",
-        }}>{syncLabel}</button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setShowPublicShare(true)} style={{
+            padding: "6px 12px", border: "1px solid #8b5cf6", borderRadius: 6, color: "#8b5cf6",
+            background: "transparent", fontWeight: 500, fontSize: 13, cursor: "pointer",
+            whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4,
+          }}><Share2 size={13} />公開分享</button>
+          <button onClick={triggerManualSync} disabled={isSyncing} style={{
+            padding: "6px 12px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
+            background: isSyncing ? "#93c5fd" : "transparent", fontWeight: 500, fontSize: 13,
+            cursor: isSyncing ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+          }}>{syncLabel}</button>
+        </div>
       </div>
 
       {syncStatus === "error" && syncError && (
@@ -201,6 +219,16 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
         selectedCount={selectedIds.size} isDirty={isDirty} isSaving={status === "saving"} isSaved={status === "saved"}
         onBatchShare={handleBatchShare} onBatchHide={handleBatchHide} onCancel={handleCancel} onSave={handleSave}
       />
+
+      {showPublicShare && (
+        <PublicShareDialog
+          userId={userId}
+          apiClient={apiClient}
+          defaultDisplayName={displayName || "我"}
+          pwaOrigin=""
+          onClose={() => setShowPublicShare(false)}
+        />
+      )}
     </div>
   );
 }
