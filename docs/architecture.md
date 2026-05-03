@@ -573,7 +573,7 @@ extension/package.json (version: "0.2.0")
 問題回報連結以 JSON 配置檔管理，方便後續增減：
 
 ```typescript
-// extension/src/config/links.ts
+// shared/src/config/links.ts
 export const reportLinks = [
   {
     name: "GitHub",
