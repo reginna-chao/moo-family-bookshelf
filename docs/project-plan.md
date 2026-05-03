@@ -674,39 +674,40 @@ jobs:
 - [x] API client `createBorrowRequest` / `listBorrowRequests` / `updateBorrowStatus` / `updateMemberSettings`
 - [x] 版本 bump 至 `1.1.0`（Extension + PWA 同步）
 
-### Phase 6：個人公開書櫃分享（v1.2.0）
+### Phase 6：個人公開書櫃分享（v1.2.0）✅ 已完成
 
 > 使用者可產生獨立網址，將個人開放書櫃對外公開分享。訪客無須登入即可瀏覽。
 > **資料模型採可擴充設計**：v1.2.0 每位使用者僅允許 1 組公開書櫃，未來（v1.3+）可在不更動 schema 與 API 形狀的前提下擴充至多組（規劃上限 3 組）。
+> **發布日期**：2026-05-03（commit `c546277`）
 
 #### 核心功能
-- [ ] 個人書櫃頁面新增「分享」icon，點擊開啟公開書櫃設定 Dialog
-- [ ] 公開書櫃設定 Dialog：開啟/關閉公開分享（預設關閉）
-- [ ] 公開書櫃設定 Dialog：自訂標題（預設「{display_name} 的公開書櫃」，可修改）
-- [ ] 公開書櫃設定 Dialog：設定過期時間（7 / 30 / 60 / 90 天 / 永久，預設 30 天）
-- [ ] 公開書櫃設定 Dialog：重設網址（產生新 share token，舊網址立即失效；shelfId 不變）
-- [ ] 公開書櫃設定 Dialog：複製公開連結
+- [x] 個人書櫃頁面新增「分享」icon，點擊開啟公開書櫃設定 Dialog
+- [x] 公開書櫃設定 Dialog：開啟/關閉公開分享（預設關閉）
+- [x] 公開書櫃設定 Dialog：自訂標題（預設「{display_name} 的公開書櫃」，可修改）
+- [x] 公開書櫃設定 Dialog：設定過期時間（7 / 30 / 60 / 90 天 / 永久，預設 30 天）
+- [x] 公開書櫃設定 Dialog：重設網址（產生新 share token，舊網址立即失效；shelfId 不變）
+- [x] 公開書櫃設定 Dialog：複製公開連結
 
 #### 公開書櫃頁面（PWA 路由 `/public/{share_token}`）
-- [ ] 不需登入即可瀏覽
-- [ ] 頁面上方說明文字：「此為對外公開書櫃，無須登入即可瀏覽」
-- [ ] 標題顯示使用者自訂的公開書櫃名稱
-- [ ] 書單搜尋功能（書名 + 作者，純前端即時過濾）
-- [ ] 書籍連結至讀墨購買介紹頁（`https://readmoo.com/book/{bookId}`，另開新分頁）
-- [ ] 不提供借閱功能
-- [ ] 顯示封面圖片（來源：讀墨 CDN）
+- [x] 不需登入即可瀏覽
+- [x] 頁面上方說明文字：「此為對外公開書櫃，無須登入即可瀏覽」
+- [x] 標題顯示使用者自訂的公開書櫃名稱
+- [x] 書單搜尋功能（書名 + 作者，純前端即時過濾）
+- [x] 書籍連結至讀墨購買介紹頁（`https://readmoo.com/book/{bookId}`，另開新分頁）
+- [x] 不提供借閱功能
+- [x] 顯示封面圖片（來源：讀墨 CDN，含 onError fallback）
 
 #### 後端 API（採「可定址」設計，從 day-1 即用 `:shelfId` 路由）
-- [ ] `GET /api/user/:id/public-shelf` — 列出所有 shelves（v1.2.0 最多 1 組）
-- [ ] `POST /api/user/:id/public-shelf` — 建立新 shelf（達上限時回 409 Conflict）
-- [ ] `PUT /api/user/:id/public-shelf/:shelfId` — 更新指定 shelf 設定（標題、過期）
-- [ ] `POST /api/user/:id/public-shelf/:shelfId/reset-token` — 重設 shareToken（shelfId 不變）
-- [ ] `DELETE /api/user/:id/public-shelf/:shelfId` — 關閉指定 shelf
-- [ ] `GET /api/public/:shareToken` — 查詢公開書櫃（不需認證）
+- [x] `GET /api/user/:id/public-shelf` — 列出所有 shelves（v1.2.0 最多 1 組）
+- [x] `POST /api/user/:id/public-shelf` — 建立新 shelf（達上限時回 409 Conflict）
+- [x] `PUT /api/user/:id/public-shelf/:shelfId` — 更新指定 shelf 設定（標題、過期）
+- [x] `POST /api/user/:id/public-shelf/:shelfId/reset-token` — 重設 shareToken（shelfId 不變）
+- [x] `DELETE /api/user/:id/public-shelf/:shelfId` — 關閉指定 shelf
+- [x] `GET /api/public/:shareToken` — 查詢公開書櫃（不需認證）
 
 #### KV Schema 擴充
-- [ ] `public:{share_token}` → `{ userId, shelfId, title, books[], createdAt, expiresAt }` （明文快照，KV TTL 管理過期）
-- [ ] `user:{id}` 擴充 `publicSharing` 欄位（array 結構）：
+- [x] `public:{share_token}` → `{ userId, shelfId, title, books[], createdAt, expiresAt }` （明文快照，KV TTL 管理過期）
+- [x] `user:{id}` 擴充 `publicSharing` 欄位（array 結構）：
   ```typescript
   publicSharing?: {
     shelves: PublicShelf[];  // v1.2.0 強制 length <= 1
