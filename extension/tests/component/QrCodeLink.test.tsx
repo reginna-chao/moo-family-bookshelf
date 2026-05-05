@@ -65,7 +65,7 @@ describe("QrCodeLink", () => {
     const apiClient = createMockApiClient();
     render(<QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />);
     expect(
-      screen.getByText("為節省資源，QR Code 5 分鐘後將自動過期，過期後可重新產生"),
+      screen.getByText("QR Code 5 分鐘後將自動過期，過期後可重新產生"),
     ).toBeInTheDocument();
   });
 

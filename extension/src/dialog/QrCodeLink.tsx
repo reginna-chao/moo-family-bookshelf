@@ -167,7 +167,7 @@ export function QrCodeLink({ syncCode, userId, apiClient }: QrCodeLinkProps) {
         用手機掃描 QR Code 或複製連結，即可在行動裝置上使用墨家書櫃
       </div>
       <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 2, textAlign: "center" }}>
-        為節省資源，QR Code 5 分鐘後將自動過期，過期後可重新產生
+        QR Code 5 分鐘後將自動過期，過期後可重新產生
       </div>
     </div>
   );
