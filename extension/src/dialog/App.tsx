@@ -11,6 +11,7 @@ import { useTokenRefresh } from "./useTokenRefresh";
 import { isExtensionContextValid } from "../utils/extensionContext";
 import { FamilyDataProvider, useFamilyData } from "./FamilyDataContext";
 import { VersionWarning } from "./VersionWarning";
+import { LoadingState } from "./LoadingState";
 
 type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "borrow" | "settings";
@@ -107,7 +108,7 @@ export function App() {
   }
 
   if (view === "loading") {
-    return <div style={{ padding: 24, textAlign: "center" }}>載入中...</div>;
+    return <LoadingState message="載入中..." />;
   }
 
   if (view === "onboarding") {

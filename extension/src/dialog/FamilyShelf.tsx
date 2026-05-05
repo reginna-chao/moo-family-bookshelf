@@ -6,6 +6,7 @@ import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
 import { useFamilyData, MemberBooks } from "./FamilyDataContext";
 import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
+import { LoadingState } from "./LoadingState";
 
 export interface FamilyShelfProps {
   userId: string;
@@ -112,11 +113,7 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   );
 
   if (state === "loading") {
-    return (
-      <div style={{ padding: 16, textAlign: "center", color: "#64748b" }}>
-        載入家庭書櫃中...
-      </div>
-    );
+    return <LoadingState message="載入家庭書櫃中..." />;
   }
 
   if (state === "error") {
