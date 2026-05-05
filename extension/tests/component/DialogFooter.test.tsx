@@ -1,16 +1,10 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { DialogFooter } from "@/dialog/DialogFooter";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
-vi.stubGlobal("matchMedia", (query: string) => ({
-  matches: false,
-  media: query,
-  onchange: null,
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
-  addListener: vi.fn(),
-  removeListener: vi.fn(),
-  dispatchEvent: vi.fn(),
+vi.mock("@/hooks/useMediaQuery", () => ({
+  useMediaQuery: vi.fn(() => false),
 }));
 
 vi.mock("@/utils/appEnv", () => ({
@@ -18,6 +12,10 @@ vi.mock("@/utils/appEnv", () => ({
 }));
 
 describe("DialogFooter", () => {
+  beforeEach(() => {
+    vi.mocked(useMediaQuery).mockReturnValue(false);
+  });
+
   afterEach(async () => {
     const { getAppEnv } = await import("@/utils/appEnv");
     vi.mocked(getAppEnv).mockReturnValue("prod");
@@ -55,5 +53,59 @@ describe("DialogFooter", () => {
 
     render(<DialogFooter />);
     expect(screen.queryByTestId("env-badge")).not.toBeInTheDocument();
+  });
+
+  describe("responsive layout", () => {
+    it("queries the 576px breakpoint", () => {
+      render(<DialogFooter />);
+      expect(useMediaQuery).toHaveBeenCalledWith("(min-width: 576px)");
+    });
+
+    it("uses narrow column layout below 576px", () => {
+      vi.mocked(useMediaQuery).mockReturnValue(false);
+      render(<DialogFooter />);
+      const footer = screen.getByTestId("dialog-footer");
+      expect(footer.style.display).not.toBe("flex");
+    });
+
+    it("uses wide row layout at 576px and above", () => {
+      vi.mocked(useMediaQuery).mockReturnValue(true);
+      render(<DialogFooter />);
+      const footer = screen.getByTestId("dialog-footer");
+      expect(footer).toHaveStyle({
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+      });
+    });
+
+    it("applies flexShrink 0 in narrow mode", () => {
+      vi.mocked(useMediaQuery).mockReturnValue(false);
+      render(<DialogFooter />);
+      const footer = screen.getByTestId("dialog-footer");
+      expect(footer.style.flexShrink).toBe("0");
+    });
+
+    it("applies flexShrink 0 in wide mode", () => {
+      vi.mocked(useMediaQuery).mockReturnValue(true);
+      render(<DialogFooter />);
+      const footer = screen.getByTestId("dialog-footer");
+      expect(footer.style.flexShrink).toBe("0");
+    });
+
+    it("applies marginTop to version div in narrow mode", () => {
+      vi.mocked(useMediaQuery).mockReturnValue(false);
+      render(<DialogFooter />);
+      const versionDiv = screen.getByText(/墨家書櫃 v0\.1\.0/).closest("div")!;
+      expect(versionDiv.style.marginTop).toBe("2px");
+    });
+
+    it("does not apply marginTop to version div in wide mode", () => {
+      vi.mocked(useMediaQuery).mockReturnValue(true);
+      render(<DialogFooter />);
+      const versionDiv = screen.getByText(/墨家書櫃 v0\.1\.0/).closest("div")!;
+      expect(versionDiv.style.marginTop).toBe("");
+    });
   });
 });

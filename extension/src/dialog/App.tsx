@@ -11,9 +11,17 @@ import { useTokenRefresh } from "./useTokenRefresh";
 import { isExtensionContextValid } from "../utils/extensionContext";
 import { FamilyDataProvider, useFamilyData } from "./FamilyDataContext";
 import { VersionWarning } from "./VersionWarning";
+import { LoadingState } from "./LoadingState";
 
 type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "borrow" | "settings";
+
+const flexColumnFill: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  flex: 1,
+  minHeight: 0,
+};
 
 export function App() {
   const [view, setView] = useState<View>("loading");
@@ -100,12 +108,12 @@ export function App() {
   }
 
   if (view === "loading") {
-    return <div style={{ padding: 24, textAlign: "center" }}>載入中...</div>;
+    return <LoadingState message="載入中..." />;
   }
 
   if (view === "onboarding") {
     return (
-      <div>
+      <div style={flexColumnFill}>
         <Onboarding
           onFamilyJoined={handleFamilyJoined}
           apiClient={apiClientRef.current}
@@ -175,7 +183,7 @@ function MainContent({
   ];
 
   return (
-    <div>
+    <div style={flexColumnFill}>
       <VersionWarning apiClient={apiClient} />
       <nav role="tablist" style={{ display: "flex", borderBottom: "1px solid #e2e8f0", alignItems: "center" }}>
         {tabs.map(({ key, label, icon }) => (
@@ -251,7 +259,7 @@ function MainContent({
           </button>
         ))}
       </nav>
-      <div style={{ padding: 16, overflowY: "auto", maxHeight: "60vh" }}>
+      <div style={{ padding: 16, overflowY: "auto", flex: 1, minHeight: 0 }}>
         <div id="panel-family-shelf" role="tabpanel" aria-labelledby="tab-family-shelf" style={{ display: activeTab === "family-shelf" ? "block" : "none" }}>
           <FamilyShelf userId={userId} />
         </div>

@@ -12,6 +12,7 @@ const footerBase: React.CSSProperties = {
   fontSize: 12,
   color: "#94a3b8",
   lineHeight: 1.6,
+  flexShrink: 0,
 };
 
 const footerWide: React.CSSProperties = {
@@ -23,12 +24,12 @@ const footerWide: React.CSSProperties = {
 };
 
 export function DialogFooter() {
-  const isWide = useMediaQuery("(min-width: 768px)");
+  const isWide = useMediaQuery("(min-width: 576px)");
 
   return (
     <footer data-testid="dialog-footer" style={isWide ? footerWide : footerBase}>
       <div>{DISCLAIMER}</div>
-      <div style={{ marginTop: 2 }}>
+      <div style={isWide ? undefined : { marginTop: 2 }}>
         墨家書櫃 {VERSION}
         <span style={{ marginLeft: 4 }}><EnvBadge /></span>
       </div>
