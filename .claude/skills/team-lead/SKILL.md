@@ -97,24 +97,49 @@ Spawn in parallel when tasks are independent. Run sequentially if there are depe
 
 ### Phase 4: Review Report (both modes stop here)
 
-After both teams complete their Fix Cycles, **present the consolidated report**:
+After both teams complete their Fix Cycles, present the **consolidated review report** in three parts:
 
-1. Collect the complete Fix Cycle history from fe-team-lead and be-team-lead:
-   - How many rounds each team went through.
-   - What CRITICAL findings were auto-fixed per round.
-   - What SUGGESTION findings remain (skipped or unaddressed).
-2. Verify API contracts match between FE and BE.
-3. Report test suite results: `pnpm test` (extension) + `cd worker && pnpm test`.
-4. Report `pnpm typecheck` results on both sides.
-5. Run E2E typecheck on affected packages (`npx tsc --noEmit --project tests/e2e/tsconfig.json` in extension/pwa) and report results.
-6. If any cross-team issues are found (API contract mismatch, integration gaps), flag them as CRITICAL and delegate fixes to the appropriate sub-team-lead.
+#### 4.1: Aggregate Sub-Team Fix Cycle Summaries
 
-**Note:** CRITICAL and SUGGESTION findings within each team are already handled by sub-team-lead Fix Cycles. Phase 4 focuses on cross-team validation and consolidated reporting.
+Pass through the **Fix Cycle 總結** from each sub-team-lead **verbatim** (do not re-classify or re-summarize):
+
+```
+## fe-team-lead Fix Cycle 總結
+[verbatim block from fe-team-lead 4.4 — CRITICAL fixed list + SUGGESTION accepted/skipped tables]
+
+## be-team-lead Fix Cycle 總結
+[verbatim block from be-team-lead 4.4 — same structure]
+```
+
+If a sub-team did not run (e.g., FE-only or BE-only feature), state "N/A — task did not involve this side" instead of inventing a section.
+
+#### 4.2: Cross-Team Validation
+
+Run the cross-team gate and report each result:
+1. Verify API contracts match between FE and BE (request/response shapes, error codes).
+2. `pnpm test` (extension) → expected: all green.
+3. `cd worker && pnpm test` → expected: all green.
+4. `pnpm typecheck` on both sides → expected: clean.
+5. E2E typecheck on affected packages (`npx tsc --noEmit --project tests/e2e/tsconfig.json`) → expected: clean.
+
+#### 4.3: Cross-Team Findings
+
+If 4.2 surfaces any cross-team issue (API contract mismatch, integration gap, type drift between FE and BE), classify it just like sub-team-leads do:
+
+- **CRITICAL** → delegate the fix to the appropriate sub-team-lead (re-enter that sub-team's Fix Cycle). Append to the consolidated CRITICAL log when fixed.
+- **SUGGESTION** → assign a TL Recommendation (🟢 / 🟡 / 🔴) and add it to a top-level Decision Prompt in the same format as sub-team-leads (see fe-team-lead 4.3). Wait for the user before delegating any fix.
+
+If no cross-team issues are found, skip this section and proceed to Phase 5.
+
+**Note:** CRITICAL and SUGGESTION findings within each team are already handled by sub-team-lead Fix Cycles — do NOT re-evaluate them. Phase 4 only adds cross-team validation on top.
 
 ### Phase 5: Complete
 
-1. `git add` changed files.
-2. Ask user about committing.
+1. Re-present the aggregated **Fix Cycle 總結** from 4.1 (sub-team tables, all ≤ 4 columns) plus any cross-team table additions from 4.3.
+2. List changed files (across both sides) and final cross-team verification status.
+3. End the report with a single **prose summary paragraph** that consolidates both sub-team narratives and cross-team result — this is the line the user reads first when scanning the final report (e.g., "本次共 FE 1 輪、BE 2 輪 Fix Cycle，自動修復 3 項 CRITICAL，採納 5 項 SUGGESTION，跳過 4 項。跨團隊驗證（API contract / typecheck / E2E）全綠。"). Tables stay above for detail; this paragraph is the headline.
+4. `git add` changed files.
+5. Ask user about committing.
 
 ### Phase 6: Security Scan
 
