@@ -207,6 +207,7 @@ function toggleDialog(): void {
   // Mount point for React app
   const mountPoint = document.createElement("div");
   mountPoint.id = MOO_ELEMENT_IDS.root;
+  mountPoint.style.cssText = "display:flex;flex-direction:column;flex:1;min-height:0";
   dialog.appendChild(mountPoint);
 
   document.body.appendChild(backdrop);

@@ -323,4 +323,47 @@ describe("App", () => {
       expect.any(Function),
     );
   });
+
+  describe("layout styles", () => {
+    it("onboarding wrapper has flex column layout", async () => {
+      setupChromeMessages({ familyId: null, userId: null });
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+      });
+
+      const wrapper = screen.getByTestId("onboarding").parentElement!;
+      expect(wrapper).toHaveStyle({
+        display: "flex",
+        flexDirection: "column",
+      });
+    });
+
+    it("main view wrapper has flex column layout", async () => {
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByRole("tablist")).toBeInTheDocument();
+      });
+
+      const wrapper = screen.getByRole("tablist").parentElement!;
+      expect(wrapper).toHaveStyle({
+        display: "flex",
+        flexDirection: "column",
+      });
+    });
+
+    it("content area uses flex growth instead of fixed max-height", async () => {
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByTestId("family-shelf")).toBeInTheDocument();
+      });
+
+      const panelDiv = screen.getByTestId("family-shelf").parentElement!;
+      const contentArea = panelDiv.parentElement!;
+      expect(contentArea.style.overflowY).toBe("auto");
+      expect(contentArea.style.maxHeight).toBe("");
+    });
+  });
 });
