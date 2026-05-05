@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { buildPwaUrl } from "../constants";
 import type { ApiClient } from "../api/client";
 
@@ -17,43 +17,53 @@ export function QrCodeLink({ syncCode, userId, apiClient }: QrCodeLinkProps) {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [qrToken, setQrToken] = useState<string | undefined>(undefined);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef(true);
 
   const pwaUrl = buildPwaUrl(syncCode, userId, qrToken);
 
-  const fetchQrToken = useCallback(async () => {
-    try {
-      const res = await apiClient.createQrToken(userId);
-      if (!mountedRef.current) return;
-      if (res.data?.token) {
-        setQrToken(res.data.token);
-        // Schedule next refresh before expiry (use server expiresIn or default 4 min)
-        const refreshMs = res.data.expiresIn
-          ? Math.max((res.data.expiresIn - 60) * 1000, 30_000)
-          : TOKEN_REFRESH_INTERVAL_MS;
-        refreshTimerRef.current = setTimeout(() => {
-          void fetchQrToken();
-        }, refreshMs);
-      }
-      // If token fetch fails, qrToken stays undefined — fallback to URL without token
-    } catch {
-      // Graceful degradation: QR code still works without token
-    }
-  }, [apiClient, userId]);
-
-  // Fetch QR token on mount and clean up timer on unmount
+  // Fetch QR token, schedule refresh, and pause when the page is hidden.
   useEffect(() => {
-    mountedRef.current = true;
-    void fetchQrToken();
-    return () => {
-      mountedRef.current = false;
-      if (refreshTimerRef.current !== null) {
-        clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = null;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    async function fetchAndSchedule() {
+      timerId = null;
+      if (cancelled) return;
+      // Skip when hidden — visibilitychange handler will resume on return.
+      if (document.visibilityState !== "visible") return;
+      try {
+        const res = await apiClient.createQrToken(userId);
+        if (cancelled) return;
+        if (res.data?.token) {
+          setQrToken(res.data.token);
+          const refreshMs = res.data.expiresIn
+            ? Math.max((res.data.expiresIn - 60) * 1000, 30_000)
+            : TOKEN_REFRESH_INTERVAL_MS;
+          timerId = setTimeout(fetchAndSchedule, refreshMs);
+        }
+        // If token fetch fails, qrToken stays undefined — URL falls back to no-token form.
+      } catch {
+        // Graceful degradation: QR code still works without token
       }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible" && !cancelled && timerId === null) {
+        void fetchAndSchedule();
+      }
+    }
+
+    void fetchAndSchedule();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [fetchQrToken]);
+  }, [apiClient, userId]);
 
   useEffect(() => {
     let cancelled = false;

@@ -22,10 +22,26 @@ function createMockApiClient(
   } as unknown as ApiClient;
 }
 
+// Override jsdom's visibilityState getter and fire the corresponding event.
+function setVisibility(state: "visible" | "hidden") {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => state,
+  });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
 describe("QrCodeLink", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     mockToDataURL.mockReset();
+    // Restore default visibility without dispatching the event —
+    // RTL hasn't unmounted the component yet at this point, so dispatching
+    // would trigger the still-mounted handler against cleared mocks.
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
   });
 
   it("shows loading state initially", () => {
@@ -300,5 +316,180 @@ describe("QrCodeLink", () => {
     expect(createQrToken).toHaveBeenCalledTimes(1);
 
     vi.useRealTimers();
+  });
+
+  // --- Visibility-aware refresh tests ---
+
+  it("does not refresh when page is hidden as the timer fires", async () => {
+    vi.useFakeTimers();
+
+    let resolveFirst!: (v: unknown) => void;
+    const firstCall = new Promise((r) => { resolveFirst = r; });
+
+    const createQrToken = vi.fn().mockReturnValueOnce(firstCall);
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    render(<QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />);
+
+    // First fetch resolves while page is visible (jsdom default).
+    await act(async () => {
+      resolveFirst({ data: { token: "token-1", expiresIn: 300 } });
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    // Hide the page before the next refresh fires.
+    await act(async () => {
+      setVisibility("hidden");
+    });
+
+    // Timer fires but visibility check skips the fetch and does not reschedule.
+    await act(async () => {
+      vi.advanceTimersByTime(240_000);
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    // Even further idling stays at zero traffic.
+    await act(async () => {
+      vi.advanceTimersByTime(600_000);
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it("resumes fetching when visibility returns after a skipped refresh", async () => {
+    vi.useFakeTimers();
+
+    let resolveFirst!: (v: unknown) => void;
+    const firstCall = new Promise((r) => { resolveFirst = r; });
+    let resolveSecond!: (v: unknown) => void;
+    const secondCall = new Promise((r) => { resolveSecond = r; });
+
+    const createQrToken = vi.fn()
+      .mockReturnValueOnce(firstCall)
+      .mockReturnValueOnce(secondCall);
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    render(<QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />);
+
+    await act(async () => {
+      resolveFirst({ data: { token: "token-1", expiresIn: 300 } });
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    // Hide and let the refresh timer fire (gets skipped, no reschedule).
+    await act(async () => {
+      setVisibility("hidden");
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(240_000);
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    // Visibility returns — handler sees no pending timer and triggers a fresh fetch.
+    await act(async () => {
+      setVisibility("visible");
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(2);
+
+    // Resolve the second to flush microtasks and avoid unhandled promise warnings.
+    await act(async () => {
+      resolveSecond({ data: { token: "token-2", expiresIn: 300 } });
+    });
+
+    vi.useRealTimers();
+  });
+
+  it("does not double-fetch when visibility returns while a timer is still pending", async () => {
+    vi.useFakeTimers();
+
+    let resolveFirst!: (v: unknown) => void;
+    const firstCall = new Promise((r) => { resolveFirst = r; });
+
+    const createQrToken = vi.fn().mockReturnValueOnce(firstCall);
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    render(<QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />);
+
+    // First fetch resolves and schedules the next timer (still pending).
+    await act(async () => {
+      resolveFirst({ data: { token: "token-1", expiresIn: 300 } });
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    // Toggle hidden → visible without advancing the timer; the pending timer
+    // means the visibility handler must NOT trigger a duplicate fetch.
+    await act(async () => {
+      setVisibility("hidden");
+    });
+    await act(async () => {
+      setVisibility("visible");
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it("does not fetch on visibility change after unmount", async () => {
+    vi.useFakeTimers();
+
+    let resolveFirst!: (v: unknown) => void;
+    const firstCall = new Promise((r) => { resolveFirst = r; });
+
+    const createQrToken = vi.fn().mockReturnValueOnce(firstCall);
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    const { unmount } = render(
+      <QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />,
+    );
+
+    await act(async () => {
+      resolveFirst({ data: { token: "token-1", expiresIn: 300 } });
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    unmount();
+
+    // visibilitychange after unmount must not reach the (now-removed) listener.
+    await act(async () => {
+      setVisibility("hidden");
+    });
+    await act(async () => {
+      setVisibility("visible");
+    });
+    expect(createQrToken).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it("does not double-fetch on parent re-render with stable apiClient and userId", async () => {
+    const createQrToken = vi.fn().mockResolvedValue({
+      data: { token: "token-1", expiresIn: 300 },
+    });
+    const apiClient = createMockApiClient({ createQrToken });
+    mockToDataURL.mockResolvedValue("data:image/png;base64,fakepng");
+
+    const { rerender } = render(
+      <QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />,
+    );
+
+    await waitFor(() => {
+      expect(createQrToken).toHaveBeenCalledTimes(1);
+    });
+
+    // Re-render with identical apiClient reference and userId — the effect's
+    // primitive deps are unchanged, so it must not re-run nor refetch.
+    rerender(<QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />);
+
+    // Flush a microtask to give any unintended fetch a chance to slip through.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(createQrToken).toHaveBeenCalledTimes(1);
   });
 });
