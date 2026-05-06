@@ -96,6 +96,17 @@ Evaluate every item and only report findings — do not list items that pass.
 - Endpoint paths match the documented API contract?
 - Idempotency considered for mutation endpoints?
 
+### 9. Lifecycle & Resource Cost
+
+The most expensive bugs are the ones that quietly burn KV / Worker budget while no human is watching. Treat any endpoint that may be called periodically (or any background job) as a budget commitment that must be justified.
+
+- **Endpoints invited to be polled**: If a frontend caller may invoke this endpoint on a timer, the design *and the docstring* must answer: *what is the expected call rate per active user per day?* Compare against Cloudflare Workers' ~100k req/day free tier. Flag if the realistic worst case (one user, tab idle 24h) exceeds **1,000 requests per user per day** — that is a sign the frontend should be on-demand, not periodic.
+- **TTL aligned with lifecycle, not arbitrary**: KV TTLs should mirror how the value is actually used. A token used once should not live for hours. A cache that's invalidated on every mutation should not have a long TTL. A short-lived OTP must have a short TTL even if the user never calls verify.
+- **No write-on-read patterns under polling**: If a polled endpoint also writes to KV (audit log, last-seen, etc.), it doubles the cost and triggers KV write-rate limits. Prefer batching writes via `ctx.waitUntil` or accepting eventual consistency.
+- **Background work via `ctx.waitUntil`**: Non-critical work (logging, cleanup, telemetry) should run in `ctx.waitUntil` to avoid blocking the response — but `waitUntil` work still counts toward Worker subrequest limits. Don't fire-and-forget into infinity.
+- **Scheduled jobs (cron, Durable Object alarms)**: Justify the schedule against actual change frequency. A nightly cleanup is usually fine; an every-minute reconciliation should have a written reason.
+- **Rate-limit counters as a safety net, not a budget**: Rate limiting prevents abuse but does not justify expensive design. If your endpoint relies on rate limiting to keep cost down, redesign — the rate limit will eventually be tuned looser, and the underlying cost remains.
+
 ---
 
 ## Logic-Aware Review

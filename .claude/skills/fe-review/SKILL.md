@@ -102,6 +102,17 @@ Evaluate every item and only report findings — do not list items that pass.
 - Content Script only reads publicly visible info — never touch account credentials?
 - Auth tokens properly stored and sent with API requests?
 
+### 9. Lifecycle & Resource Cost
+
+The most expensive bugs are the ones that quietly burn API budget while idle. Treat any long-lived timer or periodic fetch as a budget commitment that must be justified.
+
+- **Periodic operations need a use-case justification**: Any `setInterval`, recursive `setTimeout`, polling loop, or background sync must answer: *what user action does this serve, and how often does that user action occur in practice?* If a user invokes the feature once a month, a 4-minute refresh timer is wrong — switch to on-click.
+- **Worst-case API budget audit**: For any component with a recurring API call, estimate `requests/hour × hours-tab-open × users` for a left-open-and-forgotten tab (8h / 24h / 7d). Flag if the worst case exceeds **1,000 requests per user per day** or could exhaust Cloudflare Workers' 100k/day free tier.
+- **Visibility gating**: Long-lived timers that live across tab visibility changes should pause when `document.visibilityState !== "visible"`. Reference [extension/src/dialog/useTokenRefresh.ts](extension/src/dialog/useTokenRefresh.ts) for the canonical pattern. A timer that polls in a background tab is almost always a bug.
+- **On-demand alternative**: For any preemptive operation (auto-fetch on mount, periodic refresh), explicitly consider: *could this be triggered by a user click, hover, or scroll instead?* If yes, prefer that. Auto-refresh patterns belong to genuinely active sessions (auth tokens for active users), not to features the user touches occasionally.
+- **Cleanup completeness**: Every resource acquired (timer, listener, subscription, abort controller, observer) must have a matching cleanup. Cross-check `useEffect` cleanup, `useEffect` deps churn (does the effect re-run too often and leak old timers?), and unmount paths.
+- **`useEffect` deps stability for callbacks**: A `useCallback` whose deps churn on every parent render (because parent passes a new object/array prop) will cause downstream effects to re-fire — including any timers they schedule. Trace the dependency chain back to the source of churn.
+
 ---
 
 ## Logic-Aware Review

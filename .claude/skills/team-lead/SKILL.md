@@ -72,6 +72,7 @@ If the user explicitly says something like "skip review", "just write the code",
    - Point out **missing or ambiguous** aspects of the spec (edge cases, error states, UX flows, concurrency, data migration).
    - Flag **security concerns** (auth, input validation, data exposure).
    - Flag **performance concerns** (KV read/write patterns, payload sizes).
+   - Flag **lifecycle & resource cost concerns**: for any feature involving FE polling / auto-refresh, BE scheduled jobs, or background sync, do a back-of-envelope cost estimate (1 user × 24h × N devices) and compare against Cloudflare Workers' ~100k req/day free tier. **If realistic worst case exceeds 1,000 req/user/day or polling is unbounded, the design must be on-demand or visibility-gated — flag this upfront, not at code review**. See `.claude/rules/global.md` → "Lifecycle & Resource Cost".
    - Raise **open questions** that need the user's decision.
 5. Present the full analysis. **Wait for user confirmation before proceeding.**
 
