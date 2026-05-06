@@ -10,7 +10,9 @@ import { QrCodeLink } from "./QrCodeLink";
 import { InviteQrCode } from "./InviteQrCode";
 import { VerificationSettings } from "./VerificationSettings";
 import { useFamilyData } from "./FamilyDataContext";
-import { reportLinks } from "moo-family-bookshelf-shared/config/links";
+import { getReportLinks } from "moo-family-bookshelf-shared/config/links";
+
+const reportLinks = getReportLinks({ appVersion: __APP_VERSION__ });
 
 export interface FamilySettingsProps {
   familyId: string;
@@ -459,6 +461,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
               style={{ color: "#94a3b8", textDecoration: "none",  display: 'inline-block' }}
             >
               <svg
+                aria-hidden="true"
                 role="img"
                 viewBox="0 0 24 24"
                 width={24}

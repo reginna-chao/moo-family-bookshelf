@@ -32,14 +32,31 @@
 <script>
 (function () {
   var DEFAULT = 'https://github.com/reginna-chao/moo-family-bookshelf/issues';
-  var DESTINATIONS = {
-    plurk: 'https://www.plurk.com/p/3gyz74peep'
-  };
   var params = new URLSearchParams(window.location.search);
   var platform = params.get('platform');
-  var target = (platform && Object.prototype.hasOwnProperty.call(DESTINATIONS, platform))
+
+  var GOOGLE_FORM_SHORT = 'https://forms.gle/ZZHzxBh6EV2A8hMUA';
+  var GOOGLE_FORM_VIEWFORM = 'https://docs.google.com/forms/d/e/1FAIpQLSfKoAOkIvZfGU0vZie2zIQj0LjCv2RcYpj6pJjRMnYzQohTWg/viewform';
+  var GOOGLE_FORM_VERSION_ENTRY = 'entry.1575026440';
+
+  function buildGoogleFormUrl() {
+    if (!GOOGLE_FORM_VIEWFORM) return GOOGLE_FORM_SHORT;
+    var v = params.get('v');
+    if (GOOGLE_FORM_VERSION_ENTRY && v) {
+      return GOOGLE_FORM_VIEWFORM + '?usp=pp_url&' + GOOGLE_FORM_VERSION_ENTRY + '=' + encodeURIComponent(v);
+    }
+    return GOOGLE_FORM_VIEWFORM;
+  }
+
+  var DESTINATIONS = {
+    plurk: function () { return 'https://www.plurk.com/p/3gyz74peep'; },
+    googleform: buildGoogleFormUrl
+  };
+
+  var resolver = (platform && Object.prototype.hasOwnProperty.call(DESTINATIONS, platform))
     ? DESTINATIONS[platform]
-    : DEFAULT;
+    : null;
+  var target = resolver ? resolver() : DEFAULT;
   window.location.replace(target);
 })();
 </script>
