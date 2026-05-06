@@ -61,6 +61,7 @@ Orchestrate the frontend development lifecycle: spec analysis → coding → tes
    - Point out **missing or ambiguous** aspects (edge cases, UX flows, accessibility, responsive behavior, state management).
    - Flag **security concerns** (XSS, dangerouslySetInnerHTML, secrets in client code, chrome.storage exposure).
    - Flag **performance concerns** (unnecessary re-renders, large bundle imports, missing lazy loading).
+   - Flag **lifecycle & resource cost concerns**: if the feature involves any periodic timer, polling loop, auto-refresh, or background sync, estimate worst-case API cost (1 user × 24h × N devices) and compare against Cloudflare Workers' ~100k req/day free tier. **If worst case > 1,000 req/user/day or polling is unbounded, mandate on-demand or visibility-gated design and call out the user-action cadence in Phase 1**. See `.claude/rules/global.md` → "Lifecycle & Resource Cost".
    - Raise **open questions** that need the user's decision.
 5. Present the full analysis. **Wait for user confirmation before proceeding.**
 

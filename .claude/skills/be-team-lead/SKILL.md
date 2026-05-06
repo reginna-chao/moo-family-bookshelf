@@ -61,6 +61,7 @@ Orchestrate the backend development lifecycle: spec analysis → coding → test
    - Point out **missing or ambiguous** aspects (edge cases, concurrency, data migration, KV key collisions, TTL strategy).
    - Flag **security concerns** (auth bypass, plaintext data exposure, KV key injection, rate limit evasion).
    - Flag **performance concerns** (N+1 KV reads, response payload sizes, cold start impact).
+   - Flag **lifecycle & resource cost concerns**: if the endpoint is likely to be polled by a frontend, or the feature involves a scheduled job (cron, Durable Object alarm, `ctx.waitUntil` background work), state the expected call rate per active user per day. Compare against Cloudflare Workers' ~100k req/day free tier. **If realistic worst case exceeds 1,000 req/user/day, push back on the polling design before implementation begins**. See `.claude/rules/global.md` → "Lifecycle & Resource Cost".
    - Raise **open questions** that need the user's decision.
 5. Present the full analysis. **Wait for user confirmation before proceeding.**
 

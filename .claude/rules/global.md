@@ -39,6 +39,16 @@
 - No unnecessary recomputation: if a value is expensive to compute and used more than once, compute it once and reuse.
 - Measure before optimizing: do not add caching, memoization, or complexity for performance unless there is evidence of a bottleneck.
 
+#### Lifecycle & Resource Cost
+
+The Performance principles above govern *intra-request* efficiency. These rules govern *long-running* and *recurring* cost — the kind that quietly burns budget while no human is watching.
+
+- **On-demand over preemptive**: For features with non-trivial cost (network requests, KV writes, heavy computation), default to executing on user action — not on mount, not on a schedule. Preemptive execution is only justified when (a) the user cannot tolerate the latency of a fresh fetch, (b) data must stay consistent with an external source in real time, or (c) the work serves a race-against-time UX (e.g., notification arriving while user is away). Most CRUD-style features do not meet this bar.
+- **Match cadence to user need, not to TTL**: The frequency of a periodic operation must mirror how often the user actually needs it, not how often the underlying token / cache / data expires. A QR code that a user generates once a month does not need a 4-minute refresh timer just because the token has 5-minute TTL — generate it on click, mark expired in UI, regenerate on click.
+- **Cost the worst case before merging**: Before introducing any `setInterval`, recurring `setTimeout`, polling loop, or background sync, mentally simulate one user with this UI open for 8h / 24h / 7d, multiplied by realistic concurrent users. Compare against the platform's free tier (e.g., Cloudflare Workers ~100,000 req/day). **If the worst case exceeds 1,000 requests per user per day, the design is wrong — switch to user-triggered or visibility-gated.**
+- **Background-tab idle**: For any timer that lives across tab visibility changes, decide explicitly whether it should pause when hidden. The default answer is *yes*; a timer polling in a background tab for 24 hours is almost always a bug.
+- **Cleanup completeness**: Every resource acquired (timer, listener, subscription, abort controller) must have a matching cleanup on the unmount / disconnect / error path. Already covered under Side Effects, restated here because lifecycle bugs and resource bugs share a root cause.
+
 #### Side Effects
 
 - Side effects must be explicit and centralized. A function that modifies external state should make that obvious from its name and signature.
