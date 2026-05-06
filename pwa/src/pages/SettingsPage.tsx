@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Pencil, Check, X, ChevronDown, ChevronRight } from "lucide-react";
-import { reportLinks } from "moo-family-bookshelf-shared/config/links";
+import { getReportLinks } from "moo-family-bookshelf-shared/config/links";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
@@ -8,6 +8,8 @@ import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "@/constants";
 import { MemberList } from "@/components/MemberList";
 import { namespacedKey, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import { useFamilyData } from "@/hooks/useFamilyData";
+
+const reportLinks = getReportLinks({ appVersion: __APP_VERSION__ });
 
 interface SettingsPageProps {
   familyId: string;
@@ -529,6 +531,7 @@ export function SettingsPage({
               title={link.name}
             >
               <svg
+                aria-hidden="true"
                 role="img"
                 viewBox="0 0 24 24"
                 width="16"

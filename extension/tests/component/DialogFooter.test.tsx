@@ -30,7 +30,7 @@ describe("DialogFooter", () => {
 
   it("renders the app name and version number", () => {
     render(<DialogFooter />);
-    expect(screen.getByText(/墨家書櫃 v0\.1\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/墨家書櫃 v\d+\.\d+\.\d+/)).toBeInTheDocument();
   });
 
   it("has the dialog-footer test id", () => {
@@ -97,14 +97,14 @@ describe("DialogFooter", () => {
     it("applies marginTop to version div in narrow mode", () => {
       vi.mocked(useMediaQuery).mockReturnValue(false);
       render(<DialogFooter />);
-      const versionDiv = screen.getByText(/墨家書櫃 v0\.1\.0/).closest("div")!;
+      const versionDiv = screen.getByText(/墨家書櫃 v\d+\.\d+\.\d+/).closest("div")!;
       expect(versionDiv.style.marginTop).toBe("2px");
     });
 
     it("does not apply marginTop to version div in wide mode", () => {
       vi.mocked(useMediaQuery).mockReturnValue(true);
       render(<DialogFooter />);
-      const versionDiv = screen.getByText(/墨家書櫃 v0\.1\.0/).closest("div")!;
+      const versionDiv = screen.getByText(/墨家書櫃 v\d+\.\d+\.\d+/).closest("div")!;
       expect(versionDiv.style.marginTop).toBe("");
     });
   });
