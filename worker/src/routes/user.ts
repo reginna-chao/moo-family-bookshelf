@@ -111,12 +111,27 @@ userRoutes.put("/:id/books", async (c) => {
   // Read existing record to preserve server-managed fields (publicSharing)
   const existing = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
 
+  // Look up authoritative displayName from the family record instead of
+  // trusting the client-supplied value (which may be stale).
+  const memberFamilyId = await c.env.KV.get(kvKeys.member(userId));
+  let serverDisplayName = typeof body.displayName === "string" ? body.displayName : "";
+  if (memberFamilyId) {
+    const familyRaw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(memberFamilyId), "json");
+    if (familyRaw) {
+      const familyRec = normalizeFamilyRecord(familyRaw);
+      const self = familyRec.members.find((m) => m.userId === userId);
+      if (self?.displayName) {
+        serverDisplayName = self.displayName;
+      }
+    }
+  }
+
   const record: UserBooksRecord = {
     ...body,
     books: body.books,
     schemaVersion: typeof body.schemaVersion === "number" ? body.schemaVersion : 1,
     userId: typeof body.userId === "string" ? body.userId : userId,
-    displayName: typeof body.displayName === "string" ? body.displayName : "",
+    displayName: serverDisplayName,
     lastUpdated: new Date().toISOString(),
     publicSharing: existing?.publicSharing,
   };

@@ -651,11 +651,16 @@ describe("FamilySettings", () => {
           createdAt: "2026-01-01",
         },
       };
+      const errorResponse = {
+        error: { code: "INTERNAL_ERROR", message: "載入失敗" },
+      };
       const getFamilyMembers = vi.fn()
-        .mockResolvedValueOnce({
-          error: { code: "INTERNAL_ERROR", message: "載入失敗" },
-        })
-        // Subsequent calls (from refreshBookshelf and retry) return success
+        // useDisplayName's mount effect fires first (child effect),
+        // then FamilyDataProvider's refreshMembers (parent effect).
+        // Both need error responses so the error UI appears.
+        .mockResolvedValueOnce(errorResponse)
+        .mockResolvedValueOnce(errorResponse)
+        // Subsequent calls (retry) return success
         .mockResolvedValue(successData);
 
       const apiClient = createMockApiClient({ getFamilyMembers });

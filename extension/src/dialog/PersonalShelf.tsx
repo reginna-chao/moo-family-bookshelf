@@ -10,6 +10,7 @@ import { FloatingActionBar } from "./FloatingActionBar";
 import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
 import { usePersonalBooks } from "./usePersonalBooks";
 import { PublicShareDialog } from "./PublicShareDialog";
+import { useFamilyData } from "./FamilyDataContext";
 
 export interface PersonalShelfProps {
   userId: string;
@@ -26,6 +27,10 @@ function archiveTabStyle(active: boolean): CSSProperties {
 }
 
 export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
+  const { members } = useFamilyData();
+  const selfMember = members.find((m) => m.userId === userId);
+  const displayName = selfMember?.displayName ?? "";
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -33,13 +38,6 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const [syncArchived, setSyncArchived] = useState<number>(0);
   const [showPublicShare, setShowPublicShare] = useState(false);
-  const [displayName, setDisplayName] = useState("");
-
-  useEffect(() => {
-    chrome.storage.local.get("displayName").then((r) => {
-      setDisplayName((r.displayName as string) ?? "");
-    });
-  }, []);
 
   const { syncStatus, syncError, triggerManualSync, lastSyncBooks } = useBookSync({
     userId,
@@ -49,7 +47,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const {
     books, setBooks, status, setStatus, errorMessage,
     isDirty, setIsDirty, handleToggle, handleSave, handleCancel: handleCancelBooks,
-  } = usePersonalBooks({ userId, apiClient, lastSyncBooks });
+  } = usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName });
 
   useEffect(() => {
     chrome.runtime.sendMessage({ type: "GET_SYNC_ARCHIVED" }, (response) => {
