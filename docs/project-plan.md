@@ -742,6 +742,126 @@ jobs:
 - 啟用 `selectionMode: "explicit"` + `bookIds[]` 支援自選書籍
 - 既有 API 路由形狀無需變更
 
+### Phase 7：v1.3.0 — 簡易修正 + 影響現有使用者的修正（規劃中）
+
+> 正式上線（v1.0.0 / v1.2.x）後使用者回饋。**v1.3 範圍只放兩類**：
+> 1. **簡易修正與驗證**：純 CSS / 文案 / 已實作項目的驗證（風險低，可快速放出）
+> 2. **影響現有使用者的修正**：補齊既有功能在實際使用上的痛點（爬不到 >200 本書、需要手動取名）
+>
+> 「新增功能」類項目延後到 v1.4 / v1.5 / v1.6 漸進釋出（見 Phase 8–10），避免一次塞太多在同一個 minor。
+>
+> **狀態**：僅完成計畫，**尚未開始實作**。
+
+#### 7.1 簡易修正與驗證
+
+##### Wave A — UI 修正與小幅樣式調整（風險最低，先行）
+
+- [ ] **#12 PWA `<select>` 箭頭跑版修復**
+  - 純 CSS 修正，影響 PWA 數個下拉欄位
+- [ ] **#14 PWA「個人書櫃」儲存按鈕 sticky 至視窗底部**
+  - 目前必須滑到最下方才看得到「儲存變更」bar；改為 `position: sticky; bottom: 0`（或 fixed）
+  - 確保 safe-area-inset-bottom（iOS）
+- [ ] **#13 PWA hover 樣式以 `@media (hover: hover) and (pointer: fine)` 限制**
+  - 觸控裝置不應殘留 hover 樣式
+- [ ] **#5 site `index.html` 增加問題回報表單入口**
+  - Google 表單已於 v1.2.1 上線，僅補入官網說明頁
+- [ ] **#4 Extension 書籍封面 100→120 寬調整**
+  - 規格：`width: 120px; height: 180px`（修正：原始需求 100→120 寬，等比放大高度）；待 RWD 手動驗證 grid 在小視窗下不爆版
+
+##### Wave H — 基礎設施驗證（CORS / OPTIONS）
+
+- [ ] **#15 CORS preflight 確認與長期方向**
+  - **現況**：[`worker/src/index.ts:68-78`](../worker/src/index.ts#L68-L78) 已套用 Hono `cors` middleware，並設定 `maxAge: 86400`，與外部建議的「方法①」等價 → **此項主要為驗證、無立即工作**
+  - 待辦：
+    - 觀察 production preflight log，確認 24h max-age 對使用者連續操作生效（Chromium 上限 7200s，但仍能達到「短時間連續操作只發一次 OPTIONS」效果）
+    - 文件記錄此設計決策（避免未來誤改）
+  - **中期選項（非 v1.3 必做）**：申請自有 domain 將 Worker 從 `*.workers.dev` 移至 `api.<own-domain>`；同源化是長期解，但前端寄生於 `read.readmoo.com`，本質上仍跨來源，僅是中期收斂選項。優先級 **低**。
+  - **不採用**：
+    - 改用 cookie / form-encoded body 規避 preflight（API 設計受損，得不償失）
+    - 反向代理（無法控制 readmoo 網域）
+
+#### 7.2 影響現有使用者的修正
+
+##### Wave E — 顯示名稱自動帶入
+
+> **資料現況回答**：`displayName` 主要記錄在 `user:{userId}` 的 `UserBooksRecord.displayName`（source of truth），同時 denormalized 到 `family:{familyId}.members[].displayName`。兩者已於 v1.2.x（PR #14）保證同步。
+
+- [ ] **#1 初次建立 / 加入家庭時自動以讀墨會員名稱填入 `displayName`**
+  - 行為：
+    - **桌面 Extension 流程**：`scrapeDisplayName()` 已存在，在 `useAutoSetup` 完成後將其作為 `displayName` 預設值（取代目前的「使用者-{id 前 4 碼}」 fallback）
+    - **PWA 先行加入**：尚無讀墨頁面可爬 → 維持 fallback；待使用者後續從 Extension 開啟時，若偵測到 `displayName` 仍為「使用者-xxxx」格式且讀墨可抓到名稱，自動升級
+    - **使用者已自訂名稱不覆寫**：僅在 fallback pattern (`/^使用者-[a-z0-9]{4}$/`) 命中時才升級
+  - 升級時同步寫入 `user:{userId}.displayName` 與 `family:{familyId}.members[].displayName`（沿用 PR #14 同步機制）
+  - **保留事項**：「家庭成員管理」UI 中的讀墨名稱欄位仍需保留 — 讀墨名稱（用於借閱自動化匹配讀墨成員下拉選單）與 displayName（UI 顯示）是兩個不同概念
+
+##### Wave G — 書籍分頁讀取（>200 本，本版本最大改動）
+
+- [ ] **#10 移除 200 本上限**
+  - 讀墨爬取邏輯：偵測下一頁並逐頁爬取至完成
+    - 影響：[`extension/src/content/scraper.ts`](../extension/src/content/scraper.ts) 的 `scrapeBooks` 與 [`scraper-archive.ts`](../extension/src/content/scraper-archive.ts)
+    - 風險：scrape 時間延長 → `LoadingOverlay` 文案需明確顯示「正在讀取第 N 頁」進度
+  - 家庭書櫃 / 個人書櫃顯示：採「前端虛擬化（virtualized list）」或「載入更多」按鈕
+    - 不採分頁 UI，閱讀體驗較差
+  - KV 容量：單筆 25MB 上限 vs 一本書約 500B → 數萬本仍有空間，無需後端分頁
+  - API 是否需要分頁？v1.3 暫不引入（家庭聚合查詢仍一次回傳，前端虛擬化即可）；若實測過慢再加 query param
+
+> ⚠️ Wave G 是 v1.3 中工程量最大的一項。若進度緊張，建議先發 v1.3.0（A + H + E）→ 再發 v1.3.1（G）兩個 patch。
+
+### Phase 8：v1.4.0 — 顯示偏好與借閱流程提示（規劃中）
+
+> 新增使用者可控的設定項，與 PWA 借閱手動流程的 UX 改善。資料模型基本不動，主要是前端持久化偏好。
+> **狀態**：規劃中，待 v1.3 釋出後再啟動。
+
+##### Wave B — 顯示模式與本地偏好（純前端持久化，無 API 變更）
+
+- [ ] **#3 家庭書櫃 Row / Grid 顯示模式記憶**
+  - 預設 Grid；偏好寫入 Extension 的 `chrome.storage.local`、PWA 的 `localStorage`
+  - Extension 與 PWA 各自記錄，**不互通**（避免增加 sync storage 用量）
+  - 影響：`extension/src/dialog/FamilyShelf.tsx`、`pwa/src/...`
+- [ ] **#8 Extension 浮動 icon 大小可縮小**
+  - 設定頁新增 icon size 選項（small / medium / large 或 px 值）
+  - 寫入 `chrome.storage.local`，由 content script 注入時讀取
+- [ ] **#9 書籍排序選項**
+  - 選項：文字順序（書名、作者）/ 讀墨預設（爬取原順序，現行行為）
+  - 個人書櫃 + 家庭書櫃皆需，且各自記憶
+- [ ] **#7 設定新增「借閱歷史不顯示封面，純文字呈現」**
+  - 預設關閉
+  - 影響：「借閱」分頁的「歷史紀錄」區塊；Extension + PWA 同步處理
+
+##### Wave C — PWA 借閱流程提示（行為調整，無 API 變更）
+
+- [ ] **#6 PWA「同意借閱」改為「手動借閱」流程**
+  - 點擊「同意借閱」後彈窗警告：手機板無法自動操作讀墨借書，需自行從讀墨網頁 / APP 借出
+  - checkbox「不再顯示此通知」→ 寫入 PWA `localStorage`（不上 server）
+  - 按鈕：[取消] / [我知道了]
+  - 按下「我知道了」即發送借出通知給對方（呼叫既有 `updateBorrowStatus → APPROVED`，與 Extension 自動化路徑共用 API）
+
+### Phase 9：v1.5.0 — 隱藏書籍可逆（規劃中）
+
+> 補齊「隱藏書籍」流程，使其可逆且可重新顯示。
+
+##### Wave D — 隱藏書籍可逆與篩選
+
+- [ ] **#2 隱藏書籍可重新顯示 + 篩選顯示已隱藏書籍**
+  - 個人書櫃 `StatusFilterBar` 增加「已隱藏」篩選選項（現有：全部 / 已開放 / 未開放）
+  - 已隱藏視圖支援「取消隱藏」操作
+  - 影響：`extension/src/dialog/PersonalShelf.tsx`、PWA 對應頁面
+  - 注意：「隱藏」目前的存放欄位需確認是否已有，或需擴充 `BookEntry`（schema 微調）
+
+### Phase 10：v1.6.0 — 我的最愛（規劃中）
+
+> schema 擴充與借閱前 UX 強化。
+
+##### Wave F — 我的最愛
+
+- [ ] **#11 個人書籍可標記「我的最愛」，家庭書櫃可快速篩選對方的最愛**
+  - schema：`BookEntry` 新增 `isFavorite: BoolFlag`（與 `isShared` 並列）
+  - 個人書櫃 toggle；家庭書櫃成員篩選下方加「只看最愛」開關
+  - **設計問題**：是否要對家人公開「最愛」標記？
+    - 選項 A：僅自己可見（最愛 ≠ 開放，純個人筆記）
+    - 選項 B：對家人公開（家人借書前可優先借「對方推薦」的書）
+  - 預設建議 **B**（與借閱目的一致；若使用者不希望公開，仍可不勾「分享」）
+
 ---
 
 ## 十一、專案結構（預覽）
@@ -805,4 +925,4 @@ moo-family-bookshelf/
 
 ---
 
-*最後更新：2026-04-28*
+*最後更新：2026-05-08（新增 Phase 7 v1.3.0 - v1.6.0 規劃）*
