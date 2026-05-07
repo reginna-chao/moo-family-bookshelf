@@ -7,6 +7,15 @@ export interface UseDisplayNameOptions {
   apiClient?: ApiClient;
   familyId?: string;
   userId?: string;
+  /**
+   * Authoritative display name from the server (typically sourced from
+   * `useFamilyData().members`). When provided, this is the source of truth —
+   * it overrides chrome.storage.local and is preferred on re-renders.
+   *
+   * Pass `undefined` while still loading; the hook falls back to
+   * chrome.storage.local for an optimistic display.
+   */
+  initialDisplayName?: string;
 }
 
 export interface UseDisplayNameResult {
@@ -25,43 +34,49 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
   const [nameSaveError, setNameSaveError] = useState("");
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inFlightRef = useRef(false);
+  // Tracks the current savedDisplayName for the prop-sync effect, without
+  // forcing the effect to depend on it (which would cause re-runs on save).
+  const savedDisplayNameRef = useRef("");
 
   useEffect(() => {
-    // 1. Optimistic: show local cache immediately to avoid flicker
-    chrome.storage.local.get(["displayName"], (result) => {
-      const cached = (result.displayName as string | undefined) ?? "";
-      if (cached) {
-        setDisplayName(cached);
-        setSavedDisplayName(cached);
-      }
-    });
+    savedDisplayNameRef.current = savedDisplayName;
+  }, [savedDisplayName]);
 
-    // 2. Fetch authoritative value from server
-    if (options?.apiClient && options.familyId && options.userId) {
-      const { apiClient, familyId, userId } = options;
-      (async () => {
-        try {
-          const res = await apiClient.getFamilyMembers(familyId);
-          if (res.error || !res.data) return;
-          const self = res.data.members.find((m) => m.userId === userId);
-          const serverName = self?.displayName ?? "";
-          // Only update if server has a value (empty means never set — keep local)
-          if (serverName) {
-            setDisplayName(serverName);
-            setSavedDisplayName(serverName);
-            await chrome.storage.local.set({ displayName: serverName });
-            await chrome.storage.sync.set({ displayName: serverName });
-          }
-        } catch {
-          // Server fetch failed — keep local cache, no user-visible error needed
-        }
-      })();
+  useEffect(() => {
+    const initial = options?.initialDisplayName;
+
+    if (typeof initial === "string") {
+      // Server value (from FamilyDataContext) is the source of truth.
+      // Update savedDisplayName always; only update displayName when the user
+      // is NOT editing (heuristic: displayName still tracks savedDisplayName).
+      const prevSaved = savedDisplayNameRef.current;
+      setSavedDisplayName(initial);
+      setDisplayName((prev) => (prev === prevSaved ? initial : prev));
+      return;
     }
 
+    // Fallback: read chrome.storage.local for an optimistic display while
+    // context is still loading. Cancel on unmount so the deferred callback
+    // can't setState on a dead component.
+    let cancelled = false;
+    chrome.storage.local.get(["displayName"], (result) => {
+      if (cancelled) return;
+      const cached = (result.displayName as string | undefined) ?? "";
+      if (!cached) return;
+      // Only initialize from cache when we haven't received any source value yet.
+      if (savedDisplayNameRef.current !== "") return;
+      setSavedDisplayName(cached);
+      setDisplayName((prev) => (prev === "" ? cached : prev));
+    });
+
+    return () => { cancelled = true; };
+  }, [options?.initialDisplayName]);
+
+  useEffect(() => {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [options?.apiClient, options?.familyId, options?.userId]);
+  }, []);
 
   const handleSaveDisplayName = useCallback(async (): Promise<boolean> => {
     if (inFlightRef.current) return false;
@@ -72,7 +87,6 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
     setNameSaveError("");
 
     try {
-      // Call API if available
       if (options?.apiClient && options.familyId && options.userId) {
         const response = await options.apiClient.updateDisplayName(
           options.familyId,

@@ -1,4 +1,4 @@
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useDisplayName } from "@/dialog/useDisplayName";
 import type { ApiClient } from "@/api/client";
@@ -7,17 +7,6 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     updateDisplayName: vi.fn().mockResolvedValue({
       data: { userId: "user-123", displayName: "大明" },
-    }),
-    getFamilyMembers: vi.fn().mockResolvedValue({
-      data: {
-        familyId: "fam-1",
-        ownerId: "user-123",
-        members: [
-          { userId: "user-123", displayName: "伺服器名稱" },
-        ],
-        maxMembers: 2,
-        createdAt: "2024-01-01T00:00:00Z",
-      },
     }),
     ...overrides,
   } as unknown as ApiClient;
@@ -39,14 +28,16 @@ describe("useDisplayName", () => {
     vi.mocked(chrome.storage.sync.set).mockResolvedValue();
   });
 
-  it("loads display name from chrome.storage.local", () => {
+  it("loads display name from chrome.storage.local when no initial value provided", async () => {
     const { result } = renderHook(() => useDisplayName());
 
-    expect(result.current.displayName).toBe("小明");
+    await waitFor(() => {
+      expect(result.current.displayName).toBe("小明");
+    });
     expect(result.current.savedDisplayName).toBe("小明");
   });
 
-  it("defaults to empty string when no display name stored", () => {
+  it("defaults to empty string when no display name stored and no initial provided", async () => {
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
         const result = {};
@@ -59,12 +50,15 @@ describe("useDisplayName", () => {
 
     const { result } = renderHook(() => useDisplayName());
 
+    await act(async () => {});
     expect(result.current.displayName).toBe("");
     expect(result.current.savedDisplayName).toBe("");
   });
 
   it("saves display name to both local and sync storage", async () => {
     const { result } = renderHook(() => useDisplayName());
+
+    await waitFor(() => expect(result.current.displayName).toBe("小明"));
 
     act(() => {
       result.current.setDisplayName("大明");
@@ -85,6 +79,8 @@ describe("useDisplayName", () => {
     const { result } = renderHook(() =>
       useDisplayName({ apiClient, familyId: "fam-1", userId: "user-123" }),
     );
+
+    await waitFor(() => expect(result.current.displayName).toBe("小明"));
 
     act(() => {
       result.current.setDisplayName("大明");
@@ -109,6 +105,8 @@ describe("useDisplayName", () => {
       useDisplayName({ apiClient, familyId: "fam-1", userId: "user-123" }),
     );
 
+    await waitFor(() => expect(result.current.displayName).toBe("小明"));
+
     act(() => {
       result.current.setDisplayName("大明");
     });
@@ -119,7 +117,6 @@ describe("useDisplayName", () => {
 
     expect(result.current.nameSaveState).toBe("error");
     expect(result.current.nameSaveError).toBe("名稱過長");
-    // Should NOT save to storage when API fails
     expect(chrome.storage.local.set).not.toHaveBeenCalledWith({ displayName: "大明" });
   });
 
@@ -128,6 +125,8 @@ describe("useDisplayName", () => {
     const { result } = renderHook(() =>
       useDisplayName({ apiClient, familyId: "fam-1", userId: "user-123" }),
     );
+
+    await waitFor(() => expect(result.current.displayName).toBe("小明"));
 
     act(() => {
       result.current.setDisplayName("  大明  ");
@@ -144,6 +143,8 @@ describe("useDisplayName", () => {
   it("skips API call when options not provided", async () => {
     const { result } = renderHook(() => useDisplayName());
 
+    await waitFor(() => expect(result.current.displayName).toBe("小明"));
+
     act(() => {
       result.current.setDisplayName("大明");
     });
@@ -152,115 +153,153 @@ describe("useDisplayName", () => {
       await result.current.handleSaveDisplayName();
     });
 
-    // Should still save to storage
     expect(chrome.storage.local.set).toHaveBeenCalledWith({ displayName: "大明" });
     expect(result.current.nameSaveState).toBe("saved");
   });
 
-  describe("server sync on mount", () => {
-    it("fetches authoritative displayName from server and updates local storage", async () => {
-      const apiClient = createMockApiClient();
-
+  describe("initialDisplayName from context", () => {
+    it("uses initialDisplayName as source of truth, ignoring local cache", async () => {
       const { result } = renderHook(() =>
-        useDisplayName({ apiClient, familyId: "fam-1", userId: "user-123" }),
+        useDisplayName({ initialDisplayName: "伺服器名稱" }),
       );
 
-      // Wait for async server fetch to complete
-      await act(async () => {
-        // Allow microtask queue to flush
-        await vi.waitFor(() => {
-          expect(apiClient.getFamilyMembers).toHaveBeenCalledWith("fam-1");
-        });
-      });
-
-      // Should use the server value "伺服器名稱" instead of local "小明"
-      expect(result.current.displayName).toBe("伺服器名稱");
+      await waitFor(() => expect(result.current.displayName).toBe("伺服器名稱"));
       expect(result.current.savedDisplayName).toBe("伺服器名稱");
-
-      // Should sync server value back to local and sync storage
-      expect(chrome.storage.local.set).toHaveBeenCalledWith({ displayName: "伺服器名稱" });
-      expect(chrome.storage.sync.set).toHaveBeenCalledWith({ displayName: "伺服器名稱" });
     });
 
-    it("keeps local cache when server returns empty displayName", async () => {
-      const apiClient = createMockApiClient({
-        getFamilyMembers: vi.fn().mockResolvedValue({
-          data: {
-            familyId: "fam-1",
-            ownerId: "user-123",
-            members: [{ userId: "user-123", displayName: "" }],
-            maxMembers: 2,
-            createdAt: "2024-01-01T00:00:00Z",
-          },
+    it("does NOT call getFamilyMembers (no redundant fetch)", async () => {
+      const getFamilyMembers = vi.fn();
+      const apiClient = createMockApiClient({ getFamilyMembers });
+      renderHook(() =>
+        useDisplayName({
+          apiClient,
+          familyId: "fam-1",
+          userId: "user-123",
+          initialDisplayName: "伺服器名稱",
         }),
-      });
-
-      const { result } = renderHook(() =>
-        useDisplayName({ apiClient, familyId: "fam-1", userId: "user-123" }),
       );
 
-      await act(async () => {
-        await vi.waitFor(() => {
-          expect(apiClient.getFamilyMembers).toHaveBeenCalled();
-        });
-      });
-
-      // Should keep the local value "小明" since server returned empty
-      expect(result.current.displayName).toBe("小明");
-      expect(result.current.savedDisplayName).toBe("小明");
+      await act(async () => {});
+      expect(getFamilyMembers).not.toHaveBeenCalled();
     });
 
-    it("keeps local cache when server fetch fails", async () => {
-      const apiClient = createMockApiClient({
-        getFamilyMembers: vi.fn().mockRejectedValue(new Error("Network error")),
-      });
-
-      const { result } = renderHook(() =>
-        useDisplayName({ apiClient, familyId: "fam-1", userId: "user-123" }),
+    it("updates state when initialDisplayName changes (user not editing)", async () => {
+      const { result, rerender } = renderHook(
+        ({ initial }) => useDisplayName({ initialDisplayName: initial }),
+        { initialProps: { initial: "舊名" } },
       );
 
-      await act(async () => {
-        await vi.waitFor(() => {
-          expect(apiClient.getFamilyMembers).toHaveBeenCalled();
-        });
-      });
+      await waitFor(() => expect(result.current.displayName).toBe("舊名"));
 
-      // Should keep the local value since server fetch failed
-      expect(result.current.displayName).toBe("小明");
-      expect(result.current.savedDisplayName).toBe("小明");
+      rerender({ initial: "新名" });
+
+      await waitFor(() => expect(result.current.displayName).toBe("新名"));
+      expect(result.current.savedDisplayName).toBe("新名");
     });
 
-    it("keeps local cache when server returns error response", async () => {
-      const apiClient = createMockApiClient({
-        getFamilyMembers: vi.fn().mockResolvedValue({
-          error: { code: "NOT_FOUND", message: "Family not found" },
-        }),
-      });
-
-      const { result } = renderHook(() =>
-        useDisplayName({ apiClient, familyId: "fam-1", userId: "user-123" }),
+    it("does NOT clobber displayName when user is editing (only updates savedDisplayName)", async () => {
+      const { result, rerender } = renderHook(
+        ({ initial }) => useDisplayName({ initialDisplayName: initial }),
+        { initialProps: { initial: "舊名" } },
       );
 
-      await act(async () => {
-        await vi.waitFor(() => {
-          expect(apiClient.getFamilyMembers).toHaveBeenCalled();
-        });
-      });
+      await waitFor(() => expect(result.current.displayName).toBe("舊名"));
 
-      // Should keep the local value since server returned an error
-      expect(result.current.displayName).toBe("小明");
-      expect(result.current.savedDisplayName).toBe("小明");
+      // Simulate user starting to edit (typing "User Typed")
+      act(() => {
+        result.current.setDisplayName("User Typed");
+      });
+      expect(result.current.displayName).toBe("User Typed");
+      expect(result.current.savedDisplayName).toBe("舊名");
+
+      // Server pushes a new value while user is editing
+      rerender({ initial: "新名" });
+
+      await waitFor(() => expect(result.current.savedDisplayName).toBe("新名"));
+      // displayName MUST stay as the user's typed value
+      expect(result.current.displayName).toBe("User Typed");
     });
 
-    it("does not fetch from server when options are not provided", async () => {
-      const { result } = renderHook(() => useDisplayName());
+    it("falls back to chrome.storage.local while initialDisplayName is undefined (loading)", async () => {
+      const { result } = renderHook(() =>
+        useDisplayName({ initialDisplayName: undefined }),
+      );
 
-      // Give time for any potential async operations
+      await waitFor(() => expect(result.current.displayName).toBe("小明"));
+    });
+
+    it("switches from local cache to server value when context loads", async () => {
+      const { result, rerender } = renderHook(
+        ({ initial }) => useDisplayName({ initialDisplayName: initial }),
+        { initialProps: { initial: undefined as string | undefined } },
+      );
+
+      // Initial: undefined → fall back to chrome.storage.local "小明"
+      await waitFor(() => expect(result.current.displayName).toBe("小明"));
+
+      // Context finishes loading → switch to server value
+      rerender({ initial: "伺服器名稱" });
+
+      await waitFor(() => expect(result.current.displayName).toBe("伺服器名稱"));
+      expect(result.current.savedDisplayName).toBe("伺服器名稱");
+    });
+
+    it("accepts empty string from context (clear is durable)", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+          const result = { displayName: "停留在 cache 的舊名" };
+          if (typeof callback === "function") callback(result);
+          return Promise.resolve(result) as unknown as void;
+        },
+      );
+
+      const { result } = renderHook(() =>
+        useDisplayName({ initialDisplayName: "" }),
+      );
+
+      // Empty initialDisplayName must override local cache (deliberate clear)
+      await waitFor(() => expect(result.current.savedDisplayName).toBe(""));
+      expect(result.current.displayName).toBe("");
+    });
+
+    it("does not write to chrome.storage on context-driven updates", async () => {
+      const { rerender } = renderHook(
+        ({ initial }) => useDisplayName({ initialDisplayName: initial }),
+        { initialProps: { initial: "初始" } },
+      );
+
+      // Wait for initial sync
       await act(async () => {});
 
-      // Should use local value only
-      expect(result.current.displayName).toBe("小明");
-      expect(result.current.savedDisplayName).toBe("小明");
+      vi.mocked(chrome.storage.local.set).mockClear();
+      vi.mocked(chrome.storage.sync.set).mockClear();
+
+      rerender({ initial: "更新" });
+
+      await act(async () => {});
+
+      // Storage writes happen only on explicit save, not on prop sync
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
+      expect(chrome.storage.sync.set).not.toHaveBeenCalled();
+    });
+
+    it("cleans up on unmount (no setState after unmount)", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const { unmount } = renderHook(() =>
+        useDisplayName({ initialDisplayName: "name" }),
+      );
+
+      unmount();
+
+      // Wait long enough that any deferred storage callback would have fired
+      await new Promise((r) => setTimeout(r, 50));
+
+      // No "setState on unmounted" warnings
+      const calls = errorSpy.mock.calls.flat().join(" ");
+      expect(calls).not.toContain("unmounted");
+
+      errorSpy.mockRestore();
     });
   });
 });

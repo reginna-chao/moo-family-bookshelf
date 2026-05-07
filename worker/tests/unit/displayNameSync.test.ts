@@ -1,10 +1,28 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { kvKeys, type UserBooksRecord } from "../../src/kv/schema";
+import { kvKeys } from "../../src/kv/schema";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Json = any;
+interface ResponseData {
+  familyId?: string;
+  authToken?: string;
+  userId?: string;
+  displayName?: string;
+  lastUpdated?: string;
+  books?: { bookId: string }[];
+  schemaVersion?: number;
+  members?: { userId: string; displayName: string }[];
+}
+
+/** Read a successful response body. Throws if `data` is missing — every test
+ *  here exercises the success path, so this avoids optional-chaining noise. */
+async function readJson(res: Response): Promise<ResponseData> {
+  const body = (await res.json()) as { data?: ResponseData; error?: { code: string; message: string } };
+  if (!body.data) {
+    throw new Error(`Expected data in response, got error: ${JSON.stringify(body.error)}`);
+  }
+  return body.data;
+}
 
 let kv: KVNamespace;
 
@@ -22,10 +40,10 @@ async function createFamily(userId = "user1", displayName?: string) {
   const body: Record<string, string> = { userId };
   if (displayName !== undefined) body.displayName = displayName;
   const res = await request("POST", "/api/family", body);
-  const json = (await res.json()) as Json;
+  const data = await readJson(res);
   return {
-    familyId: json.data.familyId as string,
-    authToken: json.data.authToken as string,
+    familyId: data.familyId as string,
+    authToken: data.authToken as string,
   };
 }
 
@@ -35,9 +53,8 @@ async function createFamilyWithTwoMembers(displayName1?: string, displayName2?: 
     userId: "user2",
     displayName: displayName2,
   });
-  const joinJson = (await joinRes.json()) as Json;
-  const token2 = joinJson.data.authToken as string;
-  return { familyId, token1, token2 };
+  const joinData = await readJson(joinRes);
+  return { familyId, token1, token2: joinData.authToken as string };
 }
 
 beforeEach(() => {
@@ -52,7 +69,6 @@ describe("PUT displayName syncs user record", () => {
   it("should update user record displayName when user record exists", async () => {
     const { familyId, token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
 
-    // user1 saves books with displayName "Alice"
     await request("PUT", "/api/user/user1/books", {
       schemaVersion: 1,
       userId: "user1",
@@ -60,12 +76,9 @@ describe("PUT displayName syncs user record", () => {
       books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
     }, token1);
 
-    // Verify user record has displayName "Alice"
-    const beforeRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const beforeJson = (await beforeRes.json()) as Json;
-    expect(beforeJson.data.displayName).toBe("Alice");
+    const before = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(before.displayName).toBe("Alice");
 
-    // user1 updates displayName to "AliceNew" via family endpoint
     const updateRes = await request(
       "PUT",
       `/api/family/${familyId}/member/user1/displayName`,
@@ -74,31 +87,22 @@ describe("PUT displayName syncs user record", () => {
     );
     expect(updateRes.status).toBe(200);
 
-    // Verify user record's displayName was also updated
-    const afterRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const afterJson = (await afterRes.json()) as Json;
-    expect(afterJson.data.displayName).toBe("AliceNew");
+    const after = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(after.displayName).toBe("AliceNew");
   });
 
   it("should update user record lastUpdated when displayName changes", async () => {
     const { familyId, token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
 
-    // user1 saves books
     await request("PUT", "/api/user/user1/books", {
-      schemaVersion: 1,
-      userId: "user1",
-      displayName: "Alice",
-      books: [],
+      schemaVersion: 1, userId: "user1", displayName: "Alice", books: [],
     }, token1);
 
-    const beforeRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const beforeJson = (await beforeRes.json()) as Json;
-    const oldLastUpdated = beforeJson.data.lastUpdated;
+    const before = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    const oldLastUpdated = before.lastUpdated;
 
-    // Small delay to ensure different timestamps
     await new Promise((r) => setTimeout(r, 10));
 
-    // Update displayName
     await request(
       "PUT",
       `/api/family/${familyId}/member/user1/displayName`,
@@ -106,17 +110,14 @@ describe("PUT displayName syncs user record", () => {
       token1,
     );
 
-    const afterRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const afterJson = (await afterRes.json()) as Json;
-    expect(afterJson.data.lastUpdated).not.toBe(oldLastUpdated);
+    const after = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(after.lastUpdated).not.toBe(oldLastUpdated);
   });
 
   it("should not fail when user record does not exist", async () => {
     const { familyId, authToken: token1 } = await createFamily("user1", "Alice");
 
     // user1 has NOT saved any books yet — no user record exists
-
-    // Updating displayName should still succeed (no user record to sync)
     const res = await request(
       "PUT",
       `/api/family/${familyId}/member/user1/displayName`,
@@ -124,14 +125,13 @@ describe("PUT displayName syncs user record", () => {
       token1,
     );
     expect(res.status).toBe(200);
-    const json = (await res.json()) as Json;
-    expect(json.data.displayName).toBe("AliceNew");
+    const data = await readJson(res);
+    expect(data.displayName).toBe("AliceNew");
   });
 
   it("should preserve other user record fields when syncing displayName", async () => {
     const { familyId, token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
 
-    // user1 saves books with multiple fields
     await request("PUT", "/api/user/user1/books", {
       schemaVersion: 1,
       userId: "user1",
@@ -142,7 +142,6 @@ describe("PUT displayName syncs user record", () => {
       ],
     }, token1);
 
-    // Update displayName
     await request(
       "PUT",
       `/api/family/${familyId}/member/user1/displayName`,
@@ -150,15 +149,13 @@ describe("PUT displayName syncs user record", () => {
       token1,
     );
 
-    // Verify other fields are preserved
-    const res = await request("GET", "/api/user/user1/books", undefined, token1);
-    const json = (await res.json()) as Json;
-    expect(json.data.displayName).toBe("AliceRenamed");
-    expect(json.data.books).toHaveLength(2);
-    expect(json.data.books[0].bookId).toBe("b1");
-    expect(json.data.books[1].bookId).toBe("b2");
-    expect(json.data.userId).toBe("user1");
-    expect(json.data.schemaVersion).toBe(1);
+    const data = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(data.displayName).toBe("AliceRenamed");
+    expect(data.books).toHaveLength(2);
+    expect(data.books?.[0].bookId).toBe("b1");
+    expect(data.books?.[1].bookId).toBe("b2");
+    expect(data.userId).toBe("user1");
+    expect(data.schemaVersion).toBe(1);
   });
 });
 
@@ -170,7 +167,6 @@ describe("PUT books uses family displayName over client displayName", () => {
   it("should use family record displayName instead of client-supplied stale name", async () => {
     const { familyId, token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
 
-    // user1 updates displayName to "AliceNew" in family
     await request(
       "PUT",
       `/api/family/${familyId}/member/user1/displayName`,
@@ -178,7 +174,6 @@ describe("PUT books uses family displayName over client displayName", () => {
       token1,
     );
 
-    // Extension syncs books with stale displayName "Alice"
     const putRes = await request("PUT", "/api/user/user1/books", {
       schemaVersion: 1,
       userId: "user1",
@@ -187,108 +182,105 @@ describe("PUT books uses family displayName over client displayName", () => {
     }, token1);
     expect(putRes.status).toBe(200);
 
-    // Verify saved record uses authoritative name from family, not the stale one
-    const getRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const json = (await getRes.json()) as Json;
-    expect(json.data.displayName).toBe("AliceNew");
+    const data = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(data.displayName).toBe("AliceNew");
   });
 
   it("should fall back to client displayName when user is not in a family", async () => {
-    // Create a family with one member, then have the owner leave (delete family)
     const { familyId, authToken: token1 } = await createFamily("user1", "Alice");
 
-    // Save books first while in family
     await request("PUT", "/api/user/user1/books", {
-      schemaVersion: 1,
-      userId: "user1",
-      displayName: "Alice",
-      books: [],
+      schemaVersion: 1, userId: "user1", displayName: "Alice", books: [],
     }, token1);
 
-    // Owner leaves (single-member family → family deleted)
     await request("DELETE", `/api/family/${familyId}/member/user1`, undefined, token1);
 
-    // Now user1 has no family membership. Manually seed a new token for testing
-    // since leaving deletes the auth token.
     const { generateAuthToken } = await import("../../src/middleware/auth");
     const newToken = await generateAuthToken(kv, "user1");
 
-    // Sync books with a displayName — should use client's value since no family
     const putRes = await request("PUT", "/api/user/user1/books", {
-      schemaVersion: 1,
-      userId: "user1",
-      displayName: "AliceNoFamily",
-      books: [],
+      schemaVersion: 1, userId: "user1", displayName: "AliceNoFamily", books: [],
     }, newToken);
     expect(putRes.status).toBe(200);
 
-    const getRes = await request("GET", "/api/user/user1/books", undefined, newToken);
-    const json = (await getRes.json()) as Json;
-    expect(json.data.displayName).toBe("AliceNoFamily");
+    const data = await readJson(await request("GET", "/api/user/user1/books", undefined, newToken));
+    expect(data.displayName).toBe("AliceNoFamily");
   });
 
   it("should fall back to client displayName when family record is missing", async () => {
     const { familyId, authToken: token1 } = await createFamily("user1", "Alice");
 
-    // Corrupt state: delete family record but leave member key
     await kv.delete(kvKeys.family(familyId));
 
-    // Sync books — family record is missing, so fall back to client
     const putRes = await request("PUT", "/api/user/user1/books", {
-      schemaVersion: 1,
-      userId: "user1",
-      displayName: "AliceFallback",
-      books: [],
+      schemaVersion: 1, userId: "user1", displayName: "AliceFallback", books: [],
     }, token1);
     expect(putRes.status).toBe(200);
 
-    const getRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const json = (await getRes.json()) as Json;
-    expect(json.data.displayName).toBe("AliceFallback");
+    const data = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(data.displayName).toBe("AliceFallback");
   });
 
-  it("should use empty string when family member has no displayName set", async () => {
-    // Create family without displayName (defaults to "")
-    const { familyId, authToken: token1 } = await createFamily("user1");
+  it("should preserve empty displayName from family record (clear is durable)", async () => {
+    // Family with displayName "" (default) — empty is a deliberate state
+    const { authToken: token1 } = await createFamily("user1");
 
-    // Sync books with a client displayName — but family has empty displayName
-    // Since self.displayName is "", the truthy check fails, so client value is used
+    // Even though client sends "ClientName", family record's "" wins
     const putRes = await request("PUT", "/api/user/user1/books", {
-      schemaVersion: 1,
-      userId: "user1",
-      displayName: "ClientName",
-      books: [],
+      schemaVersion: 1, userId: "user1", displayName: "ClientName", books: [],
     }, token1);
     expect(putRes.status).toBe(200);
 
-    const getRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const json = (await getRes.json()) as Json;
-    // When family member displayName is empty, client value is used as fallback
-    expect(json.data.displayName).toBe("ClientName");
+    const data = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(data.displayName).toBe("");
+  });
+
+  it("should sanitize client-supplied displayName when user has no family", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1", "Alice");
+    // Strip family membership so the fallback path runs
+    await kv.delete(kvKeys.family(familyId));
+    await kv.delete(kvKeys.member("user1"));
+
+    // Zero-width space embedded in "Alice​" should be stripped by sanitizer
+    const putRes = await request("PUT", "/api/user/user1/books", {
+      schemaVersion: 1, userId: "user1", displayName: "Alice​", books: [],
+    }, token1);
+    expect(putRes.status).toBe(200);
+
+    const data = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(data.displayName).toBe("Alice");
+  });
+
+  it("should reject and store empty when fallback displayName exceeds max length", async () => {
+    const { familyId, authToken: token1 } = await createFamily("user1", "Alice");
+    await kv.delete(kvKeys.family(familyId));
+    await kv.delete(kvKeys.member("user1"));
+
+    // 21 chars, exceeds DISPLAY_NAME_MAX_LENGTH (20). sanitizer returns null → "".
+    const putRes = await request("PUT", "/api/user/user1/books", {
+      schemaVersion: 1, userId: "user1", displayName: "A".repeat(21), books: [],
+    }, token1);
+    expect(putRes.status).toBe(200);
+
+    const data = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(data.displayName).toBe("");
   });
 
   it("should use family displayName even when client sends empty string", async () => {
-    const { familyId, token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
+    const { token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
 
-    // Sync books with empty displayName — family has "Alice"
     const putRes = await request("PUT", "/api/user/user1/books", {
-      schemaVersion: 1,
-      userId: "user1",
-      displayName: "",
-      books: [],
+      schemaVersion: 1, userId: "user1", displayName: "", books: [],
     }, token1);
     expect(putRes.status).toBe(200);
 
-    const getRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const json = (await getRes.json()) as Json;
-    // Family record has "Alice", so it takes precedence
-    expect(json.data.displayName).toBe("Alice");
+    const data = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(data.displayName).toBe("Alice");
   });
 
   it("should handle both fixes together: rename then sync books", async () => {
     const { familyId, token1, token2 } = await createFamilyWithTwoMembers("Alice", "Bob");
 
-    // Both users save initial books
     await request("PUT", "/api/user/user1/books", {
       schemaVersion: 1, userId: "user1", displayName: "Alice",
       books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
@@ -298,7 +290,6 @@ describe("PUT books uses family displayName over client displayName", () => {
       books: [{ bookId: "b2", title: "Book 2", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
     }, token2);
 
-    // user1 renames to "AliceNew" via family endpoint
     await request(
       "PUT",
       `/api/family/${familyId}/member/user1/displayName`,
@@ -306,10 +297,9 @@ describe("PUT books uses family displayName over client displayName", () => {
       token1,
     );
 
-    // Fix A: user record should already reflect "AliceNew"
-    const userRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const userJson = (await userRes.json()) as Json;
-    expect(userJson.data.displayName).toBe("AliceNew");
+    // Fix A: user record already reflects "AliceNew"
+    const user = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(user.displayName).toBe("AliceNew");
 
     // Extension syncs books with stale "Alice"
     await request("PUT", "/api/user/user1/books", {
@@ -317,15 +307,13 @@ describe("PUT books uses family displayName over client displayName", () => {
       books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
     }, token1);
 
-    // Fix B: server should override with "AliceNew" from family record
-    const afterSyncRes = await request("GET", "/api/user/user1/books", undefined, token1);
-    const afterSyncJson = (await afterSyncRes.json()) as Json;
-    expect(afterSyncJson.data.displayName).toBe("AliceNew");
+    // Fix B: server overrides with "AliceNew" from family record
+    const afterSync = await readJson(await request("GET", "/api/user/user1/books", undefined, token1));
+    expect(afterSync.displayName).toBe("AliceNew");
 
-    // Family bookshelf should also show "AliceNew"
-    const bookshelfRes = await request("GET", `/api/family/${familyId}/bookshelf`, undefined, token1);
-    const bookshelfJson = (await bookshelfRes.json()) as Json;
-    const user1Member = bookshelfJson.data.members.find((m: Json) => m.userId === "user1");
-    expect(user1Member.displayName).toBe("AliceNew");
+    // Family bookshelf reflects "AliceNew" too
+    const bookshelf = await readJson(await request("GET", `/api/family/${familyId}/bookshelf`, undefined, token1));
+    const user1Member = bookshelf.members?.find((m) => m.userId === "user1");
+    expect(user1Member?.displayName).toBe("AliceNew");
   });
 });
