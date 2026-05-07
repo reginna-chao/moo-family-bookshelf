@@ -1,7 +1,13 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PersonalShelf, PersonalShelfProps } from "@/dialog/PersonalShelf";
-import { BoolFlag, type ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient, type FamilyMember } from "@/api/client";
+
+const mockUseFamilyData = vi.fn();
+
+vi.mock("@/dialog/FamilyDataContext", () => ({
+  useFamilyData: () => mockUseFamilyData(),
+}));
 
 const mockUseBookSync = vi.fn().mockReturnValue({
   syncStatus: "idle",
@@ -74,6 +80,11 @@ async function waitForBooksLoaded() {
 describe("PersonalShelf", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset useFamilyData mock — provides displayName via members list
+    const defaultMembers: FamilyMember[] = [
+      { userId: "user-abc123", displayName: "小明" },
+    ];
+    mockUseFamilyData.mockReturnValue({ members: defaultMembers });
     // Reset useBookSync mock to default
     mockUseBookSync.mockReturnValue({
       syncStatus: "idle",
@@ -555,6 +566,44 @@ describe("PersonalShelf", () => {
         expect(screen.queryByRole("button", { name: "儲存變更" })).not.toBeInTheDocument();
         expect(screen.queryByRole("button", { name: "取消變更" })).not.toBeInTheDocument();
       });
+    });
+
+    it("sends server-authoritative displayName from context, not chrome.storage.local", async () => {
+      // Set chrome.storage.local to a stale value
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+          const result = { displayName: "舊的本地名稱" };
+          if (typeof callback === "function") {
+            callback(result);
+          }
+          return Promise.resolve(result) as unknown as void;
+        },
+      );
+
+      // Set useFamilyData to return the server-authoritative name
+      mockUseFamilyData.mockReturnValue({
+        members: [{ userId: "user-abc123", displayName: "伺服器名稱" }],
+      });
+
+      const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
+      const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+      await waitForBooksLoaded();
+
+      // Make dirty and save
+      const checkboxes = screen.getAllByRole("checkbox");
+      fireEvent.click(checkboxes[0]);
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+      fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalled();
+      });
+
+      // Verify the saved payload uses the server displayName, not the stale local one
+      const savedPayload = mockUpdate.mock.calls[0][1];
+      expect(savedPayload.displayName).toBe("伺服器名稱");
     });
 
     it("shows error when save fails via API error", async () => {

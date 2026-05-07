@@ -7,6 +7,15 @@ export interface UseDisplayNameOptions {
   apiClient?: ApiClient;
   familyId?: string;
   userId?: string;
+  /**
+   * Authoritative display name from the server (typically sourced from
+   * `useFamilyData().members`). When provided, this is the source of truth —
+   * it overrides chrome.storage.local and is preferred on re-renders.
+   *
+   * Pass `undefined` while still loading; the hook falls back to
+   * chrome.storage.local for an optimistic display.
+   */
+  initialDisplayName?: string;
 }
 
 export interface UseDisplayNameResult {
@@ -25,14 +34,45 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
   const [nameSaveError, setNameSaveError] = useState("");
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inFlightRef = useRef(false);
+  // Tracks the current savedDisplayName for the prop-sync effect, without
+  // forcing the effect to depend on it (which would cause re-runs on save).
+  const savedDisplayNameRef = useRef("");
 
   useEffect(() => {
+    savedDisplayNameRef.current = savedDisplayName;
+  }, [savedDisplayName]);
+
+  useEffect(() => {
+    const initial = options?.initialDisplayName;
+
+    if (typeof initial === "string") {
+      // Server value (from FamilyDataContext) is the source of truth.
+      // Update savedDisplayName always; only update displayName when the user
+      // is NOT editing (heuristic: displayName still tracks savedDisplayName).
+      const prevSaved = savedDisplayNameRef.current;
+      setSavedDisplayName(initial);
+      setDisplayName((prev) => (prev === prevSaved ? initial : prev));
+      return;
+    }
+
+    // Fallback: read chrome.storage.local for an optimistic display while
+    // context is still loading. Cancel on unmount so the deferred callback
+    // can't setState on a dead component.
+    let cancelled = false;
     chrome.storage.local.get(["displayName"], (result) => {
-      const name = (result.displayName as string | undefined) ?? "";
-      setDisplayName(name);
-      setSavedDisplayName(name);
+      if (cancelled) return;
+      const cached = (result.displayName as string | undefined) ?? "";
+      if (!cached) return;
+      // Only initialize from cache when we haven't received any source value yet.
+      if (savedDisplayNameRef.current !== "") return;
+      setSavedDisplayName(cached);
+      setDisplayName((prev) => (prev === "" ? cached : prev));
     });
 
+    return () => { cancelled = true; };
+  }, [options?.initialDisplayName]);
+
+  useEffect(() => {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
@@ -47,7 +87,6 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
     setNameSaveError("");
 
     try {
-      // Call API if available
       if (options?.apiClient && options.familyId && options.userId) {
         const response = await options.apiClient.updateDisplayName(
           options.familyId,

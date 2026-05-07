@@ -10,6 +10,8 @@ export interface UsePersonalBooksParams {
   userId: string;
   apiClient: ApiClient;
   lastSyncBooks: BookEntry[];
+  /** Server-authoritative display name. Avoids reading stale value from chrome.storage.local. */
+  displayName: string;
 }
 
 interface LoadSavedResult {
@@ -27,7 +29,7 @@ function loadSavedBooks(
   return { books: [], raw: null };
 }
 
-export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePersonalBooksParams) {
+export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName }: UsePersonalBooksParams) {
   const [books, setBooks] = useState<BookEntry[]>([]);
   const originalBooks = useRef<BookEntry[]>([]);
   /** Raw payload — kept so save can spread back unknown fields from future versions */
@@ -112,14 +114,11 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
     setStatus("saving");
     setErrorMessage("");
     try {
-      const storageResult = await chrome.storage.local.get(["displayName"]);
-      const storedDisplayName = (storageResult.displayName as string | undefined) ?? "";
-
       const personalBooks: PersonalBooks = {
         ...savedRawPayload.current,
         schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
         userId,
-        displayName: storedDisplayName,
+        displayName,
         books,
         lastUpdated: new Date().toISOString(),
       };
@@ -139,7 +138,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks }: UsePerson
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setStatus("error");
     }
-  }, [books, userId, apiClient]);
+  }, [books, userId, apiClient, displayName]);
 
   const handleCancel = useCallback(() => {
     setBooks(originalBooks.current);

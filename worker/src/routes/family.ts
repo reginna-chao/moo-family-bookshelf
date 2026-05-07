@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../utils/env";
-import { kvKeys, BoolFlag, BorrowStatus, type BorrowRequest, type FamilyMember, type FamilyRecord, type RawFamilyRecord, type QrTokenRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { kvKeys, BoolFlag, BorrowStatus, type BorrowRequest, type FamilyMember, type FamilyRecord, type RawFamilyRecord, type QrTokenRecord, type UserBooksRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName, sanitizeShortString } from "../utils/validation";
 import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
@@ -461,6 +461,15 @@ familyRoutes.put("/:id/member/:uid/displayName", async (c) => {
   member.displayName = displayName;
 
   await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+
+  // Sync displayName to user record so it stays consistent across data stores
+  const userKey = kvKeys.user(targetUserId);
+  const userRec = await c.env.KV.get<UserBooksRecord>(userKey, "json");
+  if (userRec) {
+    userRec.displayName = displayName;
+    userRec.lastUpdated = new Date().toISOString();
+    await c.env.KV.put(userKey, JSON.stringify(userRec));
+  }
 
   return c.json({ data: { userId: targetUserId, displayName } });
 });

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../utils/env";
 import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord, type PublicShelf, type BookEntry } from "../kv/schema";
 import { writePublicSnapshot } from "./publicShelf";
-import { isValidUserId } from "../utils/validation";
+import { isValidUserId, sanitizeDisplayName } from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 
@@ -16,6 +16,29 @@ async function updateAllPublicSnapshots(
   await Promise.all(
     shelves.map((shelf) => writePublicSnapshot(kv, userId, shelf, books)),
   );
+}
+
+/**
+ * Resolve the authoritative displayName for a user when saving their book list.
+ * - In a family: the family record is the source of truth (including empty,
+ *   which represents a deliberate clear). Prevents stale client cache from
+ *   overwriting the server value.
+ * - Not in a family: sanitize the client-supplied value. Returns "" if invalid.
+ */
+async function resolveDisplayName(
+  kv: KVNamespace,
+  userId: string,
+  memberFamilyId: string | null,
+  clientValue: unknown,
+): Promise<string> {
+  if (memberFamilyId) {
+    const familyRaw = await kv.get<RawFamilyRecord>(kvKeys.family(memberFamilyId), "json");
+    if (familyRaw) {
+      const self = normalizeFamilyRecord(familyRaw).members.find((m) => m.userId === userId);
+      if (self) return self.displayName;
+    }
+  }
+  return sanitizeDisplayName(clientValue) ?? "";
 }
 
 export const userRoutes = new Hono<{ Bindings: Env }>();
@@ -108,15 +131,23 @@ userRoutes.put("/:id/books", async (c) => {
     );
   }
 
-  // Read existing record to preserve server-managed fields (publicSharing)
-  const existing = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
+  // Read user record + family membership in parallel (independent reads).
+  const [existing, memberFamilyId] = await Promise.all([
+    c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json"),
+    c.env.KV.get(kvKeys.member(userId)),
+  ]);
+
+  // Resolve displayName: family record is authoritative when the user is in a family
+  // (even an empty value, which represents a deliberate clear). Only fall back to the
+  // client-supplied value when there is no family membership / family record.
+  const serverDisplayName = await resolveDisplayName(c.env.KV, userId, memberFamilyId, body.displayName);
 
   const record: UserBooksRecord = {
     ...body,
     books: body.books,
     schemaVersion: typeof body.schemaVersion === "number" ? body.schemaVersion : 1,
     userId: typeof body.userId === "string" ? body.userId : userId,
-    displayName: typeof body.displayName === "string" ? body.displayName : "",
+    displayName: serverDisplayName,
     lastUpdated: new Date().toISOString(),
     publicSharing: existing?.publicSharing,
   };

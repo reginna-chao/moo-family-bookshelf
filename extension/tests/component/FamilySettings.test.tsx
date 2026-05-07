@@ -651,11 +651,11 @@ describe("FamilySettings", () => {
           createdAt: "2026-01-01",
         },
       };
+      const errorResponse = {
+        error: { code: "INTERNAL_ERROR", message: "載入失敗" },
+      };
       const getFamilyMembers = vi.fn()
-        .mockResolvedValueOnce({
-          error: { code: "INTERNAL_ERROR", message: "載入失敗" },
-        })
-        // Subsequent calls (from refreshBookshelf and retry) return success
+        .mockResolvedValueOnce(errorResponse)
         .mockResolvedValue(successData);
 
       const apiClient = createMockApiClient({ getFamilyMembers });
@@ -699,9 +699,10 @@ describe("FamilySettings", () => {
       );
     });
 
-    // The member list should update the current user's name
+    // Both the display-name section AND the member list should reflect "大明"
+    // because both are now sourced from the same FamilyDataContext members state.
     await waitFor(() => {
-      expect(screen.getByText("大明")).toBeInTheDocument();
+      expect(screen.getAllByText("大明").length).toBeGreaterThanOrEqual(2);
     });
   });
 

@@ -47,7 +47,14 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [syncArchived, setSyncArchived] = useState<number>(0);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inviteCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const displayNameState = useDisplayName({ apiClient, familyId, userId });
+  const selfMember = members.find((m) => m.userId === userId);
+  // Pass the server's authoritative displayName from context. While members is
+  // still loading, selfMember is undefined → useDisplayName falls back to
+  // chrome.storage.local for an optimistic display.
+  const initialDisplayName = selfMember?.displayName;
+  const displayNameState = useDisplayName({
+    apiClient, familyId, userId, initialDisplayName,
+  });
 
   useEffect(() => {
     return () => {
