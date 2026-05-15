@@ -3,3 +3,7 @@ packages:
   - extension
   - worker
   - pwa
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true

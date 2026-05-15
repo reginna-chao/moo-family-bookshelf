@@ -9,8 +9,10 @@
     "url": "https://github.com/reginna-chao/moo-family-bookshelf/issues"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "pnpm": ">=11"
   },
+  "packageManager": "pnpm@11.1.2",
   "scripts": {
     "dev": "concurrently -n ext,worker,pwa,info -c blue,green,magenta,yellow \"pnpm --filter moo-family-bookshelf-extension dev\" \"pnpm --filter moo-family-bookshelf-worker dev\" \"pnpm --filter moo-family-bookshelf-pwa dev\" \"node scripts/dev-info.mjs\"",
     "dev:remote": "concurrently -n ext,pwa,info -c blue,magenta,yellow \"pnpm --filter moo-family-bookshelf-extension dev:remote\" \"pnpm --filter moo-family-bookshelf-pwa dev:remote\" \"node scripts/dev-info.mjs --remote\"",

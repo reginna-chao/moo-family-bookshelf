@@ -742,11 +742,12 @@ jobs:
 - 啟用 `selectionMode: "explicit"` + `bookIds[]` 支援自選書籍
 - 既有 API 路由形狀無需變更
 
-### Phase 7：v1.3.0 — 簡易修正 + 影響現有使用者的修正（規劃中）
+### Phase 7：v1.3.0 — 簡易修正 + 影響現有使用者的修正 + 開發者體驗（規劃中）
 
-> 正式上線（v1.0.0 / v1.2.x）後使用者回饋。**v1.3 範圍只放兩類**：
+> 正式上線（v1.0.0 / v1.2.x）後使用者回饋。**v1.3 範圍只放三類**：
 > 1. **簡易修正與驗證**：純 CSS / 文案 / 已實作項目的驗證（風險低，可快速放出）
-> 2. **影響現有使用者的修正**：補齊既有功能在實際使用上的痛點（爬不到 >200 本書、需要手動取名）
+> 2. **影響現有使用者的修正**：補齊既有功能在實際使用上的痛點（爬不到 >200 本書、需要手動取名、借閱前置設定、>100 本書儲存卡頓）
+> 3. **開發者體驗（DX）**：dev 環境的 API 測試介面（不影響正式環境使用者）
 >
 > 「新增功能」類項目延後到 v1.4 / v1.5 / v1.6 漸進釋出（見 Phase 8–10），避免一次塞太多在同一個 minor。
 >
@@ -794,22 +795,100 @@ jobs:
   - 升級時同步寫入 `user:{userId}.displayName` 與 `family:{familyId}.members[].displayName`（沿用 PR #14 同步機制）
   - **保留事項**：「家庭成員管理」UI 中的讀墨名稱欄位仍需保留 — 讀墨名稱（用於借閱自動化匹配讀墨成員下拉選單）與 displayName（UI 顯示）是兩個不同概念
 
-##### Wave G — 書籍分頁讀取（>200 本，本版本最大改動）
+##### Wave G — 書籍分頁讀取 + 顯示量控制（>200 本，本版本最大改動）
 
-- [ ] **#10 移除 200 本上限**
+> **根因更新（2026-05-15）**：使用者回報「按下儲存後桌電主機轟轟轟運作」 — 客端 CPU/GPU 持續滿載，**根因是 1000 本書 row + 書封 `<img>` 全部在 DOM 內**，儲存只是引爆 re-render / repaint。Load More 直接砍 DOM 數量，**同時解掉瀏覽與儲存兩個卡頓場景**，並順帶取代 Wave K 原本規劃的虛擬化。
+
+- [ ] **#10 移除 200 本爬取上限**
   - 讀墨爬取邏輯：偵測下一頁並逐頁爬取至完成
-    - 影響：[`extension/src/content/scraper.ts`](../extension/src/content/scraper.ts) 的 `scrapeBooks` 與 [`scraper-archive.ts`](../extension/src/content/scraper-archive.ts)
-    - 風險：scrape 時間延長 → `LoadingOverlay` 文案需明確顯示「正在讀取第 N 頁」進度
-  - 家庭書櫃 / 個人書櫃顯示：採「前端虛擬化（virtualized list）」或「載入更多」按鈕
-    - 不採分頁 UI，閱讀體驗較差
-  - KV 容量：單筆 25MB 上限 vs 一本書約 500B → 數萬本仍有空間，無需後端分頁
-  - API 是否需要分頁？v1.3 暫不引入（家庭聚合查詢仍一次回傳，前端虛擬化即可）；若實測過慢再加 query param
+  - 影響：[`extension/src/content/scraper.ts`](../extension/src/content/scraper.ts) 的 `scrapeBooks` 與 [`scraper-archive.ts`](../extension/src/content/scraper-archive.ts)
+  - 風險：scrape 時間延長 → `LoadingOverlay` 文案需明確顯示「正在讀取第 N 頁」進度
+- [ ] **#10a 顯示層改用「Load More」按鈕**
+  - **不採用**虛擬化（`@tanstack/react-virtual`）— 實作複雜、與既有 search / filter 互動容易出 bug；對「DOM 太多」這個根因，砍量比虛擬化更直接
+  - 預設顯示首 **100 本**；底部「載入更多」按鈕，每次 +100 本
+  - 影響：[`extension/src/dialog/PersonalShelf.tsx`](../extension/src/dialog/PersonalShelf.tsx)、[`extension/src/dialog/FamilyShelf.tsx`](../extension/src/dialog/FamilyShelf.tsx)、PWA 對應頁面
+  - 搜尋 / Filter / 成員 Dropdown 套用於**完整書單**而非當前可見頁；匹配結果直接全部顯示（搜尋 + filter 後通常本來就少）
+  - 切換 tab / 重新打開 Dialog 時 reset 回首 100（不持久化捲動位置，避免狀態複雜）
+- [ ] **#10b 書封圖載入優化**
+  - 所有書封 `<img>` 加 `loading="lazy"` + `decoding="async"`
+  - 載入前 placeholder：純色背景 + 中央 spinner（與 LoadingOverlay 風格一致），onLoad 後淡入封面、onError 仍走既有 fallback
+  - 影響：BookCard / 個人書櫃 row / 家庭書櫃 grid
+- KV 容量：單筆 25MB 上限 vs 一本書約 500B → 數萬本仍有空間，無需後端分頁；家庭聚合查詢仍一次回傳，前端 Load More 即可
 
-> ⚠️ Wave G 是 v1.3 中工程量最大的一項。若進度緊張，建議先發 v1.3.0（A + H + E）→ 再發 v1.3.1（G）兩個 patch。
+> ⚠️ Wave G 是 v1.3 中工程量最大的一項，但 Wave K 已大幅縮小（虛擬化併入此處），兩者不再強耦合。建議分批發布：v1.3.0（A + H + E）→ v1.3.1（J）→ v1.3.2（G）→ v1.3.3（K + I）。
 
-### Phase 8：v1.4.0 — 顯示偏好與借閱流程提示（規劃中）
+##### Wave J — 借閱流程簡化（取消手動填讀墨名稱）
 
-> 新增使用者可控的設定項，與 PWA 借閱手動流程的 UX 改善。資料模型基本不動，主要是前端持久化偏好。
+> **目標**：v1.1.0 的「首次借閱前先填讀墨名稱」是大多數使用者的卡點。讀墨家庭多為 2 人，借出 dialog 通常只列出另一位（非書主自己） → 用「依清單長度自動決策」取代手動設定。
+> **行為總綱**：n=1 自動借、n≥2 提示並記錄、設定只能刪不能改、找不到自動重選。
+
+- [ ] **#20 借出 dialog 依成員數自動決策**
+  - 影響：[`extension/src/content/readmoo-lend.ts`](../extension/src/content/readmoo-lend.ts)、[`extension/src/dialog/BorrowTab.tsx`](../extension/src/dialog/BorrowTab.tsx)
+  - 流程改寫：
+    - **n=1**：自動點擊該唯一成員，繼續借出流程，**不顯示 MooFamily UI、不寫入 `readmooName`**（每次借閱重新偵測即可，避免不必要 KV 寫入）
+    - **n≥2 + 有 `readmooName` 且找得到匹配**：自動點擊匹配成員（沿用 v1.1.0 fast-match 路徑）
+    - **n≥2 + 無 `readmooName` 或找不到匹配**：彈出「請確認要借給誰」選擇 UI → 使用者選擇 → `PATCH /api/family/:id/member/:uid { readmooName }` 寫入記錄 → 點擊
+  - 取消 v1.1.0 的「同意借閱前先跑 readmooName setup」前置流程
+  - 實作注意：先實測讀墨借出 dialog 是否包含書主自己，若包含則 #20 的「n」需先排除自己再判斷
+- [ ] **#21 「找不到」即自動重選**
+  - [`extension/src/content/readmoo-lend.ts:184-198`](../extension/src/content/readmoo-lend.ts#L184-L198) 既有的「找不到名稱 → throw」改為觸發 #20 的選擇 UI（與「使用者刪除設定」、「讀墨改名」共用同一 fallback path）
+  - 選擇後 **覆蓋** user record 中舊的 `readmooName`，不再要求使用者去設定頁手動更新
+- [ ] **#22 設定頁 readmooName 改為「顯示 + 刪除」（不可編輯）**
+  - 影響：[`extension/src/dialog/MemberList.tsx:338-385`](../extension/src/dialog/MemberList.tsx#L338-L385)
+  - 取消可編輯輸入框（避免使用者自填導致與讀墨名稱對不上）
+  - 顯示：目前記錄的 `readmooName`（2 人家庭可能始終為空 — 因為 #20 在 n=1 不寫入）
+  - 操作：僅提供「刪除」按鈕；刪除即清空 `readmooName`，下次借閱（在 n≥2 情境）重新觸發選擇
+  - 後端 API `PATCH /api/family/:id/member/:uid { readmooName }` 不變
+- [ ] **#23 PWA 同步調整**
+  - PWA 無 content script，本就無法跑借出自動化；此 Wave 主要影響 Extension
+  - PWA MemberList 的 readmooName 欄位同步改為「顯示 + 刪除」，維持兩端一致
+
+##### Wave K — 儲存路徑的 re-render 防爆（補 Wave G 之後的尾巴）
+
+> **範圍縮小說明（2026-05-15）**：原本規劃的「前端虛擬化」併入 Wave G #10a Load More；「fetch-then-put 折衷」對使用者回報的卡頓無實質幫助（多一次 GET roundtrip 反而拖慢），移除。本 Wave 只保留**儲存成功後**的 re-render 防爆，作為 Wave G 之後的補強。
+> **與 v1.4 Wave L 關係**：v1.3 不動 API 形狀；v1.4 PATCH 上線後上行流量才真正下來。
+
+- [ ] **#24 儲存成功後不以 response 覆寫本地 state**
+  - 影響：個人書櫃儲存流程（Extension `PersonalShelf` + PWA 對應頁面）
+  - 現況推測：`setBooks(response.data.books)` 觸發 reconciliation across 全 list → re-render avalanche → 風扇
+  - 改為：儲存成功後僅清掉 dirty set（本地 state 已是權威），不重新 `setBooks`
+  - 例外：若 server 端有 normalization 邏輯（例如後端清理欄位）需要同步回前端，改為「比對是否真有差異，僅在不同時才 setBooks」
+- [ ] **#25 BookRow / BookCard 套 `React.memo`**
+  - 確保 toggle 一本書時，僅該 row 重新 render
+  - props 比對以 `bookId` + `isShared` + `isDirty` 為 key；避免 inline function / object 破壞 memo
+- [ ] **#26 Dirty state 採 `Map<bookId, BoolFlag>` 或 `Set<bookId>`**
+  - 取代「整包 array 對比」，未變更的 book 不參與 dirty 計算
+  - 與 #25 的 React.memo 配合：dirty 變化的 row 才會 re-render
+
+#### 7.3 開發者體驗（DX）
+
+##### Wave I — API 測試介面（dev-only）
+
+> **目標**：提供類 Swagger 的互動式 API 文件，讓開發 / debug 過程不必反覆寫 curl 或 Postman collection。**僅 dev 環境開啟，production 完全關閉**，避免誤觸正式資料。
+> **使用場景**：v1.4 Wave L 規劃新 PATCH endpoint、Wave G 驗證 >200 本書聚合行為時，互動式介面最省力。
+
+- [ ] **#27 Worker routes 改用 zod schema + OpenAPI 註解**
+  - 工具：`@hono/zod-openapi`
+  - 涵蓋範圍：`auth` / `user` / `family` / `borrow` / `publicShelf` / `verify` 全部 API
+  - 輸出：`GET /api/_openapi.json`（dev only）
+  - 改寫過程中順便補齊既有 routes 的 input validation（既有部分用手寫 `isValidUserId` 等，可逐步收斂）
+- [ ] **#28 掛載 Swagger UI（或 Scalar UI）**
+  - 路由：`GET /api/_docs`
+  - 選型偏好：`@hono/swagger-ui` 最輕（Hono 官方）；若要更現代外觀可選 Scalar
+  - UI bundle 以 CDN 載入，避免增加 worker deploy size
+- [ ] **#29 環境隔離（嚴格）**
+  - 條件：`c.env.ENVIRONMENT !== "production"` 才**註冊** `/api/_docs` 與 `/api/_openapi.json` routes
+  - prod 端：route 完全不存在 → 直接 404，不是回 403（降低暴露面）
+  - 本機 `wrangler dev`：開啟
+  - dev worker（部署在 `*.workers.dev` 的 dev 子環境）：開啟 → 使用者可直接從瀏覽器訪問 dev URL `/api/_docs`，**不需啟動 `pnpm dev` 或 `pnpm dev:remote`**
+- [ ] **#30 文件與安全提醒**
+  - [`worker/DEPLOY.md`](../worker/DEPLOY.md) 補充：自建者如何在自己的 dev environment 開啟此功能
+  - 安全提醒：自建者若要在 prod 開啟（不建議），須自行加上 IP 白名單 / Basic Auth
+  - 不放在 PWA Cloudflare Pages 的理由：OpenAPI spec 與 API 同源（worker 端）最自然，避免 spec 漂移與 CORS preflight 額外開銷（與 Wave H 一致原則）
+
+### Phase 8：v1.4.0 — 顯示偏好、借閱流程提示、書本 PATCH API（規劃中）
+
+> 新增使用者可控的設定項、PWA 借閱手動流程的 UX 改善，以及後端書本 PATCH API（接續 v1.3 Wave K 解決上行流量）。資料模型不動。
 > **狀態**：規劃中，待 v1.3 釋出後再啟動。
 
 ##### Wave B — 顯示模式與本地偏好（純前端持久化，無 API 變更）
@@ -835,6 +914,27 @@ jobs:
   - checkbox「不再顯示此通知」→ 寫入 PWA `localStorage`（不上 server）
   - 按鈕：[取消] / [我知道了]
   - 按下「我知道了」即發送借出通知給對方（呼叫既有 `updateBorrowStatus → APPROVED`，與 Extension 自動化路徑共用 API）
+
+##### Wave L — 後端書本 PATCH API（解上行流量）
+
+> **目標**：v1.3 Wave K 已解前端體感與整包重送上行流量的部分（透過 fetch-then-put）；本 Wave 改為真正的部分更新 API，client 只送 diff 給 worker，worker 內部仍維持 KV 整包寫（KV 無 partial update）。
+> **與資料庫換型的關係**：本 Wave **不**換 DB，僅改 API 形狀。換 DB 的評估留至 #33。
+
+- [ ] **#31 新增 `PATCH /api/user/:id/books`**
+  - 影響：[`worker/src/routes/user.ts`](../worker/src/routes/user.ts)
+  - Body：`{ changes: Array<{ bookId: string; isShared: BoolFlag }>, displayName?: string }`
+  - Worker 邏輯：read existing record → apply changes → write（同步更新 `publicSharing` 快照）
+  - 既有 `PUT /api/user/:id/books` 保留（整包覆寫仍用於 Extension 首次同步全爬書單的情境）
+- [ ] **#32 Client 切換 PUT → PATCH**
+  - Extension PersonalShelf 儲存：改用 PATCH，body 只含 v1.3 Wave K 算出的 dirty 本數
+  - PWA PersonalShelf 同步切換
+  - 首次同步（爬完全部書單）仍用 PUT
+  - v1.3 Wave K 的「fetch-then-put」折衷邏輯可在此版本整段移除
+- [ ] **#33 觀察與決策點：是否需要換 DB**
+  - 在 PATCH 上線後加上匿名 telemetry：使用者書本數分佈、單次儲存 dirty count、KV write latency p50 / p95
+  - 收集一個 minor 週期（約 4-6 週）後評估
+  - **僅在實測證明 KV 整包寫真的吃緊**（例如 p95 > 500ms 或常態觸發 quota 警告）才討論 D1 遷移，否則延後到 v2.0
+  - 不在 v1.4 內做 DB 遷移本身
 
 ### Phase 9：v1.5.0 — 隱藏書籍可逆（規劃中）
 
@@ -925,4 +1025,4 @@ moo-family-bookshelf/
 
 ---
 
-*最後更新：2026-05-08（新增 Phase 7 v1.3.0 - v1.6.0 規劃）*
+*最後更新：2026-05-15（v1.3 新增 Wave I / J / K + 修訂 Wave G：API 測試介面 + 借閱流程簡化 + Load More 顯示 + 書封 lazy load + 儲存 re-render 防爆；v1.4 新增 Wave L：書本 PATCH API）*
