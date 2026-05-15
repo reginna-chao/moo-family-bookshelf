@@ -1,7 +1,7 @@
 FROM node:22-slim AS base
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@11.0.8 --activate
 
 WORKDIR /app
 
