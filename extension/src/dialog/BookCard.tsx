@@ -68,7 +68,7 @@ export function BookCard({
         <img
           src={book.coverUrl}
           alt={book.title}
-          style={{ width: 80, height: 120, objectFit: "cover", borderRadius: 4, background: "#f1f5f9" }}
+          style={{ width: 120, height: 180, objectFit: "cover", borderRadius: 4, background: "#f1f5f9" }}
         />
         {book.isUpdated === BoolFlag.TRUE && (
           <span
