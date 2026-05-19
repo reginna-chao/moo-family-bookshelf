@@ -764,14 +764,14 @@ jobs:
   - 確保 safe-area-inset-bottom（iOS）
 - [ ] **#13 PWA hover 樣式以 `@media (hover: hover) and (pointer: fine)` 限制**
   - 觸控裝置不應殘留 hover 樣式
-- [ ] **#5 site `index.html` 增加問題回報表單入口**
+- [x] **#5 site `index.html` 增加問題回報表單入口**
   - Google 表單已於 v1.2.1 上線，僅補入官網說明頁
-- [ ] **#4 Extension 書籍封面 100→120 寬調整**
+- [x] **#4 Extension 書籍封面 100→120 寬調整**
   - 規格：`width: 120px; height: 180px`（修正：原始需求 100→120 寬，等比放大高度）；待 RWD 手動驗證 grid 在小視窗下不爆版
 
 ##### Wave H — 基礎設施驗證（CORS / OPTIONS）
 
-- [ ] **#15 CORS preflight 確認與長期方向**
+- [x] **#15 CORS preflight 確認與長期方向**
   - **現況**：[`worker/src/index.ts:68-78`](../worker/src/index.ts#L68-L78) 已套用 Hono `cors` middleware，並設定 `maxAge: 86400`，與外部建議的「方法①」等價 → **此項主要為驗證、無立即工作**
   - 待辦：
     - 觀察 production preflight log，確認 24h max-age 對使用者連續操作生效（Chromium 上限 7200s，但仍能達到「短時間連續操作只發一次 OPTIONS」效果）
