@@ -185,7 +185,7 @@ export function FamilyShelfPage({
         value={filterMember}
         onChange={(e) => { setFilterMember(e.target.value as MemberFilterValue); setCategoryFilter(""); }}
         aria-label="篩選成員"
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-4 bg-white focus:border-blue-500 outline-none"
+        className="moo-form-select w-full rounded-lg border border-gray-300 pl-3 pr-9 py-2 text-sm mb-4 bg-white focus:border-blue-500 outline-none"
       >
         <option value="all">所有人的書</option>
         <option value="all-except-self">其他家人的書</option>
