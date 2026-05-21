@@ -272,4 +272,4 @@ Family membership is the gate for all features. Without a family, only onboardin
 
 ## Final Note
 
-I will have Gemini or other LLM review this project and report areas for improvement.
+I will have CodeX, Gemini, or other LLM review this project and report areas for improvement.

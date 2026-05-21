@@ -1,3 +1,14 @@
+export interface FloatingBarVisibilityState {
+  selectedCount: number;
+  isDirty: boolean;
+  isSaving: boolean;
+  isSaved: boolean;
+}
+
+export function shouldShowFloatingBar(state: FloatingBarVisibilityState): boolean {
+  return state.selectedCount > 0 || state.isDirty || state.isSaving || state.isSaved;
+}
+
 interface FloatingActionBarProps {
   selectedCount: number;
   isDirty: boolean;
@@ -20,12 +31,12 @@ export function FloatingActionBar({
   onSave,
 }: FloatingActionBarProps) {
   const showSaveSection = isDirty || isSaving || isSaved;
-  const visible = selectedCount > 0 || showSaveSection;
+  const visible = shouldShowFloatingBar({ selectedCount, isDirty, isSaving, isSaved });
   if (!visible) return null;
 
   return (
     <div
-      className="sticky bottom-0 bg-white border-t border-gray-200 shadow-[0_-2px_8px_rgba(0,0,0,0.06)] px-4 py-2.5 flex items-center gap-2 flex-wrap"
+      className="fixed inset-x-0 mx-auto max-w-md bottom-[var(--bottom-nav-total)] bg-white border-t border-gray-200 shadow-[0_-2px_8px_rgba(0,0,0,0.06)] px-4 py-2.5 flex items-center gap-2 flex-wrap z-30"
       role="toolbar"
       aria-label="批次操作工具列"
     >

@@ -248,7 +248,8 @@ function ExpiresSelect({ value, onChange }: { value: number | null; onChange: (v
       過期時間
       <select value={value === null ? "null" : String(value)}
         onChange={(e) => onChange(e.target.value === "null" ? null : Number(e.target.value))}
-        style={inputStyle}>
+        className="moo-form-select"
+        style={{ ...inputStyle, paddingRight: "2.25rem" }}>
         {EXPIRES_OPTIONS.map((opt) => (
           <option key={String(opt.value)} value={opt.value === null ? "null" : String(opt.value)}>
             {opt.label}

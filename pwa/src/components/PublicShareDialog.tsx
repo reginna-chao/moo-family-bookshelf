@@ -169,7 +169,7 @@ function ExpiresSelect({ value, onChange }: { value: number | null; onChange: (v
       過期時間
       <select value={value === null ? "null" : String(value)}
         onChange={(e) => onChange(e.target.value === "null" ? null : Number(e.target.value))}
-        className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none">
+        className="moo-form-select rounded-lg border border-gray-300 pl-3 pr-9 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none">
         {EXPIRES_OPTIONS.map((opt) => (
           <option key={String(opt.value)} value={opt.value === null ? "null" : String(opt.value)}>
             {opt.label}

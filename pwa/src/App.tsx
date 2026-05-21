@@ -248,7 +248,7 @@ function MainContent({
       <VersionWarning apiClient={apiClient} />
       <PwaCreateNotice userId={auth.userId} onDismiss={() => {}} />
       <InstallPrompt userId={auth.userId} />
-      <main className="flex-1 overflow-y-auto pb-16">
+      <main className="flex-1 overflow-y-auto pb-[var(--bottom-nav-total)]">
         {currentPage === "family-shelf" && (
           <FamilyShelfPage userId={auth.userId} />
         )}
@@ -271,7 +271,7 @@ function MainContent({
 
       <nav
         aria-label="主要導覽"
-        className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200"
+        className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-[env(safe-area-inset-bottom,0px)]"
       >
         <div className="max-w-md mx-auto flex relative">
           {NAV_ITEMS.map((item) => {
