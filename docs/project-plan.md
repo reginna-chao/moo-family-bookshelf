@@ -757,7 +757,7 @@ jobs:
 
 ##### Wave A — UI 修正與小幅樣式調整（風險最低，先行）
 
-- [ ] **#12 PWA `<select>` 箭頭跑版修復**
+- [x] **#12 PWA `<select>` 箭頭跑版修復**
   - 純 CSS 修正，影響 PWA 數個下拉欄位
 - [x] **#14 PWA「個人書櫃」儲存按鈕 sticky 至視窗底部**
   - 已改為 `position: fixed; bottom: var(--bottom-nav-total)` 並處理 iOS safe-area-inset-bottom
