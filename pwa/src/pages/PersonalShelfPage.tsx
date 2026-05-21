@@ -3,7 +3,7 @@ import { BookOpen, Share2 } from "lucide-react";
 import { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
 import type { ApiClient, BookEntry, PersonalBooks } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
-import { FloatingActionBar } from "@/components/FloatingActionBar";
+import { FloatingActionBar, shouldShowFloatingBar } from "@/components/FloatingActionBar";
 import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
 import { PublicShareDialog } from "@/components/PublicShareDialog";
 import { namespacedKey } from "@/hooks/useAuth";
@@ -147,6 +147,12 @@ export function PersonalShelfPage({
   const archivedBooks = useMemo(() => books.filter(b => b.isArchived === BoolFlag.TRUE), [books]);
   const showArchiveTabs = syncArchived && archivedBooks.length > 0;
   const currentViewBooks = showArchiveTabs && archiveView === "archived" ? archivedBooks : activeBooks;
+  const showFloatingBar = shouldShowFloatingBar({
+    selectedCount: selectedIds.size,
+    isDirty,
+    isSaving: state === "saving",
+    isSaved: state === "saved",
+  });
 
   const statusFilteredBooks = useMemo(() => {
     if (statusFilter === "shared") return currentViewBooks.filter((b) => b.isShared === BoolFlag.TRUE);
@@ -211,7 +217,10 @@ export function PersonalShelfPage({
 
   return (
     <div className="flex flex-col min-h-0">
-      <div className="p-4 flex-1">
+      <div
+        data-testid="personal-shelf-list-container"
+        className={`p-4 flex-1 ${showFloatingBar ? "pb-[var(--personal-shelf-bottom-clearance)]" : ""}`}
+      >
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xl font-bold text-gray-900">
             個人書櫃

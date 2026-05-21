@@ -321,6 +321,30 @@ describe("PersonalShelfPage", () => {
     expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
+  it("book list container padding tracks floating bar visibility", async () => {
+    // Guards against drift between PersonalShelfPage's `showFloatingBar` and
+    // FloatingActionBar's internal visibility. If they desync, the last book
+    // row gets obscured by the fixed toolbar on mobile (no Playwright catches this).
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
+    ]);
+
+    // The container with the conditional padding is tagged with a stable testid
+    // so we don't have to walk the DOM tree (which would break on any wrapper change).
+    const bookListContainer = (): HTMLElement =>
+      screen.getByTestId("personal-shelf-list-container");
+
+    // No selection, not dirty → no toolbar, no extra padding.
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
+    expect(bookListContainer().className).toContain("p-4");
+    expect(bookListContainer().className).not.toMatch(/pb-\[var\(/);
+
+    // Selecting a book makes the toolbar appear; container must add padding.
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+    expect(screen.getByRole("toolbar")).toBeInTheDocument();
+    expect(bookListContainer().className).toMatch(/pb-\[var\(--personal-shelf-bottom-clearance\)\]/);
+  });
+
   it("status filter '已開放' shows only shared books", async () => {
     await renderWithBooks([
       { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.TRUE },

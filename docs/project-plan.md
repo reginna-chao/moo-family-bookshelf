@@ -759,9 +759,8 @@ jobs:
 
 - [ ] **#12 PWA `<select>` 箭頭跑版修復**
   - 純 CSS 修正，影響 PWA 數個下拉欄位
-- [ ] **#14 PWA「個人書櫃」儲存按鈕 sticky 至視窗底部**
-  - 目前必須滑到最下方才看得到「儲存變更」bar；改為 `position: sticky; bottom: 0`（或 fixed）
-  - 確保 safe-area-inset-bottom（iOS）
+- [x] **#14 PWA「個人書櫃」儲存按鈕 sticky 至視窗底部**
+  - 已改為 `position: fixed; bottom: var(--bottom-nav-total)` 並處理 iOS safe-area-inset-bottom
 - [ ] **#13 PWA hover 樣式以 `@media (hover: hover) and (pointer: fine)` 限制**
   - 觸控裝置不應殘留 hover 樣式
 - [x] **#5 site `index.html` 增加問題回報表單入口**

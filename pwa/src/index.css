@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --bottom-nav-height: 54px;
+  --bottom-safe-inset: env(safe-area-inset-bottom, 0px);
+  --bottom-nav-total: calc(var(--bottom-nav-height) + var(--bottom-safe-inset));
+  --floating-bar-height: 52px;
+  --personal-shelf-bottom-clearance: calc(var(--floating-bar-height) + 8px);
+}
+
 @layer components {
   .moo-form-select {
     --moo-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
