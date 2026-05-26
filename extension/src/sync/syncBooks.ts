@@ -10,7 +10,12 @@ import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VE
 // Re-export ApiClient so the content script can import it from content-sync.js
 // instead of needing a separate content-api.js entry point.
 export { ApiClient } from "../api/client";
-import { ScrapedBook, scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
+import {
+  ScrapedBook,
+  scrapeBooks,
+  scrapeArchivedBooks,
+  type ScrapeProgressCallback,
+} from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
 
 /** Minimum interval (ms) for rate-limited auto-sync */
@@ -64,6 +69,8 @@ export interface SyncBooksOptions {
   userId: string;
   /** API client instance */
   apiClient: ApiClient;
+  /** Optional progress callback for the paginated scrape (Wave G) */
+  onProgress?: ScrapeProgressCallback;
 }
 
 export interface SyncBooksResult {
@@ -84,7 +91,7 @@ export interface SyncBooksResult {
  * 7. Update lastSyncAt
  */
 export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksResult> {
-  const { navigate, userId, apiClient } = options;
+  const { navigate, userId, apiClient, onProgress } = options;
   const originalHash = window.location.hash;
   const isOnLibrary = originalHash.includes("#/library");
 
@@ -96,7 +103,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     }
 
     // Step 3: Scrape books
-    const scrapedBooks: ScrapedBook[] = await scrapeBooks();
+    const scrapedBooks: ScrapedBook[] = await scrapeBooks({ onProgress });
 
     // Step 3b: Optionally scrape archived books
     let syncArchived = BoolFlag.FALSE;
@@ -110,7 +117,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     let allScrapedBooks: ScrapedBook[] = [...scrapedBooks];
 
     if (syncArchived === BoolFlag.TRUE) {
-      const archivedBooks = await scrapeArchivedBooks();
+      const archivedBooks = await scrapeArchivedBooks({ onProgress });
       allScrapedBooks = [...allScrapedBooks, ...archivedBooks];
     }
 

@@ -4,6 +4,7 @@ import { BookCard, BookWithMember } from "./BookCard";
 import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
 import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
+import { useLoadMore } from "./useLoadMore";
 import { useFamilyData, MemberBooks } from "./FamilyDataContext";
 import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
 import { LoadingState } from "./LoadingState";
@@ -63,15 +64,22 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
 
   const categoryFilteredBooks = filterByCategory(memberFilteredBooks, categoryFilter);
 
-  const { searchTerm, setSearchTerm, resetSearch, filteredItems: visibleBooks, isFiltering } =
+  const { searchTerm, setSearchTerm, resetSearch, filteredItems, isFiltering } =
     useSearch(categoryFilteredBooks);
+
+  const narrowingActive = searchTerm !== "" || categoryFilter !== "";
+  const { visibleItems: visibleBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
+    items: filteredItems,
+    narrowingActive,
+  });
 
   const handleMemberFilterChange = useCallback((value: MemberFilterValue) => {
     setFilterMember(value);
     setCategoryFilter("");
     setCategoryOpen(false);
     resetSearch();
-  }, [resetSearch]);
+    resetLoadMore();
+  }, [resetSearch, resetLoadMore]);
 
   const memberCanLendMap = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -215,6 +223,16 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
           );
         })}
       </div>
+
+      {hasMore && (
+        <button onClick={loadMore} style={{
+          width: "100%", padding: "10px 0", marginTop: 12, border: "1px solid #2563eb",
+          borderRadius: 8, background: "transparent", color: "#2563eb",
+          fontWeight: 500, fontSize: 13, cursor: "pointer",
+        }}>
+          載入更多（已顯示 {visibleBooks.length} / 共 {filteredItems.length} 本）
+        </button>
+      )}
     </div>
   );
 }

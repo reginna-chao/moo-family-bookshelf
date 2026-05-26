@@ -6,6 +6,8 @@ vi.mock("@/content/scraper", () => ({
   scrapeUserEmail: vi.fn().mockReturnValue("user@example.com"),
   scrapeDisplayName: vi.fn().mockReturnValue("User Name"),
   scrapeBooks: vi.fn().mockResolvedValue([]),
+  formatScrapeProgress: (page: number, count: number) =>
+    `正在讀取第 ${page} 頁，已收集 ${count} 本…`,
 }));
 
 // Mock mergeBooks so tests can inspect what savedBooks gets passed in
@@ -131,6 +133,38 @@ describe("useAutoSetup", () => {
 
     expect(success).toBe(true);
     expect(result.current.phase).toBe("done");
+  });
+
+  describe("phaseMessage — dynamic progress (Wave G)", () => {
+    it("returns static message for non-scraping phases", () => {
+      const { result } = renderHook(() => useAutoSetup());
+      expect(result.current.phaseMessage).toBe("");
+    });
+
+    it("returns progressMessage during scraping-books phase when set via onProgress", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      // Make scrapeBooks invoke onProgress then hang so phase stays scraping-books
+      vi.mocked(scrapeBooks).mockImplementationOnce(async (opts) => {
+        opts?.onProgress?.(3, 600);
+        return new Promise(() => {});
+      });
+
+      const mockApi = createMockApiClient();
+      const { result } = renderHook(() => useAutoSetup());
+
+      // Fire syncBooks but don't await (it hangs)
+      act(() => {
+        result.current.syncBooks({ userId: "uid", apiClient: mockApi });
+      });
+
+      // Advance past NAV_SETTLE_MS so scrapeBooks gets called
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+
+      expect(result.current.phase).toBe("scraping-books");
+      expect(result.current.phaseMessage).toBe("正在讀取第 3 頁，已收集 600 本…");
+    });
   });
 
   describe("syncBooks — saved books handling", () => {

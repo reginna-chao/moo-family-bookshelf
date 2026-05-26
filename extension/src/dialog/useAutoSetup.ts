@@ -1,5 +1,10 @@
 import { useState, useCallback, useRef } from "react";
-import { scrapeUserEmail, scrapeDisplayName, scrapeBooks } from "../content/scraper";
+import {
+  scrapeUserEmail,
+  scrapeDisplayName,
+  scrapeBooks,
+  formatScrapeProgress,
+} from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
 import { ApiClient, BookEntry, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 
@@ -10,7 +15,7 @@ export type AutoSetupPhase =
   | "done"
   | "error";
 
-const PHASE_MESSAGES: Record<AutoSetupPhase, string> = {
+const STATIC_PHASE_MESSAGES: Record<AutoSetupPhase, string> = {
   idle: "",
   "scraping-profile": "正在取得帳號資訊...",
   "scraping-books": "正在同步書單...",
@@ -73,6 +78,7 @@ export interface UseAutoSetupReturn {
 export function useAutoSetup(): UseAutoSetupReturn {
   const [phase, setPhase] = useState<AutoSetupPhase>("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  const [progressMessage, setProgressMessage] = useState("");
   const originalHashRef = useRef(window.location.hash);
 
   const restoreHash = useCallback(() => {
@@ -82,6 +88,7 @@ export function useAutoSetup(): UseAutoSetupReturn {
   const reset = useCallback(() => {
     setPhase("idle");
     setErrorMessage("");
+    setProgressMessage("");
   }, []);
 
   const scrapeProfile = useCallback(async (): Promise<AutoSetupResult | null> => {
@@ -124,9 +131,15 @@ export function useAutoSetup(): UseAutoSetupReturn {
       originalHashRef.current = window.location.hash;
       setPhase("scraping-books");
       setErrorMessage("");
+      setProgressMessage("");
 
       try {
-        const scrapedBooks = await navigateAndRun("#/library", () => scrapeBooks());
+        const scrapedBooks = await navigateAndRun("#/library", () =>
+          scrapeBooks({
+            onProgress: (page, count) =>
+              setProgressMessage(formatScrapeProgress(page, count)),
+          }),
+        );
 
         // Fetch existing saved books for merging (plain JSON)
         const apiResponse = await apiClient.getPersonalBooks(userId);
@@ -163,9 +176,14 @@ export function useAutoSetup(): UseAutoSetupReturn {
     [restoreHash],
   );
 
+  const phaseMessage =
+    phase === "scraping-books" && progressMessage
+      ? progressMessage
+      : STATIC_PHASE_MESSAGES[phase];
+
   return {
     phase,
-    phaseMessage: PHASE_MESSAGES[phase],
+    phaseMessage,
     errorMessage,
     scrapeProfile,
     syncBooks,

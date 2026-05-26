@@ -6,7 +6,7 @@
  */
 
 import { BoolFlag } from "../api/client";
-import { scrapeBooks, type ScrapedBook } from "./scraper";
+import { scrapeBooks, type ScrapedBook, type ScrapeBooksOptions } from "./scraper";
 
 /** Wait for `ms` milliseconds. */
 function wait(ms: number): Promise<void> {
@@ -106,7 +106,9 @@ async function waitForLibraryReload(timeoutMs: number): Promise<void> {
  * MUST use try/finally to ensure filter is always cleared.
  * Returns empty array on failure (silent fallback).
  */
-export async function scrapeArchivedBooks(): Promise<ScrapedBook[]> {
+export async function scrapeArchivedBooks(
+  opts?: ScrapeBooksOptions,
+): Promise<ScrapedBook[]> {
   try {
     // Step 1: Find and click the filter button
     const filterBtn = findFilterButton();
@@ -130,7 +132,7 @@ export async function scrapeArchivedBooks(): Promise<ScrapedBook[]> {
     await waitForLibraryReload(10000);
 
     // Step 6: Scrape books and mark as archived
-    const books = await scrapeBooks();
+    const books = await scrapeBooks(opts);
     return books.map((b) => ({ ...b, isArchived: BoolFlag.TRUE }));
   } catch {
     return [];

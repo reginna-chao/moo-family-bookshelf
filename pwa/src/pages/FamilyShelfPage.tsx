@@ -3,8 +3,10 @@ import { BookOpen } from "lucide-react";
 import { BoolFlag, BorrowStatus } from "@/api/client";
 import type { BookEntry } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
+import { useLoadMore } from "@/hooks/useLoadMore";
 import { useFamilyData, MemberBooks } from "@/hooks/useFamilyData";
 import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
+import { LazyCover } from "@/components/LazyCover";
 
 export interface FamilyShelfPageProps {
   userId: string;
@@ -118,9 +120,15 @@ export function FamilyShelfPage({
   const {
     searchTerm,
     setSearchTerm,
-    filteredItems: visibleBooks,
+    filteredItems,
     isFiltering,
   } = useSearch(categoryFilteredBooks);
+
+  const narrowingActive = searchTerm !== "" || categoryFilter !== "";
+  const { visibleItems: visibleBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
+    items: filteredItems,
+    narrowingActive,
+  });
 
   if (state === "loading") {
     return (
@@ -183,7 +191,7 @@ export function FamilyShelfPage({
 
       <select
         value={filterMember}
-        onChange={(e) => { setFilterMember(e.target.value as MemberFilterValue); setCategoryFilter(""); }}
+        onChange={(e) => { setFilterMember(e.target.value as MemberFilterValue); setCategoryFilter(""); resetLoadMore(); }}
         aria-label="篩選成員"
         className="moo-form-select w-full rounded-lg border border-gray-300 pl-3 pr-9 py-2 text-sm mb-4 bg-white focus:border-blue-500 outline-none"
       >
@@ -208,6 +216,7 @@ export function FamilyShelfPage({
           {isFiltering ? "找不到符合的書籍" : "目前篩選條件下沒有書籍"}
         </p>
       ) : (
+        <>
         <div className="grid grid-cols-2 gap-3">
           {visibleBooks.map((book) => {
             const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
@@ -232,17 +241,16 @@ export function FamilyShelfPage({
                   className="block"
                 >
                   <div className="relative">
-                    {book.coverUrl ? (
-                      <img
-                        src={book.coverUrl}
-                        alt={book.title}
-                        className="w-full aspect-[3/4] object-cover"
-                      />
-                    ) : (
-                      <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center">
-                        <BookOpen size={32} className="text-gray-300" aria-hidden="true" />
-                      </div>
-                    )}
+                    <LazyCover
+                      src={book.coverUrl}
+                      alt={book.title}
+                      className="w-full aspect-[3/4] object-cover"
+                      fallback={
+                        <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center">
+                          <BookOpen size={32} className="text-gray-300" aria-hidden="true" />
+                        </div>
+                      }
+                    />
                     {book.isUpdated === BoolFlag.TRUE && (
                       <span aria-label="新分享書籍" className="absolute bottom-1 left-1 bg-green-100 text-green-600 text-xs font-semibold px-1.5 rounded-full leading-4">
                         更新
@@ -280,6 +288,16 @@ export function FamilyShelfPage({
             );
           })}
         </div>
+
+        {hasMore && (
+          <button
+            onClick={loadMore}
+            className="w-full py-2.5 mt-3 text-sm font-medium text-blue-600 border border-blue-600 rounded-lg"
+          >
+            載入更多（已顯示 {visibleBooks.length} / 共 {filteredItems.length} 本）
+          </button>
+        )}
+        </>
       )}
     </div>
   );

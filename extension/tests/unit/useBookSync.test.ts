@@ -56,13 +56,14 @@ describe("useBookSync", () => {
   });
 
   describe("initial state", () => {
-    it("starts with idle syncStatus", () => {
+    it("starts with idle syncStatus and empty progressMessage", () => {
       const { result } = renderHook(() => useBookSync(makeOptions()));
 
       expect(result.current.syncStatus).toBe("idle");
       expect(result.current.syncError).toBe("");
       expect(result.current.lastSyncBooks).toEqual([]);
       expect(result.current.autoSyncDone).toBe(false);
+      expect(result.current.progressMessage).toBe("");
     });
   });
 
@@ -130,11 +131,14 @@ describe("useBookSync", () => {
       });
 
       expect(syncBooks).toHaveBeenCalledOnce();
-      expect(syncBooks).toHaveBeenCalledWith({
-        navigate: false,
-        userId: "user-123",
-        apiClient: options.apiClient,
-      });
+      expect(syncBooks).toHaveBeenCalledWith(
+        expect.objectContaining({
+          navigate: false,
+          userId: "user-123",
+          apiClient: options.apiClient,
+        }),
+      );
+      expect(vi.mocked(syncBooks).mock.calls[0][0]).toHaveProperty("onProgress");
       expect(result.current.lastSyncBooks).toEqual(mockBooks);
       expect(result.current.autoSyncDone).toBe(true);
     });
@@ -289,11 +293,14 @@ describe("useBookSync", () => {
         await result.current.triggerManualSync();
       });
 
-      expect(syncBooks).toHaveBeenCalledWith({
-        navigate: true,
-        userId: "user-123",
-        apiClient: options.apiClient,
-      });
+      expect(syncBooks).toHaveBeenCalledWith(
+        expect.objectContaining({
+          navigate: true,
+          userId: "user-123",
+          apiClient: options.apiClient,
+        }),
+      );
+      expect(vi.mocked(syncBooks).mock.calls[0][0]).toHaveProperty("onProgress");
     });
 
     it("transitions syncing -> done -> idle on success", async () => {
@@ -379,6 +386,39 @@ describe("useBookSync", () => {
 
       // Error should be cleared on second success
       expect(result.current.syncError).toBe("");
+    });
+  });
+
+  describe("progressMessage (Wave G)", () => {
+    it("clears progressMessage after manual sync completes", async () => {
+      vi.mocked(syncBooks).mockImplementation(async (opts) => {
+        opts.onProgress?.(2, 400);
+        return { success: true, books: [] };
+      });
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+
+      expect(result.current.progressMessage).toBe("");
+    });
+
+    it("passes onProgress that updates progressMessage during sync", async () => {
+      let capturedOnProgress: ((page: number, count: number) => void) | undefined;
+      vi.mocked(syncBooks).mockImplementation(async (opts) => {
+        capturedOnProgress = opts.onProgress;
+        return { success: true, books: [] };
+      });
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+
+      expect(capturedOnProgress).toBeTypeOf("function");
     });
   });
 });

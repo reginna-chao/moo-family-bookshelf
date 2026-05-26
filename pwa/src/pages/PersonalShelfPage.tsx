@@ -3,8 +3,10 @@ import { BookOpen, Share2 } from "lucide-react";
 import { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
 import type { ApiClient, BookEntry, PersonalBooks } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
+import { useLoadMore } from "@/hooks/useLoadMore";
 import { FloatingActionBar, shouldShowFloatingBar } from "@/components/FloatingActionBar";
 import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
+import { LazyCover } from "@/components/LazyCover";
 import { PublicShareDialog } from "@/components/PublicShareDialog";
 import { namespacedKey } from "@/hooks/useAuth";
 
@@ -168,9 +170,15 @@ export function PersonalShelfPage({
   const {
     searchTerm,
     setSearchTerm,
-    filteredItems: visibleBooks,
+    filteredItems,
     isFiltering,
   } = useSearch(categoryFilteredBooks);
+
+  const narrowingActive = searchTerm !== "" || statusFilter !== "all" || categoryFilter !== "";
+  const { visibleItems: visibleBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
+    items: filteredItems,
+    narrowingActive,
+  });
 
   const handleSelectAll = useCallback(() => {
     const allVisible = visibleBooks.every(b => selectedIds.has(b.bookId));
@@ -239,7 +247,7 @@ export function PersonalShelfPage({
             <button
               role="tab"
               aria-selected={archiveView === "active"}
-              onClick={() => { setArchiveView("active"); setCategoryFilter(""); }}
+              onClick={() => { setArchiveView("active"); setCategoryFilter(""); resetLoadMore(); }}
               className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
                 archiveView === "active"
                   ? "border-blue-600 text-blue-600"
@@ -251,7 +259,7 @@ export function PersonalShelfPage({
             <button
               role="tab"
               aria-selected={archiveView === "archived"}
-              onClick={() => { setArchiveView("archived"); setCategoryFilter(""); }}
+              onClick={() => { setArchiveView("archived"); setCategoryFilter(""); resetLoadMore(); }}
               className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
                 archiveView === "archived"
                   ? "border-blue-600 text-blue-600"
@@ -317,6 +325,7 @@ export function PersonalShelfPage({
             {isFiltering ? "找不到符合的書籍" : "目前篩選條件下沒有書籍"}
           </p>
         ) : (
+          <>
           <div>
             {visibleBooks.map((book) => (
               <div
@@ -335,13 +344,16 @@ export function PersonalShelfPage({
                   aria-label={`選取 ${book.title}`}
                   className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
                 />
-                {book.coverUrl ? (
-                  <img src={book.coverUrl} alt="" className="w-10 h-[54px] rounded object-cover flex-shrink-0" />
-                ) : (
-                  <div className="w-10 h-[54px] rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                    <BookOpen size={18} className="text-gray-300" aria-hidden="true" />
-                  </div>
-                )}
+                <LazyCover
+                  src={book.coverUrl}
+                  alt=""
+                  className="w-10 h-[54px] rounded object-cover flex-shrink-0"
+                  fallback={
+                    <div className="w-10 h-[54px] rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                      <BookOpen size={18} className="text-gray-300" aria-hidden="true" />
+                    </div>
+                  }
+                />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
                     <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
@@ -369,6 +381,16 @@ export function PersonalShelfPage({
               </div>
             ))}
           </div>
+
+          {hasMore && (
+            <button
+              onClick={loadMore}
+              className="w-full py-2.5 mt-3 text-sm font-medium text-blue-600 border border-blue-600 rounded-lg"
+            >
+              載入更多（已顯示 {visibleBooks.length} / 共 {filteredItems.length} 本）
+            </button>
+          )}
+          </>
         )}
       </div>
 

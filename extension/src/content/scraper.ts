@@ -4,6 +4,11 @@
  */
 
 import { BoolFlag } from "../api/client";
+import {
+  paginateLibrary,
+  type ScrapeBooksOptions,
+  type ScrapeProgressCallback,
+} from "./scraper-pagination";
 
 export interface ScrapedBook {
   bookId: string;
@@ -21,6 +26,10 @@ const ATTR_BOOK_ID = "data-moo-book-id";
 const ATTR_COVER = "data-moo-cover-url";
 const ATTR_AUTHOR = "data-moo-author";
 const ATTR_CATEGORY = "data-moo-category";
+
+// Re-export Wave G pagination types so callers can keep `../content/scraper` as the single entry point.
+export type { ScrapeProgressCallback, ScrapeBooksOptions };
+export { formatScrapeProgress } from "./scraper-pagination";
 
 /** Dispatch synthetic hover events so Readmoo renders the `.openbook` overlay. */
 function triggerHover(element: HTMLElement): void {
@@ -181,15 +190,23 @@ export function scrapeDisplayName(): string | null {
 }
 
 /** Scrape all books from the current Readmoo library page. */
-export async function scrapeBooks(): Promise<ScrapedBook[]> {
-  await requestFiberData();
-  const items = document.querySelectorAll(".library-item");
-  const books: ScrapedBook[] = [];
-  for (const item of items) {
-    const book = await scrapeItem(item);
-    if (book) books.push(book);
+export async function scrapeBooks(
+  opts?: ScrapeBooksOptions,
+): Promise<ScrapedBook[]> {
+  const originalScrollY = window.scrollY;
+  try {
+    await requestFiberData();
+    await paginateLibrary(opts?.onProgress);
+    const items = document.querySelectorAll(".library-item");
+    const books: ScrapedBook[] = [];
+    for (const item of items) {
+      const book = await scrapeItem(item);
+      if (book) books.push(book);
+    }
+    return books;
+  } finally {
+    window.scrollTo(0, originalScrollY);
   }
-  return books;
 }
 
 // Re-export archive scraping so existing imports continue to work

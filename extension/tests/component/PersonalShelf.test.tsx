@@ -15,6 +15,7 @@ const mockUseBookSync = vi.fn().mockReturnValue({
   lastSyncBooks: [],
   triggerManualSync: vi.fn(),
   autoSyncDone: false,
+  progressMessage: "",
 });
 
 vi.mock("@/dialog/useBookSync", () => ({
@@ -46,6 +47,8 @@ vi.mock("@/content/scraper", () => ({
     },
   ]),
   scrapeArchivedBooks: vi.fn().mockResolvedValue([]),
+  formatScrapeProgress: (page: number, count: number) =>
+    `正在讀取第 ${page} 頁，已收集 ${count} 本…`,
 }));
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
@@ -92,6 +95,7 @@ describe("PersonalShelf", () => {
       lastSyncBooks: [],
       triggerManualSync: vi.fn(),
       autoSyncDone: false,
+      progressMessage: "",
     });
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -111,6 +115,23 @@ describe("PersonalShelf", () => {
 
   it("shows loading state initially", () => {
     renderPersonalShelf();
+    expect(screen.getByText("正在爬取書單...")).toBeInTheDocument();
+  });
+
+  it("shows progress message in scraping state when available (Wave G)", async () => {
+    const { scrapeBooks } = await import("@/content/scraper");
+    vi.mocked(scrapeBooks).mockImplementationOnce(async (opts) => {
+      opts?.onProgress?.(3, 600);
+      return new Promise(() => {});
+    });
+
+    renderPersonalShelf();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("正在讀取第 3 頁，已收集 600 本…"),
+      ).toBeInTheDocument();
+    });
     expect(screen.getByText("正在爬取書單...")).toBeInTheDocument();
   });
 
@@ -1127,6 +1148,138 @@ describe("PersonalShelf", () => {
       // Total "未開放" badges should include the new book
       const updatedHidden = screen.getAllByText("未開放");
       expect(updatedHidden.length).toBeGreaterThanOrEqual(4);
+    });
+  });
+
+  describe("Load More (Wave G)", () => {
+    function makeManyBooks(count: number, isArchived = BoolFlag.FALSE) {
+      return Array.from({ length: count }, (_, i) => ({
+        bookId: `book-${i + 1}`,
+        title: `書籍 ${i + 1}`,
+        author: `作者${i + 1}`,
+        coverUrl: "https://example.com/cover.jpg",
+        readmooUrl: `https://readmoo.com/book/book-${i + 1}`,
+        category: "",
+        isArchived,
+      }));
+    }
+
+    it("shows Load More button with count text when items exceed pageSize", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(250));
+
+      renderPersonalShelf();
+
+      await waitFor(() => {
+        expect(screen.getByText("書籍 1")).toBeInTheDocument();
+      });
+
+      expect(
+        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show Load More button when items fit in pageSize", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(80));
+
+      renderPersonalShelf();
+
+      await waitFor(() => {
+        expect(screen.getByText("書籍 1")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+    });
+
+    it("click Load More appends pageSize to visible count", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(250));
+
+      renderPersonalShelf();
+
+      await waitFor(() => {
+        expect(screen.getByText("書籍 1")).toBeInTheDocument();
+      });
+
+      const button = screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ });
+      fireEvent.click(button);
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 250 本/ }),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("hides Load More button when status filter narrows the view", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(250));
+
+      renderPersonalShelf();
+
+      await waitFor(() => {
+        expect(screen.getByText("書籍 1")).toBeInTheDocument();
+      });
+
+      // Click "已開放" status filter — narrows view → narrowingActive=true → button hidden
+      fireEvent.click(screen.getByRole("button", { name: "已開放" }));
+
+      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+    });
+
+    it("resets visibleCount when switching archive tabs (Q-B 視角切換類)", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce([
+        ...makeManyBooks(250, BoolFlag.FALSE),
+        ...makeManyBooks(5, BoolFlag.TRUE).map((b, i) => ({
+          ...b,
+          bookId: `archived-${i}`,
+          title: `封存書 ${i}`,
+        })),
+      ]);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
+        (message: unknown, callback?: (response: unknown) => void) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
+            callback({ syncArchived: 1 });
+          }
+          return undefined as unknown as Promise<unknown>;
+        },
+      );
+
+      renderPersonalShelf();
+
+      await waitFor(() => {
+        expect(screen.getByText("書籍 1")).toBeInTheDocument();
+      });
+
+      // Click Load More — visible 100 → 200
+      fireEvent.click(screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }));
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 250 本/ }),
+        ).toBeInTheDocument();
+      });
+
+      // Switch to archived tab
+      const archivedTab = screen.getByText((_content, el) =>
+        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+      );
+      fireEvent.click(archivedTab);
+
+      // Switch back to active tab — visibleCount should reset to 100
+      const activeTab = screen.getByText((_content, el) =>
+        el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
+      );
+      fireEvent.click(activeTab);
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+        ).toBeInTheDocument();
+      });
     });
   });
 });

@@ -619,4 +619,160 @@ describe("FamilyShelf", () => {
     // The name should still be "小明", not "不應出現"
     expect(screen.queryByText("不應出現")).not.toBeInTheDocument();
   });
+
+  describe("Load More (Wave G)", () => {
+    function makeManyBooks(count: number) {
+      return Array.from({ length: count }, (_, i) => ({
+        bookId: `b${i + 1}`,
+        title: `共享書 ${i + 1}`,
+        author: `作者${i + 1}`,
+        isShared: BoolFlag.TRUE,
+      }));
+    }
+
+    function setupShelfWithBooks(count: number) {
+      return createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+        }),
+        getFamilyBookshelf: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-1",
+            members: [
+              {
+                userId: "user-2",
+                displayName: "Alice",
+                books: makeManyBooks(count),
+                lastUpdated: "2024-01-01",
+              },
+            ],
+          },
+        }),
+      });
+    }
+
+    it("shows Load More button when shared books exceed pageSize", async () => {
+      renderWithProvider(<FamilyShelf userId="user-1" />, setupShelfWithBooks(250));
+
+      await waitFor(() => {
+        expect(screen.getByText("共享書 1")).toBeInTheDocument();
+      });
+
+      expect(
+        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show Load More button when books fit in pageSize", async () => {
+      renderWithProvider(<FamilyShelf userId="user-1" />, setupShelfWithBooks(80));
+
+      await waitFor(() => {
+        expect(screen.getByText("共享書 1")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+    });
+
+    it("click Load More appends pageSize to visible count", async () => {
+      renderWithProvider(<FamilyShelf userId="user-1" />, setupShelfWithBooks(250));
+
+      await waitFor(() => {
+        expect(screen.getByText("共享書 1")).toBeInTheDocument();
+      });
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 250 本/ }),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("hides Load More button when search narrows the view (narrowingActive)", async () => {
+      const { useSearch } = await import("@/dialog/useSearch");
+      const defaultImpl = vi.mocked(useSearch).getMockImplementation();
+      vi.mocked(useSearch).mockImplementation((items: unknown[]) => ({
+        searchTerm: "共享",
+        setSearchTerm: vi.fn(),
+        resetSearch: vi.fn(),
+        filteredItems: items,
+        isFiltering: true,
+      }) as ReturnType<typeof useSearch>);
+
+      try {
+        renderWithProvider(<FamilyShelf userId="user-1" />, setupShelfWithBooks(250));
+
+        await waitFor(() => {
+          expect(screen.getByText("共享書 1")).toBeInTheDocument();
+        });
+
+        expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+      } finally {
+        if (defaultImpl) vi.mocked(useSearch).mockImplementation(defaultImpl);
+      }
+    });
+
+    it("resets visibleCount when switching members (Q-B 視角切換類)", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-1",
+            ownerId: "user-1",
+            members: [
+              { userId: "user-2", displayName: "Alice" },
+              { userId: "user-3", displayName: "Bob" },
+            ],
+          },
+        }),
+        getFamilyBookshelf: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-1",
+            members: [
+              {
+                userId: "user-2",
+                displayName: "Alice",
+                books: makeManyBooks(250),
+                lastUpdated: "2024-01-01",
+              },
+              {
+                userId: "user-3",
+                displayName: "Bob",
+                books: makeManyBooks(80).map((b, i) => ({ ...b, bookId: `bob-${i}` })),
+                lastUpdated: "2024-01-01",
+              },
+            ],
+          },
+        }),
+      });
+
+      renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
+
+      await waitFor(() => {
+        expect(screen.getByText("共享書 1")).toBeInTheDocument();
+      });
+
+      // Load more — 100 → 200 visible
+      fireEvent.click(
+        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 330 本/ }),
+      );
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 330 本/ }),
+        ).toBeInTheDocument();
+      });
+
+      // Switch member dropdown — should reset visibleCount
+      fireEvent.change(screen.getByLabelText("篩選成員"), { target: { value: "user-2" } });
+
+      // Alice has 250 books → after reset, visible = 100
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+        ).toBeInTheDocument();
+      });
+    });
+  });
 });
