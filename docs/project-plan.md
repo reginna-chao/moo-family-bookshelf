@@ -799,21 +799,22 @@ jobs:
 
 > **根因更新（2026-05-15）**：使用者回報「按下儲存後桌電主機轟轟轟運作」 — 客端 CPU/GPU 持續滿載，**根因是 1000 本書 row + 書封 `<img>` 全部在 DOM 內**，儲存只是引爆 re-render / repaint。Load More 直接砍 DOM 數量，**同時解掉瀏覽與儲存兩個卡頓場景**，並順帶取代 Wave K 原本規劃的虛擬化。
 
-- [ ] **#10 移除 200 本爬取上限**
+- [x] **#10 移除 200 本爬取上限**
   - 讀墨爬取邏輯：偵測下一頁並逐頁爬取至完成
   - 影響：[`extension/src/content/scraper.ts`](../extension/src/content/scraper.ts) 的 `scrapeBooks` 與 [`scraper-archive.ts`](../extension/src/content/scraper-archive.ts)
-  - 風險：scrape 時間延長 → `LoadingOverlay` 文案需明確顯示「正在讀取第 N 頁」進度
-- [ ] **#10a 顯示層改用「Load More」按鈕**
+  - 實作：新增 [`extension/src/content/scraper-pagination.ts`](../extension/src/content/scraper-pagination.ts) — `paginateLibrary` 走 window scroll loop + 「scrollHeight 變化」雙重活躍偵測，5.5s 無活動即提早結束，10s hard timeout 兜底
+  - `LoadingOverlay` 文案改為動態進度（`useAutoSetup` + `useBookSync` + `usePersonalBooks` 三條路徑皆串接 `onProgress` → 顯示「正在讀取第 N 頁，已收集 X 本…」）
+- [x] **#10a 顯示層改用「Load More」按鈕**
   - **不採用**虛擬化（`@tanstack/react-virtual`）— 實作複雜、與既有 search / filter 互動容易出 bug；對「DOM 太多」這個根因，砍量比虛擬化更直接
   - 預設顯示首 **100 本**；底部「載入更多」按鈕，每次 +100 本
-  - 影響：[`extension/src/dialog/PersonalShelf.tsx`](../extension/src/dialog/PersonalShelf.tsx)、[`extension/src/dialog/FamilyShelf.tsx`](../extension/src/dialog/FamilyShelf.tsx)、PWA 對應頁面
-  - 搜尋 / Filter / 成員 Dropdown 套用於**完整書單**而非當前可見頁；匹配結果直接全部顯示（搜尋 + filter 後通常本來就少）
-  - 切換 tab / 重新打開 Dialog 時 reset 回首 100（不持久化捲動位置，避免狀態複雜）
-- [ ] **#10b 書封圖載入優化**
+  - 實作：[`extension/src/dialog/useLoadMore.ts`](../extension/src/dialog/useLoadMore.ts) + [`pwa/src/hooks/useLoadMore.ts`](../pwa/src/hooks/useLoadMore.ts)；四個 Shelf 頁面（Extension PersonalShelf/FamilyShelf、PWA PersonalShelfPage/FamilyShelfPage）皆套用
+  - 縮窄類 filter（search / status / category）啟用 → 強制全顯示、隱藏 Load More；視角切換類（成員 / archive tab）→ reset 回 100
+- [x] **#10b 書封圖載入優化**
   - 所有書封 `<img>` 加 `loading="lazy"` + `decoding="async"`
   - 載入前 placeholder：純色背景 + 中央 spinner（與 LoadingOverlay 風格一致），onLoad 後淡入封面、onError 仍走既有 fallback
-  - 影響：BookCard / 個人書櫃 row / 家庭書櫃 grid
+  - 實作：[`extension/src/dialog/LazyCover.tsx`](../extension/src/dialog/LazyCover.tsx) + [`pwa/src/components/LazyCover.tsx`](../pwa/src/components/LazyCover.tsx)；BookRow / BookCard / PWA 兩 ShelfPage 全套用
 - KV 容量：單筆 25MB 上限 vs 一本書約 500B → 數萬本仍有空間，無需後端分頁；家庭聚合查詢仍一次回傳，前端 Load More 即可
+- **完成狀態**：merged via PR #22（commit `58117c7`，2026-05-26）
 
 > ⚠️ Wave G 是 v1.3 中工程量最大的一項，但 Wave K 已大幅縮小（虛擬化併入此處），兩者不再強耦合。建議分批發布：v1.3.0（A + H + E）→ v1.3.1（J）→ v1.3.2（G）→ v1.3.3（K + I）。
 
