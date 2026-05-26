@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ApiClient, BookEntry } from "../api/client";
 import { syncBooks, canAutoSync } from "../sync/syncBooks";
+import { formatScrapeProgress } from "../content/scraper";
 
 export type SyncStatus = "idle" | "syncing" | "done" | "error";
 
@@ -24,6 +25,8 @@ export interface UseBookSyncReturn {
   triggerManualSync: () => Promise<void>;
   /** Whether auto-sync happened this session */
   autoSyncDone: boolean;
+  /** Live progress message during a paginated scrape (Wave G). Empty otherwise. */
+  progressMessage: string;
 }
 
 export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookSyncReturn {
@@ -31,6 +34,7 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
   const [syncError, setSyncError] = useState("");
   const [lastSyncBooks, setLastSyncBooks] = useState<BookEntry[]>([]);
   const [autoSyncDone, setAutoSyncDone] = useState(false);
+  const [progressMessage, setProgressMessage] = useState("");
   const autoSyncTriggered = useRef(false);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -52,8 +56,16 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
       if (!allowed) return;
 
       setSyncStatus("syncing");
+      setProgressMessage("");
       try {
-        const result = await syncBooks({ navigate: false, userId, apiClient });
+        const result = await syncBooks({
+          navigate: false,
+          userId,
+          apiClient,
+          onProgress: (page, count) =>
+            setProgressMessage(formatScrapeProgress(page, count)),
+        });
+        setProgressMessage("");
         if (result.success) {
           setLastSyncBooks(result.books);
           setSyncStatus("done");
@@ -65,6 +77,7 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
           setSyncStatus("error");
         }
       } catch (err) {
+        setProgressMessage("");
         setSyncError(err instanceof Error ? err.message : "自動同步失敗");
         setSyncStatus("error");
       }
@@ -77,8 +90,16 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
   const triggerManualSync = useCallback(async () => {
     setSyncStatus("syncing");
     setSyncError("");
+    setProgressMessage("");
 
-    const result = await syncBooks({ navigate: true, userId, apiClient });
+    const result = await syncBooks({
+      navigate: true,
+      userId,
+      apiClient,
+      onProgress: (page, count) =>
+        setProgressMessage(formatScrapeProgress(page, count)),
+    });
+    setProgressMessage("");
     if (result.success) {
       setLastSyncBooks(result.books);
       setSyncStatus("done");
@@ -96,5 +117,6 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
     lastSyncBooks,
     triggerManualSync,
     autoSyncDone,
+    progressMessage,
   };
 }

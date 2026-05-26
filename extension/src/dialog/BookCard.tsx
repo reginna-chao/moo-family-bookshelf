@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { BookEntry, BoolFlag } from "../api/client";
+import { LazyCover } from "./LazyCover";
 
 export interface BookWithMember extends BookEntry {
   memberName: string;
@@ -65,10 +66,13 @@ export function BookCard({
         rel="noopener noreferrer"
         style={{ display: "block", textDecoration: "none", position: "relative" }}
       >
-        <img
+        <LazyCover
           src={book.coverUrl}
           alt={book.title}
-          style={{ width: 120, height: 180, objectFit: "cover", borderRadius: 4, background: "#f1f5f9" }}
+          width={120}
+          height={180}
+          style={{ borderRadius: 4 }}
+          fallback={<div style={{ width: 120, height: 180, background: "#f1f5f9", borderRadius: 4 }} />}
         />
         {book.isUpdated === BoolFlag.TRUE && (
           <span

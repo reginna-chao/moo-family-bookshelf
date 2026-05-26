@@ -1,5 +1,6 @@
 import React from "react";
 import { BookEntry, BoolFlag } from "../api/client";
+import { LazyCover } from "./LazyCover";
 
 interface BookRowProps {
   book: BookEntry;
@@ -38,15 +39,14 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
         aria-label={`選取 ${book.title}`}
         style={{ flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
       />
-      {book.coverUrl ? (
-        <img
-          src={book.coverUrl}
-          alt={book.title}
-          style={{ width: 40, height: 60, objectFit: "cover", borderRadius: 4 }}
-        />
-      ) : (
-        <div style={{ width: 40, height: 60, background: "#e2e8f0", borderRadius: 4 }} />
-      )}
+      <LazyCover
+        src={book.coverUrl}
+        alt={book.title}
+        width={40}
+        height={60}
+        style={{ borderRadius: 4 }}
+        fallback={<div style={{ width: 40, height: 60, background: "#e2e8f0", borderRadius: 4 }} />}
+      />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <span style={{

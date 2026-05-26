@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
-import { scrapeBooks, scrapeArchivedBooks } from "../content/scraper";
+import { scrapeBooks, scrapeArchivedBooks, formatScrapeProgress } from "../content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "../constants";
 import { mergeBooks } from "./mergeBooks";
 
@@ -37,6 +37,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
   const [status, setStatus] = useState<PersonalBooksStatus>("scraping");
   const [errorMessage, setErrorMessage] = useState("");
   const [isDirty, setIsDirty] = useState(false);
+  const [progressMessage, setProgressMessage] = useState("");
 
   // Load books: scrape + fetch from API + merge
   useEffect(() => {
@@ -44,15 +45,19 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
 
     async function load() {
       try {
-        const scrapedBooks = await scrapeBooks();
+        const onProgress = (page: number, count: number) => {
+          if (!cancelled) setProgressMessage(formatScrapeProgress(page, count));
+        };
+        const scrapedBooks = await scrapeBooks({ onProgress });
 
         const archiveResult = await chrome.storage.local.get(["syncArchived"]);
         const syncArchivedSetting = (archiveResult.syncArchived as number | undefined) ?? BoolFlag.FALSE;
         let allScrapedBooks = [...scrapedBooks];
         if (syncArchivedSetting === BoolFlag.TRUE) {
-          const archivedBooks = await scrapeArchivedBooks();
+          const archivedBooks = await scrapeArchivedBooks({ onProgress });
           allScrapedBooks = [...scrapedBooks, ...archivedBooks];
         }
+        if (!cancelled) setProgressMessage("");
 
         const apiResponse = await apiClient.getPersonalBooks(userId);
 
@@ -76,6 +81,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
       } catch (err) {
         console.error("[PersonalShelf] Error:", err);
         if (cancelled) return;
+        setProgressMessage("");
         setErrorMessage(err instanceof Error ? err.message : "載入失敗");
         setStatus("error");
       }
@@ -157,5 +163,6 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     handleToggle,
     handleSave,
     handleCancel,
+    progressMessage,
   };
 }

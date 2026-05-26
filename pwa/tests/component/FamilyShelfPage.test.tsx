@@ -540,4 +540,99 @@ describe("FamilyShelfPage", () => {
       expect(screen.getByText("(3 本)")).toBeInTheDocument();
     });
   });
+
+  describe("Load More (Wave G)", () => {
+    function makeManyBooks(count: number) {
+      return makeBooks(
+        Array.from({ length: count }, (_, i) => ({
+          bookId: `b${i + 1}`,
+          title: `共享書 ${i + 1}`,
+          author: `作者${i + 1}`,
+          isShared: BoolFlag.TRUE,
+        })),
+      );
+    }
+
+    function setupShelf(bookCount: number) {
+      mockGetFamilyMembers.mockResolvedValue({
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-self",
+          members: [{ userId: "user-alice", displayName: "Alice" }],
+        },
+      });
+      mockGetFamilyBookshelf.mockResolvedValue({
+        data: {
+          familyId: "fam-1",
+          members: [
+            {
+              userId: "user-alice",
+              displayName: "Alice",
+              books: makeManyBooks(bookCount),
+              lastUpdated: "2026-01-01",
+            },
+          ],
+        },
+      });
+    }
+
+    it("shows Load More button when shared books exceed pageSize", async () => {
+      setupShelf(250);
+      renderWithProvider(defaultProps);
+
+      await waitFor(() => {
+        expect(screen.getByText("共享書 1")).toBeInTheDocument();
+      });
+
+      expect(
+        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show Load More button when books fit in pageSize", async () => {
+      setupShelf(80);
+      renderWithProvider(defaultProps);
+
+      await waitFor(() => {
+        expect(screen.getByText("共享書 1")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+    });
+
+    it("click Load More appends pageSize to visible count", async () => {
+      setupShelf(250);
+      renderWithProvider(defaultProps);
+
+      await waitFor(() => {
+        expect(screen.getByText("共享書 1")).toBeInTheDocument();
+      });
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 250 本/ }),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("hides Load More button when search narrows the view", async () => {
+      setupShelf(250);
+      renderWithProvider(defaultProps);
+
+      await waitFor(() => {
+        expect(screen.getByText("共享書 1")).toBeInTheDocument();
+      });
+
+      // Type in search — narrowingActive becomes true
+      fireEvent.change(screen.getByLabelText("搜尋書名或作者"), {
+        target: { value: "共享" },
+      });
+
+      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+    });
+  });
 });

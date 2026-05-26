@@ -452,4 +452,51 @@ describe("PersonalShelfPage", () => {
       expect(screen.getByText("儲存失敗")).toBeInTheDocument();
     });
   });
+
+  describe("Load More (Wave G)", () => {
+    function makeManyBooks(count: number) {
+      return Array.from({ length: count }, (_, i) => ({
+        bookId: `b${i + 1}`,
+        title: `書籍 ${i + 1}`,
+        author: `作者${i + 1}`,
+        isShared: BoolFlag.FALSE,
+      }));
+    }
+
+    it("shows Load More button when books exceed pageSize", async () => {
+      await renderWithBooks(makeManyBooks(250));
+
+      expect(
+        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show Load More button when books fit in pageSize", async () => {
+      await renderWithBooks(makeManyBooks(80));
+
+      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+    });
+
+    it("click Load More appends pageSize to visible count", async () => {
+      await renderWithBooks(makeManyBooks(250));
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 250 本/ }),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("hides Load More button when status filter narrows the view", async () => {
+      await renderWithBooks(makeManyBooks(250));
+
+      fireEvent.click(screen.getByRole("button", { name: "已開放" }));
+
+      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+    });
+  });
 });

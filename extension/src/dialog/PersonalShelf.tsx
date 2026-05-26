@@ -5,6 +5,7 @@ import { BookRow } from "./BookRow";
 import { StatusFilterBar, StatusFilter } from "./StatusFilterBar";
 import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
+import { useLoadMore } from "./useLoadMore";
 import { useBookSync } from "./useBookSync";
 import { FloatingActionBar } from "./FloatingActionBar";
 import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
@@ -39,7 +40,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const [syncArchived, setSyncArchived] = useState<number>(0);
   const [showPublicShare, setShowPublicShare] = useState(false);
 
-  const { syncStatus, syncError, triggerManualSync, lastSyncBooks } = useBookSync({
+  const { syncStatus, syncError, triggerManualSync, lastSyncBooks, progressMessage } = useBookSync({
     userId,
     apiClient,
   });
@@ -47,6 +48,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const {
     books, setBooks, status, setStatus, errorMessage,
     isDirty, setIsDirty, handleToggle, handleSave, handleCancel: handleCancelBooks,
+    progressMessage: loadProgressMessage,
   } = usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName });
 
   useEffect(() => {
@@ -65,6 +67,28 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
   const resetSearchRef = useRef<() => void>(() => {});
 
+  const activeBooks = books.filter(b => b.isArchived !== BoolFlag.TRUE);
+  const archivedBooks = books.filter(b => b.isArchived === BoolFlag.TRUE);
+  const currentViewBooks = archiveView === "active" ? activeBooks : archivedBooks;
+
+  const statusFilteredBooks = statusFilter === "shared"
+    ? currentViewBooks.filter((b) => b.isShared === BoolFlag.TRUE)
+    : statusFilter === "not-shared"
+      ? currentViewBooks.filter((b) => b.isShared === BoolFlag.FALSE)
+      : currentViewBooks;
+
+  const categoryFilteredBooks = filterByCategory(statusFilteredBooks, categoryFilter);
+
+  const { searchTerm, setSearchTerm, resetSearch, filteredItems, isFiltering } =
+    useSearch(categoryFilteredBooks);
+  resetSearchRef.current = resetSearch;
+
+  const narrowingActive = searchTerm !== "" || statusFilter !== "all" || categoryFilter !== "";
+  const { visibleItems: displayedBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
+    items: filteredItems,
+    narrowingActive,
+  });
+
   const handleStatusFilterChange = useCallback((value: StatusFilter) => {
     setStatusFilter(value);
     setCategoryFilter("");
@@ -77,7 +101,8 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     setCategoryFilter("");
     setCategoryOpen(false);
     resetSearchRef.current();
-  }, []);
+    resetLoadMore();
+  }, [resetLoadMore]);
 
   const handleSelect = useCallback((bookId: string) => {
     setSelectedIds((prev) => {
@@ -101,24 +126,15 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     setSelectedIds(new Set());
   }, [handleCancelBooks]);
 
-  const activeBooks = books.filter(b => b.isArchived !== BoolFlag.TRUE);
-  const archivedBooks = books.filter(b => b.isArchived === BoolFlag.TRUE);
-  const currentViewBooks = archiveView === "active" ? activeBooks : archivedBooks;
-
-  const statusFilteredBooks = statusFilter === "shared"
-    ? currentViewBooks.filter((b) => b.isShared === BoolFlag.TRUE)
-    : statusFilter === "not-shared"
-      ? currentViewBooks.filter((b) => b.isShared === BoolFlag.FALSE)
-      : currentViewBooks;
-
-  const categoryFilteredBooks = filterByCategory(statusFilteredBooks, categoryFilter);
-
-  const { searchTerm, setSearchTerm, resetSearch, filteredItems: displayedBooks, isFiltering } =
-    useSearch(categoryFilteredBooks);
-  resetSearchRef.current = resetSearch;
-
   if (status === "scraping") {
-    return <div style={{ padding: 16, textAlign: "center", color: "#64748b" }}>正在爬取書單...</div>;
+    return (
+      <div style={{ padding: 16, textAlign: "center", color: "#64748b" }}>
+        <div>正在爬取書單...</div>
+        {loadProgressMessage && (
+          <div style={{ marginTop: 8, fontSize: 12 }}>{loadProgressMessage}</div>
+        )}
+      </div>
+    );
   }
   if (status === "error") {
     return (
@@ -159,6 +175,12 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
           }}>{syncLabel}</button>
         </div>
       </div>
+
+      {progressMessage && (
+        <div style={{ marginTop: -4, marginBottom: 8, fontSize: 12, color: "#64748b", textAlign: "right" }}>
+          {progressMessage}
+        </div>
+      )}
 
       {syncStatus === "error" && syncError && (
         <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{syncError}</p>
@@ -212,6 +234,16 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
           <BookRow key={book.bookId} book={book} selected={selectedIds.has(book.bookId)} onSelect={handleSelect} onToggle={handleToggle} />
         ))}
       </div>
+
+      {hasMore && (
+        <button onClick={loadMore} style={{
+          width: "100%", padding: "10px 0", marginTop: 12, border: "1px solid #2563eb",
+          borderRadius: 8, background: "transparent", color: "#2563eb",
+          fontWeight: 500, fontSize: 13, cursor: "pointer",
+        }}>
+          載入更多（已顯示 {displayedBooks.length} / 共 {filteredItems.length} 本）
+        </button>
+      )}
 
       <FloatingActionBar
         selectedCount={selectedIds.size} isDirty={isDirty} isSaving={status === "saving"} isSaved={status === "saved"}
