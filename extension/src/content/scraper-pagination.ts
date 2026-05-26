@@ -10,6 +10,7 @@
 const SCROLL_HARD_CAP = 100;
 const PAGE_TIMEOUT_MS = 10000;
 const POLL_INTERVAL_MS = 500;
+const NO_ACTIVITY_CUTOFF_MS = 5500;
 
 export type ScrapeProgressCallback = (page: number, count: number) => void;
 
@@ -31,8 +32,11 @@ function countLibraryItems(): number {
 }
 
 /**
- * Poll `.library-item` count until it exceeds `baseline`, or `timeoutMs` elapses.
- * Returns true if new items appeared, false if timed out (treated as "no more pages").
+ * Poll `.library-item` count until it exceeds `baseline`, or exit early when
+ * no DOM activity is detected. Uses scrollHeight changes as a secondary
+ * "still loading" signal — if Readmoo shows a loader or spacer while fetching
+ * the next batch, scrollHeight will fluctuate and reset the inactivity timer.
+ * Falls back to `timeoutMs` as the hard ceiling.
  */
 async function waitForItemCountIncrease(
   baseline: number,
@@ -40,9 +44,20 @@ async function waitForItemCountIncrease(
   intervalMs: number,
 ): Promise<boolean> {
   const start = Date.now();
+  let lastScrollHeight = document.documentElement.scrollHeight;
+  let lastActivityAt = Date.now();
+
   while (Date.now() - start < timeoutMs) {
     await wait(intervalMs);
     if (countLibraryItems() > baseline) return true;
+
+    const currentScrollHeight = document.documentElement.scrollHeight;
+    if (currentScrollHeight !== lastScrollHeight) {
+      lastScrollHeight = currentScrollHeight;
+      lastActivityAt = Date.now();
+    }
+
+    if (Date.now() - lastActivityAt >= NO_ACTIVITY_CUTOFF_MS) return false;
   }
   return false;
 }
