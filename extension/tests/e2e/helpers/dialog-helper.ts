@@ -131,11 +131,15 @@ export async function waitForOnboarding(page: Page): Promise<void> {
 
 /**
  * Wait for the Main View (tabs) to be visible inside the Dialog.
+ *
+ * Timeout accounts for paginated scrape during onboarding's syncBooks step (Wave G).
+ * The mock Readmoo page has layout but no infinite-scroll behavior, so paginateLibrary
+ * walks its full PAGE_TIMEOUT_MS (~10s) before declaring "no more pages".
  */
 export async function waitForMainView(page: Page): Promise<void> {
   const dialog = page.locator(DIALOG_SELECTOR);
   // Main view has a nav with tab buttons
-  await dialog.locator("nav").waitFor({ state: "visible", timeout: 10_000 });
+  await dialog.locator("nav").waitFor({ state: "visible", timeout: 30_000 });
 }
 
 /**
