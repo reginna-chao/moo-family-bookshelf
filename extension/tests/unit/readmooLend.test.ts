@@ -4,7 +4,7 @@ import {
   extractReadmooMembers,
   selectMemberByName,
   waitForLendDialogClose,
-  ReadmooLendError,
+  closeLendDialog,
   READMOO_LEND_DEFAULTS,
 } from "@/content/readmoo-lend";
 
@@ -94,7 +94,7 @@ describe("readmoo-lend", () => {
   });
 
   describe("selectMemberByName", () => {
-    it("clicks the matching member's list-group-item", () => {
+    it("clicks the matching member's list-group-item and returns true", () => {
       const dialog = document.createElement("div");
       dialog.innerHTML = `
         <button class="list-group-item"><span class="fw-bold">CRY</span></button>
@@ -105,22 +105,19 @@ describe("readmoo-lend", () => {
       const clickSpy = vi.fn();
       aliceBtn.addEventListener("click", clickSpy);
 
-      selectMemberByName(dialog, "Alice");
+      const result = selectMemberByName(dialog, "Alice");
 
+      expect(result).toBe(true);
       expect(clickSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("throws ReadmooLendError(MEMBER_NOT_FOUND) when no match", () => {
+    it("returns false when no match (does not throw)", () => {
       const dialog = document.createElement("div");
       dialog.innerHTML = `
         <button class="list-group-item"><span class="fw-bold">CRY</span></button>
       `;
-      expect(() => selectMemberByName(dialog, "Missing")).toThrowError(ReadmooLendError);
-      try {
-        selectMemberByName(dialog, "Missing");
-      } catch (e) {
-        expect((e as ReadmooLendError).code).toBe("MEMBER_NOT_FOUND");
-      }
+      expect(() => selectMemberByName(dialog, "Missing")).not.toThrow();
+      expect(selectMemberByName(dialog, "Missing")).toBe(false);
     });
 
     it("trims whitespace when comparing names", () => {
@@ -132,9 +129,44 @@ describe("readmoo-lend", () => {
       const clickSpy = vi.fn();
       btn.addEventListener("click", clickSpy);
 
-      selectMemberByName(dialog, "CRY");
+      const result = selectMemberByName(dialog, "CRY");
+
+      expect(result).toBe(true);
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("closeLendDialog", () => {
+    it("clicks the dialog's .btn-close when present", () => {
+      const dialog = document.createElement("div");
+      const close = document.createElement("button");
+      close.className = "btn-close";
+      const clickSpy = vi.fn();
+      close.addEventListener("click", clickSpy);
+      dialog.appendChild(close);
+      document.body.appendChild(dialog);
+
+      closeLendDialog(dialog);
 
       expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to dispatching Escape keydown when no .btn-close", () => {
+      const dialog = document.createElement("div");
+      const keySpy = vi.fn();
+      dialog.addEventListener("keydown", keySpy);
+      document.body.appendChild(dialog);
+
+      closeLendDialog(dialog);
+
+      expect(keySpy).toHaveBeenCalledTimes(1);
+      expect((keySpy.mock.calls[0][0] as KeyboardEvent).key).toBe("Escape");
+    });
+
+    it("does nothing when the dialog is already disconnected", () => {
+      const dialog = document.createElement("div");
+      // never appended → not connected
+      expect(() => closeLendDialog(dialog)).not.toThrow();
     });
   });
 

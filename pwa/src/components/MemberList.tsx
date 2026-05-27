@@ -10,6 +10,11 @@ function canLendValue(member: FamilyMember): boolean {
   return member.canLend !== BoolFlag.FALSE;
 }
 
+/**
+ * readmooName 對應功能僅在家庭 ≥ 3 人時顯示（家庭 ≤ 2 人時讀墨借出不需要選擇成員）。
+ */
+const MIN_MEMBERS_FOR_READMOO_NAME = 3;
+
 interface MemberListProps {
   members: FamilyMember[];
   ownerId: string;
@@ -39,6 +44,7 @@ export function MemberList({
   const [canLendUpdating, setCanLendUpdating] = useState<string | null>(null);
 
   const isOwner = userId === ownerId;
+  const showReadmooNameSection = members.length >= MIN_MEMBERS_FOR_READMOO_NAME;
 
   async function handleToggleCanLend(target: FamilyMember) {
     setCanLendUpdating(target.userId);
@@ -180,6 +186,20 @@ export function MemberList({
                 <p className="text-[11px] text-gray-400 mt-1 leading-relaxed">
                   關閉後，該成員的書籍不會顯示「申請借閱」按鈕（用於非讀墨家庭成員）
                 </p>
+              </div>
+            )}
+
+            {showCanLendToggle && canLend && showReadmooNameSection && (
+              <div className="mt-2 text-xs">
+                {member.readmooName ? (
+                  <span className="text-gray-700">
+                    讀墨名稱：{member.readmooName}
+                  </span>
+                ) : (
+                  <span className="text-gray-400">
+                    尚未記錄（首次借出時自動建立）
+                  </span>
+                )}
               </div>
             )}
 

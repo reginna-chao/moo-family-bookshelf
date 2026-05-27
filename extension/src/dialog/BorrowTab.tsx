@@ -10,10 +10,14 @@ import { BorrowAction } from "./BorrowRequestCard";
 import { BorrowSection } from "./BorrowSection";
 import {
   ReadmooLendError,
+  ReadmooMember,
+  closeLendDialog,
+  decideLendAction,
   openLendDialogForBook,
   selectMemberByName,
   waitForLendDialogClose,
 } from "../content/readmoo-lend";
+import { ReadmooMemberPicker } from "./ReadmooMemberPicker";
 
 export interface BorrowTabProps {
   userId: string;
@@ -41,6 +45,21 @@ function buildOwnerNameLookup(members: FamilyMember[]): Map<string, string> {
   return map;
 }
 
+/**
+ * Local state for the "請選擇對應的讀墨家庭成員" picker. Held in BorrowTab
+ * (instead of inside readmoo-lend) so React owns the UI lifecycle and we can
+ * await the user's choice with a Promise resolver pattern.
+ */
+interface PickerState {
+  request: BorrowRequest;
+  lendDialog: HTMLElement;
+  options: ReadmooMember[];
+  saving: boolean;
+  errorMessage: string | null;
+  /** Resolved with the picked member (success) or `null` (user cancelled). */
+  resolve: (picked: ReadmooMember | null) => void;
+}
+
 export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
   const {
     borrowRequests,
@@ -48,10 +67,13 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     borrowRequestsError,
     refreshBorrowRequests,
     members,
+    familyId,
+    updateMember,
   } = useFamilyData();
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+  const [picker, setPicker] = useState<PickerState | null>(null);
 
   const ownerNameLookup = useMemo(() => buildOwnerNameLookup(members), [members]);
 
@@ -72,13 +94,38 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
   );
 
   /**
+   * Show the readmoo member picker and wait for the user to either pick a
+   * member or cancel. The PATCH and Readmoo dialog dismissal are owned by
+   * `handleApproveLending` — the picker only collects the user's choice.
+   */
+  const requestPick = useCallback(
+    (
+      request: BorrowRequest,
+      lendDialog: HTMLElement,
+      options: ReadmooMember[],
+    ): Promise<ReadmooMember | null> => {
+      return new Promise((resolve) => {
+        setPicker({
+          request,
+          lendDialog,
+          options,
+          saving: false,
+          errorMessage: null,
+          resolve,
+        });
+      });
+    },
+    [],
+  );
+
+  /**
    * Approve an incoming PENDING request: drive Readmoo's native lending
    * flow via Content Script, then mark the MooFamily request as LENT
    * once the Readmoo dialog closes (signals the user accepted the
    * native confirm).
    *
-   * Falls back to a clear error if readmooName is unset for the
-   * borrower — owner must configure it once in Family Settings.
+   * When n ≥ 2 and readmooName is missing / does not match, surface the
+   * picker; on confirm we PATCH readmooName before clicking the option.
    */
   const handleApproveLending = useCallback(
     async (request: BorrowRequest) => {
@@ -86,15 +133,35 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
       setPendingRequestId(request.requestId);
       try {
         const borrower = members.find((m) => m.userId === request.borrowerId);
-        const readmooName = borrower?.readmooName?.trim();
-        if (!readmooName) {
+        const readmooName = borrower?.readmooName;
+
+        const { lendDialog, members: readmooMembers } =
+          await openLendDialogForBook(request.bookId);
+        const decision = decideLendAction(readmooMembers, readmooName);
+
+        let target: ReadmooMember | undefined = decision.target;
+        if (decision.mode === "needs-pick") {
+          const picked = await requestPick(request, lendDialog, readmooMembers);
+          if (!picked) {
+            // User cancelled — closeLendDialog was already called in onCancel.
+            return;
+          }
+          target = picked;
+        }
+
+        if (!target) {
           throw new ReadmooLendError(
-            "READMOO_NAME_NOT_SET",
-            `請先在「設定」中為 ${request.borrowerName} 設定讀墨名稱`,
+            "MEMBER_NOT_FOUND",
+            "找不到要點擊的讀墨成員選項",
           );
         }
-        const { lendDialog } = await openLendDialogForBook(request.bookId);
-        selectMemberByName(lendDialog, readmooName);
+        const clicked = selectMemberByName(lendDialog, target.name);
+        if (!clicked) {
+          throw new ReadmooLendError(
+            "MEMBER_NOT_FOUND",
+            `在讀墨借出書籍清單中找不到「${target.name}」`,
+          );
+        }
         const closed = await waitForLendDialogClose(lendDialog);
         if (!closed) {
           throw new ReadmooLendError(
@@ -111,8 +178,42 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
         setPendingRequestId(null);
       }
     },
-    [apiClient, members, refreshBorrowRequests],
+    [apiClient, members, refreshBorrowRequests, requestPick],
   );
+
+  const handlePickerPick = useCallback(
+    async (member: ReadmooMember) => {
+      if (!picker) return;
+      const { request, resolve } = picker;
+      setPicker((prev) =>
+        prev ? { ...prev, saving: true, errorMessage: null } : prev,
+      );
+      try {
+        const updated = await apiClient.updateMemberSettings(
+          familyId,
+          request.borrowerId,
+          { readmooName: member.name },
+        );
+        updateMember(updated);
+        setPicker(null);
+        resolve(member);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "儲存失敗";
+        setPicker((prev) =>
+          prev ? { ...prev, saving: false, errorMessage: msg } : prev,
+        );
+      }
+    },
+    [picker, apiClient, familyId, updateMember],
+  );
+
+  const handlePickerCancel = useCallback(() => {
+    if (!picker || picker.saving) return;
+    closeLendDialog(picker.lendDialog);
+    const resolve = picker.resolve;
+    setPicker(null);
+    resolve(null);
+  }, [picker]);
 
   const { incoming, outgoing } = useMemo(() => {
     const incomingActive: BorrowRequest[] = [];
@@ -277,6 +378,16 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
         renderActions={renderOutgoingActions}
         resolveOtherPartyName={resolveOutgoingOtherParty}
       />
+      {picker && (
+        <ReadmooMemberPicker
+          borrowerName={picker.request.borrowerName || picker.request.borrowerId.slice(0, 8)}
+          options={picker.options}
+          saving={picker.saving}
+          errorMessage={picker.errorMessage}
+          onPick={(member) => void handlePickerPick(member)}
+          onCancel={handlePickerCancel}
+        />
+      )}
     </div>
   );
 }
