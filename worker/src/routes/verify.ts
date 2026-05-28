@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
 import {
   kvKeys,
@@ -12,8 +12,10 @@ import {
 } from "../kv/schema";
 import { isValidUserId, isValidVerifyMethod, isValidPin, isValidPattern } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
+import { defaultHook, jsonRes } from "../utils/openapi";
+import { UserIdParam } from "../schemas/common";
 
-export const verifyRoutes = new Hono<{ Bindings: Env }>();
+export const verifyRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 /**
  * Hash a secret with a salt using SHA-256.
@@ -76,7 +78,21 @@ function isLockedOut(record: VerifyRecord): boolean {
 }
 
 // GET /:id/verify — get verification method (public, needed before login)
-verifyRoutes.get("/:id/verify", async (c) => {
+const getVerifyRoute = createRoute({
+  method: "get",
+  path: "/{id}/verify",
+  tags: ["Verify"],
+  summary: "Get verification method",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("Verification method and prompted status"),
+    400: jsonRes("Invalid user ID"),
+  },
+});
+
+verifyRoutes.openapi(getVerifyRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
@@ -94,7 +110,22 @@ verifyRoutes.get("/:id/verify", async (c) => {
 });
 
 // PUT /:id/verify — set or change verification method (protected)
-verifyRoutes.put("/:id/verify", async (c) => {
+const putVerifyRoute = createRoute({
+  method: "put",
+  path: "/{id}/verify",
+  tags: ["Verify"],
+  summary: "Set or change verification method",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("Updated verification settings"),
+    400: jsonRes("Invalid request"),
+    401: jsonRes("Unauthorized"),
+  },
+});
+
+verifyRoutes.openapi(putVerifyRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
@@ -173,7 +204,22 @@ verifyRoutes.put("/:id/verify", async (c) => {
 });
 
 // POST /:id/verify/otp — generate OTP (protected, Extension pushes OTP for display)
-verifyRoutes.post("/:id/verify/otp", async (c) => {
+const postVerifyOtpRoute = createRoute({
+  method: "post",
+  path: "/{id}/verify/otp",
+  tags: ["Verify"],
+  summary: "Generate OTP code",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("Generated OTP code"),
+    400: jsonRes("Invalid request"),
+    401: jsonRes("Unauthorized"),
+  },
+});
+
+verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
@@ -216,7 +262,22 @@ verifyRoutes.post("/:id/verify/otp", async (c) => {
 });
 
 // POST /:id/verify/prompted — mark user as prompted (protected, prevents abuse)
-verifyRoutes.post("/:id/verify/prompted", async (c) => {
+const postVerifyPromptedRoute = createRoute({
+  method: "post",
+  path: "/{id}/verify/prompted",
+  tags: ["Verify"],
+  summary: "Mark user as prompted for verification",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("Prompted status updated"),
+    400: jsonRes("Invalid user ID"),
+    401: jsonRes("Unauthorized"),
+  },
+});
+
+verifyRoutes.openapi(postVerifyPromptedRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
@@ -253,7 +314,23 @@ function generateQrToken(): string {
 }
 
 // POST /:id/qr-token — generate a one-time QR token for verification bypass (protected)
-verifyRoutes.post("/:id/qr-token", async (c) => {
+const postQrTokenRoute = createRoute({
+  method: "post",
+  path: "/{id}/qr-token",
+  tags: ["Verify"],
+  summary: "Generate QR token for verification bypass",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("Generated QR token"),
+    400: jsonRes("Invalid user ID"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+  },
+});
+
+verifyRoutes.openapi(postQrTokenRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {

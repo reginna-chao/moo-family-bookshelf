@@ -145,6 +145,30 @@ pnpm dev    # 啟動本地開發伺服器 (Miniflare)
 pnpm test   # 執行測試
 ```
 
+## 開發者工具（Dev Only）
+
+Worker 內建 OpenAPI 文件與 Swagger UI，**僅在 dev 環境開啟**，production 完全關閉（回傳 404）。
+
+| 路由 | 說明 |
+|------|------|
+| `GET /api/_openapi.json` | OpenAPI 3.1 JSON spec |
+| `GET /api/_docs` | Swagger UI 互動式文件 |
+
+### 開啟條件
+
+兩個條件必須**同時**滿足：
+
+1. 環境變數 `DEV_MODE=1`
+2. Worker 名稱**不是** production 名稱（`moo-family-bookshelf`）
+
+本機 `pnpm dev`（wrangler dev）會自動滿足條件（需在 `.dev.vars` 設定 `DEV_MODE=1`）。
+部署在 `*.workers.dev` 的 dev 子環境也會自動開啟（Worker 名稱為 `moo-family-bookshelf-dev`）。
+
+### 自建者注意
+
+- 自建的 dev worker：在 Cloudflare Dashboard 的 Worker Settings → Environment Variables 中加入 `DEV_MODE=1`，即可從瀏覽器直接訪問 `/api/_docs`
+- **不建議在 production 開啟**。若確實需要，請自行加上 IP 白名單或 Basic Auth 保護，避免 API 結構暴露
+
 ## 更新
 
 ```bash

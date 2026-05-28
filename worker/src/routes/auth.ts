@@ -1,13 +1,41 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
 import { kvKeys, TOKEN_TTL_SECONDS, type RawFamilyRecord, normalizeFamilyRecord } from "../kv/schema";
 import { isValidFamilyId, isValidSha256Hex } from "../utils/validation";
 import { getOrGenerateAuthToken, getAuthenticatedUserId } from "../middleware/auth";
+import { defaultHook, jsonRes } from "../utils/openapi";
 
-export const authRoutes = new Hono<{ Bindings: Env }>();
+export const authRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
+
+// --- Route definitions ---
+
+const lookupRoute = createRoute({
+  method: "post",
+  path: "/lookup",
+  tags: ["Auth"],
+  summary: "Look up family membership by userId",
+  responses: {
+    200: jsonRes("Family membership lookup result"),
+    400: jsonRes("Invalid input"),
+  },
+});
+
+const refreshRoute = createRoute({
+  method: "post",
+  path: "/refresh",
+  tags: ["Auth"],
+  summary: "Refresh auth token",
+  responses: {
+    200: jsonRes("New auth token"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized or refresh failed"),
+  },
+});
+
+// --- Handlers ---
 
 // POST /api/auth/lookup — look up family membership by userId (public, no auth required)
-authRoutes.post("/lookup", async (c) => {
+authRoutes.openapi(lookupRoute, async (c) => {
   let body: { userId: string } | null;
   try {
     body = await c.req.json();
@@ -41,11 +69,11 @@ authRoutes.post("/lookup", async (c) => {
     }
   }
 
-  return c.json({ data: { existingFamilyId, memberCount } });
+  return c.json({ data: { existingFamilyId, memberCount } }, 200);
 });
 
 // POST /api/auth/refresh — refresh auth token (protected: requires valid Bearer token)
-authRoutes.post("/refresh", async (c) => {
+authRoutes.openapi(refreshRoute, async (c) => {
   const callerId = getAuthenticatedUserId(c);
   if (!callerId) {
     return c.json(
@@ -104,5 +132,5 @@ authRoutes.post("/refresh", async (c) => {
   const newToken = await getOrGenerateAuthToken(c.env.KV, body.userId);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
-  return c.json({ data: { token: newToken, expiresAt } });
+  return c.json({ data: { token: newToken, expiresAt } }, 200);
 });

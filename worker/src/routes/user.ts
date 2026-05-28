@@ -1,10 +1,12 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
 import { kvKeys, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord, type PublicShelf, type BookEntry } from "../kv/schema";
 import { writePublicSnapshot } from "./publicShelf";
 import { isValidUserId, sanitizeDisplayName } from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
+import { defaultHook, jsonRes } from "../utils/openapi";
+import { UserIdParam } from "../schemas/common";
 
 async function updateAllPublicSnapshots(
   kv: KVNamespace,
@@ -41,10 +43,26 @@ async function resolveDisplayName(
   return sanitizeDisplayName(clientValue) ?? "";
 }
 
-export const userRoutes = new Hono<{ Bindings: Env }>();
+export const userRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 // GET /api/user/:id/books
-userRoutes.get("/:id/books", async (c) => {
+const getUserBooksRoute = createRoute({
+  method: "get",
+  path: "/{id}/books",
+  tags: ["User"],
+  summary: "Get user books",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("User books record"),
+    400: jsonRes("Invalid user ID"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+  },
+});
+
+userRoutes.openapi(getUserBooksRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
@@ -79,7 +97,24 @@ userRoutes.get("/:id/books", async (c) => {
 });
 
 // PUT /api/user/:id/books
-userRoutes.put("/:id/books", async (c) => {
+const putUserBooksRoute = createRoute({
+  method: "put",
+  path: "/{id}/books",
+  tags: ["User"],
+  summary: "Save user books",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("Saved user books record"),
+    400: jsonRes("Invalid request"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    429: jsonRes("Rate limited"),
+  },
+});
+
+userRoutes.openapi(putUserBooksRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
@@ -112,7 +147,8 @@ userRoutes.put("/:id/books", async (c) => {
     max: 30,
     windowSec: 3600,
   });
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rateLimitResponse as any;
 
   let body: Record<string, unknown> | null;
   try {
@@ -162,7 +198,23 @@ userRoutes.put("/:id/books", async (c) => {
 });
 
 // DELETE /api/user/:id — delete user account
-userRoutes.delete("/:id", async (c) => {
+const deleteUserRoute = createRoute({
+  method: "delete",
+  path: "/{id}",
+  tags: ["User"],
+  summary: "Delete user account",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("User deleted"),
+    400: jsonRes("Invalid user ID"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+  },
+});
+
+userRoutes.openapi(deleteUserRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {

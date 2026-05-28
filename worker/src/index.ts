@@ -1,4 +1,5 @@
-import { Hono } from "hono";
+import { OpenAPIHono } from "@hono/zod-openapi";
+import { swaggerUI } from "@hono/swagger-ui";
 import { cors } from "hono/cors";
 import { rateLimit } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
@@ -51,7 +52,7 @@ export function isAllowedOrigin(origin: string, devMode?: boolean): boolean {
   return false;
 }
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new OpenAPIHono<{ Bindings: Env }>();
 
 // Security headers on ALL responses
 app.use("*", async (c, next) => {
@@ -131,6 +132,27 @@ const SERVER_VERSION = "0.1.0";
 app.get("/api/version", (c) =>
   c.json({ data: { apiVersion: API_VERSION, serverVersion: SERVER_VERSION } }),
 );
+
+// Dev-only: OpenAPI spec + Swagger UI
+app.get("/api/_openapi.json", (c) => {
+  if (!isDevMode(c.env)) {
+    return c.json({ error: { code: "NOT_FOUND", message: "Route not found" } }, 404);
+  }
+  const spec = app.getOpenAPI31Document({
+    openapi: "3.1.0",
+    info: { title: "MooFamily Bookshelf API", version: SERVER_VERSION },
+  });
+  return c.json(spec);
+});
+
+app.get("/api/_docs", async (c) => {
+  if (!isDevMode(c.env)) {
+    return c.json({ error: { code: "NOT_FOUND", message: "Route not found" } }, 404);
+  }
+  const handler = swaggerUI({ url: "/api/_openapi.json" });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return handler(c as any, async () => {}) as unknown as Response;
+});
 
 // Routes
 app.route("/api/user", userRoutes);

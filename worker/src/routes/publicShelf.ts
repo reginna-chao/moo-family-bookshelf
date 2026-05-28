@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import type { Env } from "../utils/env";
 import {
@@ -12,6 +12,8 @@ import {
 } from "../kv/schema";
 import { isValidUserId, isValidRequestId, isValidShareToken, sanitizePublicShelfTitle, isValidExpiresDays } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
+import { defaultHook, jsonRes } from "../utils/openapi";
+import { UserIdParam, ShelfIdParam, ShareTokenParam } from "../schemas/common";
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -97,19 +99,123 @@ async function findShelf(
   return { record, shelves, idx };
 }
 
+// ── Route definitions (authenticated) ────────────────────────
+
+const getPublicShelvesRoute = createRoute({
+  method: "get",
+  path: "/{id}/public-shelf",
+  tags: ["PublicShelf"],
+  summary: "List user public shelves",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("List of public shelves"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+  },
+});
+
+const createPublicShelfRoute = createRoute({
+  method: "post",
+  path: "/{id}/public-shelf",
+  tags: ["PublicShelf"],
+  summary: "Create a public shelf",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    201: jsonRes("Public shelf created"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    409: jsonRes("Max shelves reached"),
+  },
+});
+
+const updatePublicShelfRoute = createRoute({
+  method: "put",
+  path: "/{id}/public-shelf/{shelfId}",
+  tags: ["PublicShelf"],
+  summary: "Update a public shelf",
+  request: {
+    params: ShelfIdParam,
+  },
+  responses: {
+    200: jsonRes("Updated public shelf"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("Shelf not found"),
+  },
+});
+
+const resetTokenRoute = createRoute({
+  method: "post",
+  path: "/{id}/public-shelf/{shelfId}/reset-token",
+  tags: ["PublicShelf"],
+  summary: "Reset public shelf share token",
+  request: {
+    params: ShelfIdParam,
+  },
+  responses: {
+    200: jsonRes("Token reset successfully"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("Shelf not found"),
+  },
+});
+
+const deletePublicShelfRoute = createRoute({
+  method: "delete",
+  path: "/{id}/public-shelf/{shelfId}",
+  tags: ["PublicShelf"],
+  summary: "Delete a public shelf",
+  request: {
+    params: ShelfIdParam,
+  },
+  responses: {
+    204: { description: "Shelf deleted" },
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("Shelf not found"),
+  },
+});
+
+// ── Route definitions (public query) ─────────────────────────
+
+const getPublicSnapshotRoute = createRoute({
+  method: "get",
+  path: "/public/{shareToken}",
+  tags: ["PublicShelf"],
+  summary: "Get public shelf by share token",
+  request: {
+    params: ShareTokenParam,
+  },
+  responses: {
+    200: jsonRes("Public shelf snapshot"),
+    400: jsonRes("Invalid token"),
+    404: jsonRes("Shelf not found or expired"),
+  },
+});
+
 // ── Authenticated routes (mounted at /api/user) ───────────────
 
-export const publicShelfRoutes = new Hono<{ Bindings: Env }>();
+export const publicShelfRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 // GET /api/user/:id/public-shelf
-publicShelfRoutes.get("/:id/public-shelf", async (c) => {
+publicShelfRoutes.openapi(getPublicShelvesRoute, async (c) => {
   const userId = c.req.param("id");
   if (!isValidUserId(userId)) {
     return c.json({ error: { code: "INVALID_USER_ID", message: "userId format is invalid" } }, 400);
   }
 
   const denied = authGuard(c, userId);
-  if (denied) return denied;
+  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return denied as any;
 
   const record = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
   const shelves = record?.publicSharing?.shelves ?? [];
@@ -117,14 +223,15 @@ publicShelfRoutes.get("/:id/public-shelf", async (c) => {
 });
 
 // POST /api/user/:id/public-shelf
-publicShelfRoutes.post("/:id/public-shelf", async (c) => {
+publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
   const userId = c.req.param("id");
   if (!isValidUserId(userId)) {
     return c.json({ error: { code: "INVALID_USER_ID", message: "userId format is invalid" } }, 400);
   }
 
   const denied = authGuard(c, userId);
-  if (denied) return denied;
+  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return denied as any;
 
   let body: Record<string, unknown>;
   try {
@@ -171,7 +278,7 @@ publicShelfRoutes.post("/:id/public-shelf", async (c) => {
 });
 
 // PUT /api/user/:id/public-shelf/:shelfId
-publicShelfRoutes.put("/:id/public-shelf/:shelfId", async (c) => {
+publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
   const userId = c.req.param("id");
   const shelfId = c.req.param("shelfId");
 
@@ -183,7 +290,8 @@ publicShelfRoutes.put("/:id/public-shelf/:shelfId", async (c) => {
   }
 
   const denied = authGuard(c, userId);
-  if (denied) return denied;
+  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return denied as any;
 
   let body: Record<string, unknown>;
   try {
@@ -234,7 +342,7 @@ publicShelfRoutes.put("/:id/public-shelf/:shelfId", async (c) => {
 });
 
 // POST /api/user/:id/public-shelf/:shelfId/reset-token
-publicShelfRoutes.post("/:id/public-shelf/:shelfId/reset-token", async (c) => {
+publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
   const userId = c.req.param("id");
   const shelfId = c.req.param("shelfId");
 
@@ -246,7 +354,8 @@ publicShelfRoutes.post("/:id/public-shelf/:shelfId/reset-token", async (c) => {
   }
 
   const denied = authGuard(c, userId);
-  if (denied) return denied;
+  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return denied as any;
 
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
@@ -271,7 +380,7 @@ publicShelfRoutes.post("/:id/public-shelf/:shelfId/reset-token", async (c) => {
 });
 
 // DELETE /api/user/:id/public-shelf/:shelfId
-publicShelfRoutes.delete("/:id/public-shelf/:shelfId", async (c) => {
+publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
   const userId = c.req.param("id");
   const shelfId = c.req.param("shelfId");
 
@@ -283,7 +392,8 @@ publicShelfRoutes.delete("/:id/public-shelf/:shelfId", async (c) => {
   }
 
   const denied = authGuard(c, userId);
-  if (denied) return denied;
+  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return denied as any;
 
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
@@ -303,10 +413,10 @@ publicShelfRoutes.delete("/:id/public-shelf/:shelfId", async (c) => {
 
 // ── Public query route (mounted at /api) ──────────────────────
 
-export const publicQueryRoutes = new Hono<{ Bindings: Env }>();
+export const publicQueryRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 // GET /api/public/:shareToken
-publicQueryRoutes.get("/public/:shareToken", async (c) => {
+publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
   const shareToken = c.req.param("shareToken");
   if (!isValidShareToken(shareToken)) {
     return c.json({ error: { code: "INVALID_TOKEN", message: "Invalid share token format" } }, 400);
