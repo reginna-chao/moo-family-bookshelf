@@ -36,8 +36,36 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
   const [status, setStatus] = useState<PersonalBooksStatus>("scraping");
   const [errorMessage, setErrorMessage] = useState("");
-  const [isDirty, setIsDirty] = useState(false);
+  const [dirtyBookIds, setDirtyBookIds] = useState<Set<string>>(new Set());
+  const isDirty = dirtyBookIds.size > 0;
   const [progressMessage, setProgressMessage] = useState("");
+
+  const markDirty = useCallback((bookId: string) => {
+    setDirtyBookIds((prev) => {
+      if (prev.has(bookId)) return prev;
+      const next = new Set(prev);
+      next.add(bookId);
+      return next;
+    });
+  }, []);
+
+  const markManyDirty = useCallback((bookIds: Iterable<string>) => {
+    setDirtyBookIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of bookIds) {
+        if (!next.has(id)) {
+          next.add(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const clearDirty = useCallback(() => {
+    setDirtyBookIds((prev) => (prev.size === 0 ? prev : new Set()));
+  }, []);
 
   // Load books: scrape + fetch from API + merge
   useEffect(() => {
@@ -113,8 +141,8 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     setBooks((prev) =>
       prev.map((b) => (b.bookId === bookId ? { ...b, isShared: b.isShared === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE } : b)),
     );
-    setIsDirty(true);
-  }, []);
+    markDirty(bookId);
+  }, [markDirty]);
 
   const handleSave = useCallback(async () => {
     setStatus("saving");
@@ -137,19 +165,19 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
       originalBooks.current = books;
       chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books) });
       chrome.storage.local.set({ personalShelfSavedAt: Date.now() });
-      setIsDirty(false);
+      clearDirty();
       setStatus("saved");
       setTimeout(() => setStatus("ready"), 1500);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setStatus("error");
     }
-  }, [books, userId, apiClient, displayName]);
+  }, [books, userId, apiClient, displayName, clearDirty]);
 
   const handleCancel = useCallback(() => {
     setBooks(originalBooks.current);
-    setIsDirty(false);
-  }, []);
+    clearDirty();
+  }, [clearDirty]);
 
   return {
     books,
@@ -158,7 +186,10 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     setStatus,
     errorMessage,
     isDirty,
-    setIsDirty,
+    dirtyBookIds,
+    markDirty,
+    markManyDirty,
+    clearDirty,
     originalBooks,
     handleToggle,
     handleSave,

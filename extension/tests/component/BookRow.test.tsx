@@ -67,3 +67,41 @@ describe("BookRow — author display", () => {
     expect(authorTexts).toHaveLength(0);
   });
 });
+
+describe("BookRow — isDirty prop (Wave K)", () => {
+  const noop = vi.fn();
+
+  it.each([
+    { label: "undefined", value: undefined },
+    { label: "false", value: false },
+    { label: "true", value: true },
+  ])("accepts isDirty=$label without crashing", ({ value }) => {
+    const { container } = render(
+      <BookRow
+        book={makeBook()}
+        selected={false}
+        isDirty={value}
+        onSelect={noop}
+        onToggle={noop}
+      />,
+    );
+
+    expect(container.firstChild).toBeInTheDocument();
+    expect(screen.getByText("測試書籍")).toBeInTheDocument();
+  });
+
+  it("memo short-circuits when all props (including isDirty) are stable", () => {
+    const book = makeBook();
+    const { rerender } = render(
+      <BookRow book={book} selected={false} isDirty={false} onSelect={noop} onToggle={noop} />,
+    );
+    const initialButton = screen.getByRole("button");
+
+    // Same references → memo should skip the re-render.
+    rerender(
+      <BookRow book={book} selected={false} isDirty={false} onSelect={noop} onToggle={noop} />,
+    );
+
+    expect(screen.getByRole("button")).toBe(initialButton);
+  });
+});

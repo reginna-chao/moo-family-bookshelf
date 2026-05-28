@@ -853,17 +853,21 @@ jobs:
 > **範圍縮小說明（2026-05-15）**：原本規劃的「前端虛擬化」併入 Wave G #10a Load More；「fetch-then-put 折衷」對使用者回報的卡頓無實質幫助（多一次 GET roundtrip 反而拖慢），移除。本 Wave 只保留**儲存成功後**的 re-render 防爆，作為 Wave G 之後的補強。
 > **與 v1.4 Wave L 關係**：v1.3 不動 API 形狀；v1.4 PATCH 上線後上行流量才真正下來。
 
-- [ ] **#24 儲存成功後不以 response 覆寫本地 state**
+- [x] **#24 儲存成功後不以 response 覆寫本地 state**
   - 影響：個人書櫃儲存流程（Extension `PersonalShelf` + PWA 對應頁面）
-  - 現況推測：`setBooks(response.data.books)` 觸發 reconciliation across 全 list → re-render avalanche → 風扇
-  - 改為：儲存成功後僅清掉 dirty set（本地 state 已是權威），不重新 `setBooks`
-  - 例外：若 server 端有 normalization 邏輯（例如後端清理欄位）需要同步回前端，改為「比對是否真有差異，僅在不同時才 setBooks」
-- [ ] **#25 BookRow / BookCard 套 `React.memo`**
-  - 確保 toggle 一本書時，僅該 row 重新 render
-  - props 比對以 `bookId` + `isShared` + `isDirty` 為 key；避免 inline function / object 破壞 memo
-- [ ] **#26 Dirty state 採 `Map<bookId, BoolFlag>` 或 `Set<bookId>`**
-  - 取代「整包 array 對比」，未變更的 book 不參與 dirty 計算
-  - 與 #25 的 React.memo 配合：dirty 變化的 row 才會 re-render
+  - **實作結論（2026-05-28）**：原始計畫的「`setBooks(response.data.books)` 觸發 re-render avalanche」**假設不成立** — `updatePersonalBooks` API 始終只回傳 `{ ok: boolean }`，從未覆寫本地 state。實際 re-render 來源是儲存後的 `setIsDirty(false)` + `setStatus("saved")` 連續 state transition；React 18 auto-batching 已涵蓋，無需額外處理。本 task 改為 dirty 清理路徑的驗證與 derived isDirty 確認。
+- [x] **#25 BookRow / BookCard 套 `React.memo`**
+  - Extension `BookRow` 已有 memo（沿用既有）；新增 optional `isDirty?: boolean` prop 讓 memo 可正確 shallow compare
+  - PWA 原本 row 為 inline JSX → 抽出為 [`pwa/src/components/BookRow.tsx`](../pwa/src/components/BookRow.tsx)，套 `React.memo`
+  - parent 用 `useCallback` 穩定 `onSelect` / `onToggle` reference，避免 inline closure 破壞 memo
+  - BookCard 不在範圍（用於家庭書櫃，不在儲存路徑）
+- [x] **#26 Dirty state 採 `Set<bookId>`**
+  - Extension `usePersonalBooks` 與 PWA `PersonalShelfPage` 內部改用 `dirtyBookIds: Set<string>`
+  - 對外 `isDirty: boolean` 仍保留（derived from `dirtyBookIds.size > 0`），FloatingActionBar 介面不動 → 既有 ~1150 個測試全綠
+  - 新增 `markDirty` / `markManyDirty` / `clearDirty` API；對已存在 bookId 回傳同 Set ref（防無謂 re-render）
+  - 為 v1.4 Wave L PATCH API 鋪線：BookRow 接收 `isDirty` prop（暫不顯示視覺指示）
+
+- **完成狀態**：實作完成 2026-05-28；測試 +28（Extension 844 + PWA 334 + Worker 445 全綠）；無 CRITICAL，採納 1 項 SUGGESTION
 
 #### 7.3 開發者體驗（DX）
 

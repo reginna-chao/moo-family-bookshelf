@@ -5,6 +5,7 @@ import { LazyCover } from "./LazyCover";
 interface BookRowProps {
   book: BookEntry;
   selected: boolean;
+  isDirty?: boolean;
   onSelect: (bookId: string) => void;
   onToggle: (bookId: string) => void;
 }

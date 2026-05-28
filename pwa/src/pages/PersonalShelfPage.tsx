@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { BookOpen, Share2 } from "lucide-react";
+import { Share2 } from "lucide-react";
 import { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
 import type { ApiClient, BookEntry, PersonalBooks } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
 import { useLoadMore } from "@/hooks/useLoadMore";
 import { FloatingActionBar, shouldShowFloatingBar } from "@/components/FloatingActionBar";
 import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
-import { LazyCover } from "@/components/LazyCover";
+import { BookRow } from "@/components/BookRow";
 import { PublicShareDialog } from "@/components/PublicShareDialog";
 import { namespacedKey } from "@/hooks/useAuth";
 
@@ -26,7 +26,8 @@ export function PersonalShelfPage({
   const [displayName, setDisplayName] = useState("");
   const [state, setState] = useState<LoadState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
-  const [isDirty, setIsDirty] = useState(false);
+  const [dirtyBookIds, setDirtyBookIds] = useState<Set<string>>(new Set());
+  const isDirty = dirtyBookIds.size > 0;
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -35,6 +36,33 @@ export function PersonalShelfPage({
   const originalBooksRef = useRef<BookEntry[]>([]);
   /** Raw server response — kept so save can spread back unknown fields from future versions */
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
+
+  const markDirty = useCallback((bookId: string) => {
+    setDirtyBookIds((prev) => {
+      if (prev.has(bookId)) return prev;
+      const next = new Set(prev);
+      next.add(bookId);
+      return next;
+    });
+  }, []);
+
+  const markManyDirty = useCallback((bookIds: Iterable<string>) => {
+    setDirtyBookIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of bookIds) {
+        if (!next.has(id)) {
+          next.add(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const clearDirty = useCallback(() => {
+    setDirtyBookIds((prev) => (prev.size === 0 ? prev : new Set()));
+  }, []);
 
   const loadBooks = useCallback(async () => {
     setState("loading");
@@ -65,14 +93,14 @@ export function PersonalShelfPage({
       }));
       setBooks(normalized);
       originalBooksRef.current = normalized;
-      setIsDirty(false);
+      clearDirty();
       setSelectedIds(new Set());
       setState("ready");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "載入失敗");
       setState("error");
     }
-  }, [userId, apiClient]);
+  }, [userId, apiClient, clearDirty]);
 
   useEffect(() => {
     void loadBooks();
@@ -96,7 +124,7 @@ export function PersonalShelfPage({
         return;
       }
       originalBooksRef.current = books;
-      setIsDirty(false);
+      clearDirty();
       setState("saved");
       // Signal FamilyShelfPage to re-fetch
       window.dispatchEvent(new CustomEvent("personalShelfSaved"));
@@ -105,26 +133,26 @@ export function PersonalShelfPage({
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setState("error");
     }
-  }, [userId, displayName, books, apiClient]);
+  }, [userId, displayName, books, apiClient, clearDirty]);
 
   const handleCancelChanges = useCallback(() => {
     setBooks(originalBooksRef.current);
-    setIsDirty(false);
+    clearDirty();
     setSelectedIds(new Set());
     setState("ready");
-  }, []);
+  }, [clearDirty]);
 
   const handleBatchShare = useCallback(() => {
     setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.TRUE } : b));
+    markManyDirty(selectedIds);
     setSelectedIds(new Set());
-    setIsDirty(true);
-  }, [selectedIds]);
+  }, [selectedIds, markManyDirty]);
 
   const handleBatchHide = useCallback(() => {
     setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.FALSE } : b));
+    markManyDirty(selectedIds);
     setSelectedIds(new Set());
-    setIsDirty(true);
-  }, [selectedIds]);
+  }, [selectedIds, markManyDirty]);
 
   const handleToggle = useCallback((bookId: string) => {
     setBooks((prev) =>
@@ -132,8 +160,8 @@ export function PersonalShelfPage({
         b.bookId === bookId ? { ...b, isShared: b.isShared === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE } : b,
       ),
     );
-    setIsDirty(true);
-  }, []);
+    markDirty(bookId);
+  }, [markDirty]);
 
   const toggleSelect = useCallback((bookId: string) => {
     setSelectedIds(prev => {
@@ -328,57 +356,14 @@ export function PersonalShelfPage({
           <>
           <div>
             {visibleBooks.map((book) => (
-              <div
+              <BookRow
                 key={book.bookId}
-                onClick={(e) => {
-                  const target = e.target as HTMLElement;
-                  if (target.closest("[data-toggle-btn]") || target.tagName === "INPUT") return;
-                  toggleSelect(book.bookId);
-                }}
-                className="flex items-center gap-3 py-3 border-b border-gray-100 cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(book.bookId)}
-                  onChange={() => toggleSelect(book.bookId)}
-                  aria-label={`選取 ${book.title}`}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
-                />
-                <LazyCover
-                  src={book.coverUrl}
-                  alt=""
-                  className="w-10 h-[54px] rounded object-cover flex-shrink-0"
-                  fallback={
-                    <div className="w-10 h-[54px] rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                      <BookOpen size={18} className="text-gray-300" aria-hidden="true" />
-                    </div>
-                  }
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1">
-                    <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
-                    {book.isArchived === BoolFlag.TRUE && (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium flex-shrink-0">
-                        封存
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500 truncate">{book.author}</p>
-                </div>
-                <button
-                  data-toggle-btn
-                  onClick={() => handleToggle(book.bookId)}
-                  aria-pressed={book.isShared === BoolFlag.TRUE}
-                  aria-label={`${book.title} ${book.isShared === BoolFlag.TRUE ? "已開放分享" : "未開放分享"}`}
-                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 ${
-                    book.isShared === BoolFlag.TRUE
-                      ? "bg-green-100 text-green-600"
-                      : "bg-gray-100 text-gray-500"
-                  }`}
-                >
-                  {book.isShared === BoolFlag.TRUE ? "開放" : "未開放"}
-                </button>
-              </div>
+                book={book}
+                selected={selectedIds.has(book.bookId)}
+                isDirty={dirtyBookIds.has(book.bookId)}
+                onSelect={toggleSelect}
+                onToggle={handleToggle}
+              />
             ))}
           </div>
 
