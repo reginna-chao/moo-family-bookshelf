@@ -65,6 +65,8 @@ interface FamilyDataState {
   refreshBookshelf: () => Promise<void>;
   /** Update a member's display name locally (optimistic) */
   updateMemberDisplayName: (userId: string, displayName: string) => void;
+  /** Replace a single member entry locally from a server PATCH response. */
+  updateMember: (member: FamilyMember) => void;
   /** Set of bookIds with "更新" chip (fresh + unexpired chips) */
   updatedBookIds: Set<string>;
   /** Whether there are unseen bookshelf updates (drives red dot) */
@@ -300,6 +302,26 @@ export function FamilyDataProvider({
     [],
   );
 
+  /**
+   * Replace a single member entry from a server PATCH response.
+   *
+   * Used by flows that mutate a member via PATCH (e.g. picker write-back,
+   * delete readmooName) so the UI updates immediately without refetching
+   * the full member list. If the userId is unknown locally (race condition)
+   * we leave state alone — `refreshMembers` is the source of truth.
+   */
+  const updateMember = useCallback((next: FamilyMember) => {
+    setMembers((prev) => {
+      let changed = false;
+      const updated = prev.map((m) => {
+        if (m.userId !== next.userId) return m;
+        changed = true;
+        return next;
+      });
+      return changed ? updated : prev;
+    });
+  }, []);
+
   const markBookshelfSeen = useCallback(() => {
     if (freshUpdateBookIdsRef.current.size === 0) return;
 
@@ -392,6 +414,7 @@ export function FamilyDataProvider({
       refreshMembers,
       refreshBookshelf,
       updateMemberDisplayName,
+      updateMember,
       updatedBookIds,
       hasBookshelfUpdates,
       markBookshelfSeen,
@@ -415,6 +438,7 @@ export function FamilyDataProvider({
       refreshMembers,
       refreshBookshelf,
       updateMemberDisplayName,
+      updateMember,
       updatedBookIds,
       hasBookshelfUpdates,
       markBookshelfSeen,

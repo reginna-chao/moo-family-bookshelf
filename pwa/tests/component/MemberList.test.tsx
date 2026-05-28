@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemberList } from "@/components/MemberList";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient } from "@/api/client";
 
 const mockRemoveMember = vi.fn();
 const mockTransferOwnership = vi.fn();
@@ -187,5 +187,110 @@ describe("MemberList", () => {
     expect(
       screen.getAllByRole("button", { name: "移除" }),
     ).toHaveLength(2);
+  });
+
+  describe("readmooName section (read-only on PWA)", () => {
+    it("hides readmooName entirely when family has 2 members", () => {
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          members={[
+            { userId: OWNER_ID, displayName: "Owner" },
+            {
+              userId: USER_ID,
+              displayName: "小明",
+              canLend: BoolFlag.TRUE,
+              readmooName: "ming@readmoo",
+            },
+          ]}
+        />,
+      );
+      expect(
+        screen.queryByText(/讀墨名稱：ming@readmoo/),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/尚未記錄/)).not.toBeInTheDocument();
+    });
+
+    it("shows readmooName read-only when family has >=3 members and value set", () => {
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          members={[
+            { userId: OWNER_ID, displayName: "Owner" },
+            {
+              userId: USER_ID,
+              displayName: "小明",
+              canLend: BoolFlag.TRUE,
+              readmooName: "ming@readmoo",
+            },
+            {
+              userId: OTHER_ID,
+              displayName: "Bob",
+              canLend: BoolFlag.TRUE,
+            },
+          ]}
+        />,
+      );
+      expect(screen.getByText(/讀墨名稱：ming@readmoo/)).toBeInTheDocument();
+      // PWA must not offer delete/edit affordances
+      expect(
+        screen.queryByRole("button", { name: /刪除/ }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    });
+
+    it("shows '尚未記錄' hint when family has >=3 members and value unset", () => {
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          members={[
+            { userId: OWNER_ID, displayName: "Owner" },
+            {
+              userId: USER_ID,
+              displayName: "小明",
+              canLend: BoolFlag.TRUE,
+            },
+            {
+              userId: OTHER_ID,
+              displayName: "Bob",
+              canLend: BoolFlag.TRUE,
+            },
+          ]}
+        />,
+      );
+      expect(screen.getAllByText(/尚未記錄（首次借出時自動建立）/)).toHaveLength(2);
+    });
+
+    it("non-owner does not see the readmooName section", () => {
+      render(
+        <MemberList
+          {...defaultProps}
+          members={[
+            { userId: OWNER_ID, displayName: "Owner" },
+            {
+              userId: USER_ID,
+              displayName: "小明",
+              canLend: BoolFlag.TRUE,
+              readmooName: "ming@readmoo",
+            },
+            {
+              userId: OTHER_ID,
+              displayName: "Bob",
+              canLend: BoolFlag.TRUE,
+            },
+          ]}
+        />,
+      );
+      expect(
+        screen.queryByText(/讀墨名稱：ming@readmoo/),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/尚未記錄/)).not.toBeInTheDocument();
+    });
   });
 });

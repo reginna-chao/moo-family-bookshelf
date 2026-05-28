@@ -119,7 +119,13 @@ export interface CreateBorrowPayload {
 /** Settings updatable on a family member via PATCH /api/family/:id/member/:uid. */
 export interface MemberSettingsPayload {
   canLend?: BoolFlag;
-  readmooName?: string;
+  /**
+   * Readmoo display name for lending automation.
+   *  - `string`: set the value
+   *  - `null`: delete the field server-side (NOT `""` — empty string is rejected by the API)
+   *  - omitted: no change
+   */
+  readmooName?: string | null;
 }
 
 export type SelectionMode = "all-shared";

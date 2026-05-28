@@ -6,14 +6,25 @@ import React from "react";
 const mockOpenLendDialogForBook = vi.fn();
 const mockSelectMemberByName = vi.fn();
 const mockWaitForLendDialogClose = vi.fn().mockResolvedValue(true);
-vi.mock("@/content/readmoo-lend", () => ({
-  ReadmooLendError: class ReadmooLendError extends Error {
-    constructor(public code: string, message: string) { super(message); }
-  },
-  openLendDialogForBook: (...args: unknown[]) => mockOpenLendDialogForBook(...args),
-  selectMemberByName: (...args: unknown[]) => mockSelectMemberByName(...args),
-  waitForLendDialogClose: (...args: unknown[]) => mockWaitForLendDialogClose(...args),
-}));
+const mockCloseLendDialog = vi.fn();
+vi.mock("@/content/readmoo-lend", async () => {
+  // Pull in the real `decideLendAction` so picker / fast-match branching is
+  // exercised exactly as in production. Only the side-effecting helpers are
+  // stubbed because jsdom does not contain the Readmoo DOM.
+  const actual = await vi.importActual<typeof import("@/content/readmoo-lend")>(
+    "@/content/readmoo-lend",
+  );
+  return {
+    ...actual,
+    ReadmooLendError: class ReadmooLendError extends Error {
+      constructor(public code: string, message: string) { super(message); }
+    },
+    openLendDialogForBook: (...args: unknown[]) => mockOpenLendDialogForBook(...args),
+    selectMemberByName: (...args: unknown[]) => mockSelectMemberByName(...args),
+    waitForLendDialogClose: (...args: unknown[]) => mockWaitForLendDialogClose(...args),
+    closeLendDialog: (...args: unknown[]) => mockCloseLendDialog(...args),
+  };
+});
 
 import { BorrowTab } from "@/dialog/BorrowTab";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
@@ -86,7 +97,8 @@ describe("BorrowTab", () => {
       detailModal: document.createElement("div"),
       members: [{ name: "Alice", avatar: "" }],
     });
-    mockSelectMemberByName.mockReturnValue(undefined);
+    // selectMemberByName now returns boolean: true=found+clicked, false=not found.
+    mockSelectMemberByName.mockReturnValue(true);
     mockWaitForLendDialogClose.mockResolvedValue(true);
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -387,6 +399,236 @@ describe("BorrowTab", () => {
     await waitFor(() => {
       expect(screen.getByText("Network down")).toBeInTheDocument();
       expect(screen.getByText("重試")).toBeInTheDocument();
+    });
+  });
+
+  describe("approve lending flow — picker decision", () => {
+    it("n=1: auto-single — does NOT PATCH readmooName and proceeds to LENT", async () => {
+      const updateMemberSettings = vi.fn();
+      const updateBorrowStatus = vi
+        .fn()
+        .mockResolvedValue(makeRequest({ status: BorrowStatus.LENT }));
+      const apiClient = createMockApiClient({
+        // Borrower has NO readmooName cached, but only one Readmoo option exists.
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-1",
+            ownerId: OWNER_ID,
+            members: [
+              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
+              { userId: BORROWER_ID, displayName: "Alice", canLend: BoolFlag.TRUE },
+            ],
+          },
+        }),
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+        updateMemberSettings,
+      });
+      mockOpenLendDialogForBook.mockResolvedValue({
+        lendDialog: document.createElement("div"),
+        detailModal: document.createElement("div"),
+        members: [{ name: "AliceOnly", avatar: "" }],
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("同意借閱")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("同意借閱"));
+
+      await waitFor(() => {
+        expect(updateBorrowStatus).toHaveBeenCalledWith("req-1", BorrowStatus.LENT);
+      });
+      expect(updateMemberSettings).not.toHaveBeenCalled();
+      expect(mockSelectMemberByName).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        "AliceOnly",
+      );
+    });
+
+    it("n>=2 + readmooName match: auto-match — does NOT PATCH and proceeds to LENT", async () => {
+      const updateMemberSettings = vi.fn();
+      const updateBorrowStatus = vi
+        .fn()
+        .mockResolvedValue(makeRequest({ status: BorrowStatus.LENT }));
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-1",
+            ownerId: OWNER_ID,
+            members: [
+              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
+              {
+                userId: BORROWER_ID,
+                displayName: "Alice",
+                canLend: BoolFlag.TRUE,
+                readmooName: "Alice",
+              },
+            ],
+          },
+        }),
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+        updateMemberSettings,
+      });
+      mockOpenLendDialogForBook.mockResolvedValue({
+        lendDialog: document.createElement("div"),
+        detailModal: document.createElement("div"),
+        members: [
+          { name: "Alice", avatar: "" },
+          { name: "Bob", avatar: "" },
+        ],
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("同意借閱")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("同意借閱"));
+
+      await waitFor(() => {
+        expect(updateBorrowStatus).toHaveBeenCalledWith("req-1", BorrowStatus.LENT);
+      });
+      expect(updateMemberSettings).not.toHaveBeenCalled();
+      expect(mockSelectMemberByName).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        "Alice",
+      );
+    });
+
+    it("n>=2 + no readmooName: shows picker, on pick → PATCH + LENT", async () => {
+      const updateMemberSettings = vi.fn().mockResolvedValue({
+        userId: BORROWER_ID,
+        displayName: "Alice",
+        canLend: BoolFlag.TRUE,
+        readmooName: "Bob",
+      });
+      const updateBorrowStatus = vi
+        .fn()
+        .mockResolvedValue(makeRequest({ status: BorrowStatus.LENT }));
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-1",
+            ownerId: OWNER_ID,
+            members: [
+              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
+              {
+                userId: BORROWER_ID,
+                displayName: "Alice",
+                canLend: BoolFlag.TRUE,
+              },
+            ],
+          },
+        }),
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+        updateMemberSettings,
+      });
+      mockOpenLendDialogForBook.mockResolvedValue({
+        lendDialog: document.createElement("div"),
+        detailModal: document.createElement("div"),
+        members: [
+          { name: "Alice", avatar: "" },
+          { name: "Bob", avatar: "" },
+        ],
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("同意借閱")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("同意借閱"));
+
+      // Picker appears
+      await waitFor(() => {
+        expect(
+          screen.getByText(/請選擇「Alice」對應的讀墨家庭成員/),
+        ).toBeInTheDocument();
+      });
+
+      // Pick Bob
+      fireEvent.click(screen.getByRole("button", { name: /Bob/ }));
+
+      await waitFor(() => {
+        expect(updateMemberSettings).toHaveBeenCalledWith(
+          "fam-1",
+          BORROWER_ID,
+          { readmooName: "Bob" },
+        );
+        expect(updateBorrowStatus).toHaveBeenCalledWith("req-1", BorrowStatus.LENT);
+      });
+    });
+
+    it("n>=2 picker cancel: closes Readmoo dialog and keeps request PENDING", async () => {
+      const updateMemberSettings = vi.fn();
+      const updateBorrowStatus = vi.fn();
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-1",
+            ownerId: OWNER_ID,
+            members: [
+              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
+              {
+                userId: BORROWER_ID,
+                displayName: "Alice",
+                canLend: BoolFlag.TRUE,
+              },
+            ],
+          },
+        }),
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+        updateMemberSettings,
+      });
+      mockOpenLendDialogForBook.mockResolvedValue({
+        lendDialog: document.createElement("div"),
+        detailModal: document.createElement("div"),
+        members: [
+          { name: "Alice", avatar: "" },
+          { name: "Bob", avatar: "" },
+        ],
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("同意借閱")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("同意借閱"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/請選擇「Alice」對應的讀墨家庭成員/),
+        ).toBeInTheDocument();
+      });
+
+      // Click 取消
+      fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+      await waitFor(() => {
+        // Picker dismissed
+        expect(
+          screen.queryByText(/請選擇「Alice」對應的讀墨家庭成員/),
+        ).not.toBeInTheDocument();
+      });
+
+      // No PATCH, no status change, Readmoo dialog closed
+      expect(updateMemberSettings).not.toHaveBeenCalled();
+      expect(updateBorrowStatus).not.toHaveBeenCalled();
+      expect(mockCloseLendDialog).toHaveBeenCalledTimes(1);
     });
   });
 });

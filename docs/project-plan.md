@@ -783,11 +783,13 @@ jobs:
 
 #### 7.2 影響現有使用者的修正
 
-##### Wave E — 顯示名稱自動帶入
+##### Wave E — 顯示名稱自動帶入（**延後到 v1.5+**）
 
+> **延後原因（2026-05-27）**：v1.3 範圍評估後決定延後。使用者在 2 人家庭情境下不希望讀墨會員名稱直接顯示在 MooFamily 介面（避免介面上同時出現「讀墨會員名稱」與「displayName」造成混淆）。Wave E 與 Wave J 在技術上**不衝突**（前者改 displayName 預設值、後者改 readmooName 流程），但實際 UX 價值低，延後再評估。
+>
 > **資料現況回答**：`displayName` 主要記錄在 `user:{userId}` 的 `UserBooksRecord.displayName`（source of truth），同時 denormalized 到 `family:{familyId}.members[].displayName`。兩者已於 v1.2.x（PR #14）保證同步。
 
-- [ ] **#1 初次建立 / 加入家庭時自動以讀墨會員名稱填入 `displayName`**
+- [ ] **#1 初次建立 / 加入家庭時自動以讀墨會員名稱填入 `displayName`**（延後）
   - 行為：
     - **桌面 Extension 流程**：`scrapeDisplayName()` 已存在，在 `useAutoSetup` 完成後將其作為 `displayName` 預設值（取代目前的「使用者-{id 前 4 碼}」 fallback）
     - **PWA 先行加入**：尚無讀墨頁面可爬 → 維持 fallback；待使用者後續從 Extension 開啟時，若偵測到 `displayName` 仍為「使用者-xxxx」格式且讀墨可抓到名稱，自動升級
@@ -822,27 +824,29 @@ jobs:
 
 > **目標**：v1.1.0 的「首次借閱前先填讀墨名稱」是大多數使用者的卡點。讀墨家庭多為 2 人，借出 dialog 通常只列出另一位（非書主自己） → 用「依清單長度自動決策」取代手動設定。
 > **行為總綱**：n=1 自動借、n≥2 提示並記錄、設定只能刪不能改、找不到自動重選。
+> **實測結論（2026-05-27）**：讀墨「借出書籍」原生 dialog **不包含書主自己**，無需 filter；n 直接以 dialog 內成員數判斷。
 
-- [ ] **#20 借出 dialog 依成員數自動決策**
-  - 影響：[`extension/src/content/readmoo-lend.ts`](../extension/src/content/readmoo-lend.ts)、[`extension/src/dialog/BorrowTab.tsx`](../extension/src/dialog/BorrowTab.tsx)
+- [x] **#20 借出 dialog 依成員數自動決策**
+  - 影響：[`extension/src/content/readmoo-lend.ts`](../extension/src/content/readmoo-lend.ts)、[`extension/src/dialog/BorrowTab.tsx`](../extension/src/dialog/BorrowTab.tsx)、新增 [`extension/src/dialog/ReadmooMemberPicker.tsx`](../extension/src/dialog/ReadmooMemberPicker.tsx)
   - 流程改寫：
     - **n=1**：自動點擊該唯一成員，繼續借出流程，**不顯示 MooFamily UI、不寫入 `readmooName`**（每次借閱重新偵測即可，避免不必要 KV 寫入）
     - **n≥2 + 有 `readmooName` 且找得到匹配**：自動點擊匹配成員（沿用 v1.1.0 fast-match 路徑）
     - **n≥2 + 無 `readmooName` 或找不到匹配**：彈出「請確認要借給誰」選擇 UI → 使用者選擇 → `PATCH /api/family/:id/member/:uid { readmooName }` 寫入記錄 → 點擊
   - 取消 v1.1.0 的「同意借閱前先跑 readmooName setup」前置流程
-  - 實作注意：先實測讀墨借出 dialog 是否包含書主自己，若包含則 #20 的「n」需先排除自己再判斷
-- [ ] **#21 「找不到」即自動重選**
-  - [`extension/src/content/readmoo-lend.ts:184-198`](../extension/src/content/readmoo-lend.ts#L184-L198) 既有的「找不到名稱 → throw」改為觸發 #20 的選擇 UI（與「使用者刪除設定」、「讀墨改名」共用同一 fallback path）
-  - 選擇後 **覆蓋** user record 中舊的 `readmooName`，不再要求使用者去設定頁手動更新
-- [ ] **#22 設定頁 readmooName 改為「顯示 + 刪除」（不可編輯）**
+  - 實作：新增 pure helper `decideLendAction(members, readmooName?)` 回傳 `{ mode: 'auto-single' | 'auto-match' | 'needs-pick', target? }`，BorrowTab 串接 picker state；picker 取消時呼叫 `closeLendDialog()` 收尾，request 維持 PENDING
+- [x] **#21 「找不到」即自動重選**
+  - `selectMemberByName` 由 throw 改為 return boolean（true=找到並點擊、false=找不到）；BorrowTab 將「false」與「沒有 readmooName」收斂為同一 fallback path → 顯示 picker → PATCH 寫入後覆蓋舊值
+- [x] **#22 設定頁 readmooName 改為「顯示 + 刪除」（不可編輯）**
   - 影響：[`extension/src/dialog/MemberList.tsx:338-385`](../extension/src/dialog/MemberList.tsx#L338-L385)
   - 取消可編輯輸入框（避免使用者自填導致與讀墨名稱對不上）
-  - 顯示：目前記錄的 `readmooName`（2 人家庭可能始終為空 — 因為 #20 在 n=1 不寫入）
+  - **顯示規則（補強）**：`members.length <= 2` → 整個 readmooName 欄位**不顯示**（2 人家庭 #20 永遠走 n=1 分支，沒有 readmooName 可看 / 可刪）；`>= 3` → 顯示「值 + 刪除按鈕」或「尚未記錄（首次借出時自動建立）」灰字提示
   - 操作：僅提供「刪除」按鈕；刪除即清空 `readmooName`，下次借閱（在 n≥2 情境）重新觸發選擇
-  - 後端 API `PATCH /api/family/:id/member/:uid { readmooName }` 不變
-- [ ] **#23 PWA 同步調整**
+  - 後端 API `PATCH /api/family/:id/member/:uid` 擴充 `readmooName: string | null` 語意（`null` = 刪除欄位、`""` = 仍回 400，避免歧義）
+- [x] **#23 PWA 同步調整**
   - PWA 無 content script，本就無法跑借出自動化；此 Wave 主要影響 Extension
-  - PWA MemberList 的 readmooName 欄位同步改為「顯示 + 刪除」，維持兩端一致
+  - PWA MemberList readmooName 欄位：`<= 2 人` 不顯示；`>= 3 人` 唯讀顯示（**不開放刪除 / 編輯**，使用者需到 Extension 才能刪）
+
+- **完成狀態**：實作完成 2026-05-27（PR 待 merge）
 
 ##### Wave K — 儲存路徑的 re-render 防爆（補 Wave G 之後的尾巴）
 
@@ -1026,4 +1030,4 @@ moo-family-bookshelf/
 
 ---
 
-*最後更新：2026-05-15（v1.3 新增 Wave I / J / K + 修訂 Wave G：API 測試介面 + 借閱流程簡化 + Load More 顯示 + 書封 lazy load + 儲存 re-render 防爆；v1.4 新增 Wave L：書本 PATCH API）*
+*最後更新：2026-05-27（v1.3 Wave J 完成：借閱流程簡化 + readmooName: null 刪除語意 + ≤2 人不顯示規則；Wave E 延後到 v1.5+）*

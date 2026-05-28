@@ -528,16 +528,23 @@ familyRoutes.patch("/:id/member/:uid", async (c) => {
     }
   }
 
-  // Validate and sanitize readmooName if present (strips zero-width / control chars).
-  let sanitizedReadmooName: string | null = null;
-  if (body.readmooName !== undefined) {
-    sanitizedReadmooName = sanitizeShortString(body.readmooName, 50);
-    if (sanitizedReadmooName === null) {
+  // Validate readmooName if present. Three accepted shapes:
+  //   undefined → no change
+  //   null      → delete field (clear readmooName)
+  //   string    → set value (must pass sanitizeShortString: non-empty, ≤ 50 chars after cleaning)
+  // Anything else (empty string, numbers, booleans, objects, …) → 400 INVALID_FIELDS.
+  let readmooNameAction: { type: "set"; value: string } | { type: "delete" } | null = null;
+  if (body.readmooName === null) {
+    readmooNameAction = { type: "delete" };
+  } else if (body.readmooName !== undefined) {
+    const sanitized = sanitizeShortString(body.readmooName, 50);
+    if (sanitized === null) {
       return c.json(
-        { error: { code: "INVALID_FIELDS", message: "readmooName must be a non-empty string of 50 characters or fewer" } },
+        { error: { code: "INVALID_FIELDS", message: "readmooName must be a non-empty string of 50 characters or fewer, or null to clear" } },
         400,
       );
     }
+    readmooNameAction = { type: "set", value: sanitized };
   }
 
   const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
@@ -575,7 +582,7 @@ familyRoutes.patch("/:id/member/:uid", async (c) => {
     );
   }
 
-  // readmooName: owner OR the member themselves
+  // readmooName (set OR clear via null): owner OR the member themselves
   if (body.readmooName !== undefined && callerId !== record.ownerId && callerId !== targetUserId) {
     return c.json(
       { error: { code: "FORBIDDEN", message: "Only the family owner or the member themselves can change readmooName" } },
@@ -587,8 +594,12 @@ familyRoutes.patch("/:id/member/:uid", async (c) => {
   if (body.canLend !== undefined) {
     member.canLend = body.canLend as BoolFlag;
   }
-  if (sanitizedReadmooName !== null) {
-    member.readmooName = sanitizedReadmooName;
+  if (readmooNameAction !== null) {
+    if (readmooNameAction.type === "set") {
+      member.readmooName = readmooNameAction.value;
+    } else {
+      delete member.readmooName;
+    }
   }
 
   await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));

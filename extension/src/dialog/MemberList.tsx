@@ -23,6 +23,11 @@ function getMemberLabel(member: FamilyMember): string {
   return member.displayName || member.userId.slice(0, 8);
 }
 
+/**
+ * readmooName 對應功能僅在家庭 ≥ 3 人時顯示（家庭 ≤ 2 人時讀墨借出不需要選擇成員）。
+ */
+const MIN_MEMBERS_FOR_READMOO_NAME = 3;
+
 export function MemberList({
   members,
   ownerId,
@@ -37,10 +42,10 @@ export function MemberList({
   const [actionError, setActionError] = useState("");
   const [activeTransferAction, setActiveTransferAction] = useState<"keep" | "clear" | null>(null);
   const [canLendUpdating, setCanLendUpdating] = useState<string | null>(null);
-  const [readmooNameEdit, setReadmooNameEdit] = useState<{ userId: string; value: string } | null>(null);
-  const [readmooNameSaving, setReadmooNameSaving] = useState(false);
+  const [readmooNameDeleting, setReadmooNameDeleting] = useState<string | null>(null);
 
   const isOwner = userId === ownerId;
+  const showReadmooNameSection = members.length >= MIN_MEMBERS_FOR_READMOO_NAME;
 
   const handleToggleCanLend = async (target: FamilyMember) => {
     setCanLendUpdating(target.userId);
@@ -56,17 +61,16 @@ export function MemberList({
     }
   };
 
-  const handleSaveReadmooName = async (target: FamilyMember, value: string) => {
-    setReadmooNameSaving(true);
+  const handleDeleteReadmooName = async (target: FamilyMember) => {
+    setReadmooNameDeleting(target.userId);
     setActionError("");
     try {
-      await apiClient.updateMemberSettings(familyId, target.userId, { readmooName: value.trim() });
+      await apiClient.updateMemberSettings(familyId, target.userId, { readmooName: null });
       onMembersChanged();
-      setReadmooNameEdit(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "更新失敗");
+      setActionError(err instanceof Error ? err.message : "刪除失敗");
     } finally {
-      setReadmooNameSaving(false);
+      setReadmooNameDeleting(null);
     }
   };
 
@@ -263,6 +267,7 @@ export function MemberList({
           const showCanLendToggle = isOwner && member.userId !== userId;
           const canLend = canLendValue(member);
           const isUpdating = canLendUpdating === member.userId;
+          const isDeletingReadmooName = readmooNameDeleting === member.userId;
           return (
             <div key={member.userId} style={{
               padding: "10px 12px", fontSize: 14, borderBottom: "1px solid #e2e8f0",
@@ -333,52 +338,32 @@ export function MemberList({
                   </div>
                 </div>
               )}
-              {showCanLendToggle && canLend && (
-                <div style={{ marginTop: 6 }}>
-                  {readmooNameEdit?.userId === member.userId ? (
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        type="text"
-                        value={readmooNameEdit.value}
-                        onChange={(e) => setReadmooNameEdit({ userId: member.userId, value: e.target.value })}
-                        placeholder="讀墨顯示名稱"
-                        maxLength={50}
-                        aria-label={`${getMemberLabel(member)} 的讀墨名稱`}
+              {showCanLendToggle && canLend && showReadmooNameSection && (
+                <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {member.readmooName ? (
+                    <>
+                      <span style={{ fontSize: 13, color: "#334155" }}>
+                        讀墨名稱：{member.readmooName}
+                      </span>
+                      <button
+                        disabled={isDeletingReadmooName}
+                        onClick={() => void handleDeleteReadmooName(member)}
+                        aria-label={`刪除 ${getMemberLabel(member)} 的讀墨名稱`}
                         style={{
-                          flex: 1, padding: "4px 8px", fontSize: 13,
-                          border: "1px solid #cbd5e1", borderRadius: 6,
+                          ...smallBtnBase,
+                          borderColor: "#ef4444",
+                          color: "#ef4444",
+                          marginLeft: 0,
+                          opacity: isDeletingReadmooName ? 0.5 : 1,
                         }}
-                      />
-                      <button
-                        disabled={readmooNameSaving || readmooNameEdit.value.trim().length === 0}
-                        onClick={() => void handleSaveReadmooName(member, readmooNameEdit.value)}
-                        style={{ ...smallBtnBase, borderColor: "#2563eb", color: "#2563eb" }}
                       >
-                        {readmooNameSaving ? "儲存中..." : "儲存"}
+                        {isDeletingReadmooName ? "刪除中..." : "刪除"}
                       </button>
-                      <button
-                        disabled={readmooNameSaving}
-                        onClick={() => setReadmooNameEdit(null)}
-                        style={{ ...smallBtnBase, borderColor: "#94a3b8", color: "#64748b" }}
-                      >
-                        取消
-                      </button>
-                    </div>
+                    </>
                   ) : (
-                    <button
-                      onClick={() => setReadmooNameEdit({
-                        userId: member.userId,
-                        value: member.readmooName ?? "",
-                      })}
-                      style={{
-                        background: "transparent", border: "none", padding: 0,
-                        fontSize: 13, color: "#2563eb", cursor: "pointer",
-                      }}
-                    >
-                      {member.readmooName
-                        ? `讀墨名稱：${member.readmooName}（編輯）`
-                        : "設定讀墨名稱（自動借書時識別此成員）"}
-                    </button>
+                    <span style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.5 }}>
+                      尚未記錄（首次借出時自動建立）
+                    </span>
                   )}
                 </div>
               )}

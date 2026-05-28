@@ -174,7 +174,10 @@ export function extractReadmooMembers(lendDialog: HTMLElement): ReadmooMember[] 
 
 /**
  * Click the lending dialog's member button whose name matches `readmooName`.
- * Throws ReadmooLendError("MEMBER_NOT_FOUND") if no match.
+ *
+ * Returns `true` if a matching member was found and clicked, `false` otherwise.
+ * Callers that need a UI fallback (e.g., show a picker) can act on `false`
+ * without catching a thrown error.
  *
  * After click, Readmoo shows a native window.confirm — the user must accept
  * it manually. This function returns immediately after the click.
@@ -182,19 +185,73 @@ export function extractReadmooMembers(lendDialog: HTMLElement): ReadmooMember[] 
 export function selectMemberByName(
   lendDialog: HTMLElement,
   readmooName: string,
-): void {
+): boolean {
   const items = lendDialog.querySelectorAll<HTMLElement>(".list-group-item");
   for (const item of items) {
     const nameEl = item.querySelector<HTMLElement>(".fw-bold");
     const name = nameEl?.textContent?.trim();
     if (name === readmooName) {
       item.click();
-      return;
+      return true;
     }
   }
-  throw new ReadmooLendError(
-    "MEMBER_NOT_FOUND",
-    `在讀墨借出書籍清單中找不到「${readmooName}」`,
+  return false;
+}
+
+/**
+ * Lend action mode resolved before any UI is shown to the owner.
+ *
+ *  - "auto-single": exactly one option in Readmoo's dialog — click it directly,
+ *     no readmooName persistence needed.
+ *  - "auto-match": n ≥ 2 AND a stored `readmooName` matches one of the options —
+ *     click the matched option, no picker needed.
+ *  - "needs-pick": n ≥ 2 AND (no stored `readmooName` OR no match) — surface
+ *     the picker UI so the owner can choose; on confirm we PATCH readmooName.
+ */
+export interface DecideLendActionResult {
+  mode: "auto-single" | "auto-match" | "needs-pick";
+  target?: ReadmooMember;
+}
+
+/**
+ * Pure decision helper: given the Readmoo dialog's current member list and the
+ * (optional) cached `readmooName`, return the action the caller should take.
+ * Side-effect free so it is trivial to table-test.
+ */
+export function decideLendAction(
+  members: ReadmooMember[],
+  readmooName?: string,
+): DecideLendActionResult {
+  if (members.length === 1) {
+    return { mode: "auto-single", target: members[0] };
+  }
+  const trimmed = readmooName?.trim();
+  if (trimmed) {
+    const match = members.find((m) => m.name === trimmed);
+    if (match) return { mode: "auto-match", target: match };
+  }
+  return { mode: "needs-pick" };
+}
+
+/**
+ * Close the Readmoo lending dialog if it is still open.
+ *
+ * Used when the owner cancels the readmoo member picker — we should not leave
+ * the user staring at Readmoo's dialog after our UI closes.
+ *
+ * Strategy: prefer the dialog's own close button; fall back to dispatching
+ * Escape against the dialog. Best-effort; if neither works the dialog will
+ * close on the next user interaction.
+ */
+export function closeLendDialog(lendDialog: HTMLElement): void {
+  if (!lendDialog.isConnected) return;
+  const closeBtn = lendDialog.querySelector<HTMLElement>(".btn-close");
+  if (closeBtn) {
+    closeBtn.click();
+    return;
+  }
+  lendDialog.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
   );
 }
 
