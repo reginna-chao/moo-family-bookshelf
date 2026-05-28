@@ -47,7 +47,8 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
   const {
     books, setBooks, status, setStatus, errorMessage,
-    isDirty, setIsDirty, handleToggle, handleSave, handleCancel: handleCancelBooks,
+    isDirty, dirtyBookIds, markManyDirty,
+    handleToggle, handleSave, handleCancel: handleCancelBooks,
     progressMessage: loadProgressMessage,
   } = usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName });
 
@@ -115,9 +116,9 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
   const batchSetShared = useCallback((flag: BoolFlag) => {
     setBooks((prev) => prev.map((b) => (selectedIds.has(b.bookId) ? { ...b, isShared: flag } : b)));
+    markManyDirty(selectedIds);
     setSelectedIds(new Set());
-    setIsDirty(true);
-  }, [selectedIds, setBooks, setIsDirty]);
+  }, [selectedIds, setBooks, markManyDirty]);
   const handleBatchShare = useCallback(() => batchSetShared(BoolFlag.TRUE), [batchSetShared]);
   const handleBatchHide = useCallback(() => batchSetShared(BoolFlag.FALSE), [batchSetShared]);
 
@@ -231,7 +232,14 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {displayedBooks.map((book) => (
-          <BookRow key={book.bookId} book={book} selected={selectedIds.has(book.bookId)} onSelect={handleSelect} onToggle={handleToggle} />
+          <BookRow
+            key={book.bookId}
+            book={book}
+            selected={selectedIds.has(book.bookId)}
+            isDirty={dirtyBookIds.has(book.bookId)}
+            onSelect={handleSelect}
+            onToggle={handleToggle}
+          />
         ))}
       </div>
 
