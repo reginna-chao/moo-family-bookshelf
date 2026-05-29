@@ -876,24 +876,26 @@ jobs:
 > **目標**：提供類 Swagger 的互動式 API 文件，讓開發 / debug 過程不必反覆寫 curl 或 Postman collection。**僅 dev 環境開啟，production 完全關閉**，避免誤觸正式資料。
 > **使用場景**：v1.4 Wave L 規劃新 PATCH endpoint、Wave G 驗證 >200 本書聚合行為時，互動式介面最省力。
 
-- [ ] **#27 Worker routes 改用 zod schema + OpenAPI 註解**
+- [x] **#27 Worker routes 改用 zod schema + OpenAPI 註解**
   - 工具：`@hono/zod-openapi`
-  - 涵蓋範圍：`auth` / `user` / `family` / `borrow` / `publicShelf` / `verify` 全部 API
+  - 涵蓋範圍：`auth` / `user` / `family` / `borrow` / `publicShelf` / `verify` 全部 API（7 個 route 檔）
   - 輸出：`GET /api/_openapi.json`（dev only）
-  - 改寫過程中順便補齊既有 routes 的 input validation（既有部分用手寫 `isValidUserId` 等，可逐步收斂）
-- [ ] **#28 掛載 Swagger UI（或 Scalar UI）**
+  - 改寫過程中順便收斂既有 routes 的 input validation（手寫 `isValidUserId` 等改由 zod schema 統一）
+- [x] **#28 掛載 Swagger UI（或 Scalar UI）**
   - 路由：`GET /api/_docs`
-  - 選型偏好：`@hono/swagger-ui` 最輕（Hono 官方）；若要更現代外觀可選 Scalar
-  - UI bundle 以 CDN 載入，避免增加 worker deploy size
-- [ ] **#29 環境隔離（嚴格）**
-  - 條件：`c.env.ENVIRONMENT !== "production"` 才**註冊** `/api/_docs` 與 `/api/_openapi.json` routes
+  - 選型：`@hono/swagger-ui`（Hono 官方，最輕）
+  - UI bundle 以 CDN 載入，worker bundle 保持 128KB gzipped（遠低於 1MB Cloudflare 上限）
+- [x] **#29 環境隔離（嚴格）**
+  - 條件：`DEV_MODE` env var **且** `CF_WORKER` name 非 production 雙重 gate 才**註冊** `/api/_docs` 與 `/api/_openapi.json` routes
   - prod 端：route 完全不存在 → 直接 404，不是回 403（降低暴露面）
   - 本機 `wrangler dev`：開啟
   - dev worker（部署在 `*.workers.dev` 的 dev 子環境）：開啟 → 使用者可直接從瀏覽器訪問 dev URL `/api/_docs`，**不需啟動 `pnpm dev` 或 `pnpm dev:remote`**
-- [ ] **#30 文件與安全提醒**
+- [x] **#30 文件與安全提醒**
   - [`worker/DEPLOY.md`](../worker/DEPLOY.md) 補充：自建者如何在自己的 dev environment 開啟此功能
   - 安全提醒：自建者若要在 prod 開啟（不建議），須自行加上 IP 白名單 / Basic Auth
   - 不放在 PWA Cloudflare Pages 的理由：OpenAPI spec 與 API 同源（worker 端）最自然，避免 spec 漂移與 CORS preflight 額外開銷（與 Wave H 一致原則）
+
+- **完成狀態**：實作完成 2026-05-29（PR #25）；handler 邏輯不動，既有 445 個 Worker 測試全綠，加上 8 個 dev-only routes 測試共 453 個；worker bundle 維持 128KB gzipped。
 
 ### Phase 8：v1.4.0 — 顯示偏好、借閱流程提示、書本 PATCH API（規劃中）
 
