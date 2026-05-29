@@ -7,6 +7,9 @@ import { useLoadMore } from "@/hooks/useLoadMore";
 import { useFamilyData, MemberBooks } from "@/hooks/useFamilyData";
 import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
 import { LazyCover } from "@/components/LazyCover";
+import { useFamilyShelfViewMode } from "@/hooks/useFamilyShelfViewMode";
+import { ViewModeToggle } from "@/components/ViewModeToggle";
+import { FamilyBookRow } from "@/components/FamilyBookRow";
 
 export interface FamilyShelfPageProps {
   userId: string;
@@ -51,6 +54,7 @@ export function FamilyShelfPage({
   const [filterMember, setFilterMember] =
     useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const { viewMode, setViewMode } = useFamilyShelfViewMode(userId);
 
   const memberCanLendMap = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -187,6 +191,7 @@ export function FamilyShelfPage({
           value={categoryFilter}
           onChange={setCategoryFilter}
         />
+        <ViewModeToggle mode={viewMode} onChange={setViewMode} />
       </div>
 
       <select
@@ -217,7 +222,7 @@ export function FamilyShelfPage({
         </p>
       ) : (
         <>
-        <div className="grid grid-cols-2 gap-3">
+        <div className={viewMode === "grid" ? "grid grid-cols-2 gap-3" : ""}>
           {visibleBooks.map((book) => {
             const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
             const isOwnBook = book.ownerId === userId;
@@ -229,9 +234,21 @@ export function FamilyShelfPage({
               !borrowRequestPending &&
               !!apiClient &&
               !!familyId;
+            const key = `${book.memberName}-${book.bookId}`;
+            if (viewMode === "row") {
+              return (
+                <FamilyBookRow
+                  key={key}
+                  book={book}
+                  showBorrowButton={showBorrowButton}
+                  borrowRequestPending={borrowRequestPending}
+                  onBorrowClick={() => void handleBorrowClick(book)}
+                />
+              );
+            }
             return (
               <div
-                key={`${book.memberName}-${book.bookId}`}
+                key={key}
                 className="block rounded-lg bg-white shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
               >
                 <a
