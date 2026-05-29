@@ -1,13 +1,35 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
 import { kvKeys, type RawFamilyRecord, type UserBooksRecord, normalizeFamilyRecord } from "../kv/schema";
 import { isValidFamilyId } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
+import { defaultHook, jsonRes } from "../utils/openapi";
+import { FamilyIdParam } from "../schemas/common";
 
-export const bookshelfRoutes = new Hono<{ Bindings: Env }>();
+export const bookshelfRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
+
+// --- Route definition ---
+
+const getFamilyBookshelfRoute = createRoute({
+  method: "get",
+  path: "/family/{id}/bookshelf",
+  tags: ["Bookshelf"],
+  summary: "Get aggregated family bookshelf",
+  request: {
+    params: FamilyIdParam,
+  },
+  responses: {
+    200: jsonRes("Aggregated family bookshelf"),
+    400: jsonRes("Invalid family ID"),
+    401: jsonRes("Unauthorized"),
+    404: jsonRes("Family not found"),
+  },
+});
+
+// --- Handler ---
 
 // GET /api/family/:id/bookshelf
-bookshelfRoutes.get("/family/:id/bookshelf", async (c) => {
+bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
@@ -71,5 +93,5 @@ bookshelfRoutes.get("/family/:id/bookshelf", async (c) => {
       familyId,
       members: memberBooks,
     },
-  });
+  }, 200);
 });

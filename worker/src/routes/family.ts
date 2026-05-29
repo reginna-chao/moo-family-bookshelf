@@ -1,14 +1,16 @@
-import { Hono, type Context } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import type { Context } from "hono";
 import type { Env } from "../utils/env";
 import { kvKeys, BoolFlag, BorrowStatus, type BorrowRequest, type FamilyMember, type FamilyRecord, type RawFamilyRecord, type QrTokenRecord, type UserBooksRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName, sanitizeShortString } from "../utils/validation";
 import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { validateVerification } from "./verify";
+import { defaultHook, jsonRes } from "../utils/openapi";
 
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
 
-export const familyRoutes = new Hono<{ Bindings: Env }>();
+export const familyRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 function invalidDisplayNameResponse(c: Context<{ Bindings: Env }>) {
   return c.json(
@@ -21,8 +23,144 @@ function toPublicRecord(record: FamilyRecord): FamilyRecord {
   return record;
 }
 
+// --- Route definitions ---
+
+const createFamilyRoute = createRoute({
+  method: "post",
+  path: "/",
+  tags: ["Family"],
+  summary: "Create a new family",
+  responses: {
+    201: jsonRes("Family created successfully"),
+    400: jsonRes("Invalid input"),
+    409: jsonRes("User already in a family"),
+  },
+});
+
+const joinFamilyRoute = createRoute({
+  method: "post",
+  path: "/{id}/join",
+  tags: ["Family"],
+  summary: "Join an existing family",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonRes("Joined family successfully"),
+    400: jsonRes("Invalid input"),
+    403: jsonRes("Verification failed"),
+    404: jsonRes("Family not found"),
+    409: jsonRes("Already in a family or family full"),
+    429: jsonRes("Rate limit exceeded"),
+  },
+});
+
+const removeMemberRoute = createRoute({
+  method: "delete",
+  path: "/{id}/member/{uid}",
+  tags: ["Family"],
+  summary: "Remove a member from the family",
+  request: {
+    params: z.object({ id: z.string(), uid: z.string() }),
+  },
+  responses: {
+    200: jsonRes("Member removed"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("Family or member not found"),
+    500: jsonRes("Borrow cleanup failed"),
+  },
+});
+
+const listMembersRoute = createRoute({
+  method: "get",
+  path: "/{id}/members",
+  tags: ["Family"],
+  summary: "List family members",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonRes("Family members list"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    404: jsonRes("Family not found"),
+  },
+});
+
+const updateDisplayNameRoute = createRoute({
+  method: "put",
+  path: "/{id}/member/{uid}/displayName",
+  tags: ["Family"],
+  summary: "Update member display name",
+  request: {
+    params: z.object({ id: z.string(), uid: z.string() }),
+  },
+  responses: {
+    200: jsonRes("Display name updated"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("Family or member not found"),
+  },
+});
+
+const updateMemberSettingsRoute = createRoute({
+  method: "patch",
+  path: "/{id}/member/{uid}",
+  tags: ["Family"],
+  summary: "Update member settings (canLend, readmooName)",
+  request: {
+    params: z.object({ id: z.string(), uid: z.string() }),
+  },
+  responses: {
+    200: jsonRes("Member settings updated"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("Family or member not found"),
+  },
+});
+
+const transferOwnershipRoute = createRoute({
+  method: "put",
+  path: "/{id}/transfer",
+  tags: ["Family"],
+  summary: "Transfer family ownership",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonRes("Ownership transferred"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Not the owner"),
+    404: jsonRes("Family not found"),
+  },
+});
+
+const updateEndpointRoute = createRoute({
+  method: "put",
+  path: "/{id}/endpoint",
+  tags: ["Family"],
+  summary: "Update family API endpoint",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonRes("Endpoint updated"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Not the owner"),
+    404: jsonRes("Family not found"),
+  },
+});
+
+// --- Handlers ---
+
 // POST /api/family — create new family
-familyRoutes.post("/", async (c) => {
+familyRoutes.openapi(createFamilyRoute, async (c) => {
   const familyId = generateFamilyId();
 
   let body: { userId: string; displayName?: string } | null;
@@ -90,7 +228,7 @@ familyRoutes.post("/", async (c) => {
 });
 
 // POST /api/family/:id/join
-familyRoutes.post("/:id/join", async (c) => {
+familyRoutes.openapi(joinFamilyRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
@@ -142,7 +280,8 @@ familyRoutes.post("/:id/join", async (c) => {
     max: 10,
     windowSec: 3600,
   });
-  if (rateLimitResponse) return rateLimitResponse;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (rateLimitResponse) return rateLimitResponse as any;
 
   // Check if user already belongs to a different family (before verify to avoid leaking membership info)
   const existingFamily = await c.env.KV.get(kvKeys.member(body.userId));
@@ -234,7 +373,7 @@ familyRoutes.post("/:id/join", async (c) => {
 });
 
 // DELETE /api/family/:id/member/:uid
-familyRoutes.delete("/:id/member/:uid", async (c) => {
+familyRoutes.openapi(removeMemberRoute, async (c) => {
   const familyId = c.req.param("id");
   const targetUserId = c.req.param("uid");
 
@@ -335,7 +474,7 @@ familyRoutes.delete("/:id/member/:uid", async (c) => {
 });
 
 // GET /api/family/:id/members
-familyRoutes.get("/:id/members", async (c) => {
+familyRoutes.openapi(listMembersRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
@@ -380,7 +519,7 @@ familyRoutes.get("/:id/members", async (c) => {
 });
 
 // PUT /api/family/:id/member/:uid/displayName — update display name
-familyRoutes.put("/:id/member/:uid/displayName", async (c) => {
+familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
   const familyId = c.req.param("id");
   const targetUserId = c.req.param("uid");
 
@@ -475,7 +614,7 @@ familyRoutes.put("/:id/member/:uid/displayName", async (c) => {
 });
 
 // PATCH /api/family/:id/member/:uid — update member settings (canLend, readmooName)
-familyRoutes.patch("/:id/member/:uid", async (c) => {
+familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
   const familyId = c.req.param("id");
   const targetUserId = c.req.param("uid");
 
@@ -608,7 +747,7 @@ familyRoutes.patch("/:id/member/:uid", async (c) => {
 });
 
 // PUT /api/family/:id/transfer — transfer ownership
-familyRoutes.put("/:id/transfer", async (c) => {
+familyRoutes.openapi(transferOwnershipRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
@@ -696,7 +835,7 @@ familyRoutes.put("/:id/transfer", async (c) => {
 });
 
 // PUT /api/family/:id/endpoint — update family API endpoint
-familyRoutes.put("/:id/endpoint", async (c) => {
+familyRoutes.openapi(updateEndpointRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {

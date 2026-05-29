@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
 import {
   kvKeys,
@@ -14,16 +14,78 @@ import {
 import { isValidFamilyId, isValidUserId, isValidRequestId } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
+import { defaultHook, jsonRes } from "../utils/openapi";
+import { FamilyIdParam, RequestIdParamObj } from "../schemas/common";
 
-export const borrowRoutes = new Hono<{ Bindings: Env }>();
+export const borrowRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 /** Check if a member has lending enabled (treat missing/undefined as TRUE for backward compat). */
 function isMemberLendingEnabled(member: FamilyMember): boolean {
   return member.canLend !== BoolFlag.FALSE;
 }
 
+// --- Route definitions ---
+
+const createBorrowRoute = createRoute({
+  method: "post",
+  path: "/family/{id}/borrow",
+  tags: ["Borrow"],
+  summary: "Create a borrow request",
+  request: {
+    params: FamilyIdParam,
+  },
+  responses: {
+    201: jsonRes("Borrow request created"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("Family not found"),
+    429: jsonRes("Rate limited"),
+    500: jsonRes("Internal error"),
+  },
+});
+
+const listBorrowRoute = createRoute({
+  method: "get",
+  path: "/family/{id}/borrow",
+  tags: ["Borrow"],
+  summary: "List family borrow requests",
+  request: {
+    params: FamilyIdParam,
+  },
+  responses: {
+    200: jsonRes("List of borrow requests"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("Family not found"),
+    429: jsonRes("Rate limited"),
+  },
+});
+
+const updateBorrowRoute = createRoute({
+  method: "patch",
+  path: "/borrow/{requestId}",
+  tags: ["Borrow"],
+  summary: "Update borrow request status",
+  request: {
+    params: RequestIdParamObj,
+  },
+  responses: {
+    200: jsonRes("Updated borrow request"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("Request not found"),
+    422: jsonRes("Invalid status transition"),
+    429: jsonRes("Rate limited"),
+  },
+});
+
+// --- Handlers ---
+
 // POST /api/family/:id/borrow — create borrow request
-borrowRoutes.post("/family/:id/borrow", async (c) => {
+borrowRoutes.openapi(createBorrowRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
@@ -97,7 +159,8 @@ borrowRoutes.post("/family/:id/borrow", async (c) => {
     max: 10,
     windowSec: 60,
   });
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rateLimitResponse as any;
 
   // Load family record
   const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
@@ -213,7 +276,7 @@ borrowRoutes.post("/family/:id/borrow", async (c) => {
 });
 
 // GET /api/family/:id/borrow — list family borrow requests
-borrowRoutes.get("/family/:id/borrow", async (c) => {
+borrowRoutes.openapi(listBorrowRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
@@ -237,7 +300,8 @@ borrowRoutes.get("/family/:id/borrow", async (c) => {
     max: 60,
     windowSec: 60,
   });
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rateLimitResponse as any;
 
   // Verify caller is a family member
   const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
@@ -273,7 +337,7 @@ borrowRoutes.get("/family/:id/borrow", async (c) => {
 });
 
 // PATCH /api/borrow/:requestId — update borrow status
-borrowRoutes.patch("/borrow/:requestId", async (c) => {
+borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   const requestId = c.req.param("requestId");
 
   if (!isValidRequestId(requestId)) {
@@ -324,7 +388,8 @@ borrowRoutes.patch("/borrow/:requestId", async (c) => {
     max: 30,
     windowSec: 60,
   });
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rateLimitResponse as any;
 
   // Load borrow record
   const borrowRequest = await c.env.KV.get<BorrowRequest>(kvKeys.borrow(requestId), "json");
