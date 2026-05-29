@@ -18,6 +18,18 @@ import { BorrowStatus, type BorrowRequest } from "../api/types";
 
 const APP_ENV = getAppEnv();
 
+type FloatingIconSize = "small" | "medium" | "large";
+
+export function getButtonSizeStyles(size: FloatingIconSize): { padding: string; fontSize: string } {
+  if (size === "small") return { padding: "6px 12px", fontSize: "12px" };
+  if (size === "large") return { padding: "14px 24px", fontSize: "16px" };
+  return { padding: "12px 20px", fontSize: "14px" };
+}
+
+export function isFloatingIconSize(value: unknown): value is FloatingIconSize {
+  return value === "small" || value === "medium" || value === "large";
+}
+
 let envStyleInjected = false;
 function injectEnvStyle(): void {
   if (envStyleInjected) return;
@@ -47,7 +59,7 @@ function injectEnvStyle(): void {
   document.head.appendChild(style);
 }
 
-function injectFamilyBookshelfButton(): void {
+async function injectFamilyBookshelfButton(): Promise<void> {
   if (!isExtensionContextValid()) {
     cleanupMooFamilyUI();
     return;
@@ -55,6 +67,18 @@ function injectFamilyBookshelfButton(): void {
 
   // Avoid duplicate injection
   if (document.getElementById(MOO_ELEMENT_IDS.button)) return;
+
+  // Read stored size (default to medium if missing/invalid)
+  let size: FloatingIconSize = "medium";
+  try {
+    const stored = await chrome.storage.local.get(["floatingIconSize"]);
+    if (isFloatingIconSize(stored.floatingIconSize)) {
+      size = stored.floatingIconSize;
+    }
+  } catch {
+    // fallback to medium
+  }
+  const { padding, fontSize } = getButtonSizeStyles(size);
 
   const button = document.createElement("button");
   button.id = MOO_ELEMENT_IDS.button;
@@ -64,12 +88,12 @@ function injectFamilyBookshelfButton(): void {
     "bottom: 24px",
     "right: 24px",
     "z-index: 99999",
-    "padding: 12px 20px",
+    `padding: ${padding}`,
     "border-radius: 8px",
     "border: none",
     "background: #2563eb",
     "color: white",
-    "font-size: 14px",
+    `font-size: ${fontSize}`,
     "font-weight: 600",
     "cursor: pointer",
     "box-shadow: 0 2px 8px rgba(0,0,0,0.15)",
@@ -306,12 +330,31 @@ function waitAndInjectButton(): void {
   document.getElementById(MOO_ELEMENT_IDS.button)?.remove();
 
   waitForPageReady(controller.signal)
-    .then(() => injectFamilyBookshelfButton())
+    .then(() => void injectFamilyBookshelfButton())
     .catch((err: unknown) => {
       // AbortError means a new navigation cancelled this wait — silently ignore
       if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("[MooFamily] Page ready detection failed:", err);
     });
+}
+
+/**
+ * Listen for floatingIconSize changes and update the existing button in
+ * place — avoids re-injection (which would lose the badge state).
+ */
+function listenForIconSizeChanges(): void {
+  if (!isExtensionContextValid()) return;
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") return;
+    if (!changes.floatingIconSize) return;
+    const newValue = changes.floatingIconSize.newValue;
+    const size: FloatingIconSize = isFloatingIconSize(newValue) ? newValue : "medium";
+    const button = document.getElementById(MOO_ELEMENT_IDS.button);
+    if (!button) return;
+    const { padding, fontSize } = getButtonSizeStyles(size);
+    button.style.padding = padding;
+    button.style.fontSize = fontSize;
+  });
 }
 
 // Run on page load
@@ -322,6 +365,7 @@ if (!isExtensionContextValid()) {
     waitAndInjectButton();
     tryScrapeAndCacheEmail();
     listenForBackgroundSync();
+    listenForIconSizeChanges();
   };
 
   if (document.readyState === "loading") {
