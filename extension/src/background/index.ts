@@ -128,6 +128,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "GET_FAMILY_SHELF_VIEW_MODE") {
+    chrome.storage.local.get(["familyShelfViewMode"], (result) => {
+      const stored = result.familyShelfViewMode;
+      const viewMode = stored === "row" ? "row" : "grid";
+      sendResponse({ viewMode });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_FAMILY_SHELF_VIEW_MODE") {
+    const value = message.viewMode;
+    if (value !== "grid" && value !== "row") {
+      sendResponse({ ok: false, error: "viewMode must be 'grid' or 'row'" });
+      return true;
+    }
+    chrome.storage.local.set({ familyShelfViewMode: value }, () => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
   if (message.type === "SET_SYNC_ERROR_BADGE") {
     showSyncErrorBadge();
     sendResponse({ ok: true });
