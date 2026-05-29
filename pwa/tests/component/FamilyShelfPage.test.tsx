@@ -339,7 +339,7 @@ describe("FamilyShelfPage", () => {
     });
 
     // Switch to "所有人"
-    fireEvent.change(screen.getByRole("combobox"), {
+    fireEvent.change(screen.getByLabelText("篩選成員"), {
       target: { value: "all" },
     });
 
@@ -476,7 +476,7 @@ describe("FamilyShelfPage", () => {
     });
 
     // Switch to "all" filter to see self's books
-    fireEvent.change(screen.getByRole("combobox"), {
+    fireEvent.change(screen.getByLabelText("篩選成員"), {
       target: { value: "all" },
     });
 

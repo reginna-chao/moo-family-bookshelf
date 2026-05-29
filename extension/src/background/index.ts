@@ -128,6 +128,42 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "GET_BOOK_SORT") {
+    const shelf = message.shelf;
+    if (shelf !== "family" && shelf !== "personal") {
+      sendResponse({ sort: "default" });
+      return true;
+    }
+    const key = shelf === "family" ? "familyShelfSort" : "personalShelfSort";
+    chrome.storage.local.get([key], (result) => {
+      const stored = result[key];
+      const sort =
+        stored === "default" || stored === "title" || stored === "author"
+          ? stored
+          : "default";
+      sendResponse({ sort });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_BOOK_SORT") {
+    const shelf = message.shelf;
+    const value = message.sort;
+    if (shelf !== "family" && shelf !== "personal") {
+      sendResponse({ ok: false, error: "shelf must be 'family' or 'personal'" });
+      return true;
+    }
+    if (value !== "default" && value !== "title" && value !== "author") {
+      sendResponse({ ok: false, error: "sort must be 'default', 'title', or 'author'" });
+      return true;
+    }
+    const key = shelf === "family" ? "familyShelfSort" : "personalShelfSort";
+    chrome.storage.local.set({ [key]: value }, () => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
   if (message.type === "SET_SYNC_ERROR_BADGE") {
     showSyncErrorBadge();
     sendResponse({ ok: true });

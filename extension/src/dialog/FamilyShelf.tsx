@@ -8,6 +8,9 @@ import { useLoadMore } from "./useLoadMore";
 import { useFamilyData, MemberBooks } from "./FamilyDataContext";
 import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
 import { LoadingState } from "./LoadingState";
+import { useBookSort } from "./useBookSort";
+import { sortBooks } from "./sortBooks";
+import { BookSortDropdown } from "./BookSortDropdown";
 
 export interface FamilyShelfProps {
   userId: string;
@@ -48,6 +51,7 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const { sort, setSort } = useBookSort("family");
 
   const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
@@ -67,9 +71,11 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   const { searchTerm, setSearchTerm, resetSearch, filteredItems, isFiltering } =
     useSearch(categoryFilteredBooks);
 
+  const sortedBooks = useMemo(() => sortBooks(filteredItems, sort), [filteredItems, sort]);
+
   const narrowingActive = searchTerm !== "" || categoryFilter !== "";
   const { visibleItems: visibleBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
-    items: filteredItems,
+    items: sortedBooks,
     narrowingActive,
   });
 
@@ -175,12 +181,17 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
         </span>
       </h3>
 
-      <MemberDropdown
-        members={members}
-        userId={userId}
-        value={filterMember}
-        onChange={handleMemberFilterChange}
-      />
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <MemberDropdown
+            members={members}
+            userId={userId}
+            value={filterMember}
+            onChange={handleMemberFilterChange}
+          />
+        </div>
+        <BookSortDropdown value={sort} onChange={setSort} />
+      </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <div style={{ flex: 1 }}>
           <SearchBar
