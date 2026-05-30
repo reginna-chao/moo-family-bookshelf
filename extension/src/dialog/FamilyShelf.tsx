@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo } from "react";
 import { BoolFlag, BorrowStatus } from "../api/client";
 import { BookCard, BookWithMember } from "./BookCard";
+import { FamilyBookRow } from "./FamilyBookRow";
 import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
 import { SearchBar } from "./SearchBar";
 import { useSearch } from "./useSearch";
@@ -8,6 +9,8 @@ import { useLoadMore } from "./useLoadMore";
 import { useFamilyData, MemberBooks } from "./FamilyDataContext";
 import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
 import { LoadingState } from "./LoadingState";
+import { useFamilyShelfViewMode } from "./useFamilyShelfViewMode";
+import { ViewModeToggle } from "./ViewModeToggle";
 
 export interface FamilyShelfProps {
   userId: string;
@@ -48,6 +51,7 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const { viewMode, setViewMode } = useFamilyShelfViewMode();
 
   const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
@@ -198,27 +202,45 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
           open={categoryOpen}
           onToggle={() => setCategoryOpen(prev => !prev)}
         />
+        <ViewModeToggle mode={viewMode} onChange={setViewMode} />
       </div>
 
       <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-          gap: 12,
-        }}
+        style={
+          viewMode === "grid"
+            ? {
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+                gap: 12,
+              }
+            : undefined
+        }
       >
         {visibleBooks.map((book) => {
           const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
           const isOwnBook = book.ownerId === userId;
           const showBorrowButton = !isOwnBook && viewerCanLend && ownerCanLend;
           const borrowRequestPending = pendingBookIds.has(book.bookId);
+          const key = `${book.memberName}-${book.bookId}`;
+          const onBorrowClick = () => void handleBorrowClick(book);
+          if (viewMode === "row") {
+            return (
+              <FamilyBookRow
+                key={key}
+                book={book}
+                showBorrowButton={showBorrowButton}
+                borrowRequestPending={borrowRequestPending}
+                onBorrowClick={onBorrowClick}
+              />
+            );
+          }
           return (
             <BookCard
-              key={`${book.memberName}-${book.bookId}`}
+              key={key}
               book={book}
               showBorrowButton={showBorrowButton}
               borrowRequestPending={borrowRequestPending}
-              onBorrowClick={() => void handleBorrowClick(book)}
+              onBorrowClick={onBorrowClick}
             />
           );
         })}
