@@ -128,6 +128,51 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "GET_FAMILY_SHELF_VIEW_MODE") {
+    chrome.storage.local.get(["familyShelfViewMode"], (result) => {
+      const stored = result.familyShelfViewMode;
+      const viewMode = stored === "row" ? "row" : "grid";
+      sendResponse({ viewMode });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_FAMILY_SHELF_VIEW_MODE") {
+    const value = message.viewMode;
+    if (value !== "grid" && value !== "row") {
+      sendResponse({ ok: false, error: "viewMode must be 'grid' or 'row'" });
+      return true;
+    }
+    chrome.storage.local.set({ familyShelfViewMode: value }, () => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
+  if (message.type === "GET_FLOATING_ICON_SIZE") {
+    chrome.storage.local.get(["floatingIconSize"], (result) => {
+      const stored = result.floatingIconSize;
+      const size =
+        stored === "small" || stored === "medium" || stored === "large" || stored === "icon"
+          ? stored
+          : "medium";
+      sendResponse({ size });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_FLOATING_ICON_SIZE") {
+    const value = message.size;
+    if (value !== "small" && value !== "medium" && value !== "large" && value !== "icon") {
+      sendResponse({ ok: false, error: "size must be 'small', 'medium', 'large', or 'icon'" });
+      return true;
+    }
+    chrome.storage.local.set({ floatingIconSize: value }, () => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
   if (message.type === "GET_BOOK_SORT") {
     const shelf = message.shelf;
     if (shelf !== "family" && shelf !== "personal") {

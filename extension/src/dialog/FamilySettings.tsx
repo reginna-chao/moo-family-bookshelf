@@ -3,6 +3,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
+import { useFloatingIconSize } from "./useFloatingIconSize";
+import { FloatingIconSizeSelector } from "./FloatingIconSizeSelector";
 import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
 import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "../constants";
@@ -45,6 +47,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [deleteState, setDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
+  const { size: iconSize, setSize: setIconSize } = useFloatingIconSize();
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inviteCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selfMember = members.find((m) => m.userId === userId);
@@ -236,6 +239,15 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             </button>
             <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6, marginBottom: 0 }}>
               啟用後，同步時會一併讀取已封存的書籍
+            </div>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: "#334155", fontSize: 14, marginBottom: 6 }}>
+              家庭書櫃按鈕大小
+            </div>
+            <FloatingIconSizeSelector size={iconSize} onChange={setIconSize} />
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
+              在讀墨頁面顯示的家庭書櫃按鈕大小
             </div>
           </div>
         </>

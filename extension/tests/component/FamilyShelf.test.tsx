@@ -620,6 +620,58 @@ describe("FamilyShelf", () => {
     expect(screen.queryByText("不應出現")).not.toBeInTheDocument();
   });
 
+  describe("View Mode Toggle (Wave B)", () => {
+    function setupWithBooks() {
+      return createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+        }),
+        getFamilyBookshelf: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-1",
+            members: [
+              {
+                userId: "user-2",
+                displayName: "Alice",
+                books: makeMemberBooks([
+                  { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
+                ]),
+                lastUpdated: "2024-01-01",
+              },
+            ],
+          },
+        }),
+      });
+    }
+
+    it("renders ViewModeToggle in toolbar", async () => {
+      renderWithProvider(<FamilyShelf userId="user-1" />, setupWithBooks());
+      await waitFor(() => {
+        expect(screen.getByRole("group", { name: "家庭書櫃顯示模式" })).toBeInTheDocument();
+      });
+    });
+
+    it("defaults to grid mode", async () => {
+      renderWithProvider(<FamilyShelf userId="user-1" />, setupWithBooks());
+      await waitFor(() => {
+        expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute("aria-pressed", "true");
+      });
+    });
+
+    it("switches to row mode on row button click", async () => {
+      renderWithProvider(<FamilyShelf userId="user-1" />, setupWithBooks());
+      await waitFor(() => {
+        expect(screen.getByText("書一")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText("切換為列表檢視"));
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute("aria-pressed", "true");
+      });
+    });
+  });
+
   describe("Load More (Wave G)", () => {
     function makeManyBooks(count: number) {
       return Array.from({ length: count }, (_, i) => ({

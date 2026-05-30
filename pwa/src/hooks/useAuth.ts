@@ -96,6 +96,7 @@ function removeUserKeys(): void {
     localStorage.removeItem(namespacedKey(userId, "apiHost"));
     localStorage.removeItem(namespacedKey(userId, "authToken"));
     localStorage.removeItem(namespacedKey(userId, "syncArchived"));
+    localStorage.removeItem(namespacedKey(userId, "familyShelfViewMode"));
     localStorage.removeItem(namespacedKey(userId, "familyShelfSort"));
     localStorage.removeItem(namespacedKey(userId, "personalShelfSort"));
     localStorage.removeItem(namespacedKey(userId, "pwaNoticeShown"));

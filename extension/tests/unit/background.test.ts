@@ -189,6 +189,112 @@ describe("background service worker", () => {
     });
   });
 
+  describe("GET_FAMILY_SHELF_VIEW_MODE", () => {
+    it("returns 'grid' when storage has no value", async () => {
+      const response = await sendMessage({ type: "GET_FAMILY_SHELF_VIEW_MODE" });
+      expect(response).toEqual({ viewMode: "grid" });
+    });
+
+    it("returns 'row' when storage has 'row'", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ familyShelfViewMode: "row" });
+        },
+      );
+      const response = await sendMessage({ type: "GET_FAMILY_SHELF_VIEW_MODE" });
+      expect(response).toEqual({ viewMode: "row" });
+    });
+
+    it("returns 'grid' when storage has invalid value", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ familyShelfViewMode: "foo" });
+        },
+      );
+      const response = await sendMessage({ type: "GET_FAMILY_SHELF_VIEW_MODE" });
+      expect(response).toEqual({ viewMode: "grid" });
+    });
+  });
+
+  describe("SET_FAMILY_SHELF_VIEW_MODE", () => {
+    it.each(["grid", "row"] as const)("writes '%s' to local storage and responds ok", async (mode) => {
+      const response = await sendMessage({
+        type: "SET_FAMILY_SHELF_VIEW_MODE",
+        viewMode: mode,
+      });
+      expect(response).toEqual({ ok: true });
+      expect(chrome.storage.local.set).toHaveBeenCalledWith(
+        { familyShelfViewMode: mode },
+        expect.any(Function),
+      );
+    });
+
+    it.each(["foo", undefined, 42, ""])(
+      "rejects invalid value '%s' without writing",
+      async (invalidValue) => {
+        const response = await sendMessage({
+          type: "SET_FAMILY_SHELF_VIEW_MODE",
+          viewMode: invalidValue,
+        });
+        expect(response).toEqual({ ok: false, error: expect.any(String) });
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe("GET_FLOATING_ICON_SIZE", () => {
+    it("returns 'medium' when storage has no value", async () => {
+      const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
+      expect(response).toEqual({ size: "medium" });
+    });
+
+    it.each(["small", "medium", "large", "icon"] as const)("returns '%s' when storage has '%s'", async (size) => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ floatingIconSize: size });
+        },
+      );
+      const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
+      expect(response).toEqual({ size });
+    });
+
+    it("returns 'medium' when storage has invalid value", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ floatingIconSize: "huge" });
+        },
+      );
+      const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
+      expect(response).toEqual({ size: "medium" });
+    });
+  });
+
+  describe("SET_FLOATING_ICON_SIZE", () => {
+    it.each(["small", "medium", "large", "icon"] as const)("writes '%s' to local storage and responds ok", async (size) => {
+      const response = await sendMessage({
+        type: "SET_FLOATING_ICON_SIZE",
+        size,
+      });
+      expect(response).toEqual({ ok: true });
+      expect(chrome.storage.local.set).toHaveBeenCalledWith(
+        { floatingIconSize: size },
+        expect.any(Function),
+      );
+    });
+
+    it.each(["huge", undefined, 42, ""])(
+      "rejects invalid value '%s' without writing",
+      async (invalidValue) => {
+        const response = await sendMessage({
+          type: "SET_FLOATING_ICON_SIZE",
+          size: invalidValue,
+        });
+        expect(response).toEqual({ ok: false, error: expect.any(String) });
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   describe("GET_BOOK_SORT", () => {
     it("returns 'default' when storage has no value for family", async () => {
       const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });

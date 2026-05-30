@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+  <title>MooFamily Bookshelf — Monochrome Icon</title>
+
+  <!-- Arch frame (outer minus inner via evenodd) -->
+  <path fill-rule="evenodd" d="
+    M 3 22 L 3 11 A 9 9 0 0 1 21 11 L 21 22 Z
+    M 5 21 L 5 11.5 A 7 7 0 0 1 19 11.5 L 19 21 Z
+  "/>
+
+  <!-- Upper shelf plank -->
+  <rect x="5" y="15" width="14" height="1.2" rx="0.2"/>
+
+  <!-- Upper books (2 books, wider gaps) -->
+  <rect x="6.5" y="9.5" width="2" height="5.5" rx="0.5"/>
+  <rect x="10" y="10.5" width="2" height="4.5" rx="0.5"/>
+
+  <!-- Plant pot (upper shelf right) -->
+  <path d="M 15 14.8 L 15.5 12.8 L 17.5 12.8 L 18 14.8 Z"/>
+
+  <!-- Plant leaves (simplified to 3) -->
+  <path d="M 16.5 12.8 Q 14.5 11 14.5 9.5 Q 15.5 10 16.5 12.8 Z"/>
+  <path d="M 16.5 12.8 Q 18.5 11 18.5 9.5 Q 17.5 10 16.5 12.8 Z"/>
+  <path d="M 16.5 12.8 Q 16.5 10.5 16 8.5 Q 17 8.5 16.5 12.8 Z"/>
+
+  <!-- Lower shelf plank (bottom) -->
+  <rect x="5" y="20.5" width="14" height="1.2" rx="0.2"/>
+
+  <!-- Lower books (3 books, wider gaps) -->
+  <rect x="6.5" y="16.5" width="2" height="4" rx="0.5"/>
+  <rect x="10" y="17" width="2" height="3.5" rx="0.5"/>
+  <rect x="13.5" y="16.5" width="2" height="4" rx="0.5"/>
+  <!-- Tilted book -->
+  <rect x="16.5" y="17" width="1.8" height="3.5" rx="0.5" transform="rotate(-10 17.4 18.8)"/>
+</svg>
