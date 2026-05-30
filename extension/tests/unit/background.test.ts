@@ -242,6 +242,59 @@ describe("background service worker", () => {
     );
   });
 
+  describe("GET_FLOATING_ICON_SIZE", () => {
+    it("returns 'medium' when storage has no value", async () => {
+      const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
+      expect(response).toEqual({ size: "medium" });
+    });
+
+    it.each(["small", "medium", "large", "icon"] as const)("returns '%s' when storage has '%s'", async (size) => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ floatingIconSize: size });
+        },
+      );
+      const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
+      expect(response).toEqual({ size });
+    });
+
+    it("returns 'medium' when storage has invalid value", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ floatingIconSize: "huge" });
+        },
+      );
+      const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
+      expect(response).toEqual({ size: "medium" });
+    });
+  });
+
+  describe("SET_FLOATING_ICON_SIZE", () => {
+    it.each(["small", "medium", "large", "icon"] as const)("writes '%s' to local storage and responds ok", async (size) => {
+      const response = await sendMessage({
+        type: "SET_FLOATING_ICON_SIZE",
+        size,
+      });
+      expect(response).toEqual({ ok: true });
+      expect(chrome.storage.local.set).toHaveBeenCalledWith(
+        { floatingIconSize: size },
+        expect.any(Function),
+      );
+    });
+
+    it.each(["huge", undefined, 42, ""])(
+      "rejects invalid value '%s' without writing",
+      async (invalidValue) => {
+        const response = await sendMessage({
+          type: "SET_FLOATING_ICON_SIZE",
+          size: invalidValue,
+        });
+        expect(response).toEqual({ ok: false, error: expect.any(String) });
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   describe("sync error badge messages", () => {
     it("SET_SYNC_ERROR_BADGE sets badge text to '!'", async () => {
       await sendMessage({ type: "SET_SYNC_ERROR_BADGE" });

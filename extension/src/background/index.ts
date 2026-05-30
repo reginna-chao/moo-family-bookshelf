@@ -149,6 +149,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "GET_FLOATING_ICON_SIZE") {
+    chrome.storage.local.get(["floatingIconSize"], (result) => {
+      const stored = result.floatingIconSize;
+      const size =
+        stored === "small" || stored === "medium" || stored === "large" || stored === "icon"
+          ? stored
+          : "medium";
+      sendResponse({ size });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_FLOATING_ICON_SIZE") {
+    const value = message.size;
+    if (value !== "small" && value !== "medium" && value !== "large" && value !== "icon") {
+      sendResponse({ ok: false, error: "size must be 'small', 'medium', 'large', or 'icon'" });
+      return true;
+    }
+    chrome.storage.local.set({ floatingIconSize: value }, () => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
   if (message.type === "SET_SYNC_ERROR_BADGE") {
     showSyncErrorBadge();
     sendResponse({ ok: true });
