@@ -5,18 +5,20 @@ import { FloatingIconSizeSelector } from "@/dialog/FloatingIconSizeSelector";
 import type { FloatingIconSize } from "@/dialog/useFloatingIconSize";
 
 describe("FloatingIconSizeSelector", () => {
-  it("renders three buttons with correct aria-labels", () => {
+  it("renders four buttons with correct aria-labels", () => {
     render(<FloatingIconSizeSelector size="medium" onChange={vi.fn()} />);
 
+    expect(screen.getByLabelText("僅圖示")).toBeInTheDocument();
     expect(screen.getByLabelText("小尺寸")).toBeInTheDocument();
     expect(screen.getByLabelText("中尺寸")).toBeInTheDocument();
     expect(screen.getByLabelText("大尺寸")).toBeInTheDocument();
   });
 
   it.each<{ current: FloatingIconSize; pressed: string; notPressed: string[] }>([
-    { current: "small", pressed: "小尺寸", notPressed: ["中尺寸", "大尺寸"] },
-    { current: "medium", pressed: "中尺寸", notPressed: ["小尺寸", "大尺寸"] },
-    { current: "large", pressed: "大尺寸", notPressed: ["小尺寸", "中尺寸"] },
+    { current: "icon", pressed: "僅圖示", notPressed: ["小尺寸", "中尺寸", "大尺寸"] },
+    { current: "small", pressed: "小尺寸", notPressed: ["僅圖示", "中尺寸", "大尺寸"] },
+    { current: "medium", pressed: "中尺寸", notPressed: ["僅圖示", "小尺寸", "大尺寸"] },
+    { current: "large", pressed: "大尺寸", notPressed: ["僅圖示", "小尺寸", "中尺寸"] },
   ])("marks $current button as pressed", ({ current, pressed, notPressed }) => {
     render(<FloatingIconSizeSelector size={current} onChange={vi.fn()} />);
 
@@ -27,6 +29,7 @@ describe("FloatingIconSizeSelector", () => {
   });
 
   it.each<{ label: string; expected: FloatingIconSize }>([
+    { label: "僅圖示", expected: "icon" },
     { label: "小尺寸", expected: "small" },
     { label: "中尺寸", expected: "medium" },
     { label: "大尺寸", expected: "large" },

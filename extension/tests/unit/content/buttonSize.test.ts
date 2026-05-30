@@ -3,6 +3,7 @@ import { getButtonSizeStyles, isFloatingIconSize } from "@/content/index";
 
 describe("getButtonSizeStyles", () => {
   it.each([
+    { size: "icon" as const, padding: "10px", fontSize: "0px" },
     { size: "small" as const, padding: "6px 12px", fontSize: "12px" },
     { size: "medium" as const, padding: "12px 20px", fontSize: "14px" },
     { size: "large" as const, padding: "14px 24px", fontSize: "16px" },
@@ -13,6 +14,7 @@ describe("getButtonSizeStyles", () => {
 
 describe("isFloatingIconSize", () => {
   it.each([
+    { value: "icon", expected: true },
     { value: "small", expected: true },
     { value: "medium", expected: true },
     { value: "large", expected: true },

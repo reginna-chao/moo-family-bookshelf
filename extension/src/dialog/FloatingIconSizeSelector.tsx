@@ -37,6 +37,7 @@ function Segment({ active, ariaLabel, label, onClick }: SegmentProps) {
 }
 
 const OPTIONS: Array<{ size: FloatingIconSize; label: string; ariaLabel: string }> = [
+  { size: "icon", label: "圖示", ariaLabel: "僅圖示" },
   { size: "small", label: "小", ariaLabel: "小尺寸" },
   { size: "medium", label: "中", ariaLabel: "中尺寸" },
   { size: "large", label: "大", ariaLabel: "大尺寸" },

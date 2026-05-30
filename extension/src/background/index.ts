@@ -132,7 +132,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     chrome.storage.local.get(["floatingIconSize"], (result) => {
       const stored = result.floatingIconSize;
       const size =
-        stored === "small" || stored === "medium" || stored === "large"
+        stored === "small" || stored === "medium" || stored === "large" || stored === "icon"
           ? stored
           : "medium";
       sendResponse({ size });
@@ -142,8 +142,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "SET_FLOATING_ICON_SIZE") {
     const value = message.size;
-    if (value !== "small" && value !== "medium" && value !== "large") {
-      sendResponse({ ok: false, error: "size must be 'small', 'medium', or 'large'" });
+    if (value !== "small" && value !== "medium" && value !== "large" && value !== "icon") {
+      sendResponse({ ok: false, error: "size must be 'small', 'medium', 'large', or 'icon'" });
       return true;
     }
     chrome.storage.local.set({ floatingIconSize: value }, () => {

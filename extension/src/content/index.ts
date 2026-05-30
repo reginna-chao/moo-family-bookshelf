@@ -18,16 +18,31 @@ import { BorrowStatus, type BorrowRequest } from "../api/types";
 
 const APP_ENV = getAppEnv();
 
-type FloatingIconSize = "small" | "medium" | "large";
+type FloatingIconSize = "small" | "medium" | "large" | "icon";
 
 export function getButtonSizeStyles(size: FloatingIconSize): { padding: string; fontSize: string } {
+  if (size === "icon") return { padding: "10px", fontSize: "0px" };
   if (size === "small") return { padding: "6px 12px", fontSize: "12px" };
   if (size === "large") return { padding: "14px 24px", fontSize: "16px" };
   return { padding: "12px 20px", fontSize: "14px" };
 }
 
 export function isFloatingIconSize(value: unknown): value is FloatingIconSize {
-  return value === "small" || value === "medium" || value === "large";
+  return value === "small" || value === "medium" || value === "large" || value === "icon";
+}
+
+const BOOK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
+
+function applyButtonContent(button: HTMLElement, size: FloatingIconSize): void {
+  if (size === "icon") {
+    button.textContent = "";
+    button.innerHTML = BOOK_ICON_SVG;
+    button.title = "家庭書櫃";
+  } else {
+    button.innerHTML = "";
+    button.textContent = "家庭書櫃";
+    button.title = "";
+  }
 }
 
 let envStyleInjected = false;
@@ -82,7 +97,7 @@ async function injectFamilyBookshelfButton(): Promise<void> {
 
   const button = document.createElement("button");
   button.id = MOO_ELEMENT_IDS.button;
-  button.textContent = "家庭書櫃";
+  applyButtonContent(button, size);
   button.style.cssText = [
     "position: fixed",
     "bottom: 24px",
@@ -354,6 +369,7 @@ function listenForIconSizeChanges(): void {
     const { padding, fontSize } = getButtonSizeStyles(size);
     button.style.padding = padding;
     button.style.fontSize = fontSize;
+    applyButtonContent(button, size);
   });
 }
 

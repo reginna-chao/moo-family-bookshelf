@@ -195,7 +195,7 @@ describe("background service worker", () => {
       expect(response).toEqual({ size: "medium" });
     });
 
-    it.each(["small", "medium", "large"] as const)("returns '%s' when storage has '%s'", async (size) => {
+    it.each(["small", "medium", "large", "icon"] as const)("returns '%s' when storage has '%s'", async (size) => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
           callback({ floatingIconSize: size });
@@ -217,7 +217,7 @@ describe("background service worker", () => {
   });
 
   describe("SET_FLOATING_ICON_SIZE", () => {
-    it.each(["small", "medium", "large"] as const)("writes '%s' to local storage and responds ok", async (size) => {
+    it.each(["small", "medium", "large", "icon"] as const)("writes '%s' to local storage and responds ok", async (size) => {
       const response = await sendMessage({
         type: "SET_FLOATING_ICON_SIZE",
         size,
