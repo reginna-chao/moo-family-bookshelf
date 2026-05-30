@@ -31,7 +31,7 @@ export function isFloatingIconSize(value: unknown): value is FloatingIconSize {
   return value === "small" || value === "medium" || value === "large" || value === "icon";
 }
 
-const BOOK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
+const BOOK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path fill-rule="evenodd" d="M3 22L3 11A9 9 0 0 1 21 11L21 22ZM5 21L5 11.5A7 7 0 0 1 19 11.5L19 21Z"/><rect x="5" y="15" width="14" height="1.2" rx=".2"/><rect x="6.5" y="9.5" width="2" height="5.5" rx=".5"/><rect x="10" y="10.5" width="2" height="4.5" rx=".5"/><path d="M15 14.8L15.5 12.8H17.5L18 14.8Z"/><path d="M16.5 12.8Q14.5 11 14.5 9.5Q15.5 10 16.5 12.8Z"/><path d="M16.5 12.8Q18.5 11 18.5 9.5Q17.5 10 16.5 12.8Z"/><path d="M16.5 12.8Q16.5 10.5 16 8.5Q17 8.5 16.5 12.8Z"/><rect x="5" y="20.5" width="14" height="1.2" rx=".2"/><rect x="6.5" y="16.5" width="2" height="4" rx=".5"/><rect x="10" y="17" width="2" height="3.5" rx=".5"/><rect x="13.5" y="16.5" width="2" height="4" rx=".5"/><rect x="16.5" y="17" width="1.8" height="3.5" rx=".5" transform="rotate(-10 17.4 18.8)"/></svg>`;
 
 function applyButtonContent(button: HTMLElement, size: FloatingIconSize): void {
   if (size === "icon") {
