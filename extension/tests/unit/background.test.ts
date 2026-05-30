@@ -295,6 +295,76 @@ describe("background service worker", () => {
     );
   });
 
+  describe("GET_BOOK_SORT", () => {
+    it("returns 'default' when storage has no value for family", async () => {
+      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
+      expect(response).toEqual({ sort: "default" });
+    });
+
+    it("returns stored value for family shelf", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ familyShelfSort: "title" });
+        },
+      );
+      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
+      expect(response).toEqual({ sort: "title" });
+    });
+
+    it("returns stored value for personal shelf", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ personalShelfSort: "author" });
+        },
+      );
+      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "personal" });
+      expect(response).toEqual({ sort: "author" });
+    });
+
+    it("returns 'default' for invalid shelf", async () => {
+      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "invalid" });
+      expect(response).toEqual({ sort: "default" });
+    });
+
+    it("returns 'default' when storage has invalid sort value", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ familyShelfSort: "bogus" });
+        },
+      );
+      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
+      expect(response).toEqual({ sort: "default" });
+    });
+  });
+
+  describe("SET_BOOK_SORT", () => {
+    it.each(
+      (["default", "title", "author"] as const).flatMap((sort) =>
+        (["family", "personal"] as const).map((shelf) => ({ sort, shelf })),
+      ),
+    )("writes '$sort' for '$shelf' to correct storage key", async ({ sort, shelf }) => {
+      const response = await sendMessage({ type: "SET_BOOK_SORT", shelf, sort });
+      expect(response).toEqual({ ok: true });
+      const expectedKey = shelf === "family" ? "familyShelfSort" : "personalShelfSort";
+      expect(chrome.storage.local.set).toHaveBeenCalledWith(
+        { [expectedKey]: sort },
+        expect.any(Function),
+      );
+    });
+
+    it("rejects invalid shelf without writing", async () => {
+      const response = await sendMessage({ type: "SET_BOOK_SORT", shelf: "invalid", sort: "title" });
+      expect(response).toEqual({ ok: false, error: expect.any(String) });
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid sort without writing", async () => {
+      const response = await sendMessage({ type: "SET_BOOK_SORT", shelf: "family", sort: "bogus" });
+      expect(response).toEqual({ ok: false, error: expect.any(String) });
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+  });
+
   describe("sync error badge messages", () => {
     it("SET_SYNC_ERROR_BADGE sets badge text to '!'", async () => {
       await sendMessage({ type: "SET_SYNC_ERROR_BADGE" });

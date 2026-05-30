@@ -129,7 +129,7 @@ test.describe("Book Sharing", () => {
 
     // The default filter is "其他家人的書" which excludes our own books.
     // Change the filter to "所有人的書" to see our own shared books.
-    const dropdown = dialog.locator("select");
+    const dropdown = dialog.getByLabel("篩選成員");
     if (await dropdown.isVisible()) {
       await dropdown.selectOption({ label: "所有人的書" });
 

@@ -10,6 +10,9 @@ import { LazyCover } from "@/components/LazyCover";
 import { useFamilyShelfViewMode } from "@/hooks/useFamilyShelfViewMode";
 import { ViewModeToggle } from "@/components/ViewModeToggle";
 import { FamilyBookRow } from "@/components/FamilyBookRow";
+import { useBookSort } from "@/hooks/useBookSort";
+import { sortBooks } from "@/utils/sortBooks";
+import { BookSortDropdown } from "@/components/BookSortDropdown";
 
 export interface FamilyShelfPageProps {
   userId: string;
@@ -55,6 +58,7 @@ export function FamilyShelfPage({
     useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
   const { viewMode, setViewMode } = useFamilyShelfViewMode(userId);
+  const { sort, setSort } = useBookSort(userId, "family");
 
   const memberCanLendMap = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -128,9 +132,11 @@ export function FamilyShelfPage({
     isFiltering,
   } = useSearch(categoryFilteredBooks);
 
+  const sortedBooks = useMemo(() => sortBooks(filteredItems, sort), [filteredItems, sort]);
+
   const narrowingActive = searchTerm !== "" || categoryFilter !== "";
   const { visibleItems: visibleBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
-    items: filteredItems,
+    items: sortedBooks,
     narrowingActive,
   });
 
@@ -194,21 +200,24 @@ export function FamilyShelfPage({
         <ViewModeToggle mode={viewMode} onChange={setViewMode} />
       </div>
 
-      <select
-        value={filterMember}
-        onChange={(e) => { setFilterMember(e.target.value as MemberFilterValue); setCategoryFilter(""); resetLoadMore(); }}
-        aria-label="篩選成員"
-        className="moo-form-select w-full rounded-lg border border-gray-300 pl-3 pr-9 py-2 text-sm mb-4 bg-white focus:border-blue-500 outline-none"
-      >
-        <option value="all">所有人的書</option>
-        <option value="all-except-self">其他家人的書</option>
-        <option value={userId}>自己的書</option>
-        {members.filter(m => m.userId !== userId).map((m) => (
-          <option key={m.userId} value={m.userId}>
-            {m.displayName || m.userId.slice(0, 8)}
-          </option>
-        ))}
-      </select>
+      <div className="flex gap-2 mb-4">
+        <select
+          value={filterMember}
+          onChange={(e) => { setFilterMember(e.target.value as MemberFilterValue); setCategoryFilter(""); resetLoadMore(); }}
+          aria-label="篩選成員"
+          className="moo-form-select flex-1 rounded-lg border border-gray-300 pl-3 pr-9 py-2 text-sm bg-white focus:border-blue-500 outline-none"
+        >
+          <option value="all">所有人的書</option>
+          <option value="all-except-self">其他家人的書</option>
+          <option value={userId}>自己的書</option>
+          {members.filter(m => m.userId !== userId).map((m) => (
+            <option key={m.userId} value={m.userId}>
+              {m.displayName || m.userId.slice(0, 8)}
+            </option>
+          ))}
+        </select>
+        <BookSortDropdown value={sort} onChange={setSort} />
+      </div>
 
       {isFiltering && (
         <p className="text-gray-400 text-xs mb-2">

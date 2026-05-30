@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, CSSProperties } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, CSSProperties } from "react";
 import { Share2 } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { BookRow } from "./BookRow";
@@ -12,6 +12,9 @@ import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
 import { usePersonalBooks } from "./usePersonalBooks";
 import { PublicShareDialog } from "./PublicShareDialog";
 import { useFamilyData } from "./FamilyDataContext";
+import { useBookSort } from "./useBookSort";
+import { sortBooks } from "./sortBooks";
+import { BookSortDropdown } from "./BookSortDropdown";
 
 export interface PersonalShelfProps {
   userId: string;
@@ -39,6 +42,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const [syncArchived, setSyncArchived] = useState<number>(0);
   const [showPublicShare, setShowPublicShare] = useState(false);
+  const { sort, setSort } = useBookSort("personal");
 
   const { syncStatus, syncError, triggerManualSync, lastSyncBooks, progressMessage } = useBookSync({
     userId,
@@ -84,9 +88,11 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
     useSearch(categoryFilteredBooks);
   resetSearchRef.current = resetSearch;
 
+  const sortedBooks = useMemo(() => sortBooks(filteredItems, sort), [filteredItems, sort]);
+
   const narrowingActive = searchTerm !== "" || statusFilter !== "all" || categoryFilter !== "";
   const { visibleItems: displayedBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
-    items: filteredItems,
+    items: sortedBooks,
     narrowingActive,
   });
 
@@ -202,7 +208,12 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
 
       {currentViewBooks.length > 0 && (
         <>
-          <StatusFilterBar value={statusFilter} onChange={handleStatusFilterChange} />
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+            <div style={{ flex: 1 }}>
+              <StatusFilterBar value={statusFilter} onChange={handleStatusFilterChange} />
+            </div>
+            <BookSortDropdown value={sort} onChange={setSort} />
+          </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
               <SearchBar

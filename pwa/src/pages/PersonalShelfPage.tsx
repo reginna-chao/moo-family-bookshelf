@@ -9,6 +9,9 @@ import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
 import { BookRow } from "@/components/BookRow";
 import { PublicShareDialog } from "@/components/PublicShareDialog";
 import { namespacedKey } from "@/hooks/useAuth";
+import { useBookSort } from "@/hooks/useBookSort";
+import { sortBooks } from "@/utils/sortBooks";
+import { BookSortDropdown } from "@/components/BookSortDropdown";
 
 interface PersonalShelfPageProps {
   userId: string;
@@ -33,6 +36,7 @@ export function PersonalShelfPage({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const [showPublicShare, setShowPublicShare] = useState(false);
+  const { sort, setSort } = useBookSort(userId, "personal");
   const originalBooksRef = useRef<BookEntry[]>([]);
   /** Raw server response — kept so save can spread back unknown fields from future versions */
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
@@ -202,9 +206,11 @@ export function PersonalShelfPage({
     isFiltering,
   } = useSearch(categoryFilteredBooks);
 
+  const sortedBooks = useMemo(() => sortBooks(filteredItems, sort), [filteredItems, sort]);
+
   const narrowingActive = searchTerm !== "" || statusFilter !== "all" || categoryFilter !== "";
   const { visibleItems: visibleBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
-    items: filteredItems,
+    items: sortedBooks,
     narrowingActive,
   });
 
@@ -299,19 +305,22 @@ export function PersonalShelfPage({
           </div>
         )}
 
-        <div className="flex gap-2 mb-3">
-          {(["all", "shared", "not-shared"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => { setStatusFilter(f); setCategoryFilter(""); }}
-              aria-pressed={statusFilter === f}
-              className={`px-3 py-1.5 text-xs rounded-full ${
-                statusFilter === f ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"
-              }`}
-            >
-              {f === "all" ? "全部" : f === "shared" ? "已開放" : "未開放"}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex gap-2 flex-1">
+            {(["all", "shared", "not-shared"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => { setStatusFilter(f); setCategoryFilter(""); }}
+                aria-pressed={statusFilter === f}
+                className={`px-3 py-1.5 text-xs rounded-full ${
+                  statusFilter === f ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {f === "all" ? "全部" : f === "shared" ? "已開放" : "未開放"}
+              </button>
+            ))}
+          </div>
+          <BookSortDropdown value={sort} onChange={setSort} />
         </div>
 
         <div className="flex gap-2 mb-3">
