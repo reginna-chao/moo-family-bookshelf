@@ -18,14 +18,17 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
       value={value}
       onChange={(e) => onChange(e.target.value as BookSortMode)}
       aria-label="書籍排序"
+      className="moo-form-select"
       style={{
         padding: "8px 12px",
+        paddingRight: "2.25rem",
         border: "1px solid #e2e8f0",
         borderRadius: 8,
-        background: "white",
-        fontSize: 13,
+        backgroundColor: "white",
+        fontSize: 14,
         color: "#334155",
         cursor: "pointer",
+        outline: "none",
       }}
     >
       {OPTIONS.map((opt) => (
