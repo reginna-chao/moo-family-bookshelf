@@ -173,6 +173,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "GET_AUTO_SYNC_INTERVAL") {
+    chrome.storage.local.get(["autoSyncInterval"], (result) => {
+      const stored = result.autoSyncInterval;
+      const interval =
+        stored === "daily" || stored === "weekly" || stored === "monthly" || stored === "never"
+          ? stored
+          : "daily";
+      sendResponse({ interval });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_AUTO_SYNC_INTERVAL") {
+    const value = message.interval;
+    if (value !== "daily" && value !== "weekly" && value !== "monthly" && value !== "never") {
+      sendResponse({ ok: false, error: "interval must be 'daily', 'weekly', 'monthly', or 'never'" });
+      return true;
+    }
+    chrome.storage.local.set({ autoSyncInterval: value }, () => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
   if (message.type === "GET_BOOK_SORT") {
     const shelf = message.shelf;
     if (shelf !== "family" && shelf !== "personal") {

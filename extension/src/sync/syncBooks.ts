@@ -18,8 +18,23 @@ import {
 } from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
 
-/** Minimum interval (ms) for rate-limited auto-sync */
-export const AUTO_SYNC_MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+/** User-configurable auto-sync frequency */
+export type AutoSyncInterval = "daily" | "weekly" | "monthly" | "never";
+
+/** Single source of truth: interval value (ms); `never` → null = disabled */
+export const AUTO_SYNC_INTERVALS_MS: Record<AutoSyncInterval, number | null> = {
+  daily: 24 * 60 * 60 * 1000,
+  weekly: 7 * 24 * 60 * 60 * 1000,
+  monthly: 30 * 24 * 60 * 60 * 1000,
+  never: null,
+};
+
+export const DEFAULT_AUTO_SYNC_INTERVAL: AutoSyncInterval = "daily";
+
+/** Type guard for AutoSyncInterval */
+export function isAutoSyncInterval(v: unknown): v is AutoSyncInterval {
+  return v === "daily" || v === "weekly" || v === "monthly" || v === "never";
+}
 
 /** Interval for background scheduled sync */
 export const BACKGROUND_SYNC_INTERVAL_MIN = 24 * 60; // 24 hours in minutes
@@ -35,13 +50,35 @@ function wait(ms: number): Promise<void> {
 }
 
 /**
- * Check if enough time has passed since the last sync for rate-limited sync.
+ * Shared interval gate: enough time has passed since the timestamp at `timestampKey`,
+ * relative to the user-configured `autoSyncInterval`.
  */
-export async function canAutoSync(): Promise<boolean> {
-  const result = await chrome.storage.local.get(["lastSyncAt"]);
-  const lastSyncAt = result.lastSyncAt as number | undefined;
-  if (!lastSyncAt) return true;
-  return Date.now() - lastSyncAt >= AUTO_SYNC_MIN_INTERVAL_MS;
+async function canSyncByInterval(timestampKey: string): Promise<boolean> {
+  const result = await chrome.storage.local.get([timestampKey, "autoSyncInterval"]);
+  const interval = isAutoSyncInterval(result.autoSyncInterval)
+    ? result.autoSyncInterval
+    : DEFAULT_AUTO_SYNC_INTERVAL;
+  const minMs = AUTO_SYNC_INTERVALS_MS[interval];
+  if (minMs === null) return false;
+  const last = result[timestampKey] as number | undefined;
+  if (!last) return true;
+  return Date.now() - last >= minMs;
+}
+
+/**
+ * Check if enough time has passed since the last full upload sync.
+ */
+export function canAutoSync(): Promise<boolean> {
+  return canSyncByInterval("lastSyncAt");
+}
+
+/**
+ * Check if enough time has passed since the last personal-shelf display scrape.
+ * Shares the `autoSyncInterval` setting but tracks a separate timestamp so the
+ * display path never suppresses upload sync.
+ */
+export function canDisplayScrape(): Promise<boolean> {
+  return canSyncByInterval("lastDisplayScrapeAt");
 }
 
 /**
@@ -158,8 +195,9 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
       window.location.hash = originalHash || "#/";
     }
 
-    // Step 7: Update lastSyncAt
-    await chrome.storage.local.set({ lastSyncAt: Date.now() });
+    // Step 7: A full sync just scraped fresh data (also refreshes the display via
+    // lastSyncBooks), so refresh BOTH timers to avoid a redundant display re-scrape.
+    await chrome.storage.local.set({ lastSyncAt: Date.now(), lastDisplayScrapeAt: Date.now() });
 
     return { success: true, books: merged };
   } catch (err) {

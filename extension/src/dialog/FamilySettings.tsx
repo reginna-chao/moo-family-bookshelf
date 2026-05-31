@@ -5,6 +5,8 @@ import { encodeSyncCode } from "../crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
 import { useFloatingIconSize } from "./useFloatingIconSize";
 import { FloatingIconSizeSelector } from "./FloatingIconSizeSelector";
+import { useAutoSyncInterval } from "./useAutoSyncInterval";
+import { AutoSyncIntervalSelector } from "./AutoSyncIntervalSelector";
 import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
 import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "../constants";
@@ -48,6 +50,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [deleteError, setDeleteError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
   const { size: iconSize, setSize: setIconSize } = useFloatingIconSize();
+  const { interval: autoSyncInterval, setInterval: setAutoSyncInterval } = useAutoSyncInterval();
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inviteCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selfMember = members.find((m) => m.userId === userId);
@@ -239,6 +242,15 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             </button>
             <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6, marginBottom: 0 }}>
               啟用後，同步時會一併讀取已封存的書籍
+            </div>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: "#334155", fontSize: 14, marginBottom: 6 }}>
+              自動同步頻率
+            </div>
+            <AutoSyncIntervalSelector value={autoSyncInterval} onChange={setAutoSyncInterval} />
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
+              家庭書櫃自動讀取書單的頻率；手動同步不受此限制
             </div>
           </div>
           <div style={{ marginBottom: 20 }}>
