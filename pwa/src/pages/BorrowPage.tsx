@@ -6,6 +6,8 @@ import {
   type FamilyMember,
 } from "@/api/client";
 import { useFamilyData } from "@/hooks/useFamilyData";
+import { useManualLendNotice } from "@/hooks/useManualLendNotice";
+import { ManualLendDialog } from "@/components/ManualLendDialog";
 
 export interface BorrowPageProps {
   userId: string;
@@ -87,10 +89,9 @@ interface BorrowCardProps {
   request: BorrowRequest;
   otherPartyName: string;
   actions: BorrowAction[];
-  notice?: string;
 }
 
-function BorrowCard({ request, otherPartyName, actions, notice }: BorrowCardProps) {
+function BorrowCard({ request, otherPartyName, actions }: BorrowCardProps) {
   const status = getStatusStyle(request.status);
   return (
     <div className="flex gap-3 p-3 bg-white border border-gray-200 rounded-lg">
@@ -125,9 +126,6 @@ function BorrowCard({ request, otherPartyName, actions, notice }: BorrowCardProp
             {formatRelativeTime(request.createdAt)}
           </span>
         </div>
-        {notice && (
-          <p className="text-xs text-amber-600 mt-1">{notice}</p>
-        )}
         {actions.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {actions.map((action) => (
@@ -154,7 +152,6 @@ interface BorrowSectionProps {
   archived: BorrowRequest[];
   renderActions: (request: BorrowRequest) => BorrowAction[];
   resolveOtherPartyName: (request: BorrowRequest) => string;
-  noticeFor?: (request: BorrowRequest) => string | undefined;
 }
 
 function BorrowSectionView({
@@ -163,7 +160,6 @@ function BorrowSectionView({
   archived,
   renderActions,
   resolveOtherPartyName,
-  noticeFor,
 }: BorrowSectionProps) {
   const [showArchived, setShowArchived] = useState(false);
 
@@ -191,7 +187,6 @@ function BorrowSectionView({
             request={req}
             otherPartyName={resolveOtherPartyName(req)}
             actions={renderActions(req)}
-            notice={noticeFor?.(req)}
           />
         ))}
       </div>
@@ -235,6 +230,10 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+  const { isDismissed, dismiss } = useManualLendNotice(userId);
+  const [manualLendRequest, setManualLendRequest] =
+    useState<BorrowRequest | null>(null);
+  const [dontRemind, setDontRemind] = useState(false);
 
   const memberNameMap = useMemo(
     () => buildMemberNameMap(members),
@@ -256,6 +255,33 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
     },
     [apiClient, refreshBorrowRequests],
   );
+
+  const handleManualLend = useCallback(
+    (request: BorrowRequest) => {
+      if (isDismissed) {
+        void updateStatus(request.requestId, BorrowStatus.LENT);
+        return;
+      }
+      setManualLendRequest(request);
+      setDontRemind(false);
+    },
+    [isDismissed, updateStatus],
+  );
+
+  const handleConfirmManualLend = useCallback(async () => {
+    if (!manualLendRequest) return;
+    if (dontRemind) {
+      dismiss();
+    }
+    await updateStatus(manualLendRequest.requestId, BorrowStatus.LENT);
+    setManualLendRequest(null);
+  }, [manualLendRequest, dontRemind, dismiss, updateStatus]);
+
+  const closeManualLendDialog = useCallback(() => setManualLendRequest(null), []);
+
+  const confirmManualLend = useCallback(() => {
+    void handleConfirmManualLend();
+  }, [handleConfirmManualLend]);
 
   const buckets = useMemo(() => {
     const incomingActive: BorrowRequest[] = [];
@@ -287,8 +313,13 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
       const isUpdating = pendingRequestId === request.requestId;
       if (request.status === BorrowStatus.PENDING) {
         if (direction === "incoming") {
-          // PWA cannot approve (Readmoo automation lives in the desktop Extension).
           return [
+            {
+              label: isUpdating ? "處理中..." : "手動借出",
+              variant: "primary",
+              disabled: isUpdating,
+              onClick: () => handleManualLend(request),
+            },
             {
               label: "拒絕",
               variant: "danger",
@@ -321,17 +352,7 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
       }
       return [];
     },
-    [pendingRequestId, updateStatus],
-  );
-
-  const noticeForIncoming = useCallback(
-    (request: BorrowRequest): string | undefined => {
-      if (request.status === BorrowStatus.PENDING) {
-        return "請在桌面 Extension 中同意借閱";
-      }
-      return undefined;
-    },
-    [],
+    [handleManualLend, pendingRequestId, updateStatus],
   );
 
   const resolveIncomingOtherParty = useCallback(
@@ -390,7 +411,6 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
         archived={buckets.incoming.archived}
         renderActions={(req) => buildActions(req, "incoming")}
         resolveOtherPartyName={resolveIncomingOtherParty}
-        noticeFor={noticeForIncoming}
       />
       <BorrowSectionView
         title="寄件匣"
@@ -399,6 +419,15 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
         renderActions={(req) => buildActions(req, "outgoing")}
         resolveOtherPartyName={resolveOutgoingOtherParty}
       />
+      {manualLendRequest && (
+        <ManualLendDialog
+          dontRemindChecked={dontRemind}
+          onDontRemindChange={setDontRemind}
+          onConfirm={confirmManualLend}
+          onCancel={closeManualLendDialog}
+          confirming={pendingRequestId === manualLendRequest.requestId}
+        />
+      )}
     </div>
   );
 }

@@ -18,6 +18,8 @@ import {
   waitForLendDialogClose,
 } from "../content/readmoo-lend";
 import { ReadmooMemberPicker } from "./ReadmooMemberPicker";
+import { ManualLendDialog } from "./ManualLendDialog";
+import { useManualLendNotice } from "./useManualLendNotice";
 
 export interface BorrowTabProps {
   userId: string;
@@ -74,6 +76,10 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
   const [picker, setPicker] = useState<PickerState | null>(null);
+  const { isDismissed, dismiss } = useManualLendNotice();
+  const [manualLendRequest, setManualLendRequest] =
+    useState<BorrowRequest | null>(null);
+  const [dontRemind, setDontRemind] = useState(false);
 
   const ownerNameLookup = useMemo(() => buildOwnerNameLookup(members), [members]);
 
@@ -207,6 +213,33 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     [picker, apiClient, familyId, updateMember],
   );
 
+  const handleManualLend = useCallback(
+    (request: BorrowRequest) => {
+      if (isDismissed) {
+        void updateStatus(request.requestId, BorrowStatus.LENT);
+        return;
+      }
+      setManualLendRequest(request);
+      setDontRemind(false);
+    },
+    [isDismissed, updateStatus],
+  );
+
+  const handleConfirmManualLend = useCallback(async () => {
+    if (!manualLendRequest) return;
+    if (dontRemind) {
+      dismiss();
+    }
+    await updateStatus(manualLendRequest.requestId, BorrowStatus.LENT);
+    setManualLendRequest(null);
+  }, [manualLendRequest, dontRemind, dismiss, updateStatus]);
+
+  const closeManualLendDialog = useCallback(() => setManualLendRequest(null), []);
+
+  const confirmManualLend = useCallback(() => {
+    void handleConfirmManualLend();
+  }, [handleConfirmManualLend]);
+
   const handlePickerCancel = useCallback(() => {
     if (!picker || picker.saving) return;
     closeLendDialog(picker.lendDialog);
@@ -252,6 +285,12 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
             onClick: () => handleApproveLending(request),
           },
           {
+            label: "手動借出",
+            variant: "secondary",
+            disabled: isUpdating,
+            onClick: () => handleManualLend(request),
+          },
+          {
             label: "拒絕",
             variant: "danger",
             disabled: isUpdating,
@@ -271,7 +310,7 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
       }
       return [];
     },
-    [handleApproveLending, pendingRequestId, updateStatus],
+    [handleApproveLending, handleManualLend, pendingRequestId, updateStatus],
   );
 
   const renderOutgoingActions = useCallback(
@@ -386,6 +425,15 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
           errorMessage={picker.errorMessage}
           onPick={(member) => void handlePickerPick(member)}
           onCancel={handlePickerCancel}
+        />
+      )}
+      {manualLendRequest && (
+        <ManualLendDialog
+          dontRemindChecked={dontRemind}
+          onDontRemindChange={setDontRemind}
+          onConfirm={confirmManualLend}
+          onCancel={closeManualLendDialog}
+          confirming={pendingRequestId === manualLendRequest.requestId}
         />
       )}
     </div>

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BorrowPage } from "@/pages/BorrowPage";
+import { namespacedKey } from "@/hooks/useAuth";
 import {
   BorrowStatus,
   type ApiClient,
@@ -84,6 +85,7 @@ describe("BorrowPage", () => {
     mockRefreshBorrowRequests.mockClear();
     mockUpdateBorrowStatus.mockReset();
     setMockFamilyData({});
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -110,7 +112,7 @@ describe("BorrowPage", () => {
     expect(empties.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("renders incoming PENDING request with borrower name, book title, and 拒絕 button only", () => {
+  it("renders incoming PENDING request with borrower name, book title, 手動借出 and 拒絕 buttons", () => {
     setMockFamilyData({
       borrowRequestsState: "loaded",
       borrowRequests: [
@@ -128,12 +130,13 @@ describe("BorrowPage", () => {
 
     expect(screen.getByText("測試書名")).toBeInTheDocument();
     expect(screen.getByText("借閱者A")).toBeInTheDocument();
+    expect(screen.getByText("手動借出")).toBeInTheDocument();
     expect(screen.getByText("拒絕")).toBeInTheDocument();
-    // PWA-specific: 同意借閱 button must NOT be rendered
+    // PWA-specific: 同意借閱 (Extension automation) button must NOT be rendered
     expect(screen.queryByText("同意借閱")).not.toBeInTheDocument();
   });
 
-  it("shows notice prompting Extension approval for incoming PENDING requests", () => {
+  it("no longer shows the legacy 'approve in Extension' notice for incoming PENDING requests", () => {
     setMockFamilyData({
       borrowRequestsState: "loaded",
       borrowRequests: [
@@ -147,8 +150,8 @@ describe("BorrowPage", () => {
     renderPage();
 
     expect(
-      screen.getByText("請在桌面 Extension 中同意借閱"),
-    ).toBeInTheDocument();
+      screen.queryByText("請在桌面 Extension 中同意借閱"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders outgoing PENDING request with owner name and 取消申請 button", () => {
@@ -371,5 +374,110 @@ describe("BorrowPage", () => {
     });
     // refreshBorrowRequests must NOT be called on failure
     expect(mockRefreshBorrowRequests).not.toHaveBeenCalled();
+  });
+
+  describe("手動借出 flow", () => {
+    const MANUAL_LEND_KEY = namespacedKey(
+      SELF_USER_ID,
+      "manualLendNoticeDismissed",
+    );
+
+    function setIncomingPending(requestId = "req-manual") {
+      setMockFamilyData({
+        borrowRequestsState: "loaded",
+        borrowRequests: [
+          makeRequest({
+            requestId,
+            ownerId: SELF_USER_ID,
+            borrowerId: OTHER_USER_ID,
+            status: BorrowStatus.PENDING,
+          }),
+        ],
+      });
+    }
+
+    it("opens the ManualLendDialog when the notice has not been dismissed", () => {
+      setIncomingPending();
+      renderPage();
+
+      fireEvent.click(screen.getByText("手動借出"));
+
+      expect(screen.getByText("手動借出提醒")).toBeInTheDocument();
+      // API must not be called just by opening the dialog
+      expect(mockUpdateBorrowStatus).not.toHaveBeenCalled();
+    });
+
+    it("skips the dialog and calls updateBorrowStatus(LENT) when notice is dismissed", async () => {
+      localStorage.setItem(MANUAL_LEND_KEY, "true");
+      mockUpdateBorrowStatus.mockResolvedValue({ requestId: "req-manual" });
+      setIncomingPending();
+      renderPage();
+
+      fireEvent.click(screen.getByText("手動借出"));
+
+      // No dialog appears
+      expect(screen.queryByText("手動借出提醒")).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(mockUpdateBorrowStatus).toHaveBeenCalledWith(
+          "req-manual",
+          BorrowStatus.LENT,
+        );
+      });
+    });
+
+    it("calls updateBorrowStatus(LENT) when 確認借出 is clicked in the dialog", async () => {
+      mockUpdateBorrowStatus.mockResolvedValue({ requestId: "req-manual" });
+      setIncomingPending();
+      renderPage();
+
+      fireEvent.click(screen.getByText("手動借出"));
+      fireEvent.click(screen.getByText("確認借出"));
+
+      await waitFor(() => {
+        expect(mockUpdateBorrowStatus).toHaveBeenCalledWith(
+          "req-manual",
+          BorrowStatus.LENT,
+        );
+      });
+    });
+
+    it("does NOT call updateBorrowStatus when the dialog is cancelled", () => {
+      setIncomingPending();
+      renderPage();
+
+      fireEvent.click(screen.getByText("手動借出"));
+      fireEvent.click(screen.getByText("取消"));
+
+      expect(screen.queryByText("手動借出提醒")).not.toBeInTheDocument();
+      expect(mockUpdateBorrowStatus).not.toHaveBeenCalled();
+    });
+
+    it("persists the dismissal flag when checkbox is checked before 確認借出", async () => {
+      mockUpdateBorrowStatus.mockResolvedValue({ requestId: "req-manual" });
+      setIncomingPending();
+      renderPage();
+
+      fireEvent.click(screen.getByText("手動借出"));
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByText("確認借出"));
+
+      await waitFor(() => {
+        expect(localStorage.getItem(MANUAL_LEND_KEY)).toBe("true");
+      });
+    });
+
+    it("does NOT persist the flag when checkbox is left unchecked", async () => {
+      mockUpdateBorrowStatus.mockResolvedValue({ requestId: "req-manual" });
+      setIncomingPending();
+      renderPage();
+
+      fireEvent.click(screen.getByText("手動借出"));
+      fireEvent.click(screen.getByText("確認借出"));
+
+      await waitFor(() => {
+        expect(mockUpdateBorrowStatus).toHaveBeenCalled();
+      });
+      expect(localStorage.getItem(MANUAL_LEND_KEY)).toBeNull();
+    });
   });
 });
