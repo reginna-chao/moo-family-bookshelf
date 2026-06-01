@@ -139,7 +139,7 @@ describe("BorrowTab", () => {
     expect(screen.getByText("寄件匣")).toBeInTheDocument();
   });
 
-  it("renders incoming PENDING request with 同意借閱 + 拒絕 buttons", async () => {
+  it("renders incoming PENDING request with 同意借閱 + 手動借出 + 拒絕 buttons", async () => {
     const apiClient = createMockApiClient({
       listBorrowRequests: vi
         .fn()
@@ -151,6 +151,7 @@ describe("BorrowTab", () => {
     await waitFor(() => {
       expect(screen.getByText("同意借閱")).toBeInTheDocument();
     });
+    expect(screen.getByText("手動借出")).toBeInTheDocument();
     expect(screen.getByText("拒絕")).toBeInTheDocument();
     // Cancel button should not appear for incoming request
     expect(screen.queryByText("取消申請")).not.toBeInTheDocument();
@@ -629,6 +630,204 @@ describe("BorrowTab", () => {
       expect(updateMemberSettings).not.toHaveBeenCalled();
       expect(updateBorrowStatus).not.toHaveBeenCalled();
       expect(mockCloseLendDialog).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("手動借出 flow", () => {
+    function mockNoticeDismissed(dismissed: boolean) {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+          const result = dismissed ? { manualLendNoticeDismissed: true } : {};
+          if (typeof callback === "function") callback(result);
+          return Promise.resolve(result) as unknown as void;
+        },
+      );
+    }
+
+    it("opens the ManualLendDialog when the notice has not been dismissed", async () => {
+      mockNoticeDismissed(false);
+      const updateBorrowStatus = vi.fn();
+      const apiClient = createMockApiClient({
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("手動借出")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("手動借出"));
+
+      expect(screen.getByText("手動借出提醒")).toBeInTheDocument();
+      // Opening the dialog must not call the API yet.
+      expect(updateBorrowStatus).not.toHaveBeenCalled();
+    });
+
+    it("skips the dialog and calls updateBorrowStatus(LENT) when notice is dismissed", async () => {
+      mockNoticeDismissed(true);
+      const updateBorrowStatus = vi
+        .fn()
+        .mockResolvedValue(makeRequest({ status: BorrowStatus.LENT }));
+      const apiClient = createMockApiClient({
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("手動借出")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("手動借出"));
+
+      expect(screen.queryByText("手動借出提醒")).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(updateBorrowStatus).toHaveBeenCalledWith(
+          "req-1",
+          BorrowStatus.LENT,
+        );
+      });
+    });
+
+    it("calls updateBorrowStatus(LENT) when 確認借出 is clicked in the dialog", async () => {
+      mockNoticeDismissed(false);
+      const updateBorrowStatus = vi
+        .fn()
+        .mockResolvedValue(makeRequest({ status: BorrowStatus.LENT }));
+      const apiClient = createMockApiClient({
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("手動借出")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("手動借出"));
+      fireEvent.click(screen.getByText("確認借出"));
+
+      await waitFor(() => {
+        expect(updateBorrowStatus).toHaveBeenCalledWith(
+          "req-1",
+          BorrowStatus.LENT,
+        );
+      });
+    });
+
+    it("does NOT call updateBorrowStatus when the dialog is cancelled", async () => {
+      mockNoticeDismissed(false);
+      const updateBorrowStatus = vi.fn();
+      const apiClient = createMockApiClient({
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("手動借出")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("手動借出"));
+      fireEvent.click(screen.getByText("取消"));
+
+      expect(screen.queryByText("手動借出提醒")).not.toBeInTheDocument();
+      expect(updateBorrowStatus).not.toHaveBeenCalled();
+    });
+
+    it("persists the dismissal flag when checkbox is checked before 確認借出", async () => {
+      mockNoticeDismissed(false);
+      const updateBorrowStatus = vi
+        .fn()
+        .mockResolvedValue(makeRequest({ status: BorrowStatus.LENT }));
+      const apiClient = createMockApiClient({
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("手動借出")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("手動借出"));
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByText("確認借出"));
+
+      await waitFor(() => {
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          manualLendNoticeDismissed: true,
+        });
+      });
+    });
+
+    it("does NOT persist the flag when checkbox is left unchecked", async () => {
+      mockNoticeDismissed(false);
+      const updateBorrowStatus = vi
+        .fn()
+        .mockResolvedValue(makeRequest({ status: BorrowStatus.LENT }));
+      const apiClient = createMockApiClient({
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("手動借出")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("手動借出"));
+      fireEvent.click(screen.getByText("確認借出"));
+
+      await waitFor(() => {
+        expect(updateBorrowStatus).toHaveBeenCalled();
+      });
+      expect(chrome.storage.local.set).not.toHaveBeenCalledWith({
+        manualLendNoticeDismissed: true,
+      });
+    });
+
+    it("does not affect the existing 同意借閱 automation path", async () => {
+      mockNoticeDismissed(false);
+      const updateBorrowStatus = vi
+        .fn()
+        .mockResolvedValue(makeRequest({ status: BorrowStatus.LENT }));
+      const apiClient = createMockApiClient({
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("同意借閱")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("同意借閱"));
+
+      // The automation path drives Readmoo and then marks LENT; the manual
+      // dialog must NOT appear for the automated flow.
+      await waitFor(() => {
+        expect(updateBorrowStatus).toHaveBeenCalledWith(
+          "req-1",
+          BorrowStatus.LENT,
+        );
+      });
+      expect(screen.queryByText("手動借出提醒")).not.toBeInTheDocument();
     });
   });
 });
