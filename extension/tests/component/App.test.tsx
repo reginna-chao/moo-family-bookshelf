@@ -324,6 +324,90 @@ describe("App", () => {
     );
   });
 
+  describe("lazy-mount tab panels", () => {
+    it("mounts only FamilyShelf on initial render (default family-shelf tab)", async () => {
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByTestId("family-shelf")).toBeInTheDocument();
+      });
+
+      // Other tab panels are not mounted until first visited.
+      expect(screen.queryByTestId("personal-shelf")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("family-settings")).not.toBeInTheDocument();
+    });
+
+    it("mounts PersonalShelf only after its tab is first clicked", async () => {
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByText("個人書櫃")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByTestId("personal-shelf")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByText("個人書櫃"));
+
+      expect(screen.getByTestId("personal-shelf")).toBeInTheDocument();
+    });
+
+    it("mounts FamilySettings only after its tab is first clicked", async () => {
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByText("設定")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByTestId("family-settings")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByText("設定"));
+
+      expect(screen.getByTestId("family-settings")).toBeInTheDocument();
+    });
+
+    it("keeps a visited panel mounted after switching away and back", async () => {
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByText("個人書櫃")).toBeInTheDocument();
+      });
+
+      // Visit personal-shelf (mounts it)
+      fireEvent.click(screen.getByText("個人書櫃"));
+      expect(screen.getByTestId("personal-shelf")).toBeInTheDocument();
+
+      // Switch away to family-shelf
+      fireEvent.click(screen.getByText("家庭書櫃"));
+      // PersonalShelf wrapper stays mounted (display toggled, not unmounted)
+      expect(screen.getByTestId("personal-shelf")).toBeInTheDocument();
+
+      // Switch back
+      fireEvent.click(screen.getByText("個人書櫃"));
+      expect(screen.getByTestId("personal-shelf")).toBeInTheDocument();
+    });
+
+    it("a visited panel stays in the DOM but is hidden when inactive", async () => {
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByText("個人書櫃")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("個人書櫃"));
+      fireEvent.click(screen.getByText("家庭書櫃"));
+
+      // The personal-shelf panel wrapper is hidden (display:none) while inactive.
+      const personalPanel = document.getElementById("panel-personal-shelf");
+      expect(personalPanel).not.toBeNull();
+      expect(personalPanel!.style.display).toBe("none");
+    });
+  });
+
   describe("layout styles", () => {
     it("onboarding wrapper has flex column layout", async () => {
       setupChromeMessages({ familyId: null, userId: null });

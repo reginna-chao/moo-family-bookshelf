@@ -160,6 +160,13 @@ function MainContent({
 }: MainContentProps) {
   const { hasBookshelfUpdates, markBookshelfSeen, borrowRequests } = useFamilyData();
 
+  // Lazy-mount tab panels: mount a heavy child on its first visit, keep it mounted after.
+  const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set<Tab>([activeTab]));
+
+  useEffect(() => {
+    setMountedTabs((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+  }, [activeTab]);
+
   const handleTabChange = useCallback(
     (tab: Tab) => {
       if (tab === "family-shelf") {
@@ -261,21 +268,23 @@ function MainContent({
       </nav>
       <div style={{ padding: 16, overflowY: "auto", flex: 1, minHeight: 0 }}>
         <div id="panel-family-shelf" role="tabpanel" aria-labelledby="tab-family-shelf" style={{ display: activeTab === "family-shelf" ? "block" : "none" }}>
-          <FamilyShelf userId={userId} />
+          {mountedTabs.has("family-shelf") && <FamilyShelf userId={userId} />}
         </div>
         <div id="panel-personal-shelf" role="tabpanel" aria-labelledby="tab-personal-shelf" style={{ display: activeTab === "personal-shelf" ? "block" : "none" }}>
-          <PersonalShelf userId={userId} apiClient={apiClient} />
+          {mountedTabs.has("personal-shelf") && <PersonalShelf userId={userId} apiClient={apiClient} />}
         </div>
         <div id="panel-borrow" role="tabpanel" aria-labelledby="tab-borrow" style={{ display: activeTab === "borrow" ? "block" : "none" }}>
-          <BorrowTab userId={userId} apiClient={apiClient} />
+          {mountedTabs.has("borrow") && <BorrowTab userId={userId} apiClient={apiClient} />}
         </div>
         <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" style={{ display: activeTab === "settings" ? "block" : "none" }}>
-          <FamilySettings
-            familyId={familyId}
-            userId={userId}
-            apiClient={apiClient}
-            onLeave={onLeave}
-          />
+          {mountedTabs.has("settings") && (
+            <FamilySettings
+              familyId={familyId}
+              userId={userId}
+              apiClient={apiClient}
+              onLeave={onLeave}
+            />
+          )}
         </div>
       </div>
       <DialogFooter />

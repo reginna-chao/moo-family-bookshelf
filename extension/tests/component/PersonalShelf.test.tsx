@@ -901,9 +901,9 @@ describe("PersonalShelf", () => {
 
       await waitForBooksLoaded();
 
-      // After load, cache should be written
+      // After load, cache should be written (alongside lastDisplayScrapeAt in one atomic call)
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        { personalBooksCache: expect.any(String) },
+        expect.objectContaining({ personalBooksCache: expect.any(String) }),
       );
 
       // Find the call that wrote personalBooksCache and verify contents
@@ -1164,26 +1164,31 @@ describe("PersonalShelf", () => {
       }));
     }
 
+    // Inject a small pageSize so the same pagination logic is exercised with
+    // far fewer rendered BookRows, keeping these tests fast and non-flaky.
+    const PAGE_SIZE = 10;
+
     it("shows Load More button with count text when items exceed pageSize", async () => {
       const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(250));
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(25));
 
-      renderPersonalShelf();
+      renderPersonalShelf({ pageSize: PAGE_SIZE });
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
       });
 
       expect(
-        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+        screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }),
       ).toBeInTheDocument();
     });
 
     it("does not show Load More button when items fit in pageSize", async () => {
       const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(80));
+      // Fewer than pageSize → everything fits on one page → no Load More button.
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(8));
 
-      renderPersonalShelf();
+      renderPersonalShelf({ pageSize: PAGE_SIZE });
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
@@ -1194,29 +1199,29 @@ describe("PersonalShelf", () => {
 
     it("click Load More appends pageSize to visible count", async () => {
       const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(250));
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(25));
 
-      renderPersonalShelf();
+      renderPersonalShelf({ pageSize: PAGE_SIZE });
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
       });
 
-      const button = screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ });
+      const button = screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ });
       fireEvent.click(button);
 
       await waitFor(() => {
         expect(
-          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 250 本/ }),
+          screen.getByRole("button", { name: /載入更多.*已顯示 20.*共 25 本/ }),
         ).toBeInTheDocument();
       });
     });
 
     it("hides Load More button when status filter narrows the view", async () => {
       const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(250));
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(25));
 
-      renderPersonalShelf();
+      renderPersonalShelf({ pageSize: PAGE_SIZE });
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
@@ -1231,7 +1236,7 @@ describe("PersonalShelf", () => {
     it("resets visibleCount when switching archive tabs (Q-B 視角切換類)", async () => {
       const { scrapeBooks } = await import("@/content/scraper");
       vi.mocked(scrapeBooks).mockResolvedValueOnce([
-        ...makeManyBooks(250, BoolFlag.FALSE),
+        ...makeManyBooks(25, BoolFlag.FALSE),
         ...makeManyBooks(5, BoolFlag.TRUE).map((b, i) => ({
           ...b,
           bookId: `archived-${i}`,
@@ -1249,17 +1254,17 @@ describe("PersonalShelf", () => {
         },
       );
 
-      renderPersonalShelf();
+      renderPersonalShelf({ pageSize: PAGE_SIZE });
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
       });
 
-      // Click Load More — visible 100 → 200
-      fireEvent.click(screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }));
+      // Click Load More — visible 10 → 20
+      fireEvent.click(screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }));
       await waitFor(() => {
         expect(
-          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 250 本/ }),
+          screen.getByRole("button", { name: /載入更多.*已顯示 20.*共 25 本/ }),
         ).toBeInTheDocument();
       });
 
@@ -1269,7 +1274,7 @@ describe("PersonalShelf", () => {
       );
       fireEvent.click(archivedTab);
 
-      // Switch back to active tab — visibleCount should reset to 100
+      // Switch back to active tab — visibleCount should reset to 10
       const activeTab = screen.getByText((_content, el) =>
         el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
       );
@@ -1277,7 +1282,7 @@ describe("PersonalShelf", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+          screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }),
         ).toBeInTheDocument();
       });
     });

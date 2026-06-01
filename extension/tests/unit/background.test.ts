@@ -295,6 +295,65 @@ describe("background service worker", () => {
     );
   });
 
+  describe("GET_AUTO_SYNC_INTERVAL", () => {
+    it("returns 'daily' when storage has no value", async () => {
+      const response = await sendMessage({ type: "GET_AUTO_SYNC_INTERVAL" });
+      expect(response).toEqual({ interval: "daily" });
+    });
+
+    it.each(["daily", "weekly", "monthly", "never"] as const)(
+      "returns '%s' when storage has '%s'",
+      async (interval) => {
+        vi.mocked(chrome.storage.local.get).mockImplementation(
+          (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+            callback({ autoSyncInterval: interval });
+          },
+        );
+        const response = await sendMessage({ type: "GET_AUTO_SYNC_INTERVAL" });
+        expect(response).toEqual({ interval });
+      },
+    );
+
+    it("returns 'daily' when storage has invalid value", async () => {
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
+          callback({ autoSyncInterval: "yearly" });
+        },
+      );
+      const response = await sendMessage({ type: "GET_AUTO_SYNC_INTERVAL" });
+      expect(response).toEqual({ interval: "daily" });
+    });
+  });
+
+  describe("SET_AUTO_SYNC_INTERVAL", () => {
+    it.each(["daily", "weekly", "monthly", "never"] as const)(
+      "writes '%s' to local storage and responds ok",
+      async (interval) => {
+        const response = await sendMessage({
+          type: "SET_AUTO_SYNC_INTERVAL",
+          interval,
+        });
+        expect(response).toEqual({ ok: true });
+        expect(chrome.storage.local.set).toHaveBeenCalledWith(
+          { autoSyncInterval: interval },
+          expect.any(Function),
+        );
+      },
+    );
+
+    it.each(["foo", undefined, 42, ""])(
+      "rejects invalid value '%s' without writing",
+      async (invalidValue) => {
+        const response = await sendMessage({
+          type: "SET_AUTO_SYNC_INTERVAL",
+          interval: invalidValue,
+        });
+        expect(response).toEqual({ ok: false, error: expect.any(String) });
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   describe("GET_BOOK_SORT", () => {
     it("returns 'default' when storage has no value for family", async () => {
       const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });

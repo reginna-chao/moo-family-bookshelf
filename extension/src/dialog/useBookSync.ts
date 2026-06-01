@@ -1,7 +1,7 @@
 /**
  * Hook for book sync in the dialog UI.
  * Provides:
- * - Auto-sync on dialog open when on #/library (rate limited >= 1 hour)
+ * - Auto-sync on dialog open when on #/library (rate limited >= 24 hours)
  * - Manual sync button handler (no rate limiting)
  */
 

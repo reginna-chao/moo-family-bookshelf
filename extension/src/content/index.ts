@@ -299,11 +299,17 @@ function listenForBackgroundSync(): void {
       }
       // ApiClient is re-exported from content-sync.js, so a single import suffices.
       import(/* @vite-ignore */ chrome.runtime.getURL("content-sync.js"))
-        .then(async ({ syncBooks, ApiClient }) => {
+        .then(async ({ syncBooks, ApiClient, canAutoSync }) => {
           const storageResult = await chrome.storage.local.get(["userId", "authToken", "apiEndpoint"]);
           const userId = storageResult.userId as string | undefined;
           if (!userId) {
             sendResponse({ success: false, error: "No userId" });
+            return;
+          }
+
+          const allowed = await canAutoSync();
+          if (!allowed) {
+            sendResponse({ success: true, skipped: true });
             return;
           }
 

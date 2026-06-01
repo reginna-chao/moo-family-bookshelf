@@ -19,6 +19,8 @@ import { BookSortDropdown } from "./BookSortDropdown";
 export interface PersonalShelfProps {
   userId: string;
   apiClient: ApiClient;
+  /** Items shown per page in the personal shelf list. Injectable for tests; production uses the default. */
+  pageSize?: number;
 }
 
 function archiveTabStyle(active: boolean): CSSProperties {
@@ -30,7 +32,7 @@ function archiveTabStyle(active: boolean): CSSProperties {
   };
 }
 
-export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
+export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProps) {
   const { members } = useFamilyData();
   const selfMember = members.find((m) => m.userId === userId);
   const displayName = selfMember?.displayName ?? "";
@@ -94,6 +96,7 @@ export function PersonalShelf({ userId, apiClient }: PersonalShelfProps) {
   const { visibleItems: displayedBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
     items: sortedBooks,
     narrowingActive,
+    pageSize,
   });
 
   const handleStatusFilterChange = useCallback((value: StatusFilter) => {

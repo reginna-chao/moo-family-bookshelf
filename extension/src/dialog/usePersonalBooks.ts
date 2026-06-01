@@ -3,6 +3,7 @@ import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VE
 import { scrapeBooks, scrapeArchivedBooks, formatScrapeProgress } from "../content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "../constants";
 import { mergeBooks } from "./mergeBooks";
+import { canDisplayScrape } from "../sync/syncBooks";
 
 export type PersonalBooksStatus = "scraping" | "ready" | "saving" | "saved" | "error";
 
@@ -27,6 +28,33 @@ function loadSavedBooks(
     return { books: data.books as BookEntry[], raw: data };
   }
   return { books: [], raw: null };
+}
+
+/** Parse the cached `BookEntry[]` (stored as JSON string). Defensive: returns [] on any failure. */
+function parseCachedBooks(raw: unknown): BookEntry[] {
+  if (typeof raw !== "string") return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as BookEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Build the pre-scrape baseline: cached book list with share flags
+ * reconciled against the server (API wins for known books; cache value
+ * retained for cache-only books). API-only books are appended.
+ */
+function reconcileBaseline(cached: BookEntry[], saved: BookEntry[]): BookEntry[] {
+  const savedMap = new Map(saved.map((b) => [b.bookId, b]));
+  const cachedIds = new Set(cached.map((b) => b.bookId));
+  const reconciled = cached.map((b) => {
+    const apiBook = savedMap.get(b.bookId);
+    return apiBook ? { ...b, isShared: apiBook.isShared } : b;
+  });
+  const apiOnly = saved.filter((b) => !cachedIds.has(b.bookId));
+  return [...reconciled, ...apiOnly];
 }
 
 export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName }: UsePersonalBooksParams) {
@@ -67,12 +95,44 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     setDirtyBookIds((prev) => (prev.size === 0 ? prev : new Set()));
   }, []);
 
-  // Load books: scrape + fetch from API + merge
+  // Load books: cache-first display, then interval-gated scrape (the only scrolling path).
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
+        // Step 1: cache + API together (no scrape yet).
+        const cacheResult = await chrome.storage.local.get([PERSONAL_BOOKS_CACHE_KEY]);
+        const apiResponse = await apiClient.getPersonalBooks(userId);
+        if (cancelled) return;
+
+        let savedBooks: BookEntry[] = [];
+        if (apiResponse.data) {
+          const result = loadSavedBooks(
+            apiResponse.data as unknown as Record<string, unknown>,
+          );
+          savedBooks = result.books;
+          savedRawPayload.current = result.raw;
+        }
+        const cachedBooks = parseCachedBooks(cacheResult[PERSONAL_BOOKS_CACHE_KEY]);
+
+        // Step 2: baseline display WITHOUT scraping.
+        const baseline = cachedBooks.length > 0 ? reconcileBaseline(cachedBooks, savedBooks) : savedBooks;
+        if (baseline.length > 0) {
+          originalBooks.current = baseline;
+          setBooks(baseline);
+          setStatus("ready");
+        }
+
+        // Step 3: interval gate.
+        const allowed = await canDisplayScrape();
+        if (cancelled) return;
+        if (!allowed) {
+          if (baseline.length === 0) setStatus("ready");
+          return;
+        }
+
+        // Step 4: allowed → scrape (the only path that scrolls the library page).
         const onProgress = (page: number, count: number) => {
           if (!cancelled) setProgressMessage(formatScrapeProgress(page, count));
         };
@@ -85,27 +145,14 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
           const archivedBooks = await scrapeArchivedBooks({ onProgress });
           allScrapedBooks = [...scrapedBooks, ...archivedBooks];
         }
-        if (!cancelled) setProgressMessage("");
-
-        const apiResponse = await apiClient.getPersonalBooks(userId);
-
-        if (cancelled) return;
-
-        let savedBooks: BookEntry[] = [];
-        if (apiResponse.data) {
-          const result = loadSavedBooks(
-            apiResponse.data as unknown as Record<string, unknown>,
-          );
-          savedBooks = result.books;
-          savedRawPayload.current = result.raw;
-        }
         if (cancelled) return;
 
         const merged = mergeBooks(allScrapedBooks, savedBooks);
-        chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(merged) });
+        chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(merged), lastDisplayScrapeAt: Date.now() });
         originalBooks.current = merged;
         setBooks(merged);
         setStatus("ready");
+        setProgressMessage("");
       } catch (err) {
         console.error("[PersonalShelf] Error:", err);
         if (cancelled) return;
