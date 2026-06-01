@@ -1,53 +1,58 @@
-name: Claude PR Review
+name: Claude Code Review
 
-# 每次 PR 開啟或更新（push 新 commit）時，自動由 Claude 進行程式碼審查，
-# 並把審查意見以留言 / inline review 的形式貼回 PR。
 on:
   pull_request:
-    types: [opened, synchronize]
-    # 只在「程式碼目錄」變動時觸發；純文件 / 設定檔（docs、site、*.md、設定）
-    # 的變更不會啟動審查，以節省成本。
+    # 官方原有：opened, synchronize, ready_for_review, reopened
+    types: [opened, synchronize, ready_for_review, reopened]
+    # 只在「程式碼目錄」變動時觸發，過濾掉文件 / 設定檔變更以節省額度
     paths:
       - "extension/src/**"
       - "pwa/src/**"
       - "worker/src/**"
       - "shared/**"
 
-# 避免同一個 PR 連續推送時重複跑審查：新 push 取消前一個尚未完成的審查。
+# 同一個 PR 連續推送時，取消前一個未完成的審查，避免重複消耗額度
 concurrency:
-  group: claude-pr-review-${{ github.event.pull_request.number }}
+  group: claude-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  review:
-    name: Claude Code Review
+  claude-review:
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write  # 官方為 read；改為 write 以支援貼 inline review comment
+      issues: read
       id-token: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          # 需要完整歷史才能正確 diff PR 與 base 分支。
-          fetch-depth: 0
+          fetch-depth: 0  # 需要完整歷史才能正確 diff PR 與 base 分支
 
-      - name: Claude Code Review
+      - name: Run Claude Code Review
+        id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
-          # 使用 OAuth Token（Claude 訂閱額度），不要設 anthropic_api_key，
-          # 以免被計成 API 費用。
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
 
-          # 成本控制：限制模型與最大迭代次數，避免在難題上無限打轉。
+          # 成本控制：限制模型與最大迭代次數
           claude_args: |
             --model claude-opus-4-8
             --max-turns 5
 
           prompt: |
-            你是本專案的資深程式碼審查者。請審查這個 Pull Request 的變更。
+            你是本專案的資深程式碼審查者。請審查這個 Pull Request 的變更：
+            ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
 
             先閱讀根目錄的 AGENTS.md 與 .claude/rules/*.md，理解本專案的
             架構規範、命名慣例與「Code Modification Workflow」要求，再開始審查。
