@@ -5,7 +5,7 @@ description: >
   defines API contracts, and delegates to fe-team-lead and be-team-lead.
   TRIGGER when: user explicitly invokes /team-lead, or asks to implement a full-stack feature end-to-end.
   DO NOT TRIGGER when: task is clearly frontend-only or backend-only (use the specific team-lead instead).
-argument-hint: "[A|B] <requirement or feature description>"
+argument-hint: "<requirement or feature description>"
 allowed-tools: Read, Grep, Glob, Bash(pnpm*), Bash(cd*), Bash(git*), Agent
 model: claude-opus-4-6
 ---
@@ -36,30 +36,21 @@ If the user explicitly says something like "skip review", "just write the code",
 ## Invocation
 
 ```
-/team-lead A <requirement>   ← Run-through mode
-/team-lead B <requirement>   ← Checkpoint mode
-/team-lead <requirement>     ← Defaults to B (checkpoint mode)
+/team-lead <requirement>
 ```
 
-## Execution Modes
-
-### Mode A — Run-through (省 Token)
+## Execution Flow
 
 - Complete Phase 1 (spec analysis) and **wait for user confirmation**.
 - After confirmation, delegate and run all phases autonomously.
 - **Only stop mid-execution if** a blocker is found that affects architecture or security.
 - Stop at Phase 4 (Review Report) and present all findings to the user.
 
-### Mode B — Checkpoint (default)
-
-- Stop and wait for user confirmation at **every phase boundary**.
-- Phase 1 → confirm → Phase 2 → confirm → Phase 3 → confirm → Phase 4 → confirm → Phase 5.
-
 ---
 
 ## Workflow
 
-### Phase 1: Requirements Analysis (both modes stop here)
+### Phase 1: Requirements Analysis (stops here)
 
 1. Read the requirement carefully.
 2. Read `docs/project-plan.md` and `docs/architecture.md` for project context.
@@ -83,20 +74,16 @@ If the feature involves both frontend and backend:
 2. Both teams work against this contract in parallel.
 3. Document the contract in the task breakdown.
 
-**Mode B**: present contract and wait for confirmation.
-
 ### Phase 3: Delegate
 
-Spawn sub-team-leads. Pass the execution mode (A or B) through:
+Spawn sub-team-leads:
 
-- **`/fe-team-lead [A|B] <frontend tasks>`**
-- **`/be-team-lead [A|B] <backend tasks>`**
+- **`/fe-team-lead <frontend tasks>`**
+- **`/be-team-lead <backend tasks>`**
 
 Spawn in parallel when tasks are independent. Run sequentially if there are dependencies.
 
-**Mode B**: present delegation plan and wait for confirmation before spawning.
-
-### Phase 4: Review Report (both modes stop here)
+### Phase 4: Review Report (stops here)
 
 After both teams complete their Fix Cycles, present the **consolidated review report** in three parts:
 
@@ -166,11 +153,10 @@ Run **once** after the entire feature is complete (all sub-tasks committed), not
 ## Rules
 
 - Always read project docs before breaking down tasks.
-- **Never skip Phase 1 user confirmation** — this applies to both modes.
+- **Never skip Phase 1 user confirmation.**
 - Sub-team-leads handle CRITICAL and SUGGESTION findings via their own Fix Cycles. Team-lead Phase 4 focuses on cross-team validation.
 - If a task is purely frontend or purely backend, tell the user to use the specific team-lead.
 - If unsure about scope, ask the user rather than guessing.
-- When delegating, always pass the execution mode to sub-team-leads.
 
 ## FORBIDDEN Delegations
 
