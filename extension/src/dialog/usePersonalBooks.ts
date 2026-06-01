@@ -1,7 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 import { scrapeBooks, scrapeArchivedBooks, formatScrapeProgress } from "../content/scraper";
-import { PERSONAL_BOOKS_CACHE_KEY } from "../constants";
+import {
+  PERSONAL_BOOKS_CACHE_KEY,
+  SYNC_ARCHIVED_KEY,
+  LAST_DISPLAY_SCRAPE_AT_KEY,
+  PERSONAL_SHELF_SAVED_AT_KEY,
+} from "../constants";
 import { mergeBooks } from "./mergeBooks";
 import { canDisplayScrape } from "../sync/syncBooks";
 
@@ -138,8 +143,8 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
         };
         const scrapedBooks = await scrapeBooks({ onProgress });
 
-        const archiveResult = await chrome.storage.local.get(["syncArchived"]);
-        const syncArchivedSetting = (archiveResult.syncArchived as number | undefined) ?? BoolFlag.FALSE;
+        const archiveResult = await chrome.storage.local.get([SYNC_ARCHIVED_KEY]);
+        const syncArchivedSetting = (archiveResult[SYNC_ARCHIVED_KEY] as number | undefined) ?? BoolFlag.FALSE;
         let allScrapedBooks = [...scrapedBooks];
         if (syncArchivedSetting === BoolFlag.TRUE) {
           const archivedBooks = await scrapeArchivedBooks({ onProgress });
@@ -148,7 +153,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
         if (cancelled) return;
 
         const merged = mergeBooks(allScrapedBooks, savedBooks);
-        chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(merged), lastDisplayScrapeAt: Date.now() });
+        chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(merged), [LAST_DISPLAY_SCRAPE_AT_KEY]: Date.now() });
         originalBooks.current = merged;
         setBooks(merged);
         setStatus("ready");
@@ -211,7 +216,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
       }
       originalBooks.current = books;
       chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books) });
-      chrome.storage.local.set({ personalShelfSavedAt: Date.now() });
+      chrome.storage.local.set({ [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now() });
       clearDirty();
       setStatus("saved");
       setTimeout(() => setStatus("ready"), 1500);

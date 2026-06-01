@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
+import { MANUAL_LEND_NOTICE_DISMISSED_KEY } from "@/constants";
 
 // Stub the Readmoo automation so 同意借閱 can succeed in jsdom (no real Readmoo DOM).
 const mockOpenLendDialogForBook = vi.fn();
@@ -637,7 +638,7 @@ describe("BorrowTab", () => {
     function mockNoticeDismissed(dismissed: boolean) {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = dismissed ? { manualLendNoticeDismissed: true } : {};
+          const result = dismissed ? { [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true } : {};
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -767,7 +768,7 @@ describe("BorrowTab", () => {
 
       await waitFor(() => {
         expect(chrome.storage.local.set).toHaveBeenCalledWith({
-          manualLendNoticeDismissed: true,
+          [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true,
         });
       });
     });
@@ -796,7 +797,7 @@ describe("BorrowTab", () => {
         expect(updateBorrowStatus).toHaveBeenCalled();
       });
       expect(chrome.storage.local.set).not.toHaveBeenCalledWith({
-        manualLendNoticeDismissed: true,
+        [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true,
       });
     });
 

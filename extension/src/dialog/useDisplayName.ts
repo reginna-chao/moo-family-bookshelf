@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient } from "../api/client";
+import { DISPLAY_NAME_KEY } from "../constants";
 
 type NameSaveState = "idle" | "saving" | "saved" | "error";
 
@@ -59,9 +60,9 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
     // context is still loading. Cancel on unmount so the deferred callback
     // can't setState on a dead component.
     let cancelled = false;
-    chrome.storage.local.get(["displayName"], (result) => {
+    chrome.storage.local.get([DISPLAY_NAME_KEY], (result) => {
       if (cancelled) return;
-      const cached = (result.displayName as string | undefined) ?? "";
+      const cached = (result[DISPLAY_NAME_KEY] as string | undefined) ?? "";
       if (!cached) return;
       // Only initialize from cache when we haven't received any source value yet.
       if (savedDisplayNameRef.current !== "") return;
@@ -100,8 +101,8 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
         }
       }
 
-      await chrome.storage.local.set({ displayName: trimmed });
-      await chrome.storage.sync.set({ displayName: trimmed });
+      await chrome.storage.local.set({ [DISPLAY_NAME_KEY]: trimmed });
+      await chrome.storage.sync.set({ [DISPLAY_NAME_KEY]: trimmed });
       setDisplayName(trimmed);
       setSavedDisplayName(trimmed);
       setNameSaveState("saved");

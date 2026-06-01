@@ -6,6 +6,13 @@
  */
 
 import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import {
+  AUTO_SYNC_INTERVAL_KEY,
+  LAST_SYNC_AT_KEY,
+  LAST_DISPLAY_SCRAPE_AT_KEY,
+  SYNC_ARCHIVED_KEY,
+  DISPLAY_NAME_KEY,
+} from "../constants";
 
 // Re-export ApiClient so the content script can import it from content-sync.js
 // instead of needing a separate content-api.js entry point.
@@ -54,9 +61,9 @@ function wait(ms: number): Promise<void> {
  * relative to the user-configured `autoSyncInterval`.
  */
 async function canSyncByInterval(timestampKey: string): Promise<boolean> {
-  const result = await chrome.storage.local.get([timestampKey, "autoSyncInterval"]);
-  const interval = isAutoSyncInterval(result.autoSyncInterval)
-    ? result.autoSyncInterval
+  const result = await chrome.storage.local.get([timestampKey, AUTO_SYNC_INTERVAL_KEY]);
+  const interval = isAutoSyncInterval(result[AUTO_SYNC_INTERVAL_KEY])
+    ? result[AUTO_SYNC_INTERVAL_KEY]
     : DEFAULT_AUTO_SYNC_INTERVAL;
   const minMs = AUTO_SYNC_INTERVALS_MS[interval];
   if (minMs === null) return false;
@@ -69,7 +76,7 @@ async function canSyncByInterval(timestampKey: string): Promise<boolean> {
  * Check if enough time has passed since the last full upload sync.
  */
 export function canAutoSync(): Promise<boolean> {
-  return canSyncByInterval("lastSyncAt");
+  return canSyncByInterval(LAST_SYNC_AT_KEY);
 }
 
 /**
@@ -78,7 +85,7 @@ export function canAutoSync(): Promise<boolean> {
  * display path never suppresses upload sync.
  */
 export function canDisplayScrape(): Promise<boolean> {
-  return canSyncByInterval("lastDisplayScrapeAt");
+  return canSyncByInterval(LAST_DISPLAY_SCRAPE_AT_KEY);
 }
 
 /**
@@ -145,8 +152,8 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     // Step 3b: Optionally scrape archived books
     let syncArchived = BoolFlag.FALSE;
     try {
-      const archiveResult = await chrome.storage.local.get(["syncArchived"]);
-      syncArchived = (archiveResult.syncArchived as number | undefined) ?? BoolFlag.FALSE;
+      const archiveResult = await chrome.storage.local.get([SYNC_ARCHIVED_KEY]);
+      syncArchived = (archiveResult[SYNC_ARCHIVED_KEY] as number | undefined) ?? BoolFlag.FALSE;
     } catch {
       // Archive setting unavailable — skip archive sync
     }
@@ -159,7 +166,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     }
 
     // Step 4: Fetch existing saved books for merge
-    const storageResult = await chrome.storage.local.get(["displayName"]);
+    const storageResult = await chrome.storage.local.get([DISPLAY_NAME_KEY]);
 
     let savedBooks: BookEntry[] = [];
     let savedRawPayload: Record<string, unknown> | null = null;
@@ -175,7 +182,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     const merged = mergeBooks(allScrapedBooks, savedBooks);
 
     // Step 5: Build PersonalBooks object and upload as plaintext JSON
-    const displayName = (storageResult.displayName as string | undefined) ?? "";
+    const displayName = (storageResult[DISPLAY_NAME_KEY] as string | undefined) ?? "";
     const personalBooks: PersonalBooks = {
       ...savedRawPayload,
       schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
@@ -197,7 +204,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
 
     // Step 7: A full sync just scraped fresh data (also refreshes the display via
     // lastSyncBooks), so refresh BOTH timers to avoid a redundant display re-scrape.
-    await chrome.storage.local.set({ lastSyncAt: Date.now(), lastDisplayScrapeAt: Date.now() });
+    await chrome.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now(), [LAST_DISPLAY_SCRAPE_AT_KEY]: Date.now() });
 
     return { success: true, books: merged };
   } catch (err) {

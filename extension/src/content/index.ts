@@ -13,7 +13,16 @@ import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
 import { isExtensionContextValid, cleanupMooFamilyUI, MOO_ELEMENT_IDS } from "../utils/extensionContext";
 import { waitForPageReady } from "./pageReady";
 import { getAppEnv } from "../utils/appEnv";
-import { DEFAULT_API_ENDPOINT } from "../constants";
+import {
+  DEFAULT_API_ENDPOINT,
+  FLOATING_ICON_SIZE_KEY,
+  USER_ID_KEY,
+  FAMILY_ID_KEY,
+  AUTH_TOKEN_KEY,
+  API_ENDPOINT_KEY,
+  USER_EMAIL_KEY,
+  DISPLAY_NAME_KEY,
+} from "../constants";
 import { BorrowStatus, type BorrowRequest } from "../api/types";
 
 const APP_ENV = getAppEnv();
@@ -86,9 +95,9 @@ async function injectFamilyBookshelfButton(): Promise<void> {
   // Read stored size (default to medium if missing/invalid)
   let size: FloatingIconSize = "medium";
   try {
-    const stored = await chrome.storage.local.get(["floatingIconSize"]);
-    if (isFloatingIconSize(stored.floatingIconSize)) {
-      size = stored.floatingIconSize;
+    const stored = await chrome.storage.local.get([FLOATING_ICON_SIZE_KEY]);
+    if (isFloatingIconSize(stored[FLOATING_ICON_SIZE_KEY])) {
+      size = stored[FLOATING_ICON_SIZE_KEY];
     }
   } catch {
     // fallback to medium
@@ -136,16 +145,16 @@ async function injectFamilyBookshelfButton(): Promise<void> {
 async function updatePendingBorrowBadge(button: HTMLElement): Promise<void> {
   try {
     const stored = await chrome.storage.local.get([
-      "userId",
-      "familyId",
-      "authToken",
-      "apiEndpoint",
+      USER_ID_KEY,
+      FAMILY_ID_KEY,
+      AUTH_TOKEN_KEY,
+      API_ENDPOINT_KEY,
     ]);
-    const userId = stored.userId as string | undefined;
-    const familyId = stored.familyId as string | undefined;
-    const authToken = stored.authToken as string | undefined;
+    const userId = stored[USER_ID_KEY] as string | undefined;
+    const familyId = stored[FAMILY_ID_KEY] as string | undefined;
+    const authToken = stored[AUTH_TOKEN_KEY] as string | undefined;
     const apiEndpoint =
-      (stored.apiEndpoint as string | undefined) ?? DEFAULT_API_ENDPOINT;
+      (stored[API_ENDPOINT_KEY] as string | undefined) ?? DEFAULT_API_ENDPOINT;
     if (!userId || !familyId || !authToken) return;
 
     const url = `${apiEndpoint.replace(/\/+$/, "")}/api/family/${encodeURIComponent(familyId)}/borrow`;
@@ -279,7 +288,7 @@ function tryScrapeAndCacheEmail(): void {
     if (!email) return;
 
     const displayName = scrapeDisplayName() ?? "";
-    chrome.storage.local.set({ userEmail: email, displayName });
+    chrome.storage.local.set({ [USER_EMAIL_KEY]: email, [DISPLAY_NAME_KEY]: displayName });
   }, 1000);
 }
 
@@ -300,8 +309,8 @@ function listenForBackgroundSync(): void {
       // ApiClient is re-exported from content-sync.js, so a single import suffices.
       import(/* @vite-ignore */ chrome.runtime.getURL("content-sync.js"))
         .then(async ({ syncBooks, ApiClient, canAutoSync }) => {
-          const storageResult = await chrome.storage.local.get(["userId", "authToken", "apiEndpoint"]);
-          const userId = storageResult.userId as string | undefined;
+          const storageResult = await chrome.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY, API_ENDPOINT_KEY]);
+          const userId = storageResult[USER_ID_KEY] as string | undefined;
           if (!userId) {
             sendResponse({ success: false, error: "No userId" });
             return;
@@ -313,9 +322,9 @@ function listenForBackgroundSync(): void {
             return;
           }
 
-          const apiClient = new ApiClient(storageResult.apiEndpoint as string | undefined);
-          if (storageResult.authToken) {
-            apiClient.setAuthToken(storageResult.authToken as string);
+          const apiClient = new ApiClient(storageResult[API_ENDPOINT_KEY] as string | undefined);
+          if (storageResult[AUTH_TOKEN_KEY]) {
+            apiClient.setAuthToken(storageResult[AUTH_TOKEN_KEY] as string);
           }
 
           const result = await syncBooks({ navigate: true, userId, apiClient });
@@ -367,8 +376,8 @@ function listenForIconSizeChanges(): void {
   if (!isExtensionContextValid()) return;
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
-    if (!changes.floatingIconSize) return;
-    const newValue = changes.floatingIconSize.newValue;
+    if (!changes[FLOATING_ICON_SIZE_KEY]) return;
+    const newValue = changes[FLOATING_ICON_SIZE_KEY].newValue;
     const size: FloatingIconSize = isFloatingIconSize(newValue) ? newValue : "medium";
     const button = document.getElementById(MOO_ELEMENT_IDS.button);
     if (!button) return;

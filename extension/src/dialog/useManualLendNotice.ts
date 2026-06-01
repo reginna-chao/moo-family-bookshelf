@@ -1,20 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
+import { MANUAL_LEND_NOTICE_DISMISSED_KEY } from "../constants";
 
 export interface UseManualLendNoticeReturn {
   isDismissed: boolean;
   dismiss: () => void;
 }
 
-const STORAGE_KEY = "manualLendNoticeDismissed";
-
 export function useManualLendNotice(): UseManualLendNoticeReturn {
   const [isDismissed, setIsDismissed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    chrome.storage.local.get([STORAGE_KEY], (result) => {
+    chrome.storage.local.get([MANUAL_LEND_NOTICE_DISMISSED_KEY], (result) => {
       if (cancelled) return;
-      if (result[STORAGE_KEY] === true) {
+      if (result[MANUAL_LEND_NOTICE_DISMISSED_KEY] === true) {
         setIsDismissed(true);
       }
     });
@@ -24,7 +23,7 @@ export function useManualLendNotice(): UseManualLendNoticeReturn {
   }, []);
 
   const dismiss = useCallback(() => {
-    void chrome.storage.local.set({ [STORAGE_KEY]: true });
+    void chrome.storage.local.set({ [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true });
     setIsDismissed(true);
   }, []);
 

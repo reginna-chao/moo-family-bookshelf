@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { App } from "@/dialog/App";
 import { ApiClient } from "@/api/client";
+import { USER_ID_KEY, AUTH_TOKEN_KEY } from "@/constants";
 
 // Mock all child components
 vi.mock("@/dialog/Onboarding", () => ({
@@ -36,9 +37,10 @@ vi.mock("@/dialog/DialogFooter", () => ({
   ),
 }));
 
-vi.mock("@/constants", () => ({
-  DEFAULT_API_ENDPOINT: "https://default.workers.dev",
-}));
+vi.mock("@/constants", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/constants")>();
+  return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
+});
 
 type SendMessageCallback = (response: unknown) => void;
 
@@ -68,8 +70,8 @@ function setupChromeMessages(options: {
   vi.mocked(chrome.storage.local.get).mockImplementation(
     (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
       const result: Record<string, unknown> = {};
-      if (options.userId) result.userId = options.userId;
-      if (options.authToken) result.authToken = options.authToken;
+      if (options.userId) result[USER_ID_KEY] = options.userId;
+      if (options.authToken) result[AUTH_TOKEN_KEY] = options.authToken;
       if (typeof callback === "function") callback(result);
       return Promise.resolve(result) as unknown as void;
     },

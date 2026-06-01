@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useManualLendNotice } from "@/dialog/useManualLendNotice";
-
-const STORAGE_KEY = "manualLendNoticeDismissed";
+import { MANUAL_LEND_NOTICE_DISMISSED_KEY as STORAGE_KEY } from "@/constants";
 
 describe("useManualLendNotice", () => {
   beforeEach(async () => {

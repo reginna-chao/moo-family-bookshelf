@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PersonalShelf, PersonalShelfProps } from "@/dialog/PersonalShelf";
 import { BoolFlag, type ApiClient, type FamilyMember } from "@/api/client";
+import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
 
 const mockUseFamilyData = vi.fn();
 
@@ -903,16 +904,16 @@ describe("PersonalShelf", () => {
 
       // After load, cache should be written (alongside lastDisplayScrapeAt in one atomic call)
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        expect.objectContaining({ personalBooksCache: expect.any(String) }),
+        expect.objectContaining({ [PERSONAL_BOOKS_CACHE_KEY]: expect.any(String) }),
       );
 
       // Find the call that wrote personalBooksCache and verify contents
       const setCalls = vi.mocked(chrome.storage.local.set).mock.calls;
       const cacheCall = setCalls.find(
-        (call) => call[0] && typeof call[0] === "object" && "personalBooksCache" in (call[0] as Record<string, unknown>),
+        (call) => call[0] && typeof call[0] === "object" && PERSONAL_BOOKS_CACHE_KEY in (call[0] as Record<string, unknown>),
       );
       expect(cacheCall).toBeDefined();
-      const cached = JSON.parse((cacheCall![0] as Record<string, string>).personalBooksCache);
+      const cached = JSON.parse((cacheCall![0] as Record<string, string>)[PERSONAL_BOOKS_CACHE_KEY]);
       // Merged books should include all 3 scraped + isShared preserved from saved
       expect(cached.length).toBeGreaterThanOrEqual(3);
       const book1 = cached.find((b: { bookId: string }) => b.bookId === "book-1");
@@ -945,17 +946,17 @@ describe("PersonalShelf", () => {
       // After save, cache should be updated
       await waitFor(() => {
         expect(chrome.storage.local.set).toHaveBeenCalledWith(
-          { personalBooksCache: expect.any(String) },
+          { [PERSONAL_BOOKS_CACHE_KEY]: expect.any(String) },
         );
       });
 
       // Verify the cached books include the toggled share status
       const setCalls = vi.mocked(chrome.storage.local.set).mock.calls;
       const cacheCall = setCalls.find(
-        (call) => call[0] && typeof call[0] === "object" && "personalBooksCache" in (call[0] as Record<string, unknown>),
+        (call) => call[0] && typeof call[0] === "object" && PERSONAL_BOOKS_CACHE_KEY in (call[0] as Record<string, unknown>),
       );
       expect(cacheCall).toBeDefined();
-      const cached = JSON.parse((cacheCall![0] as Record<string, string>).personalBooksCache);
+      const cached = JSON.parse((cacheCall![0] as Record<string, string>)[PERSONAL_BOOKS_CACHE_KEY]);
       const book1 = cached.find((b: { bookId: string }) => b.bookId === "book-1");
       expect(book1).toBeDefined();
       expect(book1.isShared).toBe(BoolFlag.TRUE);

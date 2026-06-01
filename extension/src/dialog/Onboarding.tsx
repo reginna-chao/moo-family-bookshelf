@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ApiClient } from "../api/client";
+import { DISPLAY_NAME_KEY } from "../constants";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { useAutoSetup } from "./useAutoSetup";
 import { WelcomeView, CreatedView, ErrorView, IdleView } from "./OnboardingViews";
@@ -25,8 +26,8 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
 
   // Check if user has previously used the extension (has displayName stored)
   useEffect(() => {
-    chrome.storage.local.get(["displayName"], (result) => {
-      if (result.displayName) {
+    chrome.storage.local.get([DISPLAY_NAME_KEY], (result) => {
+      if (result[DISPLAY_NAME_KEY]) {
         setHasUsedBefore(true);
       }
     });

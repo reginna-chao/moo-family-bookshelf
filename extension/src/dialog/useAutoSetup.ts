@@ -7,6 +7,7 @@ import {
 } from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
 import { ApiClient, BookEntry, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import { USER_EMAIL_KEY, DISPLAY_NAME_KEY } from "../constants";
 
 export type AutoSetupPhase =
   | "idle"
@@ -111,8 +112,8 @@ export function useAutoSetup(): UseAutoSetupReturn {
       }
 
       await chrome.storage.local.set({
-        userEmail: result.email,
-        displayName: result.displayName,
+        [USER_EMAIL_KEY]: result.email,
+        [DISPLAY_NAME_KEY]: result.displayName,
       });
 
       restoreHash();

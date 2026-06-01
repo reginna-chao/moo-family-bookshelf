@@ -21,6 +21,7 @@ import {
   waitForPageReady,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
+import { API_ENDPOINT_KEY } from "../../src/constants";
 
 /**
  * Helper: go through onboarding and create a family, returning the sync code.
@@ -30,11 +31,11 @@ async function createFamilyAndGetSyncCode(
   extensionId: string,
 ): Promise<string> {
   await page.goto(`chrome-extension://${extensionId}/background.js`);
-  await page.evaluate((apiUrl) => {
+  await page.evaluate(({ apiUrl, key }) => {
     chrome.storage.local.clear();
     try { chrome.storage.sync.clear(); } catch {}
-    chrome.storage.local.set({ apiEndpoint: apiUrl });
-  }, WORKER_API_URL);
+    chrome.storage.local.set({ [key]: apiUrl });
+  }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
 
   await page.goto(MOCK_READMOO_URL);
   await waitForPageReady(page);
