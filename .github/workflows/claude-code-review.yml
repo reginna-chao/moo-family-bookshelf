@@ -1,0 +1,82 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    # 官方原有：opened, synchronize, ready_for_review, reopened
+    types: [opened, synchronize, ready_for_review, reopened]
+    # 只在「程式碼目錄」變動時觸發，過濾掉文件 / 設定檔變更以節省額度
+    paths:
+      - "extension/src/**"
+      - "pwa/src/**"
+      - "worker/src/**"
+      - "shared/**"
+
+# 同一個 PR 連續推送時，取消前一個未完成的審查，避免重複消耗額度
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # 官方為 read；改為 write 以支援貼 inline review comment
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要完整歷史才能正確 diff PR 與 base 分支
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+
+          # 成本控制：限制模型與最大迭代次數
+          claude_args: |
+            --model claude-opus-4-8
+            --max-turns 5
+
+          prompt: |
+            你是本專案的資深程式碼審查者。請審查這個 Pull Request 的變更：
+            ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+            先閱讀根目錄的 AGENTS.md 與 .claude/rules/*.md，理解本專案的
+            架構規範、命名慣例與「Code Modification Workflow」要求，再開始審查。
+
+            請只針對「這個 PR 實際變更的 diff」進行審查，從以下五個面向給出意見：
+
+            1. 設計（Design）：單一職責、分層清楚、依賴抽象而非具體實作；
+               是否有 god function（> ~40 行）、混合多種關注點。
+            2. 可讀性（Readability）：命名、巢狀層數（最多 3 層、用 early return）、
+               是否有巢狀三元運算子、檔案是否過長（元件 < 200 行）。
+            3. 效能（Performance）：是否有重複 I/O、N+1、不必要的重算；
+               以及生命週期成本（setInterval / 輪詢 / 背景同步是否符合
+               .claude/rules/global.md 的「Lifecycle & Resource Cost」規範）。
+            4. 安全性（Security）：auth token 驗證、輸入驗證、密鑰外洩、
+               KV 資料存取是否遵守 .claude/rules/security-ux-invariants.md 的不變量。
+            5. 可測試性（Testability）：副作用是否集中且可注入、純邏輯是否與 I/O 分離、
+               是否有對應測試（依 .claude/rules/test.md 的覆蓋率目標）。
+
+            審查方式：
+            - 對於具體問題，請使用 inline review comment 標註到對應的「檔案與 diff 行數」，
+              並說明問題、影響與建議改法（盡量附上修正範例）。
+            - 嚴重程度請標示為 CRITICAL / WARNING / NITPICK。
+            - 最後在 PR 上留一則總結留言：條列主要發現、是否有 CRITICAL 阻擋合併、
+              以及整體評估。
+            - 找不到問題時，明確說「無重大問題」，不要硬湊意見。
+
+            所有審查內容請使用繁體中文撰寫。
