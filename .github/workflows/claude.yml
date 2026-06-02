@@ -1,22 +1,24 @@
 name: Claude Code
 
 on:
+  # 縮減事件來源：移除 pull_request_review / pull_request_review_comment，
+  # 因為自動審查 bot 一貼 review / inline 留言就會觸發它們，產生大量 skipped 空轉 run。
+  # 代價：@claude 只能在 PR/Issue 的「主留言框」使用，無法在程式碼行內 reply 觸發。
   issue_comment:
-    types: [created]
-  pull_request_review_comment:
     types: [created]
   issues:
     types: [opened, assigned]
-  pull_request_review:
-    types: [submitted]
 
 jobs:
   claude:
+    # sender.type != 'Bot'：即使留言由 bot 發出（含自動審查 bot 的總結留言），也直接跳過，
+    # 不讓任何機器人留言喚醒 Claude。人類在主留言框 tag @claude 才會真的執行。
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      github.event.sender.type != 'Bot' &&
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
