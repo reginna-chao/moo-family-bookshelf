@@ -6,11 +6,16 @@ const syncStorageMock: Record<string, unknown> = {};
 
 function createStorageAreaMock(store: Record<string, unknown>) {
   return {
-    get: vi.fn((keys: string | string[], callback?: (result: Record<string, unknown>) => void) => {
-      const keyList = Array.isArray(keys) ? keys : [keys];
-      const result: Record<string, unknown> = {};
-      for (const key of keyList) {
-        if (key in store) result[key] = store[key];
+    get: vi.fn((keys: string | string[] | null | undefined, callback?: (result: Record<string, unknown>) => void) => {
+      let result: Record<string, unknown> = {};
+      if (keys === null || keys === undefined) {
+        // Match the real API: get(null) / get() returns the entire store.
+        result = { ...store };
+      } else {
+        const keyList = Array.isArray(keys) ? keys : [keys];
+        for (const key of keyList) {
+          if (key in store) result[key] = store[key];
+        }
       }
       if (typeof callback === "function") {
         callback(result);
@@ -50,6 +55,9 @@ function createStorageAreaMock(store: Record<string, unknown>) {
       removeListener: vi.fn(),
     },
     onInstalled: {
+      addListener: vi.fn(),
+    },
+    onStartup: {
       addListener: vi.fn(),
     },
     lastError: null,

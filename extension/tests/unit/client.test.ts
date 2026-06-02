@@ -1,12 +1,39 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiClient, validateEndpointUrl } from "@/api/client";
+import {
+  USER_ID_KEY,
+  FAMILY_ID_KEY,
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+} from "@/constants";
 
-// Mock the constants module so we don't depend on import.meta.env
-vi.mock("@/constants", () => ({
-  DEFAULT_API_ENDPOINT: "https://default.workers.dev",
-}));
+// Mock the constants module to pin DEFAULT_API_ENDPOINT (avoids import.meta.env
+// dependence) while keeping all real values — notably the storage-key constants
+// that auth-refresh.ts imports.
+vi.mock("@/constants", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/constants")>();
+  return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
+});
 
 const MOCK_ENDPOINT = "https://test.workers.dev";
+
+/**
+ * Re-key a logical storage-read object to the production `moo:` keys, so the
+ * mocked chrome.storage.local.get returns what auth-refresh.ts actually reads.
+ */
+const STORAGE_KEY_ALIAS: Record<string, string> = {
+  userId: USER_ID_KEY,
+  familyId: FAMILY_ID_KEY,
+  authToken: AUTH_TOKEN_KEY,
+  tokenExpiresAt: TOKEN_EXPIRES_AT_KEY,
+};
+function toStorageKeys(data: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data)) {
+    out[STORAGE_KEY_ALIAS[k] ?? k] = v;
+  }
+  return out;
+}
 
 function mockFetchSuccess<T>(data: T, status = 200) {
   return vi.fn().mockResolvedValue({
@@ -398,7 +425,7 @@ describe("ApiClient", () => {
       // Set up chrome.storage.local.get to return userId and familyId
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1" };
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -433,7 +460,7 @@ describe("ApiClient", () => {
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1", displayName: "Test" };
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -494,7 +521,7 @@ describe("ApiClient", () => {
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1" };
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -534,7 +561,7 @@ describe("ApiClient", () => {
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1", displayName: "Test" };
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -570,7 +597,7 @@ describe("ApiClient", () => {
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1", displayName: "Test" };
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -623,7 +650,7 @@ describe("ApiClient", () => {
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1", displayName: "Test User" };
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test User" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -641,7 +668,7 @@ describe("ApiClient", () => {
       expect(onFamilyRemoved).not.toHaveBeenCalled();
       // New token should be stored
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        expect.objectContaining({ authToken: "recovered-token", tokenExpiresAt: 9999999999 }),
+        expect.objectContaining({ [AUTH_TOKEN_KEY]: "recovered-token", [TOKEN_EXPIRES_AT_KEY]: 9999999999 }),
       );
     });
 
@@ -682,7 +709,7 @@ describe("ApiClient", () => {
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1", displayName: "小明" };
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "小明" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -721,8 +748,8 @@ describe("ApiClient", () => {
           // First call (for refresh): has userId/familyId
           // Second call (for recovery): missing familyId
           const result = getCallCount === 1
-            ? { userId: "u1", familyId: "fam-1" }
-            : { userId: "u1" };
+            ? toStorageKeys({ userId: "u1", familyId: "fam-1" })
+            : toStorageKeys({ userId: "u1" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -779,7 +806,7 @@ describe("ApiClient", () => {
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1", displayName: "Test" };
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -821,7 +848,7 @@ describe("ApiClient", () => {
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { userId: "u1", familyId: "fam-1", displayName: "Test" };
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -831,11 +858,11 @@ describe("ApiClient", () => {
 
       // First: clear only token
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        ["authToken", "tokenExpiresAt"],
+        [AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY],
       );
       // Then: clear family data after recovery fails
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        ["familyId"],
+        [FAMILY_ID_KEY],
       );
     });
   });

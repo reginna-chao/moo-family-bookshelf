@@ -18,6 +18,12 @@ import { performJoin, performSoloRecovery, tryAutoRecovery } from "@/dialog/onbo
 import { decodeSyncCode } from "@/crypto/syncCode";
 import type { ApiClient } from "@/api/client";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
+import {
+  USER_ID_KEY,
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  FAMILY_ID_KEY,
+} from "@/constants";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
@@ -121,15 +127,15 @@ describe("performSoloRecovery", () => {
     // Credentials written to local storage
     expect(chrome.storage.local.set).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: "user-abc",
-        authToken: "tok",
-        tokenExpiresAt: 9999999999,
+        [USER_ID_KEY]: "user-abc",
+        [AUTH_TOKEN_KEY]: "tok",
+        [TOKEN_EXPIRES_AT_KEY]: 9999999999,
       }),
     );
 
     // familyId written to sync storage
     expect(chrome.storage.sync.set).toHaveBeenCalledWith(
-      expect.objectContaining({ familyId: "fam-solo-1" }),
+      expect.objectContaining({ [FAMILY_ID_KEY]: "fam-solo-1" }),
     );
 
     // Background messages sent
@@ -395,9 +401,9 @@ describe("performJoin", () => {
 
     expect(chrome.storage.local.set).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: "user-x",
-        authToken: "tok",
-        tokenExpiresAt: 9999999999,
+        [USER_ID_KEY]: "user-x",
+        [AUTH_TOKEN_KEY]: "tok",
+        [TOKEN_EXPIRES_AT_KEY]: 9999999999,
       }),
     );
 

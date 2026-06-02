@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Inbox } from "lucide-react";
 import { ApiClient, BorrowStatus } from "../api/client";
+import {
+  USER_ID_KEY,
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  HAS_COMPLETED_INITIAL_SETUP_KEY,
+} from "../constants";
 import { Onboarding } from "./Onboarding";
 import { PersonalShelf } from "./PersonalShelf";
 import { FamilyShelf } from "./FamilyShelf";
@@ -61,17 +67,17 @@ export function App() {
     // Load familyId, userId, and custom API endpoint on mount.
     // GET_FAMILY_ID checks sync first, falling back to local (handled in background).
     chrome.runtime.sendMessage({ type: "GET_FAMILY_ID" }, (familyResponse) => {
-      chrome.storage.local.get(["userId", "authToken"], (storageResult) => {
+      chrome.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY], (storageResult) => {
         chrome.runtime.sendMessage({ type: "GET_API_ENDPOINT" }, (apiResponse) => {
           if (apiResponse?.apiEndpoint) {
             apiClientRef.current.setEndpoint(apiResponse.apiEndpoint);
           }
-          if (storageResult.authToken) {
-            apiClientRef.current.setAuthToken(storageResult.authToken as string);
+          if (storageResult[AUTH_TOKEN_KEY]) {
+            apiClientRef.current.setAuthToken(storageResult[AUTH_TOKEN_KEY] as string);
           }
-          if (familyResponse?.familyId && storageResult.userId) {
+          if (familyResponse?.familyId && storageResult[USER_ID_KEY]) {
             setFamilyId(familyResponse.familyId);
-            setUserId(storageResult.userId as string);
+            setUserId(storageResult[USER_ID_KEY] as string);
             setView("main");
           } else {
             setView("onboarding");
@@ -85,10 +91,10 @@ export function App() {
     setFamilyId(id);
     setUserId(newUserId);
     // First-time onboarding: default to personal-shelf tab
-    chrome.storage.local.get(["hasCompletedInitialSetup"], (result) => {
-      if (!result.hasCompletedInitialSetup) {
+    chrome.storage.local.get([HAS_COMPLETED_INITIAL_SETUP_KEY], (result) => {
+      if (!result[HAS_COMPLETED_INITIAL_SETUP_KEY]) {
         setActiveTab("personal-shelf");
-        chrome.storage.local.set({ hasCompletedInitialSetup: true });
+        chrome.storage.local.set({ [HAS_COMPLETED_INITIAL_SETUP_KEY]: true });
       }
     });
     setView("main");
@@ -96,7 +102,7 @@ export function App() {
 
   const handleLeaveFamily = () => {
     chrome.runtime.sendMessage({ type: "CLEAR_FAMILY_ID" });
-    chrome.storage.local.remove("tokenExpiresAt");
+    chrome.storage.local.remove(TOKEN_EXPIRES_AT_KEY);
     setFamilyId(null);
     setActiveTab("family-shelf");
     setView("onboarding");

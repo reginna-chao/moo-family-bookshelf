@@ -4,6 +4,7 @@ import React from "react";
 import { FamilySettings, FamilySettingsProps } from "@/dialog/FamilySettings";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import type { ApiClient } from "@/api/client";
+import { DISPLAY_NAME_KEY } from "@/constants";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
@@ -62,7 +63,7 @@ describe("FamilySettings", () => {
     // Return an encryption key and display name from storage
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-        const result = { displayName: "小明" };
+        const result = { [DISPLAY_NAME_KEY]: "小明" };
         if (typeof callback === "function") {
           callback(result);
         }
@@ -152,8 +153,8 @@ describe("FamilySettings", () => {
       expect(apiClient.updateDisplayName).toHaveBeenCalledWith(
         "fam-123", "user-abc12345", "大明",
       );
-      expect(chrome.storage.local.set).toHaveBeenCalledWith({ displayName: "大明" });
-      expect(chrome.storage.sync.set).toHaveBeenCalledWith({ displayName: "大明" });
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
+      expect(chrome.storage.sync.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
     });
   });
 
@@ -694,7 +695,7 @@ describe("FamilySettings", () => {
     // Simulate storage change for displayName
     act(() => {
       listener(
-        { displayName: { newValue: "大明", oldValue: "小明" } },
+        { [DISPLAY_NAME_KEY]: { newValue: "大明", oldValue: "小明" } },
         "local",
       );
     });
@@ -719,7 +720,7 @@ describe("FamilySettings", () => {
     // Fire from "sync" area — should be ignored
     act(() => {
       listener(
-        { displayName: { newValue: "不應出現", oldValue: "小明" } },
+        { [DISPLAY_NAME_KEY]: { newValue: "不應出現", oldValue: "小明" } },
         "sync",
       );
     });

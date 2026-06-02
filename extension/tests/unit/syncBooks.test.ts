@@ -20,6 +20,33 @@ vi.mock("@/sync/mergeBooks", () => ({
 import { syncBooks, type SyncBooksOptions } from "@/sync/syncBooks";
 import { scrapeBooks, scrapeArchivedBooks } from "@/content/scraper";
 import { BoolFlag, type ApiClient } from "@/api/client";
+import {
+  AUTO_SYNC_INTERVAL_KEY,
+  LAST_SYNC_AT_KEY,
+  LAST_DISPLAY_SCRAPE_AT_KEY,
+  DISPLAY_NAME_KEY,
+  SYNC_ARCHIVED_KEY,
+} from "@/constants";
+
+/**
+ * Tests describe storage data with logical names; production reads the
+ * `moo:`-prefixed keys. This maps logical → production keys via the imported
+ * constants, so a key-constant rename still breaks the test at compile time.
+ */
+const STORAGE_KEY_ALIAS: Record<string, string> = {
+  autoSyncInterval: AUTO_SYNC_INTERVAL_KEY,
+  lastSyncAt: LAST_SYNC_AT_KEY,
+  lastDisplayScrapeAt: LAST_DISPLAY_SCRAPE_AT_KEY,
+  displayName: DISPLAY_NAME_KEY,
+  syncArchived: SYNC_ARCHIVED_KEY,
+};
+function toStorageKeys(data: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data)) {
+    out[STORAGE_KEY_ALIAS[k] ?? k] = v;
+  }
+  return out;
+}
 
 function createMockApiClient(): ApiClient {
   return {
@@ -52,14 +79,15 @@ describe("syncBooks — archive sync path", () => {
   });
 
   function setupStorage(data: Record<string, unknown>) {
+    const store = toStorageKeys(data);
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
         // Return only requested keys
         const keyList = Array.isArray(keys) ? keys : [keys];
         const result: Record<string, unknown> = {};
         for (const key of keyList) {
-          if (typeof key === "string" && key in data) {
-            result[key] = data[key];
+          if (typeof key === "string" && key in store) {
+            result[key] = store[key];
           }
         }
         if (typeof callback === "function") {
@@ -194,13 +222,14 @@ describe("canAutoSync", () => {
   });
 
   function setupStorage(data: Record<string, unknown>) {
+    const store = toStorageKeys(data);
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
         const keyList = Array.isArray(keys) ? keys : [keys];
         const result: Record<string, unknown> = {};
         for (const key of keyList) {
-          if (typeof key === "string" && key in data) {
-            result[key] = data[key];
+          if (typeof key === "string" && key in store) {
+            result[key] = store[key];
           }
         }
         if (typeof callback === "function") {
@@ -316,13 +345,14 @@ describe("canDisplayScrape", () => {
   });
 
   function setupStorage(data: Record<string, unknown>) {
+    const store = toStorageKeys(data);
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
         const keyList = Array.isArray(keys) ? keys : [keys];
         const result: Record<string, unknown> = {};
         for (const key of keyList) {
-          if (typeof key === "string" && key in data) {
-            result[key] = data[key];
+          if (typeof key === "string" && key in store) {
+            result[key] = store[key];
           }
         }
         if (typeof callback === "function") {
@@ -452,13 +482,14 @@ describe("syncBooks — full flow", () => {
   });
 
   function setupStorage(data: Record<string, unknown>) {
+    const store = toStorageKeys(data);
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
         const keyList = Array.isArray(keys) ? keys : [keys];
         const result: Record<string, unknown> = {};
         for (const key of keyList) {
-          if (typeof key === "string" && key in data) {
-            result[key] = data[key];
+          if (typeof key === "string" && key in store) {
+            result[key] = store[key];
           }
         }
         if (typeof callback === "function") {
@@ -540,8 +571,8 @@ describe("syncBooks — full flow", () => {
     // does not trigger a redundant re-scrape afterwards.
     expect(chrome.storage.local.set).toHaveBeenCalledWith(
       expect.objectContaining({
-        lastSyncAt: expect.any(Number),
-        lastDisplayScrapeAt: expect.any(Number),
+        [LAST_SYNC_AT_KEY]: expect.any(Number),
+        [LAST_DISPLAY_SCRAPE_AT_KEY]: expect.any(Number),
       }),
     );
   });

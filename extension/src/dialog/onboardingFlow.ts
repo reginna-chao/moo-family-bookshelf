@@ -9,7 +9,15 @@
 
 import { ApiClient, FamilyGroup, BookEntry, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 import { decodeSyncCode, encodeSyncCode } from "../crypto/syncCode";
-import { DEFAULT_API_ENDPOINT, PERSONAL_BOOKS_CACHE_KEY } from "../constants";
+import {
+  DEFAULT_API_ENDPOINT,
+  PERSONAL_BOOKS_CACHE_KEY,
+  DISPLAY_NAME_KEY,
+  USER_ID_KEY,
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  FAMILY_ID_KEY,
+} from "../constants";
 import type { useAutoSetup } from "./useAutoSetup";
 
 /**
@@ -21,11 +29,11 @@ export async function migratePersonalBooksCache(
   apiClient: ApiClient,
 ): Promise<void> {
   try {
-    const result = await chrome.storage.local.get([PERSONAL_BOOKS_CACHE_KEY, "displayName"]);
+    const result = await chrome.storage.local.get([PERSONAL_BOOKS_CACHE_KEY, DISPLAY_NAME_KEY]);
     const raw = result[PERSONAL_BOOKS_CACHE_KEY] as string | undefined;
     if (!raw) return;
 
-    const storedDisplayName = (result.displayName as string | undefined) ?? "";
+    const storedDisplayName = (result[DISPLAY_NAME_KEY] as string | undefined) ?? "";
     const books = JSON.parse(raw) as BookEntry[];
     const personalBooks: PersonalBooks = {
       schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
@@ -50,13 +58,13 @@ async function persistJoinCredentials(opts: {
   expiresAt?: number;
 }): Promise<void> {
   const storageData: Record<string, unknown> = {
-    userId: opts.userId,
+    [USER_ID_KEY]: opts.userId,
   };
   if (opts.authToken !== undefined) {
-    storageData.authToken = opts.authToken;
+    storageData[AUTH_TOKEN_KEY] = opts.authToken;
   }
   if (opts.expiresAt) {
-    storageData.tokenExpiresAt = opts.expiresAt;
+    storageData[TOKEN_EXPIRES_AT_KEY] = opts.expiresAt;
   }
   await chrome.storage.local.set(storageData);
 }
@@ -95,7 +103,7 @@ export async function tryAutoRecovery(opts: {
   });
   // Overwrite stale familyId in sync storage so background reads stay consistent
   try {
-    await chrome.storage.sync.set({ familyId: opts.familyId });
+    await chrome.storage.sync.set({ [FAMILY_ID_KEY]: opts.familyId });
   } catch {
     // sync storage may be unavailable in some contexts
   }
@@ -141,7 +149,7 @@ export async function performSoloRecovery(opts: {
     expiresAt: joinData?.expiresAt,
   });
   try {
-    await chrome.storage.sync.set({ familyId: opts.familyId });
+    await chrome.storage.sync.set({ [FAMILY_ID_KEY]: opts.familyId });
   } catch {
     // sync storage may be unavailable in some contexts
   }

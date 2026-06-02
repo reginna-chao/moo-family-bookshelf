@@ -17,6 +17,7 @@ import {
   waitForPageReady,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
+import { API_ENDPOINT_KEY } from "../../src/constants";
 
 /**
  * Helper: go through the full onboarding flow to get to main view.
@@ -27,9 +28,9 @@ async function setupFamily(
 ): Promise<void> {
   // Set API endpoint
   await page.goto(`chrome-extension://${extensionId}/background.js`);
-  await page.evaluate((apiUrl) => {
-    chrome.storage.local.set({ apiEndpoint: apiUrl });
-  }, WORKER_API_URL);
+  await page.evaluate(({ apiUrl, key }) => {
+    chrome.storage.local.set({ [key]: apiUrl });
+  }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
 
   await page.goto(MOCK_READMOO_URL);
   await waitForPageReady(page);

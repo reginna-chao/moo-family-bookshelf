@@ -8,6 +8,8 @@
  * for navigation between mock pages during tests.
  */
 
+import { API_ENDPOINT_KEY } from "../../../src/constants";
+
 /** Base URL for the mock fixture server */
 export const FIXTURES_BASE_URL = "http://localhost:4173";
 
@@ -33,7 +35,7 @@ export const MOCK_PAGES = {
 export function getSetApiEndpointScript(apiUrl: string = WORKER_API_URL): string {
   return `
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({ apiEndpoint: '${apiUrl}' });
+      chrome.storage.local.set({ '${API_ENDPOINT_KEY}': '${apiUrl}' });
     }
   `;
 }

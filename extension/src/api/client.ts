@@ -3,7 +3,7 @@
  * Supports configurable endpoint for self-hosted backends.
  */
 
-import { DEFAULT_API_ENDPOINT } from "../constants";
+import { DEFAULT_API_ENDPOINT, TOKEN_EXPIRES_AT_KEY } from "../constants";
 
 /** Hostname patterns allowed over plain HTTP (dev / LAN self-hosting). */
 const PRIVATE_HOST_RE =
@@ -111,8 +111,9 @@ export class ApiClient {
    */
   async proactiveRefresh(): Promise<boolean> {
     try {
-      const { tokenExpiresAt } =
-        await chrome.storage.local.get("tokenExpiresAt");
+      const expiryResult =
+        await chrome.storage.local.get(TOKEN_EXPIRES_AT_KEY);
+      const tokenExpiresAt = expiryResult[TOKEN_EXPIRES_AT_KEY];
       if (!tokenExpiresAt) return true; // No expiry info — assume valid
 
       if (Date.now() > (tokenExpiresAt as number) - REFRESH_BUFFER_MS) {

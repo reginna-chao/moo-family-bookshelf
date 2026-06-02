@@ -3,6 +3,12 @@
  */
 
 import type { ApiResponse } from "./types";
+import {
+  USER_ID_KEY,
+  FAMILY_ID_KEY,
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+} from "../constants";
 
 interface RefreshDeps {
   request: <T>(path: string, init?: RequestInit, skipRefresh?: boolean) => Promise<ApiResponse<T>>;
@@ -20,10 +26,10 @@ interface RefreshDeps {
  */
 export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
   try {
-    const storage = await chrome.storage.local.get(["userId", "familyId", "authToken"]);
-    const userId = storage.userId as string | undefined;
-    const familyId = storage.familyId as string | undefined;
-    const storedToken = storage.authToken as string | undefined;
+    const storage = await chrome.storage.local.get([USER_ID_KEY, FAMILY_ID_KEY, AUTH_TOKEN_KEY]);
+    const userId = storage[USER_ID_KEY] as string | undefined;
+    const familyId = storage[FAMILY_ID_KEY] as string | undefined;
+    const storedToken = storage[AUTH_TOKEN_KEY] as string | undefined;
     if (!userId || !familyId) return false;
 
     // Ensure the current token is set before calling the protected refresh endpoint.
@@ -41,10 +47,10 @@ export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
     if (result.data?.token) {
       deps.setAuthToken(result.data.token);
       const storageUpdate: Record<string, unknown> = {
-        authToken: result.data.token,
+        [AUTH_TOKEN_KEY]: result.data.token,
       };
       if (result.data.expiresAt) {
-        storageUpdate.tokenExpiresAt = result.data.expiresAt;
+        storageUpdate[TOKEN_EXPIRES_AT_KEY] = result.data.expiresAt;
       }
       await chrome.storage.local.set(storageUpdate);
       return true;
@@ -52,15 +58,15 @@ export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
 
     // Refresh failed — attempt staged recovery via joinFamily
     deps.setAuthToken(null);
-    await chrome.storage.local.remove(["authToken", "tokenExpiresAt"]);
+    await chrome.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
 
     const recovered = await attemptJoinRecovery(deps);
     if (recovered) return true;
 
     // Recovery also failed — clear family data
-    await chrome.storage.local.remove(["familyId"]);
+    await chrome.storage.local.remove([FAMILY_ID_KEY]);
     try {
-      await chrome.storage.sync.remove(["familyId"]);
+      await chrome.storage.sync.remove([FAMILY_ID_KEY]);
     } catch {
       // sync storage may not be available in all contexts
     }
@@ -79,11 +85,11 @@ export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
 
 async function attemptJoinRecovery(deps: RefreshDeps): Promise<boolean> {
   const recoveryStorage = await chrome.storage.local.get([
-    "familyId",
-    "userId",
+    FAMILY_ID_KEY,
+    USER_ID_KEY,
   ]);
-  const familyId = recoveryStorage.familyId as string | undefined;
-  const userId = recoveryStorage.userId as string | undefined;
+  const familyId = recoveryStorage[FAMILY_ID_KEY] as string | undefined;
+  const userId = recoveryStorage[USER_ID_KEY] as string | undefined;
 
   if (!familyId || !userId) return false;
 
@@ -111,10 +117,10 @@ async function attemptJoinRecovery(deps: RefreshDeps): Promise<boolean> {
   if (joinResult.data?.authToken) {
     deps.setAuthToken(joinResult.data.authToken);
     const recoveryUpdate: Record<string, unknown> = {
-      authToken: joinResult.data.authToken,
+      [AUTH_TOKEN_KEY]: joinResult.data.authToken,
     };
     if (joinResult.data.expiresAt) {
-      recoveryUpdate.tokenExpiresAt = joinResult.data.expiresAt;
+      recoveryUpdate[TOKEN_EXPIRES_AT_KEY] = joinResult.data.expiresAt;
     }
     await chrome.storage.local.set(recoveryUpdate);
     return true;

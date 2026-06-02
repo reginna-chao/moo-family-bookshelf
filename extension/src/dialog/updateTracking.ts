@@ -1,5 +1,8 @@
 import type { MemberBooks } from "./FamilyDataContext";
 
+// Re-export dynamic key builders from constants for backward compatibility
+export { seenKey, chipsKey } from "../constants";
+
 export interface BookshelfSeenRecord {
   [userId: string]: {
     lastUpdated: string;
@@ -16,14 +19,6 @@ export interface BookshelfChipsRecord {
 interface RawMemberInfo {
   userId: string;
   lastUpdated: string | null;
-}
-
-export function seenKey(userId: string): string {
-  return `familyBookshelfSeen:${userId}`;
-}
-
-export function chipsKey(userId: string): string {
-  return `familyBookshelfChips:${userId}`;
 }
 
 /** Compare current bookshelf with stored baseline to find newly added bookIds. */

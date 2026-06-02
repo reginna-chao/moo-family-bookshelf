@@ -2,6 +2,7 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useDisplayName } from "@/dialog/useDisplayName";
 import type { ApiClient } from "@/api/client";
+import { DISPLAY_NAME_KEY } from "@/constants";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
@@ -17,7 +18,7 @@ describe("useDisplayName", () => {
     vi.clearAllMocks();
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-        const result = { displayName: "小明" };
+        const result = { [DISPLAY_NAME_KEY]: "小明" };
         if (typeof callback === "function") {
           callback(result);
         }
@@ -68,8 +69,8 @@ describe("useDisplayName", () => {
       await result.current.handleSaveDisplayName();
     });
 
-    expect(chrome.storage.local.set).toHaveBeenCalledWith({ displayName: "大明" });
-    expect(chrome.storage.sync.set).toHaveBeenCalledWith({ displayName: "大明" });
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
+    expect(chrome.storage.sync.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
     expect(result.current.savedDisplayName).toBe("大明");
     expect(result.current.nameSaveState).toBe("saved");
   });
@@ -91,7 +92,7 @@ describe("useDisplayName", () => {
     });
 
     expect(apiClient.updateDisplayName).toHaveBeenCalledWith("fam-1", "user-123", "大明");
-    expect(chrome.storage.local.set).toHaveBeenCalledWith({ displayName: "大明" });
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
     expect(result.current.nameSaveState).toBe("saved");
   });
 
@@ -117,7 +118,7 @@ describe("useDisplayName", () => {
 
     expect(result.current.nameSaveState).toBe("error");
     expect(result.current.nameSaveError).toBe("名稱過長");
-    expect(chrome.storage.local.set).not.toHaveBeenCalledWith({ displayName: "大明" });
+    expect(chrome.storage.local.set).not.toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
   });
 
   it("trims whitespace from display name before saving", async () => {
@@ -137,7 +138,7 @@ describe("useDisplayName", () => {
     });
 
     expect(apiClient.updateDisplayName).toHaveBeenCalledWith("fam-1", "user-123", "大明");
-    expect(chrome.storage.local.set).toHaveBeenCalledWith({ displayName: "大明" });
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
   });
 
   it("skips API call when options not provided", async () => {
@@ -153,7 +154,7 @@ describe("useDisplayName", () => {
       await result.current.handleSaveDisplayName();
     });
 
-    expect(chrome.storage.local.set).toHaveBeenCalledWith({ displayName: "大明" });
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
     expect(result.current.nameSaveState).toBe("saved");
   });
 
@@ -247,7 +248,7 @@ describe("useDisplayName", () => {
     it("accepts empty string from context (clear is durable)", async () => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { displayName: "停留在 cache 的舊名" };
+          const result = { [DISPLAY_NAME_KEY]: "停留在 cache 的舊名" };
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },

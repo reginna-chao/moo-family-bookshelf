@@ -19,6 +19,10 @@ import {
 import {
   seenKey,
   chipsKey,
+  PERSONAL_SHELF_SAVED_AT_KEY,
+  DISPLAY_NAME_KEY,
+} from "../constants";
+import {
   computeFreshBookIds,
   loadValidChipBookIds,
   buildSeenBaseline,
@@ -372,11 +376,11 @@ export function FamilyDataProvider({
       area: string,
     ) => {
       if (area !== "local") return;
-      if (changes.personalShelfSavedAt) {
+      if (changes[PERSONAL_SHELF_SAVED_AT_KEY]) {
         void refreshBookshelf();
       }
-      if (changes.displayName) {
-        const newName = (changes.displayName.newValue as string) ?? "";
+      if (changes[DISPLAY_NAME_KEY]) {
+        const newName = (changes[DISPLAY_NAME_KEY].newValue as string) ?? "";
         updateMemberDisplayName(userId, newName);
       }
     };

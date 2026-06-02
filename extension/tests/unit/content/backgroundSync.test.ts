@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { USER_ID_KEY, AUTH_TOKEN_KEY, API_ENDPOINT_KEY } from "@/constants";
 
 /**
  * Tests for the content-script background-sync message handler
@@ -85,7 +86,7 @@ describe("listenForBackgroundSync — TRIGGER_BOOK_SYNC", () => {
       }) as never,
     );
 
-    mockStorage({ userId: "user-1", authToken: "tok-1", apiEndpoint: "https://api.test" });
+    mockStorage({ [USER_ID_KEY]: "user-1", [AUTH_TOKEN_KEY]: "tok-1", [API_ENDPOINT_KEY]: "https://api.test" });
 
     // Side-effect import: registers the onMessage listener.
     await import("@/content/index");
@@ -116,7 +117,7 @@ describe("listenForBackgroundSync — TRIGGER_BOOK_SYNC", () => {
   });
 
   it("responds with No userId and never reaches the gate when userId is missing", async () => {
-    mockStorage({ authToken: "tok-1", apiEndpoint: "https://api.test" });
+    mockStorage({ [AUTH_TOKEN_KEY]: "tok-1", [API_ENDPOINT_KEY]: "https://api.test" });
 
     const response = await trigger({ type: "TRIGGER_BOOK_SYNC" });
 

@@ -4,6 +4,7 @@ import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { BoolFlag, type ApiClient } from "@/api/client";
+import { DISPLAY_NAME_KEY } from "@/constants";
 
 
 // Mock useSearch to avoid debounce complexity in tests
@@ -17,9 +18,10 @@ vi.mock("@/dialog/useSearch", () => ({
   })),
 }));
 
-vi.mock("@/constants", () => ({
-  DEFAULT_API_ENDPOINT: "https://default.workers.dev",
-}));
+vi.mock("@/constants", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/constants")>();
+  return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
+});
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
@@ -561,7 +563,7 @@ describe("FamilyShelf", () => {
     // Simulate storage change
     act(() => {
       listener(
-        { displayName: { newValue: "新名字", oldValue: "小明" } },
+        { [DISPLAY_NAME_KEY]: { newValue: "新名字", oldValue: "小明" } },
         "local",
       );
     });
@@ -611,7 +613,7 @@ describe("FamilyShelf", () => {
     // Fire from "sync" area — should be ignored
     act(() => {
       listener(
-        { displayName: { newValue: "不應出現", oldValue: "小明" } },
+        { [DISPLAY_NAME_KEY]: { newValue: "不應出現", oldValue: "小明" } },
         "sync",
       );
     });

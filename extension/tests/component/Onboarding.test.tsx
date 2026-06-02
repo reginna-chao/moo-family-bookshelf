@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Onboarding, OnboardingProps } from "@/dialog/Onboarding";
 import { BoolFlag, type ApiClient } from "@/api/client";
 import { scrapeUserEmail } from "@/content/scraper";
+import { PERSONAL_BOOKS_CACHE_KEY, FAMILY_ID_KEY } from "@/constants";
 
 import { webcrypto } from "node:crypto";
 
@@ -638,8 +639,8 @@ describe("Onboarding", () => {
         (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
           const keyArr = Array.isArray(keys) ? keys : typeof keys === "string" ? [keys] : [];
           const result: Record<string, unknown> = {};
-          if (cache && keyArr.includes("personalBooksCache")) {
-            result.personalBooksCache = JSON.stringify(cache);
+          if (cache && keyArr.includes(PERSONAL_BOOKS_CACHE_KEY)) {
+            result[PERSONAL_BOOKS_CACHE_KEY] = JSON.stringify(cache);
           }
           if (typeof callback === "function") {
             callback(result);
@@ -690,7 +691,7 @@ describe("Onboarding", () => {
       );
 
       // Cache should be removed after successful migration
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith(["personalBooksCache"]);
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([PERSONAL_BOOKS_CACHE_KEY]);
     });
 
     it("migrates cached books when joining a family", async () => {
@@ -741,7 +742,7 @@ describe("Onboarding", () => {
       );
 
       // Cache should be removed
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith(["personalBooksCache"]);
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([PERSONAL_BOOKS_CACHE_KEY]);
     });
 
     it("skips migration when no cache exists", async () => {
@@ -815,7 +816,7 @@ describe("Onboarding", () => {
       });
 
       // Cache should still be cleaned up even on failure
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith(["personalBooksCache"]);
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([PERSONAL_BOOKS_CACHE_KEY]);
     });
   });
 
@@ -879,7 +880,7 @@ describe("Onboarding", () => {
 
       // tryAutoRecovery should overwrite sync storage familyId
       expect(chrome.storage.sync.set).toHaveBeenCalledWith(
-        expect.objectContaining({ familyId: "fam-new-sync" }),
+        expect.objectContaining({ [FAMILY_ID_KEY]: "fam-new-sync" }),
       );
     });
 

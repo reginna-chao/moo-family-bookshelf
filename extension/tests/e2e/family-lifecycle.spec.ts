@@ -25,6 +25,7 @@ import {
   waitForPageReady,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
+import { API_ENDPOINT_KEY } from "../../src/constants";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -58,9 +59,9 @@ test.describe("Family Lifecycle", () => {
 
     // Configure API endpoint to local worker
     await page1.goto(`chrome-extension://${extensionId}/background.js`);
-    await page1.evaluate((apiUrl) => {
-      chrome.storage.local.set({ apiEndpoint: apiUrl });
-    }, WORKER_API_URL);
+    await page1.evaluate(({ apiUrl, key }) => {
+      chrome.storage.local.set({ [key]: apiUrl });
+    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
 
     // Navigate to mock page
     await page1.goto(MOCK_READMOO_URL);
@@ -124,9 +125,9 @@ test.describe("Family Lifecycle", () => {
 
       // Configure API endpoint for user 2
       await page2.goto(`chrome-extension://${extensionId2}/background.js`);
-      await page2.evaluate((apiUrl) => {
-        chrome.storage.local.set({ apiEndpoint: apiUrl });
-      }, WORKER_API_URL);
+      await page2.evaluate(({ apiUrl, key }) => {
+        chrome.storage.local.set({ [key]: apiUrl });
+      }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
 
       // Navigate to mock page
       await page2.goto(MOCK_READMOO_URL);
@@ -228,11 +229,11 @@ test.describe("Family Lifecycle", () => {
 
     // Set up API endpoint + clear storage from previous tests
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate((apiUrl) => {
+    await page.evaluate(({ apiUrl, key }) => {
       chrome.storage.local.clear();
       try { chrome.storage.sync.clear(); } catch {}
-      chrome.storage.local.set({ apiEndpoint: apiUrl });
-    }, WORKER_API_URL);
+      chrome.storage.local.set({ [key]: apiUrl });
+    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);

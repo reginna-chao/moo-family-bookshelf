@@ -11,9 +11,22 @@
 
 import { BoolFlag } from "../api/client";
 import { showSyncErrorBadge, clearSyncErrorBadge } from "./badge";
+import { migrateStorageKeys } from "../storage/migrate";
+import {
+  FAMILY_ID_KEY,
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  SYNC_ARCHIVED_KEY,
+  FAMILY_SHELF_VIEW_MODE_KEY,
+  FLOATING_ICON_SIZE_KEY,
+  AUTO_SYNC_INTERVAL_KEY,
+  FAMILY_SHELF_SORT_KEY,
+  PERSONAL_SHELF_SORT_KEY,
+  API_ENDPOINT_KEY,
+} from "../constants";
 
 /** Keys that are synced across devices via chrome.storage.sync */
-const SYNCED_KEYS = ["familyId"] as const;
+const SYNCED_KEYS = [FAMILY_ID_KEY] as const;
 
 /** Alarm name for scheduled background book sync */
 const BOOK_SYNC_ALARM_NAME = "bookSync";
@@ -21,8 +34,16 @@ const BOOK_SYNC_ALARM_NAME = "bookSync";
 /** Background sync interval in minutes (24 hours) */
 const BACKGROUND_SYNC_INTERVAL_MIN = 24 * 60;
 
+// Attempt the storage-key migration on every service-worker activation.
+// Guarded by the STORAGE_MIGRATED_KEY flag, so it is a cheap no-op once done.
+void migrateStorageKeys();
+
 chrome.runtime.onInstalled.addListener(async () => {
   console.log("MooFamily Bookshelf installed");
+
+  // Migrate any legacy (unprefixed) storage keys to the `moo:` namespace.
+  // Awaited so the service worker stays alive until migration completes.
+  await migrateStorageKeys();
 
   // Create recurring alarm for background book sync (skip if already exists)
   const existing = await chrome.alarms.get(BOOK_SYNC_ALARM_NAME);
@@ -31,6 +52,13 @@ chrome.runtime.onInstalled.addListener(async () => {
       periodInMinutes: BACKGROUND_SYNC_INTERVAL_MIN,
     });
   }
+});
+
+// Resilience: re-attempt the storage migration on browser startup in case a
+// previous onInstalled migration failed (the flag guard makes this a no-op
+// once migration has completed).
+chrome.runtime.onStartup.addListener(() => {
+  void migrateStorageKeys();
 });
 
 /**
@@ -85,15 +113,15 @@ function getWithSyncFallback(
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "GET_FAMILY_ID") {
-    getWithSyncFallback("familyId", (value) => {
+    getWithSyncFallback(FAMILY_ID_KEY, (value) => {
       sendResponse({ familyId: value ?? null });
     });
     return true; // async response
   }
 
   if (message.type === "SET_FAMILY_ID") {
-    chrome.storage.sync.set({ familyId: message.familyId }, () => {
-      chrome.storage.local.set({ familyId: message.familyId }, () => {
+    chrome.storage.sync.set({ [FAMILY_ID_KEY]: message.familyId }, () => {
+      chrome.storage.local.set({ [FAMILY_ID_KEY]: message.familyId }, () => {
         sendResponse({ ok: true });
       });
     });
@@ -102,7 +130,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "CLEAR_FAMILY_ID") {
     chrome.storage.sync.remove(SYNCED_KEYS as unknown as string[], () => {
-      chrome.storage.local.remove([...SYNCED_KEYS, "authToken", "tokenExpiresAt"], () => {
+      chrome.storage.local.remove([...SYNCED_KEYS, AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY], () => {
         sendResponse({ ok: true });
       });
     });
@@ -110,8 +138,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "GET_SYNC_ARCHIVED") {
-    chrome.storage.local.get(["syncArchived"], (result) => {
-      sendResponse({ syncArchived: result.syncArchived ?? BoolFlag.FALSE });
+    chrome.storage.local.get([SYNC_ARCHIVED_KEY], (result) => {
+      sendResponse({ syncArchived: result[SYNC_ARCHIVED_KEY] ?? BoolFlag.FALSE });
     });
     return true;
   }
@@ -122,15 +150,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: "syncArchived must be 0 or 1" });
       return true;
     }
-    chrome.storage.local.set({ syncArchived: value }, () => {
+    chrome.storage.local.set({ [SYNC_ARCHIVED_KEY]: value }, () => {
       sendResponse({ ok: true });
     });
     return true;
   }
 
   if (message.type === "GET_FAMILY_SHELF_VIEW_MODE") {
-    chrome.storage.local.get(["familyShelfViewMode"], (result) => {
-      const stored = result.familyShelfViewMode;
+    chrome.storage.local.get([FAMILY_SHELF_VIEW_MODE_KEY], (result) => {
+      const stored = result[FAMILY_SHELF_VIEW_MODE_KEY];
       const viewMode = stored === "row" ? "row" : "grid";
       sendResponse({ viewMode });
     });
@@ -143,15 +171,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: "viewMode must be 'grid' or 'row'" });
       return true;
     }
-    chrome.storage.local.set({ familyShelfViewMode: value }, () => {
+    chrome.storage.local.set({ [FAMILY_SHELF_VIEW_MODE_KEY]: value }, () => {
       sendResponse({ ok: true });
     });
     return true;
   }
 
   if (message.type === "GET_FLOATING_ICON_SIZE") {
-    chrome.storage.local.get(["floatingIconSize"], (result) => {
-      const stored = result.floatingIconSize;
+    chrome.storage.local.get([FLOATING_ICON_SIZE_KEY], (result) => {
+      const stored = result[FLOATING_ICON_SIZE_KEY];
       const size =
         stored === "small" || stored === "medium" || stored === "large" || stored === "icon"
           ? stored
@@ -167,15 +195,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: "size must be 'small', 'medium', 'large', or 'icon'" });
       return true;
     }
-    chrome.storage.local.set({ floatingIconSize: value }, () => {
+    chrome.storage.local.set({ [FLOATING_ICON_SIZE_KEY]: value }, () => {
       sendResponse({ ok: true });
     });
     return true;
   }
 
   if (message.type === "GET_AUTO_SYNC_INTERVAL") {
-    chrome.storage.local.get(["autoSyncInterval"], (result) => {
-      const stored = result.autoSyncInterval;
+    chrome.storage.local.get([AUTO_SYNC_INTERVAL_KEY], (result) => {
+      const stored = result[AUTO_SYNC_INTERVAL_KEY];
       const interval =
         stored === "daily" || stored === "weekly" || stored === "monthly" || stored === "never"
           ? stored
@@ -191,7 +219,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: "interval must be 'daily', 'weekly', 'monthly', or 'never'" });
       return true;
     }
-    chrome.storage.local.set({ autoSyncInterval: value }, () => {
+    chrome.storage.local.set({ [AUTO_SYNC_INTERVAL_KEY]: value }, () => {
       sendResponse({ ok: true });
     });
     return true;
@@ -203,7 +231,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ sort: "default" });
       return true;
     }
-    const key = shelf === "family" ? "familyShelfSort" : "personalShelfSort";
+    const key = shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
     chrome.storage.local.get([key], (result) => {
       const stored = result[key];
       const sort =
@@ -226,7 +254,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: "sort must be 'default', 'title', or 'author'" });
       return true;
     }
-    const key = shelf === "family" ? "familyShelfSort" : "personalShelfSort";
+    const key = shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
     chrome.storage.local.set({ [key]: value }, () => {
       sendResponse({ ok: true });
     });
@@ -246,8 +274,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "GET_API_ENDPOINT") {
-    chrome.storage.local.get(["apiEndpoint"], (result) => {
-      sendResponse({ apiEndpoint: result.apiEndpoint ?? null });
+    chrome.storage.local.get([API_ENDPOINT_KEY], (result) => {
+      sendResponse({ apiEndpoint: result[API_ENDPOINT_KEY] ?? null });
     });
     return true;
   }
@@ -256,7 +284,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const endpoint = message.apiEndpoint;
     if (endpoint === null || endpoint === undefined) {
       // Clear: remove custom endpoint, revert to default
-      chrome.storage.local.remove("apiEndpoint", () => {
+      chrome.storage.local.remove(API_ENDPOINT_KEY, () => {
         sendResponse({ ok: 1 });
       });
     } else if (typeof endpoint === "string") {
@@ -273,7 +301,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ ok: 0, error: "Invalid URL" });
         return true;
       }
-      chrome.storage.local.set({ apiEndpoint: endpoint }, () => {
+      chrome.storage.local.set({ [API_ENDPOINT_KEY]: endpoint }, () => {
         sendResponse({ ok: 1 });
       });
     } else {

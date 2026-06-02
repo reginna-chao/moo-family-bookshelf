@@ -1,8 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  FAMILY_ID_KEY,
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  API_ENDPOINT_KEY,
+  FAMILY_SHELF_VIEW_MODE_KEY,
+  FLOATING_ICON_SIZE_KEY,
+  AUTO_SYNC_INTERVAL_KEY,
+  FAMILY_SHELF_SORT_KEY,
+  PERSONAL_SHELF_SORT_KEY,
+  PERSONAL_BOOKS_CACHE_KEY,
+} from "@/constants";
+
+// The background module runs migrateStorageKeys() at import time (and in
+// onInstalled/onStartup). These handler tests are not about migration — it has
+// its own suite in tests/unit/storage/migrate.test.ts — so stub it out to keep
+// its storage side effects from polluting the chrome.storage spy assertions.
+vi.mock("@/storage/migrate", () => ({
+  migrateStorageKeys: vi.fn().mockResolvedValue(undefined),
+}));
 
 /**
  * Tests for the background service worker message handlers.
  * Validates the sync+local dual-storage strategy.
+ *
+ * Note: message payloads (e.g. { type: "SET_FAMILY_ID", familyId }) and handler
+ * response shapes (e.g. { familyId: value }) use their own field names and are
+ * unrelated to storage keys. Only storage reads/writes use the `moo:`-prefixed
+ * key constants.
  */
 
 type MessageHandler = (
@@ -82,11 +107,11 @@ describe("background service worker", () => {
 
       expect(response).toEqual({ ok: true });
       expect(chrome.storage.sync.set).toHaveBeenCalledWith(
-        { familyId: "fam-abc" },
+        { [FAMILY_ID_KEY]: "fam-abc" },
         expect.any(Function),
       );
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        { familyId: "fam-abc" },
+        { [FAMILY_ID_KEY]: "fam-abc" },
         expect.any(Function),
       );
     });
@@ -96,7 +121,7 @@ describe("background service worker", () => {
     it("returns familyId from sync storage when available", async () => {
       vi.mocked(chrome.storage.sync.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ familyId: "fam-from-sync" });
+          callback({ [FAMILY_ID_KEY]: "fam-from-sync" });
         },
       );
 
@@ -115,7 +140,7 @@ describe("background service worker", () => {
       );
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ familyId: "fam-from-local" });
+          callback({ [FAMILY_ID_KEY]: "fam-from-local" });
         },
       );
 
@@ -137,11 +162,11 @@ describe("background service worker", () => {
 
       expect(response).toEqual({ ok: true });
       expect(chrome.storage.sync.remove).toHaveBeenCalledWith(
-        ["familyId"],
+        [FAMILY_ID_KEY],
         expect.any(Function),
       );
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        ["familyId", "authToken", "tokenExpiresAt"],
+        [FAMILY_ID_KEY, AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY],
         expect.any(Function),
       );
     });
@@ -153,7 +178,7 @@ describe("background service worker", () => {
       const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
       for (const call of removeCalls) {
         const keys = call[0] as string[];
-        expect(keys).not.toContain("personalBooksCache");
+        expect(keys).not.toContain(PERSONAL_BOOKS_CACHE_KEY);
       }
     });
   });
@@ -162,7 +187,7 @@ describe("background service worker", () => {
     it("reads apiEndpoint from local storage only", async () => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ apiEndpoint: "https://custom.workers.dev" });
+          callback({ [API_ENDPOINT_KEY]: "https://custom.workers.dev" });
         },
       );
 
@@ -182,7 +207,7 @@ describe("background service worker", () => {
 
       expect(response).toEqual({ ok: 1 });
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        { apiEndpoint: "https://custom.workers.dev" },
+        { [API_ENDPOINT_KEY]: "https://custom.workers.dev" },
         expect.any(Function),
       );
       expect(chrome.storage.sync.set).not.toHaveBeenCalled();
@@ -198,7 +223,7 @@ describe("background service worker", () => {
     it("returns 'row' when storage has 'row'", async () => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ familyShelfViewMode: "row" });
+          callback({ [FAMILY_SHELF_VIEW_MODE_KEY]: "row" });
         },
       );
       const response = await sendMessage({ type: "GET_FAMILY_SHELF_VIEW_MODE" });
@@ -208,7 +233,7 @@ describe("background service worker", () => {
     it("returns 'grid' when storage has invalid value", async () => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ familyShelfViewMode: "foo" });
+          callback({ [FAMILY_SHELF_VIEW_MODE_KEY]: "foo" });
         },
       );
       const response = await sendMessage({ type: "GET_FAMILY_SHELF_VIEW_MODE" });
@@ -224,7 +249,7 @@ describe("background service worker", () => {
       });
       expect(response).toEqual({ ok: true });
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        { familyShelfViewMode: mode },
+        { [FAMILY_SHELF_VIEW_MODE_KEY]: mode },
         expect.any(Function),
       );
     });
@@ -251,7 +276,7 @@ describe("background service worker", () => {
     it.each(["small", "medium", "large", "icon"] as const)("returns '%s' when storage has '%s'", async (size) => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ floatingIconSize: size });
+          callback({ [FLOATING_ICON_SIZE_KEY]: size });
         },
       );
       const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
@@ -261,7 +286,7 @@ describe("background service worker", () => {
     it("returns 'medium' when storage has invalid value", async () => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ floatingIconSize: "huge" });
+          callback({ [FLOATING_ICON_SIZE_KEY]: "huge" });
         },
       );
       const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
@@ -277,7 +302,7 @@ describe("background service worker", () => {
       });
       expect(response).toEqual({ ok: true });
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        { floatingIconSize: size },
+        { [FLOATING_ICON_SIZE_KEY]: size },
         expect.any(Function),
       );
     });
@@ -306,7 +331,7 @@ describe("background service worker", () => {
       async (interval) => {
         vi.mocked(chrome.storage.local.get).mockImplementation(
           (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-            callback({ autoSyncInterval: interval });
+            callback({ [AUTO_SYNC_INTERVAL_KEY]: interval });
           },
         );
         const response = await sendMessage({ type: "GET_AUTO_SYNC_INTERVAL" });
@@ -317,7 +342,7 @@ describe("background service worker", () => {
     it("returns 'daily' when storage has invalid value", async () => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ autoSyncInterval: "yearly" });
+          callback({ [AUTO_SYNC_INTERVAL_KEY]: "yearly" });
         },
       );
       const response = await sendMessage({ type: "GET_AUTO_SYNC_INTERVAL" });
@@ -335,7 +360,7 @@ describe("background service worker", () => {
         });
         expect(response).toEqual({ ok: true });
         expect(chrome.storage.local.set).toHaveBeenCalledWith(
-          { autoSyncInterval: interval },
+          { [AUTO_SYNC_INTERVAL_KEY]: interval },
           expect.any(Function),
         );
       },
@@ -363,7 +388,7 @@ describe("background service worker", () => {
     it("returns stored value for family shelf", async () => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ familyShelfSort: "title" });
+          callback({ [FAMILY_SHELF_SORT_KEY]: "title" });
         },
       );
       const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
@@ -373,7 +398,7 @@ describe("background service worker", () => {
     it("returns stored value for personal shelf", async () => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ personalShelfSort: "author" });
+          callback({ [PERSONAL_SHELF_SORT_KEY]: "author" });
         },
       );
       const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "personal" });
@@ -388,7 +413,7 @@ describe("background service worker", () => {
     it("returns 'default' when storage has invalid sort value", async () => {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (_keys: unknown, callback: (result: Record<string, unknown>) => void) => {
-          callback({ familyShelfSort: "bogus" });
+          callback({ [FAMILY_SHELF_SORT_KEY]: "bogus" });
         },
       );
       const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
@@ -404,7 +429,7 @@ describe("background service worker", () => {
     )("writes '$sort' for '$shelf' to correct storage key", async ({ sort, shelf }) => {
       const response = await sendMessage({ type: "SET_BOOK_SORT", shelf, sort });
       expect(response).toEqual({ ok: true });
-      const expectedKey = shelf === "family" ? "familyShelfSort" : "personalShelfSort";
+      const expectedKey = shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
         { [expectedKey]: sort },
         expect.any(Function),

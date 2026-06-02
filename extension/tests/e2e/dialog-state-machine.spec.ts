@@ -24,6 +24,7 @@ import {
   waitForPageReady,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
+import { API_ENDPOINT_KEY, FAMILY_ID_KEY } from "../../src/constants";
 
 /**
  * Helper: go through full onboarding to reach main view.
@@ -84,9 +85,9 @@ test.describe("Dialog State Machine", () => {
 
     // Set API endpoint
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate((apiUrl) => {
-      chrome.storage.local.set({ apiEndpoint: apiUrl });
-    }, WORKER_API_URL);
+    await page.evaluate(({ apiUrl, key }) => {
+      chrome.storage.local.set({ [key]: apiUrl });
+    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);
@@ -121,9 +122,9 @@ test.describe("Dialog State Machine", () => {
 
     // Set up with family
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate((apiUrl) => {
-      chrome.storage.local.set({ apiEndpoint: apiUrl });
-    }, WORKER_API_URL);
+    await page.evaluate(({ apiUrl, key }) => {
+      chrome.storage.local.set({ [key]: apiUrl });
+    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);
@@ -156,11 +157,11 @@ test.describe("Dialog State Machine", () => {
 
     // Set up with family — clear storage and use unique email to avoid KV collisions
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate((apiUrl) => {
+    await page.evaluate(({ apiUrl, key }) => {
       chrome.storage.local.clear();
       try { chrome.storage.sync.clear(); } catch {}
-      chrome.storage.local.set({ apiEndpoint: apiUrl });
-    }, WORKER_API_URL);
+      chrome.storage.local.set({ [key]: apiUrl });
+    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);
@@ -200,11 +201,11 @@ test.describe("Dialog State Machine", () => {
 
     // Set up with family — clear storage and use unique email to avoid KV collisions
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate((apiUrl) => {
+    await page.evaluate(({ apiUrl, key }) => {
       chrome.storage.local.clear();
       try { chrome.storage.sync.clear(); } catch {}
-      chrome.storage.local.set({ apiEndpoint: apiUrl });
-    }, WORKER_API_URL);
+      chrome.storage.local.set({ [key]: apiUrl });
+    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);
@@ -229,10 +230,10 @@ test.describe("Dialog State Machine", () => {
     // chrome.storage is only accessible on chrome-extension:// pages
     await closeDialog(page);
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate(() => {
-      chrome.storage.local.remove(["familyId"]);
-      chrome.storage.sync.remove(["familyId"]);
-    });
+    await page.evaluate((familyKey) => {
+      chrome.storage.local.remove([familyKey]);
+      chrome.storage.sync.remove([familyKey]);
+    }, FAMILY_ID_KEY);
 
     // Navigate back and reopen dialog — should show Onboarding
     await page.goto(MOCK_READMOO_URL);

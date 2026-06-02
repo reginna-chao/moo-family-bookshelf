@@ -48,7 +48,7 @@ import { usePersonalBooks } from "@/dialog/usePersonalBooks";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { scrapeBooks } from "@/content/scraper";
 import { canDisplayScrape } from "@/sync/syncBooks";
-import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
+import { PERSONAL_BOOKS_CACHE_KEY, LAST_DISPLAY_SCRAPE_AT_KEY } from "@/constants";
 
 function createMockApiClient(
   overrides: Partial<ApiClient> = {},
@@ -218,11 +218,11 @@ describe("usePersonalBooks — load flow (cache-first, interval-gated scrape)", 
         (call) =>
           call[0] &&
           typeof call[0] === "object" &&
-          "lastDisplayScrapeAt" in (call[0] as Record<string, unknown>),
+          LAST_DISPLAY_SCRAPE_AT_KEY in (call[0] as Record<string, unknown>),
       );
       expect(timestampCall).toBeDefined();
       expect(
-        (timestampCall![0] as Record<string, unknown>).lastDisplayScrapeAt,
+        (timestampCall![0] as Record<string, unknown>)[LAST_DISPLAY_SCRAPE_AT_KEY],
       ).toEqual(expect.any(Number));
     });
 
