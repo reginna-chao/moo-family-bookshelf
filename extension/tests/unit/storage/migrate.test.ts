@@ -119,6 +119,22 @@ describe("migrateStorageKeys", () => {
     expect(local[USER_ID_KEY]).toBe("user-1");
   });
 
+  it("does not clobber an existing new-namespace value with a stale legacy one (retry after partial run)", async () => {
+    // Simulates: a prior partial migration left the legacy key behind, then the
+    // app wrote a FRESH value under the new key. A retry must keep the fresh
+    // new value and merely drop the stale legacy key.
+    await chrome.storage.local.set({
+      [LEGACY_FAMILY_ID]: "stale-old-family",
+      [FAMILY_ID_KEY]: "fresh-new-family",
+    });
+
+    await migrateStorageKeys();
+
+    const local = await chrome.storage.local.get(null);
+    expect(local[FAMILY_ID_KEY]).toBe("fresh-new-family"); // not reverted
+    expect(LEGACY_FAMILY_ID in local).toBe(false); // legacy dropped
+  });
+
   it("migrates dynamic per-user keys (seen / chips)", async () => {
     const seenValue = { [USER]: { lastUpdated: "2025-01-01", bookIds: ["b1"] } };
     const chipsValue = { bookIds: ["b1"], expiresAt: "2025-01-02" };

@@ -75,13 +75,22 @@ async function migrateArea(area: chrome.storage.StorageArea): Promise<void> {
 
   for (const [key, value] of Object.entries(all)) {
     if (!isLegacyKey(key)) continue;
-    toSet[`${NEW_PREFIX}${key}`] = value;
+    const newKey = `${NEW_PREFIX}${key}`;
+    // Never clobber an existing new-namespace value with a stale legacy one.
+    // This can happen on a retry after a partial run (set succeeded, remove
+    // failed) where the app has since written fresh data under the moo: key.
+    // Only adopt the legacy value when the new key is absent; always drop legacy.
+    if (!(newKey in all)) {
+      toSet[newKey] = value;
+    }
     toRemove.push(key);
   }
 
   if (toRemove.length === 0) return;
 
-  await area.set(toSet);
+  if (Object.keys(toSet).length > 0) {
+    await area.set(toSet);
+  }
   await area.remove(toRemove);
 }
 
