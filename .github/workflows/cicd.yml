@@ -257,10 +257,35 @@ jobs:
           path: pwa/playwright-report/
           retention-days: 7
 
+  # ── CI gate ─────────────────────────────────────────
+  # Single aggregate status for branch protection. Always runs; passes when
+  # every CI job either succeeded or was path-filtered (skipped), and fails
+  # only on a real failure/cancellation. Set THIS as the required check —
+  # never the individual jobs, which skip under path filtering and would
+  # otherwise block merges forever.
+  ci-success:
+    name: CI Success
+    needs: [extension-check, worker-check, pwa-check, e2e, pwa-e2e]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify no CI job failed
+        run: |
+          results="${{ needs.extension-check.result }} ${{ needs.worker-check.result }} ${{ needs.pwa-check.result }} ${{ needs.e2e.result }} ${{ needs.pwa-e2e.result }}"
+          echo "CI job results: $results"
+          for r in $results; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A CI job did not pass (result=$r)"
+              exit 1
+            fi
+          done
+          echo "All CI jobs passed or were skipped by path filtering."
+
   # ── CD: Dev (push to main) ─────────────────────────
   # Dev deploys are path-gated: a package only redeploys when it changed.
-  # The plain `if` lets needs-skip propagation skip the deploy when its
-  # check job was filtered out.
+  # The if has no always()/!cancelled(), so needs-skip propagation skips
+  # the deploy when its check job was filtered out.
   deploy-worker-dev:
     name: Deploy Worker (Dev)
     needs: [changes, worker-check]
