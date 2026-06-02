@@ -5,7 +5,7 @@ description: >
   Never writes code directly; coordinates via agents.
   TRIGGER when: user explicitly invokes /fe-team-lead, or asks to implement a frontend feature with full cycle.
   DO NOT TRIGGER when: user only wants to write code (use /fe-coder), only wants tests (use /fe-tester), or only wants review (use /fe-review).
-argument-hint: "[A|B] <frontend task description>"
+argument-hint: "<frontend task description>"
 allowed-tools: Read, Grep, Glob, Bash(cd extension*), Bash(pnpm*), Bash(git*), Agent
 model: claude-opus-4-6
 ---
@@ -23,31 +23,21 @@ Orchestrate the frontend development lifecycle: spec analysis → coding → tes
 ## Invocation
 
 ```
-/fe-team-lead A <task>   ← Run-through mode
-/fe-team-lead B <task>   ← Checkpoint mode
-/fe-team-lead <task>     ← Defaults to B (checkpoint mode)
+/fe-team-lead <task>
 ```
 
-## Execution Modes
-
-### Mode A — Run-through (省 Token)
+## Execution Flow
 
 - Complete Phase 1 (spec analysis) and **wait for user confirmation**.
 - After confirmation, run Phase 2 (dev), Phase 3 (review), and Phase 4 Fix Cycle autonomously.
-- **CRITICAL findings are auto-fixed without asking** in both modes.
+- **CRITICAL findings are auto-fixed without asking.**
 - **Only stop for user input when** SUGGESTION findings need user decision, or a blocker affects architecture/security.
-
-### Mode B — Checkpoint (default)
-
-- Stop and wait for user confirmation at **every phase boundary**.
-- Phase 1 → confirm → Phase 2 → confirm → Phase 3 + Phase 4 Fix Cycle → Phase 5.
-- **CRITICAL findings are auto-fixed without asking** — the Fix Cycle only pauses for SUGGESTION decisions.
 
 ---
 
 ## Workflow
 
-### Phase 1: Requirements Analysis (both modes stop here)
+### Phase 1: Requirements Analysis (stops here)
 
 1. Read the task description.
 2. Read `.claude/rules/frontend.md` for architecture context.
@@ -86,8 +76,6 @@ If any fail, fix via coder or tester before proceeding.
 2. Run E2E typecheck: `npx tsc --noEmit --project tests/e2e/tsconfig.json` in the affected package(s).
 3. If typecheck fails, spawn `/fe-coder` to fix the breakage (update imports, adapt helpers, etc.).
 4. This step catches compile-time breaks early — it does NOT require running the full E2E suite locally.
-
-**Mode B**: present dev results and wait for confirmation.
 
 ### Phase 3: Review
 
@@ -243,7 +231,7 @@ This phase runs automatically — no user confirmation needed to start, but CRIT
 ## Rules
 
 - Never write production or test code directly.
-- **Never skip Phase 1 user confirmation** — this applies to both modes.
+- **Never skip Phase 1 user confirmation.**
 - **CRITICAL findings are always auto-fixed** — never ask the user whether to fix a CRITICAL.
 - **SUGGESTION findings require user approval** — never auto-fix a SUGGESTION without asking.
 - Always verify with typecheck + lint + test after each fix in the Fix Cycle.
