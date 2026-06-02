@@ -264,7 +264,7 @@ jobs:
   deploy-worker-dev:
     name: Deploy Worker (Dev)
     needs: [changes, worker-check]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.worker == 'true'
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.worker == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -294,7 +294,7 @@ jobs:
   deploy-pwa-dev:
     name: Deploy PWA (Dev)
     needs: [changes, pwa-check]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.pwa == 'true'
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.pwa == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -322,7 +322,7 @@ jobs:
   deploy-pages:
     name: Deploy GitHub Pages
     needs: changes
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.site == 'true'
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.site == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -350,7 +350,7 @@ jobs:
   deploy-worker-prod:
     name: Deploy Worker (Prod)
     needs: [worker-check, e2e]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -380,7 +380,7 @@ jobs:
   deploy-pwa-prod:
     name: Deploy PWA (Prod)
     needs: [pwa-check, pwa-e2e]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -408,7 +408,7 @@ jobs:
   release-extension:
     name: Build Extension Release
     needs: [extension-check, e2e]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
