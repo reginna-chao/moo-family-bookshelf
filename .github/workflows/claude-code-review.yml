@@ -5,12 +5,11 @@ on:
     # 官方原有：opened, synchronize, ready_for_review, reopened
     types: [opened, synchronize, ready_for_review, reopened]
     # 只在「程式碼目錄」變動時觸發，過濾掉文件 / 設定檔變更以節省額度
-    # TODO 暫時隱藏，先修正錯誤確認整個流程可以跑
-    # paths:
-    #   - "extension/src/**"
-    #   - "pwa/src/**"
-    #   - "worker/src/**"
-    #   - "shared/**"
+    paths:
+      - "extension/src/**"
+      - "pwa/src/**"
+      - "worker/src/**"
+      - "shared/**"
 
 # 同一個 PR 連續推送時，取消前一個未完成的審查，避免重複消耗額度
 concurrency:
@@ -49,9 +48,8 @@ jobs:
           #   - 讀檔工具 (Read/Glob/Grep)：prompt 會參照 AGENTS.md 與 .claude/rules/*.md
           #   - GitHub 留言工具：才能貼 inline comment 與總結留言
           # 任何 Claude 需要、卻沒列在這裡的工具都會被拒並燒掉一個 turn。
-          # NOTE: 流程驗證 OK 後，把 --model 改回 claude-opus-4-8。
           claude_args: |
-            --model claude-sonnet-4-6
+            --model claude-opus-4-8
             --max-turns 20
             --allowedTools "Read,Glob,Grep,Bash(git diff:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
