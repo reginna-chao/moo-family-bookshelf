@@ -2,16 +2,16 @@ name: Claude Code Review
 
 on:
   pull_request:
-    # 官方原有：opened, synchronize, ready_for_review, reopened
+    # Official defaults: opened, synchronize, ready_for_review, reopened
     types: [opened, synchronize, ready_for_review, reopened]
-    # 只在「程式碼目錄」變動時觸發，過濾掉文件 / 設定檔變更以節省額度
+    # Only trigger on code-directory changes; skip docs/config-only changes to save quota
     paths:
       - "extension/src/**"
       - "pwa/src/**"
       - "worker/src/**"
       - "shared/**"
 
-# 同一個 PR 連續推送時，取消前一個未完成的審查，避免重複消耗額度
+# Cancel the previous in-progress review when the same PR is pushed again, to avoid duplicate spend
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -30,7 +30,7 @@ jobs:
       CLAUDE_MODEL_LABEL: "Opus 4.8"
     permissions:
       contents: read
-      pull-requests: write # 官方為 read；改為 write 以支援貼 inline review comment
+      pull-requests: write # official default is read; raised to write so the review can post inline comments
       issues: read
       id-token: write
 
@@ -38,7 +38,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0 # 需要完整歷史才能正確 diff PR 與 base 分支
+          fetch-depth: 0 # full history is needed to diff the PR against its base branch
 
       - name: Run Claude Code Review
         id: claude-review
@@ -46,13 +46,15 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-          # 成本控制 + 工具授權。
-          # 教訓：用「逐一列舉的 Bash(...) 窄清單」會讓 Claude 一伸手拿到清單外的
-          # 指令（git log / cat / sed / gh pr review / TodoWrite 規劃…）就被拒，
-          # 每次 denial 燒一個 turn，最後 error_max_turns。
-          # 解法：放行整個 Bash 工具 + 常用讀取/規劃工具，涵蓋審查所需的一切探索；
-          # 但「刻意不放 Write / Edit / Task」——Claude 改不了檔案，安全邊界仍在
-          # （何況 job 權限已是 contents: read）。
+          # Cost control + tool permissions.
+          # Lesson learned: a narrow per-command Bash(...) allowlist makes Claude hit
+          # a denial whenever it reaches for a command not on the list
+          # (git log / cat / sed / gh pr review / TodoWrite planning...), and each
+          # denial burns a turn until the run ends in error_max_turns.
+          # Fix: allow the whole Bash tool + common read/planning tools to cover all
+          # review-time exploration, while deliberately NOT allowing Write / Edit /
+          # Task — Claude still cannot modify files, so the safety boundary holds
+          # (the job is contents: read anyway).
           claude_args: |
             --model ${{ env.CLAUDE_MODEL }}
             --max-turns 35

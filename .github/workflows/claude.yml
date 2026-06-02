@@ -1,9 +1,11 @@
 name: Claude Code
 
 on:
-  # 縮減事件來源：移除 pull_request_review / pull_request_review_comment，
-  # 因為自動審查 bot 一貼 review / inline 留言就會觸發它們，產生大量 skipped 空轉 run。
-  # 代價：@claude 只能在 PR/Issue 的「主留言框」使用，無法在程式碼行內 reply 觸發。
+  # Trim event sources: drop pull_request_review / pull_request_review_comment,
+  # because the auto-review bot posting a review / inline comment triggers them and
+  # creates many skipped (no-op) runs.
+  # Tradeoff: @claude works only in the PR/Issue main comment box, not via inline
+  # code-comment replies.
   issue_comment:
     types: [created]
   issues:
@@ -11,8 +13,9 @@ on:
 
 jobs:
   claude:
-    # sender.type != 'Bot'：即使留言由 bot 發出（含自動審查 bot 的總結留言），也直接跳過，
-    # 不讓任何機器人留言喚醒 Claude。人類在主留言框 tag @claude 才會真的執行。
+    # sender.type != 'Bot': skip immediately when a comment is posted by a bot
+    # (including the review bot's own summary), so no bot comment ever wakes Claude.
+    # Only a human tagging @claude in the main comment box actually runs it.
     if: |
       github.event.sender.type != 'Bot' &&
       (
