@@ -52,7 +52,7 @@ jobs:
           # （何況 job 權限已是 contents: read）。
           claude_args: |
             --model claude-opus-4-8
-            --max-turns 25
+            --max-turns 35
             --allowedTools "Bash,Read,Glob,Grep,TodoWrite,mcp__github_inline_comment__create_inline_comment"
 
           prompt: |
