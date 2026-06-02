@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # 需要完整歷史才能正確 diff PR 與 base 分支
 
@@ -46,9 +46,11 @@ jobs:
           plugins: 'code-review@claude-code-plugins'
 
           # 成本控制：限制模型與最大迭代次數
+          # --allowedTools 必填：貼 inline comment 與 gh pr 指令都需要明確授權
           claude_args: |
             --model claude-opus-4-8
-            --max-turns 5
+            --max-turns 15
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
           prompt: |
             你是本專案的資深程式碼審查者。請審查這個 Pull Request 的變更：
@@ -74,6 +76,8 @@ jobs:
             審查方式：
             - 對於具體問題，請使用 inline review comment 標註到對應的「檔案與 diff 行數」，
               並說明問題、影響與建議改法（盡量附上修正範例）。
+              使用 mcp__github_inline_comment__create_inline_comment 工具時，
+              請一律帶上 confirmed: true，確保留言直接貼上 PR 而非被緩衝過濾。
             - 嚴重程度請標示為 CRITICAL / WARNING / NITPICK。
             - 最後在 PR 上留一則總結留言：條列主要發現、是否有 CRITICAL 阻擋合併、
               以及整體評估。
