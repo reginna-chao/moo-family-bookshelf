@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write  # 官方為 read；改為 write 以支援貼 inline review comment
+      pull-requests: write # 官方為 read；改為 write 以支援貼 inline review comment
       issues: read
       id-token: write
 
@@ -35,52 +35,57 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0  # 需要完整歷史才能正確 diff PR 與 base 分支
+          fetch-depth: 0 # 需要完整歷史才能正確 diff PR 與 base 分支
 
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
 
-          # 成本控制：限制模型與最大迭代次數
-          # --allowedTools 必填：貼 inline comment 與 gh pr 指令都需要明確授權
+          # 成本控制 + 工具授權。
+          # allowedTools 必須同時包含：
+          #   - 讀檔工具 (Read/Glob/Grep)：prompt 會參照 AGENTS.md 與 .claude/rules/*.md
+          #   - GitHub 留言工具：才能貼 inline comment 與總結留言
+          # 任何 Claude 需要、卻沒列在這裡的工具都會被拒並燒掉一個 turn。
           claude_args: |
             --model claude-opus-4-8
-            --max-turns 15
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --max-turns 20
+            --allowedTools "Read,Glob,Grep,Bash(git diff:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
           prompt: |
-            你是本專案的資深程式碼審查者。請審查這個 Pull Request 的變更：
-            ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
 
-            先閱讀根目錄的 AGENTS.md 與 .claude/rules/*.md，理解本專案的
-            架構規範、命名慣例與「Code Modification Workflow」要求，再開始審查。
+            You are the senior code reviewer for this project. Review this pull request.
 
-            請只針對「這個 PR 實際變更的 diff」進行審查，從以下五個面向給出意見：
+            Project conventions live in AGENTS.md and .claude/rules/*.md at the repo
+            root. Read them if helpful, but if any file is unavailable, proceed using
+            the diff alone — never get blocked on reading a file.
 
-            1. 設計（Design）：單一職責、分層清楚、依賴抽象而非具體實作；
-               是否有 god function（> ~40 行）、混合多種關注點。
-            2. 可讀性（Readability）：命名、巢狀層數（最多 3 層、用 early return）、
-               是否有巢狀三元運算子、檔案是否過長（元件 < 200 行）。
-            3. 效能（Performance）：是否有重複 I/O、N+1、不必要的重算；
-               以及生命週期成本（setInterval / 輪詢 / 背景同步是否符合
-               .claude/rules/global.md 的「Lifecycle & Resource Cost」規範）。
-            4. 安全性（Security）：auth token 驗證、輸入驗證、密鑰外洩、
-               KV 資料存取是否遵守 .claude/rules/security-ux-invariants.md 的不變量。
-            5. 可測試性（Testability）：副作用是否集中且可注入、純邏輯是否與 I/O 分離、
-               是否有對應測試（依 .claude/rules/test.md 的覆蓋率目標）。
+            Review ONLY the actual diff of this PR, across five dimensions:
 
-            審查方式：
-            - 對於具體問題，請使用 inline review comment 標註到對應的「檔案與 diff 行數」，
-              並說明問題、影響與建議改法（盡量附上修正範例）。
-              使用 mcp__github_inline_comment__create_inline_comment 工具時，
-              請一律帶上 confirmed: true，確保留言直接貼上 PR 而非被緩衝過濾。
-            - 嚴重程度請標示為 CRITICAL / WARNING / NITPICK。
-            - 最後在 PR 上留一則總結留言：條列主要發現、是否有 CRITICAL 阻擋合併、
-              以及整體評估。
-            - 找不到問題時，明確說「無重大問題」，不要硬湊意見。
+            1. Design: single responsibility, clear layering, depend on abstractions;
+               flag god functions (> ~40 lines) and mixed concerns.
+            2. Readability: naming, nesting depth (max 3, prefer early return),
+               no nested ternaries, file length (components < 200 lines).
+            3. Performance: redundant I/O, N+1, needless recomputation; and lifecycle
+               cost (setInterval / polling / background sync, per the "Lifecycle &
+               Resource Cost" rules in .claude/rules/global.md).
+            4. Security: auth-token validation, input validation, secret leakage, and
+               KV access against the invariants in
+               .claude/rules/security-ux-invariants.md.
+            5. Testability: side effects isolated and injectable, pure logic separated
+               from I/O, and matching tests per .claude/rules/test.md coverage targets.
 
-            所有審查內容請使用繁體中文撰寫。
+            Tag each finding CRITICAL / WARNING / NITPICK. In the top-level summary,
+            state whether any CRITICAL finding should block the merge. If you find
+            nothing significant, say so plainly — do not invent findings.
+
+            The PR branch is already checked out in the current working directory.
+            Use `gh pr comment` for top-level summary feedback.
+            Use `mcp__github_inline_comment__create_inline_comment` (with
+            `confirmed: true`) to flag specific lines in the diff.
+            Only post GitHub comments — do not submit the review as a chat message.
+
+            Write all review content in Traditional Chinese (繁體中文).
