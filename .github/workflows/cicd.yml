@@ -8,9 +8,53 @@ on:
     branches: [main]
 
 jobs:
+  # ── Change detection ────────────────────────────────
+  # Per-package path filter. Tag pushes ignore these outputs
+  # (each job ORs in `startsWith(github.ref, 'refs/tags/v')`),
+  # so a release always runs the full pipeline.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      extension: ${{ steps.filter.outputs.extension }}
+      pwa: ${{ steps.filter.outputs.pwa }}
+      worker: ${{ steps.filter.outputs.worker }}
+      site: ${{ steps.filter.outputs.site }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            extension:
+              - 'extension/**'
+              - 'shared/**'
+              - 'pnpm-lock.yaml'
+              - 'package.json'
+              - '.github/workflows/cicd.yml'
+            pwa:
+              - 'pwa/**'
+              - 'shared/**'
+              - 'pnpm-lock.yaml'
+              - 'package.json'
+              - '.github/workflows/cicd.yml'
+            worker:
+              - 'worker/**'
+              - '.github/workflows/cicd.yml'
+            site:
+              - 'site/**'
+              - '.github/workflows/cicd.yml'
+
   # ── CI ──────────────────────────────────────────────
   extension-check:
     name: Extension — Lint, Typecheck, Test, Build
+    needs: changes
+    if: >-
+      ${{ !cancelled() &&
+      (needs.changes.outputs.extension == 'true' ||
+      startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
 
     steps:
@@ -40,6 +84,11 @@ jobs:
 
   worker-check:
     name: Worker — Lint, Typecheck, Test
+    needs: changes
+    if: >-
+      ${{ !cancelled() &&
+      (needs.changes.outputs.worker == 'true' ||
+      startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -69,6 +118,11 @@ jobs:
 
   pwa-check:
     name: PWA — Lint, Typecheck, Test, Build
+    needs: changes
+    if: >-
+      ${{ !cancelled() &&
+      (needs.changes.outputs.pwa == 'true' ||
+      startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
 
     steps:
@@ -98,7 +152,16 @@ jobs:
 
   e2e:
     name: E2E — Playwright Chrome Extension Tests
-    needs: [extension-check, worker-check]
+    needs: [changes, extension-check, worker-check]
+    # Run when extension OR worker changed (E2E exercises both), or on a tag.
+    # !cancelled() overrides the default skip when worker-check was filtered out.
+    if: >-
+      ${{ !cancelled() &&
+      needs.extension-check.result != 'failure' &&
+      needs.worker-check.result != 'failure' &&
+      (needs.changes.outputs.extension == 'true' ||
+      needs.changes.outputs.worker == 'true' ||
+      startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
 
     steps:
@@ -143,7 +206,15 @@ jobs:
 
   pwa-e2e:
     name: PWA E2E — Playwright Tests
-    needs: [pwa-check, worker-check]
+    needs: [changes, pwa-check, worker-check]
+    # Run when pwa OR worker changed, or on a tag.
+    if: >-
+      ${{ !cancelled() &&
+      needs.pwa-check.result != 'failure' &&
+      needs.worker-check.result != 'failure' &&
+      (needs.changes.outputs.pwa == 'true' ||
+      needs.changes.outputs.worker == 'true' ||
+      startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
 
     steps:
@@ -186,11 +257,39 @@ jobs:
           path: pwa/playwright-report/
           retention-days: 7
 
+  # ── CI gate ─────────────────────────────────────────
+  # Single aggregate status for branch protection. Always runs; passes when
+  # every CI job either succeeded or was path-filtered (skipped), and fails
+  # only on a real failure/cancellation. Set THIS as the required check —
+  # never the individual jobs, which skip under path filtering and would
+  # otherwise block merges forever.
+  ci-success:
+    name: CI Success
+    needs: [extension-check, worker-check, pwa-check, e2e, pwa-e2e]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify no CI job failed
+        run: |
+          results="${{ needs.extension-check.result }} ${{ needs.worker-check.result }} ${{ needs.pwa-check.result }} ${{ needs.e2e.result }} ${{ needs.pwa-e2e.result }}"
+          echo "CI job results: $results"
+          for r in $results; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A CI job did not pass (result=$r)"
+              exit 1
+            fi
+          done
+          echo "All CI jobs passed or were skipped by path filtering."
+
   # ── CD: Dev (push to main) ─────────────────────────
+  # Dev deploys are path-gated: a package only redeploys when it changed.
+  # The if has no always()/!cancelled(), so needs-skip propagation skips
+  # the deploy when its check job was filtered out.
   deploy-worker-dev:
     name: Deploy Worker (Dev)
-    needs: [worker-check]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [changes, worker-check]
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.worker == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -219,8 +318,8 @@ jobs:
 
   deploy-pwa-dev:
     name: Deploy PWA (Dev)
-    needs: [pwa-check]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [changes, pwa-check]
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.pwa == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -247,7 +346,8 @@ jobs:
 
   deploy-pages:
     name: Deploy GitHub Pages
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: changes
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.site == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -270,10 +370,12 @@ jobs:
         uses: actions/deploy-pages@v5
 
   # ── CD: Prod (v* tag) ──────────────────────────────
+  # Prod deploys are NOT path-gated — a release tag always runs the full
+  # pipeline (the check/e2e jobs above OR in the tag condition).
   deploy-worker-prod:
     name: Deploy Worker (Prod)
     needs: [worker-check, e2e]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -303,7 +405,7 @@ jobs:
   deploy-pwa-prod:
     name: Deploy PWA (Prod)
     needs: [pwa-check, pwa-e2e]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -331,7 +433,7 @@ jobs:
   release-extension:
     name: Build Extension Release
     needs: [extension-check, e2e]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
