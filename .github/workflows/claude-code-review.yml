@@ -44,14 +44,16 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
           # 成本控制 + 工具授權。
-          # allowedTools 必須同時包含：
-          #   - 讀檔工具 (Read/Glob/Grep)：prompt 會參照 AGENTS.md 與 .claude/rules/*.md
-          #   - GitHub 留言工具：才能貼 inline comment 與總結留言
-          # 任何 Claude 需要、卻沒列在這裡的工具都會被拒並燒掉一個 turn。
+          # 教訓：用「逐一列舉的 Bash(...) 窄清單」會讓 Claude 一伸手拿到清單外的
+          # 指令（git log / cat / sed / gh pr review / TodoWrite 規劃…）就被拒，
+          # 每次 denial 燒一個 turn，最後 error_max_turns。
+          # 解法：放行整個 Bash 工具 + 常用讀取/規劃工具，涵蓋審查所需的一切探索；
+          # 但「刻意不放 Write / Edit / Task」——Claude 改不了檔案，安全邊界仍在
+          # （何況 job 權限已是 contents: read）。
           claude_args: |
             --model claude-opus-4-8
-            --max-turns 20
-            --allowedTools "Read,Glob,Grep,Bash(git diff:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --max-turns 35
+            --allowedTools "Bash,Read,Glob,Grep,TodoWrite,mcp__github_inline_comment__create_inline_comment"
 
           prompt: |
             REPO: ${{ github.repository }}
