@@ -48,7 +48,7 @@ async function resolveDisplayName(
 // ---------------------------------------------------------------------------
 
 export type ParseChangesOk = { ok: true; changeMap: Map<string, number> };
-export type ParseChangesErr = { ok: false; code: string; message: string };
+export type ParseChangesErr = { ok: false; code: "INVALID_PAYLOAD"; message: string };
 export type ParseChangesResult = ParseChangesOk | ParseChangesErr;
 
 /**
@@ -89,7 +89,7 @@ export function parsePatchChanges(
 
 export type ValidateDisplayNameResult =
   | { ok: true }
-  | { ok: false; code: string; message: string };
+  | { ok: false; code: "INVALID_PAYLOAD"; message: string };
 
 /**
  * Validate the optional `displayName` field on a PATCH body.
