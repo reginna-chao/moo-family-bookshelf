@@ -519,6 +519,59 @@ describe("PUT /api/user/:id/books side-effect", () => {
   });
 });
 
+// ── PATCH /api/user/:id/books — snapshot sync side-effect ────
+
+describe("PATCH /api/user/:id/books side-effect", () => {
+  it("updates public snapshot when isShared changes via PATCH", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
+    const shareToken = created.data.shelf.shareToken;
+
+    // Initial snapshot: book1 (shared) + book3 (shared) = 2
+    const snap1 = await kv.get(kvKeys.publicShelf(shareToken), "json") as PublicShelfSnapshot;
+    expect(snap1.books).toHaveLength(2);
+    expect(snap1.books.map((b: Json) => b.bookId).sort()).toEqual(["book1", "book3"]);
+
+    // PATCH: unshare book1, share book2
+    const res = await request("PATCH", `/api/user/${USER_ID}/books`, {
+      body: JSON.stringify({
+        changes: [
+          { bookId: "book1", isShared: 0 },
+          { bookId: "book2", isShared: 1 },
+        ],
+      }),
+      token: AUTH_TOKEN,
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.ok).toBe(true);
+    expect(json.data.applied).toBe(2);
+
+    // Verify snapshot updated: book2 (now shared) + book3 (still shared)
+    const snap2 = await kv.get(kvKeys.publicShelf(shareToken), "json") as PublicShelfSnapshot;
+    expect(snap2.books).toHaveLength(2);
+    expect(snap2.books.map((b: Json) => b.bookId).sort()).toEqual(["book2", "book3"]);
+  });
+
+  it("preserves publicSharing field after PATCH", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    await createShelf(USER_ID, AUTH_TOKEN);
+
+    const res = await request("PATCH", `/api/user/${USER_ID}/books`, {
+      body: JSON.stringify({
+        changes: [{ bookId: "book1", isShared: 0 }],
+      }),
+      token: AUTH_TOKEN,
+    });
+
+    expect(res.status).toBe(200);
+
+    const record = await kv.get(kvKeys.user(USER_ID), "json") as UserBooksRecord;
+    expect(record.publicSharing?.shelves).toHaveLength(1);
+  });
+});
+
 // ── DELETE /api/user/:id — cleanup ────────────────────────────
 
 describe("DELETE /api/user/:id — public shelf cleanup", () => {
