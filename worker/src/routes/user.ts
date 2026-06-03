@@ -43,6 +43,69 @@ async function resolveDisplayName(
   return sanitizeDisplayName(clientValue) ?? "";
 }
 
+// ---------------------------------------------------------------------------
+// Pure validation helpers (extracted for testability — keep handler thin)
+// ---------------------------------------------------------------------------
+
+export type ParseChangesOk = { ok: true; changeMap: Map<string, BoolFlag> };
+export type ParseChangesErr = { ok: false; code: "INVALID_PAYLOAD"; message: string };
+export type ParseChangesResult = ParseChangesOk | ParseChangesErr;
+
+/**
+ * Validate the `changes` array from a PATCH body and build a Map<bookId, isShared>
+ * for efficient apply. Returns an error descriptor on any validation failure
+ * (caller converts to the appropriate HTTP response).
+ */
+export function parsePatchChanges(
+  body: Record<string, unknown>,
+  maxChanges: number,
+): ParseChangesResult {
+  if (!Array.isArray(body.changes)) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: "changes array is required" };
+  }
+  const changes = body.changes as unknown[];
+  if (changes.length === 0) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: "changes array must not be empty" };
+  }
+  if (changes.length > maxChanges) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: `changes array exceeds maximum of ${maxChanges}` };
+  }
+  const changeMap = new Map<string, BoolFlag>();
+  for (const entry of changes) {
+    if (typeof entry !== "object" || entry === null) {
+      return { ok: false, code: "INVALID_PAYLOAD", message: "Each change must be an object with bookId and isShared" };
+    }
+    const { bookId, isShared } = entry as Record<string, unknown>;
+    if (typeof bookId !== "string" || bookId.length === 0) {
+      return { ok: false, code: "INVALID_PAYLOAD", message: "bookId must be a non-empty string" };
+    }
+    if (isShared !== BoolFlag.FALSE && isShared !== BoolFlag.TRUE) {
+      return { ok: false, code: "INVALID_PAYLOAD", message: "isShared must be 0 or 1" };
+    }
+    changeMap.set(bookId, isShared as BoolFlag);
+  }
+  return { ok: true, changeMap };
+}
+
+export type ValidateDisplayNameResult =
+  | { ok: true }
+  | { ok: false; code: "INVALID_PAYLOAD"; message: string };
+
+/**
+ * Validate the optional `displayName` field on a PATCH body.
+ * Returns ok:true when the field is absent OR valid; an error descriptor otherwise.
+ */
+export function validatePatchDisplayName(body: Record<string, unknown>): ValidateDisplayNameResult {
+  if (body.displayName === undefined) return { ok: true };
+  if (typeof body.displayName === "string" && body.displayName === "") {
+    return { ok: false, code: "INVALID_PAYLOAD", message: "displayName must not be empty string" };
+  }
+  if (sanitizeDisplayName(body.displayName) === null) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: "displayName is invalid" };
+  }
+  return { ok: true };
+}
+
 export const userRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 // GET /api/user/:id/books
@@ -266,68 +329,22 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   }
 
   // --- Validate changes array ---
-  if (!body || !Array.isArray(body.changes)) {
+  if (!body) {
     return c.json(
       { error: { code: "INVALID_PAYLOAD", message: "changes array is required" } },
       400,
     );
   }
-
-  const changes = body.changes as unknown[];
-
-  if (changes.length === 0) {
-    return c.json(
-      { error: { code: "INVALID_PAYLOAD", message: "changes array must not be empty" } },
-      400,
-    );
+  const parsed = parsePatchChanges(body, MAX_PATCH_CHANGES);
+  if (!parsed.ok) {
+    return c.json({ error: { code: parsed.code, message: parsed.message } }, 400);
   }
-
-  if (changes.length > MAX_PATCH_CHANGES) {
-    return c.json(
-      { error: { code: "INVALID_PAYLOAD", message: `changes array exceeds maximum of ${MAX_PATCH_CHANGES}` } },
-      400,
-    );
-  }
-
-  // Validate each change entry
-  const changeMap = new Map<string, number>();
-  for (const entry of changes) {
-    if (typeof entry !== "object" || entry === null) {
-      return c.json(
-        { error: { code: "INVALID_PAYLOAD", message: "Each change must be an object with bookId and isShared" } },
-        400,
-      );
-    }
-    const { bookId, isShared } = entry as Record<string, unknown>;
-    if (typeof bookId !== "string" || bookId.length === 0) {
-      return c.json(
-        { error: { code: "INVALID_PAYLOAD", message: "bookId must be a non-empty string" } },
-        400,
-      );
-    }
-    if (isShared !== BoolFlag.FALSE && isShared !== BoolFlag.TRUE) {
-      return c.json(
-        { error: { code: "INVALID_PAYLOAD", message: "isShared must be 0 or 1" } },
-        400,
-      );
-    }
-    changeMap.set(bookId, isShared as number);
-  }
+  const { changeMap } = parsed;
 
   // --- Validate optional displayName ---
-  if (body.displayName !== undefined) {
-    if (typeof body.displayName === "string" && body.displayName === "") {
-      return c.json(
-        { error: { code: "INVALID_PAYLOAD", message: "displayName must not be empty string" } },
-        400,
-      );
-    }
-    if (sanitizeDisplayName(body.displayName) === null) {
-      return c.json(
-        { error: { code: "INVALID_PAYLOAD", message: "displayName is invalid" } },
-        400,
-      );
-    }
+  const nameCheck = validatePatchDisplayName(body);
+  if (!nameCheck.ok) {
+    return c.json({ error: { code: nameCheck.code, message: nameCheck.message } }, 400);
   }
 
   // Read existing record + family membership in parallel
