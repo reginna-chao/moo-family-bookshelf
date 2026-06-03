@@ -6,7 +6,7 @@ description: >
   TRIGGER when: user explicitly invokes /fe-team-lead, or asks to implement a frontend feature with full cycle.
   DO NOT TRIGGER when: user only wants to write code (use /fe-coder), only wants tests (use /fe-tester), or only wants review (use /fe-review).
 argument-hint: "<frontend task description>"
-allowed-tools: Read, Grep, Glob, Bash(cd extension*), Bash(pnpm*), Bash(git*), Agent
+allowed-tools: Read, Grep, Glob, Bash(cd extension*), Bash(pnpm*), Bash(git*), Agent, TodoWrite
 model: claude-opus-4-6
 ---
 
@@ -28,16 +28,37 @@ Orchestrate the frontend development lifecycle: spec analysis → coding → tes
 
 ## Execution Flow
 
-- Complete Phase 1 (spec analysis) and **wait for user confirmation**.
-- After confirmation, run Phase 2 (dev), Phase 3 (review), and Phase 4 Fix Cycle autonomously.
+**Invocation context.**
+- **Direct** (user runs `/fe-team-lead`): hold the interactive gates below and stop for the user as described.
+- **Delegated** (spawned by `/team-lead` as a non-interactive Agent): you cannot pause for the user mid-cycle. Run the full cycle autonomously, auto-fix CRITICAL, and **defer** every item that needs user input — the Phase 2 verify-before-test gate and all SUGGESTION decisions — into your returned Fix Cycle Summary (mark the deferred verify gate "未經人工驗證") so team-lead can surface them.
+
+**Progress tracking (mandatory).** Once Phase 1 is confirmed, maintain a TodoWrite checklist of every phase below and keep it updated (✅ done / ⏳ in-progress / ⬜ pending) as you advance, so the user always sees where we are without having to ask. (If TodoWrite is unavailable, render the same checklist inline in each message instead.)
+
+**Stop discipline.**
+- **Phase 1 (planning) is collaborative** — iterate with the user (multiple rounds expected) until the plan/spec is confirmed.
+- **After Phase 1, auto-advance through the phases.** Do NOT stop merely to ask "可以進下一階段嗎" — just continue. Stop ONLY when:
+  1. **User choice** — pick between options (which SUGGESTION fixes to apply; whether to commit/push).
+  2. **Manual verification** — the user must confirm something themselves (the Phase 2 verify-before-test gate; CRITICAL security findings).
+  3. **Blocker** — an architecture/security problem that invalidates the plan.
 - **CRITICAL findings are auto-fixed without asking.**
-- **Only stop for user input when** SUGGESTION findings need user decision, or a blocker affects architecture/security.
+
+**Stop Block (mandatory at every stop).** Whenever you pause for the user, the message MUST end with this block. A silent stop, or one that only says "完成了，要繼續嗎？", is a defect:
+
+```
+## 📍 目前進度
+[the TodoWrite checklist — ✅ / ⏳ / ⬜ per phase]
+
+## 👉 接下來需要你做的事
+[the ONE concrete action the user must take now, as explicit options — e.g.
+ A) 手動驗證後回「正確」，我接著寫測試
+ B) 有要修的地方，直接告訴我]
+```
 
 ---
 
 ## Workflow
 
-### Phase 1: Requirements Analysis (stops here)
+### Phase 1: Requirements Analysis (collaborative — iterate until confirmed)
 
 1. Read the task description.
 2. Read `.claude/rules/frontend.md` for architecture context.
@@ -59,14 +80,22 @@ Orchestrate the frontend development lifecycle: spec analysis → coding → tes
 ### Phase 2: Development
 
 1. Spawn **`/fe-coder`** with clear requirements and file scope.
-2. After coder completes, spawn **`/fe-tester`** targeting the changed files.
-3. Run verification: `pnpm typecheck && pnpm lint && pnpm test`.
+2. After coder completes, run `pnpm typecheck && pnpm lint` (NOT the full test suite yet — the new behavior is not test-covered).
+3. **Verify-before-test gate [STOP — manual verification].** Before any test is written, present:
+   - a concise summary of what the coder changed (files + behavior + affected UI states),
+   - how the user can verify it (what to click / observe),
 
-**Gate** — all must pass before proceeding:
-- Coder reports completion.
+   then ask the user to confirm the change is correct, OR point out what to fix. **Rationale:** writing tests against unconfirmed UI behavior forces repeated test rewrites. End this message with the Stop Block.
+   - If the user reports fixes needed → spawn `/fe-coder` to fix, re-run typecheck/lint, and re-present this gate.
+   - If the user confirms correct → proceed to step 4.
+   - (Delegated run: skip the stop; note "未經人工驗證" and continue, per Invocation context.)
+4. Spawn **`/fe-tester`** targeting the changed files.
+5. Run verification: `pnpm typecheck && pnpm lint && pnpm test`.
+
+**Gate** — all must pass before proceeding to Phase 3:
+- Coder reports completion and the user confirmed the change is correct (step 3).
 - Tester reports completion.
-- `pnpm typecheck` passes.
-- `pnpm test` passes.
+- `pnpm typecheck`, `pnpm lint`, `pnpm test` all pass.
 - E2E impact check passes (see below).
 
 If any fail, fix via coder or tester before proceeding.
@@ -232,6 +261,9 @@ This phase runs automatically — no user confirmation needed to start, but CRIT
 
 - Never write production or test code directly.
 - **Never skip Phase 1 user confirmation.**
+- **After Phase 1, auto-advance** — never stop just to ask permission to start the next phase. Stop only for a user choice, a manual verification, or a blocker (see Execution Flow).
+- **Every stop must end with the Stop Block** (current progress + the explicit next action). A silent stop is a defect.
+- **Never write tests before the user confirms the code change is correct** (Phase 2 verify-before-test gate) — except on a delegated run, where the gate is deferred to the returned summary.
 - **CRITICAL findings are always auto-fixed** — never ask the user whether to fix a CRITICAL.
 - **SUGGESTION findings require user approval** — never auto-fix a SUGGESTION without asking.
 - Always verify with typecheck + lint + test after each fix in the Fix Cycle.
