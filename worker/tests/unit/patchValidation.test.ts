@@ -103,4 +103,14 @@ describe("validatePatchDisplayName", () => {
       expect(result.message).toBe("displayName is invalid");
     }
   });
+
+  it("returns error when displayName is a too-long string (> max length)", () => {
+    const tooLong = "a".repeat(21); // DISPLAY_NAME_MAX_LENGTH is 20
+    const result = validatePatchDisplayName({ displayName: tooLong });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_PAYLOAD");
+      expect(result.message).toBe("displayName is invalid");
+    }
+  });
 });
