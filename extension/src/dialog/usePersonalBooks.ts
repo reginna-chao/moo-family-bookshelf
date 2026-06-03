@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { scrapeBooks, scrapeArchivedBooks, formatScrapeProgress } from "../content/scraper";
 import {
   PERSONAL_BOOKS_CACHE_KEY,
@@ -213,15 +214,12 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     // PATCH only the dirty books, unless the diff can't be safely expressed as
     // a partial update (new un-synced books, no server record, or over the cap)
     // — those fall back to a full PUT so nothing is silently dropped.
-    const dirtyBooks = books.filter((b) => dirtyBookIds.has(b.bookId));
-    const rawServerBooks = savedRawPayload.current?.books;
-    const serverKnownIds = new Set(
-      (Array.isArray(rawServerBooks) ? (rawServerBooks as BookEntry[]) : []).map((b) => b.bookId),
-    );
-    const usePut =
-      savedRawPayload.current === null ||
-      dirtyBookIds.size > MAX_PATCH_CHANGES ||
-      dirtyBooks.some((b) => !serverKnownIds.has(b.bookId));
+    const { usePut, dirtyBooks } = decideSaveStrategy({
+      books,
+      dirtyBookIds,
+      savedRawPayload: savedRawPayload.current,
+      maxPatchChanges: MAX_PATCH_CHANGES,
+    });
 
     try {
       const response = usePut
