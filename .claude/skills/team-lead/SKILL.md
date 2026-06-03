@@ -6,7 +6,7 @@ description: >
   TRIGGER when: user explicitly invokes /team-lead, or asks to implement a full-stack feature end-to-end.
   DO NOT TRIGGER when: task is clearly frontend-only or backend-only (use the specific team-lead instead).
 argument-hint: "<requirement or feature description>"
-allowed-tools: Read, Grep, Glob, Bash(pnpm*), Bash(cd*), Bash(git*), Agent
+allowed-tools: Read, Grep, Glob, Bash(pnpm*), Bash(cd*), Bash(git*), Agent, TodoWrite
 model: claude-opus-4-6
 ---
 
@@ -41,16 +41,31 @@ If the user explicitly says something like "skip review", "just write the code",
 
 ## Execution Flow
 
-- Complete Phase 1 (spec analysis) and **wait for user confirmation**.
-- After confirmation, delegate and run all phases autonomously.
-- **Only stop mid-execution if** a blocker is found that affects architecture or security.
-- Stop at Phase 4 (Review Report) and present all findings to the user.
+**Progress tracking (mandatory).** Once Phase 1 is confirmed, maintain a TodoWrite checklist of all phases and keep it updated (✅ done / ⏳ in-progress / ⬜ pending), so the user always sees progress without having to ask. (If TodoWrite is unavailable, render the same checklist inline in each message.)
+
+**Stop discipline.**
+- **Phase 1 (requirements) is collaborative** — iterate with the user (multiple rounds expected) until the breakdown and API contract are confirmed.
+- **After Phase 1, run autonomously.** Do NOT stop merely to ask "可以進下一階段嗎" — just continue. Stop ONLY for: a **user choice** (which cross-team SUGGESTION fixes to apply; whether to commit/push), a **manual verification** the user must perform, or an architecture/security **blocker**.
+- Sub-team-leads handle their own CRITICAL auto-fixes and SUGGESTION decisions inside their Fix Cycle.
+- At Phase 4 (consolidated report), stop **only if** it surfaces a decision or verification the user must make; otherwise continue toward the commit confirmation.
+
+**Delegation note.** A sub-team-lead spawned via Agent is non-interactive and cannot pause for the user mid-cycle. When delegated, sub-team-leads run their full cycle autonomously and **defer** any user-input item (the verify-before-test gate, SUGGESTION decisions) into their returned Fix Cycle Summary. team-lead surfaces these consolidated decisions/verifications to the user at Phase 4 as a single Stop Block.
+
+**Stop Block (mandatory at every stop).** Whenever you pause for the user, the message MUST end with this block — a silent stop, or one that only says "完成了，要繼續嗎？", is a defect:
+
+```
+## 📍 目前進度
+[the TodoWrite checklist — ✅ / ⏳ / ⬜ per phase]
+
+## 👉 接下來需要你做的事
+[the ONE concrete action the user must take now, as explicit options.]
+```
 
 ---
 
 ## Workflow
 
-### Phase 1: Requirements Analysis (stops here)
+### Phase 1: Requirements Analysis (collaborative — iterate until confirmed)
 
 1. Read the requirement carefully.
 2. Read `docs/project-plan.md` and `docs/architecture.md` for project context.
@@ -83,7 +98,7 @@ Spawn sub-team-leads:
 
 Spawn in parallel when tasks are independent. Run sequentially if there are dependencies.
 
-### Phase 4: Review Report (stops here)
+### Phase 4: Review Report (stops only if a decision/verification is needed)
 
 After both teams complete their Fix Cycles, present the **consolidated review report** in three parts:
 
@@ -154,6 +169,8 @@ Run **once** after the entire feature is complete (all sub-tasks committed), not
 
 - Always read project docs before breaking down tasks.
 - **Never skip Phase 1 user confirmation.**
+- **After Phase 1, auto-advance** — never stop just to ask permission to start the next phase. Stop only for a user choice, a manual verification, or a blocker (see Execution Flow).
+- **Every stop must end with the Stop Block** (current progress + the explicit next action). A silent stop is a defect.
 - Sub-team-leads handle CRITICAL and SUGGESTION findings via their own Fix Cycles. Team-lead Phase 4 focuses on cross-team validation.
 - If a task is purely frontend or purely backend, tell the user to use the specific team-lead.
 - If unsure about scope, ask the user rather than guessing.
