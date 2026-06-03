@@ -280,6 +280,19 @@ export class ApiClient {
     return this.put(`/api/user/${userId}/books`, data);
   }
 
+  /**
+   * Partial update — send only the changed books (diff). Used by the manual
+   * "save" flow to cut upload traffic vs the full-payload PUT. Unknown bookIds
+   * are silently skipped server-side; new (un-synced) books must go via PUT.
+   */
+  async patchPersonalBooks(
+    userId: string,
+    changes: Array<{ bookId: BookEntry["bookId"]; isShared: BoolFlag }>,
+  ): Promise<ApiResponse<{ ok: boolean; applied: number }>> {
+    this.validateHexId(userId, "userId");
+    return this.patch(`/api/user/${userId}/books`, { changes });
+  }
+
   // --- Family Group ---
 
   /**

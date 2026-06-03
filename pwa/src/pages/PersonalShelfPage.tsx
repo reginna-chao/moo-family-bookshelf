@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Share2 } from "lucide-react";
 import { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
-import type { ApiClient, BookEntry, PersonalBooks } from "@/api/client";
+import type { ApiClient, BookEntry } from "@/api/client";
+import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { useSearch } from "@/hooks/useSearch";
 import { useLoadMore } from "@/hooks/useLoadMore";
 import { FloatingActionBar, shouldShowFloatingBar } from "@/components/FloatingActionBar";
@@ -17,6 +18,9 @@ interface PersonalShelfPageProps {
   userId: string;
   apiClient: ApiClient;
 }
+
+/** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
+const MAX_PATCH_CHANGES = 1000;
 
 type LoadState = "loading" | "ready" | "saving" | "saved" | "error";
 type StatusFilter = "all" | "shared" | "not-shared";
@@ -111,23 +115,52 @@ export function PersonalShelfPage({
   }, [loadBooks]);
 
   const handleSave = useCallback(async () => {
+    // Nothing changed → treat as an instant no-op save (UI guards this too).
+    if (dirtyBookIds.size === 0) {
+      setState("saved");
+      setTimeout(() => setState("ready"), 1500);
+      return;
+    }
+
     setState("saving");
+
+    // PATCH only the dirty books, unless the diff can't be safely expressed as
+    // a partial update (new un-synced books, no server record, or over the cap)
+    // — those fall back to a full PUT so nothing is silently dropped.
+    const { usePut, dirtyBooks } = decideSaveStrategy({
+      books,
+      dirtyBookIds,
+      savedRawPayload: savedRawPayload.current,
+      maxPatchChanges: MAX_PATCH_CHANGES,
+    });
+
     try {
-      const personalBooks: PersonalBooks = {
-        ...savedRawPayload.current,
-        schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
-        userId,
-        displayName,
-        books,
-        lastUpdated: new Date().toISOString(),
-      };
-      const response = await apiClient.updatePersonalBooks(userId, personalBooks);
+      const response = usePut
+        ? await apiClient.updatePersonalBooks(userId, {
+            ...savedRawPayload.current,
+            schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
+            userId,
+            displayName,
+            books,
+            lastUpdated: new Date().toISOString(),
+          })
+        : await apiClient.patchPersonalBooks(
+            userId,
+            dirtyBooks.map((b) => ({ bookId: b.bookId, isShared: b.isShared })),
+          );
       if (response.error) {
         setErrorMessage(response.error.message);
         setState("error");
         return;
       }
       originalBooksRef.current = books;
+      // Only a PUT persists the full local list; a PATCH leaves the server's
+      // book set unchanged (it can only update isShared of existing books).
+      // Marking PATCH-time books as server-known would wrongly classify
+      // un-synced scraped books as known and silently drop them on a later PATCH.
+      if (usePut) {
+        savedRawPayload.current = { ...(savedRawPayload.current ?? {}), books };
+      }
       clearDirty();
       setState("saved");
       // Signal FamilyShelfPage to re-fetch
@@ -137,7 +170,7 @@ export function PersonalShelfPage({
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setState("error");
     }
-  }, [userId, displayName, books, apiClient, clearDirty]);
+  }, [userId, displayName, books, apiClient, clearDirty, dirtyBookIds]);
 
   const handleCancelChanges = useCallback(() => {
     setBooks(originalBooksRef.current);

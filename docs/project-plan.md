@@ -931,21 +931,25 @@ jobs:
 > **目標**：v1.3 Wave K 已解前端體感與整包重送上行流量的部分（透過 fetch-then-put）；本 Wave 改為真正的部分更新 API，client 只送 diff 給 worker，worker 內部仍維持 KV 整包寫（KV 無 partial update）。
 > **與資料庫換型的關係**：本 Wave **不**換 DB，僅改 API 形狀。換 DB 的評估留至 #33。
 
-- [ ] **#31 新增 `PATCH /api/user/:id/books`**
+- [x] **#31 新增 `PATCH /api/user/:id/books`**
   - 影響：[`worker/src/routes/user.ts`](../worker/src/routes/user.ts)
   - Body：`{ changes: Array<{ bookId: string; isShared: BoolFlag }>, displayName?: string }`
   - Worker 邏輯：read existing record → apply changes → write（同步更新 `publicSharing` 快照）
   - 既有 `PUT /api/user/:id/books` 保留（整包覆寫仍用於 Extension 首次同步全爬書單的情境）
-- [ ] **#32 Client 切換 PUT → PATCH**
+  - 補充實作：`changes` 上限 1000（超過回 400）、未知 bookId 靜默略過不計入 `applied`、user record 不存在回 404、與 PUT 共用 `put-books` rate limit（30/hr）、no-op（無命中且無 displayName）短路跳過 KV 寫入
+- [x] **#32 Client 切換 PUT → PATCH**
   - Extension PersonalShelf 儲存：改用 PATCH，body 只含 v1.3 Wave K 算出的 dirty 本數
   - PWA PersonalShelf 同步切換
   - 首次同步（爬完全部書單）仍用 PUT
-  - v1.3 Wave K 的「fetch-then-put」折衷邏輯可在此版本整段移除
-- [ ] **#33 觀察與決策點：是否需要換 DB**
+  - **智慧 fallback（非單純切換）**：dirty 含「server 上不存在的新爬書」/ 無 server record / dirty > 1000 時，該次自動 fallback 整包 PUT，避免 PATCH 靜默丟失新書；PATCH body 不帶 displayName（書櫃儲存不改名）
+  - 註：Wave K #24 已確認「fetch-then-put」折衷邏輯實際不存在（原假設不成立），故無可移除之程式碼
+- [ ] **#33 觀察與決策點：是否需要換 DB**（待 PATCH 上線後啟動）
   - 在 PATCH 上線後加上匿名 telemetry：使用者書本數分佈、單次儲存 dirty count、KV write latency p50 / p95
   - 收集一個 minor 週期（約 4-6 週）後評估
   - **僅在實測證明 KV 整包寫真的吃緊**（例如 p95 > 500ms 或常態觸發 quota 警告）才討論 D1 遷移，否則延後到 v2.0
   - 不在 v1.4 內做 DB 遷移本身
+
+- **完成狀態**：#31 / #32 實作完成 2026-06-03（branch `feat/wave-l-book-patch-api`，commits `aa7462f` BE + `dc81f79` FE）；FE 1 輪 + BE 1 輪 Fix Cycle，修復 1 項 CRITICAL（連續儲存 server-known 污染致資料遺失）+ 採納 3 項 SUGGESTION；三端 typecheck/test/E2E 全綠（Worker 478 / Extension 1077 / PWA 403），security scan（full）PASS。#33 待上線後啟動。
 
 ### Phase 9：v1.5.0 — 隱藏書籍可逆（規劃中）
 

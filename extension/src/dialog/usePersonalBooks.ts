@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { scrapeBooks, scrapeArchivedBooks, formatScrapeProgress } from "../content/scraper";
 import {
   PERSONAL_BOOKS_CACHE_KEY,
@@ -11,6 +12,9 @@ import { mergeBooks } from "./mergeBooks";
 import { canDisplayScrape } from "../sync/syncBooks";
 
 export type PersonalBooksStatus = "scraping" | "ready" | "saving" | "saved" | "error";
+
+/** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
+const MAX_PATCH_CHANGES = 1000;
 
 export interface UsePersonalBooksParams {
   userId: string;
@@ -197,24 +201,53 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
   }, [markDirty]);
 
   const handleSave = useCallback(async () => {
+    // Nothing changed → treat as an instant no-op save (UI guards this too).
+    if (dirtyBookIds.size === 0) {
+      setStatus("saved");
+      setTimeout(() => setStatus("ready"), 1500);
+      return;
+    }
+
     setStatus("saving");
     setErrorMessage("");
+
+    // PATCH only the dirty books, unless the diff can't be safely expressed as
+    // a partial update (new un-synced books, no server record, or over the cap)
+    // — those fall back to a full PUT so nothing is silently dropped.
+    const { usePut, dirtyBooks } = decideSaveStrategy({
+      books,
+      dirtyBookIds,
+      savedRawPayload: savedRawPayload.current,
+      maxPatchChanges: MAX_PATCH_CHANGES,
+    });
+
     try {
-      const personalBooks: PersonalBooks = {
-        ...savedRawPayload.current,
-        schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
-        userId,
-        displayName,
-        books,
-        lastUpdated: new Date().toISOString(),
-      };
-      const response = await apiClient.updatePersonalBooks(userId, personalBooks);
+      const response = usePut
+        ? await apiClient.updatePersonalBooks(userId, {
+            ...savedRawPayload.current,
+            schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
+            userId,
+            displayName,
+            books,
+            lastUpdated: new Date().toISOString(),
+          })
+        : await apiClient.patchPersonalBooks(
+            userId,
+            dirtyBooks.map((b) => ({ bookId: b.bookId, isShared: b.isShared })),
+          );
       if (response.error) {
         setErrorMessage(response.error.message);
         setStatus("error");
         return;
       }
       originalBooks.current = books;
+      // Only a PUT persists the full local list; a PATCH leaves the server's
+      // book set unchanged (it can only update isShared of existing books).
+      // Marking PATCH-time books as server-known would wrongly classify
+      // un-synced scraped books as known and silently drop them on a later PATCH.
+      if (usePut) {
+        savedRawPayload.current = { ...(savedRawPayload.current ?? {}), books };
+      }
       chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books) });
       chrome.storage.local.set({ [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now() });
       clearDirty();
@@ -224,7 +257,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setStatus("error");
     }
-  }, [books, userId, apiClient, displayName, clearDirty]);
+  }, [books, userId, apiClient, displayName, clearDirty, dirtyBookIds]);
 
   const handleCancel = useCallback(() => {
     setBooks(originalBooks.current);

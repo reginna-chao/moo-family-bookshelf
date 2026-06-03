@@ -135,6 +135,44 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("patchPersonalBooks", () => {
+    it("should call PATCH /api/user/:id/books with a { changes } body", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { ok: true, applied: 2 } }),
+      );
+
+      const changes = [
+        { bookId: "b1", isShared: BoolFlag.TRUE },
+        { bookId: "b2", isShared: BoolFlag.FALSE },
+      ];
+      const result = await client.patchPersonalBooks(USER_1, changes);
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(`https://api.example.com/api/user/${USER_1}/books`);
+      expect(init.method).toBe("PATCH");
+      expect(JSON.parse(init.body)).toEqual({ changes });
+      expect(result.data).toEqual({ ok: true, applied: 2 });
+    });
+
+    it("should not include a displayName in the PATCH body", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true, applied: 1 } }));
+
+      await client.patchPersonalBooks(USER_1, [{ bookId: "b1", isShared: BoolFlag.TRUE }]);
+
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init.body);
+      expect(body).not.toHaveProperty("displayName");
+      expect(Object.keys(body)).toEqual(["changes"]);
+    });
+
+    it("should reject invalid userId", async () => {
+      await expect(
+        client.patchPersonalBooks("invalid-id", [{ bookId: "b1", isShared: BoolFlag.TRUE }]),
+      ).rejects.toThrow("Invalid userId");
+    });
+  });
+
   describe("createFamily", () => {
     it("should call POST /api/family with userId only when no displayName", async () => {
       const familyData = {
