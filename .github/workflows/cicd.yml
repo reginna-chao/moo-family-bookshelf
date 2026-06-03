@@ -461,13 +461,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+
+          # Exclude non-user-facing commit types from the changelog.
+          # Keeps feat/fix/refactor/perf/security and any non-conventional
+          # subjects; drops docs/chore/ci/test/build/style (with optional
+          # scope and breaking "!"). Conventional-commit prefixes only.
+          EXCLUDE='^- (docs|chore|ci|test|build|style)(\(.+\))?!?:'
+
           if [ -n "$PREV_TAG" ]; then
-            NOTES=$(git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s" --no-merges)
+            CHANGES=$(git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s" --no-merges | grep -vE "$EXCLUDE" || true)
+            [ -z "$CHANGES" ] && CHANGES="_No user-facing changes._"
+            COMPARE="${SERVER_URL}/${REPO}/compare/${PREV_TAG}...${TAG}"
+            NOTES=$(printf '%s\n\n**Full Changelog**: %s\n' "$CHANGES" "$COMPARE")
           else
             NOTES="Initial release"
           fi
+
           gh release create "${TAG}" \
             --title "${TAG}" \
             --notes "$NOTES" \
