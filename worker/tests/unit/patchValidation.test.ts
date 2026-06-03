@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parsePatchChanges, validatePatchDisplayName } from "../../src/routes/user";
+import { DISPLAY_NAME_MAX_LENGTH } from "../../src/utils/validation";
 
 // ---------------------------------------------------------------------------
 // parsePatchChanges
@@ -105,7 +106,7 @@ describe("validatePatchDisplayName", () => {
   });
 
   it("returns error when displayName is a too-long string (> max length)", () => {
-    const tooLong = "a".repeat(21); // DISPLAY_NAME_MAX_LENGTH is 20
+    const tooLong = "a".repeat(DISPLAY_NAME_MAX_LENGTH + 1);
     const result = validatePatchDisplayName({ displayName: tooLong });
     expect(result.ok).toBe(false);
     if (!result.ok) {

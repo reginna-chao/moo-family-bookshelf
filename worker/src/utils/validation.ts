@@ -16,7 +16,7 @@ export function isValidFamilyId(id: string): boolean {
   return FamilyIdSchema.safeParse(id).success;
 }
 
-const DISPLAY_NAME_MAX_LENGTH = 20;
+export const DISPLAY_NAME_MAX_LENGTH = 20;
 
 // Strip zero-width, control, and directional override characters
 // eslint-disable-next-line no-control-regex

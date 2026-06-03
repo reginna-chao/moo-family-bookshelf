@@ -47,7 +47,7 @@ async function resolveDisplayName(
 // Pure validation helpers (extracted for testability — keep handler thin)
 // ---------------------------------------------------------------------------
 
-export type ParseChangesOk = { ok: true; changeMap: Map<string, number> };
+export type ParseChangesOk = { ok: true; changeMap: Map<string, BoolFlag> };
 export type ParseChangesErr = { ok: false; code: "INVALID_PAYLOAD"; message: string };
 export type ParseChangesResult = ParseChangesOk | ParseChangesErr;
 
@@ -70,7 +70,7 @@ export function parsePatchChanges(
   if (changes.length > maxChanges) {
     return { ok: false, code: "INVALID_PAYLOAD", message: `changes array exceeds maximum of ${maxChanges}` };
   }
-  const changeMap = new Map<string, number>();
+  const changeMap = new Map<string, BoolFlag>();
   for (const entry of changes) {
     if (typeof entry !== "object" || entry === null) {
       return { ok: false, code: "INVALID_PAYLOAD", message: "Each change must be an object with bookId and isShared" };
@@ -82,7 +82,7 @@ export function parsePatchChanges(
     if (isShared !== BoolFlag.FALSE && isShared !== BoolFlag.TRUE) {
       return { ok: false, code: "INVALID_PAYLOAD", message: "isShared must be 0 or 1" };
     }
-    changeMap.set(bookId, isShared as number);
+    changeMap.set(bookId, isShared as BoolFlag);
   }
   return { ok: true, changeMap };
 }
