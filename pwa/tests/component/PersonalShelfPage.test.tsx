@@ -13,10 +13,12 @@ import { BoolFlag, type PersonalBooks, type ApiClient } from "@/api/client";
 
 const mockGetPersonalBooks = vi.fn();
 const mockUpdatePersonalBooks = vi.fn();
+const mockPatchPersonalBooks = vi.fn();
 
 const mockApiClient = {
   getPersonalBooks: mockGetPersonalBooks,
   updatePersonalBooks: mockUpdatePersonalBooks,
+  patchPersonalBooks: mockPatchPersonalBooks,
 } as unknown as ApiClient;
 
 function makePersonalBooks(
@@ -72,6 +74,8 @@ describe("PersonalShelfPage", () => {
   beforeEach(() => {
     mockGetPersonalBooks.mockReset();
     mockUpdatePersonalBooks.mockReset();
+    mockPatchPersonalBooks.mockReset();
+    mockPatchPersonalBooks.mockResolvedValue({ data: { ok: true, applied: 1 } });
     defaultProps = createProps();
   });
 
@@ -282,12 +286,12 @@ describe("PersonalShelfPage", () => {
     expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
-  it("save flow calls updatePersonalBooks with PersonalBooks object", async () => {
+  it("save flow PATCHes only the changed (server-known) book", async () => {
     await renderWithBooks([
       { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
     ]);
 
-    mockUpdatePersonalBooks.mockResolvedValue({ data: { ok: true } });
+    mockPatchPersonalBooks.mockResolvedValue({ data: { ok: true, applied: 1 } });
 
     // Batch share to make dirty
     fireEvent.click(screen.getByLabelText("選取 書籍一"));
@@ -297,20 +301,35 @@ describe("PersonalShelfPage", () => {
     fireEvent.click(screen.getByText("儲存變更"));
 
     await waitFor(() => {
-      expect(mockUpdatePersonalBooks).toHaveBeenCalledWith(
-        "user-1",
-        expect.objectContaining({
-          userId: "user-1",
-          books: expect.arrayContaining([
-            expect.objectContaining({ bookId: "b1", isShared: BoolFlag.TRUE }),
-          ]),
-        }),
-      );
+      expect(mockPatchPersonalBooks).toHaveBeenCalledWith("user-1", [
+        { bookId: "b1", isShared: BoolFlag.TRUE },
+      ]);
     });
+    // Books loaded from the server are all server-known → PATCH, never PUT.
+    expect(mockUpdatePersonalBooks).not.toHaveBeenCalled();
 
     await waitFor(() => {
       expect(screen.getByText("已儲存")).toBeInTheDocument();
     });
+  });
+
+  it("dispatches personalShelfSaved event after a successful PATCH save", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
+    ]);
+
+    mockPatchPersonalBooks.mockResolvedValue({ data: { ok: true, applied: 1 } });
+    const listener = vi.fn();
+    window.addEventListener("personalShelfSaved", listener);
+
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+    fireEvent.click(screen.getByText("設為開放"));
+    fireEvent.click(screen.getByText("儲存變更"));
+
+    await waitFor(() => {
+      expect(listener).toHaveBeenCalled();
+    });
+    window.removeEventListener("personalShelfSaved", listener);
   });
 
   it("floating action bar hidden when not dirty and no selection", async () => {
@@ -436,12 +455,13 @@ describe("PersonalShelfPage", () => {
     expect(screen.queryByText("書籍一")).not.toBeInTheDocument();
   });
 
-  it("shows save error when updatePersonalBooks fails", async () => {
+  it("shows save error when the save request fails", async () => {
     await renderWithBooks([
       { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
     ]);
 
-    mockUpdatePersonalBooks.mockRejectedValue(new Error("儲存失敗"));
+    // Server-known book → save goes through PATCH; make it reject.
+    mockPatchPersonalBooks.mockRejectedValue(new Error("儲存失敗"));
 
     // Batch share to make dirty
     fireEvent.click(screen.getByLabelText("選取 書籍一"));

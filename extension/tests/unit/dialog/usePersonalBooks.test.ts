@@ -56,6 +56,7 @@ function createMockApiClient(
   return {
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    patchPersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true, applied: 0 } }),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -410,5 +411,171 @@ describe("usePersonalBooks — dirty Set", () => {
     expect(
       result.current.books.find((b) => b.bookId === "book-1")?.isShared,
     ).toBe(originalSnapshot[0].isShared);
+  });
+});
+
+describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
+  const makeBook = (bookId: string, isShared = BoolFlag.FALSE): BookEntry => ({
+    bookId,
+    title: `書-${bookId}`,
+    author: "",
+    isbn: "",
+    coverUrl: "",
+    readmooUrl: "",
+    category: "",
+    isShared,
+  });
+
+  /** Build a client whose server record already contains `books` (server-known). */
+  function clientWithServerBooks(
+    books: BookEntry[],
+    overrides: Partial<ApiClient> = {},
+  ): ApiClient {
+    return createMockApiClient({
+      getPersonalBooks: vi.fn().mockResolvedValue({
+        data: {
+          schemaVersion: 1,
+          userId: "user-abc",
+          displayName: "小明",
+          books,
+          lastUpdated: "2026-01-01T00:00:00.000Z",
+        },
+      }),
+      ...overrides,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Gate closed → no scrape; the baseline comes straight from the API record,
+    // so every book is "server-known" unless a test injects a cache-only book.
+    vi.mocked(canDisplayScrape).mockResolvedValue(false);
+    setupStorage();
+  });
+
+  it("PATCHes only the dirty book when all dirty books are server-known", async () => {
+    const client = clientWithServerBooks([makeBook("b1"), makeBook("b2"), makeBook("b3")]);
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    act(() => {
+      result.current.handleToggle("b1");
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+    expect(client.patchPersonalBooks).toHaveBeenCalledWith("user-abc", [
+      { bookId: "b1", isShared: BoolFlag.TRUE },
+    ]);
+    expect(client.updatePersonalBooks).not.toHaveBeenCalled();
+  });
+
+  it("PATCH changes array contains only dirty books (not untouched ones)", async () => {
+    const client = clientWithServerBooks([makeBook("b1"), makeBook("b2"), makeBook("b3")]);
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    act(() => {
+      result.current.handleToggle("b1");
+      result.current.handleToggle("b3");
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+    const changes = vi.mocked(client.patchPersonalBooks).mock.calls[0][1];
+    const ids = changes.map((c) => c.bookId).sort();
+    expect(ids).toEqual(["b1", "b3"]);
+    expect(ids).not.toContain("b2");
+  });
+
+  it("falls back to PUT when a dirty book is not yet on the server (new scraped book)", async () => {
+    // Server knows only b1; cache carries a new un-synced book b2.
+    setupStorage(setCache([makeBook("b1"), makeBook("b2")]));
+    const client = clientWithServerBooks([makeBook("b1")]);
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    // Toggle the new (server-unknown) book.
+    act(() => {
+      result.current.handleToggle("b2");
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.updatePersonalBooks).toHaveBeenCalledTimes(1);
+    expect(client.patchPersonalBooks).not.toHaveBeenCalled();
+  });
+
+  it("does not PATCH a new book after a prior PATCH save (no server-known contamination)", async () => {
+    // Regression (review C1): a successful PATCH must NOT mark the full local
+    // list as server-known. Otherwise a later save of an un-synced scraped book
+    // would wrongly PATCH (backend silently drops unknown bookIds) instead of PUT.
+    // Server knows only b1; cache carries a new un-synced book b2.
+    setupStorage(setCache([makeBook("b1"), makeBook("b2")]));
+    const client = clientWithServerBooks([makeBook("b1")]);
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    // First save: toggle the server-known book b1 → PATCH.
+    act(() => {
+      result.current.handleToggle("b1");
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+
+    // Second save: toggle the new (server-unknown) book b2 → must fall back to PUT.
+    act(() => {
+      result.current.handleToggle("b2");
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    // b2 must be persisted via PUT, and PATCH must NOT be called a second time.
+    expect(client.updatePersonalBooks).toHaveBeenCalledTimes(1);
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+    const putPayload = vi.mocked(client.updatePersonalBooks).mock.calls[0][1];
+    expect(putPayload.books.some((b) => b.bookId === "b2")).toBe(true);
+  });
+
+  it("makes no API call when there are no dirty books", async () => {
+    const client = clientWithServerBooks([makeBook("b1")]);
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.patchPersonalBooks).not.toHaveBeenCalled();
+    expect(client.updatePersonalBooks).not.toHaveBeenCalled();
+  });
+
+  it("keeps dirty state and surfaces error when PATCH fails", async () => {
+    const client = clientWithServerBooks([makeBook("b1")], {
+      patchPersonalBooks: vi
+        .fn()
+        .mockResolvedValue({ error: { code: "BOOM", message: "patch failed" } }),
+    });
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    act(() => {
+      result.current.handleToggle("b1");
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.errorMessage).toBe("patch failed");
+    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
   });
 });

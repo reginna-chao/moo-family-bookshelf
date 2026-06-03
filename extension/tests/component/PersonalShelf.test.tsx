@@ -59,6 +59,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     leaveFamily: vi.fn(),
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    patchPersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true, applied: 0 } }),
     getFamilyMembers: vi.fn(),
     getFamilyBookshelf: vi.fn(),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),

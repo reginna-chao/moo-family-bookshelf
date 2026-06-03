@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ApiClient, validateEndpointUrl } from "@/api/client";
+import { ApiClient, BoolFlag, validateEndpointUrl } from "@/api/client";
 import {
   USER_ID_KEY,
   FAMILY_ID_KEY,
@@ -236,6 +236,37 @@ describe("ApiClient", () => {
           body: JSON.stringify(personalBooks),
         }),
       );
+    });
+  });
+
+  describe("patchPersonalBooks", () => {
+    it("sends PATCH to /api/user/:id/books with a { changes } body", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true, applied: 2 });
+      const changes = [
+        { bookId: "b1", isShared: BoolFlag.TRUE },
+        { bookId: "b2", isShared: BoolFlag.FALSE },
+      ];
+      const result = await client.patchPersonalBooks("u1", changes);
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${MOCK_ENDPOINT}/api/user/u1/books`,
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ changes }),
+        }),
+      );
+      expect(result.data).toEqual({ ok: true, applied: 2 });
+    });
+
+    it("does not include a displayName in the PATCH body", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true, applied: 1 });
+      await client.patchPersonalBooks("u1", [{ bookId: "b1", isShared: BoolFlag.TRUE }]);
+
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+      );
+      expect(body).not.toHaveProperty("displayName");
+      expect(Object.keys(body)).toEqual(["changes"]);
     });
   });
 
