@@ -270,6 +270,34 @@ Family membership is the gate for all features. Without a family, only onboardin
 - Keep `pnpm-lock.yaml` in sync when changing dependencies.
 - PWA limitation: cannot scrape Readmoo book lists (no Content Script). Personal shelf management requires at least one sync from desktop Extension first.
 
+## Local Agent Hooks (optional)
+
+`.claude/hooks/block-ps-herestring.js` is a `PreToolUse` hook that guards against a Windows/PowerShell footgun: using PowerShell here-string syntax `@'...'@` inside an agent's Bash tool. bash treats the leading/trailing `@` as literal characters, silently corrupting `git commit -m` / `gh pr create --body` text (a stray `@` ends up at the start and end). The hook denies any Bash command containing both `@'` and `'@`.
+
+The script is checked into the repo, but `.claude/settings.json` is **gitignored** (personal, per-developer). To activate the hook on your machine, add this to your local `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-ps-herestring.js\"",
+            "shell": "bash",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Only relevant when driving an agent from a Windows/PowerShell shell; harmless to skip otherwise.
+
 ## Final Note
 
 I will have CodeX, Gemini, or other LLM review this project and report areas for improvement.
