@@ -1,15 +1,21 @@
 name: Claude Code
 
 on:
-  # Trim event sources: drop pull_request_review / pull_request_review_comment,
-  # because the auto-review bot posting a review / inline comment triggers them and
-  # creates many skipped (no-op) runs.
-  # Tradeoff: @claude works only in the PR/Issue main comment box, not via inline
-  # code-comment replies.
+  # Listen to the main comment box, issues, AND inline code-review comment replies.
+  # pull_request_review_comment lets @claude be tagged inside an inline review-comment
+  # reply (not just the PR/Issue main comment box).
+  # Note: pull_request_review (the review-submit event) is intentionally NOT listened
+  # to, because the auto-review bot submitting a review would wake the workflow on
+  # every PR. The sender.type != 'Bot' guard below filters out the remaining bot-driven
+  # inline-comment noise, so only a human tagging @claude actually runs the job.
+  # Tradeoff: a human posting an inline reply without "@claude" still creates a quick
+  # skipped run, since GitHub creates the run before evaluating the job-level if.
   issue_comment:
     types: [created]
   issues:
     types: [opened, assigned]
+  pull_request_review_comment:
+    types: [created]
 
 jobs:
   claude:
@@ -20,6 +26,7 @@ jobs:
       github.event.sender.type != 'Bot' &&
       (
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
         (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
       )
     runs-on: ubuntu-latest
