@@ -2,8 +2,14 @@ name: Claude Code Review
 
 on:
   pull_request:
-    # Official defaults: opened, synchronize, ready_for_review, reopened
-    types: [opened, synchronize, ready_for_review, reopened]
+    # Auto-review only on open / marked-ready / reopen.
+    # Dropped `synchronize`: every push used to re-run a full review with no
+    # cross-round memory, growing an endless tail of fresh NITPICKs. Re-review
+    # after fixes is now human-triggered via `@claude` — either in the PR comment
+    # box or as an inline reply under a specific review comment (both handled by
+    # claude.yml). Tradeoff: a pushed CRITICAL fix is no longer auto-verified;
+    # the author asks @claude to re-check (and can target the exact thread).
+    types: [opened, ready_for_review, reopened]
     # Only trigger on code-directory changes; skip docs/config-only changes to save quota
     paths:
       - "extension/src/**"
@@ -18,6 +24,9 @@ concurrency:
 
 jobs:
   claude-review:
+    # Skip draft PRs; the real review happens on `ready_for_review`.
+    if: github.event.pull_request.draft == false
+
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||
@@ -85,9 +94,33 @@ jobs:
             5. Testability: side effects isolated and injectable, pure logic separated
                from I/O, and matching tests per .claude/rules/test.md coverage targets.
 
-            Tag each finding CRITICAL / WARNING / NITPICK. In the top-level summary,
-            state whether any CRITICAL finding should block the merge. If you find
-            nothing significant, say so plainly — do not invent findings.
+            SEVERITY POLICY — align with the local Fix Cycle in
+            .claude/rules/global.md (CRITICAL=must-fix / WARNING=use-judgment /
+            NITPICK=optional-skippable):
+
+            - CRITICAL — correctness bugs, security holes, or violations of the
+              invariants in .claude/rules/security-ux-invariants.md. ONLY
+              CRITICAL findings block the merge. Post these as inline comments.
+            - WARNING — non-blocking recommendations the author may adopt at
+              their discretion. Keep them few; inline comments allowed but sparse.
+            - NITPICK — optional polish (anything ESLint/Prettier already covers,
+              micro-naming, pure preference). Do NOT post NITPICKs as inline
+              comments. Collect them into a single section titled
+              "可選 NITPICK（非必要，可留待後續）", clearly marked optional and
+              skippable. Do not open one inline thread per nitpick.
+
+            VERDICT — open the summary with exactly one of these lines:
+            - ✅ APPROVE — no CRITICAL findings. Say so plainly and STOP. Do not
+              hunt for polish and do not manufacture NITPICKs to fill space; a
+              clean PR earns a short approval, not a long list.
+            - 🛑 REQUEST CHANGES — one or more CRITICAL findings; list each with
+              file:line and a concrete fix.
+
+            Do not flag formatting that ESLint/Prettier already handle. If you
+            find nothing significant, give ✅ APPROVE and stop — never invent
+            findings to justify the run. When a human later asks you to
+            re-review after fixes, focus only on whether the prior CRITICAL items
+            are resolved; do not generate a fresh batch of NITPICKs.
 
             The PR branch is already checked out in the current working directory.
             Use `gh pr comment` for top-level summary feedback.
