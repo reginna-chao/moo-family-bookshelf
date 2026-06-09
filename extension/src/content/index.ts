@@ -292,59 +292,6 @@ function tryScrapeAndCacheEmail(): void {
   }, 1000);
 }
 
-/**
- * Handle background sync requests from the service worker.
- * The background alarm handler sends TRIGGER_BOOK_SYNC when
- * it finds an open read.readmoo.com tab.
- */
-function listenForBackgroundSync(): void {
-  if (!isExtensionContextValid()) return;
-
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message.type === "TRIGGER_BOOK_SYNC") {
-      if (!isExtensionContextValid()) {
-        sendResponse({ success: false, error: "Extension context invalidated" });
-        return;
-      }
-      // ApiClient is re-exported from content-sync.js, so a single import suffices.
-      import(/* @vite-ignore */ chrome.runtime.getURL("content-sync.js"))
-        .then(async ({ syncBooks, ApiClient, canAutoSync }) => {
-          const storageResult = await chrome.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY, API_ENDPOINT_KEY]);
-          const userId = storageResult[USER_ID_KEY] as string | undefined;
-          if (!userId) {
-            sendResponse({ success: false, error: "No userId" });
-            return;
-          }
-
-          const allowed = await canAutoSync();
-          if (!allowed) {
-            sendResponse({ success: true, skipped: true });
-            return;
-          }
-
-          const apiClient = new ApiClient(storageResult[API_ENDPOINT_KEY] as string | undefined);
-          if (storageResult[AUTH_TOKEN_KEY]) {
-            apiClient.setAuthToken(storageResult[AUTH_TOKEN_KEY] as string);
-          }
-
-          const result = await syncBooks({ navigate: true, userId, apiClient });
-          if (result.success) {
-            chrome.runtime.sendMessage({ type: "CLEAR_SYNC_ERROR_BADGE" });
-          }
-          sendResponse({
-            success: result.success,
-            error: result.error,
-          });
-        })
-        .catch((err) => {
-          console.error("[MooFamily] Failed to load sync module:", err);
-          sendResponse({ success: false, error: "Module load failed" });
-        });
-      return true; // async response
-    }
-  });
-}
-
 let currentAbortController: AbortController | null = null;
 
 /**
@@ -395,7 +342,6 @@ if (!isExtensionContextValid()) {
   const init = (): void => {
     waitAndInjectButton();
     tryScrapeAndCacheEmail();
-    listenForBackgroundSync();
     listenForIconSizeChanges();
   };
 

@@ -23,7 +23,6 @@ import { BoolFlag, type ApiClient } from "@/api/client";
 import {
   AUTO_SYNC_INTERVAL_KEY,
   LAST_SYNC_AT_KEY,
-  LAST_DISPLAY_SCRAPE_AT_KEY,
   DISPLAY_NAME_KEY,
   SYNC_ARCHIVED_KEY,
 } from "@/constants";
@@ -36,7 +35,6 @@ import {
 const STORAGE_KEY_ALIAS: Record<string, string> = {
   autoSyncInterval: AUTO_SYNC_INTERVAL_KEY,
   lastSyncAt: LAST_SYNC_AT_KEY,
-  lastDisplayScrapeAt: LAST_DISPLAY_SCRAPE_AT_KEY,
   displayName: DISPLAY_NAME_KEY,
   syncArchived: SYNC_ARCHIVED_KEY,
 };
@@ -335,138 +333,6 @@ describe("canAutoSync", () => {
   });
 });
 
-describe("canDisplayScrape", () => {
-  let canDisplayScrape: () => Promise<boolean>;
-
-  beforeEach(async () => {
-    vi.resetModules();
-    const mod = await import("@/sync/syncBooks");
-    canDisplayScrape = mod.canDisplayScrape;
-  });
-
-  function setupStorage(data: Record<string, unknown>) {
-    const store = toStorageKeys(data);
-    vi.mocked(chrome.storage.local.get).mockImplementation(
-      (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-        const keyList = Array.isArray(keys) ? keys : [keys];
-        const result: Record<string, unknown> = {};
-        for (const key of keyList) {
-          if (typeof key === "string" && key in store) {
-            result[key] = store[key];
-          }
-        }
-        if (typeof callback === "function") {
-          callback(result);
-          return undefined as unknown as Promise<Record<string, unknown>>;
-        }
-        return Promise.resolve(result) as unknown as Promise<Record<string, unknown>>;
-      },
-    );
-  }
-
-  const HOUR = 60 * 60 * 1000;
-  const DAY = 24 * HOUR;
-
-  describe("lastDisplayScrapeAt not set", () => {
-    it.each(["daily", "weekly", "monthly"] as const)(
-      "returns true with interval '%s'",
-      async (autoSyncInterval) => {
-        setupStorage({ autoSyncInterval });
-        expect(await canDisplayScrape()).toBe(true);
-      },
-    );
-
-    it("returns true with default (no interval stored)", async () => {
-      setupStorage({});
-      expect(await canDisplayScrape()).toBe(true);
-    });
-  });
-
-  describe("daily interval", () => {
-    it("returns false when lastDisplayScrapeAt is 1 hour ago", async () => {
-      setupStorage({ autoSyncInterval: "daily", lastDisplayScrapeAt: Date.now() - HOUR });
-      expect(await canDisplayScrape()).toBe(false);
-    });
-
-    it("returns true when lastDisplayScrapeAt is more than 24 hours ago", async () => {
-      setupStorage({ autoSyncInterval: "daily", lastDisplayScrapeAt: Date.now() - 2 * DAY });
-      expect(await canDisplayScrape()).toBe(true);
-    });
-
-    it("returns true when lastDisplayScrapeAt is exactly 24 hours ago", async () => {
-      setupStorage({ autoSyncInterval: "daily", lastDisplayScrapeAt: Date.now() - DAY });
-      expect(await canDisplayScrape()).toBe(true);
-    });
-  });
-
-  describe("weekly interval", () => {
-    it("returns false when lastDisplayScrapeAt is 3 days ago", async () => {
-      setupStorage({ autoSyncInterval: "weekly", lastDisplayScrapeAt: Date.now() - 3 * DAY });
-      expect(await canDisplayScrape()).toBe(false);
-    });
-
-    it("returns true when lastDisplayScrapeAt is more than 7 days ago", async () => {
-      setupStorage({ autoSyncInterval: "weekly", lastDisplayScrapeAt: Date.now() - 8 * DAY });
-      expect(await canDisplayScrape()).toBe(true);
-    });
-  });
-
-  describe("monthly interval", () => {
-    it("returns false when lastDisplayScrapeAt is 10 days ago", async () => {
-      setupStorage({ autoSyncInterval: "monthly", lastDisplayScrapeAt: Date.now() - 10 * DAY });
-      expect(await canDisplayScrape()).toBe(false);
-    });
-
-    it("returns true when lastDisplayScrapeAt is more than 30 days ago", async () => {
-      setupStorage({ autoSyncInterval: "monthly", lastDisplayScrapeAt: Date.now() - 31 * DAY });
-      expect(await canDisplayScrape()).toBe(true);
-    });
-  });
-
-  describe("never interval", () => {
-    it("returns false even when lastDisplayScrapeAt is very old", async () => {
-      setupStorage({ autoSyncInterval: "never", lastDisplayScrapeAt: Date.now() - 365 * DAY });
-      expect(await canDisplayScrape()).toBe(false);
-    });
-
-    it("returns false when lastDisplayScrapeAt is not set", async () => {
-      setupStorage({ autoSyncInterval: "never" });
-      expect(await canDisplayScrape()).toBe(false);
-    });
-  });
-
-  describe("invalid/missing interval falls back to daily", () => {
-    it("invalid value behaves like daily — false at 1 hour ago", async () => {
-      setupStorage({ autoSyncInterval: "foo", lastDisplayScrapeAt: Date.now() - HOUR });
-      expect(await canDisplayScrape()).toBe(false);
-    });
-
-    it("invalid value behaves like daily — true at 25 hours ago", async () => {
-      setupStorage({ autoSyncInterval: "foo", lastDisplayScrapeAt: Date.now() - 25 * HOUR });
-      expect(await canDisplayScrape()).toBe(true);
-    });
-
-    it("missing value behaves like daily — false at 1 hour ago", async () => {
-      setupStorage({ lastDisplayScrapeAt: Date.now() - HOUR });
-      expect(await canDisplayScrape()).toBe(false);
-    });
-
-    it("missing value behaves like daily — true at 25 hours ago", async () => {
-      setupStorage({ lastDisplayScrapeAt: Date.now() - 25 * HOUR });
-      expect(await canDisplayScrape()).toBe(true);
-    });
-  });
-
-  describe("independence from lastSyncAt", () => {
-    it("ignores lastSyncAt — gate driven only by lastDisplayScrapeAt", async () => {
-      // lastSyncAt is recent (would block canAutoSync) but lastDisplayScrapeAt
-      // is absent → display scrape is still allowed.
-      setupStorage({ autoSyncInterval: "daily", lastSyncAt: Date.now() - HOUR });
-      expect(await canDisplayScrape()).toBe(true);
-    });
-  });
-});
-
 describe("syncBooks — full flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -552,7 +418,7 @@ describe("syncBooks — full flow", () => {
     expect(window.location.hash).toBe("#/settings");
   });
 
-  it("updates both lastSyncAt and lastDisplayScrapeAt on success", async () => {
+  it("records lastSyncAt on success", async () => {
     setupStorage({ displayName: "Test", syncArchived: 0 });
     vi.mocked(scrapeBooks).mockResolvedValue([]);
 
@@ -567,14 +433,25 @@ describe("syncBooks — full flow", () => {
       apiClient,
     });
 
-    // A full sync refreshes BOTH timers in a single set() so the display path
-    // does not trigger a redundant re-scrape afterwards.
+    // A successful sync records the sync timestamp so canAutoSync() throttles
+    // the next auto sync. The separate display-scrape timer was removed when the
+    // self-contained display scrape was deleted — sync only writes LAST_SYNC_AT_KEY.
     expect(chrome.storage.local.set).toHaveBeenCalledWith(
-      expect.objectContaining({
-        [LAST_SYNC_AT_KEY]: expect.any(Number),
-        [LAST_DISPLAY_SCRAPE_AT_KEY]: expect.any(Number),
-      }),
+      expect.objectContaining({ [LAST_SYNC_AT_KEY]: expect.any(Number) }),
     );
+
+    // It must NOT write any display-scrape timestamp key.
+    const wroteDisplayScrapeKey = vi
+      .mocked(chrome.storage.local.set)
+      .mock.calls.some(
+        (call) =>
+          call[0] !== null &&
+          typeof call[0] === "object" &&
+          Object.keys(call[0] as Record<string, unknown>).some((k) =>
+            k.toLowerCase().includes("displayscrape"),
+          ),
+      );
+    expect(wroteDisplayScrapeKey).toBe(false);
   });
 
   it("loads saved books from plain books array", async () => {

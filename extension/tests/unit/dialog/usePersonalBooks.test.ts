@@ -1,54 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 
-// Mock scraper module before importing the hook. scrapeBooks resolves the
-// "fresh scrape" set — only reached when canDisplayScrape() returns true.
+// usePersonalBooks no longer scrapes on its own (the self-contained display
+// scrape was removed). It loads cache-first: cache + API → reconciled baseline
+// → "ready". Fresh books arrive later via `lastSyncBooks` (from useBookSync's
+// auto full sync), merged by an effect. We still mock the scraper so any
+// accidental call would be detectable, and assert it is never invoked.
 vi.mock("@/content/scraper", () => ({
-  scrapeBooks: vi.fn().mockResolvedValue([
-    {
-      bookId: "book-1",
-      title: "書一",
-      author: "作者A",
-      isbn: "",
-      coverUrl: "",
-      readmooUrl: "",
-      category: "",
-    },
-    {
-      bookId: "book-2",
-      title: "書二",
-      author: "作者B",
-      isbn: "",
-      coverUrl: "",
-      readmooUrl: "",
-      category: "",
-    },
-    {
-      bookId: "book-3",
-      title: "書三",
-      author: "作者C",
-      isbn: "",
-      coverUrl: "",
-      readmooUrl: "",
-      category: "",
-    },
-  ]),
+  scrapeBooks: vi.fn().mockResolvedValue([]),
   scrapeArchivedBooks: vi.fn().mockResolvedValue([]),
   formatScrapeProgress: (page: number, count: number) =>
     `正在讀取第 ${page} 頁，已收集 ${count} 本…`,
 }));
 
-// Mock the interval gate. Default = true (scrape path) so the existing handler
-// tests keep their 3-book baseline; individual tests override per scenario.
-vi.mock("@/sync/syncBooks", () => ({
-  canDisplayScrape: vi.fn().mockResolvedValue(true),
-}));
-
 import { usePersonalBooks } from "@/dialog/usePersonalBooks";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { scrapeBooks } from "@/content/scraper";
-import { canDisplayScrape } from "@/sync/syncBooks";
-import { PERSONAL_BOOKS_CACHE_KEY, LAST_DISPLAY_SCRAPE_AT_KEY } from "@/constants";
+import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
 
 function createMockApiClient(
   overrides: Partial<ApiClient> = {},
@@ -92,18 +60,23 @@ function setCache(books: Partial<BookEntry>[]) {
   return { [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books) };
 }
 
-function renderUsePersonalBooks(client?: ApiClient) {
+function renderUsePersonalBooks(
+  client?: ApiClient,
+  lastSyncBooks: BookEntry[] = [],
+) {
   // Create the client ONCE so the apiClient reference is stable across
   // re-renders — otherwise the load effect (deps: [userId, apiClient]) would
-  // re-run on every state update and re-trigger the scrape.
+  // re-run on every state update and re-trigger the load.
   const apiClient = client ?? createMockApiClient();
-  return renderHook(() =>
-    usePersonalBooks({
-      userId: "user-abc",
-      apiClient,
-      lastSyncBooks: [],
-      displayName: "小明",
-    }),
+  return renderHook(
+    ({ lastSyncBooks: syncBooks }: { lastSyncBooks: BookEntry[] }) =>
+      usePersonalBooks({
+        userId: "user-abc",
+        apiClient,
+        lastSyncBooks: syncBooks,
+        displayName: "小明",
+      }),
+    { initialProps: { lastSyncBooks } },
   );
 }
 
@@ -111,150 +84,257 @@ async function waitForReady(result: { current: { status: string } }) {
   await waitFor(() => expect(result.current.status).toBe("ready"));
 }
 
-describe("usePersonalBooks — load flow (cache-first, interval-gated scrape)", () => {
+describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: gate open (scrape allowed), no cache, no saved books.
-    vi.mocked(canDisplayScrape).mockResolvedValue(true);
     setupStorage();
   });
 
-  describe("gate closed (canDisplayScrape=false → no scroll)", () => {
-    it("does NOT call scrapeBooks", async () => {
-      vi.mocked(canDisplayScrape).mockResolvedValue(false);
-      setupStorage(setCache([
-        { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-      ]));
+  it("never calls scrapeBooks during load (display scrape removed)", async () => {
+    setupStorage(setCache([
+      { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+    ]));
 
-      const { result } = renderUsePersonalBooks();
-      await waitForReady(result);
+    const { result } = renderUsePersonalBooks();
+    await waitForReady(result);
 
-      expect(scrapeBooks).not.toHaveBeenCalled();
-    });
-
-    it("shows books from cache when cache is present", async () => {
-      vi.mocked(canDisplayScrape).mockResolvedValue(false);
-      setupStorage(setCache([
-        { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.TRUE },
-      ]));
-
-      const { result } = renderUsePersonalBooks();
-      await waitForReady(result);
-
-      expect(result.current.books).toHaveLength(1);
-      expect(result.current.books[0].bookId).toBe("c1");
-      expect(result.current.books[0].isShared).toBe(BoolFlag.TRUE);
-      expect(scrapeBooks).not.toHaveBeenCalled();
-    });
-
-    it("falls back to API books when cache absent but API has books", async () => {
-      vi.mocked(canDisplayScrape).mockResolvedValue(false);
-      setupStorage(); // no cache
-      const client = createMockApiClient({
-        getPersonalBooks: vi.fn().mockResolvedValue({
-          data: { books: [{ bookId: "api-1", title: "API 書", author: "B", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE }] },
-        }),
-      });
-
-      const { result } = renderUsePersonalBooks(client);
-      await waitForReady(result);
-
-      expect(result.current.books).toHaveLength(1);
-      expect(result.current.books[0].bookId).toBe("api-1");
-      expect(scrapeBooks).not.toHaveBeenCalled();
-    });
-
-    it("ends in empty ready state when neither cache nor API has books", async () => {
-      vi.mocked(canDisplayScrape).mockResolvedValue(false);
-      setupStorage(); // no cache; API default returns data:null
-
-      const { result } = renderUsePersonalBooks();
-      await waitForReady(result);
-
-      expect(result.current.books).toHaveLength(0);
-      expect(result.current.status).toBe("ready");
-      expect(scrapeBooks).not.toHaveBeenCalled();
-    });
+    expect(scrapeBooks).not.toHaveBeenCalled();
   });
 
-  describe("gate open (canDisplayScrape=true → scrape)", () => {
-    it("calls scrapeBooks and shows the merged scrape result", async () => {
-      vi.mocked(canDisplayScrape).mockResolvedValue(true);
-      setupStorage(); // no cache
+  it("shows books from cache when cache is present", async () => {
+    setupStorage(setCache([
+      { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.TRUE },
+    ]));
 
-      const { result } = renderUsePersonalBooks();
-      await waitForReady(result);
+    const { result } = renderUsePersonalBooks();
+    await waitForReady(result);
 
-      expect(scrapeBooks).toHaveBeenCalledOnce();
-      expect(result.current.books).toHaveLength(3);
-      expect(result.current.books.map((b) => b.bookId)).toEqual([
-        "book-1",
-        "book-2",
-        "book-3",
-      ]);
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.books[0].bookId).toBe("c1");
+    expect(result.current.books[0].isShared).toBe(BoolFlag.TRUE);
+    expect(scrapeBooks).not.toHaveBeenCalled();
+  });
+
+  it("reconciles cache share flags against the server (API wins for known books)", async () => {
+    // Cache says c1 is NOT shared; server says it IS shared → API wins.
+    setupStorage(setCache([
+      { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+    ]));
+    const client = createMockApiClient({
+      getPersonalBooks: vi.fn().mockResolvedValue({
+        data: { books: [{ bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.TRUE }] },
+      }),
     });
 
-    it("writes the merged result to cache and updates lastDisplayScrapeAt", async () => {
-      vi.mocked(canDisplayScrape).mockResolvedValue(true);
-      setupStorage();
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
 
-      const { result } = renderUsePersonalBooks();
-      await waitForReady(result);
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.books[0].isShared).toBe(BoolFlag.TRUE);
+  });
 
-      const setCalls = vi.mocked(chrome.storage.local.set).mock.calls;
+  it("falls back to API books when cache absent but API has books", async () => {
+    setupStorage(); // no cache
+    const client = createMockApiClient({
+      getPersonalBooks: vi.fn().mockResolvedValue({
+        data: { books: [{ bookId: "api-1", title: "API 書", author: "B", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE }] },
+      }),
+    });
 
-      const cacheCall = setCalls.find(
-        (call) =>
-          call[0] &&
-          typeof call[0] === "object" &&
-          PERSONAL_BOOKS_CACHE_KEY in (call[0] as Record<string, unknown>),
-      );
-      expect(cacheCall).toBeDefined();
-      const cached: BookEntry[] = JSON.parse(
-        (cacheCall![0] as Record<string, string>)[PERSONAL_BOOKS_CACHE_KEY],
-      );
-      expect(cached).toHaveLength(3);
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
 
-      const timestampCall = setCalls.find(
-        (call) =>
-          call[0] &&
-          typeof call[0] === "object" &&
-          LAST_DISPLAY_SCRAPE_AT_KEY in (call[0] as Record<string, unknown>),
-      );
-      expect(timestampCall).toBeDefined();
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.books[0].bookId).toBe("api-1");
+    expect(scrapeBooks).not.toHaveBeenCalled();
+  });
+
+  it("ends in empty ready state when neither cache nor API has books", async () => {
+    setupStorage(); // no cache; API default returns data:null
+
+    const { result } = renderUsePersonalBooks();
+    await waitForReady(result);
+
+    // Empty baseline must still resolve to ready (shows empty state, not stuck loading).
+    expect(result.current.books).toHaveLength(0);
+    expect(result.current.status).toBe("ready");
+    expect(scrapeBooks).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a progressMessage field (removed from the hook)", async () => {
+    const { result } = renderUsePersonalBooks();
+    await waitForReady(result);
+
+    expect(result.current).not.toHaveProperty("progressMessage");
+  });
+
+  it("uses 'loading' (not 'scraping') as the pre-ready status", async () => {
+    // Hold the API open so we can observe the pre-ready status.
+    let resolveApi: (v: { data: null }) => void;
+    const client = createMockApiClient({
+      getPersonalBooks: vi.fn().mockReturnValue(
+        new Promise((resolve) => { resolveApi = resolve; }),
+      ),
+    });
+
+    const { result } = renderUsePersonalBooks(client);
+
+    expect(result.current.status).toBe("loading");
+
+    await act(async () => {
+      resolveApi!({ data: null });
+    });
+    await waitForReady(result);
+  });
+});
+
+describe("usePersonalBooks — lastSyncBooks merge effect", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupStorage();
+  });
+
+  it("merges newly synced books into the displayed list once ready", async () => {
+    setupStorage(setCache([
+      { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+    ]));
+
+    const { result, rerender } = renderUsePersonalBooks();
+    await waitForReady(result);
+    expect(result.current.books).toHaveLength(1);
+
+    // Auto-sync streams a fresh book back via lastSyncBooks.
+    act(() => {
+      rerender({
+        lastSyncBooks: [
+          { bookId: "new-1", title: "新書", author: "C", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+        ],
+      });
+    });
+
+    await waitFor(() => expect(result.current.books).toHaveLength(2));
+    expect(result.current.books.map((b) => b.bookId)).toContain("new-1");
+  });
+
+  it("new synced books default to not-shared", async () => {
+    setupStorage();
+    const { result, rerender } = renderUsePersonalBooks();
+    await waitForReady(result);
+
+    act(() => {
+      rerender({
+        lastSyncBooks: [
+          { bookId: "new-1", title: "新書", author: "C", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+        ],
+      });
+    });
+
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+    expect(result.current.books[0].isShared).toBe(BoolFlag.FALSE);
+  });
+
+  it("does NOT overwrite an unsaved (dirty) toggle when sync books arrive (save-before-sync, invariant 3)", async () => {
+    // Baseline: server-known book b1, currently NOT shared.
+    setupStorage(setCache([
+      { bookId: "b1", title: "書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+    ]));
+
+    const { result, rerender } = renderUsePersonalBooks();
+    await waitForReady(result);
+
+    // User toggles b1 to shared locally but has NOT saved yet → dirty.
+    act(() => {
+      result.current.handleToggle("b1");
+    });
+    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
+    expect(
+      result.current.books.find((b) => b.bookId === "b1")?.isShared,
+    ).toBe(BoolFlag.TRUE);
+
+    // Auto-sync completes and streams b1 back. mergeBooks merges scraped books
+    // INTO the current (prev) list, keeping prev's isShared for known books, so
+    // the user's unsaved toggle must survive — never reverted to the synced value.
+    act(() => {
+      rerender({
+        lastSyncBooks: [
+          { bookId: "b1", title: "書一（同步版）", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+        ],
+      });
+    });
+
+    await waitFor(() =>
       expect(
-        (timestampCall![0] as Record<string, unknown>)[LAST_DISPLAY_SCRAPE_AT_KEY],
-      ).toEqual(expect.any(Number));
+        result.current.books.find((b) => b.bookId === "b1")?.title,
+      ).toBe("書一（同步版）"),
+    );
+
+    // Critical: the unsaved toggle is preserved (still TRUE), and b1 stays dirty.
+    expect(
+      result.current.books.find((b) => b.bookId === "b1")?.isShared,
+    ).toBe(BoolFlag.TRUE);
+    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
+  });
+
+  it("keeps synced-in new books after handleCancel, but reverts the unsaved toggle (S1 behaviour a)", async () => {
+    // Baseline: server-known book b1, currently NOT shared.
+    setupStorage(setCache([
+      { bookId: "b1", title: "書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+    ]));
+
+    const { result, rerender } = renderUsePersonalBooks();
+    await waitForReady(result);
+    expect(result.current.books).toHaveLength(1);
+
+    // Auto/manual sync streams a brand-new book b2 (absent from the baseline) →
+    // the merge effect folds it into BOTH the display list and the cancel
+    // baseline (originalBooks), so it must show up in books.
+    act(() => {
+      rerender({
+        lastSyncBooks: [
+          { bookId: "b2", title: "新書", author: "C", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+        ],
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.books.map((b) => b.bookId)).toContain("b2"),
+    );
+
+    // User toggles b1 to shared locally but does NOT save → dirty.
+    act(() => {
+      result.current.handleToggle("b1");
+    });
+    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
+    expect(
+      result.current.books.find((b) => b.bookId === "b1")?.isShared,
+    ).toBe(BoolFlag.TRUE);
+
+    // User presses "取消變更" → restores from the (merged) cancel baseline.
+    act(() => {
+      result.current.handleCancel();
     });
 
-    it("shows cache baseline first, then replaces with the fresh scrape", async () => {
-      vi.mocked(canDisplayScrape).mockResolvedValue(true);
-      setupStorage(setCache([
-        { bookId: "c1", title: "舊快取書", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-      ]));
-
-      const { result } = renderUsePersonalBooks();
-      await waitForReady(result);
-
-      // After the scrape completes, the 3 scraped books replace the cache baseline.
-      await waitFor(() => expect(result.current.books).toHaveLength(3));
-      expect(result.current.books.map((b) => b.bookId)).toEqual([
-        "book-1",
-        "book-2",
-        "book-3",
-      ]);
-      expect(scrapeBooks).toHaveBeenCalledOnce();
-    });
+    // b2 (synced-in new book) must SURVIVE the cancel — it lives in the baseline.
+    expect(result.current.books.map((b) => b.bookId)).toContain("b2");
+    // b1's unsaved toggle must be reverted to its clean baseline value (FALSE).
+    expect(
+      result.current.books.find((b) => b.bookId === "b1")?.isShared,
+    ).toBe(BoolFlag.FALSE);
+    // Dirty state fully cleared.
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.dirtyBookIds.size).toBe(0);
   });
 });
 
 describe("usePersonalBooks — dirty Set", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Gate open so the baseline becomes the 3 scraped books (handler tests
-    // toggle book-1 / book-2 against that set).
-    vi.mocked(canDisplayScrape).mockResolvedValue(true);
-    setupStorage();
+    // Seed the baseline from cache (the hook is now cache-first, no scrape).
+    // Handler tests toggle book-1 / book-2 against this 3-book set.
+    setupStorage(setCache([
+      { bookId: "book-1", title: "書一", author: "作者A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+      { bookId: "book-2", title: "書二", author: "作者B", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+      { bookId: "book-3", title: "書三", author: "作者C", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+    ]));
   });
 
   it("starts with empty dirty set and isDirty=false", async () => {
@@ -447,9 +527,8 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Gate closed → no scrape; the baseline comes straight from the API record,
-    // so every book is "server-known" unless a test injects a cache-only book.
-    vi.mocked(canDisplayScrape).mockResolvedValue(false);
+    // No scrape; the baseline comes straight from the API record, so every book
+    // is "server-known" unless a test injects a cache-only book.
     setupStorage();
   });
 

@@ -1,17 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
-import { scrapeBooks, scrapeArchivedBooks, formatScrapeProgress } from "../content/scraper";
 import {
   PERSONAL_BOOKS_CACHE_KEY,
-  SYNC_ARCHIVED_KEY,
-  LAST_DISPLAY_SCRAPE_AT_KEY,
   PERSONAL_SHELF_SAVED_AT_KEY,
 } from "../constants";
 import { mergeBooks } from "./mergeBooks";
-import { canDisplayScrape } from "../sync/syncBooks";
 
-export type PersonalBooksStatus = "scraping" | "ready" | "saving" | "saved" | "error";
+export type PersonalBooksStatus = "loading" | "ready" | "saving" | "saved" | "error";
 
 /** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
 const MAX_PATCH_CHANGES = 1000;
@@ -71,11 +67,10 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
   const originalBooks = useRef<BookEntry[]>([]);
   /** Raw payload — kept so save can spread back unknown fields from future versions */
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
-  const [status, setStatus] = useState<PersonalBooksStatus>("scraping");
+  const [status, setStatus] = useState<PersonalBooksStatus>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [dirtyBookIds, setDirtyBookIds] = useState<Set<string>>(new Set());
   const isDirty = dirtyBookIds.size > 0;
-  const [progressMessage, setProgressMessage] = useState("");
 
   const markDirty = useCallback((bookId: string) => {
     setDirtyBookIds((prev) => {
@@ -104,15 +99,19 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     setDirtyBookIds((prev) => (prev.size === 0 ? prev : new Set()));
   }, []);
 
-  // Load books: cache-first display, then interval-gated scrape (the only scrolling path).
+  // Load books: cache-first display only (no scrape here). The actual scrape +
+  // upload happens in useBookSync's auto full sync, which refreshes the cache and
+  // streams results back via `lastSyncBooks` (merged by the effect below).
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        // Step 1: cache + API together (no scrape yet).
-        const cacheResult = await chrome.storage.local.get([PERSONAL_BOOKS_CACHE_KEY]);
-        const apiResponse = await apiClient.getPersonalBooks(userId);
+        // Independent reads — run in parallel to shorten shelf load latency.
+        const [cacheResult, apiResponse] = await Promise.all([
+          chrome.storage.local.get([PERSONAL_BOOKS_CACHE_KEY]),
+          apiClient.getPersonalBooks(userId),
+        ]);
         if (cancelled) return;
 
         let savedBooks: BookEntry[] = [];
@@ -125,47 +124,15 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
         }
         const cachedBooks = parseCachedBooks(cacheResult[PERSONAL_BOOKS_CACHE_KEY]);
 
-        // Step 2: baseline display WITHOUT scraping.
+        // Baseline display from cache reconciled against the server (API wins for
+        // share flags). Empty baseline still resolves to "ready" → "尚無書籍".
         const baseline = cachedBooks.length > 0 ? reconcileBaseline(cachedBooks, savedBooks) : savedBooks;
-        if (baseline.length > 0) {
-          originalBooks.current = baseline;
-          setBooks(baseline);
-          setStatus("ready");
-        }
-
-        // Step 3: interval gate.
-        const allowed = await canDisplayScrape();
-        if (cancelled) return;
-        if (!allowed) {
-          if (baseline.length === 0) setStatus("ready");
-          return;
-        }
-
-        // Step 4: allowed → scrape (the only path that scrolls the library page).
-        const onProgress = (page: number, count: number) => {
-          if (!cancelled) setProgressMessage(formatScrapeProgress(page, count));
-        };
-        const scrapedBooks = await scrapeBooks({ onProgress });
-
-        const archiveResult = await chrome.storage.local.get([SYNC_ARCHIVED_KEY]);
-        const syncArchivedSetting = (archiveResult[SYNC_ARCHIVED_KEY] as number | undefined) ?? BoolFlag.FALSE;
-        let allScrapedBooks = [...scrapedBooks];
-        if (syncArchivedSetting === BoolFlag.TRUE) {
-          const archivedBooks = await scrapeArchivedBooks({ onProgress });
-          allScrapedBooks = [...scrapedBooks, ...archivedBooks];
-        }
-        if (cancelled) return;
-
-        const merged = mergeBooks(allScrapedBooks, savedBooks);
-        chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(merged), [LAST_DISPLAY_SCRAPE_AT_KEY]: Date.now() });
-        originalBooks.current = merged;
-        setBooks(merged);
+        originalBooks.current = baseline;
+        setBooks(baseline);
         setStatus("ready");
-        setProgressMessage("");
       } catch (err) {
         console.error("[PersonalShelf] Error:", err);
         if (cancelled) return;
-        setProgressMessage("");
         setErrorMessage(err instanceof Error ? err.message : "載入失敗");
         setStatus("error");
       }
@@ -175,21 +142,25 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     return () => { cancelled = true; };
   }, [userId, apiClient]);
 
-  // Merge new books from auto-sync or manual sync
+  // Merge new books from auto-sync or manual sync into both the display list and
+  // the cancel baseline. mergeBooks(scraped, saved) keeps the second arg's
+  // isShared and only adds new books / metadata from the first arg, so:
+  // - display merges into `prev` → user's unsaved toggles are preserved
+  // - baseline merges into the previous clean baseline → "clean + new books"
+  //   without any unsaved toggle, honouring save-before-sync (Invariant 3).
   useEffect(() => {
     if (lastSyncBooks.length > 0 && status === "ready") {
-      setBooks((prev) => mergeBooks(
-        lastSyncBooks.map((b) => ({
-          bookId: b.bookId,
-          title: b.title,
-          author: b.author,
-          coverUrl: b.coverUrl,
-          readmooUrl: b.readmooUrl,
-          category: b.category,
-          isArchived: b.isArchived ?? BoolFlag.FALSE,
-        })),
-        prev,
-      ));
+      const mapped = lastSyncBooks.map((b) => ({
+        bookId: b.bookId,
+        title: b.title,
+        author: b.author,
+        coverUrl: b.coverUrl,
+        readmooUrl: b.readmooUrl,
+        category: b.category,
+        isArchived: b.isArchived ?? BoolFlag.FALSE,
+      }));
+      setBooks((prev) => mergeBooks(mapped, prev));
+      originalBooks.current = mergeBooks(mapped, originalBooks.current);
     }
   }, [lastSyncBooks, status]);
 
@@ -279,6 +250,5 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     handleToggle,
     handleSave,
     handleCancel,
-    progressMessage,
   };
 }

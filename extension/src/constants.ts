@@ -39,7 +39,6 @@ export const HAS_COMPLETED_INITIAL_SETUP_KEY = "moo:hasCompletedInitialSetup";
 export const SYNC_ARCHIVED_KEY = "moo:syncArchived";
 export const AUTO_SYNC_INTERVAL_KEY = "moo:autoSyncInterval";
 export const LAST_SYNC_AT_KEY = "moo:lastSyncAt";
-export const LAST_DISPLAY_SCRAPE_AT_KEY = "moo:lastDisplayScrapeAt";
 
 // UI Preferences
 export const FAMILY_SHELF_VIEW_MODE_KEY = "moo:familyShelfViewMode";
