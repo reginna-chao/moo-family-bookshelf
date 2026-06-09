@@ -1,15 +1,17 @@
 /**
  * Shared book sync infrastructure used by:
- * A) Auto-detect sync (dialog open + #/library)
- * B) Background scheduled sync (chrome.alarms)
- * C) Manual sync button
+ * A) Auto full sync on personal-shelf mount (throttled by autoSyncInterval)
+ * B) Manual sync button (no throttle)
+ *
+ * Both run a single complete scrape + upload. Background scheduled sync
+ * (chrome.alarms) was removed — sync only happens when the user opens their
+ * personal shelf.
  */
 
 import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 import {
   AUTO_SYNC_INTERVAL_KEY,
   LAST_SYNC_AT_KEY,
-  LAST_DISPLAY_SCRAPE_AT_KEY,
   SYNC_ARCHIVED_KEY,
   DISPLAY_NAME_KEY,
 } from "../constants";
@@ -43,12 +45,6 @@ export function isAutoSyncInterval(v: unknown): v is AutoSyncInterval {
   return v === "daily" || v === "weekly" || v === "monthly" || v === "never";
 }
 
-/** Interval for background scheduled sync */
-export const BACKGROUND_SYNC_INTERVAL_MIN = 24 * 60; // 24 hours in minutes
-
-/** Chrome alarm name for background sync */
-export const BOOK_SYNC_ALARM_NAME = "bookSync";
-
 /** Delay (ms) to wait for page render after hash navigation */
 const NAV_SETTLE_MS = 1500;
 
@@ -77,15 +73,6 @@ async function canSyncByInterval(timestampKey: string): Promise<boolean> {
  */
 export function canAutoSync(): Promise<boolean> {
   return canSyncByInterval(LAST_SYNC_AT_KEY);
-}
-
-/**
- * Check if enough time has passed since the last personal-shelf display scrape.
- * Shares the `autoSyncInterval` setting but tracks a separate timestamp so the
- * display path never suppresses upload sync.
- */
-export function canDisplayScrape(): Promise<boolean> {
-  return canSyncByInterval(LAST_DISPLAY_SCRAPE_AT_KEY);
 }
 
 /**
@@ -124,7 +111,13 @@ export interface SyncBooksResult {
 }
 
 /**
- * Core sync function shared by all three mechanisms.
+ * Core sync function shared by all callers.
+ *
+ * NOTE: As of the single-full-sync consolidation, every caller (auto full sync
+ * on personal-shelf mount AND the manual sync button) passes `navigate: true`.
+ * The `navigate: false` path currently has no caller. The full navigate logic
+ * is intentionally retained for the `navigate: true` case (and any future
+ * caller that already sits on #/library); do not remove it.
  *
  * 1. Navigate to #/library if needed
  * 2. Wait for render
@@ -202,9 +195,9 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
       window.location.hash = originalHash || "#/";
     }
 
-    // Step 7: A full sync just scraped fresh data (also refreshes the display via
-    // lastSyncBooks), so refresh BOTH timers to avoid a redundant display re-scrape.
-    await chrome.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now(), [LAST_DISPLAY_SCRAPE_AT_KEY]: Date.now() });
+    // Step 7: Record this successful sync so the auto-sync throttle (canAutoSync)
+    // honours the user's configured interval before syncing again.
+    await chrome.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now() });
 
     return { success: true, books: merged };
   } catch (err) {

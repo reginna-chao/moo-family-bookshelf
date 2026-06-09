@@ -1,7 +1,7 @@
 /**
  * Hook for book sync in the dialog UI.
  * Provides:
- * - Auto-sync on dialog open when on #/library (rate limited >= 24 hours)
+ * - Auto-sync on personal-shelf mount (a full sync, rate limited by autoSyncInterval)
  * - Manual sync button handler (no rate limiting)
  */
 
@@ -44,13 +44,13 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
     };
   }, []);
 
-  // Mechanism A: Auto-sync when dialog opens on #/library page
+  // Mechanism A: Auto full sync when the personal shelf mounts.
+  // Throttled by canAutoSync() (LAST_SYNC_AT_KEY + autoSyncInterval); `never`
+  // disables it. Uses navigate:true so it works regardless of the current hash
+  // (syncBooks restores the original hash afterwards), matching manual sync.
   useEffect(() => {
     if (autoSyncTriggered.current) return;
     autoSyncTriggered.current = true;
-
-    const isOnLibrary = window.location.hash.includes("#/library");
-    if (!isOnLibrary) return;
 
     canAutoSync().then(async (allowed) => {
       if (!allowed) return;
@@ -59,7 +59,7 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
       setProgressMessage("");
       try {
         const result = await syncBooks({
-          navigate: false,
+          navigate: true,
           userId,
           apiClient,
           onProgress: (page, count) =>
@@ -86,7 +86,7 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
     });
   }, [userId, apiClient]);
 
-  // Mechanism C: Manual sync (no rate limiting)
+  // Mechanism B: Manual sync (no rate limiting)
   const triggerManualSync = useCallback(async () => {
     setSyncStatus("syncing");
     setSyncError("");

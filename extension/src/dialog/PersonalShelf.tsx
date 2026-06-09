@@ -55,7 +55,6 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
     books, setBooks, status, setStatus, errorMessage,
     isDirty, dirtyBookIds, markManyDirty,
     handleToggle, handleSave, handleCancel: handleCancelBooks,
-    progressMessage: loadProgressMessage,
   } = usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName });
 
   useEffect(() => {
@@ -136,13 +135,10 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
     setSelectedIds(new Set());
   }, [handleCancelBooks]);
 
-  if (status === "scraping") {
+  if (status === "loading") {
     return (
       <div style={{ padding: 16, textAlign: "center", color: "#64748b" }}>
-        <div>正在爬取書單...</div>
-        {loadProgressMessage && (
-          <div style={{ marginTop: 8, fontSize: 12 }}>{loadProgressMessage}</div>
-        )}
+        <div>載入中...</div>
       </div>
     );
   }

@@ -23,40 +23,69 @@ vi.mock("@/dialog/useBookSync", () => ({
   useBookSync: (...args: unknown[]) => mockUseBookSync(...args),
 }));
 
+// usePersonalBooks no longer scrapes — its baseline comes from the API record
+// (cache-first reconciled against the server). The scraper is mocked only so an
+// accidental call would surface; books for these tests are supplied via the API.
 vi.mock("@/content/scraper", () => ({
-  scrapeBooks: vi.fn().mockResolvedValue([
-    {
-      bookId: "book-1",
-      title: "測試書籍一",
-      author: "作者A",
-      coverUrl: "https://example.com/cover1.jpg",
-      readmooUrl: "https://readmoo.com/book/book-1",
-    },
-    {
-      bookId: "book-2",
-      title: "測試書籍二",
-      author: "作者B",
-      coverUrl: "https://example.com/cover2.jpg",
-      readmooUrl: "https://readmoo.com/book/book-2",
-    },
-    {
-      bookId: "book-3",
-      title: "測試書籍三",
-      author: "作者C",
-      coverUrl: "https://example.com/cover3.jpg",
-      readmooUrl: "https://readmoo.com/book/book-3",
-    },
-  ]),
+  scrapeBooks: vi.fn().mockResolvedValue([]),
   scrapeArchivedBooks: vi.fn().mockResolvedValue([]),
   formatScrapeProgress: (page: number, count: number) =>
     `正在讀取第 ${page} 頁，已收集 ${count} 本…`,
 }));
+
+type TestBook = {
+  bookId: string;
+  title: string;
+  author: string;
+  coverUrl: string;
+  readmooUrl: string;
+  category: string;
+  isbn: string;
+  isShared: BoolFlag;
+  isArchived: BoolFlag;
+};
+
+function makeBook(overrides: Partial<TestBook> & { bookId: string; title: string }): TestBook {
+  return {
+    author: "",
+    coverUrl: "",
+    readmooUrl: `https://readmoo.com/book/${overrides.bookId}`,
+    category: "",
+    isbn: "",
+    isShared: BoolFlag.FALSE,
+    isArchived: BoolFlag.FALSE,
+    ...overrides,
+  };
+}
+
+/** The default 3-book set every test starts from (supplied via the API record). */
+const DEFAULT_BOOKS: TestBook[] = [
+  makeBook({ bookId: "book-1", title: "測試書籍一", author: "作者A", coverUrl: "https://example.com/cover1.jpg" }),
+  makeBook({ bookId: "book-2", title: "測試書籍二", author: "作者B", coverUrl: "https://example.com/cover2.jpg" }),
+  makeBook({ bookId: "book-3", title: "測試書籍三", author: "作者C", coverUrl: "https://example.com/cover3.jpg" }),
+];
+
+/** Build a getPersonalBooks mock that returns the given book set as the server record. */
+function getPersonalBooksReturning(books: TestBook[]) {
+  return vi.fn().mockResolvedValue({
+    data: {
+      schemaVersion: 1,
+      userId: "user-abc123",
+      displayName: "小明",
+      books,
+      lastUpdated: "2026-01-01T00:00:00.000Z",
+    },
+  });
+}
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     createFamily: vi.fn(),
     joinFamily: vi.fn(),
     leaveFamily: vi.fn(),
+    // No server record by default: the books for these tests arrive via the
+    // auto-sync stream (useBookSync.lastSyncBooks). With no server record, a
+    // save goes out as a full PUT (updatePersonalBooks) — see decideSaveStrategy.
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
     patchPersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true, applied: 0 } }),
@@ -68,7 +97,50 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
-function renderPersonalShelf(props: Partial<PersonalShelfProps> = {}) {
+/** Configure the mocked useBookSync to stream `books` back via lastSyncBooks (the "open shelf → auto full sync" path). */
+function setSyncBooks(books: TestBook[]) {
+  mockUseBookSync.mockReturnValue({
+    syncStatus: "idle",
+    syncError: "",
+    lastSyncBooks: books,
+    triggerManualSync: vi.fn(),
+    autoSyncDone: true,
+    progressMessage: "",
+  });
+}
+
+/**
+ * Seed chrome.storage.local so the cache-first load picks up `books` as its
+ * baseline (and originalBooks snapshot). Using the cache — rather than the API
+ * record — means the books are NOT server-known, so a save goes out as a full
+ * PUT (updatePersonalBooks), matching what the save-flow tests assert.
+ */
+function seedCache(books: TestBook[]) {
+  const store: Record<string, unknown> = {
+    displayName: "小明",
+    [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books),
+  };
+  vi.mocked(chrome.storage.local.get).mockImplementation(
+    (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+      const keyList = Array.isArray(keys) ? keys : [keys];
+      const result: Record<string, unknown> = {};
+      for (const key of keyList) {
+        if (typeof key === "string" && key in store) result[key] = store[key];
+      }
+      if (typeof callback === "function") {
+        callback(result);
+        return undefined as unknown as void;
+      }
+      return Promise.resolve(result) as unknown as void;
+    },
+  );
+}
+
+function renderPersonalShelf(
+  props: Partial<PersonalShelfProps> = {},
+  books: TestBook[] = DEFAULT_BOOKS,
+) {
+  seedCache(books);
   const defaultProps: PersonalShelfProps = {
     userId: "user-abc123",
     apiClient: createMockApiClient(),
@@ -115,29 +187,46 @@ describe("PersonalShelf", () => {
     await act(async () => {});
   });
 
-  it("shows loading state initially", () => {
-    renderPersonalShelf();
-    expect(screen.getByText("正在爬取書單...")).toBeInTheDocument();
+  it("shows loading state initially while the API record resolves", async () => {
+    // Hold the API open so the brief "loading" state is observable.
+    let resolveApi: (v: { data: null }) => void;
+    const apiClient = createMockApiClient({
+      getPersonalBooks: vi.fn().mockReturnValue(
+        new Promise((resolve) => { resolveApi = resolve; }),
+      ),
+    });
+    seedCache(DEFAULT_BOOKS);
+
+    render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+
+    // New copy: cache-first load shows "載入中..." (not the old scrape message).
+    expect(screen.getByText("載入中...")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveApi!({ data: null });
+    });
   });
 
-  it("shows progress message in scraping state when available (Wave G)", async () => {
-    const { scrapeBooks } = await import("@/content/scraper");
-    vi.mocked(scrapeBooks).mockImplementationOnce(async (opts) => {
-      opts?.onProgress?.(3, 600);
-      return new Promise(() => {});
+  it("shows the auto-sync progress message when useBookSync reports one (Wave G)", async () => {
+    mockUseBookSync.mockReturnValue({
+      syncStatus: "syncing",
+      syncError: "",
+      lastSyncBooks: [],
+      triggerManualSync: vi.fn(),
+      autoSyncDone: false,
+      progressMessage: "正在讀取第 3 頁，已收集 600 本…",
     });
 
-    renderPersonalShelf();
+    render(<PersonalShelf userId="user-abc123" apiClient={createMockApiClient()} />);
 
     await waitFor(() => {
       expect(
         screen.getByText("正在讀取第 3 頁，已收集 600 本…"),
       ).toBeInTheDocument();
     });
-    expect(screen.getByText("正在爬取書單...")).toBeInTheDocument();
   });
 
-  it("renders scraped books after loading", async () => {
+  it("renders books streamed from the auto-sync after loading", async () => {
     renderPersonalShelf();
     await waitForBooksLoaded();
 
@@ -436,6 +525,7 @@ describe("PersonalShelf", () => {
     it("save button in floating bar triggers save", async () => {
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
       const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitForBooksLoaded();
@@ -490,14 +580,16 @@ describe("PersonalShelf", () => {
   });
 
   describe("error state", () => {
-    it("shows error message when scraping fails", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockRejectedValueOnce(new Error("Scrape failed"));
+    it("shows error message when the load (API fetch) fails", async () => {
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockRejectedValue(new Error("Load failed")),
+      });
+      seedCache(DEFAULT_BOOKS);
 
-      renderPersonalShelf();
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitFor(() => {
-        expect(screen.getByText("Scrape failed")).toBeInTheDocument();
+        expect(screen.getByText("Load failed")).toBeInTheDocument();
       });
 
       // Should show a return button
@@ -505,10 +597,12 @@ describe("PersonalShelf", () => {
     });
 
     it("return button in error state transitions to ready", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockRejectedValueOnce(new Error("Error test"));
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockRejectedValue(new Error("Error test")),
+      });
+      setSyncBooks([]);
 
-      renderPersonalShelf();
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitFor(() => {
         expect(screen.getByText("Error test")).toBeInTheDocument();
@@ -522,10 +616,12 @@ describe("PersonalShelf", () => {
     });
 
     it("shows generic error for non-Error exceptions", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockRejectedValueOnce("string error");
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockRejectedValue("string error"),
+      });
+      seedCache(DEFAULT_BOOKS);
 
-      renderPersonalShelf();
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitFor(() => {
         expect(screen.getByText("載入失敗")).toBeInTheDocument();
@@ -569,6 +665,7 @@ describe("PersonalShelf", () => {
     it("clears isDirty after successful save", async () => {
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
       const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitForBooksLoaded();
@@ -592,24 +689,15 @@ describe("PersonalShelf", () => {
     });
 
     it("sends server-authoritative displayName from context, not chrome.storage.local", async () => {
-      // Set chrome.storage.local to a stale value
-      vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = { displayName: "舊的本地名稱" };
-          if (typeof callback === "function") {
-            callback(result);
-          }
-          return Promise.resolve(result) as unknown as void;
-        },
-      );
-
-      // Set useFamilyData to return the server-authoritative name
+      // Set useFamilyData to return the server-authoritative name. The cache/storage
+      // displayName ("小明") must be ignored in favour of this context value.
       mockUseFamilyData.mockReturnValue({
         members: [{ userId: "user-abc123", displayName: "伺服器名稱" }],
       });
 
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
       const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitForBooksLoaded();
@@ -634,6 +722,7 @@ describe("PersonalShelf", () => {
         error: { code: "SAVE_FAILED", message: "儲存失敗" },
       });
       const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitForBooksLoaded();
@@ -669,10 +758,8 @@ describe("PersonalShelf", () => {
 
   describe("empty states", () => {
     it("shows 尚無書籍 when active books are empty", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce([]);
-
-      renderPersonalShelf();
+      // No server record and no synced books → empty ready state.
+      renderPersonalShelf({}, []);
 
       await waitFor(() => {
         expect(screen.getByText("尚無書籍")).toBeInTheDocument();
@@ -682,28 +769,11 @@ describe("PersonalShelf", () => {
 
   describe("archive features", () => {
     it("archive view tabs appear when syncArchived is enabled and there are archived books", async () => {
-      // Mock scrapeBooks to include an archived book
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce([
-        {
-          bookId: "book-1",
-          title: "測試書籍一",
-          author: "作者A",
-          coverUrl: "https://example.com/cover1.jpg",
-          readmooUrl: "https://readmoo.com/book/book-1",
-          category: "",
-          isArchived: BoolFlag.FALSE,
-        },
-        {
-          bookId: "book-archived",
-          title: "封存書籍一",
-          author: "作者D",
-          coverUrl: "https://example.com/cover-a.jpg",
-          readmooUrl: "https://readmoo.com/book/book-archived",
-          category: "",
-          isArchived: BoolFlag.TRUE,
-        },
-      ]);
+      // Synced books include an archived book.
+      const books = [
+        makeBook({ bookId: "book-1", title: "測試書籍一", author: "作者A", coverUrl: "https://example.com/cover1.jpg" }),
+        makeBook({ bookId: "book-archived", title: "封存書籍一", author: "作者D", coverUrl: "https://example.com/cover-a.jpg", isArchived: BoolFlag.TRUE }),
+      ];
 
       // Mock GET_SYNC_ARCHIVED to return 1
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -717,7 +787,7 @@ describe("PersonalShelf", () => {
         },
       );
 
-      renderPersonalShelf();
+      renderPersonalShelf({}, books);
       await waitFor(() => {
         expect(screen.getByText("測試書籍一")).toBeInTheDocument();
       });
@@ -756,27 +826,10 @@ describe("PersonalShelf", () => {
     });
 
     it("clicking '未封存' tab shows only active books", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce([
-        {
-          bookId: "book-1",
-          title: "活躍書籍",
-          author: "作者A",
-          coverUrl: "",
-          readmooUrl: "https://readmoo.com/book/book-1",
-          category: "",
-          isArchived: BoolFlag.FALSE,
-        },
-        {
-          bookId: "book-2",
-          title: "已封存書",
-          author: "作者B",
-          coverUrl: "",
-          readmooUrl: "https://readmoo.com/book/book-2",
-          category: "",
-          isArchived: BoolFlag.TRUE,
-        },
-      ]);
+      const books = [
+        makeBook({ bookId: "book-1", title: "活躍書籍", author: "作者A" }),
+        makeBook({ bookId: "book-2", title: "已封存書", author: "作者B", isArchived: BoolFlag.TRUE }),
+      ];
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
@@ -789,7 +842,7 @@ describe("PersonalShelf", () => {
         },
       );
 
-      renderPersonalShelf();
+      renderPersonalShelf({}, books);
       await waitFor(() => {
         expect(screen.getByText("活躍書籍")).toBeInTheDocument();
       });
@@ -805,27 +858,10 @@ describe("PersonalShelf", () => {
     });
 
     it("clicking '封存' tab shows only archived books", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce([
-        {
-          bookId: "book-1",
-          title: "活躍書籍",
-          author: "作者A",
-          coverUrl: "",
-          readmooUrl: "https://readmoo.com/book/book-1",
-          category: "",
-          isArchived: BoolFlag.FALSE,
-        },
-        {
-          bookId: "book-2",
-          title: "已封存書",
-          author: "作者B",
-          coverUrl: "",
-          readmooUrl: "https://readmoo.com/book/book-2",
-          category: "",
-          isArchived: BoolFlag.TRUE,
-        },
-      ]);
+      const books = [
+        makeBook({ bookId: "book-1", title: "活躍書籍", author: "作者A" }),
+        makeBook({ bookId: "book-2", title: "已封存書", author: "作者B", isArchived: BoolFlag.TRUE }),
+      ];
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
@@ -838,7 +874,7 @@ describe("PersonalShelf", () => {
         },
       );
 
-      renderPersonalShelf();
+      renderPersonalShelf({}, books);
       await waitFor(() => {
         expect(screen.getByText("活躍書籍")).toBeInTheDocument();
       });
@@ -880,51 +916,13 @@ describe("PersonalShelf", () => {
   });
 
   describe("personalBooksCache", () => {
-    it("caches books to chrome.storage.local after successful load", async () => {
-      const apiClient = createMockApiClient({
-        getPersonalBooks: vi.fn().mockResolvedValue({
-          data: {
-            books: [
-              {
-                bookId: "book-1",
-                title: "測試書籍一",
-                author: "作者A",
-                coverUrl: "https://example.com/cover1.jpg",
-                readmooUrl: "https://readmoo.com/book/book-1",
-                isShared: BoolFlag.TRUE,
-                isbn: "",
-              },
-            ],
-          },
-        }),
-      });
-
-      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
-
-      await waitForBooksLoaded();
-
-      // After load, cache should be written (alongside lastDisplayScrapeAt in one atomic call)
-      expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        expect.objectContaining({ [PERSONAL_BOOKS_CACHE_KEY]: expect.any(String) }),
-      );
-
-      // Find the call that wrote personalBooksCache and verify contents
-      const setCalls = vi.mocked(chrome.storage.local.set).mock.calls;
-      const cacheCall = setCalls.find(
-        (call) => call[0] && typeof call[0] === "object" && PERSONAL_BOOKS_CACHE_KEY in (call[0] as Record<string, unknown>),
-      );
-      expect(cacheCall).toBeDefined();
-      const cached = JSON.parse((cacheCall![0] as Record<string, string>)[PERSONAL_BOOKS_CACHE_KEY]);
-      // Merged books should include all 3 scraped + isShared preserved from saved
-      expect(cached.length).toBeGreaterThanOrEqual(3);
-      const book1 = cached.find((b: { bookId: string }) => b.bookId === "book-1");
-      expect(book1).toBeDefined();
-      expect(book1.isShared).toBe(BoolFlag.TRUE);
-    });
-
+    // Note: the load path no longer writes the cache (the self-contained display
+    // scrape was removed). The cache is now written by syncBooks (during sync) and
+    // by handleSave — the latter is exercised below.
     it("updates cache after successful save", async () => {
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
       const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitForBooksLoaded();
@@ -966,29 +964,12 @@ describe("PersonalShelf", () => {
 
   describe("category filter reset", () => {
     it("resets category filter when status filter changes", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce([
-        {
-          bookId: "book-1",
-          title: "奇幻書籍",
-          author: "作者A",
-          coverUrl: "",
-          readmooUrl: "https://readmoo.com/book/book-1",
-          category: "奇幻冒險",
-          isArchived: BoolFlag.FALSE,
-        },
-        {
-          bookId: "book-2",
-          title: "韓國書籍",
-          author: "作者B",
-          coverUrl: "",
-          readmooUrl: "https://readmoo.com/book/book-2",
-          category: "韓國耽美",
-          isArchived: BoolFlag.FALSE,
-        },
-      ]);
+      const books = [
+        makeBook({ bookId: "book-1", title: "奇幻書籍", author: "作者A", category: "奇幻冒險" }),
+        makeBook({ bookId: "book-2", title: "韓國書籍", author: "作者B", category: "韓國耽美" }),
+      ];
 
-      renderPersonalShelf();
+      renderPersonalShelf({}, books);
       await waitFor(() => {
         expect(screen.getByText("奇幻書籍")).toBeInTheDocument();
       });
@@ -1100,7 +1081,7 @@ describe("PersonalShelf", () => {
     });
 
     it("new books from sync default to not-shared", async () => {
-      // Start with no saved books (all from scrape, none shared)
+      // Start with 3 server-known books, none shared.
       mockUseBookSync.mockReturnValue({
         syncStatus: "idle",
         syncError: "",
@@ -1109,14 +1090,16 @@ describe("PersonalShelf", () => {
         autoSyncDone: false,
       });
 
-      const apiClient = createMockApiClient();
+      const apiClient = createMockApiClient({
+        getPersonalBooks: getPersonalBooksReturning(DEFAULT_BOOKS),
+      });
       const { rerender } = render(
         <PersonalShelf userId="user-abc123" apiClient={apiClient} />,
       );
 
       await waitForBooksLoaded();
 
-      // All 3 scraped books should be not-shared
+      // All 3 initial books should be not-shared
       const initialHidden = screen.getAllByText("未開放");
       // 3 badges + 1 filter button = at least 3
       expect(initialHidden.length).toBeGreaterThanOrEqual(3);
@@ -1154,16 +1137,16 @@ describe("PersonalShelf", () => {
   });
 
   describe("Load More (Wave G)", () => {
-    function makeManyBooks(count: number, isArchived = BoolFlag.FALSE) {
-      return Array.from({ length: count }, (_, i) => ({
-        bookId: `book-${i + 1}`,
-        title: `書籍 ${i + 1}`,
-        author: `作者${i + 1}`,
-        coverUrl: "https://example.com/cover.jpg",
-        readmooUrl: `https://readmoo.com/book/book-${i + 1}`,
-        category: "",
-        isArchived,
-      }));
+    function makeManyBooks(count: number, isArchived = BoolFlag.FALSE): TestBook[] {
+      return Array.from({ length: count }, (_, i) =>
+        makeBook({
+          bookId: `book-${i + 1}`,
+          title: `書籍 ${i + 1}`,
+          author: `作者${i + 1}`,
+          coverUrl: "https://example.com/cover.jpg",
+          isArchived,
+        }),
+      );
     }
 
     // Inject a small pageSize so the same pagination logic is exercised with
@@ -1171,10 +1154,7 @@ describe("PersonalShelf", () => {
     const PAGE_SIZE = 10;
 
     it("shows Load More button with count text when items exceed pageSize", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(25));
-
-      renderPersonalShelf({ pageSize: PAGE_SIZE });
+      renderPersonalShelf({ pageSize: PAGE_SIZE }, makeManyBooks(25));
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
@@ -1186,11 +1166,8 @@ describe("PersonalShelf", () => {
     });
 
     it("does not show Load More button when items fit in pageSize", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
       // Fewer than pageSize → everything fits on one page → no Load More button.
-      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(8));
-
-      renderPersonalShelf({ pageSize: PAGE_SIZE });
+      renderPersonalShelf({ pageSize: PAGE_SIZE }, makeManyBooks(8));
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
@@ -1200,10 +1177,7 @@ describe("PersonalShelf", () => {
     });
 
     it("click Load More appends pageSize to visible count", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(25));
-
-      renderPersonalShelf({ pageSize: PAGE_SIZE });
+      renderPersonalShelf({ pageSize: PAGE_SIZE }, makeManyBooks(25));
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
@@ -1220,10 +1194,7 @@ describe("PersonalShelf", () => {
     });
 
     it("hides Load More button when status filter narrows the view", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce(makeManyBooks(25));
-
-      renderPersonalShelf({ pageSize: PAGE_SIZE });
+      renderPersonalShelf({ pageSize: PAGE_SIZE }, makeManyBooks(25));
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
@@ -1236,15 +1207,14 @@ describe("PersonalShelf", () => {
     });
 
     it("resets visibleCount when switching archive tabs (Q-B 視角切換類)", async () => {
-      const { scrapeBooks } = await import("@/content/scraper");
-      vi.mocked(scrapeBooks).mockResolvedValueOnce([
+      const books = [
         ...makeManyBooks(25, BoolFlag.FALSE),
         ...makeManyBooks(5, BoolFlag.TRUE).map((b, i) => ({
           ...b,
           bookId: `archived-${i}`,
           title: `封存書 ${i}`,
         })),
-      ]);
+      ];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
         (message: unknown, callback?: (response: unknown) => void) => {
@@ -1256,7 +1226,7 @@ describe("PersonalShelf", () => {
         },
       );
 
-      renderPersonalShelf({ pageSize: PAGE_SIZE });
+      renderPersonalShelf({ pageSize: PAGE_SIZE }, books);
 
       await waitFor(() => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();

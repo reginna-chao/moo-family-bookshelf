@@ -68,21 +68,27 @@ describe("useBookSync", () => {
   });
 
   describe("auto-sync", () => {
-    it("does not trigger auto-sync when not on #/library page", async () => {
+    it("triggers auto-sync regardless of the current hash (no #/library gate)", async () => {
+      // The old isOnLibrary restriction was removed: auto full sync now runs on
+      // mount irrespective of hash, since syncBooks(navigate:true) handles the
+      // navigation itself and restores the hash afterwards.
       Object.defineProperty(window, "location", {
         writable: true,
         value: { hash: "#/settings" },
       });
+      vi.mocked(canAutoSync).mockResolvedValue(true);
 
       renderHook(() => useBookSync(makeOptions()));
 
-      // Flush promises
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
-      expect(canAutoSync).not.toHaveBeenCalled();
-      expect(syncBooks).not.toHaveBeenCalled();
+      expect(canAutoSync).toHaveBeenCalledOnce();
+      expect(syncBooks).toHaveBeenCalledOnce();
+      expect(syncBooks).toHaveBeenCalledWith(
+        expect.objectContaining({ navigate: true }),
+      );
     });
 
     it("does not trigger auto-sync when canAutoSync returns false", async () => {
@@ -102,7 +108,7 @@ describe("useBookSync", () => {
       expect(syncBooks).not.toHaveBeenCalled();
     });
 
-    it("triggers auto-sync when on #/library and canAutoSync returns true", async () => {
+    it("triggers a full navigate sync when canAutoSync returns true", async () => {
       Object.defineProperty(window, "location", {
         writable: true,
         value: { hash: "#/library" },
@@ -131,9 +137,10 @@ describe("useBookSync", () => {
       });
 
       expect(syncBooks).toHaveBeenCalledOnce();
+      // Auto full sync uses navigate:true (same as manual), so it works from any hash.
       expect(syncBooks).toHaveBeenCalledWith(
         expect.objectContaining({
-          navigate: false,
+          navigate: true,
           userId: "user-123",
           apiClient: options.apiClient,
         }),
