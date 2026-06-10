@@ -169,7 +169,7 @@ function ExpiresSelect({ value, onChange }: { value: number | null; onChange: (v
       過期時間
       <select value={value === null ? "null" : String(value)}
         onChange={(e) => onChange(e.target.value === "null" ? null : Number(e.target.value))}
-        className="moo-form-select rounded-lg border border-gray-300 pl-3 pr-9 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none">
+        className="moo-form-select rounded-lg border border-gray-300 pl-3 pr-9 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none">
         {EXPIRES_OPTIONS.map((opt) => (
           <option key={String(opt.value)} value={opt.value === null ? "null" : String(opt.value)}>
             {opt.label}
@@ -191,7 +191,7 @@ function CreateForm({ title, expiresDays, saving, onTitleChange, onExpiresDaysCh
       <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
         標題
         <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" />
+          className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" />
       </label>
       <ExpiresSelect value={expiresDays} onChange={onExpiresDaysChange} />
       <button onClick={onCreate} disabled={saving || !title.trim()}
@@ -220,7 +220,7 @@ function ActiveShelf({
       <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
         標題
         <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" />
+          className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" />
       </label>
       <ExpiresSelect value={expiresDays} onChange={onExpiresDaysChange} />
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import React from "react";
 import { ViewModeToggle } from "@/components/ViewModeToggle";
 
@@ -46,5 +46,26 @@ describe("ViewModeToggle", () => {
     render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
 
     expect(screen.getByRole("group", { name: "家庭書櫃顯示模式" })).toBeInTheDocument();
+  });
+
+  it("places the grid button first with left-rounded corners", () => {
+    render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
+
+    const group = screen.getByRole("group", { name: "家庭書櫃顯示模式" });
+    const [first] = within(group).getAllByRole("button");
+
+    expect(first).toHaveAttribute("aria-label", "切換為網格檢視");
+    expect(first).toHaveClass("rounded-l-lg");
+  });
+
+  it("places the row button last with right-rounded corners", () => {
+    render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
+
+    const group = screen.getByRole("group", { name: "家庭書櫃顯示模式" });
+    const buttons = within(group).getAllByRole("button");
+    const last = buttons[buttons.length - 1];
+
+    expect(last).toHaveAttribute("aria-label", "切換為列表檢視");
+    expect(last).toHaveClass("rounded-r-lg");
   });
 });

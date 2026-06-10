@@ -363,7 +363,7 @@ export function PersonalShelfPage({
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="搜尋書名或作者"
             aria-label="搜尋書名或作者"
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
           />
           <CategoryFilter
             books={statusFilteredBooks}
