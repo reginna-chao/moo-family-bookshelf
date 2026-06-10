@@ -245,7 +245,7 @@ export function SettingsPage({
                       maxLength={20}
                       placeholder="輸入顯示名稱"
                       aria-label="顯示名稱"
-                      className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
                     />
                     <button
                       onClick={() => void handleSaveName()}
@@ -331,7 +331,7 @@ export function SettingsPage({
             </div>
             <button
               onClick={() => void handleCopy()}
-              className={`w-full rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-600 ${
+              className={`w-full rounded-lg border border-blue-600 px-4 py-2.5 text-sm font-semibold text-blue-600 ${
                 copied ? "bg-blue-50" : "bg-transparent hover:bg-blue-50"
               } transition-colors`}
             >
@@ -339,7 +339,7 @@ export function SettingsPage({
             </button>
             <button
               onClick={() => void handleInvite()}
-              className={`w-full rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-600 mt-2 ${
+              className={`w-full rounded-lg border border-green-600 px-4 py-2.5 text-sm font-semibold text-green-600 mt-2 ${
                 inviteCopied ? "bg-green-50" : "bg-transparent hover:bg-green-50"
               } transition-colors`}
             >
