@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Pencil, Check, X, ChevronDown, ChevronRight } from "lucide-react";
 import { getReportLinks } from "moo-family-bookshelf-shared/config/links";
+import {
+  buildSyncCodeInviteMessage,
+  buildLinkInviteMessage,
+} from "moo-family-bookshelf-shared/invite/messages";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
@@ -74,7 +78,7 @@ export function SettingsPage({
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(syncCode);
+      await navigator.clipboard.writeText(buildSyncCodeInviteMessage(syncCode));
       setCopied(true);
       copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -84,16 +88,20 @@ export function SettingsPage({
 
   async function handleInvite() {
     const inviteUrl = buildInviteUrl(syncCode);
+    const message = buildLinkInviteMessage(inviteUrl);
     if (navigator.share) {
       try {
-        await navigator.share({ title: "加入墨家書櫃", url: inviteUrl });
+        // Pass `url` alongside the message so share targets can render a link
+        // preview / "open in browser" affordance. The URL also appears inline
+        // in `text` for targets that ignore the `url` field.
+        await navigator.share({ title: "加入墨家書櫃", text: message, url: inviteUrl });
         return;
       } catch {
         // User cancelled or share failed — fall through to clipboard
       }
     }
     try {
-      await navigator.clipboard.writeText(inviteUrl);
+      await navigator.clipboard.writeText(message);
       setInviteCopied(true);
       inviteCopyTimerRef.current = setTimeout(() => setInviteCopied(false), 2000);
     } catch {
