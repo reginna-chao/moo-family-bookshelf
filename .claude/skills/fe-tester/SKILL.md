@@ -7,7 +7,7 @@ description: >
   DO NOT TRIGGER when: user is writing production code, reviewing code, or running E2E tests.
 argument-hint: <target file or component to test>
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cd extension*), Bash(pnpm test*), Bash(git diff*), Bash(git log*), Agent
-model: claude-opus-4-6
+model: opus
 ---
 
 # Frontend Tester
@@ -39,8 +39,8 @@ Write unit tests and component tests for the Chrome Extension and PWA using Vite
 ## Test Structure
 
 ```typescript
-describe('ComponentOrFunction', () => {
-  it('should do expected behavior when given condition', () => {
+describe("ComponentOrFunction", () => {
+  it("should do expected behavior when given condition", () => {
     // Arrange → Act → Assert
   });
 });
@@ -48,11 +48,11 @@ describe('ComponentOrFunction', () => {
 
 ## Test Types
 
-| Type | Location | When |
-|------|----------|------|
-| Unit | `tests/unit/` | Pure functions: crypto, API client, sync code parser, utils |
-| Component | `tests/component/` | React components: Dialog views, toggles, forms |
-| E2E maintenance | `tests/e2e/` | Fix existing E2E tests broken by production code changes (helpers, imports, selectors). Do NOT write new E2E test scenarios. |
+| Type            | Location           | When                                                                                                                         |
+| --------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Unit            | `tests/unit/`      | Pure functions: crypto, API client, sync code parser, utils                                                                  |
+| Component       | `tests/component/` | React components: Dialog views, toggles, forms                                                                               |
+| E2E maintenance | `tests/e2e/`       | Fix existing E2E tests broken by production code changes (helpers, imports, selectors). Do NOT write new E2E test scenarios. |
 
 ## Mock Policy
 

@@ -8,7 +8,7 @@ description: >
   DO NOT TRIGGER when: user wants code written, tests added, or code reviewed for non-security concerns.
 argument-hint: "[full | secrets | deps | code | extension | crypto | api | publish]"
 allowed-tools: Read, Grep, Glob, Bash(pnpm audit*), Bash(git log*), Bash(git diff*), Bash(git show*), Bash(git ls-files*), Bash(cat *manifest*), Bash(ls*), Bash(find*), Agent
-model: claude-opus-4-6
+model: opus
 ---
 
 # Security Audit
@@ -25,16 +25,16 @@ Scan the entire repository for security risks. Read-only — never modify code, 
 
 **Scope** (optional, defaults to `full`):
 
-| Scope | Description |
-|-------|-------------|
-| `full` | Run all 7 dimensions |
-| `secrets` | Dimension 1 only — secrets & credentials |
-| `deps` | Dimension 2 only — dependency vulnerabilities |
-| `code` | Dimension 3 only — code-level OWASP issues |
-| `extension` | Dimension 4 only — Chrome Extension security |
-| `crypto` | Dimension 5 only — Hashing implementation |
-| `api` | Dimension 6 only — API & Worker security |
-| `publish` | Dimension 7 only — pre-publish readiness |
+| Scope       | Description                                   |
+| ----------- | --------------------------------------------- |
+| `full`      | Run all 7 dimensions                          |
+| `secrets`   | Dimension 1 only — secrets & credentials      |
+| `deps`      | Dimension 2 only — dependency vulnerabilities |
+| `code`      | Dimension 3 only — code-level OWASP issues    |
+| `extension` | Dimension 4 only — Chrome Extension security  |
+| `crypto`    | Dimension 5 only — Hashing implementation     |
+| `api`       | Dimension 6 only — API & Worker security      |
+| `publish`   | Dimension 7 only — pre-publish readiness      |
 
 ## Audit Dimensions
 
@@ -43,6 +43,7 @@ Scan the entire repository for security risks. Read-only — never modify code, 
 Scan for secrets that must never be committed to version control.
 
 **Checks:**
+
 - Hardcoded API keys, tokens, passwords, private keys in source code
 - `.env`, `.dev.vars`, or credential files tracked by git (`git ls-files`)
 - Private keys or certificates (`.pem`, `.key`, `.p12`, `.pfx`, `.cert`)
@@ -53,6 +54,7 @@ Scan for secrets that must never be committed to version control.
 - Sensitive values in `package.json`, `wrangler.toml`, or any JSON/YAML config
 
 **Search patterns:**
+
 ```
 API_KEY, SECRET, TOKEN, PASSWORD, PRIVATE_KEY, CREDENTIAL,
 BEARER, AUTHORIZATION, api_key, secret_key, access_token,
@@ -64,6 +66,7 @@ database_url, connection_string, -----BEGIN
 Check for known vulnerabilities in project dependencies.
 
 **Checks:**
+
 - Run `pnpm audit` in `extension/` and `worker/` directories
 - Flag `critical` and `high` severity vulnerabilities
 - Check for outdated packages with known CVEs
@@ -75,6 +78,7 @@ Check for known vulnerabilities in project dependencies.
 Scan source code for common vulnerability patterns.
 
 **Checks:**
+
 - **Injection**: `eval()`, `Function()`, `innerHTML`, `dangerouslySetInnerHTML`, `document.write()`
 - **XSS**: Unsanitized user input rendered in DOM, template literal injection in HTML
 - **Prototype pollution**: `Object.assign` with untrusted input, `__proto__` access
@@ -88,6 +92,7 @@ Scan source code for common vulnerability patterns.
 Review extension-specific security concerns.
 
 **Checks:**
+
 - `manifest.json` permissions: are they minimal and justified?
 - Content Security Policy (CSP): is it defined and restrictive?
 - `host_permissions`: overly broad patterns (e.g., `<all_urls>`, `*://*/*`)
@@ -103,6 +108,7 @@ Review extension-specific security concerns.
 Verify the hashing module and auth token handling follow best practices.
 
 **Checks:**
+
 - Hashing: using SHA-256 via `crypto.subtle` for deriveUserId? Salt applied correctly?
 - Auth tokens: never logged, never in error messages, never in URL params
 - Token validation: constant-time comparison for security-sensitive values (tokens, hashes)
@@ -114,27 +120,32 @@ Verify the hashing module and auth token handling follow best practices.
 Review backend API for security vulnerabilities. Go beyond "does it exist" — check **implementation quality**.
 
 **6A. Authentication — verify every protected endpoint is guarded:**
+
 - All non-public endpoints require a valid auth token (Bearer header).
 - **Authorization bypass patterns**: look for `if (userId) { /* check */ }` instead of `if (!userId) return 401`. A conditional guard that silently skips when null is a regression hazard — any change to public route list could expose data.
 - Verify the public route list (`isPublicRoute`) is minimal and cannot be expanded without review.
 
 **6B. Authorization — verify identity source and access control:**
+
 - **IDOR (Insecure Direct Object Reference)**: when a handler receives a user ID in both the request body AND the auth token, the authenticated identity (`callerUserId`) must be the sole source of truth. Body-supplied identity fields should be ignored or validated against the token. Flag any `body.userId` used for permission checks instead of the authenticated caller.
 - Family membership verified before returning any family data.
 - Owner-only actions (remove member, transfer ownership) check `callerUserId === record.ownerId`.
 
 **6C. Input validation:**
+
 - All user inputs validated and sanitized at handler level.
 - KV key injection: user-controlled values used directly in KV key construction without sanitization?
 - **Request body size**: middleware enforces a max body size. Check if the limit can be bypassed (e.g., by omitting `Content-Length` header).
 
 **6D. Rate limiting — check implementation quality, not just existence:**
+
 - Implemented on sensitive endpoints (create family, join family).
 - **IP source trustworthiness**: rate limiter must use a non-spoofable IP header. `cf-connecting-ip` (Cloudflare edge) is safe; `x-forwarded-for` is client-controllable and must NOT be the sole/primary source. Check the fallback chain.
 - **Counter atomicity**: KV read-then-write is not atomic. Document whether concurrent requests can exceed the configured limit and assess impact.
 - **Tier separation**: public routes (unauthenticated) should have stricter limits than authenticated routes. Verify separate counters (different KV key prefixes) so exhausting one tier doesn't affect the other.
 
 **6E. CORS — check origin validation depth:**
+
 - Not `Access-Control-Allow-Origin: *` in production.
 - **Origin allowlist review**: list every allowed origin pattern and verify each is necessary.
 - **Localhost in production**: `http://localhost` must be gated behind a dev-mode flag, not unconditionally allowed. A locally-running malicious page can exploit this.
@@ -143,11 +154,13 @@ Review backend API for security vulnerabilities. Go beyond "does it exist" — c
 - **Preview/staging origins**: if using Cloudflare Pages or similar, preview deploy URLs (e.g., `abc123.project.pages.dev`) should be explicitly allowed or denied.
 
 **6F. Response security:**
+
 - Error messages: no internal details leaked (stack traces, KV keys, etc.).
 - HTTP headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Strict-Transport-Security`, `X-XSS-Protection: 0` set on all responses.
 - Data access: Worker stores plaintext JSON; verify auth tokens are validated before returning data.
 
 **6G. Enumeration & abuse:**
+
 - Family IDs or user IDs not easily enumerable.
 - Public endpoints (create/join) cannot be used to spam KV with garbage data without rate limiting.
 
@@ -156,6 +169,7 @@ Review backend API for security vulnerabilities. Go beyond "does it exist" — c
 Verify the repository is safe to make public.
 
 **Checks:**
+
 - `.gitignore` covers: `.env`, `.dev.vars`, `node_modules/`, `.wrangler/`, build output, OS files, IDE config
 - No internal/company references in code, comments, docs, or commit messages
 - No personal information (real names, emails, phone numbers) in source files
@@ -179,11 +193,11 @@ Remediation: {how to fix}
 
 ### Severity Levels
 
-| Level | Meaning | Action |
-|-------|---------|--------|
-| **CRITICAL** | Exploitable vulnerability or secret exposure. Must fix before publishing. | Block release |
-| **WARNING** | Potential risk or bad practice. Should fix. | Fix recommended |
-| **INFO** | Observation or minor improvement. Nice to have. | Optional |
+| Level        | Meaning                                                                   | Action          |
+| ------------ | ------------------------------------------------------------------------- | --------------- |
+| **CRITICAL** | Exploitable vulnerability or secret exposure. Must fix before publishing. | Block release   |
+| **WARNING**  | Potential risk or bad practice. Should fix.                               | Fix recommended |
+| **INFO**     | Observation or minor improvement. Nice to have.                           | Optional        |
 
 ## Summary Report
 

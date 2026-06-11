@@ -7,7 +7,7 @@ description: >
   DO NOT TRIGGER when: user is working on features, writing code, or reviewing — this is a one-time setup tool.
 argument-hint: (no arguments needed, reads project context automatically)
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cat*), Bash(ls*)
-model: claude-opus-4-6
+model: opus
 ---
 
 # Project Init — Adapt Skills & Rules to a New Project
@@ -44,18 +44,18 @@ Read the following files (skip if not found):
 
 From the discovered context, extract:
 
-| Item | Where to Apply |
-|------|---------------|
-| **Tech stack** (framework, language, DB, hosting) | Rules: `frontend.md`, `backend.md` |
-| **Project structure** (directory layout) | Rules: `frontend.md`, `backend.md` |
-| **Build/dev commands** (`pnpm dev`, `pnpm test`, etc.) | Rules: all, Skills: team-leads, coders, testers |
-| **Testing tools** (Vitest, Jest, Playwright, etc.) | Rules: `test.md`, Skills: testers |
-| **API design** (REST, GraphQL, endpoints) | Rules: `backend.md`, Skills: `be-coder` |
-| **Data model** (DB schema, KV patterns, etc.) | Rules: `backend.md`, Skills: `be-coder`, `be-tester` |
-| **UI patterns** (component library, styling approach) | Rules: `frontend.md`, Skills: `fe-coder` |
-| **State management** (Redux, Zustand, Context, etc.) | Rules: `frontend.md`, Skills: `fe-coder` |
-| **CI/CD pipeline** | Rules: `global.md` |
-| **Naming conventions** | Rules: `global.md` |
+| Item                                                   | Where to Apply                                       |
+| ------------------------------------------------------ | ---------------------------------------------------- |
+| **Tech stack** (framework, language, DB, hosting)      | Rules: `frontend.md`, `backend.md`                   |
+| **Project structure** (directory layout)               | Rules: `frontend.md`, `backend.md`                   |
+| **Build/dev commands** (`pnpm dev`, `pnpm test`, etc.) | Rules: all, Skills: team-leads, coders, testers      |
+| **Testing tools** (Vitest, Jest, Playwright, etc.)     | Rules: `test.md`, Skills: testers                    |
+| **API design** (REST, GraphQL, endpoints)              | Rules: `backend.md`, Skills: `be-coder`              |
+| **Data model** (DB schema, KV patterns, etc.)          | Rules: `backend.md`, Skills: `be-coder`, `be-tester` |
+| **UI patterns** (component library, styling approach)  | Rules: `frontend.md`, Skills: `fe-coder`             |
+| **State management** (Redux, Zustand, Context, etc.)   | Rules: `frontend.md`, Skills: `fe-coder`             |
+| **CI/CD pipeline**                                     | Rules: `global.md`                                   |
+| **Naming conventions**                                 | Rules: `global.md`                                   |
 
 ### Step 3: Propose Changes
 
@@ -75,6 +75,7 @@ Present a table of proposed changes to the user:
 ### Step 4: Apply Changes
 
 Update each file according to the approved changes. For each file:
+
 1. Read the current base template content.
 2. Replace project-specific sections (tech stack, structure, commands, patterns).
 3. Keep generic sections intact (workflow phases, role definitions, review dimensions).
@@ -90,26 +91,26 @@ Update each file according to the approved changes. For each file:
 
 ### Rules (`.claude/rules/`)
 
-| File | What Gets Customized |
-|------|---------------------|
-| `global.md` | Language policy, commit conventions, decision framework |
+| File          | What Gets Customized                                                          |
+| ------------- | ----------------------------------------------------------------------------- |
+| `global.md`   | Language policy, commit conventions, decision framework                       |
 | `frontend.md` | Tech stack, project structure, coding conventions, commands, state management |
-| `backend.md` | Tech stack, project structure, API design, DB/storage patterns, commands |
-| `test.md` | Framework & tools, test locations, coverage targets, mock policy |
+| `backend.md`  | Tech stack, project structure, API design, DB/storage patterns, commands      |
+| `test.md`     | Framework & tools, test locations, coverage targets, mock policy              |
 
 ### Skills (`.claude/skills/`)
 
-| Skill | What Gets Customized |
-|-------|---------------------|
-| `fe-coder` | Coding rules, framework conventions, boundary (working directory) |
-| `fe-tester` | Test tools, mock policy, test structure |
-| `fe-review` | Review dimensions adjusted for framework |
-| `be-coder` | Coding rules, framework conventions, DB/API patterns |
-| `be-tester` | Test tools, integration test setup, key scenarios |
-| `be-review` | Review dimensions adjusted for backend stack |
-| `fe-team-lead` | Verification commands |
-| `be-team-lead` | Verification commands |
-| `team-lead` | Verification commands |
+| Skill          | What Gets Customized                                              |
+| -------------- | ----------------------------------------------------------------- |
+| `fe-coder`     | Coding rules, framework conventions, boundary (working directory) |
+| `fe-tester`    | Test tools, mock policy, test structure                           |
+| `fe-review`    | Review dimensions adjusted for framework                          |
+| `be-coder`     | Coding rules, framework conventions, DB/API patterns              |
+| `be-tester`    | Test tools, integration test setup, key scenarios                 |
+| `be-review`    | Review dimensions adjusted for backend stack                      |
+| `fe-team-lead` | Verification commands                                             |
+| `be-team-lead` | Verification commands                                             |
+| `team-lead`    | Verification commands                                             |
 
 ## What This Skill Does NOT Change
 

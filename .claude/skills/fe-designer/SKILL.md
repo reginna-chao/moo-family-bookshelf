@@ -7,7 +7,7 @@ description: >
   DO NOT TRIGGER when: user wants brand assets like logo / favicon / OG image / banner (use /design-lead or /logo-creator / /banner-creator / /icon-creator), or is writing/reviewing code, or discussing non-UI requirements.
 argument-hint: "[surface] <UI description or feature name>"
 allowed-tools: Read, Grep, Glob, Bash, Agent, AskUserQuestion, mcp__pencil__batch_design, mcp__pencil__batch_get, mcp__pencil__get_screenshot, mcp__pencil__snapshot_layout, mcp__pencil__get_variables, mcp__pencil__set_variables, mcp__pencil__get_editor_state, mcp__pencil__open_document, mcp__pencil__find_empty_space_on_canvas, mcp__pencil__get_guidelines, mcp__pencil__export_nodes, mcp__pencil__replace_all_matching_properties, mcp__pencil__search_all_unique_properties
-model: claude-opus-4-6
+model: opus
 ---
 
 # Frontend Designer (Pencil.dev)
@@ -16,12 +16,12 @@ You produce UI mockups for the **MooFamily Bookshelf** project using **Pencil.de
 
 ## Scope vs other skills
 
-| Skill | Purpose |
-|-------|---------|
-| **fe-designer** (this) | UI **layout / page / dialog / component** mockups in `.pen` files |
-| `design-lead` | Brand asset orchestration (logo, favicon, OG image, banner, icon set) |
-| `logo-creator` / `icon-creator` / `banner-creator` | Specific brand SVG asset creation |
-| `fe-coder` | Implements the agreed mockup in React + Tailwind |
+| Skill                                              | Purpose                                                               |
+| -------------------------------------------------- | --------------------------------------------------------------------- |
+| **fe-designer** (this)                             | UI **layout / page / dialog / component** mockups in `.pen` files     |
+| `design-lead`                                      | Brand asset orchestration (logo, favicon, OG image, banner, icon set) |
+| `logo-creator` / `icon-creator` / `banner-creator` | Specific brand SVG asset creation                                     |
+| `fe-coder`                                         | Implements the agreed mockup in React + Tailwind                      |
 
 If the request is for a logo, favicon, brand mark, or marketing banner — **defer to `design-lead`**, do not create them here.
 
@@ -37,6 +37,7 @@ If the request is for a logo, favicon, brand mark, or marketing banner — **def
 The Pencil MCP server starts instantly, but the VS Code Pencil extension needs time to initialize its WebSocket server. This causes "WebSocket not connected" or "Connection closed" errors immediately after VS Code starts or restarts.
 
 **Recovery steps** (in order):
+
 1. Ask the user to open a `.pen` file in VS Code (this triggers extension activation).
 2. Wait ~10 seconds for the extension to fully initialize.
 3. Retry `get_editor_state` — if it still fails, wait another 10 seconds and retry once more.
@@ -50,12 +51,12 @@ The Pencil MCP server starts instantly, but the VS Code Pencil extension needs t
 - **Base directory**: `design/` (relative to repo root).
 - **Surface subfolder** matches the project's top-level layout:
 
-  | Surface | Folder | What lives there |
-  |---------|--------|------------------|
+  | Surface                 | Folder              | What lives there                                                                                                     |
+  | ----------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------- |
   | Chrome Extension Dialog | `design/extension/` | Dialog overlay, Onboarding, Family Shelf, Personal Shelf, Borrow, Family Settings, Verification, Public Share dialog |
-  | PWA mobile viewer | `design/pwa/` | Mobile login / verify, family bookshelf viewer, settings |
-  | Landing site | `design/site/` | `site/index.html` marketing / docs visuals |
-  | Cross-surface flows | `design/flows/` | Multi-surface user journeys (e.g. Extension → PWA invite flow) |
+  | PWA mobile viewer       | `design/pwa/`       | Mobile login / verify, family bookshelf viewer, settings                                                             |
+  | Landing site            | `design/site/`      | `site/index.html` marketing / docs visuals                                                                           |
+  | Cross-surface flows     | `design/flows/`     | Multi-surface user journeys (e.g. Extension → PWA invite flow)                                                       |
 
 - **Folder naming**: kebab-case, feature-scoped (e.g. `borrow-flow/`, `public-share/`, `verification-pin/`).
 - **File naming**: descriptive kebab-case `.pen` (e.g. `borrow-request.pen`, `public-share-dialog.pen`).
@@ -93,6 +94,7 @@ Pencil MCP operates on the in-memory editor document. File persistence is handle
 ### Step 1: Understand the requirement
 
 Read the feature description from `$ARGUMENTS` or conversation context. Identify:
+
 - Which **surface** is affected: Extension Dialog? PWA? Site? Cross-surface?
 - Which existing screen / dialog tab the feature lives in (Onboarding / Family Shelf / Personal Shelf / Borrow / Family Settings / Verification / Public Share).
 - What UI elements are needed (book cards, lists, dropdowns, forms, dialogs, QR codes, PIN / pattern inputs).
@@ -119,12 +121,12 @@ Use the Pencil MCP tools to build the mockup:
 
 1. **`batch_design`** — create frames, components, and layout elements. Match the surface's actual frame:
 
-   | Surface | Frame size guidance |
-   |---------|---------------------|
+   | Surface                                    | Frame size guidance                                                       |
+   | ------------------------------------------ | ------------------------------------------------------------------------- |
    | Extension Dialog (overlay on Readmoo page) | ~480–640 px wide, ~600–720 px tall — modal-style overlay, NOT a full page |
-   | Extension Settings page | Standard browser tab width — ~960 px |
-   | PWA mobile | 360 / 390 px wide (iPhone-class), portrait |
-   | Landing site | 1280 / 1440 px wide hero + scroll sections |
+   | Extension Settings page                    | Standard browser tab width — ~960 px                                      |
+   | PWA mobile                                 | 360 / 390 px wide (iPhone-class), portrait                                |
+   | Landing site                               | 1280 / 1440 px wide hero + scroll sections                                |
 
 2. **`get_screenshot`** — render a preview to verify the layout looks correct.
 
@@ -144,6 +146,7 @@ Create separate frames for each UI state the feature can be in:
 ### Step 5: Annotate
 
 Add text annotations near the mockup explaining:
+
 - **Component mapping** — which existing component (`BookCard`, `MemberDropdown`, `LoadingState`, …) to reuse, or whether a new component is needed.
 - **Interaction** — click → action, hover → tooltip, swipe → reveal, etc.
 - **Data source** — which Worker API endpoint (`GET /api/family/:id/bookshelf`, `PUT /api/user/:id/books`, …) or which `chrome.storage` key.
@@ -153,6 +156,7 @@ Add text annotations near the mockup explaining:
 ### Step 6: Present & iterate
 
 Use `get_screenshot` to render the final mockup and present it to the user. Ask:
+
 1. Layout 是否符合預期？
 2. 有沒有缺少的欄位或操作？
 3. 互動行為是否正確？
@@ -164,21 +168,22 @@ Refine based on feedback using `batch_design` (update / replace operations) unti
 
 This project does NOT use MUI / Chakra / Ant. The "design system" is Tailwind utility classes + lucide-react + project conventions.
 
-| Element | Reference |
-|---------|-----------|
-| Styling system | Tailwind CSS 3.x — default tokens (neither `extension/` nor `pwa/` extends the theme) |
-| Icons | `lucide-react` — outlined, 1.5–2 px stroke (already used: `Inbox`, etc.) |
-| Color | Default Tailwind palette — no custom brand color yet (see `design-lead` if needed) |
-| Border radius | Default Tailwind (`rounded`, `rounded-md`, `rounded-lg`) |
-| Spacing unit | Tailwind 4 px scale |
-| Typography | System font stack — no custom font loaded |
-| Buttons / inputs | Tailwind utility classes — see existing `dialog/` components for patterns |
-| Layout (Dialog) | Flex column, `flex: 1`, `minHeight: 0` (see `App.tsx:19` `flexColumnFill`) |
-| Tabs | Family Shelf · Personal Shelf · Borrow · Settings (see `App.tsx`) |
+| Element          | Reference                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------- |
+| Styling system   | Tailwind CSS 3.x — default tokens (neither `extension/` nor `pwa/` extends the theme) |
+| Icons            | `lucide-react` — outlined, 1.5–2 px stroke (already used: `Inbox`, etc.)              |
+| Color            | Default Tailwind palette — no custom brand color yet (see `design-lead` if needed)    |
+| Border radius    | Default Tailwind (`rounded`, `rounded-md`, `rounded-lg`)                              |
+| Spacing unit     | Tailwind 4 px scale                                                                   |
+| Typography       | System font stack — no custom font loaded                                             |
+| Buttons / inputs | Tailwind utility classes — see existing `dialog/` components for patterns             |
+| Layout (Dialog)  | Flex column, `flex: 1`, `minHeight: 0` (see `App.tsx:19` `flexColumnFill`)            |
+| Tabs             | Family Shelf · Personal Shelf · Borrow · Settings (see `App.tsx`)                     |
 
 ## When Invoked by Team Lead / fe-team-lead
 
 The team-lead provides the feature requirements. Create the mockup in Pencil and return:
+
 1. A screenshot of the mockup (via `get_screenshot`).
 2. Annotation notes for the TL to relay to the user.
 3. Component mapping recommendations for `fe-coder` (reuse vs new).
@@ -187,6 +192,7 @@ The team-lead provides the feature requirements. Create the mockup in Pencil and
 ## When Invoked Standalone
 
 If called directly via `/fe-designer`:
+
 1. Call `get_editor_state` to check if a `.pen` file is already open.
 2. If no editor is active, or the active file is not the target:
    - Determine the target path: if `$ARGUMENTS` specifies a `.pen` path, use it; otherwise derive from `<surface> <feature-name>` → `design/{surface}/{feature-name}/{name}.pen`. If surface is unclear, ask the user.

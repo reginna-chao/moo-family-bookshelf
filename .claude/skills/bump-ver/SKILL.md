@@ -8,7 +8,7 @@ description: >
   DO NOT TRIGGER when: user wants to write code, fix bugs, or run tests. Code changes go through team-lead, not here.
 argument-hint: "<x.y.z | patch | minor | major>"
 allowed-tools: Read, Edit, Glob, Grep, Bash(git log*), Bash(git tag*), Bash(git describe*), Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(pnpm typecheck*)
-model: claude-opus-4-6
+model: opus
 ---
 
 # Bump Version
@@ -57,6 +57,7 @@ Pure version bumps don't need the team-lead Fix Cycle. This skill encodes the pr
 ### Step 2 — Classify commits
 
 For each commit since last tag:
+
 - **Include** if prefix matches: `feat:`, `fix:`, `perf:`, `security:`, or `style:` with a user-facing scope like `(extension)`, `(pwa)`, `(dialog)`, `(ui)`.
 - **Exclude** if prefix matches: `chore:`, `docs:`, `test:`, `refactor:`, `ci:`, `build:`, or `style:` with a dev-tooling scope like `(skills)`, `(eslint)`, `(scripts)`.
 - For ambiguous commits, default to **exclude** and surface them in the plan as "uncertain — confirm if these should be in CHANGELOG".
@@ -74,6 +75,7 @@ Generate a draft following the project's existing structure:
 ```
 
 Sub-section heading rules (pick the headings that fit the included commits):
+
 - `### 功能新增` for `feat:`
 - `### 問題修正` for `fix:`
 - `### 效能改善` for `perf:`
@@ -99,6 +101,7 @@ End with: "確認後我直接套用變更、跑 typecheck、commit。"
 ### Step 5 — Execute (after user approval)
 
 In order:
+
 1. `Edit` each of the 5 version files. Use `replace_all: false` and a precise `old_string` that includes the `"name": "..."` line above the version, so we never match a dependency version by accident.
 2. `Edit` `CHANGELOG.md`: insert the new entry directly above the most recent entry (between `---` separator and `## v<previous>`).
 3. Run `pnpm typecheck` from repo root. If it fails, stop and report.

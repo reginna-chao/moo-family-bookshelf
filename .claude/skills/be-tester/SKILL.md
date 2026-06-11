@@ -7,7 +7,7 @@ description: >
   DO NOT TRIGGER when: user is writing production code, reviewing code, or asking about architecture.
 argument-hint: <target route or module to test>
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cd worker*), Bash(pnpm test*), Bash(git diff*), Bash(git log*), Agent
-model: claude-opus-4-6
+model: opus
 ---
 
 # Backend Tester
@@ -38,10 +38,10 @@ Write unit and integration tests for the Cloudflare Worker using Vitest + Minifl
 
 ## Test Types
 
-| Type | Location | When |
-|------|----------|------|
-| Unit | `tests/unit/` | Pure logic: validation, helpers, key generation, rate limit logic |
-| Integration | `tests/integration/` | Full API flow: HTTP request → handler → KV read/write → response |
+| Type        | Location             | When                                                              |
+| ----------- | -------------------- | ----------------------------------------------------------------- |
+| Unit        | `tests/unit/`        | Pure logic: validation, helpers, key generation, rate limit logic |
+| Integration | `tests/integration/` | Full API flow: HTTP request → handler → KV read/write → response  |
 
 ## Integration Test Setup
 

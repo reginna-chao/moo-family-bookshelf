@@ -7,7 +7,7 @@ description: >
   DO NOT TRIGGER when: task is clearly frontend-only or backend-only (use the specific team-lead instead).
 argument-hint: "<requirement or feature description>"
 allowed-tools: Read, Grep, Glob, Bash(pnpm*), Bash(cd*), Bash(git*), Agent, TodoWrite
-model: claude-opus-4-6
+model: opus
 ---
 
 # Team Lead
@@ -44,6 +44,7 @@ If the user explicitly says something like "skip review", "just write the code",
 **Progress tracking (mandatory).** Once Phase 1 is confirmed, maintain a TodoWrite checklist of all phases and keep it updated (✅ done / ⏳ in-progress / ⬜ pending), so the user always sees progress without having to ask. (If TodoWrite is unavailable, render the same checklist inline in each message.)
 
 **Stop discipline.**
+
 - **Phase 1 (requirements) is collaborative** — iterate with the user (multiple rounds expected) until the breakdown and API contract are confirmed.
 - **After Phase 1, run autonomously.** Do NOT stop merely to ask "可以進下一階段嗎" — just continue. Stop ONLY for: a **user choice** (which cross-team SUGGESTION fixes to apply; whether to commit/push), a **manual verification** the user must perform, or an architecture/security **blocker**.
 - Sub-team-leads handle their own CRITICAL auto-fixes and SUGGESTION decisions inside their Fix Cycle.
@@ -85,6 +86,7 @@ If the user explicitly says something like "skip review", "just write the code",
 ### Phase 2: Define API Contract
 
 If the feature involves both frontend and backend:
+
 1. Define the API contract (endpoints, HTTP methods, request/response shapes, error codes).
 2. Both teams work against this contract in parallel.
 3. Document the contract in the task breakdown.
@@ -119,6 +121,7 @@ If a sub-team did not run (e.g., FE-only or BE-only feature), state "N/A — tas
 #### 4.2: Cross-Team Validation
 
 Run the cross-team gate and report each result:
+
 1. Verify API contracts match between FE and BE (request/response shapes, error codes).
 2. `pnpm test` (extension) → expected: all green.
 3. `cd worker && pnpm test` → expected: all green.

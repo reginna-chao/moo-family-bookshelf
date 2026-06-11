@@ -6,7 +6,7 @@ description: >
   DO NOT TRIGGER when: user is discussing requirements, reviewing code, writing tests, or asking questions about existing code.
 argument-hint: <requirement description or file paths to modify>
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash(cd extension*), Bash(pnpm typecheck*), Bash(pnpm lint*), Bash(pnpm build*), Bash(git diff*), Bash(git log*), Bash(git show*), Agent
-model: claude-opus-4-6
+model: opus
 ---
 
 # Frontend Coder
