@@ -6,6 +6,7 @@
   "exports": {
     "./config/*": "./src/config/*",
     "./icons/*": "./src/icons/*",
+    "./invite/*": "./src/invite/*",
     "./personal/*": "./src/personal/*"
   }
 }

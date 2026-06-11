@@ -114,9 +114,11 @@ describe("SettingsPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "複製同步碼" }));
 
+    // Clipboard now receives a welcome message that embeds the sync code
+    // (full wording is covered by inviteMessages.test.ts).
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        "moo-fam1-key1",
+        expect.stringContaining("moo-fam1-key1"),
       );
     });
     expect(screen.getByRole("button", { name: "已複製" })).toBeInTheDocument();

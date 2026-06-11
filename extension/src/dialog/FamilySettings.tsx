@@ -10,6 +10,10 @@ import { AutoSyncIntervalSelector } from "./AutoSyncIntervalSelector";
 import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
 import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "../constants";
+import {
+  buildSyncCodeInviteMessage,
+  buildLinkInviteMessage,
+} from "moo-family-bookshelf-shared/invite/messages";
 import { QrCodeLink } from "./QrCodeLink";
 import { InviteQrCode } from "./InviteQrCode";
 import { VerificationSettings } from "./VerificationSettings";
@@ -119,7 +123,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
 
   const handleCopy = async () => {
     if (!syncCode) return;
-    await navigator.clipboard.writeText(syncCode);
+    await navigator.clipboard.writeText(buildSyncCodeInviteMessage(syncCode));
     setCopied(true);
     if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
     copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
@@ -127,7 +131,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
 
   const handleInviteCopy = async () => {
     if (!syncCode) return;
-    await navigator.clipboard.writeText(buildInviteUrl(syncCode));
+    await navigator.clipboard.writeText(buildLinkInviteMessage(buildInviteUrl(syncCode)));
     setInviteCopied(true);
     if (inviteCopiedTimerRef.current !== null) clearTimeout(inviteCopiedTimerRef.current);
     inviteCopiedTimerRef.current = setTimeout(() => setInviteCopied(false), 2000);
