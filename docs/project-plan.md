@@ -904,23 +904,24 @@ jobs:
 
 ##### Wave B — 顯示模式與本地偏好（純前端持久化，無 API 變更）
 
-- [ ] **#3 家庭書櫃 Row / Grid 顯示模式記憶**
+- [x] **#3 家庭書櫃 Row / Grid 顯示模式記憶**
   - 預設 Grid；偏好寫入 Extension 的 `chrome.storage.local`、PWA 的 `localStorage`
   - Extension 與 PWA 各自記錄，**不互通**（避免增加 sync storage 用量）
   - 影響：`extension/src/dialog/FamilyShelf.tsx`、`pwa/src/...`
-- [ ] **#8 Extension 浮動 icon 大小可縮小**
+- [x] **#8 Extension 浮動 icon 大小可縮小**
   - 設定頁新增 icon size 選項（small / medium / large 或 px 值）
   - 寫入 `chrome.storage.local`，由 content script 注入時讀取
-- [ ] **#9 書籍排序選項**
+- [x] **#9 書籍排序選項**
   - 選項：文字順序（書名、作者）/ 讀墨預設（爬取原順序，現行行為）
   - 個人書櫃 + 家庭書櫃皆需，且各自記憶
 - [ ] **#7 設定新增「借閱歷史不顯示封面，純文字呈現」**
   - 預設關閉
   - 影響：「借閱」分頁的「歷史紀錄」區塊；Extension + PWA 同步處理
+  - **狀態**：Won't do，考慮後認為不需要這個項目。
 
 ##### Wave C — PWA 借閱流程提示（行為調整，無 API 變更）
 
-- [ ] **#6 PWA「同意借閱」改為「手動借閱」流程**
+- [x] **#6 PWA「同意借閱」改為「手動借閱」流程**
   - 點擊「同意借閱」後彈窗警告：手機板無法自動操作讀墨借書，需自行從讀墨網頁 / APP 借出
   - checkbox「不再顯示此通知」→ 寫入 PWA `localStorage`（不上 server）
   - 按鈕：[取消] / [我知道了]
