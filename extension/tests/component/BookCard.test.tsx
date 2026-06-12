@@ -104,6 +104,63 @@ describe("BookCard", () => {
     // Category should not be displayed on BookCard
     expect(screen.queryByText("韓國耽美")).not.toBeInTheDocument();
   });
+
+  describe("hide action (v1.5.0)", () => {
+    it("renders the hide action button when both onHideToggle and label are provided", () => {
+      render(
+        <BookCard book={makeBook()} onHideToggle={() => {}} hideActionLabel="隱藏" />,
+      );
+      expect(screen.getByRole("button", { name: "隱藏" })).toBeInTheDocument();
+    });
+
+    it("renders the unhide label in showHidden mode", () => {
+      render(
+        <BookCard book={makeBook()} onHideToggle={() => {}} hideActionLabel="取消隱藏" />,
+      );
+      expect(screen.getByRole("button", { name: "取消隱藏" })).toBeInTheDocument();
+    });
+
+    it("does not render the hide action when onHideToggle is missing", () => {
+      render(<BookCard book={makeBook()} hideActionLabel="隱藏" />);
+      expect(screen.queryByRole("button", { name: "隱藏" })).not.toBeInTheDocument();
+    });
+
+    it("does not render the hide action when label is missing", () => {
+      render(<BookCard book={makeBook()} onHideToggle={() => {}} />);
+      expect(screen.queryByRole("button", { name: "隱藏" })).not.toBeInTheDocument();
+    });
+
+    it("calls onHideToggle when the hide action is clicked", () => {
+      const onHideToggle = vi.fn();
+      render(
+        <BookCard
+          book={makeBook()}
+          onHideToggle={onHideToggle}
+          hideActionLabel="隱藏"
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "隱藏" }));
+      expect(onHideToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("prevents default and stops propagation on hide action click", () => {
+      const onHideToggle = vi.fn();
+      render(
+        <BookCard
+          book={makeBook()}
+          onHideToggle={onHideToggle}
+          hideActionLabel="隱藏"
+        />,
+      );
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      const preventDefaultSpy = vi.spyOn(event, "preventDefault");
+      const stopPropagationSpy = vi.spyOn(event, "stopPropagation");
+      screen.getByRole("button", { name: "隱藏" }).dispatchEvent(event);
+      expect(preventDefaultSpy).toHaveBeenCalled();
+      expect(stopPropagationSpy).toHaveBeenCalled();
+      expect(onHideToggle).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe("FilterButton", () => {

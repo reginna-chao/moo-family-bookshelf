@@ -159,8 +159,35 @@ export interface UserBooksRecord {
   books: BookEntry[];
   lastUpdated: string;
   publicSharing?: { shelves: PublicShelf[] };
+  /**
+   * Per-viewer private family-shelf preferences (v1.5.0+).
+   * `hidden` holds `"{ownerId}:{bookId}"` refs the viewer has hidden from
+   * their own family-shelf view. Container is reserved for future additions
+   * (e.g. favorites in v1.6.0).
+   */
+  familyShelfPrefs?: { hidden: string[] };
   [key: string]: unknown;
 }
+
+/**
+ * Max entries allowed in a single familyShelfPrefs list (v1.5.0+).
+ *
+ * Enforced by `parseFamilyPrefs` in `routes/user.ts`, which returns
+ * 400 INVALID_PAYLOAD when the deduped `hidden` array exceeds this count.
+ *
+ * Sizing rationale — kept reachable under the body guard:
+ *   The global 256KB request-body guard (`MAX_BODY_SIZE = 262144` in
+ *   `index.ts`) is the *outer* defense and rejects oversized bodies with 413
+ *   before they reach this handler. Each valid entry is
+ *   `"{64-hex ownerId}:{bookId}"` and serializes to ~69 bytes of JSON
+ *   (including quotes + comma). At 3000 entries an over-limit payload of
+ *   3001 refs is ~207KB < 256KB, so it slips past the body guard and actually
+ *   triggers the 400 branch here — keeping that branch reachable and testable
+ *   over the real HTTP path. A larger cap (e.g. 10000 ≈ 690KB) would always be
+ *   pre-empted by the 413 guard, making the 400 branch dead code. Real hidden
+ *   counts are far smaller than 3000, so this cap is ample headroom.
+ */
+export const MAX_FAMILY_PREF_ENTRIES = 3000;
 
 export interface AuthRecord {
   token: string;

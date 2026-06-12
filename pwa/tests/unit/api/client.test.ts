@@ -173,6 +173,41 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("updateFamilyPrefs", () => {
+    it("should call PUT /api/user/:id/family-prefs with a { hidden } body", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { ok: true, hidden: ["o1:b1"] } }),
+      );
+
+      const hidden = ["o1:b1", "o2:b2"];
+      const result = await client.updateFamilyPrefs(USER_1, hidden);
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(`https://api.example.com/api/user/${USER_1}/family-prefs`);
+      expect(init.method).toBe("PUT");
+      expect(JSON.parse(init.body)).toEqual({ hidden });
+      expect(result.data).toEqual({ ok: true, hidden: ["o1:b1"] });
+    });
+
+    it("should send an empty hidden array as { hidden: [] }", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { ok: true, hidden: [] } }),
+      );
+
+      await client.updateFamilyPrefs(USER_1, []);
+
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body)).toEqual({ hidden: [] });
+    });
+
+    it("should reject invalid userId", async () => {
+      await expect(
+        client.updateFamilyPrefs("invalid-id", ["o1:b1"]),
+      ).rejects.toThrow("Invalid userId");
+    });
+  });
+
   describe("createFamily", () => {
     it("should call POST /api/family with userId only when no displayName", async () => {
       const familyData = {

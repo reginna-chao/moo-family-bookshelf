@@ -15,6 +15,12 @@ export interface BookCardProps {
   onBorrowClick?: () => void;
   /** Disables the borrow button (e.g. an existing PENDING request). */
   borrowRequestPending?: boolean;
+  /** Toggle hide/unhide for this copy-scoped card (v1.5.0). */
+  onHideToggle?: () => void;
+  /** Label for the hide/unhide control, e.g. "隱藏" / "取消隱藏". */
+  hideActionLabel?: string;
+  /** Whether the family shelf is currently in the hidden-view (drives aria-pressed). */
+  hideToggleActive?: boolean;
 }
 
 export function FilterButton({
@@ -50,9 +56,18 @@ export function BookCard({
   showBorrowButton = false,
   onBorrowClick,
   borrowRequestPending = false,
+  onHideToggle,
+  hideActionLabel,
+  hideToggleActive,
 }: BookCardProps) {
   const [hover, setHover] = useState(false);
   const overlayVisible = showBorrowButton && hover;
+
+  const handleHideToggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onHideToggle) onHideToggle();
+  };
 
   return (
     <div
@@ -173,6 +188,23 @@ export function BookCard({
       >
         {book.memberName}
       </span>
+      {onHideToggle && hideActionLabel && (
+        <button
+          type="button"
+          onClick={handleHideToggle}
+          aria-pressed={hideToggleActive}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: "#4b5563",
+            fontSize: 12,
+            padding: 0,
+            cursor: "pointer",
+          }}
+        >
+          {hideActionLabel}
+        </button>
+      )}
     </div>
   );
 }

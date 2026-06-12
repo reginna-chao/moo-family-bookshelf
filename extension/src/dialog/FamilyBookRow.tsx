@@ -8,6 +8,12 @@ export interface FamilyBookRowProps {
   showBorrowButton?: boolean;
   onBorrowClick?: () => void;
   borrowRequestPending?: boolean;
+  /** Toggle hide/unhide for this copy-scoped card (v1.5.0). */
+  onHideToggle?: () => void;
+  /** Label for the hide/unhide control, e.g. "隱藏" / "取消隱藏". */
+  hideActionLabel?: string;
+  /** Whether the family shelf is currently in the hidden-view (drives aria-pressed). */
+  hideToggleActive?: boolean;
 }
 
 export function FamilyBookRow({
@@ -15,11 +21,20 @@ export function FamilyBookRow({
   showBorrowButton = false,
   onBorrowClick,
   borrowRequestPending = false,
+  onHideToggle,
+  hideActionLabel,
+  hideToggleActive,
 }: FamilyBookRowProps) {
   const handleBorrow = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (!borrowRequestPending && onBorrowClick) onBorrowClick();
+  };
+
+  const handleHideToggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onHideToggle) onHideToggle();
   };
 
   return (
@@ -124,6 +139,25 @@ export function FamilyBookRow({
           }}
         >
           {borrowRequestPending ? "申請中" : "申請借閱"}
+        </button>
+      )}
+      {onHideToggle && hideActionLabel && (
+        <button
+          type="button"
+          onClick={handleHideToggle}
+          aria-pressed={hideToggleActive}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: "#4b5563",
+            fontSize: 12,
+            padding: 0,
+            cursor: "pointer",
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {hideActionLabel}
         </button>
       )}
     </a>

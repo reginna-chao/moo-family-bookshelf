@@ -163,7 +163,7 @@ describe("FamilyShelf", () => {
     // Only shared books should appear
     expect(screen.queryByText("私密書籍")).not.toBeInTheDocument();
     // Total count shows 1
-    expect(screen.getByText("(1 本)")).toBeInTheDocument();
+    expect(screen.getByText("(可見 1 本)")).toBeInTheDocument();
   });
 
   it("shows error state with retry button on API error", async () => {
@@ -444,7 +444,7 @@ describe("FamilyShelf", () => {
     renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
-      expect(screen.getByText("(2 本)")).toBeInTheDocument();
+      expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
     });
   });
 

@@ -91,6 +91,13 @@ export function sanitizePublicShelfTitle(value: unknown): string | null {
   return sanitizeShortString(value, PUBLIC_SHELF_TITLE_MAX_LENGTH);
 }
 
+// "{ownerId}:{bookId}" — 64-char lowercase SHA-256 hex ownerId, ':' separator, non-empty bookId.
+const FAMILY_PREF_REF_RE = /^[0-9a-f]{64}:.+$/;
+
+export function isValidFamilyPrefRef(s: string): boolean {
+  return FAMILY_PREF_REF_RE.test(s);
+}
+
 const VALID_EXPIRES_DAYS = [7, 30, 60, 90];
 
 export function isValidExpiresDays(value: unknown): value is number | null {
