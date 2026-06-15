@@ -3,7 +3,7 @@ import { BoolFlag } from "../api/client";
 import type { BookWithMember } from "./BookCard";
 import type { MemberBooks } from "./FamilyDataContext";
 import { countHidden } from "./familyShelfPrefs";
-import type { MemberFilterValue } from "./MemberDropdown";
+import { HIDDEN_FILTER_VALUE, type MemberFilterValue } from "./MemberDropdown";
 
 interface BookOwnership {
   ownerId: string;
@@ -29,7 +29,8 @@ function selectMembers(
   filterMember: MemberFilterValue,
   userId: string,
 ): MemberBooks[] {
-  if (filterMember === "all") {
+  // Hidden-view spans all members, ignoring member scoping.
+  if (filterMember === "all" || filterMember === HIDDEN_FILTER_VALUE) {
     return members;
   }
   if (filterMember === "all-except-self") {
@@ -45,7 +46,6 @@ export interface UseFamilyShelfBooksParams {
   updatedBookIds: Set<string>;
   hiddenRefs: Set<string>;
   isHidden: (ownerId: string, bookId: string) => boolean;
-  showHidden: boolean;
 }
 
 export interface UseFamilyShelfBooksResult {
@@ -74,8 +74,8 @@ export function useFamilyShelfBooks({
   updatedBookIds,
   hiddenRefs,
   isHidden,
-  showHidden,
 }: UseFamilyShelfBooksParams): UseFamilyShelfBooksResult {
+  const showHidden = filterMember === HIDDEN_FILTER_VALUE;
   const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
   const hiddenCount = useMemo(

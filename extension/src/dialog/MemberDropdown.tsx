@@ -1,5 +1,8 @@
 import React from "react";
 
+/** Sentinel filter value for the cross-everyone hidden-books view. */
+export const HIDDEN_FILTER_VALUE = "__hidden__";
+
 export type MemberFilterValue = "all-except-self" | "all" | string;
 
 interface MemberInfo {
@@ -45,6 +48,7 @@ export function MemberDropdown({ members, userId, value, onChange }: MemberDropd
           {m.displayName || m.userId.slice(0, 8)}
         </option>
       ))}
+      <option value={HIDDEN_FILTER_VALUE}>隱藏的書</option>
     </select>
   );
 }

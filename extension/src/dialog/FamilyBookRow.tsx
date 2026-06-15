@@ -2,6 +2,7 @@ import React from "react";
 import { BoolFlag } from "../api/client";
 import type { BookWithMember } from "./BookCard";
 import { LazyCover } from "./LazyCover";
+import { OverflowMenu } from "./OverflowMenu";
 
 export interface FamilyBookRowProps {
   book: BookWithMember;
@@ -10,10 +11,8 @@ export interface FamilyBookRowProps {
   borrowRequestPending?: boolean;
   /** Toggle hide/unhide for this copy-scoped card (v1.5.0). */
   onHideToggle?: () => void;
-  /** Label for the hide/unhide control, e.g. "隱藏" / "取消隱藏". */
+  /** Label for the hide/unhide menu item, e.g. "隱藏書籍" / "取消隱藏". */
   hideActionLabel?: string;
-  /** Whether the family shelf is currently in the hidden-view (drives aria-pressed). */
-  hideToggleActive?: boolean;
 }
 
 export function FamilyBookRow({
@@ -23,18 +22,11 @@ export function FamilyBookRow({
   borrowRequestPending = false,
   onHideToggle,
   hideActionLabel,
-  hideToggleActive,
 }: FamilyBookRowProps) {
   const handleBorrow = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (!borrowRequestPending && onBorrowClick) onBorrowClick();
-  };
-
-  const handleHideToggle = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (onHideToggle) onHideToggle();
   };
 
   return (
@@ -142,23 +134,12 @@ export function FamilyBookRow({
         </button>
       )}
       {onHideToggle && hideActionLabel && (
-        <button
-          type="button"
-          onClick={handleHideToggle}
-          aria-pressed={hideToggleActive}
-          style={{
-            border: "none",
-            background: "transparent",
-            color: "#4b5563",
-            fontSize: 12,
-            padding: 0,
-            cursor: "pointer",
-            flexShrink: 0,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {hideActionLabel}
-        </button>
+        <span style={{ flexShrink: 0 }}>
+          <OverflowMenu
+            items={[{ label: hideActionLabel, onSelect: onHideToggle }]}
+            tone="plain"
+          />
+        </span>
       )}
     </a>
   );

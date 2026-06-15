@@ -3,9 +3,10 @@ import { ViewModeToggle } from "@/components/ViewModeToggle";
 import { BookSortDropdown } from "@/components/BookSortDropdown";
 import type { BookSortMode } from "@/utils/sortBooks";
 import type { MemberBooks } from "@/hooks/useFamilyData";
-import type {
-  BookWithMember,
-  MemberFilterValue,
+import {
+  HIDDEN_FILTER_VALUE,
+  type BookWithMember,
+  type MemberFilterValue,
 } from "@/hooks/useFamilyShelfBooks";
 
 type ViewMode = "grid" | "row";
@@ -25,8 +26,6 @@ export interface FamilyShelfToolbarProps {
   userId: string;
   sort: BookSortMode;
   onSortChange: (sort: BookSortMode) => void;
-  showHidden: boolean;
-  onShowHiddenToggle: () => void;
 }
 
 /** Family-shelf header + filter controls (PWA). */
@@ -45,12 +44,7 @@ export function FamilyShelfToolbar({
   userId,
   sort,
   onSortChange,
-  showHidden,
-  onShowHiddenToggle,
 }: FamilyShelfToolbarProps) {
-  const showHiddenClass = showHidden
-    ? "text-blue-600 border-blue-600 bg-blue-50"
-    : "text-gray-500 border-gray-300";
   return (
     <>
       <h2 className="text-xl font-bold text-gray-900 mb-3">
@@ -92,19 +86,9 @@ export function FamilyShelfToolbar({
               {m.displayName || m.userId.slice(0, 8)}
             </option>
           ))}
+          <option value={HIDDEN_FILTER_VALUE}>隱藏的書</option>
         </select>
         <BookSortDropdown value={sort} onChange={onSortChange} />
-      </div>
-
-      <div className="mb-4">
-        <button
-          type="button"
-          onClick={onShowHiddenToggle}
-          aria-pressed={showHidden}
-          className={`inline-flex items-center text-xs font-medium rounded-full px-3 py-1.5 border ${showHiddenClass}`}
-        >
-          顯示已隱藏
-        </button>
       </div>
     </>
   );

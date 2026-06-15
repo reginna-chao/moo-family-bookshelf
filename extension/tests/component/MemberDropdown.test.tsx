@@ -1,6 +1,10 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { MemberDropdown, MemberDropdownProps } from "@/dialog/MemberDropdown";
+import {
+  MemberDropdown,
+  MemberDropdownProps,
+  HIDDEN_FILTER_VALUE,
+} from "@/dialog/MemberDropdown";
 
 const MEMBERS = [
   { userId: "user-a", displayName: "Alice", books: [{ bookId: "b1" }] },
@@ -26,14 +30,33 @@ describe("MemberDropdown", () => {
     const select = screen.getByRole("combobox", { name: "篩選成員" });
     expect(select).toBeInTheDocument();
 
-    // Check all options: all, all-except-self, self, Alice, Bob
+    // Check all options: all, all-except-self, self, Alice, Bob, hidden
     const options = screen.getAllByRole("option");
-    expect(options).toHaveLength(5);
+    expect(options).toHaveLength(6);
     expect(options[0]).toHaveTextContent("所有人的書");
     expect(options[1]).toHaveTextContent("其他家人的書");
     expect(options[2]).toHaveTextContent("自己的書");
     expect(options[3]).toHaveTextContent("Alice");
     expect(options[4]).toHaveTextContent("Bob");
+    expect(options[5]).toHaveTextContent("隱藏的書");
+  });
+
+  it("renders the 隱藏的書 option last with the hidden sentinel value", () => {
+    renderDropdown();
+
+    const options = screen.getAllByRole("option") as HTMLOptionElement[];
+    const last = options[options.length - 1];
+    expect(last).toHaveTextContent("隱藏的書");
+    expect(last.value).toBe(HIDDEN_FILTER_VALUE);
+  });
+
+  it("calls onChange with the hidden sentinel when 隱藏的書 is selected", () => {
+    const { onChange } = renderDropdown();
+
+    const select = screen.getByRole("combobox", { name: "篩選成員" });
+    fireEvent.change(select, { target: { value: HIDDEN_FILTER_VALUE } });
+
+    expect(onChange).toHaveBeenCalledWith(HIDDEN_FILTER_VALUE);
   });
 
   it("excludes self from the dynamic member list", () => {
@@ -44,8 +67,8 @@ describe("MemberDropdown", () => {
     renderDropdown({ members, userId: "user-self" });
 
     const options = screen.getAllByRole("option");
-    // all, all-except-self, self, Alice (Me should not appear in dynamic list)
-    expect(options).toHaveLength(4);
+    // all, all-except-self, self, Alice, hidden (Me should not appear in dynamic list)
+    expect(options).toHaveLength(5);
     const optionTexts = options.map((o) => o.textContent);
     expect(optionTexts).not.toContain("Me");
   });

@@ -34,7 +34,7 @@ export function FamilyShelfBookList({
   onBorrow,
   onToggleHidden,
 }: FamilyShelfBookListProps) {
-  const hideActionLabel = showHidden ? "取消隱藏" : "隱藏";
+  const hideActionLabel = showHidden ? "取消隱藏" : "隱藏書籍";
   const renderBook = (book: FamilyShelfBook) => {
     const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
     const isOwnBook = book.ownerId === userId;
@@ -48,7 +48,6 @@ export function FamilyShelfBookList({
       onBorrowClick: () => onBorrow(book),
       onHideToggle: () => onToggleHidden(book.ownerId, book.bookId),
       hideActionLabel,
-      hideToggleActive: showHidden,
     };
     if (viewMode === "row") {
       return <FamilyBookRow key={key} {...shared} />;

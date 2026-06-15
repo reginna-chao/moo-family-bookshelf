@@ -3,7 +3,29 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
+import { HIDDEN_FILTER_VALUE } from "@/dialog/MemberDropdown";
 import { BoolFlag, type ApiClient } from "@/api/client";
+
+/** Returns the grid-card root element that contains a book with the given title. */
+function cardOf(title: string): HTMLElement {
+  const root = screen.getByText(title).closest("div");
+  if (!root) throw new Error(`card root not found for ${title}`);
+  return root;
+}
+
+/** Opens the overflow menu on the given book's card and clicks its hide/unhide item. */
+function triggerHideAction(title: string, itemName: string) {
+  const card = cardOf(title);
+  fireEvent.click(within(card).getByRole("button", { name: "更多選項" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: itemName }));
+}
+
+/** Switches the member dropdown to the cross-everyone hidden view. */
+function enterHiddenView() {
+  fireEvent.change(screen.getByLabelText("篩選成員"), {
+    target: { value: HIDDEN_FILTER_VALUE },
+  });
+}
 
 // Mock useSearch to avoid debounce complexity in tests
 vi.mock("@/dialog/useSearch", () => ({
@@ -132,9 +154,8 @@ describe("FamilyShelf — hide feature", () => {
     // No hidden yet → only 可見 count, no 隱藏 half.
     expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
 
-    // Click 隱藏 on 書一's card.
-    const hideButtons = screen.getAllByRole("button", { name: "隱藏" });
-    fireEvent.click(hideButtons[0]);
+    // Open 書一's overflow menu and hide it.
+    triggerHideAction("書一", "隱藏書籍");
 
     await waitFor(() => {
       // The first card (書一) is removed from the default view.
@@ -154,14 +175,14 @@ describe("FamilyShelf — hide feature", () => {
     });
     expect(screen.queryByText(/隱藏 \d+ 本/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "隱藏" })[0]);
+    triggerHideAction("書一", "隱藏書籍");
 
     await waitFor(() => {
       expect(screen.getByText("(可見 1 本，隱藏 1 本)")).toBeInTheDocument();
     });
   });
 
-  it("「顯示已隱藏」lists ONLY hidden cards, and 取消隱藏 returns them to default view", async () => {
+  it("「隱藏的書」view lists ONLY hidden cards, and 取消隱藏 returns them to default view", async () => {
     const apiClient = createMockApiClient({
       ...aliceTwoBooks(),
       hidden: ["user-2:b1"],
@@ -175,16 +196,16 @@ describe("FamilyShelf — hide feature", () => {
     expect(screen.queryByText("書一")).not.toBeInTheDocument();
     expect(screen.getByText("(可見 1 本，隱藏 1 本)")).toBeInTheDocument();
 
-    // Toggle 顯示已隱藏 → only hidden cards (書一) shown.
-    fireEvent.click(screen.getByRole("button", { name: "顯示已隱藏" }));
+    // Switch dropdown to 隱藏的書 → only hidden cards (書一) shown.
+    enterHiddenView();
 
     await waitFor(() => {
       expect(screen.getByText("書一")).toBeInTheDocument();
     });
     expect(screen.queryByText("書二")).not.toBeInTheDocument();
 
-    // Click 取消隱藏 → 書一 leaves the showHidden list.
-    fireEvent.click(screen.getByRole("button", { name: "取消隱藏" }));
+    // 取消隱藏 via overflow menu → 書一 leaves the hidden view.
+    triggerHideAction("書一", "取消隱藏");
 
     await waitFor(() => {
       expect(screen.queryByText("書一")).not.toBeInTheDocument();
@@ -208,7 +229,7 @@ describe("FamilyShelf — hide feature", () => {
     });
 
     vi.useFakeTimers();
-    fireEvent.click(screen.getAllByRole("button", { name: "隱藏" })[0]);
+    triggerHideAction("書一", "隱藏書籍");
 
     await act(async () => {
       vi.advanceTimersByTime(600);
@@ -279,18 +300,8 @@ describe("FamilyShelf — hide feature", () => {
       expect(screen.getByText("我的書")).toBeInTheDocument();
     });
 
-    // Hide self's own book — find its card's 隱藏 button.
-    const selfCard = screen.getByText("我的書").closest("div");
-    const hideBtn = selfCard
-      ? within(selfCard).queryByRole("button", { name: "隱藏" })
-      : null;
-    // Fall back to the first 隱藏 button matching the self book ordering.
-    if (hideBtn) {
-      fireEvent.click(hideBtn);
-    } else {
-      // 我的書 is first member → first 隱藏 button.
-      fireEvent.click(screen.getAllByRole("button", { name: "隱藏" })[0]);
-    }
+    // Hide self's own book via its card's overflow menu.
+    triggerHideAction("我的書", "隱藏書籍");
 
     await waitFor(() => {
       expect(screen.queryByText("我的書")).not.toBeInTheDocument();

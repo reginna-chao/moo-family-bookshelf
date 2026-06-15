@@ -3,6 +3,7 @@ import { BookOpen } from "lucide-react";
 import { BoolFlag } from "@/api/client";
 import type { BookEntry } from "@/api/client";
 import { LazyCover } from "@/components/LazyCover";
+import { OverflowMenu } from "@/components/OverflowMenu";
 
 export interface FamilyBookRowBook extends BookEntry {
   memberName: string;
@@ -17,10 +18,8 @@ export interface FamilyBookRowProps {
   onBorrowClick?: () => void;
   /** Toggle hide/unhide for this copy-scoped card (v1.5.0). */
   onHideToggle?: () => void;
-  /** Label for the hide/unhide control, e.g. "隱藏" / "取消隱藏". */
+  /** Label for the hide/unhide menu item, e.g. "隱藏書籍" / "取消隱藏". */
   hideActionLabel?: string;
-  /** Whether the family shelf is currently in the hidden-view (drives aria-pressed). */
-  hideToggleActive?: boolean;
 }
 
 export function FamilyBookRow({
@@ -30,18 +29,11 @@ export function FamilyBookRow({
   onBorrowClick,
   onHideToggle,
   hideActionLabel,
-  hideToggleActive,
 }: FamilyBookRowProps) {
   const handleBorrow = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (!borrowRequestPending && onBorrowClick) onBorrowClick();
-  };
-
-  const handleHideToggle = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (onHideToggle) onHideToggle();
   };
 
   return (
@@ -93,14 +85,9 @@ export function FamilyBookRow({
         </button>
       )}
       {onHideToggle && hideActionLabel && (
-        <button
-          type="button"
-          onClick={handleHideToggle}
-          aria-pressed={hideToggleActive}
-          className="text-[11px] text-gray-600 flex-shrink-0 whitespace-nowrap"
-        >
-          {hideActionLabel}
-        </button>
+        <span className="flex-shrink-0">
+          <OverflowMenu items={[{ label: hideActionLabel, onSelect: onHideToggle }]} />
+        </span>
       )}
     </a>
   );

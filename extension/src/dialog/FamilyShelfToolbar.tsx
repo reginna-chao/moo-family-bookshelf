@@ -1,4 +1,3 @@
-import { FilterButton } from "./BookCard";
 import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
 import { SearchBar } from "./SearchBar";
 import { CategoryFilter } from "./CategoryDropdown";
@@ -30,8 +29,6 @@ export interface FamilyShelfToolbarProps {
   onCategoryChange: (value: string) => void;
   categoryOpen: boolean;
   onCategoryToggle: () => void;
-  showHidden: boolean;
-  onShowHiddenToggle: () => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
 }
@@ -55,8 +52,6 @@ export function FamilyShelfToolbar({
   onCategoryChange,
   categoryOpen,
   onCategoryToggle,
-  showHidden,
-  onShowHiddenToggle,
   viewMode,
   onViewModeChange,
 }: FamilyShelfToolbarProps) {
@@ -96,11 +91,6 @@ export function FamilyShelfToolbar({
           onChange={onCategoryChange}
           open={categoryOpen}
           onToggle={onCategoryToggle}
-        />
-        <FilterButton
-          label="顯示已隱藏"
-          active={showHidden}
-          onClick={onShowHiddenToggle}
         />
         <ViewModeToggle mode={viewMode} onChange={onViewModeChange} />
       </div>

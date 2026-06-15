@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { BoolFlag, BorrowStatus } from "../api/client";
-import { type MemberFilterValue } from "./MemberDropdown";
+import { HIDDEN_FILTER_VALUE, type MemberFilterValue } from "./MemberDropdown";
 import { useSearch } from "./useSearch";
 import { useLoadMore } from "./useLoadMore";
 import { useFamilyData } from "./FamilyDataContext";
@@ -37,9 +37,10 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [categoryOpen, setCategoryOpen] = useState(false);
-  const [showHidden, setShowHidden] = useState(false);
   const { viewMode, setViewMode } = useFamilyShelfViewMode();
   const { sort, setSort } = useBookSort("family");
+
+  const showHidden = filterMember === HIDDEN_FILTER_VALUE;
 
   const { memberFilteredBooks, totalBooks, headingCount } = useFamilyShelfBooks({
     members,
@@ -48,7 +49,6 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     updatedBookIds,
     hiddenRefs,
     isHidden,
-    showHidden,
   });
 
   const categoryFilteredBooks = filterByCategory(memberFilteredBooks, categoryFilter);
@@ -71,11 +71,6 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     resetSearch();
     resetLoadMore();
   }, [resetSearch, resetLoadMore]);
-
-  const handleShowHiddenToggle = useCallback(() => {
-    setShowHidden((prev) => !prev);
-    resetLoadMore();
-  }, [resetLoadMore]);
 
   const memberCanLendMap = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -153,8 +148,6 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
         onCategoryChange={setCategoryFilter}
         categoryOpen={categoryOpen}
         onCategoryToggle={() => setCategoryOpen((prev) => !prev)}
-        showHidden={showHidden}
-        onShowHiddenToggle={handleShowHiddenToggle}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
       />

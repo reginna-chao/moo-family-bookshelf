@@ -46,7 +46,7 @@ export function FamilyBookList({
     );
   }
 
-  const hideActionLabel = showHidden ? "取消隱藏" : "隱藏";
+  const hideActionLabel = showHidden ? "取消隱藏" : "隱藏書籍";
   const renderBook = (book: BookWithMember) => {
     const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
     const isOwnBook = book.ownerId === userId;
@@ -69,7 +69,6 @@ export function FamilyBookList({
           onBorrowClick={() => onBorrow(book)}
           onHideToggle={onHideToggle}
           hideActionLabel={hideActionLabel}
-          hideToggleActive={showHidden}
         />
       );
     }
@@ -80,7 +79,6 @@ export function FamilyBookList({
         isOwnBook={isOwnBook}
         showBorrowButton={showBorrowButton}
         borrowRequestPending={borrowRequestPending}
-        showHidden={showHidden}
         hideActionLabel={hideActionLabel}
         onBorrowClick={() => onBorrow(book)}
         onHideToggle={onHideToggle}

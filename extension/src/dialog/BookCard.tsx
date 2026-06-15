@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { BookEntry, BoolFlag } from "../api/client";
 import { LazyCover } from "./LazyCover";
+import { OverflowMenu } from "./OverflowMenu";
 
 export interface BookWithMember extends BookEntry {
   memberName: string;
@@ -17,10 +18,8 @@ export interface BookCardProps {
   borrowRequestPending?: boolean;
   /** Toggle hide/unhide for this copy-scoped card (v1.5.0). */
   onHideToggle?: () => void;
-  /** Label for the hide/unhide control, e.g. "隱藏" / "取消隱藏". */
+  /** Label for the hide/unhide menu item, e.g. "隱藏書籍" / "取消隱藏". */
   hideActionLabel?: string;
-  /** Whether the family shelf is currently in the hidden-view (drives aria-pressed). */
-  hideToggleActive?: boolean;
 }
 
 export function FilterButton({
@@ -58,16 +57,12 @@ export function BookCard({
   borrowRequestPending = false,
   onHideToggle,
   hideActionLabel,
-  hideToggleActive,
 }: BookCardProps) {
   const [hover, setHover] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const overlayVisible = showBorrowButton && hover;
-
-  const handleHideToggle = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (onHideToggle) onHideToggle();
-  };
+  const showMenu = Boolean(onHideToggle && hideActionLabel);
+  const menuVisible = showMenu && (hover || menuOpen);
 
   return (
     <div
@@ -150,6 +145,23 @@ export function BookCard({
             </button>
           </div>
         )}
+        {showMenu && hideActionLabel && onHideToggle && (
+          <div
+            style={{
+              position: "absolute",
+              top: 4,
+              right: 4,
+              opacity: menuVisible ? 1 : 0,
+              pointerEvents: menuVisible ? "auto" : "none",
+              transition: "opacity 0.15s",
+            }}
+          >
+            <OverflowMenu
+              items={[{ label: hideActionLabel, onSelect: onHideToggle }]}
+              onOpenChange={setMenuOpen}
+            />
+          </div>
+        )}
       </a>
       <a
         href={book.readmooUrl}
@@ -188,23 +200,6 @@ export function BookCard({
       >
         {book.memberName}
       </span>
-      {onHideToggle && hideActionLabel && (
-        <button
-          type="button"
-          onClick={handleHideToggle}
-          aria-pressed={hideToggleActive}
-          style={{
-            border: "none",
-            background: "transparent",
-            color: "#4b5563",
-            fontSize: 12,
-            padding: 0,
-            cursor: "pointer",
-          }}
-        >
-          {hideActionLabel}
-        </button>
-      )}
     </div>
   );
 }

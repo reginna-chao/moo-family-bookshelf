@@ -6,10 +6,36 @@ import {
   fireEvent,
   waitFor,
   act,
+  within,
 } from "@testing-library/react";
 import React from "react";
 import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
 import { FamilyDataProvider } from "@/hooks/useFamilyData";
+import { HIDDEN_FILTER_VALUE } from "@/hooks/useFamilyShelfBooks";
+
+/** Walks up from the book title to the nearest card root containing its overflow trigger. */
+function cardOf(title: string): HTMLElement {
+  let el: HTMLElement | null = screen.getByText(title);
+  while (el) {
+    if (within(el).queryByRole("button", { name: "更多選項" })) return el;
+    el = el.parentElement;
+  }
+  throw new Error(`overflow trigger not found for card ${title}`);
+}
+
+/** Opens the overflow menu on the given book's card and clicks its hide/unhide item. */
+function triggerHideAction(title: string, itemName: string) {
+  const card = cardOf(title);
+  fireEvent.click(within(card).getByRole("button", { name: "更多選項" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: itemName }));
+}
+
+/** Switches the member dropdown to the cross-everyone hidden view. */
+function enterHiddenView() {
+  fireEvent.change(screen.getByLabelText("篩選成員"), {
+    target: { value: HIDDEN_FILTER_VALUE },
+  });
+}
 
 vi.mock("@/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/client")>();
@@ -123,7 +149,7 @@ describe("FamilyShelfPage — hide feature", () => {
     });
     expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "隱藏" })[0]);
+    triggerHideAction("書一", "隱藏書籍");
 
     await waitFor(() => {
       expect(screen.queryByText("書一")).not.toBeInTheDocument();
@@ -142,7 +168,7 @@ describe("FamilyShelfPage — hide feature", () => {
     expect(screen.queryByText(/隱藏 \d+ 本/)).not.toBeInTheDocument();
   });
 
-  it("「顯示已隱藏」lists ONLY hidden cards, and 取消隱藏 returns them to default view", async () => {
+  it("「隱藏的書」view lists ONLY hidden cards, and 取消隱藏 returns them to default view", async () => {
     const apiClient = createApiClient({
       ...aliceTwoBooks(),
       hidden: ["user-alice:b1"],
@@ -155,14 +181,14 @@ describe("FamilyShelfPage — hide feature", () => {
     expect(screen.queryByText("書一")).not.toBeInTheDocument();
     expect(screen.getByText("(可見 1 本，隱藏 1 本)")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "顯示已隱藏" }));
+    enterHiddenView();
 
     await waitFor(() => {
       expect(screen.getByText("書一")).toBeInTheDocument();
     });
     expect(screen.queryByText("書二")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "取消隱藏" }));
+    triggerHideAction("書一", "取消隱藏");
 
     await waitFor(() => {
       expect(screen.queryByText("書一")).not.toBeInTheDocument();
@@ -182,7 +208,7 @@ describe("FamilyShelfPage — hide feature", () => {
     });
 
     vi.useFakeTimers();
-    fireEvent.click(screen.getAllByRole("button", { name: "隱藏" })[0]);
+    triggerHideAction("書一", "隱藏書籍");
     await act(async () => {
       vi.advanceTimersByTime(600);
     });
@@ -257,8 +283,8 @@ describe("FamilyShelfPage — hide feature", () => {
       expect(screen.getByText("我的書")).toBeInTheDocument();
     });
 
-    // 我的書 is the first member's card → its 隱藏 button is the first.
-    fireEvent.click(screen.getAllByRole("button", { name: "隱藏" })[0]);
+    // Hide self's own book via its card's overflow menu.
+    triggerHideAction("我的書", "隱藏書籍");
 
     await waitFor(() => {
       expect(screen.queryByText("我的書")).not.toBeInTheDocument();

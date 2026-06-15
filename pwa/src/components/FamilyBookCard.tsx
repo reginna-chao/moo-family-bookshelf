@@ -1,6 +1,7 @@
 import { BookOpen } from "lucide-react";
 import { BoolFlag } from "@/api/client";
 import { LazyCover } from "@/components/LazyCover";
+import { OverflowMenu } from "@/components/OverflowMenu";
 import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
 
 export interface FamilyBookCardProps {
@@ -8,7 +9,6 @@ export interface FamilyBookCardProps {
   isOwnBook: boolean;
   showBorrowButton: boolean;
   borrowRequestPending: boolean;
-  showHidden: boolean;
   hideActionLabel: string;
   onBorrowClick: () => void;
   onHideToggle: () => void;
@@ -49,7 +49,6 @@ export function FamilyBookCard({
   isOwnBook,
   showBorrowButton,
   borrowRequestPending,
-  showHidden,
   hideActionLabel,
   onBorrowClick,
   onHideToggle,
@@ -96,14 +95,9 @@ export function FamilyBookCard({
           borrowRequestPending={borrowRequestPending}
           onBorrowClick={onBorrowClick}
         />
-        <button
-          type="button"
-          onClick={onHideToggle}
-          aria-pressed={showHidden}
-          className="inline-flex items-center text-[11px] text-gray-600 px-1 py-1"
-        >
-          {hideActionLabel}
-        </button>
+        <div className="ml-auto">
+          <OverflowMenu items={[{ label: hideActionLabel, onSelect: onHideToggle }]} />
+        </div>
       </div>
     </div>
   );

@@ -16,6 +16,7 @@ import { useBookSort } from "@/hooks/useBookSort";
 import { sortBooks } from "@/utils/sortBooks";
 import {
   useFamilyShelfBooks,
+  HIDDEN_FILTER_VALUE,
   type BookWithMember,
   type MemberFilterValue,
 } from "@/hooks/useFamilyShelfBooks";
@@ -45,9 +46,10 @@ export function FamilyShelfPage({
   const [filterMember, setFilterMember] =
     useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
-  const [showHidden, setShowHidden] = useState(false);
   const { viewMode, setViewMode } = useFamilyShelfViewMode(userId);
   const { sort, setSort } = useBookSort(userId, "family");
+
+  const showHidden = filterMember === HIDDEN_FILTER_VALUE;
 
   const memberCanLendMap = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -96,7 +98,6 @@ export function FamilyShelfPage({
     updatedBookIds,
     hiddenRefs,
     isHidden,
-    showHidden,
   });
 
   const categoryFilteredBooks = useMemo(
@@ -127,11 +128,6 @@ export function FamilyShelfPage({
     },
     [resetLoadMore],
   );
-
-  const handleShowHiddenToggle = useCallback(() => {
-    setShowHidden((prev) => !prev);
-    resetLoadMore();
-  }, [resetLoadMore]);
 
   if (state === "loading") {
     return <FamilyShelfLoading />;
@@ -167,8 +163,6 @@ export function FamilyShelfPage({
         userId={userId}
         sort={sort}
         onSortChange={setSort}
-        showHidden={showHidden}
-        onShowHiddenToggle={handleShowHiddenToggle}
       />
 
       {isFiltering && (

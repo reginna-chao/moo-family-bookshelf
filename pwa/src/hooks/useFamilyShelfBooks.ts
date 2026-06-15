@@ -10,6 +10,9 @@ export interface BookWithMember extends BookEntry {
   isUpdated: BoolFlag;
 }
 
+/** Sentinel filter value for the cross-everyone hidden-books view. */
+export const HIDDEN_FILTER_VALUE = "__hidden__";
+
 export type MemberFilterValue = "all" | "all-except-self" | string;
 
 function toBookWithMember(
@@ -30,7 +33,8 @@ function selectMembers(
   filterMember: MemberFilterValue,
   userId: string,
 ): MemberBooks[] {
-  if (filterMember === "all") {
+  // Hidden-view spans all members, ignoring member scoping.
+  if (filterMember === "all" || filterMember === HIDDEN_FILTER_VALUE) {
     return members;
   }
   if (filterMember === "all-except-self") {
@@ -46,7 +50,6 @@ export interface UseFamilyShelfBooksParams {
   updatedBookIds: Set<string>;
   hiddenRefs: Set<string>;
   isHidden: (ownerId: string, bookId: string) => boolean;
-  showHidden: boolean;
 }
 
 export interface UseFamilyShelfBooksResult {
@@ -75,8 +78,8 @@ export function useFamilyShelfBooks({
   updatedBookIds,
   hiddenRefs,
   isHidden,
-  showHidden,
 }: UseFamilyShelfBooksParams): UseFamilyShelfBooksResult {
+  const showHidden = filterMember === HIDDEN_FILTER_VALUE;
   const totalBooks = useMemo(
     () => members.reduce((sum, m) => sum + m.books.length, 0),
     [members],
