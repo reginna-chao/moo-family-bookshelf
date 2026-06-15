@@ -27,6 +27,16 @@ export function useFamilyShelfPrefs(
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Latest desired hidden array — read by the debounced flush. */
   const pendingRef = useRef<string[]>([]);
+  /**
+   * Latest fire-and-forget flush, refreshed every render so unmount cleanup
+   * reads the current userId/apiClient (not the values captured at mount).
+   */
+  const flushRef = useRef<() => void>(() => {});
+  flushRef.current = () => {
+    void apiClient.updateFamilyPrefs(userId, pendingRef.current).catch(() => {
+      // Optimistic local state is the session source of truth.
+    });
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -49,11 +59,14 @@ export function useFamilyShelfPrefs(
     })();
   }, [userId, apiClient]);
 
-  // Clear any pending flush timer on unmount.
+  // On unmount, flush any pending change before clearing the timer so a
+  // toggle made inside the debounce window is not silently lost.
   useEffect(() => {
     return () => {
       if (flushTimerRef.current !== null) {
+        flushRef.current();
         clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
       }
     };
   }, []);
@@ -83,14 +96,10 @@ export function useFamilyShelfPrefs(
       }
       flushTimerRef.current = setTimeout(() => {
         flushTimerRef.current = null;
-        void apiClient
-          .updateFamilyPrefs(userId, pendingRef.current)
-          .catch(() => {
-            // Optimistic local state is the session source of truth.
-          });
+        flushRef.current();
       }, FLUSH_DEBOUNCE_MS);
     },
-    [userId, apiClient],
+    [],
   );
 
   return { hiddenRefs, isHidden, toggleHidden };

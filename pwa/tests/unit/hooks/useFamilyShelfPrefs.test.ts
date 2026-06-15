@@ -92,7 +92,7 @@ describe("useFamilyShelfPrefs (PWA)", () => {
     );
   });
 
-  it("clears the pending timer on unmount — no flush after unmount", async () => {
+  it("flushes the pending change on unmount within the debounce window", async () => {
     const apiClient = createMockApiClient([]);
     const { result, unmount } = renderHook(() =>
       useFamilyShelfPrefs(USER, apiClient),
@@ -105,10 +105,33 @@ describe("useFamilyShelfPrefs (PWA)", () => {
     act(() => {
       result.current.toggleHidden("owner-1", "b1");
     });
+
+    // Unmount before the debounce fires — the cleanup flushes synchronously.
     unmount();
+
+    expect(apiClient.updateFamilyPrefs).toHaveBeenCalledTimes(1);
+    const [userIdArg, hiddenArg] = vi.mocked(
+      apiClient.updateFamilyPrefs,
+    ).mock.calls[0];
+    expect(userIdArg).toBe(USER);
+    expect([...hiddenArg]).toContain("owner-1:b1");
+
+    // The pending timer was cleared on unmount — no duplicate flush fires.
     act(() => {
       vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS * 2);
     });
+    expect(apiClient.updateFamilyPrefs).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not flush on unmount when there is no pending change", async () => {
+    const apiClient = createMockApiClient([]);
+    const { unmount } = renderHook(() => useFamilyShelfPrefs(USER, apiClient));
+    await waitFor(() => {
+      expect(apiClient.getPersonalBooks).toHaveBeenCalled();
+    });
+
+    // No toggle was made, so there is no pending timer to flush.
+    unmount();
 
     expect(apiClient.updateFamilyPrefs).not.toHaveBeenCalled();
   });
