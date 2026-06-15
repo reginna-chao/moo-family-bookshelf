@@ -81,6 +81,47 @@ describe("OverflowMenu", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("keeps the menu open when clicking inside the portaled menu", () => {
+    render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+    const menu = screen.getByRole("menu");
+    expect(menu).toBeInTheDocument();
+
+    // A mousedown landing on the menu container itself must NOT close it
+    // (validates isInsideMenu's check against the portaled menu ref).
+    fireEvent.mouseDown(menu);
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("keeps the menu open when clicking the trigger button (toggle, not outside)", () => {
+    render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+
+    const trigger = screen.getByRole("button", { name: "更多選項" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    // mousedown on the trigger is inside-menu → outside-click handler ignores it.
+    fireEvent.mouseDown(trigger);
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("portals the menu to document.body, not inside the trigger wrapper", () => {
+    const { container } = render(
+      <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+
+    const menu = screen.getByRole("menu");
+    // The menu must NOT live inside the component's own rendered subtree...
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+    // ...but it must exist somewhere under document.body (the portal target).
+    expect(document.body.contains(menu)).toBe(true);
+  });
+
   it("notifies onOpenChange when opening and closing", () => {
     const onOpenChange = vi.fn();
     render(
