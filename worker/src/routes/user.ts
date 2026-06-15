@@ -1,8 +1,8 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
-import { kvKeys, BoolFlag, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord, type PublicShelf, type BookEntry } from "../kv/schema";
+import { kvKeys, BoolFlag, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord, type PublicShelf, type BookEntry, MAX_FAMILY_PREF_ENTRIES } from "../kv/schema";
 import { writePublicSnapshot } from "./publicShelf";
-import { isValidUserId, sanitizeDisplayName } from "../utils/validation";
+import { isValidUserId, sanitizeDisplayName, isValidFamilyPrefRef } from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
@@ -104,6 +104,44 @@ export function validatePatchDisplayName(body: Record<string, unknown>): Validat
     return { ok: false, code: "INVALID_PAYLOAD", message: "displayName is invalid" };
   }
   return { ok: true };
+}
+
+export type ParseFamilyPrefsOk = { ok: true; hidden: string[] };
+export type ParseFamilyPrefsErr = { ok: false; code: "INVALID_PAYLOAD"; message: string };
+export type ParseFamilyPrefsResult = ParseFamilyPrefsOk | ParseFamilyPrefsErr;
+
+/**
+ * Validate the `hidden` array from a family-prefs PUT body, deduping entries
+ * (first-seen order preserved) before enforcing the max. An empty array is
+ * valid and means "clear all hidden". Returns an error descriptor on failure
+ * (caller converts to the appropriate HTTP response).
+ */
+export function parseFamilyPrefs(
+  body: Record<string, unknown>,
+  max: number,
+): ParseFamilyPrefsResult {
+  if (!Array.isArray(body.hidden)) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: "hidden array is required" };
+  }
+  const raw = body.hidden as unknown[];
+  const seen = new Set<string>();
+  const hidden: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string" || !isValidFamilyPrefRef(entry)) {
+      return {
+        ok: false,
+        code: "INVALID_PAYLOAD",
+        message: "Each hidden entry must be a string in the form '{ownerId}:{bookId}'",
+      };
+    }
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+    hidden.push(entry);
+  }
+  if (hidden.length > max) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: `hidden array exceeds maximum of ${max} entries` };
+  }
+  return { ok: true, hidden };
 }
 
 export const userRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
@@ -396,6 +434,108 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   await updateAllPublicSnapshots(c.env.KV, userId, shelves, record.books);
 
   return c.json({ data: { ok: true, applied } });
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/user/:id/family-prefs — per-viewer private family-shelf prefs (v1.5.0)
+// ---------------------------------------------------------------------------
+
+const putFamilyPrefsRoute = createRoute({
+  method: "put",
+  path: "/{id}/family-prefs",
+  tags: ["User"],
+  summary: "Save per-viewer family-shelf preferences (hidden books)",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("Saved family-shelf preferences"),
+    400: jsonRes("Invalid request"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Forbidden"),
+    404: jsonRes("User record not found"),
+    429: jsonRes("Rate limited"),
+  },
+});
+
+userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
+  const userId = c.req.param("id");
+
+  if (!isValidUserId(userId)) {
+    return c.json(
+      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
+      400,
+    );
+  }
+
+  const authUserId = getAuthenticatedUserId(c);
+  if (!authUserId) {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+      401,
+    );
+  }
+  if (authUserId !== userId) {
+    return c.json(
+      { error: { code: "FORBIDDEN", message: "Cannot modify another user's data" } },
+      403,
+    );
+  }
+
+  // Per-userId write rate limit: max 60 family-prefs saves per userId per hour.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId: authUserId,
+    scope: "family-prefs",
+    max: 60,
+    windowSec: 3600,
+  });
+  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rateLimitResponse as any;
+
+  let body: Record<string, unknown> | null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
+      400,
+    );
+  }
+
+  if (!body) {
+    return c.json(
+      { error: { code: "INVALID_PAYLOAD", message: "hidden array is required" } },
+      400,
+    );
+  }
+  const parsed = parseFamilyPrefs(body, MAX_FAMILY_PREF_ENTRIES);
+  if (!parsed.ok) {
+    return c.json({ error: { code: parsed.code, message: parsed.message } }, 400);
+  }
+  const { hidden } = parsed;
+
+  const existing = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
+  if (!existing) {
+    return c.json(
+      { error: { code: "NOT_FOUND", message: "User record not found" } },
+      404,
+    );
+  }
+
+  // Full-overwrite semantics: the client sends the complete desired hidden set
+  // each time. All other fields — books, displayName, publicSharing,
+  // schemaVersion, lastUpdated — are preserved untouched, and no public
+  // snapshot is written (this is a private per-viewer preference). Cross-device
+  // concurrent edits carry a lost-update risk, acceptable for the single-user
+  // scenario.
+  const record: UserBooksRecord = {
+    ...existing,
+    familyShelfPrefs: { hidden },
+  };
+
+  await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
+
+  return c.json({ data: { ok: true, hidden } });
 });
 
 // DELETE /api/user/:id — delete user account

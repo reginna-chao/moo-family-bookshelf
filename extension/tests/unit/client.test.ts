@@ -270,6 +270,48 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("updateFamilyPrefs", () => {
+    it("sends PUT to /api/user/:id/family-prefs with a { hidden } body", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: ["o1:b1"] });
+      const userId = "a".repeat(64);
+      const hidden = ["o1:b1", "o2:b2"];
+      await client.updateFamilyPrefs(userId, hidden);
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${MOCK_ENDPOINT}/api/user/${userId}/family-prefs`,
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ hidden }),
+        }),
+      );
+    });
+
+    it("unwraps the { data: { ok, hidden } } response envelope", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: ["o1:b1"] });
+      const userId = "a".repeat(64);
+      const result = await client.updateFamilyPrefs(userId, ["o1:b1"]);
+      expect(result.data).toEqual({ ok: true, hidden: ["o1:b1"] });
+    });
+
+    it("sends an empty hidden array as { hidden: [] }", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: [] });
+      const userId = "a".repeat(64);
+      await client.updateFamilyPrefs(userId, []);
+
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+      );
+      expect(body).toEqual({ hidden: [] });
+    });
+
+    it("surfaces server error responses through the envelope", async () => {
+      globalThis.fetch = mockFetchError("FORBIDDEN", "no access", 403);
+      const userId = "a".repeat(64);
+      const result = await client.updateFamilyPrefs(userId, ["o1:b1"]);
+      expect(result.error).toEqual({ code: "FORBIDDEN", message: "no access" });
+    });
+  });
+
   describe("createFamily", () => {
     it("sends POST to /api/family with userId and displayName", async () => {
       globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });

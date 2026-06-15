@@ -52,6 +52,8 @@ export interface PersonalBooks {
   displayName: string;
   books: BookEntry[];
   lastUpdated: string;
+  /** Viewer-private family-shelf preferences (v1.5.0). */
+  familyShelfPrefs?: { hidden: string[] };
   /** Preserve unknown fields from future schema versions */
   [key: string]: unknown;
 }
@@ -291,6 +293,19 @@ export class ApiClient {
   ): Promise<ApiResponse<{ ok: boolean; applied: number }>> {
     this.validateHexId(userId, "userId");
     return this.patch(`/api/user/${userId}/books`, { changes });
+  }
+
+  /**
+   * Update viewer-private family-shelf preferences (v1.5.0). Full-replace the
+   * hidden ref list (`{ownerId}:{bookId}`). Stored server-side so the hidden
+   * view stays consistent across Extension and PWA.
+   */
+  async updateFamilyPrefs(
+    userId: string,
+    hidden: string[],
+  ): Promise<ApiResponse<{ ok: boolean; hidden: string[] }>> {
+    this.validateHexId(userId, "userId");
+    return this.put(`/api/user/${userId}/family-prefs`, { hidden });
   }
 
   // --- Family Group ---

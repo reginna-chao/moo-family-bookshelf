@@ -29,6 +29,7 @@ import {
   type BookshelfSeenRecord,
   type BookshelfChipsRecord,
 } from "./updateTracking";
+import { useFamilyShelfPrefs } from "./useFamilyShelfPrefs";
 
 /** Member bookshelf for family shelf display */
 export interface MemberBooks {
@@ -77,6 +78,13 @@ interface FamilyDataState {
   hasBookshelfUpdates: boolean;
   /** Mark current bookshelf as seen: clears red dot, preserves chips for 24h */
   markBookshelfSeen: () => void;
+
+  /** Viewer-private family-shelf hidden refs (v1.5.0). */
+  hiddenRefs: Set<string>;
+  /** Whether a given copy-scoped card is hidden by the viewer. */
+  isHidden: (ownerId: string, bookId: string) => boolean;
+  /** Toggle a card's hidden state (optimistic + debounced server flush). */
+  toggleHidden: (ownerId: string, bookId: string) => void;
 }
 
 const FamilyDataContext = createContext<FamilyDataState | null>(null);
@@ -145,6 +153,12 @@ export function FamilyDataProvider({
   }, [freshUpdateBookIds, chipBookIds]);
 
   const hasBookshelfUpdates = freshUpdateBookIds.size > 0;
+
+  // --- Viewer-private hidden prefs (v1.5.0) ---
+  const { hiddenRefs, isHidden, toggleHidden } = useFamilyShelfPrefs(
+    userId,
+    apiClient,
+  );
 
   const mountedRef = useRef(true);
   const membersRef = useRef<FamilyMember[]>([]);
@@ -371,6 +385,9 @@ export function FamilyDataProvider({
       updatedBookIds,
       hasBookshelfUpdates,
       markBookshelfSeen,
+      hiddenRefs,
+      isHidden,
+      toggleHidden,
     }),
     [
       familyId,
@@ -395,6 +412,9 @@ export function FamilyDataProvider({
       updatedBookIds,
       hasBookshelfUpdates,
       markBookshelfSeen,
+      hiddenRefs,
+      isHidden,
+      toggleHidden,
     ],
   );
 

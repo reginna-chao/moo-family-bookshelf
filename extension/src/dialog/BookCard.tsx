@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { BookEntry, BoolFlag } from "../api/client";
 import { LazyCover } from "./LazyCover";
+import { OverflowMenu } from "./OverflowMenu";
 
 export interface BookWithMember extends BookEntry {
   memberName: string;
@@ -15,6 +16,10 @@ export interface BookCardProps {
   onBorrowClick?: () => void;
   /** Disables the borrow button (e.g. an existing PENDING request). */
   borrowRequestPending?: boolean;
+  /** Toggle hide/unhide for this copy-scoped card (v1.5.0). */
+  onHideToggle?: () => void;
+  /** Label for the hide/unhide menu item, e.g. "隱藏書籍" / "取消隱藏". */
+  hideActionLabel?: string;
 }
 
 export function FilterButton({
@@ -50,9 +55,14 @@ export function BookCard({
   showBorrowButton = false,
   onBorrowClick,
   borrowRequestPending = false,
+  onHideToggle,
+  hideActionLabel,
 }: BookCardProps) {
   const [hover, setHover] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const overlayVisible = showBorrowButton && hover;
+  const showMenu = Boolean(onHideToggle && hideActionLabel);
+  const menuVisible = showMenu && (hover || menuOpen);
 
   return (
     <div
@@ -133,6 +143,23 @@ export function BookCard({
             >
               {borrowRequestPending ? "申請中" : "申請借閱"}
             </button>
+          </div>
+        )}
+        {showMenu && hideActionLabel && onHideToggle && (
+          <div
+            style={{
+              position: "absolute",
+              top: 4,
+              right: 4,
+              opacity: menuVisible ? 1 : 0,
+              pointerEvents: menuVisible ? "auto" : "none",
+              transition: "opacity 0.15s",
+            }}
+          >
+            <OverflowMenu
+              items={[{ label: hideActionLabel, onSelect: onHideToggle }]}
+              onOpenChange={setMenuOpen}
+            />
           </div>
         )}
       </a>

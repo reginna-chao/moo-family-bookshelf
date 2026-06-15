@@ -2,12 +2,17 @@ import React from "react";
 import { BoolFlag } from "../api/client";
 import type { BookWithMember } from "./BookCard";
 import { LazyCover } from "./LazyCover";
+import { OverflowMenu } from "./OverflowMenu";
 
 export interface FamilyBookRowProps {
   book: BookWithMember;
   showBorrowButton?: boolean;
   onBorrowClick?: () => void;
   borrowRequestPending?: boolean;
+  /** Toggle hide/unhide for this copy-scoped card (v1.5.0). */
+  onHideToggle?: () => void;
+  /** Label for the hide/unhide menu item, e.g. "隱藏書籍" / "取消隱藏". */
+  hideActionLabel?: string;
 }
 
 export function FamilyBookRow({
@@ -15,6 +20,8 @@ export function FamilyBookRow({
   showBorrowButton = false,
   onBorrowClick,
   borrowRequestPending = false,
+  onHideToggle,
+  hideActionLabel,
 }: FamilyBookRowProps) {
   const handleBorrow = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -125,6 +132,14 @@ export function FamilyBookRow({
         >
           {borrowRequestPending ? "申請中" : "申請借閱"}
         </button>
+      )}
+      {onHideToggle && hideActionLabel && (
+        <span style={{ flexShrink: 0 }}>
+          <OverflowMenu
+            items={[{ label: hideActionLabel, onSelect: onHideToggle }]}
+            tone="plain"
+          />
+        </span>
       )}
     </a>
   );

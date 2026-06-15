@@ -93,4 +93,48 @@ describe("FamilyBookRow", () => {
     expect(link).toHaveAttribute("href", "https://readmoo.com/book/book-1");
     expect(link).toHaveAttribute("target", "_blank");
   });
+
+  describe("hide action overflow menu (v1.5.0)", () => {
+    it("renders the overflow trigger when onHideToggle and label are provided", () => {
+      render(
+        <FamilyBookRow book={makeBook()} onHideToggle={() => {}} hideActionLabel="隱藏書籍" />,
+      );
+      expect(screen.getByRole("button", { name: "更多選項" })).toBeInTheDocument();
+    });
+
+    it("shows the hide label as a menuitem after opening the menu", () => {
+      render(
+        <FamilyBookRow book={makeBook()} onHideToggle={() => {}} hideActionLabel="隱藏書籍" />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+      expect(screen.getByRole("menuitem", { name: "隱藏書籍" })).toBeInTheDocument();
+    });
+
+    it("shows the unhide label as a menuitem in showHidden mode", () => {
+      render(
+        <FamilyBookRow book={makeBook()} onHideToggle={() => {}} hideActionLabel="取消隱藏" />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+      expect(screen.getByRole("menuitem", { name: "取消隱藏" })).toBeInTheDocument();
+    });
+
+    it("does not render the overflow trigger when onHideToggle is missing", () => {
+      render(<FamilyBookRow book={makeBook()} hideActionLabel="隱藏書籍" />);
+      expect(screen.queryByRole("button", { name: "更多選項" })).not.toBeInTheDocument();
+    });
+
+    it("calls onHideToggle when the menuitem is clicked", () => {
+      const onHideToggle = vi.fn();
+      render(
+        <FamilyBookRow
+          book={makeBook()}
+          onHideToggle={onHideToggle}
+          hideActionLabel="隱藏書籍"
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "隱藏書籍" }));
+      expect(onHideToggle).toHaveBeenCalledTimes(1);
+    });
+  });
 });

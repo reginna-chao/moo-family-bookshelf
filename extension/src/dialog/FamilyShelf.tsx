@@ -1,41 +1,21 @@
-import React, { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { BoolFlag, BorrowStatus } from "../api/client";
-import { BookCard, BookWithMember } from "./BookCard";
-import { FamilyBookRow } from "./FamilyBookRow";
-import { MemberDropdown, MemberFilterValue } from "./MemberDropdown";
-import { SearchBar } from "./SearchBar";
+import { HIDDEN_FILTER_VALUE, type MemberFilterValue } from "./MemberDropdown";
 import { useSearch } from "./useSearch";
 import { useLoadMore } from "./useLoadMore";
-import { useFamilyData, MemberBooks } from "./FamilyDataContext";
-import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
+import { useFamilyData } from "./FamilyDataContext";
+import { filterByCategory } from "./CategoryDropdown";
 import { LoadingState } from "./LoadingState";
 import { useFamilyShelfViewMode } from "./useFamilyShelfViewMode";
-import { ViewModeToggle } from "./ViewModeToggle";
 import { useBookSort } from "./useBookSort";
 import { sortBooks } from "./sortBooks";
-import { BookSortDropdown } from "./BookSortDropdown";
+import { useFamilyShelfBooks, type FamilyShelfBook } from "./useFamilyShelfBooks";
+import { FamilyShelfBookList } from "./FamilyShelfBookList";
+import { FamilyShelfError, FamilyShelfEmpty } from "./FamilyShelfStatus";
+import { FamilyShelfToolbar } from "./FamilyShelfToolbar";
 
 export interface FamilyShelfProps {
   userId: string;
-}
-
-interface BookOwnership {
-  ownerId: string;
-}
-
-type FamilyShelfBook = BookWithMember & BookOwnership;
-
-function toBookWithMember(
-  member: MemberBooks,
-  updatedBookIds: Set<string>,
-): FamilyShelfBook[] {
-  const name = member.displayName || member.userId.slice(0, 8);
-  return member.books.map((b) => ({
-    ...b,
-    memberName: name,
-    ownerId: member.userId,
-    isUpdated: updatedBookIds.has(b.bookId) ? BoolFlag.TRUE : BoolFlag.FALSE,
-  }));
 }
 
 export function FamilyShelf({ userId }: FamilyShelfProps) {
@@ -50,6 +30,9 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     refreshBorrowRequests,
     apiClient,
     familyId,
+    hiddenRefs,
+    isHidden,
+    toggleHidden,
   } = useFamilyData();
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -57,18 +40,16 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   const { viewMode, setViewMode } = useFamilyShelfViewMode();
   const { sort, setSort } = useBookSort("family");
 
-  const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
+  const showHidden = filterMember === HIDDEN_FILTER_VALUE;
 
-  const memberFilteredBooks = (() => {
-    const toBooks = (m: MemberBooks) => toBookWithMember(m, updatedBookIds);
-    if (filterMember === "all") {
-      return members.flatMap(toBooks);
-    }
-    if (filterMember === "all-except-self") {
-      return members.filter((m) => m.userId !== userId).flatMap(toBooks);
-    }
-    return members.filter((m) => m.userId === filterMember).flatMap(toBooks);
-  })();
+  const { memberFilteredBooks, totalBooks, headingCount } = useFamilyShelfBooks({
+    members,
+    filterMember,
+    userId,
+    updatedBookIds,
+    hiddenRefs,
+    isHidden,
+  });
 
   const categoryFilteredBooks = filterByCategory(memberFilteredBooks, categoryFilter);
 
@@ -136,126 +117,52 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
 
   if (state === "error") {
     return (
-      <div style={{ padding: 16 }}>
-        <p style={{ color: "#ef4444", fontSize: 14, marginBottom: 12 }}>
-          {errorMessage}
-        </p>
-        <button
-          onClick={() => void loadBookshelf()}
-          style={{
-            padding: "8px 16px",
-            border: "1px solid #2563eb",
-            borderRadius: 8,
-            background: "transparent",
-            color: "#2563eb",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          重試
-        </button>
-      </div>
+      <FamilyShelfError
+        message={errorMessage}
+        onRetry={() => void loadBookshelf()}
+      />
     );
   }
 
   if (totalBooks === 0) {
-    return (
-      <div style={{ padding: 16, textAlign: "center" }}>
-        <p style={{ color: "#94a3b8", marginTop: 16 }}>尚無家人分享書籍</p>
-        <p style={{ color: "#cbd5e1", fontSize: 13, marginTop: 8 }}>
-          家庭成員需在「個人書櫃」中開放書籍後才會出現在這裡
-        </p>
-      </div>
-    );
+    return <FamilyShelfEmpty />;
   }
 
   return (
     <div>
-      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
-        家庭開放書櫃
-        <span
-          style={{
-            fontWeight: 400,
-            color: "#94a3b8",
-            marginLeft: 8,
-            fontSize: 13,
-          }}
-        >
-          ({totalBooks} 本)
-        </span>
-      </h3>
+      <FamilyShelfToolbar
+        headingCount={headingCount}
+        members={members}
+        userId={userId}
+        filterMember={filterMember}
+        onMemberFilterChange={handleMemberFilterChange}
+        sort={sort}
+        onSortChange={setSort}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchTotalCount={categoryFilteredBooks.length}
+        searchFilteredCount={visibleBooks.length}
+        isFiltering={isFiltering}
+        categoryBooks={memberFilteredBooks}
+        categoryFilter={categoryFilter}
+        onCategoryChange={setCategoryFilter}
+        categoryOpen={categoryOpen}
+        onCategoryToggle={() => setCategoryOpen((prev) => !prev)}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <div style={{ flex: 1 }}>
-          <MemberDropdown
-            members={members}
-            userId={userId}
-            value={filterMember}
-            onChange={handleMemberFilterChange}
-          />
-        </div>
-        <BookSortDropdown value={sort} onChange={setSort} />
-      </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <div style={{ flex: 1 }}>
-          <SearchBar
-            value={searchTerm}
-            onChange={setSearchTerm}
-            totalCount={categoryFilteredBooks.length}
-            filteredCount={visibleBooks.length}
-            isFiltering={isFiltering}
-          />
-        </div>
-        <CategoryFilter
-          books={memberFilteredBooks}
-          value={categoryFilter}
-          onChange={setCategoryFilter}
-          open={categoryOpen}
-          onToggle={() => setCategoryOpen(prev => !prev)}
-        />
-        <ViewModeToggle mode={viewMode} onChange={setViewMode} />
-      </div>
-
-      <div
-        style={
-          viewMode === "grid"
-            ? {
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-                gap: 12,
-              }
-            : undefined
-        }
-      >
-        {visibleBooks.map((book) => {
-          const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
-          const isOwnBook = book.ownerId === userId;
-          const showBorrowButton = !isOwnBook && viewerCanLend && ownerCanLend;
-          const borrowRequestPending = pendingBookIds.has(book.bookId);
-          const key = `${book.memberName}-${book.bookId}`;
-          const onBorrowClick = () => void handleBorrowClick(book);
-          if (viewMode === "row") {
-            return (
-              <FamilyBookRow
-                key={key}
-                book={book}
-                showBorrowButton={showBorrowButton}
-                borrowRequestPending={borrowRequestPending}
-                onBorrowClick={onBorrowClick}
-              />
-            );
-          }
-          return (
-            <BookCard
-              key={key}
-              book={book}
-              showBorrowButton={showBorrowButton}
-              borrowRequestPending={borrowRequestPending}
-              onBorrowClick={onBorrowClick}
-            />
-          );
-        })}
-      </div>
+      <FamilyShelfBookList
+        books={visibleBooks}
+        viewMode={viewMode}
+        userId={userId}
+        viewerCanLend={viewerCanLend}
+        showHidden={showHidden}
+        memberCanLendMap={memberCanLendMap}
+        pendingBookIds={pendingBookIds}
+        onBorrow={(book) => void handleBorrowClick(book)}
+        onToggleHidden={toggleHidden}
+      />
 
       {hasMore && (
         <button onClick={loadMore} style={{

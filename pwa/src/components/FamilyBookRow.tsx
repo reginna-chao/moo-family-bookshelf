@@ -3,6 +3,7 @@ import { BookOpen } from "lucide-react";
 import { BoolFlag } from "@/api/client";
 import type { BookEntry } from "@/api/client";
 import { LazyCover } from "@/components/LazyCover";
+import { OverflowMenu } from "@/components/OverflowMenu";
 
 export interface FamilyBookRowBook extends BookEntry {
   memberName: string;
@@ -15,6 +16,10 @@ export interface FamilyBookRowProps {
   showBorrowButton?: boolean;
   borrowRequestPending?: boolean;
   onBorrowClick?: () => void;
+  /** Toggle hide/unhide for this copy-scoped card (v1.5.0). */
+  onHideToggle?: () => void;
+  /** Label for the hide/unhide menu item, e.g. "隱藏書籍" / "取消隱藏". */
+  hideActionLabel?: string;
 }
 
 export function FamilyBookRow({
@@ -22,6 +27,8 @@ export function FamilyBookRow({
   showBorrowButton = false,
   borrowRequestPending = false,
   onBorrowClick,
+  onHideToggle,
+  hideActionLabel,
 }: FamilyBookRowProps) {
   const handleBorrow = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -76,6 +83,11 @@ export function FamilyBookRow({
         >
           {borrowRequestPending ? "申請中" : "申請借閱"}
         </button>
+      )}
+      {onHideToggle && hideActionLabel && (
+        <span className="flex-shrink-0">
+          <OverflowMenu items={[{ label: hideActionLabel, onSelect: onHideToggle }]} />
+        </span>
       )}
     </a>
   );

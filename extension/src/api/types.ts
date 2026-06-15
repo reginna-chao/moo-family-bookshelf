@@ -30,6 +30,8 @@ export interface PersonalBooks {
   displayName: string;
   books: BookEntry[];
   lastUpdated: string;
+  /** Viewer-private family-shelf preferences (v1.5.0). */
+  familyShelfPrefs?: { hidden: string[] };
   /** Preserve unknown fields from future schema versions */
   [key: string]: unknown;
 }

@@ -537,7 +537,7 @@ describe("FamilyShelfPage", () => {
     renderWithProvider(defaultProps);
 
     await waitFor(() => {
-      expect(screen.getByText("(3 本)")).toBeInTheDocument();
+      expect(screen.getByText("(可見 3 本)")).toBeInTheDocument();
     });
   });
 

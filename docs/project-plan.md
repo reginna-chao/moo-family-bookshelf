@@ -952,31 +952,51 @@ jobs:
 
 - **完成狀態**：#31 / #32 實作完成 2026-06-03（branch `feat/wave-l-book-patch-api`，commits `aa7462f` BE + `dc81f79` FE）；FE 1 輪 + BE 1 輪 Fix Cycle，修復 1 項 CRITICAL（連續儲存 server-known 污染致資料遺失）+ 採納 3 項 SUGGESTION；三端 typecheck/test/E2E 全綠（Worker 478 / Extension 1077 / PWA 403），security scan（full）PASS。#33 待上線後啟動。
 
-### Phase 9：v1.5.0 — 隱藏書籍可逆（規劃中）
+### Phase 9：v1.5.0 — 隱藏書籍可逆（實作中）
 
-> 補齊「隱藏書籍」流程，使其可逆且可重新顯示。
+> 讓使用者把家庭書櫃中不想看到的書「隱藏」，且可逆、可重新顯示。
+> **本版本只做隱藏**；「我的最愛」（原 Phase 10）延後獨立發布。
+> **設計確認日期**：2026-06-12
 
-##### Wave D — 隱藏書籍可逆與篩選
+##### Wave D — 家庭書櫃隱藏書籍（觀看者私有、可逆）
 
-- [ ] **#2 隱藏書籍可重新顯示 + 篩選顯示已隱藏書籍**
-  - 個人書櫃 `StatusFilterBar` 增加「已隱藏」篩選選項（現有：全部 / 已開放 / 未開放）
-  - 已隱藏視圖支援「取消隱藏」操作
-  - 影響：`extension/src/dialog/PersonalShelf.tsx`、PWA 對應頁面
-  - 注意：「隱藏」目前的存放欄位需確認是否已有，或需擴充 `BookEntry`（schema 微調）
+> **核心語意（與原始 #2 描述不同，以本段為準）**：隱藏是**觀看者私有的家庭書櫃偏好**，
+> 「只在家庭書櫃作用、只影響自己的 view、不影響家人紀錄」。**不是** owner 端的分享開關，
+> 也與讀墨封存 `isArchived` 無關。原 #2 提到的「個人書櫃 StatusFilterBar 已隱藏選項」框架已**作廢**。
 
-### Phase 10：v1.6.0 — 我的最愛（規劃中）
+- [ ] **#2 家庭書櫃隱藏書籍可逆 + 篩選顯示已隱藏**
+  - **作用範圍**：僅家庭書櫃（`FamilyShelf` / PWA `FamilyShelfPage`）。個人書櫃不動。
+  - **可隱藏對象**：家庭書櫃中任一張卡片，含自己開放的書（隱藏自己的只影響自己的 view，家人仍看得到）。
+  - **key 模型（copy-scoped）**：偏好以 `{ownerId}:{bookId}` 為單位（ownerId = 64 字元 SHA-256 hex，`:` 分隔安全）。
+    對應家庭書櫃「依成員分組、不去重」的渲染（同書名不同成員 = 兩張卡 = 兩筆獨立紀錄）。
+  - **儲存位置**：觀看者自己的 `user:{userId}` record 新增 `familyShelfPrefs.hidden: string[]`（持久化、跨 Extension/PWA、不隨家庭變動）。
+  - **持久化方式**：toggle 即時生效（optimistic）+ debounce 後 `PUT /api/user/:id/family-prefs` 全量覆寫。
+    隱藏是檢視偏好、非分享設定，**不受 Invariant 3（save-before-sync）約束**，無需手動儲存按鈕。
+  - **計數顯示**：標題旁 `(N 本)` 改為 `(可見 N 本，隱藏 M 本)`；`M > 0` 才顯示「隱藏 M 本」後半（沿用全域總數語意，不受成員/搜尋 filter 影響）。
+  - **篩選**：家庭書櫃新增「顯示已隱藏」切換 → 只列出已隱藏卡片，每張提供「取消隱藏」。預設檢視排除已隱藏卡片，每張提供「隱藏」。
+  - **成員變更語意（孤兒忽略）**：一筆偏好只有在其 `(ownerId, bookId)` 仍存在於當前家庭書櫃時才生效；否則視為孤兒、渲染時忽略，不需 migration。
+    - 情境 A（無重複書）：成員離開 → 其書離開書櫃 → 對應隱藏紀錄成孤兒自動失效。
+    - 情境 B（有重複書）：因 key 含 ownerId，每位成員的同名書是獨立紀錄；舊成員離開其紀錄成孤兒，新成員的同名書是全新、不繼承舊隱藏。
+  - **後端**：family bookshelf 聚合端點不變（隱藏是觀看者自己 record 的偏好，前端過濾）。新增 `PUT /api/user/:id/family-prefs` + schema `familyShelfPrefs`。
+  - **影響**：`worker/src/kv/schema.ts`、`worker/src/routes/user.ts`、`extension/src/dialog/FamilyShelf.tsx` + Context/hooks、`pwa/src/` 對應頁面、雙端 `api/client.ts`。
 
-> schema 擴充與借閱前 UX 強化。
+### Phase 10：v1.6.0 — 我的最愛（規劃中，與隱藏對稱）
 
-##### Wave F — 我的最愛
+> **設計已於 2026-06-12 重新定調**：我的最愛改為**觀看者私有**，與 Phase 9 隱藏功能**同構**，
+> 直接複用隱藏的基礎建設（`familyShelfPrefs` 容器 + copy-scoped key + 同一套成員變更孤兒語意）。
+> 原本「owner-scoped、對家人公開（選項 B）」的設計**作廢**。
 
-- [ ] **#11 個人書籍可標記「我的最愛」，家庭書櫃可快速篩選對方的最愛**
-  - schema：`BookEntry` 新增 `isFavorite: BoolFlag`（與 `isShared` 並列）
-  - 個人書櫃 toggle；家庭書櫃成員篩選下方加「只看最愛」開關
-  - **設計問題**：是否要對家人公開「最愛」標記？
-    - 選項 A：僅自己可見（最愛 ≠ 開放，純個人筆記）
-    - 選項 B：對家人公開（家人借書前可優先借「對方推薦」的書）
-  - 預設建議 **B**（與借閱目的一致；若使用者不希望公開，仍可不勾「分享」）
+##### Wave F — 家庭書櫃我的最愛（觀看者私有）
+
+- [ ] **#11 家庭書櫃可標記「我的最愛」+ 篩選只看最愛**
+  - **語意（與隱藏對稱）**：最愛是觀看者私有標記，只在家庭書櫃作用、只影響自己、不公開給家人（家人不知道我把哪些書加最愛）。
+  - **資料模型**：沿用 Phase 9 的 `familyShelfPrefs` 容器，擴充 `favorites: string[]`（同樣 `{ownerId}:{bookId}` copy-scoped）。
+    schema 與 API 形狀無需新增——`PUT /api/user/:id/family-prefs` body 擴充 `favorites` 欄位即可。
+    **不採用** owner 端 `BookEntry.isFavorite`（那會公開給家人，違反新語意）。
+  - **UI**：家庭書櫃每張卡片加「加入/移除最愛」；成員篩選旁加「只看最愛」切換 filter。
+  - **與隱藏共存**：最愛與隱藏互不衝突，同一本書可同時是最愛與被隱藏（兩個獨立集合）。
+  - **成員變更語意**：與隱藏完全相同——孤兒紀錄（`(ownerId, bookId)` 不在當前書櫃）渲染時忽略，新成員不繼承。
+  - **前置依賴**：Phase 9 的 `familyShelfPrefs` 容器與 `family-prefs` 端點須先上線（v1.5.0）。
 
 ---
 
