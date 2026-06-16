@@ -1,6 +1,33 @@
 import "@testing-library/jest-dom/vitest";
 
-// Mock chrome.runtime and chrome.storage for tests
+/**
+ * Test environment mock for the WebExtension APIs.
+ *
+ * Production code was migrated (Wave #34) from the Chrome-only callback APIs
+ * (`chrome.*`) to the promise-based `webextension-polyfill` (`browser.*`).
+ * `import browser from "webextension-polyfill"` resolves as follows (see
+ * node_modules/webextension-polyfill/dist/browser-polyfill.js):
+ *
+ *   - If `globalThis.browser` already exists AND has `runtime.id`, the polyfill
+ *     returns that object verbatim (no wrapping).
+ *   - Otherwise it wraps `globalThis.chrome`.
+ *
+ * We exploit the first branch: by defining `globalThis.browser` here with a
+ * valid `runtime.id`, every `import browser from "webextension-polyfill"` in
+ * production code resolves to OUR mock.
+ *
+ * To keep the ~290 existing `chrome.*` assertions working with zero churn,
+ * `globalThis.chrome` and `globalThis.browser` are the SAME object: the spies
+ * (`vi.fn()`) are shared, so a test that asserts on `chrome.storage.local.get`
+ * observes the exact call production made via `browser.storage.local.get`.
+ *
+ * The mock is promise-style: `get`/`set`/`remove`/`clear` and `sendMessage`
+ * return Promises. For back-compat with the few tests that still pass a Chrome
+ * callback, the storage methods also invoke a trailing callback if provided.
+ * `chrome.runtime.lastError` is retained for back-compat; the promise API never
+ * consults it (errors are modeled as rejected promises instead).
+ */
+
 const localStorageMock: Record<string, unknown> = {};
 const syncStorageMock: Record<string, unknown> = {};
 
@@ -33,6 +60,7 @@ function createStorageAreaMock(store: Record<string, unknown>) {
         delete store[key];
       }
       callback?.();
+      return Promise.resolve();
     }),
     clear: vi.fn((callback?: () => void) => {
       for (const key of Object.keys(store)) {
@@ -44,8 +72,8 @@ function createStorageAreaMock(store: Record<string, unknown>) {
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(globalThis as any).chrome = {
+// Single shared mock surface, aliased as both `chrome` and `browser`.
+const extensionApiMock = {
   runtime: {
     id: "mock-extension-id",
     getURL: vi.fn((path: string) => `chrome-extension://mock-extension-id/${path}`),
@@ -85,4 +113,12 @@ function createStorageAreaMock(store: Record<string, unknown>) {
     setBadgeText: vi.fn(),
     setBadgeBackgroundColor: vi.fn(),
   },
-} as unknown as typeof chrome;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).chrome = extensionApiMock as unknown as typeof chrome;
+// `browser` must carry a valid `runtime.id` so webextension-polyfill returns it
+// verbatim instead of re-wrapping `chrome`. Shares the same spy objects as
+// `chrome`, so assertions on either alias observe identical recorded calls.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).browser = extensionApiMock;

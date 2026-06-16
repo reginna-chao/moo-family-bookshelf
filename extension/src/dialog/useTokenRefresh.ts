@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import browser from "webextension-polyfill";
 import type { ApiClient } from "../api/client";
 import { isExtensionContextValid } from "../utils/extensionContext";
 import { TOKEN_EXPIRES_AT_KEY } from "../constants";
@@ -21,7 +22,7 @@ export function useTokenRefresh(apiClient: ApiClient): void {
 
       let tokenExpiresAt: number | undefined;
       try {
-        const result = await chrome.storage.local.get(TOKEN_EXPIRES_AT_KEY);
+        const result = await browser.storage.local.get(TOKEN_EXPIRES_AT_KEY);
         tokenExpiresAt = result[TOKEN_EXPIRES_AT_KEY] as number | undefined;
       } catch {
         // Extension context may have been invalidated between the check and the call
@@ -43,7 +44,7 @@ export function useTokenRefresh(apiClient: ApiClient): void {
         if (success) {
           // Re-read tokenExpiresAt to see if it was updated by the refresh
           try {
-            const updated = await chrome.storage.local.get(TOKEN_EXPIRES_AT_KEY);
+            const updated = await browser.storage.local.get(TOKEN_EXPIRES_AT_KEY);
             const newExpiry = updated[TOKEN_EXPIRES_AT_KEY] as number | undefined;
             const newDelay = newExpiry
               ? newExpiry - Date.now() - REFRESH_BUFFER_MS

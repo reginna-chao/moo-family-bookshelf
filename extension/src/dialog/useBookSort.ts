@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import browser from "webextension-polyfill";
 import type { BookSortMode } from "./sortBooks";
 
 export type BookSortShelf = "family" | "personal";
@@ -23,15 +24,24 @@ export function useBookSort(shelf: BookSortShelf): UseBookSortReturn {
   }, [sort]);
 
   useEffect(() => {
-    chrome.runtime.sendMessage(
-      { type: "GET_BOOK_SORT", shelf },
-      (response) => {
-        if (chrome.runtime.lastError) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = (await browser.runtime.sendMessage({
+          type: "GET_BOOK_SORT",
+          shelf,
+        })) as { sort?: unknown } | undefined;
+        if (cancelled) return;
         if (isSortMode(response?.sort)) {
           setSortState(response.sort);
         }
-      },
-    );
+      } catch {
+        // Background unavailable — keep default
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [shelf]);
 
   const setSort = useCallback(
@@ -39,14 +49,20 @@ export function useBookSort(shelf: BookSortShelf): UseBookSortReturn {
       const prev = sortRef.current;
       if (prev === next) return;
       setSortState(next);
-      chrome.runtime.sendMessage(
-        { type: "SET_BOOK_SORT", shelf, sort: next },
-        (response) => {
-          if (chrome.runtime.lastError || !response?.ok) {
+      void (async () => {
+        try {
+          const response = (await browser.runtime.sendMessage({
+            type: "SET_BOOK_SORT",
+            shelf,
+            sort: next,
+          })) as { ok?: boolean } | undefined;
+          if (!response?.ok) {
             setSortState(prev);
           }
-        },
-      );
+        } catch {
+          setSortState(prev);
+        }
+      })();
     },
     [shelf],
   );

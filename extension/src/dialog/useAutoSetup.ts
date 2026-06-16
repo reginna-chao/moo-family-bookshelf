@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react";
+import browser from "webextension-polyfill";
 import {
   scrapeUserEmail,
   scrapeDisplayName,
@@ -111,7 +112,7 @@ export function useAutoSetup(): UseAutoSetupReturn {
         return null;
       }
 
-      await chrome.storage.local.set({
+      await browser.storage.local.set({
         [USER_EMAIL_KEY]: result.email,
         [DISPLAY_NAME_KEY]: result.displayName,
       });

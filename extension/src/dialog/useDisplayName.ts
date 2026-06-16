@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import browser from "webextension-polyfill";
 import { ApiClient } from "../api/client";
 import { DISPLAY_NAME_KEY } from "../constants";
 
@@ -60,7 +61,8 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
     // context is still loading. Cancel on unmount so the deferred callback
     // can't setState on a dead component.
     let cancelled = false;
-    chrome.storage.local.get([DISPLAY_NAME_KEY], (result) => {
+    void (async () => {
+      const result = await browser.storage.local.get([DISPLAY_NAME_KEY]);
       if (cancelled) return;
       const cached = (result[DISPLAY_NAME_KEY] as string | undefined) ?? "";
       if (!cached) return;
@@ -68,7 +70,7 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
       if (savedDisplayNameRef.current !== "") return;
       setSavedDisplayName(cached);
       setDisplayName((prev) => (prev === "" ? cached : prev));
-    });
+    })();
 
     return () => { cancelled = true; };
   }, [options?.initialDisplayName]);
@@ -101,8 +103,8 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
         }
       }
 
-      await chrome.storage.local.set({ [DISPLAY_NAME_KEY]: trimmed });
-      await chrome.storage.sync.set({ [DISPLAY_NAME_KEY]: trimmed });
+      await browser.storage.local.set({ [DISPLAY_NAME_KEY]: trimmed });
+      await browser.storage.sync.set({ [DISPLAY_NAME_KEY]: trimmed });
       setDisplayName(trimmed);
       setSavedDisplayName(trimmed);
       setNameSaveState("saved");

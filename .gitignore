@@ -4,7 +4,10 @@ node_modules/
 
 # Build output
 dist/
+dist-firefox/
+web-ext-artifacts/
 *.zip
+*.xpi
 
 # Environment & secrets
 .env

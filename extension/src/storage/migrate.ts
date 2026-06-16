@@ -23,6 +23,7 @@
  *   the migration retries on the next startup because the flag stays unset.
  */
 
+import browser from "webextension-polyfill";
 import { STORAGE_MIGRATED_KEY } from "../constants";
 
 const NEW_PREFIX = "moo:";
@@ -67,7 +68,9 @@ function isLegacyKey(key: string): boolean {
  * Migrate legacy keys within a single storage area.
  * Writes new keys first, then removes the old ones.
  */
-async function migrateArea(area: chrome.storage.StorageArea): Promise<void> {
+async function migrateArea(
+  area: browser.Storage.StorageArea,
+): Promise<void> {
   const all = await area.get(null);
 
   const toSet: Record<string, unknown> = {};
@@ -100,18 +103,18 @@ async function migrateArea(area: chrome.storage.StorageArea): Promise<void> {
  */
 export async function migrateStorageKeys(): Promise<void> {
   try {
-    const flag = await chrome.storage.local.get(STORAGE_MIGRATED_KEY);
+    const flag = await browser.storage.local.get(STORAGE_MIGRATED_KEY);
     if (flag[STORAGE_MIGRATED_KEY]) return;
 
-    await migrateArea(chrome.storage.local);
+    await migrateArea(browser.storage.local);
 
     try {
-      await migrateArea(chrome.storage.sync);
+      await migrateArea(browser.storage.sync);
     } catch {
       // sync storage may be unavailable in some contexts — local migration still counts
     }
 
-    await chrome.storage.local.set({ [STORAGE_MIGRATED_KEY]: true });
+    await browser.storage.local.set({ [STORAGE_MIGRATED_KEY]: true });
   } catch {
     // Best-effort: never crash the background worker. Retries next startup
     // because the migration flag stays unset.

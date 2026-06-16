@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import browser from "webextension-polyfill";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { encodeSyncCode } from "../crypto/syncCode";
@@ -76,24 +77,42 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const membersLoading = membersState === "loading";
 
   useEffect(() => {
-    chrome.runtime.sendMessage({ type: "GET_SYNC_ARCHIVED" }, (response) => {
-      if (response?.syncArchived !== undefined) {
-        setSyncArchived(response.syncArchived);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = (await browser.runtime.sendMessage({
+          type: "GET_SYNC_ARCHIVED",
+        })) as { syncArchived?: number } | undefined;
+        if (cancelled) return;
+        if (response?.syncArchived !== undefined) {
+          setSyncArchived(response.syncArchived);
+        }
+      } catch {
+        // Background unavailable — keep default
       }
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleToggleSyncArchived = useCallback(() => {
-    const newValue = syncArchived === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
+    const prev = syncArchived;
+    const newValue = prev === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
     setSyncArchived(newValue);
-    chrome.runtime.sendMessage(
-      { type: "SET_SYNC_ARCHIVED", syncArchived: newValue },
-      (response) => {
+    void (async () => {
+      try {
+        const response = (await browser.runtime.sendMessage({
+          type: "SET_SYNC_ARCHIVED",
+          syncArchived: newValue,
+        })) as { ok?: boolean } | undefined;
         if (!response?.ok) {
-          setSyncArchived(syncArchived);
+          setSyncArchived(prev);
         }
-      },
-    );
+      } catch {
+        setSyncArchived(prev);
+      }
+    })();
   }, [syncArchived]);
 
   useEffect(() => {
@@ -114,10 +133,14 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     const currentEndpoint = apiClient.getEndpoint();
     if (familyEndpoint && familyEndpoint !== currentEndpoint) {
       apiClient.setEndpoint(familyEndpoint);
-      chrome.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: familyEndpoint });
+      void Promise.resolve(
+        browser.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: familyEndpoint }),
+      ).catch(() => {});
     } else if (!familyEndpoint && currentEndpoint !== DEFAULT_API_ENDPOINT) {
       apiClient.setEndpoint(DEFAULT_API_ENDPOINT);
-      chrome.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: null });
+      void Promise.resolve(
+        browser.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: null }),
+      ).catch(() => {});
     }
   }, [membersState, familyEndpoint, apiClient]);
 
@@ -181,7 +204,14 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         setDeleteState("idle");
         return;
       }
-      chrome.storage.local.clear();
+      // Best-effort local cleanup: the server account is already deleted and
+      // non-reversible, so the server state is the source of truth. A failure
+      // to clear local storage must not block onLeave() or surface as an error.
+      try {
+        await browser.storage.local.clear();
+      } catch (clearErr) {
+        console.warn("[FamilySettings] Failed to clear local storage after account deletion", clearErr);
+      }
       onLeave();
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "發生未知錯誤");

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import browser from "webextension-polyfill";
 import { ApiClient } from "../api/client";
 import { DISPLAY_NAME_KEY } from "../constants";
 import { LoadingOverlay } from "./LoadingOverlay";
@@ -26,11 +27,17 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
 
   // Check if user has previously used the extension (has displayName stored)
   useEffect(() => {
-    chrome.storage.local.get([DISPLAY_NAME_KEY], (result) => {
+    let cancelled = false;
+    void (async () => {
+      const result = await browser.storage.local.get([DISPLAY_NAME_KEY]);
+      if (cancelled) return;
       if (result[DISPLAY_NAME_KEY]) {
         setHasUsedBefore(true);
       }
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleCopy = async () => {

@@ -7,6 +7,7 @@
  * Callers are expected to map errors into UI state.
  */
 
+import browser from "webextension-polyfill";
 import { ApiClient, FamilyGroup, BookEntry, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 import { decodeSyncCode, encodeSyncCode } from "../crypto/syncCode";
 import {
@@ -29,7 +30,7 @@ export async function migratePersonalBooksCache(
   apiClient: ApiClient,
 ): Promise<void> {
   try {
-    const result = await chrome.storage.local.get([PERSONAL_BOOKS_CACHE_KEY, DISPLAY_NAME_KEY]);
+    const result = await browser.storage.local.get([PERSONAL_BOOKS_CACHE_KEY, DISPLAY_NAME_KEY]);
     const raw = result[PERSONAL_BOOKS_CACHE_KEY] as string | undefined;
     if (!raw) return;
 
@@ -43,11 +44,11 @@ export async function migratePersonalBooksCache(
       lastUpdated: new Date().toISOString(),
     };
     await apiClient.updatePersonalBooks(userId, personalBooks);
-    await chrome.storage.local.remove([PERSONAL_BOOKS_CACHE_KEY]);
+    await browser.storage.local.remove([PERSONAL_BOOKS_CACHE_KEY]);
   } catch {
     // Cache migration is best-effort; don't block family join/create
     console.warn("[Onboarding] Failed to migrate personal books cache");
-    await chrome.storage.local.remove([PERSONAL_BOOKS_CACHE_KEY]);
+    await browser.storage.local.remove([PERSONAL_BOOKS_CACHE_KEY]);
   }
 }
 
@@ -66,7 +67,7 @@ async function persistJoinCredentials(opts: {
   if (opts.expiresAt) {
     storageData[TOKEN_EXPIRES_AT_KEY] = opts.expiresAt;
   }
-  await chrome.storage.local.set(storageData);
+  await browser.storage.local.set(storageData);
 }
 
 export interface RecoveryResult {
@@ -95,7 +96,9 @@ export async function tryAutoRecovery(opts: {
 
   const joinData = joinRes.data;
 
-  chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: opts.familyId });
+  void Promise.resolve(
+    browser.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: opts.familyId }),
+  ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
     authToken: joinData?.authToken,
@@ -103,7 +106,7 @@ export async function tryAutoRecovery(opts: {
   });
   // Overwrite stale familyId in sync storage so background reads stay consistent
   try {
-    await chrome.storage.sync.set({ [FAMILY_ID_KEY]: opts.familyId });
+    await browser.storage.sync.set({ [FAMILY_ID_KEY]: opts.familyId });
   } catch {
     // sync storage may be unavailable in some contexts
   }
@@ -142,14 +145,16 @@ export async function performSoloRecovery(opts: {
 
   const joinData = joinRes.data;
 
-  chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: opts.familyId });
+  void Promise.resolve(
+    browser.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: opts.familyId }),
+  ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
     authToken: joinData?.authToken,
     expiresAt: joinData?.expiresAt,
   });
   try {
-    await chrome.storage.sync.set({ [FAMILY_ID_KEY]: opts.familyId });
+    await browser.storage.sync.set({ [FAMILY_ID_KEY]: opts.familyId });
   } catch {
     // sync storage may be unavailable in some contexts
   }
@@ -193,7 +198,9 @@ export async function createNewFamily(opts: {
     apiHost: isCustomEndpoint ? opts.apiClient.getEndpoint() : undefined,
   });
 
-  chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId });
+  void Promise.resolve(
+    browser.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId }),
+  ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
     authToken: data.authToken,
@@ -241,10 +248,12 @@ export async function performJoin(opts: {
 
   if (decoded.apiHost) {
     opts.apiClient.setEndpoint(decoded.apiHost);
-    chrome.runtime.sendMessage({
-      type: "SET_API_ENDPOINT",
-      apiEndpoint: decoded.apiHost,
-    });
+    void Promise.resolve(
+      browser.runtime.sendMessage({
+        type: "SET_API_ENDPOINT",
+        apiEndpoint: decoded.apiHost,
+      }),
+    ).catch(() => {});
   }
 
   const response = await opts.apiClient.joinFamily(
@@ -262,7 +271,9 @@ export async function performJoin(opts: {
 
   const joinData = response.data;
 
-  chrome.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: decoded.familyId });
+  void Promise.resolve(
+    browser.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: decoded.familyId }),
+  ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
     authToken: joinData?.authToken,

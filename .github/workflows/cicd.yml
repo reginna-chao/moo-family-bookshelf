@@ -485,3 +485,72 @@ jobs:
             --title "${TAG}" \
             --notes "$NOTES" \
             "moo-family-bookshelf-${TAG}.zip"
+
+  release-extension-firefox:
+    name: Build & Submit Firefox Extension (AMO)
+    needs: [extension-check, e2e]
+    # e2e can be SKIPPED (not failed) under path filtering; without
+    # !cancelled() the default needs-skip propagation would silently skip
+    # this release on a tag push. !cancelled() overrides that.
+    if: >-
+      ${{ !cancelled() &&
+      startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build & lint Firefox extension
+        run: pnpm --filter moo-family-bookshelf-extension lint:firefox
+
+      # Package the build into an unsigned .zip for traceability. With
+      # --channel=listed, `web-ext sign` does NOT return a downloadable signed
+      # .xpi (it submits to AMO for human review and only emails/serves the
+      # signed file later), so this packaged build is what we archive as the
+      # workflow artifact. if-no-files-found: error on the upload step below
+      # makes a missing package fail the job loudly.
+      - name: Package Firefox extension (unsigned)
+        run: >-
+          npx web-ext build
+          --source-dir=extension/dist-firefox
+          --artifacts-dir=extension/web-ext-artifacts
+          --overwrite-dest
+
+      - name: Upload unsigned Firefox package artifact
+        uses: actions/upload-artifact@v5
+        if: ${{ !cancelled() }}
+        with:
+          name: firefox-extension-unsigned
+          path: extension/web-ext-artifacts/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      # Submit to AMO as a listed (publicly distributed) add-on so it is
+      # searchable on addons.mozilla.org (unlisted would be self-distribution
+      # only). This is a SUBMISSION step: --channel=listed enqueues the build
+      # for Mozilla review and does not yield a local signed .xpi. A non-zero
+      # exit (auth failure, validation rejection, duplicate version) fails the
+      # job — no `continue-on-error`, so the CD cannot silently pass.
+      # This step rebuilds the package from --source-dir and submits THAT to
+      # AMO for review — it does not sign the previously uploaded unsigned zip.
+      # A separate --artifacts-dir keeps the unsigned package artifact in
+      # extension/web-ext-artifacts intact for traceability.
+      - name: Sign & submit to AMO
+        run: >-
+          npx web-ext sign
+          --source-dir=extension/dist-firefox
+          --artifacts-dir=extension/web-ext-artifacts-signed
+          --channel=listed
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}

@@ -9,6 +9,7 @@
 // and also imported by syncBooks.ts (bundled into the ESM content-sync module).
 // This intentional duplication is safe because the scraper is stateless — it only
 // reads DOM elements and returns data, with no shared mutable state.
+import browser from "webextension-polyfill";
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
 import { isExtensionContextValid, cleanupMooFamilyUI, MOO_ELEMENT_IDS } from "../utils/extensionContext";
 import { waitForPageReady } from "./pageReady";
@@ -95,7 +96,7 @@ async function injectFamilyBookshelfButton(): Promise<void> {
   // Read stored size (default to medium if missing/invalid)
   let size: FloatingIconSize = "medium";
   try {
-    const stored = await chrome.storage.local.get([FLOATING_ICON_SIZE_KEY]);
+    const stored = await browser.storage.local.get([FLOATING_ICON_SIZE_KEY]);
     if (isFloatingIconSize(stored[FLOATING_ICON_SIZE_KEY])) {
       size = stored[FLOATING_ICON_SIZE_KEY];
     }
@@ -144,7 +145,7 @@ async function injectFamilyBookshelfButton(): Promise<void> {
  */
 async function updatePendingBorrowBadge(button: HTMLElement): Promise<void> {
   try {
-    const stored = await chrome.storage.local.get([
+    const stored = await browser.storage.local.get([
       USER_ID_KEY,
       FAMILY_ID_KEY,
       AUTH_TOKEN_KEY,
@@ -264,7 +265,7 @@ function toggleDialog(): void {
   // Content scripts run in Chrome's isolated world — standard ES module
   // imports don't resolve correctly, so we load code-split modules via
   // chrome.runtime.getURL() which points to web-accessible extension resources.
-  import(/* @vite-ignore */ chrome.runtime.getURL("content-dialog.js"))
+  import(/* @vite-ignore */ browser.runtime.getURL("content-dialog.js"))
     .then(({ mountDialog }) => {
       mountDialog(mountPoint);
     })
@@ -288,7 +289,7 @@ function tryScrapeAndCacheEmail(): void {
     if (!email) return;
 
     const displayName = scrapeDisplayName() ?? "";
-    chrome.storage.local.set({ [USER_EMAIL_KEY]: email, [DISPLAY_NAME_KEY]: displayName });
+    void browser.storage.local.set({ [USER_EMAIL_KEY]: email, [DISPLAY_NAME_KEY]: displayName });
   }, 1000);
 }
 
@@ -321,7 +322,7 @@ function waitAndInjectButton(): void {
  */
 function listenForIconSizeChanges(): void {
   if (!isExtensionContextValid()) return;
-  chrome.storage.onChanged.addListener((changes, areaName) => {
+  browser.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
     if (!changes[FLOATING_ICON_SIZE_KEY]) return;
     const newValue = changes[FLOATING_ICON_SIZE_KEY].newValue;

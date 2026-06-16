@@ -1,21 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { useFamilyShelfViewMode } from "@/dialog/useFamilyShelfViewMode";
 
-type SendMessageCallback = (response: Record<string, unknown>) => void;
-
+/**
+ * Production reads/writes the view mode via the promise-based
+ * `browser.runtime.sendMessage(msg)` (webextension-polyfill). The mock returns a
+ * Promise resolving to the response keyed by message type — there is no Chrome
+ * callback argument. The mount read is async, so assertions on the loaded value
+ * use `waitFor`.
+ */
 function mockSendMessage(
   getResponse: Record<string, unknown>,
   setResponse: Record<string, unknown> = { ok: true },
 ) {
   vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    ((message: unknown, callback: SendMessageCallback) => {
+    ((message: unknown) => {
       const msg = message as Record<string, unknown>;
       if (msg.type === "GET_FAMILY_SHELF_VIEW_MODE") {
-        callback(getResponse);
-      } else if (msg.type === "SET_FAMILY_SHELF_VIEW_MODE") {
-        callback(setResponse);
+        return Promise.resolve(getResponse);
       }
+      if (msg.type === "SET_FAMILY_SHELF_VIEW_MODE") {
+        return Promise.resolve(setResponse);
+      }
+      return Promise.resolve(undefined);
     }) as typeof chrome.runtime.sendMessage,
   );
 }
@@ -23,8 +30,6 @@ function mockSendMessage(
 describe("useFamilyShelfViewMode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset lastError
-    Object.defineProperty(chrome.runtime, "lastError", { value: null, writable: true, configurable: true });
   });
 
   it("defaults to 'grid'", () => {
@@ -36,22 +41,19 @@ describe("useFamilyShelfViewMode", () => {
   it("reads 'row' from background on mount", async () => {
     mockSendMessage({ viewMode: "row" });
     const { result } = renderHook(() => useFamilyShelfViewMode());
-    // sendMessage callback is sync in mock → state updates immediately
-    expect(result.current.viewMode).toBe("row");
+    await waitFor(() => {
+      expect(result.current.viewMode).toBe("row");
+    });
   });
 
-  it("keeps 'grid' when chrome.runtime.lastError is set", () => {
-    Object.defineProperty(chrome.runtime, "lastError", {
-      value: { message: "error" },
-      writable: true,
-      configurable: true,
-    });
+  it("keeps 'grid' when the background message rejects", async () => {
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((_message: unknown, callback: SendMessageCallback) => {
-        callback({ viewMode: "row" });
-      }) as typeof chrome.runtime.sendMessage,
+      (() => Promise.reject(new Error("background unavailable"))) as typeof chrome.runtime.sendMessage,
     );
     const { result } = renderHook(() => useFamilyShelfViewMode());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(result.current.viewMode).toBe("grid");
   });
 
@@ -74,24 +76,14 @@ describe("useFamilyShelfViewMode", () => {
       result.current.setViewMode("row");
     });
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      { type: "SET_FAMILY_SHELF_VIEW_MODE", viewMode: "row" },
-      expect.any(Function),
-    );
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "SET_FAMILY_SHELF_VIEW_MODE",
+      viewMode: "row",
+    });
   });
 
   it("rolls back state when SET responds with ok: false", async () => {
-    // Use async callback to let React process the optimistic update before rollback
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((message: unknown, callback: SendMessageCallback) => {
-        const msg = message as Record<string, unknown>;
-        if (msg.type === "GET_FAMILY_SHELF_VIEW_MODE") {
-          callback({ viewMode: "grid" });
-        } else if (msg.type === "SET_FAMILY_SHELF_VIEW_MODE") {
-          Promise.resolve().then(() => callback({ ok: false }));
-        }
-      }) as typeof chrome.runtime.sendMessage,
-    );
+    mockSendMessage({ viewMode: "grid" }, { ok: false });
     const { result } = renderHook(() => useFamilyShelfViewMode());
 
     act(() => {
@@ -100,12 +92,10 @@ describe("useFamilyShelfViewMode", () => {
     // Optimistic: now "row"
     expect(result.current.viewMode).toBe("row");
 
-    // Wait for the async callback to trigger rollback
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+    // Wait for the rejected/ok:false response to trigger rollback
+    await waitFor(() => {
+      expect(result.current.viewMode).toBe("grid");
     });
-
-    expect(result.current.viewMode).toBe("grid");
   });
 
   it("does not send message when setting same mode", () => {

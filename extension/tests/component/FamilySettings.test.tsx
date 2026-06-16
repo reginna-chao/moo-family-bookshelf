@@ -184,9 +184,11 @@ describe("FamilySettings", () => {
 
     expect(screen.getByText("複製同步碼")).toBeInTheDocument();
 
-    // Wait for async member fetch to complete to avoid act() warning
+    // Wait for async member fetch to complete to avoid act() warning.
+    // "小明" appears in both the display-name editor and the member list, so
+    // use getAllByText.
     await waitFor(() => {
-      expect(screen.getByText("小明")).toBeInTheDocument();
+      expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -196,9 +198,9 @@ describe("FamilySettings", () => {
 
     renderFamilySettings();
 
-    // Wait for members to load so async effects settle
+    // Wait for members to load so async effects settle.
     await waitFor(() => {
-      expect(screen.getByText("小明")).toBeInTheDocument();
+      expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.click(screen.getByText("邀請成員加入家庭"));
@@ -233,9 +235,10 @@ describe("FamilySettings", () => {
 
     expect(screen.getByText("離開家庭")).toBeInTheDocument();
 
-    // Wait for async member fetch to complete to avoid act() warning
+    // Wait for async member fetch to complete to avoid act() warning.
+    // "小明" appears in both the display-name editor and the member list.
     await waitFor(() => {
-      expect(screen.getByText("小明")).toBeInTheDocument();
+      expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -533,12 +536,12 @@ describe("FamilySettings", () => {
     it("toggle reflects initial GET_SYNC_ARCHIVED value of 1", async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown, callback?: (response: unknown) => void) => {
+        (message: unknown) => {
           const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
-            callback({ syncArchived: 1 });
+          if (msg.type === "GET_SYNC_ARCHIVED") {
+            return Promise.resolve({ syncArchived: 1 });
           }
-          return undefined as unknown as Promise<unknown>;
+          return Promise.resolve(undefined);
         },
       );
 
@@ -553,15 +556,15 @@ describe("FamilySettings", () => {
     it("clicking toggle sends SET_SYNC_ARCHIVED message", async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown, callback?: (response: unknown) => void) => {
+        (message: unknown) => {
           const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
-            callback({ syncArchived: 0 });
+          if (msg.type === "GET_SYNC_ARCHIVED") {
+            return Promise.resolve({ syncArchived: 0 });
           }
-          if (msg.type === "SET_SYNC_ARCHIVED" && callback) {
-            callback({ ok: true });
+          if (msg.type === "SET_SYNC_ARCHIVED") {
+            return Promise.resolve({ ok: true });
           }
-          return undefined as unknown as Promise<unknown>;
+          return Promise.resolve(undefined);
         },
       );
 
@@ -573,25 +576,24 @@ describe("FamilySettings", () => {
 
       fireEvent.click(screen.getByRole("switch", { name: "同步封存書籍" }));
 
-      // Should have sent SET_SYNC_ARCHIVED with value 1
+      // Should have sent SET_SYNC_ARCHIVED with value 1 (no Chrome callback arg)
       expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({ type: "SET_SYNC_ARCHIVED", syncArchived: 1 }),
-        expect.any(Function),
       );
     });
 
     it("reverts toggle state when SET_SYNC_ARCHIVED response is not ok", async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown, callback?: (response: unknown) => void) => {
+        (message: unknown) => {
           const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
-            callback({ syncArchived: 0 });
+          if (msg.type === "GET_SYNC_ARCHIVED") {
+            return Promise.resolve({ syncArchived: 0 });
           }
-          if (msg.type === "SET_SYNC_ARCHIVED" && callback) {
-            callback({ ok: false });
+          if (msg.type === "SET_SYNC_ARCHIVED") {
+            return Promise.resolve({ ok: false });
           }
-          return undefined as unknown as Promise<unknown>;
+          return Promise.resolve(undefined);
         },
       );
 

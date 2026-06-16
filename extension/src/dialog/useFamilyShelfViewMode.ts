@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import browser from "webextension-polyfill";
 
 export type FamilyShelfViewMode = "grid" | "row";
 
@@ -22,29 +23,42 @@ export function useFamilyShelfViewMode(): UseFamilyShelfViewModeReturn {
   }, [viewMode]);
 
   useEffect(() => {
-    chrome.runtime.sendMessage(
-      { type: "GET_FAMILY_SHELF_VIEW_MODE" },
-      (response) => {
-        if (chrome.runtime.lastError) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = (await browser.runtime.sendMessage({
+          type: "GET_FAMILY_SHELF_VIEW_MODE",
+        })) as { viewMode?: unknown } | undefined;
+        if (cancelled) return;
         if (isViewMode(response?.viewMode)) {
           setViewModeState(response.viewMode);
         }
-      },
-    );
+      } catch {
+        // Background unavailable — keep default
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const setViewMode = useCallback((mode: FamilyShelfViewMode) => {
     const prev = viewModeRef.current;
     if (prev === mode) return;
     setViewModeState(mode);
-    chrome.runtime.sendMessage(
-      { type: "SET_FAMILY_SHELF_VIEW_MODE", viewMode: mode },
-      (response) => {
-        if (chrome.runtime.lastError || !response?.ok) {
+    void (async () => {
+      try {
+        const response = (await browser.runtime.sendMessage({
+          type: "SET_FAMILY_SHELF_VIEW_MODE",
+          viewMode: mode,
+        })) as { ok?: boolean } | undefined;
+        if (!response?.ok) {
           setViewModeState(prev);
         }
-      },
-    );
+      } catch {
+        setViewModeState(prev);
+      }
+    })();
   }, []);
 
   return { viewMode, setViewMode };

@@ -33,6 +33,24 @@ Easily browse books shared by family members on your Readmoo family account.
 
 </details>
 
+### Firefox (Desktop / Android™)
+
+Also available on Firefox Desktop and Firefox for Android™.
+
+- AMO install link: (coming soon, link TBD)<!-- TODO: add the official AMO URL once listed -->
+
+<details>
+
+<summary>Manual Installation (Firefox)</summary>
+
+1. Get the Firefox build: download it from [Releases](https://github.com/reginna-chao/moo-family-bookshelf/releases), or build it yourself with `pnpm --filter moo-family-bookshelf-extension build:firefox` (output in `extension/dist-firefox/`)
+2. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`
+3. Click "Load Temporary Add-on…"
+4. Select `dist-firefox/manifest.json`
+5. Done! Go to any Readmoo page and you'll see the "Family Bookshelf" button
+
+</details>
+
 ## Usage
 
 1. **Create a family** — Click "Family Bookshelf" on any Readmoo page, create a family, and get a sync code

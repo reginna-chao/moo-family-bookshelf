@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import browser from "webextension-polyfill";
 import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import {
@@ -109,7 +110,7 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
       try {
         // Independent reads — run in parallel to shorten shelf load latency.
         const [cacheResult, apiResponse] = await Promise.all([
-          chrome.storage.local.get([PERSONAL_BOOKS_CACHE_KEY]),
+          browser.storage.local.get([PERSONAL_BOOKS_CACHE_KEY]),
           apiClient.getPersonalBooks(userId),
         ]);
         if (cancelled) return;
@@ -219,8 +220,8 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
       if (usePut) {
         savedRawPayload.current = { ...(savedRawPayload.current ?? {}), books };
       }
-      chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books) });
-      chrome.storage.local.set({ [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now() });
+      void browser.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books) });
+      void browser.storage.local.set({ [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now() });
       clearDirty();
       setStatus("saved");
       setTimeout(() => setStatus("ready"), 1500);

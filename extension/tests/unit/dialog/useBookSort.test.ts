@@ -1,22 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { useBookSort } from "@/dialog/useBookSort";
 import type { BookSortShelf } from "@/dialog/useBookSort";
 
-type SendMessageCallback = (response: Record<string, unknown>) => void;
-
+/**
+ * Production reads/writes sort via the promise-based
+ * `browser.runtime.sendMessage(msg)` (webextension-polyfill). The mock returns a
+ * Promise resolving to the response keyed by message type — there is no Chrome
+ * callback argument. The mount read is async, so assertions on the loaded value
+ * use `waitFor`.
+ */
 function mockSendMessage(
   getResponse: Record<string, unknown>,
   setResponse: Record<string, unknown> = { ok: true },
 ) {
   vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    ((message: unknown, callback: SendMessageCallback) => {
+    ((message: unknown) => {
       const msg = message as Record<string, unknown>;
       if (msg.type === "GET_BOOK_SORT") {
-        callback(getResponse);
-      } else if (msg.type === "SET_BOOK_SORT") {
-        callback(setResponse);
+        return Promise.resolve(getResponse);
       }
+      if (msg.type === "SET_BOOK_SORT") {
+        return Promise.resolve(setResponse);
+      }
+      return Promise.resolve(undefined);
     }) as typeof chrome.runtime.sendMessage,
   );
 }
@@ -24,7 +31,6 @@ function mockSendMessage(
 describe("useBookSort", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(chrome.runtime, "lastError", { value: null, writable: true, configurable: true });
   });
 
   it("defaults to 'default'", () => {
@@ -36,33 +42,31 @@ describe("useBookSort", () => {
   it.each<{ shelf: BookSortShelf }>([
     { shelf: "family" },
     { shelf: "personal" },
-  ])("reads sort from background for shelf '$shelf'", ({ shelf }) => {
+  ])("reads sort from background for shelf '$shelf'", async ({ shelf }) => {
     mockSendMessage({ sort: "title" });
     const { result } = renderHook(() => useBookSort(shelf));
-    expect(result.current.sort).toBe("title");
+    await waitFor(() => {
+      expect(result.current.sort).toBe("title");
+    });
   });
 
   it("sends correct shelf in GET_BOOK_SORT message", () => {
     mockSendMessage({ sort: "default" });
     renderHook(() => useBookSort("personal"));
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      { type: "GET_BOOK_SORT", shelf: "personal" },
-      expect.any(Function),
-    );
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "GET_BOOK_SORT",
+      shelf: "personal",
+    });
   });
 
-  it("keeps 'default' when chrome.runtime.lastError is set", () => {
-    Object.defineProperty(chrome.runtime, "lastError", {
-      value: { message: "error" },
-      writable: true,
-      configurable: true,
-    });
+  it("keeps 'default' when the background message rejects", async () => {
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((_message: unknown, callback: SendMessageCallback) => {
-        callback({ sort: "title" });
-      }) as typeof chrome.runtime.sendMessage,
+      (() => Promise.reject(new Error("background unavailable"))) as typeof chrome.runtime.sendMessage,
     );
     const { result } = renderHook(() => useBookSort("family"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(result.current.sort).toBe("default");
   });
 
@@ -85,23 +89,15 @@ describe("useBookSort", () => {
       result.current.setSort("title");
     });
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      { type: "SET_BOOK_SORT", shelf: "personal", sort: "title" },
-      expect.any(Function),
-    );
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "SET_BOOK_SORT",
+      shelf: "personal",
+      sort: "title",
+    });
   });
 
   it("rolls back state when SET responds with ok: false", async () => {
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((message: unknown, callback: SendMessageCallback) => {
-        const msg = message as Record<string, unknown>;
-        if (msg.type === "GET_BOOK_SORT") {
-          callback({ sort: "default" });
-        } else if (msg.type === "SET_BOOK_SORT") {
-          Promise.resolve().then(() => callback({ ok: false }));
-        }
-      }) as typeof chrome.runtime.sendMessage,
-    );
+    mockSendMessage({ sort: "default" }, { ok: false });
     const { result } = renderHook(() => useBookSort("family"));
 
     act(() => {
@@ -109,11 +105,9 @@ describe("useBookSort", () => {
     });
     expect(result.current.sort).toBe("title");
 
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+    await waitFor(() => {
+      expect(result.current.sort).toBe("default");
     });
-
-    expect(result.current.sort).toBe("default");
   });
 
   it("does not send message when setting same sort", () => {

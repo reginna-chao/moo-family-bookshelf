@@ -778,12 +778,12 @@ describe("PersonalShelf", () => {
       // Mock GET_SYNC_ARCHIVED to return 1
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown, callback?: (response: unknown) => void) => {
+        (message: unknown) => {
           const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
-            callback({ syncArchived: 1 });
+          if (msg.type === "GET_SYNC_ARCHIVED") {
+            return Promise.resolve({ syncArchived: 1 });
           }
-          return undefined as unknown as Promise<unknown>;
+          return Promise.resolve(undefined);
         },
       );
 
@@ -805,12 +805,12 @@ describe("PersonalShelf", () => {
       // Default sendMessage mock doesn't call back, so syncArchived stays 0
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown, callback?: (response: unknown) => void) => {
+        (message: unknown) => {
           const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
-            callback({ syncArchived: 0 });
+          if (msg.type === "GET_SYNC_ARCHIVED") {
+            return Promise.resolve({ syncArchived: 0 });
           }
-          return undefined as unknown as Promise<unknown>;
+          return Promise.resolve(undefined);
         },
       );
 
@@ -833,12 +833,12 @@ describe("PersonalShelf", () => {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown, callback?: (response: unknown) => void) => {
+        (message: unknown) => {
           const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
-            callback({ syncArchived: 1 });
+          if (msg.type === "GET_SYNC_ARCHIVED") {
+            return Promise.resolve({ syncArchived: 1 });
           }
-          return undefined as unknown as Promise<unknown>;
+          return Promise.resolve(undefined);
         },
       );
 
@@ -865,12 +865,12 @@ describe("PersonalShelf", () => {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown, callback?: (response: unknown) => void) => {
+        (message: unknown) => {
           const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
-            callback({ syncArchived: 1 });
+          if (msg.type === "GET_SYNC_ARCHIVED") {
+            return Promise.resolve({ syncArchived: 1 });
           }
-          return undefined as unknown as Promise<unknown>;
+          return Promise.resolve(undefined);
         },
       );
 
@@ -893,12 +893,12 @@ describe("PersonalShelf", () => {
       // All books are active, none archived
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown, callback?: (response: unknown) => void) => {
+        (message: unknown) => {
           const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
-            callback({ syncArchived: 1 });
+          if (msg.type === "GET_SYNC_ARCHIVED") {
+            return Promise.resolve({ syncArchived: 1 });
           }
-          return undefined as unknown as Promise<unknown>;
+          return Promise.resolve(undefined);
         },
       );
 
@@ -1217,12 +1217,12 @@ describe("PersonalShelf", () => {
       ];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown, callback?: (response: unknown) => void) => {
+        (message: unknown) => {
           const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED" && callback) {
-            callback({ syncArchived: 1 });
+          if (msg.type === "GET_SYNC_ARCHIVED") {
+            return Promise.resolve({ syncArchived: 1 });
           }
-          return undefined as unknown as Promise<unknown>;
+          return Promise.resolve(undefined);
         },
       );
 
