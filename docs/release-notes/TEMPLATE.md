@@ -12,6 +12,9 @@ GitHub Release 策展式筆記範本。
 
 注意：本檔（TEMPLATE.md）不會被 release job 取用，只有 v*.md 會。
 CHANGELOG.md 維持全繁體中文，本檔則是雙語對外發佈用。
+
+雙語順序為刻意設計：對外的 GitHub Release 面向國際讀者，故 English 段落
+置於繁體中文之前，與專案內部文件「繁中優先」的慣例不同，請勿改回繁中優先。
 -->
 
 # English

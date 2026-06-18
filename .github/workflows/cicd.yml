@@ -488,10 +488,16 @@ jobs:
             COMPARE=""
           fi
 
+          # Warn (don't fail) when no curated notes exist, so the silent
+          # fallback to the bare commit list is visible in the Actions log.
+          [ -s "$NOTES_FILE" ] || echo "::warning::No curated release notes at ${NOTES_FILE} — falling back to the auto-generated commit list."
+
           # Assemble the Release body: curated notes (if any) → divider →
-          # collapsible commit list → Full Changelog link.
+          # collapsible commit list → Full Changelog link. `-s` (exists AND
+          # non-empty) so an accidentally blank notes file falls back cleanly
+          # instead of emitting a stray divider with no content above it.
           {
-            if [ -f "$NOTES_FILE" ]; then
+            if [ -s "$NOTES_FILE" ]; then
               cat "$NOTES_FILE"
               printf '\n\n---\n\n'
             fi
