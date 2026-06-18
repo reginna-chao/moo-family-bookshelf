@@ -27,7 +27,7 @@
 
 <summary>手動安裝（Chrome）</summary>
 
-1. [下載最新版本](https://github.com/reginna-chao/moo-family-bookshelf/releases) (`moo-family-bookshelf-vX.X.X.zip`) 並解壓縮
+1. [下載最新版本](https://github.com/reginna-chao/moo-family-bookshelf/releases) (`moo-family-bookshelf-chrome-vX.X.X.zip`) 並解壓縮
 2. 開啟 Chrome，在網址列輸入 `chrome://extensions/`
 3. 打開右上角「開發人員模式」
 4. 點擊「載入未封裝項目」，選取解壓縮的資料夾
@@ -47,11 +47,11 @@
 
 <summary>手動安裝（Firefox）</summary>
 
-1. 取得 Firefox 版本：可從 [Releases](https://github.com/reginna-chao/moo-family-bookshelf/releases) 下載，或自行建置 `pnpm --filter moo-family-bookshelf-extension build:firefox`（輸出在 `extension/dist-firefox/`）
-2. 開啟 Firefox，在網址列輸入 `about:debugging#/runtime/this-firefox`
-3. 點擊「載入暫時性的附加元件…」（Load Temporary Add-on）
-4. 選取 `dist-firefox/manifest.json`
-5. 完成！前往讀墨網頁，你會看到「家庭書櫃」按鈕
+1. 從 [Releases](https://github.com/reginna-chao/moo-family-bookshelf/releases) 下載 `moo-family-bookshelf-firefox-vX.X.X-direct-install.xpi`
+2. 開啟 Firefox，前往 `about:addons`
+3. 點擊右上角齒輪圖示 →「從檔案安裝附加元件…」（Install Add-on From File）
+4. 選取剛下載的 `.xpi` 並確認安裝
+5. 完成！此為永久安裝（已簽署），會透過 `updates.json` 自動更新
 
 </details>
 
