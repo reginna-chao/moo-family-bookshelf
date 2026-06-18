@@ -466,7 +466,14 @@ jobs:
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
 
-          # Exclude non-user-facing commit types from the changelog.
+          # Curated, human-readable release notes live in a per-release file
+          # authored before tagging (bilingual, categorised prose). When present
+          # it becomes the top of the Release body; the auto-generated commit
+          # list is always appended, collapsed inside a <details> block. When
+          # absent, the Release falls back to just the commit list + changelog.
+          NOTES_FILE="docs/release-notes/${TAG}.md"
+
+          # Exclude non-user-facing commit types from the auto commit list.
           # Keeps feat/fix/refactor/perf/security and any non-conventional
           # subjects; drops docs/chore/ci/test/build/style (with optional
           # scope and breaking "!"). Conventional-commit prefixes only.
@@ -476,12 +483,29 @@ jobs:
             CHANGES=$(git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s" --no-merges | grep -vE "$EXCLUDE" || true)
             [ -z "$CHANGES" ] && CHANGES="_No user-facing changes._"
             COMPARE="${SERVER_URL}/${REPO}/compare/${PREV_TAG}...${TAG}"
-            NOTES=$(printf '%s\n\n**Full Changelog**: %s\n' "$CHANGES" "$COMPARE")
           else
-            NOTES="Initial release"
+            CHANGES="_Initial release._"
+            COMPARE=""
           fi
+
+          # Warn (don't fail) when no curated notes exist, so the silent
+          # fallback to the bare commit list is visible in the Actions log.
+          [ -s "$NOTES_FILE" ] || echo "::warning::No curated release notes at ${NOTES_FILE} — falling back to the auto-generated commit list."
+
+          # Assemble the Release body: curated notes (if any) → divider →
+          # collapsible commit list → Full Changelog link. `-s` (exists AND
+          # non-empty) so an accidentally blank notes file falls back cleanly
+          # instead of emitting a stray divider with no content above it.
+          {
+            if [ -s "$NOTES_FILE" ]; then
+              cat "$NOTES_FILE"
+              printf '\n\n---\n\n'
+            fi
+            printf '<details>\n<summary>What'\''s Changed</summary>\n\n%s\n\n</details>\n' "$CHANGES"
+            [ -n "$COMPARE" ] && printf '\n**Full Changelog**: %s\n' "$COMPARE"
+          } > release-notes.md
 
           gh release create "${TAG}" \
             --title "${TAG}" \
-            --notes "$NOTES" \
+            --notes-file release-notes.md \
             "moo-family-bookshelf-${TAG}.zip"
