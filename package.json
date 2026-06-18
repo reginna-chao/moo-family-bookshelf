@@ -32,8 +32,6 @@
     "test:e2e:pwa": "pnpm --filter moo-family-bookshelf-pwa test:e2e",
     "e2e:verify:selectors": "pnpm --filter moo-family-bookshelf-extension e2e:verify:selectors",
     "e2e:verify:selectors:update": "pnpm --filter moo-family-bookshelf-extension e2e:verify:selectors:update",
-    "changeset": "changeset",
-    "version:bump": "changeset version && node scripts/sync-manifest-version.mjs",
     "clean:kv": "rimraf worker/.wrangler/state",
     "clean:kv:dev": "node scripts/clean-kv.mjs dev",
     "prepare": "husky"
@@ -50,7 +48,6 @@
     ]
   },
   "devDependencies": {
-    "@changesets/cli": "^2.30.0",
     "concurrently": "^9.1.2",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
