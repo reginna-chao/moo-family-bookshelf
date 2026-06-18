@@ -175,53 +175,44 @@ pnpm test:coverage
 
 ## Versioning
 
-This project uses [Changesets](https://github.com/changesets/changesets) to manage versions across all packages. All sub-packages (`extension`, `pwa`, `worker`) are locked to the same version via the `fixed` config.
+Versions are managed by the `/bump-ver` Claude Code skill — there are no per-PR
+changeset files to add. Contributors just land their feature/fix commits with
+[Conventional Commits](https://www.conventionalcommits.org/) prefixes; the
+CHANGELOG and version bump happen later, at release time, in one step.
 
-### Adding a Changeset
+All five version files are kept in sync to the same number:
 
-After making changes, create a changeset to describe what you did:
-
-```bash
-pnpm changeset
-```
-
-This will interactively ask you to:
-1. Select affected packages
-2. Choose bump type (`patch` / `minor` / `major`)
-3. Write a summary of the change
-
-A `.changeset/*.md` file is generated — commit it along with your PR.
+| File |
+|------|
+| `extension/package.json` |
+| `pwa/package.json` |
+| `worker/package.json` |
+| `extension/public/manifest.json` |
+| `package.json` (root) |
 
 ### Releasing a New Version
 
-When ready to release, run:
+When ready to release, invoke the skill from Claude Code:
 
-```bash
-pnpm version:bump
+```
+/bump-ver minor        # or: patch / major / an explicit x.y.z
 ```
 
-This does two things:
-1. `changeset version` — bumps all `package.json` files and updates changelogs
-2. `sync-manifest-version.mjs` — syncs the version to `extension/public/manifest.json` and root `package.json`
+It bumps the five version files, drafts a 繁體中文 `CHANGELOG.md` entry from the
+commits since the last tag, and (after a single confirmation) commits the
+result. Review the drafted entry before approving.
 
-Then commit and tag:
+Then tag manually and push the tag — the CD workflow builds the extension and
+publishes the GitHub Release:
 
 ```bash
-git add -A && git commit -m "chore: release vX.Y.Z"
 git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-### Version Files
-
-| File | Managed by |
-|------|-----------|
-| `extension/package.json` | Changesets |
-| `pwa/package.json` | Changesets |
-| `worker/package.json` | Changesets |
-| `extension/public/manifest.json` | `sync-manifest-version.mjs` |
-| `package.json` (root) | `sync-manifest-version.mjs` |
-
-> **Do not manually edit version numbers** in any `package.json` or `manifest.json`. Always use the changeset workflow.
+> **Do not manually edit version numbers** in any `package.json` or
+> `manifest.json`, and do not hand-write `CHANGELOG.md` entries. Always go
+> through `/bump-ver` so all five files and the changelog stay in sync.
 
 ## Pull Requests
 

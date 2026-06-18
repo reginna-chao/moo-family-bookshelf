@@ -140,6 +140,8 @@ Every push/PR triggers:
 | Merge to `main` + `pwa/` changed | Deploy PWA to Cloudflare Pages |
 | Git tag `v*` | Build Extension → `.zip` → GitHub Release |
 
+GitHub Release 內容：release job 會讀取 `docs/release-notes/v<X.Y.Z>.md`（雙語策展內容）放到 Release 正文最上方，並自動把 commit 清單收進 `<details>` 折疊區、補上 Full Changelog。此檔由 `/bump-ver` 產生，必須存在於 tag 指向的 commit；缺檔時 release job 會 fallback 成自動 commit 清單並印 `::warning::`。**先 `/bump-ver` 再打 tag**，順序顛倒會走 fallback。
+
 ### Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 
 ### Dev Script Maintenance Note
