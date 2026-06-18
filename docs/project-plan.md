@@ -965,7 +965,7 @@ jobs:
 > 「只在家庭書櫃作用、只影響自己的 view、不影響家人紀錄」。**不是** owner 端的分享開關，
 > 也與讀墨封存 `isArchived` 無關。原 #2 提到的「個人書櫃 StatusFilterBar 已隱藏選項」框架已**作廢**。
 
-- [ ] **#2 家庭書櫃隱藏書籍可逆 + 篩選顯示已隱藏**
+- [x] **#2 家庭書櫃隱藏書籍可逆 + 篩選顯示已隱藏**
   - **作用範圍**：僅家庭書櫃（`FamilyShelf` / PWA `FamilyShelfPage`）。個人書櫃不動。
   - **可隱藏對象**：家庭書櫃中任一張卡片，含自己開放的書（隱藏自己的只影響自己的 view，家人仍看得到）。
   - **key 模型（copy-scoped）**：偏好以 `{ownerId}:{bookId}` 為單位（ownerId = 64 字元 SHA-256 hex，`:` 分隔安全）。
@@ -987,15 +987,15 @@ jobs:
 > **範圍**：純前端（Extension 相容性 / 建置）+ CI/CD + 文件。**不**動 `worker/`、**不**動 `pwa/`、**不**新增任何使用者功能。同一份 codebase 靠 manifest / 建置目標區分 Chrome 與 Firefox。
 > **API 策略**：導入 `webextension-polyfill`，全面改用 promise 風格 `browser.*`，順手收斂既有 callback/promise 混用技術債。
 
-- [ ] **#34 導入 webextension-polyfill，統一 `browser.*`**
+- [x] **#34 導入 webextension-polyfill，統一 `browser.*`**
   - 新增 `webextension-polyfill` + `@types/webextension-polyfill` 依賴
   - 將 `chrome.*`（散落 24 個檔案、123 處）改為 `browser.*`；content script / background / dialog 三類入口確保 polyfill 正確載入
   - 同步更新測試 mock（chrome mock → browser mock / 相容 shim），保持既有測試全綠
-- [ ] **#35 Firefox manifest + 雙瀏覽器建置**
+- [x] **#35 Firefox manifest + 雙瀏覽器建置**
   - manifest 新增 `browser_specific_settings.gecko.id` + `gecko_android`（Android 最低版本）
   - background 策略：Chrome 維持 `service_worker`；Firefox 用相容鍵（`scripts` event page 或 FF 支援的 service_worker），於 manifest 轉換步驟分流
   - 建置產出分流：`dist/`（Chrome）+ `dist-firefox/`（Firefox）
-- [ ] **#36 web-ext 打包 + AMO CD**
+- [x] **#36 web-ext 打包 + AMO CD**
   - `web-ext` lint / build / sign；`.github/workflows/cicd.yml` 新增 Firefox release job（`v*` tag 觸發，與既有 `release-extension` 並列）
   - 需 GitHub Secrets：`AMO_JWT_ISSUER` / `AMO_JWT_SECRET`（須向 Mozilla AMO 申請）
 - [ ] **#37 文件**：`README` / `worker/DEPLOY.md` 補 Firefox 安裝說明；`site/` 加「Available on Firefox for Android™」入口
