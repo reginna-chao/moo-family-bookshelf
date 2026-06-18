@@ -455,7 +455,7 @@ jobs:
       - run: pnpm --filter moo-family-bookshelf-extension build
 
       - name: Package Extension
-        run: cd extension/dist && zip -r ../../moo-family-bookshelf-${{ github.ref_name }}.zip .
+        run: cd extension/dist && zip -r ../../moo-family-bookshelf-chrome-${{ github.ref_name }}.zip .
 
       - name: Create GitHub Release
         env:
@@ -508,4 +508,171 @@ jobs:
           gh release create "${TAG}" \
             --title "${TAG}" \
             --notes-file release-notes.md \
-            "moo-family-bookshelf-${TAG}.zip"
+            "moo-family-bookshelf-chrome-${TAG}.zip"
+
+  # Firefox produces TWO distribution channels, each with its OWN gecko id
+  # (GECKO_ID_AMO vs GECKO_ID_DIRECT, see build-firefox-manifest.ts):
+  #   - listed (AMO store):    `web-ext sign --channel=listed` submits the
+  #     amo build (GECKO_ID_AMO) to addons.mozilla.org for review. It does NOT
+  #     yield a local signed file — Mozilla serves/emails the signed add-on
+  #     later. The AMO build must NOT carry update_url (AMO serves its own).
+  #   - unlisted (self-dist):  `web-ext sign --channel=unlisted` returns a
+  #     downloadable signed .xpi (direct build, GECKO_ID_DIRECT) we attach to
+  #     the Release for direct install. This build carries update_url ->
+  #     updates.json for auto-updates.
+  # Because the two channels use DISTINCT gecko ids, they live in independent
+  # version namespaces — there is no same-version dual-channel AMO conflict.
+  # The listed submission still runs LAST so AMO review latency never blocks
+  # the self-dist asset upload that already happened in earlier steps.
+  release-extension-firefox:
+    name: Build & Submit Firefox Extension (AMO + self-dist)
+    needs: [extension-check, e2e, release-extension]
+    # This job performs an IRREVERSIBLE side effect (AMO unlisted signing
+    # consumes a version slot) and uploads to the GitHub Release that
+    # release-extension creates. It must therefore run ONLY when that release
+    # was actually created — i.e. release-extension SUCCEEDED. Guarding on
+    # `result == 'success'` (instead of `!cancelled()`) prevents the job from
+    # signing on AMO and then loud-failing at `gh release upload` because no
+    # release exists (which would wedge the version on a fix-and-rerun).
+    # e2e may be SKIPPED under path filtering on a tag; tolerate skip, but not
+    # failure, so it is checked with `!= 'failure'` rather than `== 'success'`.
+    if: >-
+      ${{ !cancelled() &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.release-extension.result == 'success' &&
+      needs.e2e.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      # 0. Anti-drift guard: the Firefox asset names and the GitHub Release tag
+      #    derive from the git tag (github.ref_name, e.g. v1.5.0), while
+      #    updates.json's version + update_link derive from extension/
+      #    package.json. If these diverge, the signed .xpi is uploaded under the
+      #    tag-based name while updates.json points update_link at a
+      #    package.json-based URL that 404s — silently breaking Firefox
+      #    auto-updates. Fail loudly here BEFORE any AMO signing if they differ.
+      - name: Assert tag matches package.json version
+        run: |
+          PKG_VERSION=$(node -p "require('./extension/package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "package.json=$PKG_VERSION  tag=$GITHUB_REF_NAME (stripped=$TAG_VERSION)"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match extension/package.json version $PKG_VERSION. Bump package.json before tagging."
+            exit 1
+          fi
+
+      # 1. Build BOTH Firefox variants (dist-firefox-amo + dist-firefox-direct)
+      #    and verify the update_url policy of each.
+      - name: Build Firefox variants
+        run: pnpm --filter moo-family-bookshelf-extension build:firefox
+
+      # 2. Lint both variants with web-ext (fails the job on any error).
+      #    The direct variant carries update_url, which web-ext flags as
+      #    MANIFEST_UPDATE_URL ("not allowed for Mozilla-hosted add-ons").
+      #    That add-on is self-hosted, not Mozilla-hosted, so --self-hosted
+      #    suppresses that one (correct) error while keeping every other check.
+      #    The amo variant is linted WITHOUT --self-hosted so AMO-hosting
+      #    problems (including an accidental update_url) still fail the job.
+      - name: web-ext lint (both variants)
+        run: |
+          npx web-ext lint --source-dir=extension/dist-firefox-amo
+          npx web-ext lint --source-dir=extension/dist-firefox-direct --self-hosted
+
+      # 3. Package the AMO-listed variant into a zip for the Release.
+      - name: Package AMO zip
+        run: cd extension/dist-firefox-amo && zip -r ../../moo-family-bookshelf-firefox-${{ github.ref_name }}-amo.zip .
+
+      # 4. Generate the self-distribution update manifest (updates.json).
+      - name: Generate updates.json
+        run: cd extension && npx tsx scripts/build-updates-json.ts --out "$GITHUB_WORKSPACE/updates.json"
+
+      # 5. Sign the direct-install variant on the unlisted channel — this DOES
+      #    return a downloadable signed .xpi. Exactly one .xpi is expected; the
+      #    rename step fails loudly otherwise.
+      - name: Sign direct-install (unlisted)
+        run: >-
+          npx web-ext sign
+          --source-dir=extension/dist-firefox-direct
+          --artifacts-dir=extension/web-ext-artifacts-direct
+          --channel=unlisted
+          --no-input
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+
+      - name: Rename signed .xpi
+        run: |
+          shopt -s nullglob
+          xpis=(extension/web-ext-artifacts-direct/*.xpi)
+          if [ "${#xpis[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly 1 signed .xpi, found ${#xpis[@]}"
+            exit 1
+          fi
+          XPI_NAME="moo-family-bookshelf-firefox-${GITHUB_REF_NAME}-direct-install.xpi"
+          # Anti-drift: the uploaded .xpi name MUST equal the basename of
+          # updates.json's update_link, or Firefox auto-update 404s. Fail loudly
+          # if the two ever diverge (e.g. a name change in only one place).
+          # Derive the (single) addons key from the file the builder wrote so
+          # this guard follows GECKO_ID_DIRECT rather than a hardcoded literal.
+          LINK_BASENAME=$(node -p "const u=require('$GITHUB_WORKSPACE/updates.json');u.addons[Object.keys(u.addons)[0]].updates[0].update_link.split('/').pop()")
+          if [ "$XPI_NAME" != "$LINK_BASENAME" ]; then
+            echo "::error::Asset name '$XPI_NAME' does not match updates.json update_link basename '$LINK_BASENAME'."
+            exit 1
+          fi
+          mv "${xpis[0]}" "$GITHUB_WORKSPACE/$XPI_NAME"
+
+      # Retain the built Firefox variants as a workflow artifact for
+      # post-mortem / manual recovery, independent of the Release upload
+      # succeeding (mirrors the traceability the pre-self-dist job provided).
+      - name: Upload Firefox build artifacts
+        uses: actions/upload-artifact@v5
+        if: ${{ !cancelled() }}
+        with:
+          name: firefox-extension-builds
+          path: |
+            extension/dist-firefox-amo
+            extension/dist-firefox-direct
+          if-no-files-found: error
+          retention-days: 7
+
+      # 6. Upload the 3 Firefox assets to the SAME release/tag created by
+      #    release-extension. --clobber makes re-runs idempotent.
+      - name: Upload Firefox assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release upload "${{ github.ref_name }}"
+          moo-family-bookshelf-firefox-${{ github.ref_name }}-amo.zip
+          moo-family-bookshelf-firefox-${{ github.ref_name }}-direct-install.xpi
+          updates.json
+          --clobber
+
+      # 7. Submit the AMO-listed variant LAST. --channel=listed enqueues the
+      #    build for Mozilla review and yields NO local signed file. Running it
+      #    after the self-dist upload means an AMO review hiccup (e.g. a
+      #    same-version conflict with the unlisted submission) cannot block the
+      #    downloadable .xpi from reaching the Release.
+      - name: Sign & submit to AMO (listed)
+        run: >-
+          npx web-ext sign
+          --source-dir=extension/dist-firefox-amo
+          --artifacts-dir=extension/web-ext-artifacts-amo
+          --channel=listed
+          --no-input
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}

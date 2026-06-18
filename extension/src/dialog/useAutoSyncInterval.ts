@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import browser from "webextension-polyfill";
 // Type-only import: avoids pulling the content scraper into the dialog bundle.
 import type { AutoSyncInterval } from "../sync/syncBooks";
 
@@ -24,29 +25,42 @@ export function useAutoSyncInterval(): UseAutoSyncIntervalReturn {
   }, [interval]);
 
   useEffect(() => {
-    chrome.runtime.sendMessage(
-      { type: "GET_AUTO_SYNC_INTERVAL" },
-      (response) => {
-        if (chrome.runtime.lastError) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = (await browser.runtime.sendMessage({
+          type: "GET_AUTO_SYNC_INTERVAL",
+        })) as { interval?: unknown } | undefined;
+        if (cancelled) return;
         if (isAutoSyncInterval(response?.interval)) {
           setIntervalState(response.interval);
         }
-      },
-    );
+      } catch {
+        // Background unavailable — keep default
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const updateInterval = useCallback((next: AutoSyncInterval) => {
     const prev = intervalRef.current;
     if (prev === next) return;
     setIntervalState(next);
-    chrome.runtime.sendMessage(
-      { type: "SET_AUTO_SYNC_INTERVAL", interval: next },
-      (response) => {
-        if (chrome.runtime.lastError || !response?.ok) {
+    void (async () => {
+      try {
+        const response = (await browser.runtime.sendMessage({
+          type: "SET_AUTO_SYNC_INTERVAL",
+          interval: next,
+        })) as { ok?: boolean } | undefined;
+        if (!response?.ok) {
           setIntervalState(prev);
         }
-      },
-    );
+      } catch {
+        setIntervalState(prev);
+      }
+    })();
   }, []);
 
   return { interval, setInterval: updateInterval };

@@ -1,3 +1,5 @@
+import browser from "webextension-polyfill";
+
 /**
  * Element IDs for MooFamily UI injected into the page.
  */
@@ -14,7 +16,7 @@ export const MOO_ELEMENT_IDS = {
  */
 export function isExtensionContextValid(): boolean {
   try {
-    return typeof chrome !== "undefined" && !!chrome.runtime?.id;
+    return !!browser.runtime?.id;
   } catch {
     return false;
   }

@@ -1,21 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { useAutoSyncInterval } from "@/dialog/useAutoSyncInterval";
 
-type SendMessageCallback = (response: Record<string, unknown>) => void;
-
+/**
+ * Production reads/writes the interval via the promise-based
+ * `browser.runtime.sendMessage(msg)` (webextension-polyfill). The mock returns a
+ * Promise resolving to the response keyed by message type — there is no Chrome
+ * callback argument. The mount read is async, so assertions on the loaded value
+ * use `waitFor`.
+ */
 function mockSendMessage(
   getResponse: Record<string, unknown>,
   setResponse: Record<string, unknown> = { ok: true },
 ) {
   vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    ((message: unknown, callback: SendMessageCallback) => {
+    ((message: unknown) => {
       const msg = message as Record<string, unknown>;
       if (msg.type === "GET_AUTO_SYNC_INTERVAL") {
-        callback(getResponse);
-      } else if (msg.type === "SET_AUTO_SYNC_INTERVAL") {
-        callback(setResponse);
+        return Promise.resolve(getResponse);
       }
+      if (msg.type === "SET_AUTO_SYNC_INTERVAL") {
+        return Promise.resolve(setResponse);
+      }
+      return Promise.resolve(undefined);
     }) as typeof chrome.runtime.sendMessage,
   );
 }
@@ -23,7 +30,6 @@ function mockSendMessage(
 describe("useAutoSyncInterval", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(chrome.runtime, "lastError", { value: null, writable: true, configurable: true });
   });
 
   it("defaults to 'daily'", () => {
@@ -34,25 +40,23 @@ describe("useAutoSyncInterval", () => {
 
   it.each(["weekly", "monthly", "never"] as const)(
     "reads '%s' from background on mount",
-    (interval) => {
+    async (interval) => {
       mockSendMessage({ interval });
       const { result } = renderHook(() => useAutoSyncInterval());
-      expect(result.current.interval).toBe(interval);
+      await waitFor(() => {
+        expect(result.current.interval).toBe(interval);
+      });
     },
   );
 
-  it("keeps 'daily' when chrome.runtime.lastError is set", () => {
-    Object.defineProperty(chrome.runtime, "lastError", {
-      value: { message: "error" },
-      writable: true,
-      configurable: true,
-    });
+  it("keeps 'daily' when the background message rejects", async () => {
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((_message: unknown, callback: SendMessageCallback) => {
-        callback({ interval: "weekly" });
-      }) as typeof chrome.runtime.sendMessage,
+      (() => Promise.reject(new Error("background unavailable"))) as typeof chrome.runtime.sendMessage,
     );
     const { result } = renderHook(() => useAutoSyncInterval());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(result.current.interval).toBe("daily");
   });
 
@@ -75,23 +79,14 @@ describe("useAutoSyncInterval", () => {
       result.current.setInterval("monthly");
     });
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      { type: "SET_AUTO_SYNC_INTERVAL", interval: "monthly" },
-      expect.any(Function),
-    );
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "SET_AUTO_SYNC_INTERVAL",
+      interval: "monthly",
+    });
   });
 
   it("rolls back state when SET responds with ok: false", async () => {
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((message: unknown, callback: SendMessageCallback) => {
-        const msg = message as Record<string, unknown>;
-        if (msg.type === "GET_AUTO_SYNC_INTERVAL") {
-          callback({ interval: "daily" });
-        } else if (msg.type === "SET_AUTO_SYNC_INTERVAL") {
-          Promise.resolve().then(() => callback({ ok: false }));
-        }
-      }) as typeof chrome.runtime.sendMessage,
-    );
+    mockSendMessage({ interval: "daily" }, { ok: false });
     const { result } = renderHook(() => useAutoSyncInterval());
 
     act(() => {
@@ -99,11 +94,9 @@ describe("useAutoSyncInterval", () => {
     });
     expect(result.current.interval).toBe("never");
 
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+    await waitFor(() => {
+      expect(result.current.interval).toBe("daily");
     });
-
-    expect(result.current.interval).toBe("daily");
   });
 
   it("does not send message when setting same interval", () => {

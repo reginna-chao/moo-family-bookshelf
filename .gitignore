@@ -4,7 +4,15 @@ node_modules/
 
 # Build output
 dist/
+dist-firefox/
+dist-firefox-amo/
+dist-firefox-direct/
+dist-firefox-updates.json
+web-ext-artifacts/
+web-ext-artifacts-amo/
+web-ext-artifacts-direct/
 *.zip
+*.xpi
 
 # Environment & secrets
 .env

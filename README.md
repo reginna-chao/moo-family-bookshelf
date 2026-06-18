@@ -19,17 +19,39 @@
 
 ### Chrome Web Store（推薦）
 
+適用瀏覽器：Chrome、Edge、Opera
+
 [前往 Chrome 線上應用程式商店安裝](https://chromewebstore.google.com/detail/ogclfjfjdiminibemhbckobeapnohjnk?utm_source=github)
 
 <details>
 
-<summary>手動安裝</summary>
+<summary>手動安裝（Chrome）</summary>
 
-1. [下載最新版本](https://github.com/reginna-chao/moo-family-bookshelf/releases) 並解壓縮
+1. [下載最新版本](https://github.com/reginna-chao/moo-family-bookshelf/releases) (`moo-family-bookshelf-chrome-vX.X.X.zip`) 並解壓縮
 2. 開啟 Chrome，在網址列輸入 `chrome://extensions/`
 3. 打開右上角「開發人員模式」
 4. 點擊「載入未封裝項目」，選取解壓縮的資料夾
 5. 完成！前往讀墨網頁，你會看到「家庭書櫃」按鈕
+
+</details>
+
+### Firefox（桌面版 / Android™）
+
+適用瀏覽器：Firefox
+
+也支援 Firefox 桌面版與 Firefox for Android™（火狐手機版）。
+
+- AMO 安裝連結：（即將上架，連結待補）<!-- TODO: 上架 AMO 後補上正式網址 -->
+
+<details>
+
+<summary>手動安裝（Firefox）</summary>
+
+1. 從 [Releases](https://github.com/reginna-chao/moo-family-bookshelf/releases) 下載 `moo-family-bookshelf-firefox-vX.X.X-direct-install.xpi`
+2. 開啟 Firefox，前往 `about:addons`
+3. 點擊右上角齒輪圖示 →「從檔案安裝附加元件…」（Install Add-on From File）
+4. 選取剛下載的 `.xpi` 並確認安裝
+5. 完成！此為永久安裝（已簽署），會透過 `updates.json` 自動更新
 
 </details>
 

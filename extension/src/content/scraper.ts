@@ -3,6 +3,7 @@
  * `.library-item` divs require a hover event to reveal `.openbook` links.
  */
 
+import browser from "webextension-polyfill";
 import { BoolFlag } from "../api/client";
 import {
   paginateLibrary,
@@ -82,7 +83,7 @@ function injectFiberBridge(): void {
   if (document.documentElement.hasAttribute("data-moo-fiber-bridge")) return;
   document.documentElement.setAttribute("data-moo-fiber-bridge", "1");
   const script = document.createElement("script");
-  script.src = chrome.runtime.getURL("fiber-bridge.js");
+  script.src = browser.runtime.getURL("fiber-bridge.js");
   script.onload = () => script.remove();
   document.documentElement.appendChild(script);
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, CSSProperties } from "react";
+import browser from "webextension-polyfill";
 import { Share2 } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { BookRow } from "./BookRow";
@@ -58,11 +59,23 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
   } = usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName });
 
   useEffect(() => {
-    chrome.runtime.sendMessage({ type: "GET_SYNC_ARCHIVED" }, (response) => {
-      if (response?.syncArchived !== undefined) {
-        setSyncArchived(response.syncArchived);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = (await browser.runtime.sendMessage({
+          type: "GET_SYNC_ARCHIVED",
+        })) as { syncArchived?: number } | undefined;
+        if (cancelled) return;
+        if (response?.syncArchived !== undefined) {
+          setSyncArchived(response.syncArchived);
+        }
+      } catch {
+        // Background unavailable — keep default
       }
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

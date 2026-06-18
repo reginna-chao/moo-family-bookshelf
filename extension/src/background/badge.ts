@@ -4,13 +4,15 @@
  * does not declare `"action"`) so callers never crash the service worker.
  */
 
+import browser from "webextension-polyfill";
+
 export function showSyncErrorBadge(): void {
-  if (!chrome.action?.setBadgeText) return;
-  chrome.action.setBadgeText({ text: "!" });
-  chrome.action.setBadgeBackgroundColor?.({ color: "#EF4444" });
+  if (!browser.action?.setBadgeText) return;
+  void browser.action.setBadgeText({ text: "!" });
+  void browser.action.setBadgeBackgroundColor?.({ color: "#EF4444" });
 }
 
 export function clearSyncErrorBadge(): void {
-  if (!chrome.action?.setBadgeText) return;
-  chrome.action.setBadgeText({ text: "" });
+  if (!browser.action?.setBadgeText) return;
+  void browser.action.setBadgeText({ text: "" });
 }

@@ -7,6 +7,7 @@ import React, {
   useRef,
   useMemo,
 } from "react";
+import browser from "webextension-polyfill";
 import {
   ApiClient,
   BookEntry,
@@ -242,7 +243,7 @@ export function FamilyDataProvider({
       const ck = chipsKey(userId);
       let storageData: Record<string, unknown> = {};
       try {
-        storageData = await chrome.storage.local.get([sk, ck]);
+        storageData = await browser.storage.local.get([sk, ck]);
       } catch {
         // Extension context invalidated
       }
@@ -265,7 +266,7 @@ export function FamilyDataProvider({
       if (Object.keys(seenData).length === 0) {
         const baseline = buildSeenBaseline(parsedMembers, rawMembers);
         try {
-          chrome.storage.local.set({ [sk]: baseline });
+          void browser.storage.local.set({ [sk]: baseline });
         } catch {
           // Extension context invalidated
         }
@@ -362,7 +363,7 @@ export function FamilyDataProvider({
       Date.now() + 24 * 60 * 60 * 1000,
     ).toISOString();
     try {
-      chrome.storage.local.set({
+      void browser.storage.local.set({
         [seenKey(userId)]: baseline,
         [chipsKey(userId)]: { bookIds: [...mergedChips], expiresAt },
       });
@@ -386,7 +387,7 @@ export function FamilyDataProvider({
   // S4: single storage listener for cross-component sync
   useEffect(() => {
     const listener = (
-      changes: { [key: string]: chrome.storage.StorageChange },
+      changes: Record<string, browser.Storage.StorageChange>,
       area: string,
     ) => {
       if (area !== "local") return;
@@ -399,13 +400,13 @@ export function FamilyDataProvider({
       }
     };
     try {
-      chrome.storage.onChanged.addListener(listener);
+      browser.storage.onChanged.addListener(listener);
     } catch {
       // Extension context may be invalidated
     }
     return () => {
       try {
-        chrome.storage.onChanged.removeListener(listener);
+        browser.storage.onChanged.removeListener(listener);
       } catch {
         // Extension context may be invalidated
       }

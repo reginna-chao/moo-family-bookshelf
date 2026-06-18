@@ -952,11 +952,12 @@ jobs:
 
 - **完成狀態**：#31 / #32 實作完成 2026-06-03（branch `feat/wave-l-book-patch-api`，commits `aa7462f` BE + `dc81f79` FE）；FE 1 輪 + BE 1 輪 Fix Cycle，修復 1 項 CRITICAL（連續儲存 server-known 污染致資料遺失）+ 採納 3 項 SUGGESTION；三端 typecheck/test/E2E 全綠（Worker 478 / Extension 1077 / PWA 403），security scan（full）PASS。#33 待上線後啟動。
 
-### Phase 9：v1.5.0 — 隱藏書籍可逆（實作中）
+### Phase 9：v1.5.0 — 隱藏書籍可逆 + Firefox 跨瀏覽器支援（實作中）
 
-> 讓使用者把家庭書櫃中不想看到的書「隱藏」，且可逆、可重新顯示。
-> **本版本只做隱藏**；「我的最愛」（原 Phase 10）延後獨立發布。
-> **設計確認日期**：2026-06-12
+> 讓使用者把家庭書櫃中不想看到的書「隱藏」，且可逆、可重新顯示；並讓擴充功能跨瀏覽器（含 Firefox for Android™）。
+> **本版本含兩大塊**：Wave D（隱藏書籍）+ Wave M（Firefox 跨瀏覽器支援），兩者同 release 發布。
+> 「我的最愛」（Phase 10）**維持 v1.6.0、不延後**。
+> **設計確認日期**：2026-06-12（隱藏）、2026-06-15（Firefox）
 
 ##### Wave D — 家庭書櫃隱藏書籍（觀看者私有、可逆）
 
@@ -980,11 +981,35 @@ jobs:
   - **後端**：family bookshelf 聚合端點不變（隱藏是觀看者自己 record 的偏好，前端過濾）。新增 `PUT /api/user/:id/family-prefs` + schema `familyShelfPrefs`。
   - **影響**：`worker/src/kv/schema.ts`、`worker/src/routes/user.ts`、`extension/src/dialog/FamilyShelf.tsx` + Context/hooks、`pwa/src/` 對應頁面、雙端 `api/client.ts`。
 
+##### Wave M — Firefox 擴充功能跨瀏覽器支援（含 Firefox for Android™）
+
+> **決策（2026-06-15）**：原規劃「Firefox 取代 v1.6.0、我的最愛延後 v1.7.0」，最終改為**併入 v1.5.0、與隱藏書籍同 release**；我的最愛**維持 v1.6.0、不延後**。
+> **範圍**：純前端（Extension 相容性 / 建置）+ CI/CD + 文件。**不**動 `worker/`、**不**動 `pwa/`、**不**新增任何使用者功能。同一份 codebase 靠 manifest / 建置目標區分 Chrome 與 Firefox。
+> **API 策略**：導入 `webextension-polyfill`，全面改用 promise 風格 `browser.*`，順手收斂既有 callback/promise 混用技術債。
+
+- [ ] **#34 導入 webextension-polyfill，統一 `browser.*`**
+  - 新增 `webextension-polyfill` + `@types/webextension-polyfill` 依賴
+  - 將 `chrome.*`（散落 24 個檔案、123 處）改為 `browser.*`；content script / background / dialog 三類入口確保 polyfill 正確載入
+  - 同步更新測試 mock（chrome mock → browser mock / 相容 shim），保持既有測試全綠
+- [ ] **#35 Firefox manifest + 雙瀏覽器建置**
+  - manifest 新增 `browser_specific_settings.gecko.id` + `gecko_android`（Android 最低版本）
+  - background 策略：Chrome 維持 `service_worker`；Firefox 用相容鍵（`scripts` event page 或 FF 支援的 service_worker），於 manifest 轉換步驟分流
+  - 建置產出分流：`dist/`（Chrome）+ `dist-firefox/`（Firefox）
+- [ ] **#36 web-ext 打包 + AMO CD**
+  - `web-ext` lint / build / sign；`.github/workflows/cicd.yml` 新增 Firefox release job（`v*` tag 觸發，與既有 `release-extension` 並列）
+  - 需 GitHub Secrets：`AMO_JWT_ISSUER` / `AMO_JWT_SECRET`（須向 Mozilla AMO 申請）
+- [ ] **#37 文件**：`README` / `worker/DEPLOY.md` 補 Firefox 安裝說明；`site/` 加「Available on Firefox for Android™」入口
+- [ ] **#38 實機驗證（需手動）**：Firefox Desktop + Android（Fenix）載入、content script 注入 `read.readmoo.com`、`storage.sync`（需登入 Firefox 帳號，已有 sync code fallback）、`#/me` / `#/library` 爬取流程
+
+> ⚠️ E2E（Playwright）目前僅載入 Chrome；Firefox E2E 視成本決定，**預設先不擴充**，列為後續追蹤。
+> ⚠️ 版號與 CHANGELOG 不在 Wave M 內手動處理 — 於 release 前以 `/bump-ver` 統一 bump 至 `v1.5.0` 並自動產生涵蓋隱藏書籍 + Firefox 的條目。
+
 ### Phase 10：v1.6.0 — 我的最愛（規劃中，與隱藏對稱）
 
 > **設計已於 2026-06-12 重新定調**：我的最愛改為**觀看者私有**，與 Phase 9 隱藏功能**同構**，
 > 直接複用隱藏的基礎建設（`familyShelfPrefs` 容器 + copy-scoped key + 同一套成員變更孤兒語意）。
 > 原本「owner-scoped、對家人公開（選項 B）」的設計**作廢**。
+> **版號（2026-06-15）**：維持 v1.6.0。Firefox 跨瀏覽器支援已併入 v1.5.0（Phase 9 Wave M），未佔用此版位，故我的最愛無需延後。
 
 ##### Wave F — 家庭書櫃我的最愛（觀看者私有）
 
@@ -1061,4 +1086,4 @@ moo-family-bookshelf/
 
 ---
 
-*最後更新：2026-05-27（v1.3 Wave J 完成：借閱流程簡化 + readmooName: null 刪除語意 + ≤2 人不顯示規則；Wave E 延後到 v1.5+）*
+*最後更新：2026-06-15（v1.5.0 範圍調整：新增 Wave M Firefox 跨瀏覽器支援（含 Firefox for Android™），與隱藏書籍同 release；我的最愛維持 v1.6.0、不延後）*

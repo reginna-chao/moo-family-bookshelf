@@ -2,6 +2,7 @@
  * Token refresh and recovery logic, extracted from ApiClient.
  */
 
+import browser from "webextension-polyfill";
 import type { ApiResponse } from "./types";
 import {
   USER_ID_KEY,
@@ -26,7 +27,7 @@ interface RefreshDeps {
  */
 export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
   try {
-    const storage = await chrome.storage.local.get([USER_ID_KEY, FAMILY_ID_KEY, AUTH_TOKEN_KEY]);
+    const storage = await browser.storage.local.get([USER_ID_KEY, FAMILY_ID_KEY, AUTH_TOKEN_KEY]);
     const userId = storage[USER_ID_KEY] as string | undefined;
     const familyId = storage[FAMILY_ID_KEY] as string | undefined;
     const storedToken = storage[AUTH_TOKEN_KEY] as string | undefined;
@@ -52,29 +53,29 @@ export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
       if (result.data.expiresAt) {
         storageUpdate[TOKEN_EXPIRES_AT_KEY] = result.data.expiresAt;
       }
-      await chrome.storage.local.set(storageUpdate);
+      await browser.storage.local.set(storageUpdate);
       return true;
     }
 
     // Refresh failed — attempt staged recovery via joinFamily
     deps.setAuthToken(null);
-    await chrome.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
+    await browser.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
 
     const recovered = await attemptJoinRecovery(deps);
     if (recovered) return true;
 
     // Recovery also failed — clear family data
-    await chrome.storage.local.remove([FAMILY_ID_KEY]);
+    await browser.storage.local.remove([FAMILY_ID_KEY]);
     try {
-      await chrome.storage.sync.remove([FAMILY_ID_KEY]);
+      await browser.storage.sync.remove([FAMILY_ID_KEY]);
     } catch {
       // sync storage may not be available in all contexts
     }
-    try {
-      chrome.runtime.sendMessage({ type: "FAMILY_REMOVED" });
-    } catch {
+    void Promise.resolve(
+      browser.runtime.sendMessage({ type: "FAMILY_REMOVED" }),
+    ).catch(() => {
       // Message may fail if no listener is active
-    }
+    });
     deps.onFamilyRemoved?.();
 
     return false;
@@ -84,7 +85,7 @@ export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
 }
 
 async function attemptJoinRecovery(deps: RefreshDeps): Promise<boolean> {
-  const recoveryStorage = await chrome.storage.local.get([
+  const recoveryStorage = await browser.storage.local.get([
     FAMILY_ID_KEY,
     USER_ID_KEY,
   ]);
@@ -122,7 +123,7 @@ async function attemptJoinRecovery(deps: RefreshDeps): Promise<boolean> {
     if (joinResult.data.expiresAt) {
       recoveryUpdate[TOKEN_EXPIRES_AT_KEY] = joinResult.data.expiresAt;
     }
-    await chrome.storage.local.set(recoveryUpdate);
+    await browser.storage.local.set(recoveryUpdate);
     return true;
   }
 

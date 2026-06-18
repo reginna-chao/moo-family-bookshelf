@@ -1,21 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { useFloatingIconSize } from "@/dialog/useFloatingIconSize";
 
-type SendMessageCallback = (response: Record<string, unknown>) => void;
-
+/**
+ * Production reads/writes the icon size via the promise-based
+ * `browser.runtime.sendMessage(msg)` (webextension-polyfill). The mock returns a
+ * Promise resolving to the response keyed by message type — there is no Chrome
+ * callback argument. The mount read is async, so assertions on the loaded value
+ * use `waitFor`.
+ */
 function mockSendMessage(
   getResponse: Record<string, unknown>,
   setResponse: Record<string, unknown> = { ok: true },
 ) {
   vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    ((message: unknown, callback: SendMessageCallback) => {
+    ((message: unknown) => {
       const msg = message as Record<string, unknown>;
       if (msg.type === "GET_FLOATING_ICON_SIZE") {
-        callback(getResponse);
-      } else if (msg.type === "SET_FLOATING_ICON_SIZE") {
-        callback(setResponse);
+        return Promise.resolve(getResponse);
       }
+      if (msg.type === "SET_FLOATING_ICON_SIZE") {
+        return Promise.resolve(setResponse);
+      }
+      return Promise.resolve(undefined);
     }) as typeof chrome.runtime.sendMessage,
   );
 }
@@ -23,7 +30,6 @@ function mockSendMessage(
 describe("useFloatingIconSize", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(chrome.runtime, "lastError", { value: null, writable: true, configurable: true });
   });
 
   it("defaults to 'medium'", () => {
@@ -32,24 +38,22 @@ describe("useFloatingIconSize", () => {
     expect(result.current.size).toBe("medium");
   });
 
-  it.each(["small", "large"] as const)("reads '%s' from background on mount", (size) => {
+  it.each(["small", "large"] as const)("reads '%s' from background on mount", async (size) => {
     mockSendMessage({ size });
     const { result } = renderHook(() => useFloatingIconSize());
-    expect(result.current.size).toBe(size);
+    await waitFor(() => {
+      expect(result.current.size).toBe(size);
+    });
   });
 
-  it("keeps 'medium' when chrome.runtime.lastError is set", () => {
-    Object.defineProperty(chrome.runtime, "lastError", {
-      value: { message: "error" },
-      writable: true,
-      configurable: true,
-    });
+  it("keeps 'medium' when the background message rejects", async () => {
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((_message: unknown, callback: SendMessageCallback) => {
-        callback({ size: "small" });
-      }) as typeof chrome.runtime.sendMessage,
+      (() => Promise.reject(new Error("background unavailable"))) as typeof chrome.runtime.sendMessage,
     );
     const { result } = renderHook(() => useFloatingIconSize());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(result.current.size).toBe("medium");
   });
 
@@ -72,23 +76,14 @@ describe("useFloatingIconSize", () => {
       result.current.setSize("large");
     });
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      { type: "SET_FLOATING_ICON_SIZE", size: "large" },
-      expect.any(Function),
-    );
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "SET_FLOATING_ICON_SIZE",
+      size: "large",
+    });
   });
 
   it("rolls back state when SET responds with ok: false", async () => {
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((message: unknown, callback: SendMessageCallback) => {
-        const msg = message as Record<string, unknown>;
-        if (msg.type === "GET_FLOATING_ICON_SIZE") {
-          callback({ size: "medium" });
-        } else if (msg.type === "SET_FLOATING_ICON_SIZE") {
-          Promise.resolve().then(() => callback({ ok: false }));
-        }
-      }) as typeof chrome.runtime.sendMessage,
-    );
+    mockSendMessage({ size: "medium" }, { ok: false });
     const { result } = renderHook(() => useFloatingIconSize());
 
     act(() => {
@@ -96,11 +91,9 @@ describe("useFloatingIconSize", () => {
     });
     expect(result.current.size).toBe("small");
 
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+    await waitFor(() => {
+      expect(result.current.size).toBe("medium");
     });
-
-    expect(result.current.size).toBe("medium");
   });
 
   it("does not send message when setting same size", () => {

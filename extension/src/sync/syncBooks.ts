@@ -8,6 +8,7 @@
  * personal shelf.
  */
 
+import browser from "webextension-polyfill";
 import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
 import {
   AUTO_SYNC_INTERVAL_KEY,
@@ -57,7 +58,7 @@ function wait(ms: number): Promise<void> {
  * relative to the user-configured `autoSyncInterval`.
  */
 async function canSyncByInterval(timestampKey: string): Promise<boolean> {
-  const result = await chrome.storage.local.get([timestampKey, AUTO_SYNC_INTERVAL_KEY]);
+  const result = await browser.storage.local.get([timestampKey, AUTO_SYNC_INTERVAL_KEY]);
   const interval = isAutoSyncInterval(result[AUTO_SYNC_INTERVAL_KEY])
     ? result[AUTO_SYNC_INTERVAL_KEY]
     : DEFAULT_AUTO_SYNC_INTERVAL;
@@ -145,7 +146,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     // Step 3b: Optionally scrape archived books
     let syncArchived = BoolFlag.FALSE;
     try {
-      const archiveResult = await chrome.storage.local.get([SYNC_ARCHIVED_KEY]);
+      const archiveResult = await browser.storage.local.get([SYNC_ARCHIVED_KEY]);
       syncArchived = (archiveResult[SYNC_ARCHIVED_KEY] as number | undefined) ?? BoolFlag.FALSE;
     } catch {
       // Archive setting unavailable — skip archive sync
@@ -159,7 +160,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     }
 
     // Step 4: Fetch existing saved books for merge
-    const storageResult = await chrome.storage.local.get([DISPLAY_NAME_KEY]);
+    const storageResult = await browser.storage.local.get([DISPLAY_NAME_KEY]);
 
     let savedBooks: BookEntry[] = [];
     let savedRawPayload: Record<string, unknown> | null = null;
@@ -197,7 +198,7 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
 
     // Step 7: Record this successful sync so the auto-sync throttle (canAutoSync)
     // honours the user's configured interval before syncing again.
-    await chrome.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now() });
+    await browser.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now() });
 
     return { success: true, books: merged };
   } catch (err) {

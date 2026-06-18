@@ -897,6 +897,51 @@ describe("ApiClient", () => {
       expect(fetchMock).toHaveBeenCalledTimes(4);
     });
 
+    it("does not propagate a rejected FAMILY_REMOVED sendMessage when recovery fails", async () => {
+      const fetchMock = vi.fn()
+        // Original request → 401
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+        })
+        // Refresh request → REFRESH_FAILED
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Removed" } }),
+        })
+        // joinFamily recovery → fails
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({ error: { code: "FAMILY_NOT_FOUND", message: "Not found" } }),
+        });
+      globalThis.fetch = fetchMock;
+
+      vi.mocked(chrome.storage.local.get).mockImplementation(
+        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+          if (typeof callback === "function") callback(result);
+          return Promise.resolve(result) as unknown as void;
+        },
+      );
+
+      // Simulate webextension-polyfill rejecting when no listener is active /
+      // the context is invalidated. A synchronous try/catch cannot catch this;
+      // the recovery-failure path must still resolve cleanly.
+      vi.mocked(chrome.runtime.sendMessage).mockRejectedValueOnce(
+        new Error("Could not establish connection. Receiving end does not exist."),
+      );
+
+      const result = await client.getPersonalBooks("u1");
+
+      // The rejected sendMessage must not propagate out of the refresh flow:
+      // the original request still resolves to its 401 error envelope.
+      expect(result.error?.code).toBe("UNAUTHORIZED");
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "FAMILY_REMOVED" });
+    });
+
     it("clears token then family data on REFRESH_FAILED when recovery fails", async () => {
       const fetchMock = vi.fn()
         // Original request → 401

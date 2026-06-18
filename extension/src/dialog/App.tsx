@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import browser from "webextension-polyfill";
 import { Inbox } from "lucide-react";
 import { ApiClient, BorrowStatus } from "../api/client";
 import {
@@ -66,43 +67,63 @@ export function App() {
 
     // Load familyId, userId, and custom API endpoint on mount.
     // GET_FAMILY_ID checks sync first, falling back to local (handled in background).
-    chrome.runtime.sendMessage({ type: "GET_FAMILY_ID" }, (familyResponse) => {
-      chrome.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY], (storageResult) => {
-        chrome.runtime.sendMessage({ type: "GET_API_ENDPOINT" }, (apiResponse) => {
-          if (apiResponse?.apiEndpoint) {
-            apiClientRef.current.setEndpoint(apiResponse.apiEndpoint);
-          }
-          if (storageResult[AUTH_TOKEN_KEY]) {
-            apiClientRef.current.setAuthToken(storageResult[AUTH_TOKEN_KEY] as string);
-          }
-          if (familyResponse?.familyId && storageResult[USER_ID_KEY]) {
-            setFamilyId(familyResponse.familyId);
-            setUserId(storageResult[USER_ID_KEY] as string);
-            setView("main");
-          } else {
-            setView("onboarding");
-          }
-        });
-      });
-    });
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [familyResponse, storageResult, apiResponse] = await Promise.all([
+          browser.runtime.sendMessage({ type: "GET_FAMILY_ID" }) as Promise<
+            { familyId?: string } | undefined
+          >,
+          browser.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY]),
+          browser.runtime.sendMessage({ type: "GET_API_ENDPOINT" }) as Promise<
+            { apiEndpoint?: string } | undefined
+          >,
+        ]);
+        if (cancelled) return;
+
+        if (apiResponse?.apiEndpoint) {
+          apiClientRef.current.setEndpoint(apiResponse.apiEndpoint);
+        }
+        if (storageResult[AUTH_TOKEN_KEY]) {
+          apiClientRef.current.setAuthToken(storageResult[AUTH_TOKEN_KEY] as string);
+        }
+        if (familyResponse?.familyId && storageResult[USER_ID_KEY]) {
+          setFamilyId(familyResponse.familyId);
+          setUserId(storageResult[USER_ID_KEY] as string);
+          setView("main");
+        } else {
+          setView("onboarding");
+        }
+      } catch {
+        // Background asleep/unavailable or storage read failed after the
+        // context-valid guard passed. Don't leave `view` stuck on "loading";
+        // fall back to onboarding so the UI stays interactive.
+        if (cancelled) return;
+        setView("onboarding");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleFamilyJoined = (id: string, newUserId: string) => {
     setFamilyId(id);
     setUserId(newUserId);
     // First-time onboarding: default to personal-shelf tab
-    chrome.storage.local.get([HAS_COMPLETED_INITIAL_SETUP_KEY], (result) => {
+    void (async () => {
+      const result = await browser.storage.local.get([HAS_COMPLETED_INITIAL_SETUP_KEY]);
       if (!result[HAS_COMPLETED_INITIAL_SETUP_KEY]) {
         setActiveTab("personal-shelf");
-        chrome.storage.local.set({ [HAS_COMPLETED_INITIAL_SETUP_KEY]: true });
+        void browser.storage.local.set({ [HAS_COMPLETED_INITIAL_SETUP_KEY]: true });
       }
-    });
+    })();
     setView("main");
   };
 
   const handleLeaveFamily = () => {
-    chrome.runtime.sendMessage({ type: "CLEAR_FAMILY_ID" });
-    chrome.storage.local.remove(TOKEN_EXPIRES_AT_KEY);
+    void browser.runtime.sendMessage({ type: "CLEAR_FAMILY_ID" });
+    void browser.storage.local.remove(TOKEN_EXPIRES_AT_KEY);
     setFamilyId(null);
     setActiveTab("family-shelf");
     setView("onboarding");

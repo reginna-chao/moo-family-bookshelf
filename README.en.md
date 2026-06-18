@@ -25,11 +25,29 @@ Easily browse books shared by family members on your Readmoo family account.
 
 <summary>Manual Installation</summary>
 
-1. [Download the latest release](https://github.com/reginna-chao/moo-family-bookshelf/releases) and extract it
+1. [Download the latest release](https://github.com/reginna-chao/moo-family-bookshelf/releases) (`moo-family-bookshelf-chrome-vX.X.X.zip`) and extract it
 2. Open Chrome and navigate to `chrome://extensions/`
 3. Enable "Developer mode" in the top right corner
 4. Click "Load unpacked" and select the extracted folder
 5. Done! Go to any Readmoo page and you'll see the "Family Bookshelf" button
+
+</details>
+
+### Firefox (Desktop / Android™)
+
+Also available on Firefox Desktop and Firefox for Android™.
+
+- AMO install link: (coming soon, link TBD)<!-- TODO: add the official AMO URL once listed -->
+
+<details>
+
+<summary>Manual Installation (Firefox)</summary>
+
+1. Download `moo-family-bookshelf-firefox-vX.X.X-direct-install.xpi` from [Releases](https://github.com/reginna-chao/moo-family-bookshelf/releases)
+2. Open Firefox and navigate to `about:addons`
+3. Click the gear icon in the top right → "Install Add-on From File…"
+4. Select the downloaded `.xpi` and confirm the install
+5. Done! This is a permanent (signed) install that auto-updates via `updates.json`
 
 </details>
 

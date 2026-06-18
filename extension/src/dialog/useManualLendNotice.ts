@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import browser from "webextension-polyfill";
 import { MANUAL_LEND_NOTICE_DISMISSED_KEY } from "../constants";
 
 export interface UseManualLendNoticeReturn {
@@ -11,19 +12,22 @@ export function useManualLendNotice(): UseManualLendNoticeReturn {
 
   useEffect(() => {
     let cancelled = false;
-    chrome.storage.local.get([MANUAL_LEND_NOTICE_DISMISSED_KEY], (result) => {
+    void (async () => {
+      const result = await browser.storage.local.get([
+        MANUAL_LEND_NOTICE_DISMISSED_KEY,
+      ]);
       if (cancelled) return;
       if (result[MANUAL_LEND_NOTICE_DISMISSED_KEY] === true) {
         setIsDismissed(true);
       }
-    });
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
 
   const dismiss = useCallback(() => {
-    void chrome.storage.local.set({ [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true });
+    void browser.storage.local.set({ [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true });
     setIsDismissed(true);
   }, []);
 

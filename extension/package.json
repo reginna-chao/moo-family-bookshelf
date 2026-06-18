@@ -17,6 +17,9 @@
     "sync-version": "tsx scripts/sync-version.ts",
     "build": "tsx scripts/sync-version.ts && tsc --noEmit && vite build && vite build --config vite.config.content.ts && vite build --config vite.config.content-modules.ts && vite build --config vite.config.fiber-bridge.ts && tsx scripts/verify-build.ts",
     "build:dev": "tsx scripts/sync-version.ts && tsc --noEmit && vite build --mode remote && vite build --mode remote --config vite.config.content.ts && vite build --mode remote --config vite.config.content-modules.ts && vite build --mode remote --config vite.config.fiber-bridge.ts",
+    "build:firefox": "pnpm build && tsx scripts/build-firefox.ts && tsx scripts/verify-firefox-build.ts",
+    "build:updates-json": "tsx scripts/build-updates-json.ts",
+    "lint:firefox": "pnpm build:firefox && web-ext lint --source-dir=dist-firefox-amo && web-ext lint --source-dir=dist-firefox-direct --self-hosted",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
@@ -34,6 +37,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "webextension-polyfill": "^0.12.0",
     "moo-family-bookshelf-shared": "workspace:*"
   },
   "devDependencies": {
@@ -42,6 +46,7 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/chrome": "^0.0.287",
+    "@types/webextension-polyfill": "^0.12.1",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -60,6 +65,7 @@
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.57.2",
     "vite": "^6.0.5",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "web-ext": "^8.3.0"
   }
 }

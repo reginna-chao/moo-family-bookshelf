@@ -56,12 +56,17 @@ cp .env.example .env
 
 ```bash
 cd extension
-pnpm dev        # Dev server (API points to localhost:8787)
-pnpm build      # Production build (API points to prod Worker)
-pnpm typecheck  # Type check
-pnpm lint       # ESLint + Prettier
-pnpm test       # Unit + component tests
+pnpm dev                  # Dev server (API points to localhost:8787)
+pnpm build                # Production build (API points to prod Worker)
+pnpm typecheck            # Type check
+pnpm lint                 # ESLint + Prettier
+pnpm test                 # Unit + component tests
+pnpm build:firefox        # Build both Firefox variants (dist-firefox-amo/ + dist-firefox-direct/)
+pnpm build:updates-json   # Generate the Firefox self-distribution updates.json
+pnpm lint:firefox         # web-ext lint both Firefox variants
 ```
+
+> The `amo` variant omits `update_url` (an AMO listing requirement), while the `direct` variant includes it so self-distributed `.xpi` installs auto-update via `updates.json`.
 
 ### Worker
 

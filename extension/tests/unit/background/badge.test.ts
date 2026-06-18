@@ -8,50 +8,54 @@ import {
  * Regression tests for the sync error badge helpers.
  *
  * Why this file exists: the bug these helpers were created to fix is that
- * `chrome.action` is undefined when the Manifest V3 `"action"` field is
- * missing. The global `chrome` mock in tests/setup.ts always defines
- * `chrome.action`, so these tests use `vi.stubGlobal` to simulate the broken
- * manifest case and assert the helpers fail safely.
+ * `action` is undefined when the Manifest V3 `"action"` field is missing.
+ *
+ * Production reads the badge API via the webextension-polyfill `browser` import,
+ * which (see tests/setup.ts) is the SAME object as `globalThis.browser`. The
+ * `browser.action` property is read at call time on that live object, so these
+ * tests mutate `globalThis.browser.action` in place (rather than replacing the
+ * whole global, which the module's bound import reference would not observe) and
+ * restore the original `action` afterwards.
  */
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const browserMock = (globalThis as any).browser as { action?: unknown };
+const originalAction = browserMock.action;
+
 afterEach(() => {
-  vi.unstubAllGlobals();
+  browserMock.action = originalAction;
   vi.restoreAllMocks();
 });
 
-function stubChromeWithAction(): {
+function stubBrowserWithAction(): {
   setBadgeText: ReturnType<typeof vi.fn>;
   setBadgeBackgroundColor: ReturnType<typeof vi.fn>;
 } {
   const setBadgeText = vi.fn();
   const setBadgeBackgroundColor = vi.fn();
-  vi.stubGlobal("chrome", {
-    action: { setBadgeText, setBadgeBackgroundColor },
-  });
+  browserMock.action = { setBadgeText, setBadgeBackgroundColor };
   return { setBadgeText, setBadgeBackgroundColor };
 }
 
-function stubChromeWithoutAction(): void {
-  vi.stubGlobal("chrome", {});
+function stubBrowserWithoutAction(): void {
+  browserMock.action = undefined;
 }
 
-function stubChromeActionPartial(): {
+function stubBrowserActionPartial(): {
   setBadgeText: ReturnType<typeof vi.fn>;
 } {
   const setBadgeText = vi.fn();
-  vi.stubGlobal("chrome", {
-    action: { setBadgeText },
-  });
+  browserMock.action = { setBadgeText };
   return { setBadgeText };
 }
 
-function stubChromeActionEmpty(): void {
-  vi.stubGlobal("chrome", { action: {} });
+function stubBrowserActionEmpty(): void {
+  browserMock.action = {};
 }
 
 describe("showSyncErrorBadge", () => {
-  it("sets badge text to '!' and red background when chrome.action is defined", () => {
-    const { setBadgeText, setBadgeBackgroundColor } = stubChromeWithAction();
+  it("sets badge text to '!' and red background when browser.action is defined", () => {
+    const { setBadgeText, setBadgeBackgroundColor } = stubBrowserWithAction();
 
     showSyncErrorBadge();
 
@@ -59,43 +63,43 @@ describe("showSyncErrorBadge", () => {
     expect(setBadgeBackgroundColor).toHaveBeenCalledWith({ color: "#EF4444" });
   });
 
-  it("does nothing and does not throw when chrome.action is undefined", () => {
-    stubChromeWithoutAction();
+  it("does nothing and does not throw when browser.action is undefined", () => {
+    stubBrowserWithoutAction();
 
     expect(() => showSyncErrorBadge()).not.toThrow();
   });
 
   it("still sets badge text when setBadgeBackgroundColor is missing", () => {
-    const { setBadgeText } = stubChromeActionPartial();
+    const { setBadgeText } = stubBrowserActionPartial();
 
     expect(() => showSyncErrorBadge()).not.toThrow();
     expect(setBadgeText).toHaveBeenCalledWith({ text: "!" });
   });
 
-  it("does nothing when chrome.action is defined but setBadgeText is missing", () => {
-    stubChromeActionEmpty();
+  it("does nothing when browser.action is defined but setBadgeText is missing", () => {
+    stubBrowserActionEmpty();
 
     expect(() => showSyncErrorBadge()).not.toThrow();
   });
 });
 
 describe("clearSyncErrorBadge", () => {
-  it("sets badge text to empty string when chrome.action is defined", () => {
-    const { setBadgeText } = stubChromeWithAction();
+  it("sets badge text to empty string when browser.action is defined", () => {
+    const { setBadgeText } = stubBrowserWithAction();
 
     clearSyncErrorBadge();
 
     expect(setBadgeText).toHaveBeenCalledWith({ text: "" });
   });
 
-  it("does nothing and does not throw when chrome.action is undefined", () => {
-    stubChromeWithoutAction();
+  it("does nothing and does not throw when browser.action is undefined", () => {
+    stubBrowserWithoutAction();
 
     expect(() => clearSyncErrorBadge()).not.toThrow();
   });
 
-  it("does nothing when chrome.action is defined but setBadgeText is missing", () => {
-    stubChromeActionEmpty();
+  it("does nothing when browser.action is defined but setBadgeText is missing", () => {
+    stubBrowserActionEmpty();
 
     expect(() => clearSyncErrorBadge()).not.toThrow();
   });

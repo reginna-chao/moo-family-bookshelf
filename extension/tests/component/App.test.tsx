@@ -42,8 +42,10 @@ vi.mock("@/constants", async (importOriginal) => {
   return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
 });
 
-type SendMessageCallback = (response: unknown) => void;
-
+// Production reads via promise-based `browser.runtime.sendMessage(msg)` and
+// `browser.storage.local.get(keys)` (webextension-polyfill). The mocks resolve
+// the response/result Promise keyed by message type — there is no Chrome
+// callback argument.
 function setupChromeMessages(options: {
   familyId?: string | null;
   userId?: string | null;
@@ -52,30 +54,28 @@ function setupChromeMessages(options: {
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-    (message: unknown, callback?: SendMessageCallback) => {
+    (message: unknown) => {
       const msg = message as { type: string };
-      if (msg.type === "GET_FAMILY_ID" && callback) {
-        callback({ familyId: options.familyId ?? null });
+      if (msg.type === "GET_FAMILY_ID") {
+        return Promise.resolve({ familyId: options.familyId ?? null });
       }
-      if (msg.type === "GET_API_ENDPOINT" && callback) {
-        callback({ apiEndpoint: options.apiEndpoint ?? null });
+      if (msg.type === "GET_API_ENDPOINT") {
+        return Promise.resolve({ apiEndpoint: options.apiEndpoint ?? null });
       }
-      if (msg.type === "CLEAR_FAMILY_ID" && callback) {
-        callback(undefined);
+      if (msg.type === "CLEAR_FAMILY_ID") {
+        return Promise.resolve(undefined);
       }
-      return undefined as unknown as Promise<unknown>;
+      return Promise.resolve(undefined);
     },
   );
 
-  vi.mocked(chrome.storage.local.get).mockImplementation(
-    (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-      const result: Record<string, unknown> = {};
-      if (options.userId) result[USER_ID_KEY] = options.userId;
-      if (options.authToken) result[AUTH_TOKEN_KEY] = options.authToken;
-      if (typeof callback === "function") callback(result);
-      return Promise.resolve(result) as unknown as void;
-    },
-  );
+  vi.mocked(chrome.storage.local.get).mockImplementation(((keys: unknown) => {
+    void keys;
+    const result: Record<string, unknown> = {};
+    if (options.userId) result[USER_ID_KEY] = options.userId;
+    if (options.authToken) result[AUTH_TOKEN_KEY] = options.authToken;
+    return Promise.resolve(result);
+  }) as typeof chrome.storage.local.get);
 }
 
 describe("App", () => {
@@ -320,10 +320,10 @@ describe("App", () => {
     });
 
     // The component should have called sendMessage with GET_API_ENDPOINT
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      { type: "GET_API_ENDPOINT" },
-      expect.any(Function),
-    );
+    // (promise-based browser.runtime.sendMessage — no Chrome callback arg).
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "GET_API_ENDPOINT",
+    });
   });
 
   describe("lazy-mount tab panels", () => {
