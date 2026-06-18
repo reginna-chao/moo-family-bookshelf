@@ -71,11 +71,11 @@ export async function doRefreshToken(deps: RefreshDeps): Promise<boolean> {
     } catch {
       // sync storage may not be available in all contexts
     }
-    try {
-      void browser.runtime.sendMessage({ type: "FAMILY_REMOVED" });
-    } catch {
+    void Promise.resolve(
+      browser.runtime.sendMessage({ type: "FAMILY_REMOVED" }),
+    ).catch(() => {
       // Message may fail if no listener is active
-    }
+    });
     deps.onFamilyRemoved?.();
 
     return false;
