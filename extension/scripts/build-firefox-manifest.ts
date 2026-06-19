@@ -58,6 +58,19 @@ export const STRICT_MIN_VERSION = "121.0";
 export const UPDATE_URL =
   "https://github.com/reginna-chao/moo-family-bookshelf/releases/latest/download/updates.json";
 
+/**
+ * Firefox built-in data-consent declaration (required by AMO for all new
+ * Firefox extensions; see mzl.la/firefox-builtin-data-consent).
+ *
+ * The extension syncs book-list content scraped from read.readmoo.com, so it
+ * declares the "websiteContent" data category. Email is hashed client-side
+ * (no PII category) and there is no tracking/telemetry. Applied to BOTH
+ * channels (Mozilla will require it for unlisted builds too).
+ */
+export const DATA_COLLECTION_PERMISSIONS: { required: string[] } = {
+  required: ["websiteContent"],
+};
+
 export type FirefoxTarget = "amo" | "direct";
 
 interface BackgroundMv3 {
@@ -70,6 +83,7 @@ interface GeckoSettings {
   id: string;
   strict_min_version: string;
   update_url?: string;
+  data_collection_permissions: { required: string[] };
 }
 
 interface Manifest {
@@ -94,6 +108,7 @@ export function toFirefoxManifest(
   const gecko: GeckoSettings = {
     id,
     strict_min_version: STRICT_MIN_VERSION,
+    data_collection_permissions: DATA_COLLECTION_PERMISSIONS,
   };
   if (target === "direct") {
     gecko.update_url = UPDATE_URL;
