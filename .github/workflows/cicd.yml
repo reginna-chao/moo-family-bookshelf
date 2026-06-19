@@ -666,7 +666,18 @@ jobs:
       #    after the self-dist upload means an AMO review hiccup (e.g. a
       #    same-version conflict with the unlisted submission) cannot block the
       #    downloadable .xpi from reaching the Release.
+      #    NON-BLOCKING (continue-on-error): a listed submission requires a
+      #    pre-existing AMO listing with curated metadata (name/summary/
+      #    categories/license) maintained on the AMO dashboard — without it
+      #    web-ext fails with "this field, or custom_license, is required for
+      #    listed versions". That curation is a human, one-time step, not a CD
+      #    concern; once the listing exists subsequent versions submit cleanly.
+      #    So this final step is allowed to fail (warn) rather than red the
+      #    release — every artifact that matters (the self-dist .xpi, updates.json
+      #    and release assets) was already produced and uploaded by the
+      #    hard-failing steps above.
       - name: Sign & submit to AMO (listed)
+        continue-on-error: true
         run: >-
           npx web-ext sign
           --source-dir=extension/dist-firefox-amo
