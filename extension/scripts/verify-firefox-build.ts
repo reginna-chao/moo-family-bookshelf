@@ -32,7 +32,12 @@ const root = resolve(__dirname, "..");
 interface FirefoxManifest {
   background?: { scripts?: string[]; service_worker?: string };
   browser_specific_settings?: {
-    gecko?: { id?: string; strict_min_version?: string; update_url?: string };
+    gecko?: {
+      id?: string;
+      strict_min_version?: string;
+      update_url?: string;
+      data_collection_permissions?: { required?: string[] };
+    };
     gecko_android?: { strict_min_version?: string };
   };
 }
@@ -122,6 +127,22 @@ function verifyTarget(target: FirefoxTarget): boolean {
   } else {
     console.log(
       `OK: gecko_android.strict_min_version present (${geckoAndroidMinVersion})`,
+    );
+  }
+
+  const dataCollectionRequired =
+    gecko?.data_collection_permissions?.required;
+  if (
+    !dataCollectionRequired ||
+    !dataCollectionRequired.includes("websiteContent")
+  ) {
+    console.error(
+      "FAIL: manifest missing browser_specific_settings.gecko.data_collection_permissions.required containing \"websiteContent\"",
+    );
+    failed = true;
+  } else {
+    console.log(
+      `OK: gecko.data_collection_permissions.required present (${dataCollectionRequired.join(", ")})`,
     );
   }
 

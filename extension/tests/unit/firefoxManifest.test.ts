@@ -5,6 +5,7 @@ import {
   GECKO_ID_DIRECT,
   STRICT_MIN_VERSION,
   UPDATE_URL,
+  DATA_COLLECTION_PERMISSIONS,
   type FirefoxTarget,
 } from "../../scripts/build-firefox-manifest";
 
@@ -18,6 +19,7 @@ interface GeckoShape {
   id: string;
   strict_min_version: string;
   update_url?: string;
+  data_collection_permissions?: { required: string[] };
 }
 
 function makeChromeManifest(
@@ -70,7 +72,22 @@ describe("toFirefoxManifest", () => {
       expect(gecko.id).toBe(expectedId);
       expect(gecko.strict_min_version).toBe(STRICT_MIN_VERSION);
 
+      // AMO requires a data-consent declaration on all new Firefox add-ons;
+      // both channels declare exactly ["websiteContent"] (book-list content
+      // scraped from Readmoo; email hashed client-side, no tracking).
+      expect(gecko.data_collection_permissions).toEqual({
+        required: ["websiteContent"],
+      });
+      expect(gecko.data_collection_permissions).toEqual(
+        DATA_COLLECTION_PERMISSIONS,
+      );
+
       expect(geckoAndroidOf(result).strict_min_version).toBe(STRICT_MIN_VERSION);
+
+      // The data-consent declaration lives under gecko, not gecko_android.
+      expect(geckoAndroidOf(result)).not.toHaveProperty(
+        "data_collection_permissions",
+      );
 
       // Event page replaces the MV3 service worker for Firefox/Android.
       const background = result.background as BackgroundShape;
