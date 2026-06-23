@@ -41,7 +41,7 @@
 
 也支援 Firefox 桌面版與 Firefox for Android™（火狐手機版）。
 
-- AMO 安裝連結：（即將上架，連結待補）<!-- TODO: 上架 AMO 後補上正式網址 -->
+[前往 Firefox 附加元件商店安裝](https://addons.mozilla.org/firefox/addon/moofamily-bookshelf/)
 
 <details>
 

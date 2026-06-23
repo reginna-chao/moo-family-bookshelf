@@ -37,7 +37,7 @@ Easily browse books shared by family members on your Readmoo family account.
 
 Also available on Firefox Desktop and Firefox for Android™.
 
-- AMO install link: (coming soon, link TBD)<!-- TODO: add the official AMO URL once listed -->
+[Install from Firefox Add-ons](https://addons.mozilla.org/firefox/addon/moofamily-bookshelf/)
 
 <details>
 
