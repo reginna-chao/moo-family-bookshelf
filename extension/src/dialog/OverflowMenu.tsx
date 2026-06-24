@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 export interface OverflowMenuItem {
   label: string;
@@ -44,6 +45,8 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerStyle = triggerStyleFor(tone);
+  const isMobile = useIsMobile();
+  const triggerSize = isMobile ? 32 : 28;
   const { position, place, reset } = useAnchoredPosition();
 
   const setOpenState = (next: boolean) => {
@@ -112,8 +115,8 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          width: 28,
-          height: 28,
+          width: triggerSize,
+          height: triggerSize,
           border: "none",
           borderRadius: 6,
           background: triggerStyle.background,

@@ -1,8 +1,17 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { OverflowMenu } from "@/dialog/OverflowMenu";
+import { useIsMobile } from "@/hooks/useIsMobile";
+
+vi.mock("@/hooks/useIsMobile", () => ({
+  useIsMobile: vi.fn(() => false),
+}));
 
 describe("OverflowMenu", () => {
+  beforeEach(() => {
+    vi.mocked(useIsMobile).mockReturnValue(false);
+  });
+
   it("renders a trigger with menu a11y attributes, collapsed by default", () => {
     render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
 
@@ -150,5 +159,23 @@ describe("OverflowMenu", () => {
       fireEvent.keyDown(document, { key: "Escape" });
       fireEvent.mouseDown(document.body);
     }).not.toThrow();
+  });
+
+  describe("responsive sizing", () => {
+    it("renders a 28px trigger on desktop", () => {
+      vi.mocked(useIsMobile).mockReturnValue(false);
+      render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+      const trigger = screen.getByRole("button", { name: "更多選項" });
+      expect(trigger.style.width).toBe("28px");
+      expect(trigger.style.height).toBe("28px");
+    });
+
+    it("renders a 32px trigger on mobile", () => {
+      vi.mocked(useIsMobile).mockReturnValue(true);
+      render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+      const trigger = screen.getByRole("button", { name: "更多選項" });
+      expect(trigger.style.width).toBe("32px");
+      expect(trigger.style.height).toBe("32px");
+    });
   });
 });

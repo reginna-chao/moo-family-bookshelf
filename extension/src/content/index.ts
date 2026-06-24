@@ -15,6 +15,14 @@ import { isExtensionContextValid, cleanupMooFamilyUI, MOO_ELEMENT_IDS } from "..
 import { waitForPageReady } from "./pageReady";
 import { getAppEnv } from "../utils/appEnv";
 import {
+  watchMobile,
+  stopAllMobileWatchers,
+  applyDialogLayout,
+  applyBackdropLayout,
+  createCloseIcon,
+  placeFloatingButton,
+} from "./mobileLayout";
+import {
   DEFAULT_API_ENDPOINT,
   FLOATING_ICON_SIZE_KEY,
   USER_ID_KEY,
@@ -27,6 +35,24 @@ import {
 import { BorrowStatus, type BorrowRequest } from "../api/types";
 
 const APP_ENV = getAppEnv();
+
+/** Disposer for the floating button's breakpoint watcher (see injection). */
+let disposeButtonWatcher: (() => void) | null = null;
+
+/** Disposer for the open dialog's breakpoint watcher (see toggleDialog). */
+let disposeDialogWatcher: (() => void) | null = null;
+
+/**
+ * Remove all MooFamily UI and stop every breakpoint watcher. Use this instead
+ * of `cleanupMooFamilyUI` from the content script so matchMedia listeners are
+ * never left dangling after teardown.
+ */
+function teardownMooFamilyUI(): void {
+  disposeButtonWatcher = null;
+  disposeDialogWatcher = null;
+  stopAllMobileWatchers();
+  cleanupMooFamilyUI();
+}
 
 type FloatingIconSize = "small" | "medium" | "large" | "icon";
 
@@ -86,7 +112,7 @@ function injectEnvStyle(): void {
 
 async function injectFamilyBookshelfButton(): Promise<void> {
   if (!isExtensionContextValid()) {
-    cleanupMooFamilyUI();
+    teardownMooFamilyUI();
     return;
   }
 
@@ -132,6 +158,14 @@ async function injectFamilyBookshelfButton(): Promise<void> {
 
   button.addEventListener("click", toggleDialog);
   document.body.appendChild(button);
+
+  // Reposition the button on mobile (next to Readmoo's header overflow button)
+  // and keep it bottom-right on desktop. The disposer is stored at module level
+  // so re-injection / cleanup can tear the watcher down (no leaked listener).
+  disposeButtonWatcher?.();
+  disposeButtonWatcher = watchMobile((isMobile) => {
+    placeFloatingButton(button, isMobile);
+  });
 
   // Best-effort: query pending borrow requests and badge the button.
   // Failures are silent — the badge is a non-essential nicety.
@@ -206,29 +240,29 @@ function attachBadge(button: HTMLElement, count: number): void {
 
 function toggleDialog(): void {
   if (!isExtensionContextValid()) {
-    cleanupMooFamilyUI();
+    teardownMooFamilyUI();
     return;
   }
 
   const existing = document.getElementById(MOO_ELEMENT_IDS.dialog);
   if (existing) {
+    // Toggle off: tear down the dialog, its backdrop, and ONLY the dialog's
+    // breakpoint watcher. The floating button's watcher must survive so the
+    // button keeps repositioning on later breakpoint changes.
+    disposeDialogWatcher?.();
+    disposeDialogWatcher = null;
     existing.remove();
+    document.getElementById(MOO_ELEMENT_IDS.backdrop)?.remove();
     return;
   }
 
   const dialog = document.createElement("div");
   dialog.id = MOO_ELEMENT_IDS.dialog;
+  // Layout-independent base styles; position/size are set per-breakpoint below.
   dialog.style.cssText = [
     "position: fixed",
-    "top: 50%",
-    "left: 50%",
-    "transform: translate(-50%, -50%)",
     "z-index: 100000",
-    "width: 90vw",
-    "max-width: 640px",
-    "max-height: 80vh",
     "background: white",
-    "border-radius: 12px",
     "box-shadow: 0 8px 32px rgba(0,0,0,0.2)",
     "overflow: hidden",
     "display: flex",
@@ -248,10 +282,21 @@ function toggleDialog(): void {
     "z-index: 99999",
     "background: rgba(0,0,0,0.4)",
   ].join(";");
-  backdrop.addEventListener("click", () => {
+
+  // Single close path reused by backdrop click and the mobile close icon.
+  // Tears down only the dialog's breakpoint watcher (module-level, so the
+  // toggle-off branch can dispose the same one); the button watcher is separate.
+  const closeDialog = (): void => {
+    disposeDialogWatcher?.();
+    disposeDialogWatcher = null;
     dialog.remove();
     backdrop.remove();
-  });
+  };
+  backdrop.addEventListener("click", closeDialog);
+
+  // Mobile-only close icon (top-right). Reuses closeDialog; hidden on desktop.
+  const closeIcon = createCloseIcon(closeDialog, false);
+  dialog.appendChild(closeIcon);
 
   // Mount point for React app
   const mountPoint = document.createElement("div");
@@ -261,6 +306,16 @@ function toggleDialog(): void {
 
   document.body.appendChild(backdrop);
   document.body.appendChild(dialog);
+
+  // Drive full-screen (mobile) vs centred-card (desktop) layout. The disposer
+  // is invoked by closeDialog / the toggle-off branch so the listener is
+  // cleaned up on every close. Dispose any stale one first (defensive).
+  disposeDialogWatcher?.();
+  disposeDialogWatcher = watchMobile((isMobile) => {
+    applyDialogLayout(dialog, isMobile);
+    applyBackdropLayout(backdrop, isMobile);
+    closeIcon.style.display = isMobile ? "inline-flex" : "none";
+  });
 
   // Content scripts run in Chrome's isolated world — standard ES module
   // imports don't resolve correctly, so we load code-split modules via
@@ -304,7 +359,10 @@ function waitAndInjectButton(): void {
   const controller = new AbortController();
   currentAbortController = controller;
 
-  // Remove existing button for hashchange re-injection
+  // Remove existing button for hashchange re-injection. Dispose its breakpoint
+  // watcher first so the stale listener does not outlive the removed button.
+  disposeButtonWatcher?.();
+  disposeButtonWatcher = null;
   document.getElementById(MOO_ELEMENT_IDS.button)?.remove();
 
   waitForPageReady(controller.signal)
@@ -338,7 +396,7 @@ function listenForIconSizeChanges(): void {
 
 // Run on page load
 if (!isExtensionContextValid()) {
-  cleanupMooFamilyUI();
+  teardownMooFamilyUI();
 } else {
   const init = (): void => {
     waitAndInjectButton();

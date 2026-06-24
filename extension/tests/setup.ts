@@ -115,6 +115,26 @@ const extensionApiMock = {
   },
 };
 
+/**
+ * jsdom does not implement `window.matchMedia`. Several Dialog components now
+ * read it (via `useMediaQuery` / `useIsMobile`) for responsive behaviour, so
+ * provide a default desktop-sized stub: every query reports `matches: false`.
+ * Tests that need mobile behaviour either mock `useMediaQuery`/`useIsMobile`
+ * directly or override `window.matchMedia` themselves.
+ */
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })) as unknown as typeof window.matchMedia;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).chrome = extensionApiMock as unknown as typeof chrome;
 // `browser` must carry a valid `runtime.id` so webextension-polyfill returns it

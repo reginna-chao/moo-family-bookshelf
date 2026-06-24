@@ -1,12 +1,21 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CategoryFilter, filterByCategory } from "@/dialog/CategoryDropdown";
+import { useIsMobile } from "@/hooks/useIsMobile";
+
+vi.mock("@/hooks/useIsMobile", () => ({
+  useIsMobile: vi.fn(() => false),
+}));
 
 function makeBooks(categories: string[]) {
   return categories.map((category, i) => ({ category, bookId: `b${i}` }));
 }
 
 describe("CategoryFilter", () => {
+  beforeEach(() => {
+    vi.mocked(useIsMobile).mockReturnValue(false);
+  });
+
   const defaultProps = {
     value: "",
     onChange: vi.fn(),
@@ -133,6 +142,26 @@ describe("CategoryFilter", () => {
     const options = screen.getAllByRole("option");
     // "全部分類" + 2 unique categories
     expect(options).toHaveLength(3);
+  });
+
+  describe("responsive sizing", () => {
+    const books = makeBooks(["奇幻冒險", "韓國耽美", "軍事戰略"]);
+
+    it("renders a 40px trigger on desktop", () => {
+      vi.mocked(useIsMobile).mockReturnValue(false);
+      render(<CategoryFilter {...defaultProps} books={books} />);
+      const trigger = screen.getByLabelText("篩選分類");
+      expect(trigger.style.width).toBe("40px");
+      expect(trigger.style.height).toBe("40px");
+    });
+
+    it("renders a 32px trigger on mobile", () => {
+      vi.mocked(useIsMobile).mockReturnValue(true);
+      render(<CategoryFilter {...defaultProps} books={books} />);
+      const trigger = screen.getByLabelText("篩選分類");
+      expect(trigger.style.width).toBe("32px");
+      expect(trigger.style.height).toBe("32px");
+    });
   });
 });
 

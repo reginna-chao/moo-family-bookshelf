@@ -1,6 +1,7 @@
 import React from "react";
 import { LayoutGrid, Rows3 } from "lucide-react";
 import type { FamilyShelfViewMode } from "./useFamilyShelfViewMode";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 export interface ViewModeToggleProps {
   mode: FamilyShelfViewMode;
@@ -12,6 +13,7 @@ interface ToggleButtonProps {
   ariaLabel: string;
   onClick: () => void;
   children: React.ReactNode;
+  size: number;
   position?: "first" | "middle" | "last";
 }
 
@@ -21,7 +23,7 @@ function getBorderRadius(position?: "first" | "middle" | "last"): string {
   return "0";
 }
 
-function ToggleButton({ active, ariaLabel, onClick, children, position }: ToggleButtonProps) {
+function ToggleButton({ active, ariaLabel, onClick, children, size, position }: ToggleButtonProps) {
   return (
     <button
       type="button"
@@ -29,8 +31,8 @@ function ToggleButton({ active, ariaLabel, onClick, children, position }: Toggle
       aria-pressed={active}
       onClick={onClick}
       style={{
-        width: 40,
-        height: 40,
+        width: size,
+        height: size,
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -48,6 +50,8 @@ function ToggleButton({ active, ariaLabel, onClick, children, position }: Toggle
 }
 
 export function ViewModeToggle({ mode, onChange }: ViewModeToggleProps) {
+  const isMobile = useIsMobile();
+  const size = isMobile ? 32 : 40;
   return (
     <div
       role="group"
@@ -58,6 +62,7 @@ export function ViewModeToggle({ mode, onChange }: ViewModeToggleProps) {
         active={mode === "grid"}
         ariaLabel="切換為網格檢視"
         onClick={() => onChange("grid")}
+        size={size}
         position="first"
       >
         <LayoutGrid size={18} />
@@ -66,6 +71,7 @@ export function ViewModeToggle({ mode, onChange }: ViewModeToggleProps) {
         active={mode === "row"}
         ariaLabel="切換為列表檢視"
         onClick={() => onChange("row")}
+        size={size}
         position="last"
       >
         <Rows3 size={18} />

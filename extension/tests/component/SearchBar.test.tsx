@@ -1,6 +1,11 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SearchBar, SearchBarProps } from "@/dialog/SearchBar";
+import { useIsMobile } from "@/hooks/useIsMobile";
+
+vi.mock("@/hooks/useIsMobile", () => ({
+  useIsMobile: vi.fn(() => false),
+}));
 
 function renderSearchBar(overrides: Partial<SearchBarProps> = {}) {
   const defaultProps: SearchBarProps = {
@@ -15,6 +20,10 @@ function renderSearchBar(overrides: Partial<SearchBarProps> = {}) {
 }
 
 describe("SearchBar", () => {
+  beforeEach(() => {
+    vi.mocked(useIsMobile).mockReturnValue(false);
+  });
+
   it("renders input with correct placeholder", () => {
     renderSearchBar();
     const input = screen.getByPlaceholderText("搜尋書名或作者...");
@@ -56,5 +65,21 @@ describe("SearchBar", () => {
     renderSearchBar({ isFiltering: true, filteredCount: 0, totalCount: 5 });
     const countEl = screen.getByTestId("search-count");
     expect(countEl.textContent).toBe("顯示 0 / 5 本");
+  });
+
+  describe("responsive sizing", () => {
+    it("uses a 32px-tall input on mobile", () => {
+      vi.mocked(useIsMobile).mockReturnValue(true);
+      renderSearchBar();
+      const input = screen.getByLabelText("搜尋書名或作者");
+      expect(input.style.height).toBe("32px");
+    });
+
+    it("does not pin the input height on desktop", () => {
+      vi.mocked(useIsMobile).mockReturnValue(false);
+      renderSearchBar();
+      const input = screen.getByLabelText("搜尋書名或作者");
+      expect(input.style.height).toBe("");
+    });
   });
 });
