@@ -204,14 +204,20 @@ function fallbackNavHeight(): number {
 /**
  * Measure the rendered height of the Readmoo bottom tab bar.
  *
- * The exact Readmoo DOM is not knowable here, so a small allowlist of plausible
- * selectors is tried and each candidate is validated to actually look like a
- * bottom bar (spans most of the viewport width, sits at the viewport bottom)
- * before being trusted. Returns the height in CSS pixels, or null when no
- * candidate qualifies so the caller can fall back to a hardcoded height.
+ * Readmoo's actual bottom bar (`.main-menu`) is tried first, ahead of a small
+ * allowlist of generic guesses kept as a fallback in case the class names
+ * change. Each candidate is validated to actually look like a bottom bar (spans
+ * most of the viewport width, sits at the viewport bottom) before being
+ * trusted. Returns the height in CSS pixels, or null when no candidate
+ * qualifies so the caller can fall back to a hardcoded height.
  */
 function findBottomNavHeight(): number | null {
   const selectors = [
+    // `.main-menu` is Readmoo's actual bottom tab bar; `.nav.nav-justified` is a
+    // defensive secondary class on the SAME element (kept in case `main-menu`
+    // changes). The rest are generic fallbacks; all are validated by `isBottomBar`.
+    ".main-menu",
+    ".nav.nav-justified",
     "nav[class*='bottom']",
     "footer nav",
     ".bottom-nav",
