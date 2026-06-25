@@ -23,6 +23,14 @@ vi.mock("@/dialog/useBookSync", () => ({
   useBookSync: (...args: unknown[]) => mockUseBookSync(...args),
 }));
 
+// Controllable viewport mock for the header buttons' icon-only (mobile) vs
+// icon+text (desktop) rendering. Defaults to false (desktop) so the rest of the
+// suite keeps its desktop behaviour; reset in beforeEach.
+const mockUseIsMobile = vi.fn<() => boolean>().mockReturnValue(false);
+vi.mock("@/hooks/useIsMobile", () => ({
+  useIsMobile: () => mockUseIsMobile(),
+}));
+
 // usePersonalBooks no longer scrapes — its baseline comes from the API record
 // (cache-first reconciled against the server). The scraper is mocked only so an
 // accidental call would surface; books for these tests are supplied via the API.
@@ -157,6 +165,8 @@ async function waitForBooksLoaded() {
 describe("PersonalShelf", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default to desktop so existing tests keep their icon+text behaviour.
+    mockUseIsMobile.mockReturnValue(false);
     // Reset useFamilyData mock — provides displayName via members list
     const defaultMembers: FamilyMember[] = [
       { userId: "user-abc123", displayName: "小明" },
@@ -753,6 +763,52 @@ describe("PersonalShelf", () => {
       await waitForBooksLoaded();
 
       expect(screen.getByText("(3 本)")).toBeInTheDocument();
+    });
+  });
+
+  describe("header buttons responsive label (icon-only on mobile)", () => {
+    it("desktop shows visible text on 公開分享 and 同步書櫃 buttons", async () => {
+      mockUseIsMobile.mockReturnValue(false);
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      const shareBtn = screen.getByLabelText("公開分享");
+      const syncBtn = screen.getByLabelText("同步書櫃");
+      expect(shareBtn).toHaveTextContent("公開分享");
+      expect(syncBtn).toHaveTextContent("同步書櫃");
+    });
+
+    it("mobile hides the visible text but keeps the buttons findable by aria-label", async () => {
+      mockUseIsMobile.mockReturnValue(true);
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      // Buttons still exist and remain accessible by their aria-label.
+      const shareBtn = screen.getByLabelText("公開分享");
+      const syncBtn = screen.getByLabelText("同步書櫃");
+      expect(shareBtn).toBeInTheDocument();
+      expect(syncBtn).toBeInTheDocument();
+
+      // Icon-only: no visible label text rendered inside the buttons.
+      expect(shareBtn).not.toHaveTextContent("公開分享");
+      expect(syncBtn).not.toHaveTextContent("同步書櫃");
+    });
+
+    it("sync button aria-label becomes 同步中... while syncing", async () => {
+      mockUseBookSync.mockReturnValue({
+        syncStatus: "syncing",
+        syncError: "",
+        lastSyncBooks: [],
+        triggerManualSync: vi.fn(),
+        autoSyncDone: false,
+        progressMessage: "",
+      });
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      const syncBtn = screen.getByLabelText("同步中...");
+      expect(syncBtn).toBeInTheDocument();
+      expect(syncBtn).toBeDisabled();
     });
   });
 

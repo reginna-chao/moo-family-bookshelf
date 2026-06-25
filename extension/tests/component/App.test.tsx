@@ -1,8 +1,9 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { App } from "@/dialog/App";
 import { ApiClient } from "@/api/client";
 import { USER_ID_KEY, AUTH_TOKEN_KEY } from "@/constants";
+import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
 
 // Mock all child components
 vi.mock("@/dialog/Onboarding", () => ({
@@ -407,6 +408,66 @@ describe("App", () => {
       const personalPanel = document.getElementById("panel-personal-shelf");
       expect(personalPanel).not.toBeNull();
       expect(personalPanel!.style.display).toBe("none");
+    });
+  });
+
+  describe("mobile responsive tab row", () => {
+    const originalMatchMedia = window.matchMedia;
+
+    afterEach(() => {
+      // Restore the desktop-default matchMedia stub so other tests are unaffected,
+      // and reset the module registry mutated by the mobile case's dynamic import.
+      window.matchMedia = originalMatchMedia;
+      vi.resetModules();
+    });
+
+    it("uses desktop tab-row sizing when viewport is not mobile", async () => {
+      // tests/setup.ts default stub reports matches:false for every query.
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByRole("tablist")).toBeInTheDocument();
+      });
+
+      const nav = screen.getByRole("tablist");
+      expect(nav.style.paddingRight).toBe("0px");
+
+      const settingsTab = screen.getByRole("tab", { name: "設定" });
+      expect(settingsTab).toHaveStyle({ padding: "12px 0", fontSize: "14px" });
+    });
+
+    it("reserves space for the close icon and tightens tabs on mobile", async () => {
+      // useMediaQuery caches the MediaQueryList per query at module level, so the
+      // mobile matchMedia mock must be in place before App's module graph reads it.
+      // Reset modules + dynamic-import App so the fresh cache picks up the mobile MQL.
+      vi.resetModules();
+
+      const mobileMatchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: query === MOBILE_MEDIA_QUERY,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+      window.matchMedia = mobileMatchMedia as unknown as typeof window.matchMedia;
+
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+
+      const { App: FreshApp } = await import("@/dialog/App");
+      render(<FreshApp />);
+      await waitFor(() => {
+        expect(screen.getByRole("tablist")).toBeInTheDocument();
+      });
+
+      const nav = screen.getByRole("tablist");
+      expect(nav.style.paddingRight).toBe("40px");
+
+      const settingsTab = screen.getByRole("tab", { name: "設定" });
+      expect(settingsTab).toHaveStyle({ padding: "8px 0", fontSize: "13px" });
     });
   });
 

@@ -19,9 +19,17 @@ import { isExtensionContextValid } from "../utils/extensionContext";
 import { FamilyDataProvider, useFamilyData } from "./FamilyDataContext";
 import { VersionWarning } from "./VersionWarning";
 import { LoadingState } from "./LoadingState";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "borrow" | "settings";
+
+/**
+ * Horizontal space (px) reserved at the tab row's right edge on mobile so the
+ * content-script close icon (X at top:8px right:8px, 32x32) never overlaps the
+ * last tab. 8 (offset) + 32 (icon width) = 40.
+ */
+const CLOSE_ICON_RESERVED_PX = 40;
 
 const flexColumnFill: React.CSSProperties = {
   display: "flex",
@@ -186,6 +194,7 @@ function MainContent({
   onLeave,
 }: MainContentProps) {
   const { hasBookshelfUpdates, markBookshelfSeen, borrowRequests } = useFamilyData();
+  const isMobile = useIsMobile();
 
   // Lazy-mount tab panels: mount a heavy child on its first visit, keep it mounted after.
   const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set<Tab>([activeTab]));
@@ -216,10 +225,24 @@ function MainContent({
     { key: "settings", label: "設定" },
   ];
 
+  // Mobile-only tab sizing: tighter buttons + right padding so the content-script
+  // close icon never overlaps the last tab. Desktop values are unchanged.
+  const tabRowPaddingRight = isMobile ? CLOSE_ICON_RESERVED_PX : 0;
+  const tabButtonPadding = isMobile ? "8px 0" : "12px 0";
+  const tabButtonFontSize = isMobile ? 13 : 14;
+
   return (
     <div style={flexColumnFill}>
       <VersionWarning apiClient={apiClient} />
-      <nav role="tablist" style={{ display: "flex", borderBottom: "1px solid #e2e8f0", alignItems: "center" }}>
+      <nav
+        role="tablist"
+        style={{
+          display: "flex",
+          borderBottom: "1px solid #e2e8f0",
+          alignItems: "center",
+          paddingRight: tabRowPaddingRight,
+        }}
+      >
         {tabs.map(({ key, label, icon }) => (
           <button
             key={key}
@@ -237,13 +260,13 @@ function MainContent({
             }
             style={{
               flex: 1,
-              padding: "12px 0",
+              padding: tabButtonPadding,
               border: "none",
               background: activeTab === key ? "#eff6ff" : "transparent",
               fontWeight: activeTab === key ? 600 : 400,
               color: activeTab === key ? "#2563eb" : "#64748b",
               cursor: "pointer",
-              fontSize: 14,
+              fontSize: tabButtonFontSize,
               borderBottom:
                 activeTab === key ? "2px solid #2563eb" : "2px solid transparent",
               display: "inline-flex",

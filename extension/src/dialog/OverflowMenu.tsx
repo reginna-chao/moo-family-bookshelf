@@ -1,7 +1,9 @@
-import React, { useRef, useEffect, useLayoutEffect, useState } from "react";
+import React, { useRef, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
+import { useDismissableMenu } from "../hooks/useDismissableMenu";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 export interface OverflowMenuItem {
   label: string;
@@ -44,6 +46,8 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerStyle = triggerStyleFor(tone);
+  const isMobile = useIsMobile();
+  const triggerSize = isMobile ? 32 : 28;
   const { position, place, reset } = useAnchoredPosition();
 
   const setOpenState = (next: boolean) => {
@@ -61,30 +65,7 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
     place(triggerRef.current, menuRef.current);
   }, [open, place, reset]);
 
-  useEffect(() => {
-    if (!open) return;
-
-    function handlePointerDown(e: MouseEvent) {
-      if (isInsideMenu(e.target, triggerRef.current, menuRef.current)) return;
-      close();
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      close();
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, onOpenChange]);
+  useDismissableMenu({ isOpen: open, onClose: close, triggerRef, menuRef });
 
   const handleTriggerClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -112,8 +93,8 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          width: 28,
-          height: 28,
+          width: triggerSize,
+          height: triggerSize,
           border: "none",
           borderRadius: 6,
           background: triggerStyle.background,
@@ -171,15 +152,4 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
         )}
     </div>
   );
-}
-
-function isInsideMenu(
-  target: EventTarget | null,
-  trigger: HTMLElement | null,
-  menu: HTMLElement | null,
-): boolean {
-  if (!(target instanceof Node)) return false;
-  if (trigger?.contains(target)) return true;
-  if (menu?.contains(target)) return true;
-  return false;
 }

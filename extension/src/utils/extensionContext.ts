@@ -8,6 +8,7 @@ export const MOO_ELEMENT_IDS = {
   dialog: "moo-family-bookshelf-dialog",
   backdrop: "moo-family-bookshelf-backdrop",
   root: "moo-family-bookshelf-root",
+  closeIcon: "moo-family-bookshelf-close",
 } as const;
 
 /**

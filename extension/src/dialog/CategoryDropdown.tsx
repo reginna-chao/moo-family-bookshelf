@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import { SlidersHorizontal } from "lucide-react";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 const UNCATEGORIZED = "未分類";
 
@@ -35,6 +36,8 @@ function buildCategories(books: { category: string }[]): CategoryOption[] {
 export function CategoryFilter({ books, value, onChange, open, onToggle }: CategoryFilterProps) {
   const categories = React.useMemo(() => buildCategories(books), [books]);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
+  const triggerSize = isMobile ? 32 : 40;
 
   useEffect(() => {
     if (!open) return;
@@ -61,8 +64,8 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          width: 40,
-          height: 40,
+          width: triggerSize,
+          height: triggerSize,
           border: isActive ? "1px solid #2563eb" : "1px solid #e2e8f0",
           borderRadius: 8,
           background: isActive ? "#eff6ff" : "white",
@@ -77,7 +80,7 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
         <div
           style={{
             position: "absolute",
-            top: 40,
+            top: triggerSize,
             right: 0,
             minWidth: 180,
             maxHeight: 240,

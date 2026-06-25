@@ -1,5 +1,6 @@
 import React from "react";
 import type { FloatingIconSize } from "./useFloatingIconSize";
+import { type SegmentPosition, getSegmentBorderRadius } from "./segmentBorderRadius";
 
 export interface FloatingIconSizeSelectorProps {
   size: FloatingIconSize;
@@ -11,9 +12,10 @@ interface SegmentProps {
   ariaLabel: string;
   label: string;
   onClick: () => void;
+  position?: SegmentPosition;
 }
 
-function Segment({ active, ariaLabel, label, onClick }: SegmentProps) {
+function Segment({ active, ariaLabel, label, onClick, position }: SegmentProps) {
   return (
     <button
       type="button"
@@ -24,6 +26,7 @@ function Segment({ active, ariaLabel, label, onClick }: SegmentProps) {
         flex: 1,
         padding: "6px 0",
         border: active ? "1px solid #2563eb" : "1px solid #e2e8f0",
+        borderRadius: getSegmentBorderRadius(position),
         background: active ? "#eff6ff" : "transparent",
         color: active ? "#2563eb" : "#64748b",
         fontSize: 13,
@@ -34,6 +37,12 @@ function Segment({ active, ariaLabel, label, onClick }: SegmentProps) {
       {label}
     </button>
   );
+}
+
+function getSegmentPosition(index: number, total: number): SegmentPosition {
+  if (index === 0) return "first";
+  if (index === total - 1) return "last";
+  return "middle";
 }
 
 const OPTIONS: Array<{ size: FloatingIconSize; label: string; ariaLabel: string }> = [
@@ -50,13 +59,14 @@ export function FloatingIconSizeSelector({ size, onChange }: FloatingIconSizeSel
       aria-label="家庭書櫃按鈕大小"
       style={{ display: "flex", borderRadius: 6, overflow: "hidden" }}
     >
-      {OPTIONS.map((opt) => (
+      {OPTIONS.map((opt, index) => (
         <Segment
           key={opt.size}
           active={size === opt.size}
           ariaLabel={opt.ariaLabel}
           label={opt.label}
           onClick={() => onChange(opt.size)}
+          position={getSegmentPosition(index, OPTIONS.length)}
         />
       ))}
     </div>

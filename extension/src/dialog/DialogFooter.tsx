@@ -3,6 +3,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { EnvBadge } from "./EnvBadge";
 
 const DISCLAIMER = "本功能由第三方開發，非 Readmoo 官方提供";
+
 const VERSION = `v${typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.1.0"}`;
 
 const footerBase: React.CSSProperties = {

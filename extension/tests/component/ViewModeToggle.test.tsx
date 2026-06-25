@@ -1,9 +1,18 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import React from "react";
 import { ViewModeToggle } from "@/dialog/ViewModeToggle";
+import { useIsMobile } from "@/hooks/useIsMobile";
+
+vi.mock("@/hooks/useIsMobile", () => ({
+  useIsMobile: vi.fn(() => false),
+}));
 
 describe("ViewModeToggle", () => {
+  beforeEach(() => {
+    vi.mocked(useIsMobile).mockReturnValue(false);
+  });
+
   it("renders both grid and row buttons", () => {
     render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
 
@@ -45,5 +54,23 @@ describe("ViewModeToggle", () => {
     render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
 
     expect(screen.getByRole("group", { name: "家庭書櫃顯示模式" })).toBeInTheDocument();
+  });
+
+  describe("responsive sizing", () => {
+    it("renders 40px buttons on desktop", () => {
+      vi.mocked(useIsMobile).mockReturnValue(false);
+      render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
+      const grid = screen.getByLabelText("切換為網格檢視");
+      expect(grid.style.width).toBe("40px");
+      expect(grid.style.height).toBe("40px");
+    });
+
+    it("renders 32px buttons on mobile", () => {
+      vi.mocked(useIsMobile).mockReturnValue(true);
+      render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
+      const grid = screen.getByLabelText("切換為網格檢視");
+      expect(grid.style.width).toBe("32px");
+      expect(grid.style.height).toBe("32px");
+    });
   });
 });
