@@ -7,3 +7,12 @@
   background-position: right 0.75rem center;
   background-size: 16px 12px;
 }
+
+#moo-family-bookshelf-dialog .moo-spin {
+  animation: moo-spin 1s linear infinite;
+}
+
+@keyframes moo-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

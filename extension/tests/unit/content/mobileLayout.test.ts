@@ -196,116 +196,143 @@ describe("mobileLayout", () => {
   });
 
   describe("placeFloatingButton", () => {
+    const GAP_PX = 12;
+    const FALLBACK_HEIGHT_PX = 55;
+    const FALLBACK_HEIGHT_SMALL_PX = 76;
+    const SMALL_PHONE_BREAKPOINT_PX = 370;
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+
     function makeButton(): HTMLElement {
       const btn = document.createElement("button");
       document.body.appendChild(btn);
       return btn;
     }
 
-    it("uses bottom-right placement on desktop", () => {
+    function setViewport(width: number, height: number): void {
+      Object.defineProperty(window, "innerWidth", {
+        value: width,
+        configurable: true,
+        writable: true,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        value: height,
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    function rect(partial: Partial<DOMRect>): DOMRect {
+      return {
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: 0,
+        height: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+        ...partial,
+      } as DOMRect;
+    }
+
+    /** Append a bottom-nav element and stub its rect so it reads as a bottom bar. */
+    function addBottomNav(navRect: Partial<DOMRect>): HTMLElement {
+      const nav = document.createElement("nav");
+      nav.className = "bottom-nav";
+      document.body.appendChild(nav);
+      vi.spyOn(nav, "getBoundingClientRect").mockReturnValue(rect(navRect));
+      return nav;
+    }
+
+    afterEach(() => {
+      setViewport(originalInnerWidth, originalInnerHeight);
+    });
+
+    it("uses bottom-right placement on desktop with original offsets", () => {
       const btn = makeButton();
-      const usedAnchor = placeFloatingButton(btn, false);
-      expect(usedAnchor).toBe(false);
+      const measured = placeFloatingButton(btn, false);
+      expect(measured).toBe(false);
       expect(btn.style.bottom).toBe("24px");
       expect(btn.style.right).toBe("24px");
       expect(btn.style.top).toBe("auto");
+      expect(btn.style.left).toBe("auto");
     });
 
-    it("falls back to bottom-right on mobile when no header anchor exists", () => {
+    it("lifts the button above the measured bottom nav on mobile", () => {
+      setViewport(400, 800);
+      const navHeight = 55;
+      // Bottom bar: full width, bottom edge flush with the viewport bottom.
+      addBottomNav({
+        width: 400,
+        height: navHeight,
+        bottom: 800,
+        top: 800 - navHeight,
+      });
+
       const btn = makeButton();
-      const usedAnchor = placeFloatingButton(btn, true);
-      expect(usedAnchor).toBe(false);
-      expect(btn.style.bottom).toBe("24px");
+      const measured = placeFloatingButton(btn, true);
+      expect(measured).toBe(true);
       expect(btn.style.right).toBe("24px");
+      expect(btn.style.top).toBe("auto");
+      expect(btn.style.bottom).toBe(`${navHeight + GAP_PX}px`);
     });
 
-    it("relocates next to the Readmoo header overflow button on mobile", () => {
-      const header = document.createElement("header");
-      const overflow = document.createElement("button");
-      overflow.className = "header-overflow";
-      overflow.setAttribute("aria-haspopup", "true");
-      header.appendChild(overflow);
-      document.body.appendChild(header);
-
-      // jsdom returns zero rects by default; stub a non-zero rect so the
-      // anchor is considered visible and usable.
-      vi.spyOn(overflow, "getBoundingClientRect").mockReturnValue({
-        top: 10,
-        left: 300,
-        right: 332,
-        bottom: 42,
-        width: 32,
-        height: 32,
-        x: 300,
-        y: 10,
-        toJSON: () => ({}),
-      } as DOMRect);
+    it("adapts to a taller two-line bottom nav when measured", () => {
+      setViewport(360, 800);
+      const navHeight = 76;
+      addBottomNav({
+        width: 360,
+        height: navHeight,
+        bottom: 800,
+        top: 800 - navHeight,
+      });
 
       const btn = makeButton();
-      const usedAnchor = placeFloatingButton(btn, true);
-      expect(usedAnchor).toBe(true);
-      expect(btn.style.bottom).toBe("auto");
-      expect(btn.style.top).toBe("10px");
-      // right = innerWidth - anchor.left + gap
-      const expectedRight = window.innerWidth - 300 + 8;
-      expect(btn.style.right).toBe(`${expectedRight}px`);
+      const measured = placeFloatingButton(btn, true);
+      expect(measured).toBe(true);
+      expect(btn.style.bottom).toBe(`${navHeight + GAP_PX}px`);
     });
 
-    it("does not match a generic 'overflow-hidden' utility class on mobile", () => {
-      const header = document.createElement("header");
-      const util = document.createElement("div");
-      // Generic utility class: substring contains "overflow" but is NOT a
-      // standalone `overflow` token, and there is no aria-haspopup / aria-label
-      // menu trigger. Must not be matched by the [class~='overflow'] selector.
-      util.className = "overflow-hidden";
-      header.appendChild(util);
-      document.body.appendChild(header);
-
-      vi.spyOn(util, "getBoundingClientRect").mockReturnValue({
-        top: 10,
-        left: 300,
-        right: 332,
-        bottom: 42,
-        width: 32,
-        height: 32,
-        x: 300,
-        y: 10,
-        toJSON: () => ({}),
-      } as DOMRect);
-
+    it("falls back to 55px on mobile when no nav is found (width > 370)", () => {
+      setViewport(400, 800);
       const btn = makeButton();
-      const usedAnchor = placeFloatingButton(btn, true);
-      expect(usedAnchor).toBe(false);
-      expect(btn.style.bottom).toBe("24px");
+      const measured = placeFloatingButton(btn, true);
+      expect(measured).toBe(false);
       expect(btn.style.right).toBe("24px");
+      expect(btn.style.bottom).toBe(`${FALLBACK_HEIGHT_PX + GAP_PX}px`);
     });
 
-    it("matches a standalone 'overflow' class token on mobile", () => {
-      const header = document.createElement("header");
-      const overflow = document.createElement("div");
-      // Standalone `overflow` token (no aria-haspopup), so it can only be
-      // reached via the [class~='overflow'] selector, not the button selector.
-      overflow.className = "header overflow";
-      header.appendChild(overflow);
-      document.body.appendChild(header);
+    it("falls back to 76px on mobile when no nav is found (width <= 370)", () => {
+      setViewport(SMALL_PHONE_BREAKPOINT_PX, 800);
+      const btn = makeButton();
+      const measured = placeFloatingButton(btn, true);
+      expect(measured).toBe(false);
+      expect(btn.style.bottom).toBe(`${FALLBACK_HEIGHT_SMALL_PX + GAP_PX}px`);
+    });
 
-      vi.spyOn(overflow, "getBoundingClientRect").mockReturnValue({
-        top: 10,
-        left: 300,
-        right: 332,
-        bottom: 42,
-        width: 32,
-        height: 32,
-        x: 300,
-        y: 10,
-        toJSON: () => ({}),
-      } as DOMRect);
+    it("ignores a candidate that does not span the viewport width", () => {
+      setViewport(400, 800);
+      // Narrow element flush with the bottom: spans only 30% of width, so it is
+      // not a bottom bar and the width fallback (55px) must be used instead.
+      addBottomNav({ width: 120, height: 40, bottom: 800, top: 760 });
 
       const btn = makeButton();
-      const usedAnchor = placeFloatingButton(btn, true);
-      expect(usedAnchor).toBe(true);
-      expect(btn.style.bottom).toBe("auto");
-      expect(btn.style.top).toBe("10px");
+      const measured = placeFloatingButton(btn, true);
+      expect(measured).toBe(false);
+      expect(btn.style.bottom).toBe(`${FALLBACK_HEIGHT_PX + GAP_PX}px`);
+    });
+
+    it("ignores a full-width candidate that is not at the viewport bottom", () => {
+      setViewport(400, 800);
+      // Full width but anchored at the top (a header), not the bottom bar.
+      addBottomNav({ width: 400, height: 55, bottom: 55, top: 0 });
+
+      const btn = makeButton();
+      const measured = placeFloatingButton(btn, true);
+      expect(measured).toBe(false);
+      expect(btn.style.bottom).toBe(`${FALLBACK_HEIGHT_PX + GAP_PX}px`);
     });
   });
 });

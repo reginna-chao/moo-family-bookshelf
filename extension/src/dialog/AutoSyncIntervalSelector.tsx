@@ -1,5 +1,7 @@
 import React from "react";
 import type { AutoSyncInterval } from "./useAutoSyncInterval";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { formSelectStyle } from "./formSelectStyle";
 
 export interface AutoSyncIntervalSelectorProps {
   value: AutoSyncInterval;
@@ -14,23 +16,14 @@ const OPTIONS: Array<{ value: AutoSyncInterval; label: string }> = [
 ];
 
 export function AutoSyncIntervalSelector({ value, onChange }: AutoSyncIntervalSelectorProps) {
+  const isMobile = useIsMobile();
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as AutoSyncInterval)}
       aria-label="自動同步頻率"
       className="moo-form-select"
-      style={{
-        padding: "8px 12px",
-        paddingRight: "2.25rem",
-        border: "1px solid #e2e8f0",
-        borderRadius: 8,
-        backgroundColor: "white",
-        fontSize: 14,
-        color: "#334155",
-        cursor: "pointer",
-        outline: "none",
-      }}
+      style={formSelectStyle(isMobile)}
     >
       {OPTIONS.map((opt) => (
         <option key={opt.value} value={opt.value}>

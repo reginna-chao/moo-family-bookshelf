@@ -10,8 +10,27 @@
  * helper writes the original desktop values in its non-mobile branch.
  */
 
-import { MOBILE_MEDIA_QUERY } from "../hooks/breakpoints";
+import {
+  MOBILE_MEDIA_QUERY,
+  SMALL_PHONE_BREAKPOINT_PX,
+} from "../hooks/breakpoints";
 import { MOO_ELEMENT_IDS } from "../utils/extensionContext";
+
+/** Gap between the floating button and the Readmoo bottom nav, in CSS pixels. */
+const FLOATING_BUTTON_GAP_PX = 12;
+
+/** Fallback height of Readmoo's single-line bottom nav (wider phones). */
+const BOTTOM_NAV_HEIGHT_PX = 55;
+
+/** Fallback height of Readmoo's two-line bottom nav (phones ≤ 370px). */
+const BOTTOM_NAV_HEIGHT_SMALL_PX = 76;
+
+/**
+ * A measured nav candidate is only trusted as the bottom tab bar when it spans
+ * most of the viewport width and sits near the very bottom of the viewport.
+ */
+const BOTTOM_NAV_MIN_WIDTH_RATIO = 0.6;
+const BOTTOM_NAV_MAX_BOTTOM_GAP_PX = 4;
 
 type MobileListener = (isMobile: boolean) => void;
 
@@ -56,6 +75,7 @@ const DESKTOP_DIALOG_STYLE: Record<string, string> = {
   left: "50%",
   transform: "translate(-50%, -50%)",
   width: "90vw",
+  height: "80vh",
   maxWidth: "640px",
   maxHeight: "80vh",
   borderRadius: "12px",
@@ -66,13 +86,17 @@ const MOBILE_DIALOG_STYLE: Record<string, string> = {
   left: "0",
   transform: "none",
   width: "100vw",
+  height: "100vh",
   maxWidth: "100vw",
   maxHeight: "100vh",
   borderRadius: "0",
 };
 
 /** Switch the dialog container between desktop (centred card) and mobile (full screen). */
-export function applyDialogLayout(dialog: HTMLElement, isMobile: boolean): void {
+export function applyDialogLayout(
+  dialog: HTMLElement,
+  isMobile: boolean,
+): void {
   const style = isMobile ? MOBILE_DIALOG_STYLE : DESKTOP_DIALOG_STYLE;
   for (const [prop, value] of Object.entries(style)) {
     dialog.style.setProperty(camelToKebab(prop), value);
@@ -83,7 +107,10 @@ export function applyDialogLayout(dialog: HTMLElement, isMobile: boolean): void 
  * On mobile the dialog fills the viewport, so the dimmed backdrop adds nothing
  * and would only sit behind the opaque dialog — hide it. Desktop keeps it.
  */
-export function applyBackdropLayout(backdrop: HTMLElement, isMobile: boolean): void {
+export function applyBackdropLayout(
+  backdrop: HTMLElement,
+  isMobile: boolean,
+): void {
   backdrop.style.display = isMobile ? "none" : "block";
 }
 
@@ -94,7 +121,10 @@ const CLOSE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="tru
  * logic via `onClose` — it does not implement its own teardown. Hidden on
  * desktop (where the backdrop click already closes the dialog).
  */
-export function createCloseIcon(onClose: () => void, isMobile: boolean): HTMLButtonElement {
+export function createCloseIcon(
+  onClose: () => void,
+  isMobile: boolean,
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.id = MOO_ELEMENT_IDS.closeIcon;
   button.type = "button";
@@ -103,8 +133,8 @@ export function createCloseIcon(onClose: () => void, isMobile: boolean): HTMLBut
   button.innerHTML = CLOSE_ICON_SVG;
   button.style.cssText = [
     "position: absolute",
-    "top: 8px",
-    "right: 8px",
+    "top: 2px",
+    "right: 4px",
     "z-index: 1",
     "width: 32px",
     "height: 32px",
@@ -135,67 +165,89 @@ const DESKTOP_BUTTON_POSITION: Record<string, string> = {
  * Position the floating "家庭書櫃" button.
  *
  * - Desktop: bottom-right of the viewport (original behaviour).
- * - Mobile: relocated next to the Readmoo header overflow (⋯) button so it does
- *   not overlap the mobile bottom tab bar. The header DOM is volatile, so when
- *   the anchor cannot be found we fall back to the desktop bottom-right
- *   position rather than breaking entirely.
+ * - Mobile: bottom-right, but lifted above the Readmoo bottom tab bar so it does
+ *   not overlap. The bar's height is measured at runtime, so the lift adapts to
+ *   both the single-line bar and the taller two-line bar on small phones. When
+ *   the bar cannot be located, a width-based fallback height is used.
  *
  * The button stays in `document.body` in both cases; only its fixed coordinates
- * change. Returns true when the mobile anchor was found and used.
+ * change. Returns true when the bottom nav was measured (vs. the fallback).
  */
-export function placeFloatingButton(button: HTMLElement, isMobile: boolean): boolean {
+export function placeFloatingButton(
+  button: HTMLElement,
+  isMobile: boolean,
+): boolean {
   if (!isMobile) {
     applyInlineStyles(button, DESKTOP_BUTTON_POSITION);
     return false;
   }
 
-  const anchorRect = findHeaderOverflowRect();
-  if (!anchorRect) {
-    applyInlineStyles(button, DESKTOP_BUTTON_POSITION);
-    return false;
-  }
-
-  const gap = 8;
-  const top = Math.max(anchorRect.top, 4);
-  const right = Math.max(window.innerWidth - anchorRect.left + gap, 4);
+  const measuredNavHeight = findBottomNavHeight();
+  const navHeight = measuredNavHeight ?? fallbackNavHeight();
   applyInlineStyles(button, {
     position: "fixed",
-    bottom: "auto",
+    top: "auto",
     left: "auto",
-    top: `${top}px`,
-    right: `${right}px`,
+    right: "24px",
+    bottom: `${navHeight + FLOATING_BUTTON_GAP_PX}px`,
   });
-  return true;
+  return measuredNavHeight !== null;
+}
+
+/** Fallback bottom-nav height based on viewport width when measurement fails. */
+function fallbackNavHeight(): number {
+  return window.innerWidth <= SMALL_PHONE_BREAKPOINT_PX
+    ? BOTTOM_NAV_HEIGHT_SMALL_PX
+    : BOTTOM_NAV_HEIGHT_PX;
 }
 
 /**
- * Locate the Readmoo header overflow / menu trigger. Tries a few resilient
- * selectors; returns its bounding rect, or null when none match.
+ * Measure the rendered height of the Readmoo bottom tab bar.
+ *
+ * The exact Readmoo DOM is not knowable here, so a small allowlist of plausible
+ * selectors is tried and each candidate is validated to actually look like a
+ * bottom bar (spans most of the viewport width, sits at the viewport bottom)
+ * before being trusted. Returns the height in CSS pixels, or null when no
+ * candidate qualifies so the caller can fall back to a hardcoded height.
  */
-function findHeaderOverflowRect(): DOMRect | null {
+function findBottomNavHeight(): number | null {
   const selectors = [
-    "header [class~='overflow']",
-    "header button[aria-haspopup]",
-    "header [aria-label*='選單']",
-    "header [aria-label*='menu' i]",
-    ".navbar [class~='overflow']",
-    "#header [class*='dropdown-toggle']",
+    "nav[class*='bottom']",
+    "footer nav",
+    ".bottom-nav",
+    ".tabbar",
+    ".tab-bar",
+    "[class*='bottom-navigation']",
   ];
   for (const selector of selectors) {
     const el = document.querySelector(selector);
-    if (el instanceof HTMLElement && isVisible(el)) {
-      return el.getBoundingClientRect();
+    if (el instanceof HTMLElement && isBottomBar(el)) {
+      return el.getBoundingClientRect().height;
     }
   }
   return null;
 }
 
-function isVisible(el: HTMLElement): boolean {
+/**
+ * A candidate qualifies as the bottom tab bar when it has a non-zero size,
+ * spans most of the viewport width, and its bottom edge sits at (or just above)
+ * the viewport bottom.
+ */
+function isBottomBar(el: HTMLElement): boolean {
   const rect = el.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0;
+  if (rect.width <= 0 || rect.height <= 0) return false;
+
+  const spansWidth =
+    rect.width >= window.innerWidth * BOTTOM_NAV_MIN_WIDTH_RATIO;
+  const atBottom =
+    Math.abs(rect.bottom - window.innerHeight) <= BOTTOM_NAV_MAX_BOTTOM_GAP_PX;
+  return spansWidth && atBottom;
 }
 
-function applyInlineStyles(el: HTMLElement, styles: Record<string, string>): void {
+function applyInlineStyles(
+  el: HTMLElement,
+  styles: Record<string, string>,
+): void {
   for (const [prop, value] of Object.entries(styles)) {
     el.style.setProperty(camelToKebab(prop), value);
   }

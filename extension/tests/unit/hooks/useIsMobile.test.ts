@@ -28,12 +28,12 @@ function createMockMql(query: string, matches: boolean) {
 }
 
 describe("breakpoints", () => {
-  it("defines the mobile cutoff at 600px", () => {
-    expect(MOBILE_BREAKPOINT_PX).toBe(600);
+  it("defines the mobile cutoff at 767px", () => {
+    expect(MOBILE_BREAKPOINT_PX).toBe(767);
   });
 
   it("derives the media query from the breakpoint constant", () => {
-    expect(MOBILE_MEDIA_QUERY).toBe("(max-width: 600px)");
+    expect(MOBILE_MEDIA_QUERY).toBe(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`);
   });
 });
 

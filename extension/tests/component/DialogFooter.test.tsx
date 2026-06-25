@@ -2,14 +2,9 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { DialogFooter } from "@/dialog/DialogFooter";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { useIsMobile } from "@/hooks/useIsMobile";
 
 vi.mock("@/hooks/useMediaQuery", () => ({
   useMediaQuery: vi.fn(() => false),
-}));
-
-vi.mock("@/hooks/useIsMobile", () => ({
-  useIsMobile: vi.fn(() => false),
 }));
 
 vi.mock("@/utils/appEnv", () => ({
@@ -19,7 +14,6 @@ vi.mock("@/utils/appEnv", () => ({
 describe("DialogFooter", () => {
   beforeEach(() => {
     vi.mocked(useMediaQuery).mockReturnValue(false);
-    vi.mocked(useIsMobile).mockReturnValue(false);
   });
 
   afterEach(async () => {
@@ -112,29 +106,6 @@ describe("DialogFooter", () => {
       render(<DialogFooter />);
       const versionDiv = screen.getByText(/墨家書櫃 v\d+\.\d+\.\d+/).closest("div")!;
       expect(versionDiv.style.marginTop).toBe("");
-    });
-  });
-
-  describe("mobile note", () => {
-    it("shows the neutral mobile positioning note on mobile", () => {
-      vi.mocked(useIsMobile).mockReturnValue(true);
-      render(<DialogFooter />);
-      const note = screen.getByTestId("dialog-mobile-note");
-      expect(note).toBeInTheDocument();
-      expect(note).toHaveTextContent("行動版：墨家書櫃家庭書櫃的瀏覽介面");
-    });
-
-    it("does not claim any sync capability in the note", () => {
-      vi.mocked(useIsMobile).mockReturnValue(true);
-      render(<DialogFooter />);
-      const note = screen.getByTestId("dialog-mobile-note");
-      expect(note.textContent).not.toMatch(/同步/);
-    });
-
-    it("hides the mobile note on desktop", () => {
-      vi.mocked(useIsMobile).mockReturnValue(false);
-      render(<DialogFooter />);
-      expect(screen.queryByTestId("dialog-mobile-note")).not.toBeInTheDocument();
     });
   });
 });

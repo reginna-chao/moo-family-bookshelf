@@ -1,4 +1,6 @@
 import React from "react";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { formSelectStyle } from "./formSelectStyle";
 
 /** Sentinel filter value for the cross-everyone hidden-books view. */
 export const HIDDEN_FILTER_VALUE = "__hidden__";
@@ -19,6 +21,7 @@ export interface MemberDropdownProps {
 }
 
 export function MemberDropdown({ members, userId, value, onChange }: MemberDropdownProps) {
+  const isMobile = useIsMobile();
   const othersWithBooks = members.filter((m) => m.userId !== userId && m.books.length > 0);
 
   return (
@@ -27,18 +30,7 @@ export function MemberDropdown({ members, userId, value, onChange }: MemberDropd
       onChange={(e) => onChange(e.target.value as MemberFilterValue)}
       aria-label="篩選成員"
       className="moo-form-select"
-      style={{
-        width: "100%",
-        padding: "8px 12px",
-        paddingRight: "2.25rem",
-        border: "1px solid #e2e8f0",
-        borderRadius: 8,
-        fontSize: 14,
-        backgroundColor: "white",
-        color: "#334155",
-        cursor: "pointer",
-        outline: "none",
-      }}
+      style={{ ...formSelectStyle(isMobile), width: "100%" }}
     >
       <option value="all">所有人的書</option>
       <option value="all-except-self">其他家人的書</option>

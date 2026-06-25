@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, CSSProperties } from "react";
 import browser from "webextension-polyfill";
-import { Share2 } from "lucide-react";
+import { Share2, RefreshCw } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
 import { BookRow } from "./BookRow";
 import { StatusFilterBar, StatusFilter } from "./StatusFilterBar";
@@ -16,6 +16,7 @@ import { useFamilyData } from "./FamilyDataContext";
 import { useBookSort } from "./useBookSort";
 import { sortBooks } from "./sortBooks";
 import { BookSortDropdown } from "./BookSortDropdown";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 export interface PersonalShelfProps {
   userId: string;
@@ -33,7 +34,42 @@ function archiveTabStyle(active: boolean): CSSProperties {
   };
 }
 
+function publicShareButtonStyle(isMobile: boolean): CSSProperties {
+  if (isMobile) {
+    return {
+      width: 32, height: 32, padding: 0, display: "flex",
+      alignItems: "center", justifyContent: "center",
+      border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
+      background: "transparent", cursor: "pointer",
+    };
+  }
+  return {
+    padding: "6px 12px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
+    background: "transparent", fontWeight: 500, fontSize: 13, cursor: "pointer",
+    whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4,
+  };
+}
+
+function syncButtonStyle(isMobile: boolean, isSyncing: boolean): CSSProperties {
+  const background = isSyncing ? "#93c5fd" : "transparent";
+  const cursor = isSyncing ? "not-allowed" : "pointer";
+  if (isMobile) {
+    return {
+      width: 32, height: 32, padding: 0, display: "flex",
+      alignItems: "center", justifyContent: "center",
+      border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
+      background, cursor,
+    };
+  }
+  return {
+    padding: "6px 12px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
+    background, fontWeight: 500, fontSize: 13, cursor, whiteSpace: "nowrap",
+    display: "flex", alignItems: "center", gap: 4,
+  };
+}
+
 export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProps) {
+  const isMobile = useIsMobile();
   const { members } = useFamilyData();
   const selfMember = members.find((m) => m.userId === userId);
   const displayName = selfMember?.displayName ?? "";
@@ -182,16 +218,25 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
           <span style={{ fontWeight: 400, color: "#94a3b8", marginLeft: 8, fontSize: 13 }}>({currentViewBooks.length} 本)</span>
         </h3>
         <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setShowPublicShare(true)} style={{
-            padding: "6px 12px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
-            background: "transparent", fontWeight: 500, fontSize: 13, cursor: "pointer",
-            whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4,
-          }}><Share2 size={13} />公開分享</button>
-          <button onClick={triggerManualSync} disabled={isSyncing} style={{
-            padding: "6px 12px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
-            background: isSyncing ? "#93c5fd" : "transparent", fontWeight: 500, fontSize: 13,
-            cursor: isSyncing ? "not-allowed" : "pointer", whiteSpace: "nowrap",
-          }}>{syncLabel}</button>
+          <button
+            onClick={() => setShowPublicShare(true)}
+            aria-label="公開分享"
+            title="公開分享"
+            style={publicShareButtonStyle(isMobile)}
+          >
+            <Share2 size={13} />
+            {!isMobile && "公開分享"}
+          </button>
+          <button
+            onClick={triggerManualSync}
+            disabled={isSyncing}
+            aria-label={syncLabel}
+            title={syncLabel}
+            style={syncButtonStyle(isMobile, isSyncing)}
+          >
+            <RefreshCw size={13} className={isSyncing ? "moo-spin" : undefined} />
+            {!isMobile && syncLabel}
+          </button>
         </div>
       </div>
 
