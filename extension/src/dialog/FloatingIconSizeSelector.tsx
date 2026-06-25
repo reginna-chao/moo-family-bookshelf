@@ -1,5 +1,6 @@
 import React from "react";
 import type { FloatingIconSize } from "./useFloatingIconSize";
+import { type SegmentPosition, getSegmentBorderRadius } from "./segmentBorderRadius";
 
 export interface FloatingIconSizeSelectorProps {
   size: FloatingIconSize;
@@ -11,13 +12,7 @@ interface SegmentProps {
   ariaLabel: string;
   label: string;
   onClick: () => void;
-  position?: "first" | "middle" | "last";
-}
-
-function getBorderRadius(position?: "first" | "middle" | "last"): string {
-  if (position === "first") return "6px 0 0 6px";
-  if (position === "last") return "0 6px 6px 0";
-  return "0";
+  position?: SegmentPosition;
 }
 
 function Segment({ active, ariaLabel, label, onClick, position }: SegmentProps) {
@@ -31,7 +26,7 @@ function Segment({ active, ariaLabel, label, onClick, position }: SegmentProps) 
         flex: 1,
         padding: "6px 0",
         border: active ? "1px solid #2563eb" : "1px solid #e2e8f0",
-        borderRadius: getBorderRadius(position),
+        borderRadius: getSegmentBorderRadius(position),
         background: active ? "#eff6ff" : "transparent",
         color: active ? "#2563eb" : "#64748b",
         fontSize: 13,
@@ -44,7 +39,7 @@ function Segment({ active, ariaLabel, label, onClick, position }: SegmentProps) 
   );
 }
 
-function getSegmentPosition(index: number, total: number): "first" | "middle" | "last" {
+function getSegmentPosition(index: number, total: number): SegmentPosition {
   if (index === 0) return "first";
   if (index === total - 1) return "last";
   return "middle";

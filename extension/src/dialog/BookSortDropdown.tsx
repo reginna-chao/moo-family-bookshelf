@@ -1,8 +1,9 @@
-import React, { useRef, useEffect, useLayoutEffect, useState } from "react";
+import React, { useRef, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDownWideNarrow } from "lucide-react";
 import type { BookSortMode } from "./sortBooks";
 import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
+import { useDismissableMenu } from "../hooks/useDismissableMenu";
 import { useIsMobile } from "../hooks/useIsMobile";
 
 export interface BookSortDropdownProps {
@@ -45,29 +46,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
     place(triggerRef.current, menuRef.current);
   }, [open, place, reset]);
 
-  useEffect(() => {
-    if (!open) return;
-
-    function handlePointerDown(e: MouseEvent) {
-      if (isInsideMenu(e.target, triggerRef.current, menuRef.current)) return;
-      close();
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      close();
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-  }, [open]);
+  useDismissableMenu({ isOpen: open, onClose: close, triggerRef, menuRef });
 
   const handleSelect = (mode: BookSortMode) => {
     onChange(mode);
@@ -150,15 +129,4 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
         )}
     </div>
   );
-}
-
-function isInsideMenu(
-  target: EventTarget | null,
-  trigger: HTMLElement | null,
-  menu: HTMLElement | null,
-): boolean {
-  if (!(target instanceof Node)) return false;
-  if (trigger?.contains(target)) return true;
-  if (menu?.contains(target)) return true;
-  return false;
 }

@@ -47,6 +47,14 @@ describe("FloatingIconSizeSelector", () => {
     expect(screen.getByRole("group", { name: "家庭書櫃按鈕大小" })).toBeInTheDocument();
   });
 
+  it("clips the segmented container so child border-radius is masked", () => {
+    render(<FloatingIconSizeSelector size="medium" onChange={vi.fn()} />);
+
+    const container = screen.getByRole("group", { name: "家庭書櫃按鈕大小" });
+    expect(container.style.overflow).toBe("hidden");
+    expect(container.style.borderRadius).toBe("6px");
+  });
+
   it.each<{ label: string; expected: string }>([
     { label: "僅圖示", expected: "6px 0 0 6px" },
     { label: "小尺寸", expected: "0" },

@@ -1,6 +1,7 @@
 import React from "react";
 import { LayoutGrid, Rows3 } from "lucide-react";
 import type { FamilyShelfViewMode } from "./useFamilyShelfViewMode";
+import { type SegmentPosition, getSegmentBorderRadius } from "./segmentBorderRadius";
 import { useIsMobile } from "../hooks/useIsMobile";
 
 export interface ViewModeToggleProps {
@@ -14,13 +15,7 @@ interface ToggleButtonProps {
   onClick: () => void;
   children: React.ReactNode;
   size: number;
-  position?: "first" | "middle" | "last";
-}
-
-function getBorderRadius(position?: "first" | "middle" | "last"): string {
-  if (position === "first") return "6px 0 0 6px";
-  if (position === "last") return "0 6px 6px 0";
-  return "0";
+  position?: SegmentPosition;
 }
 
 function ToggleButton({ active, ariaLabel, onClick, children, size, position }: ToggleButtonProps) {
@@ -37,7 +32,7 @@ function ToggleButton({ active, ariaLabel, onClick, children, size, position }: 
         alignItems: "center",
         justifyContent: "center",
         border: active ? "1px solid #2563eb" : "1px solid #e2e8f0",
-        borderRadius: getBorderRadius(position),
+        borderRadius: getSegmentBorderRadius(position),
         background: active ? "#eff6ff" : "transparent",
         color: active ? "#2563eb" : "#64748b",
         cursor: "pointer",

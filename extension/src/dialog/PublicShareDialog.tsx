@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, type CSSProperties } from "re
 import { X, Copy, RefreshCw, Trash2 } from "lucide-react";
 import type { ApiClient } from "../api/client";
 import type { PublicShelf } from "../api/types";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 export interface PublicShareDialogProps {
   userId: string;
@@ -243,13 +244,14 @@ function ActiveShelf({
 }
 
 function ExpiresSelect({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+  const isMobile = useIsMobile();
   return (
     <label style={labelStyle}>
       過期時間
       <select value={value === null ? "null" : String(value)}
         onChange={(e) => onChange(e.target.value === "null" ? null : Number(e.target.value))}
         className="moo-form-select"
-        style={{ ...inputStyle, paddingRight: "2.25rem" }}>
+        style={{ ...inputStyle, paddingRight: "2.25rem", ...(isMobile ? { padding: "4px 10px", paddingRight: "2.25rem" } : {}) }}>
         {EXPIRES_OPTIONS.map((opt) => (
           <option key={String(opt.value)} value={opt.value === null ? "null" : String(opt.value)}>
             {opt.label}
