@@ -100,6 +100,25 @@ describe("background service worker", () => {
         [FAMILY_ID_KEY]: "fam-abc",
       });
     });
+
+    it("still writes familyId to local and resolves ok when sync.set rejects (Firefox)", async () => {
+      vi.mocked(browser.storage.sync.set).mockRejectedValue(
+        new Error("sync unavailable"),
+      );
+
+      const response = await sendMessage({
+        type: "SET_FAMILY_ID",
+        familyId: "fam-no-sync",
+      });
+
+      // Local-first ordering: the local write is independent of the sync
+      // outcome, so it must persist even though sync threw.
+      expect(browser.storage.local.set).toHaveBeenCalledWith({
+        [FAMILY_ID_KEY]: "fam-no-sync",
+      });
+      // A sync rejection must not propagate; handler still resolves ok.
+      expect(response).toEqual({ ok: true });
+    });
   });
 
   describe("GET_FAMILY_ID", () => {
@@ -131,6 +150,29 @@ describe("background service worker", () => {
 
       expect(response).toEqual({ familyId: null });
     });
+
+    it("falls back to local and returns its value when sync.get rejects (Firefox)", async () => {
+      vi.mocked(browser.storage.sync.get).mockRejectedValue(
+        new Error("sync unavailable"),
+      );
+      vi.mocked(browser.storage.local.get).mockResolvedValue({
+        [FAMILY_ID_KEY]: "fam-from-local",
+      });
+
+      const response = await sendMessage({ type: "GET_FAMILY_ID" });
+
+      expect(response).toEqual({ familyId: "fam-from-local" });
+    });
+
+    it("returns null when sync.get rejects and local is also empty", async () => {
+      vi.mocked(browser.storage.sync.get).mockRejectedValue(
+        new Error("sync unavailable"),
+      );
+
+      const response = await sendMessage({ type: "GET_FAMILY_ID" });
+
+      expect(response).toEqual({ familyId: null });
+    });
   });
 
   describe("CLEAR_FAMILY_ID", () => {
@@ -155,6 +197,24 @@ describe("background service worker", () => {
         const keys = call[0] as string[];
         expect(keys).not.toContain(PERSONAL_BOOKS_CACHE_KEY);
       }
+    });
+
+    it("still removes local keys and resolves ok when sync.remove rejects (Firefox)", async () => {
+      vi.mocked(browser.storage.sync.remove).mockRejectedValue(
+        new Error("sync unavailable"),
+      );
+
+      const response = await sendMessage({ type: "CLEAR_FAMILY_ID" });
+
+      // Local removal is authoritative and independent of the sync outcome, so
+      // it must still run even though sync threw.
+      expect(browser.storage.local.remove).toHaveBeenCalledWith([
+        FAMILY_ID_KEY,
+        AUTH_TOKEN_KEY,
+        TOKEN_EXPIRES_AT_KEY,
+      ]);
+      // A sync rejection must not propagate; handler still resolves ok.
+      expect(response).toEqual({ ok: true });
     });
   });
 

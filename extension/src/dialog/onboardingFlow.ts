@@ -52,15 +52,25 @@ export async function migratePersonalBooksCache(
   }
 }
 
-/** Persist auth/family credentials to chrome.storage.local. */
+/**
+ * Persist auth/family credentials to chrome.storage.local.
+ *
+ * familyId is written DIRECTLY to local here (not only via the background
+ * SET_FAMILY_ID message) so persistence survives Firefox's sleeping background
+ * event page, where the message round-trip can fail.
+ */
 async function persistJoinCredentials(opts: {
   userId: string;
+  familyId?: string;
   authToken?: string;
   expiresAt?: number;
 }): Promise<void> {
   const storageData: Record<string, unknown> = {
     [USER_ID_KEY]: opts.userId,
   };
+  if (opts.familyId !== undefined) {
+    storageData[FAMILY_ID_KEY] = opts.familyId;
+  }
   if (opts.authToken !== undefined) {
     storageData[AUTH_TOKEN_KEY] = opts.authToken;
   }
@@ -101,6 +111,7 @@ export async function tryAutoRecovery(opts: {
   ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
+    familyId: opts.familyId,
     authToken: joinData?.authToken,
     expiresAt: joinData?.expiresAt,
   });
@@ -150,6 +161,7 @@ export async function performSoloRecovery(opts: {
   ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
+    familyId: opts.familyId,
     authToken: joinData?.authToken,
     expiresAt: joinData?.expiresAt,
   });
@@ -203,9 +215,15 @@ export async function createNewFamily(opts: {
   ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
+    familyId,
     authToken: data.authToken,
     expiresAt: data.expiresAt,
   });
+  try {
+    await browser.storage.sync.set({ [FAMILY_ID_KEY]: familyId });
+  } catch {
+    // sync storage may be unavailable in some contexts
+  }
   await migratePersonalBooksCache(opts.userId, opts.apiClient);
 
   if (data.authToken) {
@@ -276,9 +294,15 @@ export async function performJoin(opts: {
   ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
+    familyId: decoded.familyId,
     authToken: joinData?.authToken,
     expiresAt: joinData?.expiresAt,
   });
+  try {
+    await browser.storage.sync.set({ [FAMILY_ID_KEY]: decoded.familyId });
+  } catch {
+    // sync storage may be unavailable in some contexts
+  }
   await migratePersonalBooksCache(opts.userId, opts.apiClient);
 
   if (joinData?.authToken) {

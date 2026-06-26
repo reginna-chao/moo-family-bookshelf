@@ -104,7 +104,15 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
       }
 
       await browser.storage.local.set({ [DISPLAY_NAME_KEY]: trimmed });
-      await browser.storage.sync.set({ [DISPLAY_NAME_KEY]: trimmed });
+      // sync write is best-effort: it can reject in Firefox (no signed-in
+      // account, Android limits, pref disabled) and must not surface as a
+      // save failure once the local write has already succeeded.
+      try {
+        await browser.storage.sync.set({ [DISPLAY_NAME_KEY]: trimmed });
+      } catch {
+        // local persisted; sync is best-effort (may reject in Firefox)
+        console.warn("[useDisplayName] storage.sync.set failed; local write kept");
+      }
       setDisplayName(trimmed);
       setSavedDisplayName(trimmed);
       setNameSaveState("saved");
