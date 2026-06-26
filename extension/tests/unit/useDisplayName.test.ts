@@ -75,6 +75,32 @@ describe("useDisplayName", () => {
     expect(result.current.nameSaveState).toBe("saved");
   });
 
+  it("treats save as successful when sync.set rejects but local.set succeeds (Firefox)", async () => {
+    vi.mocked(chrome.storage.sync.set).mockRejectedValue(
+      new Error("sync unavailable"),
+    );
+
+    const { result } = renderHook(() => useDisplayName());
+
+    await waitFor(() => expect(result.current.displayName).toBe("小明"));
+
+    act(() => {
+      result.current.setDisplayName("大明");
+    });
+
+    let saved: boolean | undefined;
+    await act(async () => {
+      saved = await result.current.handleSaveDisplayName();
+    });
+
+    // Local write must still land; sync failure is best-effort and swallowed.
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
+    // A sync rejection must NOT flip the save to error or return false.
+    expect(saved).toBe(true);
+    expect(result.current.nameSaveState).toBe("saved");
+    expect(result.current.savedDisplayName).toBe("大明");
+  });
+
   it("calls updateDisplayName API when options provided", async () => {
     const apiClient = createMockApiClient();
     const { result } = renderHook(() =>

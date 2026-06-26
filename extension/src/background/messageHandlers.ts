@@ -12,6 +12,7 @@
 
 import browser from "webextension-polyfill";
 import { BoolFlag } from "../api/client";
+import { readFamilyId } from "../storage/familyId";
 import { showSyncErrorBadge, clearSyncErrorBadge } from "./badge";
 import {
   FAMILY_ID_KEY,
@@ -75,39 +76,40 @@ export type MessageHandler = (
   message: BackgroundMessage,
 ) => Promise<unknown> | unknown;
 
-/**
- * Read a value from browser.storage.sync first, falling back to
- * browser.storage.local. Returns null when neither area has the key.
- */
-async function getWithSyncFallback(key: string): Promise<unknown> {
-  const syncResult = await browser.storage.sync.get([key]);
-  if (syncResult[key] !== undefined) {
-    return syncResult[key];
-  }
-  const localResult = await browser.storage.local.get([key]);
-  return localResult[key] ?? null;
-}
-
 async function handleGetFamilyId(): Promise<unknown> {
-  const value = await getWithSyncFallback(FAMILY_ID_KEY);
-  return { familyId: value ?? null };
+  return { familyId: await readFamilyId() };
 }
 
 async function handleSetFamilyId(
   message: Extract<BackgroundMessage, { type: "SET_FAMILY_ID" }>,
 ): Promise<unknown> {
-  await browser.storage.sync.set({ [FAMILY_ID_KEY]: message.familyId });
+  // Local is the reliable source of truth — write it first so persistence
+  // never depends on storage.sync, which can reject in Firefox (no signed-in
+  // account, Android limits, or the pref disabled). The sync write is
+  // best-effort and isolated so its failure cannot prevent the local write.
   await browser.storage.local.set({ [FAMILY_ID_KEY]: message.familyId });
+  try {
+    await browser.storage.sync.set({ [FAMILY_ID_KEY]: message.familyId });
+  } catch {
+    console.warn("[Background] storage.sync.set failed for familyId; local write kept");
+  }
   return { ok: true };
 }
 
 async function handleClearFamilyId(): Promise<unknown> {
-  await browser.storage.sync.remove(SYNCED_KEYS as unknown as string[]);
+  // Local is authoritative — remove it first so unbind always clears the local
+  // familyId + auth credentials even if storage.sync rejects in Firefox. The
+  // sync removal is best-effort and isolated so it cannot abort the local clear.
   await browser.storage.local.remove([
     ...SYNCED_KEYS,
     AUTH_TOKEN_KEY,
     TOKEN_EXPIRES_AT_KEY,
   ]);
+  try {
+    await browser.storage.sync.remove(SYNCED_KEYS as unknown as string[]);
+  } catch {
+    console.warn("[Background] storage.sync.remove failed for familyId; local clear kept");
+  }
   return { ok: true };
 }
 

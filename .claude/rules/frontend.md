@@ -53,6 +53,7 @@ Open Dialog → has family_id in chrome.storage?
 
 - `pnpm dev` — dev server
 - `pnpm build` — production build
+- `pnpm build:firefox:dev` — dev-mode Firefox build → load `dist-firefox-direct/manifest.json` via about:debugging
 - `pnpm typecheck` — `tsc --noEmit`
 - `pnpm lint` — ESLint + Prettier
 - `pnpm test` — Vitest (unit + component)

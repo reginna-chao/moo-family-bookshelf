@@ -2,7 +2,12 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { App } from "@/dialog/App";
 import { ApiClient } from "@/api/client";
-import { USER_ID_KEY, AUTH_TOKEN_KEY } from "@/constants";
+import {
+  USER_ID_KEY,
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  FAMILY_ID_KEY,
+} from "@/constants";
 import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
 
 // Mock all child components
@@ -44,9 +49,31 @@ vi.mock("@/constants", async (importOriginal) => {
 });
 
 // Production reads via promise-based `browser.runtime.sendMessage(msg)` and
-// `browser.storage.local.get(keys)` (webextension-polyfill). The mocks resolve
-// the response/result Promise keyed by message type — there is no Chrome
-// callback argument.
+// `browser.storage.{local,sync}.get(keys)` (webextension-polyfill). The mocks
+// resolve the response/result Promise keyed by message type / storage key —
+// there is no Chrome callback argument.
+//
+// IMPORTANT: the mount gate now resolves familyId via `readFamilyId()` (DIRECT
+// storage.sync→local read), NOT via the `GET_FAMILY_ID` message. So familyId is
+// seeded into BOTH storage areas here. The storage mocks are key-aware so
+// `readFamilyId([FAMILY_ID_KEY])` and the App's `get([USER_ID_KEY, AUTH_TOKEN_KEY])`
+// each get only the keys they ask for.
+function pickKeys(
+  store: Record<string, unknown>,
+  keys: unknown,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  const keyList = Array.isArray(keys)
+    ? keys
+    : typeof keys === "string"
+      ? [keys]
+      : Object.keys(store);
+  for (const k of keyList) {
+    if (k in store) result[k as string] = store[k as string];
+  }
+  return result;
+}
+
 function setupChromeMessages(options: {
   familyId?: string | null;
   userId?: string | null;
@@ -70,13 +97,18 @@ function setupChromeMessages(options: {
     },
   );
 
-  vi.mocked(chrome.storage.local.get).mockImplementation(((keys: unknown) => {
-    void keys;
-    const result: Record<string, unknown> = {};
-    if (options.userId) result[USER_ID_KEY] = options.userId;
-    if (options.authToken) result[AUTH_TOKEN_KEY] = options.authToken;
-    return Promise.resolve(result);
-  }) as typeof chrome.storage.local.get);
+  const localStore: Record<string, unknown> = {};
+  if (options.userId) localStore[USER_ID_KEY] = options.userId;
+  if (options.authToken) localStore[AUTH_TOKEN_KEY] = options.authToken;
+  if (options.familyId) localStore[FAMILY_ID_KEY] = options.familyId;
+
+  const syncStore: Record<string, unknown> = {};
+  if (options.familyId) syncStore[FAMILY_ID_KEY] = options.familyId;
+
+  vi.mocked(chrome.storage.local.get).mockImplementation(((keys: unknown) =>
+    Promise.resolve(pickKeys(localStore, keys))) as typeof chrome.storage.local.get);
+  vi.mocked(chrome.storage.sync.get).mockImplementation(((keys: unknown) =>
+    Promise.resolve(pickKeys(syncStore, keys))) as typeof chrome.storage.sync.get);
 }
 
 describe("App", () => {
@@ -325,6 +357,118 @@ describe("App", () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       type: "GET_API_ENDPOINT",
     });
+  });
+
+  // Firefox MV3 non-persistent background event page sleeps, so
+  // browser.runtime.sendMessage round-trips fail — but browser.storage.* stays
+  // reliable. The mount gate must resolve familyId/userId from DIRECT storage
+  // and NOT fall back to onboarding just because a message rejected.
+  describe("Firefox sleeping-background gate", () => {
+    // Seed familyId/userId/authToken DIRECTLY into storage (sync + local),
+    // bypassing setupChromeMessages so we control the sendMessage rejection.
+    function seedStorage(opts: {
+      familyId?: string | null;
+      userId?: string | null;
+      authToken?: string | null;
+    }) {
+      const localStore: Record<string, unknown> = {};
+      if (opts.userId) localStore[USER_ID_KEY] = opts.userId;
+      if (opts.authToken) localStore[AUTH_TOKEN_KEY] = opts.authToken;
+      if (opts.familyId) localStore[FAMILY_ID_KEY] = opts.familyId;
+      const syncStore: Record<string, unknown> = {};
+      if (opts.familyId) syncStore[FAMILY_ID_KEY] = opts.familyId;
+
+      vi.mocked(chrome.storage.local.get).mockImplementation(((keys: unknown) =>
+        Promise.resolve(pickKeys(localStore, keys))) as typeof chrome.storage.local.get);
+      vi.mocked(chrome.storage.sync.get).mockImplementation(((keys: unknown) =>
+        Promise.resolve(pickKeys(syncStore, keys))) as typeof chrome.storage.sync.get);
+    }
+
+    it("resolves to MAIN view when sendMessage REJECTS but storage has familyId+userId", async () => {
+      // Every background message rejects (sleeping Firefox background).
+      vi.mocked(chrome.runtime.sendMessage).mockRejectedValue(
+        new Error("Could not establish connection. Receiving end does not exist."),
+      );
+      seedStorage({ familyId: "fam-ff", userId: "user-ff", authToken: "tok" });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+        expect(screen.getByText("個人書櫃")).toBeInTheDocument();
+        expect(screen.getByText("設定")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("onboarding")).not.toBeInTheDocument();
+    });
+
+    it("resolves to onboarding when sendMessage rejects and storage has no familyId", async () => {
+      vi.mocked(chrome.runtime.sendMessage).mockRejectedValue(
+        new Error("Could not establish connection. Receiving end does not exist."),
+      );
+      seedStorage({ familyId: null, userId: null, authToken: null });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+      });
+    });
+
+    it("a rejected GET_API_ENDPOINT does not block the main view", async () => {
+      // Only GET_API_ENDPOINT rejects; storage still has familyId+userId.
+      vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+        (message: unknown) => {
+          const msg = message as { type: string };
+          if (msg.type === "GET_API_ENDPOINT") {
+            return Promise.reject(new Error("background asleep"));
+          }
+          return Promise.resolve(undefined);
+        },
+      );
+      seedStorage({ familyId: "fam-ff", userId: "user-ff", authToken: "tok" });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("onboarding")).not.toBeInTheDocument();
+    });
+  });
+
+  // Firefox: CLEAR_FAMILY_ID message can fail (sleeping background), so leave
+  // must also clear familyId + auth credentials DIRECTLY from storage.local.
+  it("handleLeaveFamily removes credentials from storage.local even when CLEAR_FAMILY_ID message rejects", async () => {
+    setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+    // The CLEAR_FAMILY_ID message rejects (Firefox sleeping background). The
+    // GET_* messages used at mount must still resolve so the main view renders.
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation((message: unknown) => {
+      const msg = message as { type: string };
+      if (msg.type === "CLEAR_FAMILY_ID") {
+        return Promise.reject(new Error("background asleep"));
+      }
+      if (msg.type === "GET_API_ENDPOINT") {
+        return Promise.resolve({ apiEndpoint: null });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("設定")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("設定"));
+    fireEvent.click(screen.getByText("Mock Leave"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+    });
+
+    // Direct storage cleanup guarantees Unbind Isolation even with no background.
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+      expect.arrayContaining([FAMILY_ID_KEY, AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]),
+    );
   });
 
   describe("lazy-mount tab panels", () => {

@@ -6,8 +6,10 @@ import {
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  FAMILY_ID_KEY,
   HAS_COMPLETED_INITIAL_SETUP_KEY,
 } from "../constants";
+import { readFamilyId } from "../storage/familyId";
 import { Onboarding } from "./Onboarding";
 import { PersonalShelf } from "./PersonalShelf";
 import { FamilyShelf } from "./FamilyShelf";
@@ -74,29 +76,33 @@ export function App() {
     }
 
     // Load familyId, userId, and custom API endpoint on mount.
-    // GET_FAMILY_ID checks sync first, falling back to local (handled in background).
+    // familyId + userId come from DIRECT storage reads (reliable in Firefox,
+    // where the non-persistent background event page sleeps and its message
+    // round-trips fail). The API endpoint still goes through the background
+    // message, but its result is decoupled so a rejected/undefined response
+    // falls back to the default endpoint instead of forcing onboarding.
     let cancelled = false;
     void (async () => {
       try {
-        const [familyResponse, storageResult, apiResponse] = await Promise.all([
-          browser.runtime.sendMessage({ type: "GET_FAMILY_ID" }) as Promise<
-            { familyId?: string } | undefined
-          >,
+        const [familyId, storageResult, apiResult] = await Promise.all([
+          readFamilyId(),
           browser.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY]),
-          browser.runtime.sendMessage({ type: "GET_API_ENDPOINT" }) as Promise<
-            { apiEndpoint?: string } | undefined
-          >,
+          Promise.resolve(
+            browser.runtime.sendMessage({ type: "GET_API_ENDPOINT" }) as Promise<
+              { apiEndpoint?: string } | undefined
+            >,
+          ).catch(() => undefined),
         ]);
         if (cancelled) return;
 
-        if (apiResponse?.apiEndpoint) {
-          apiClientRef.current.setEndpoint(apiResponse.apiEndpoint);
+        if (apiResult?.apiEndpoint) {
+          apiClientRef.current.setEndpoint(apiResult.apiEndpoint);
         }
         if (storageResult[AUTH_TOKEN_KEY]) {
           apiClientRef.current.setAuthToken(storageResult[AUTH_TOKEN_KEY] as string);
         }
-        if (familyResponse?.familyId && storageResult[USER_ID_KEY]) {
-          setFamilyId(familyResponse.familyId);
+        if (familyId && storageResult[USER_ID_KEY]) {
+          setFamilyId(familyId);
           setUserId(storageResult[USER_ID_KEY] as string);
           setView("main");
         } else {
@@ -130,8 +136,22 @@ export function App() {
   };
 
   const handleLeaveFamily = () => {
+    // CLEAR_FAMILY_ID can fail in Firefox (sleeping background event page), so
+    // also clear familyId + auth credentials DIRECTLY from storage to guarantee
+    // Unbind Isolation (no leftover familyId/token readable after leave).
     void browser.runtime.sendMessage({ type: "CLEAR_FAMILY_ID" });
-    void browser.storage.local.remove(TOKEN_EXPIRES_AT_KEY);
+    void browser.storage.local.remove([
+      FAMILY_ID_KEY,
+      AUTH_TOKEN_KEY,
+      TOKEN_EXPIRES_AT_KEY,
+    ]);
+    void (async () => {
+      try {
+        await browser.storage.sync.remove(FAMILY_ID_KEY);
+      } catch {
+        // sync storage may be unavailable (e.g. Firefox without sync)
+      }
+    })();
     setFamilyId(null);
     setActiveTab("family-shelf");
     setView("onboarding");
