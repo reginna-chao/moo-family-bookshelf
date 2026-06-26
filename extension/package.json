@@ -18,6 +18,7 @@
     "build": "tsx scripts/sync-version.ts && tsc --noEmit && vite build && vite build --config vite.config.content.ts && vite build --config vite.config.content-modules.ts && vite build --config vite.config.fiber-bridge.ts && tsx scripts/verify-build.ts",
     "build:dev": "tsx scripts/sync-version.ts && tsc --noEmit && vite build --mode remote && vite build --mode remote --config vite.config.content.ts && vite build --mode remote --config vite.config.content-modules.ts && vite build --mode remote --config vite.config.fiber-bridge.ts",
     "build:firefox": "pnpm build && tsx scripts/build-firefox.ts && tsx scripts/verify-firefox-build.ts",
+    "build:firefox:dev": "pnpm build:dev && tsx scripts/build-firefox.ts --target direct && tsx scripts/verify-firefox-build.ts --target direct",
     "build:updates-json": "tsx scripts/build-updates-json.ts",
     "lint:firefox": "pnpm build:firefox && web-ext lint --source-dir=dist-firefox-amo && web-ext lint --source-dir=dist-firefox-direct --self-hosted",
     "typecheck": "tsc --noEmit",
