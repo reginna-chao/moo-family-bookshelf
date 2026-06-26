@@ -23,7 +23,7 @@ import { VersionWarning } from "./VersionWarning";
 import { LoadingState } from "./LoadingState";
 import { useIsMobile } from "../hooks/useIsMobile";
 
-type View = "loading" | "onboarding" | "main";
+export type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "borrow" | "settings";
 
 /**
@@ -40,7 +40,16 @@ const flexColumnFill: React.CSSProperties = {
   minHeight: 0,
 };
 
-export function App() {
+interface AppProps {
+  /**
+   * Notifies the host (content script) of the current top-level view so it can
+   * adjust the dialog container's layout — e.g. only the "main" view uses a
+   * fixed desktop height; "loading"/"onboarding" size to their content.
+   */
+  onViewChange?: (view: View) => void;
+}
+
+export function App({ onViewChange }: AppProps = {}) {
   const [view, setView] = useState<View>("loading");
   const [activeTab, setActiveTab] = useState<Tab>("family-shelf");
   const [familyId, setFamilyId] = useState<string | null>(null);
@@ -120,6 +129,12 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  // Report the current view to the host so it can adapt the dialog container's
+  // layout (only "main" uses a fixed desktop height; other views fit content).
+  useEffect(() => {
+    onViewChange?.(view);
+  }, [view, onViewChange]);
 
   const handleFamilyJoined = (id: string, newUserId: string) => {
     setFamilyId(id);

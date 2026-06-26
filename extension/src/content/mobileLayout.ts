@@ -70,16 +70,31 @@ export function stopAllMobileWatchers(): void {
   activeWatchers.clear();
 }
 
-const DESKTOP_DIALOG_STYLE: Record<string, string> = {
+/** Desktop card height ceiling; the main view's fixed height equals this cap. */
+const DESKTOP_MAX_HEIGHT = "80vh";
+
+/**
+ * Desktop card geometry, excluding `height`. The fixed `height: 80vh` is applied
+ * separately and only for the "main" view (see `applyDialogLayout`) so the
+ * onboarding/loading screens size to their content (capped by `maxHeight` and
+ * floored by the container's `min-height`) instead of leaving a tall blank gap
+ * below short content.
+ */
+const DESKTOP_DIALOG_BASE_STYLE: Record<string, string> = {
   top: "50%",
   left: "50%",
   transform: "translate(-50%, -50%)",
   width: "90vw",
-  height: "80vh",
   maxWidth: "640px",
-  maxHeight: "80vh",
+  maxHeight: DESKTOP_MAX_HEIGHT,
   borderRadius: "12px",
 };
+
+/**
+ * Fixed desktop height for the main view, so switching tabs never jumps height.
+ * Equals the card's max-height ceiling, so the main view fills exactly to the cap.
+ */
+const DESKTOP_MAIN_HEIGHT = DESKTOP_MAX_HEIGHT;
 
 const MOBILE_DIALOG_STYLE: Record<string, string> = {
   top: "0",
@@ -92,12 +107,35 @@ const MOBILE_DIALOG_STYLE: Record<string, string> = {
   borderRadius: "0",
 };
 
-/** Switch the dialog container between desktop (centred card) and mobile (full screen). */
+/**
+ * Switch the dialog container between desktop (centred card) and mobile (full
+ * screen). On desktop, only the main view gets a fixed `height: 80vh`; other
+ * views (onboarding/loading) drop the explicit height so the card fits content.
+ */
 export function applyDialogLayout(
   dialog: HTMLElement,
   isMobile: boolean,
+  isMainView = false,
 ): void {
-  const style = isMobile ? MOBILE_DIALOG_STYLE : DESKTOP_DIALOG_STYLE;
+  if (isMobile) {
+    applyStyleMap(dialog, MOBILE_DIALOG_STYLE);
+    return;
+  }
+
+  applyStyleMap(dialog, DESKTOP_DIALOG_BASE_STYLE);
+  if (isMainView) {
+    dialog.style.setProperty("height", DESKTOP_MAIN_HEIGHT);
+  } else {
+    // Clear any height left over from a previous main/mobile layout so the
+    // desktop card collapses back to its content height.
+    dialog.style.removeProperty("height");
+  }
+}
+
+function applyStyleMap(
+  dialog: HTMLElement,
+  style: Record<string, string>,
+): void {
   for (const [prop, value] of Object.entries(style)) {
     dialog.style.setProperty(camelToKebab(prop), value);
   }

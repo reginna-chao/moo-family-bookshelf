@@ -36,6 +36,9 @@ import { BorrowStatus, type BorrowRequest } from "../api/types";
 
 const APP_ENV = getAppEnv();
 
+/** Shape of the code-split dialog module loaded at runtime via getURL(). */
+type DialogModule = typeof import("../dialog/main");
+
 /** Disposer for the floating button's breakpoint watcher (see injection). */
 let disposeButtonWatcher: (() => void) | null = null;
 
@@ -307,22 +310,38 @@ function toggleDialog(): void {
   document.body.appendChild(backdrop);
   document.body.appendChild(dialog);
 
+  // Track the latest breakpoint + view so a change to either re-applies the full
+  // layout. View starts non-main (loading); React reports changes via onViewChange.
+  // Only the desktop main view uses a fixed 80vh height (see applyDialogLayout).
+  let currentIsMobile = false;
+  let currentIsMainView = false;
+
+  const relayout = (): void => {
+    applyDialogLayout(dialog, currentIsMobile, currentIsMainView);
+    applyBackdropLayout(backdrop, currentIsMobile);
+    closeIcon.style.display = currentIsMobile ? "inline-flex" : "none";
+  };
+
   // Drive full-screen (mobile) vs centred-card (desktop) layout. The disposer
   // is invoked by closeDialog / the toggle-off branch so the listener is
   // cleaned up on every close. Dispose any stale one first (defensive).
   disposeDialogWatcher?.();
   disposeDialogWatcher = watchMobile((isMobile) => {
-    applyDialogLayout(dialog, isMobile);
-    applyBackdropLayout(backdrop, isMobile);
-    closeIcon.style.display = isMobile ? "inline-flex" : "none";
+    currentIsMobile = isMobile;
+    relayout();
   });
 
   // Content scripts run in Chrome's isolated world — standard ES module
   // imports don't resolve correctly, so we load code-split modules via
   // chrome.runtime.getURL() which points to web-accessible extension resources.
   import(/* @vite-ignore */ browser.runtime.getURL("content-dialog.js"))
-    .then(({ mountDialog }) => {
-      mountDialog(mountPoint);
+    .then((mod: DialogModule) => {
+      mod.mountDialog(mountPoint, {
+        onViewChange: (view) => {
+          currentIsMainView = view === "main";
+          relayout();
+        },
+      });
     })
     .catch((err) => {
       console.error("[MooFamily] Failed to load dialog module:", err);

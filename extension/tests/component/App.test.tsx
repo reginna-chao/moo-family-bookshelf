@@ -657,4 +657,30 @@ describe("App", () => {
       expect(contentArea.style.maxHeight).toBe("");
     });
   });
+
+  describe("onViewChange callback", () => {
+    it("reports the onboarding view when no familyId", async () => {
+      setupChromeMessages({ familyId: null, userId: null });
+      const onViewChange = vi.fn();
+
+      render(<App onViewChange={onViewChange} />);
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+      });
+
+      expect(onViewChange).toHaveBeenCalledWith("onboarding");
+    });
+
+    it("reports the main view when familyId and userId exist", async () => {
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      const onViewChange = vi.fn();
+
+      render(<App onViewChange={onViewChange} />);
+      await waitFor(() => {
+        expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+      });
+
+      expect(onViewChange).toHaveBeenCalledWith("main");
+    });
+  });
 });

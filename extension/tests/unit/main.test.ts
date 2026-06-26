@@ -43,6 +43,28 @@ describe("mountDialog", () => {
     // StrictMode wraps the App — check the type
     expect(renderArg).toBeDefined();
   });
+
+  it("forwards onViewChange from options to the App component", async () => {
+    const { mountDialog } = await import("@/dialog/main");
+    const container = document.createElement("div");
+    const onViewChange = vi.fn();
+
+    mountDialog(container, { onViewChange });
+
+    // <StrictMode><App onViewChange={...} /></StrictMode>
+    const renderArg = mockRender.mock.calls[0][0];
+    expect(renderArg.props.children.props.onViewChange).toBe(onViewChange);
+  });
+
+  it("mounts without options (backward compatible)", async () => {
+    const { mountDialog } = await import("@/dialog/main");
+    const container = document.createElement("div");
+
+    expect(() => mountDialog(container)).not.toThrow();
+
+    const renderArg = mockRender.mock.calls[0][0];
+    expect(renderArg.props.children.props.onViewChange).toBeUndefined();
+  });
 });
 
 describe("auto-mount", () => {
