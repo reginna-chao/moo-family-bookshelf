@@ -56,7 +56,7 @@ Present **3 distinct text mood boards** (Colors / Font / Feel / Icons / Similar-
 Mix/iterate per feedback ("A 的配色 + B 的 icon 風格"); propose 3 new if all rejected. Iterate until 「OK, 就這個」.
 
 ### Phase 4 — Produce (optional)
-Ask 「要開始製作嗎？需要哪些資產？」. Yes → switch to **Mode 1** with the agreed direction as the brief (dispatch `designer`). No → save direction: `mkdir -p .skill-archive/design/` and write `style-direction.md` (palette, font, icon style, references).
+Ask 「要開始製作嗎？需要哪些資產？」. Yes → switch to **Mode 1** with the agreed direction as the brief (dispatch `designer`). No → persist the agreed direction by dispatching the `designer` agent with the decided palette / font / icon-style / references as `context`, asking it to write `.skill-archive/design/style-direction.md`. (`/develop` never writes files itself — see `SKILL.md` §1; the `designer` agent has `Write`.)
 
 → If producing, continue to **Review & Deliver**.
 
