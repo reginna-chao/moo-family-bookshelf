@@ -1,36 +1,24 @@
----
-name: icon-creator
-description: >
-  Create consistent UI icon sets for app interfaces using SVG generation.
-  Follows 24dp grid, unified stroke width, and optical alignment conventions.
-  Outputs SVG symbol sprites and individual icon files.
-  TRIGGER when: user wants to create UI icons, toolbar icons, navigation icons, tab bar icons, status icons, or a consistent icon set for an interface.
-  DO NOT TRIGGER when: user wants logos/app icons (use logo-creator), banners (use banner-creator), or single brand marks.
-argument-hint: <icon names to create, e.g. "home, search, settings, bookmark, share">
-allowed-tools: Read, Write, Edit, Bash(open *), Bash(start *), Bash(ls *), Bash(mkdir *), Bash(cp *), Glob, Grep
----
+# Designer Reference: UI Icons (SVG)
 
-# Icon Creator Skill
-
-Create consistent UI icon sets through SVG generation for app and web interfaces.
+The designer agent reads this reference on demand when a request is for UI icons — an icon set, toolbar / navigation / tab bar icons, status icons, or any consistent icon family for an interface. It describes how to create consistent UI icon sets through SVG generation for app and web interfaces.
 
 ## Scope
 
-| This skill handles | Use another skill |
+| This reference handles | Use another reference / agent |
 |---|---|
-| Toolbar / action bar icons | Logos → `/logo-creator` |
-| Navigation / tab bar icons | App icons → `/logo-creator` |
-| Status / indicator icons | Banners → `/banner-creator` |
+| Toolbar / action bar icons | Logos → logo reference |
+| Navigation / tab bar icons | App icons → logo reference |
+| Status / indicator icons | Banners → banner reference |
 | Menu / list item icons | |
 | Empty state illustrations (simple) | |
 | Badge / chip icons | |
 
 ## Output Location
 
-All generated files saved to `.skill-archive/icon-creator/<yyyy-mm-dd-summaryname>/`:
+All generated files saved to `.skill-archive/designer/icon/<yyyy-mm-dd-summaryname>/`:
 
 ```
-.skill-archive/icon-creator/2026-03-26-moo-bookshelf-ui/
+.skill-archive/designer/icon/2026-03-26-moo-bookshelf-ui/
   individual/
     home.svg
     search.svg
@@ -96,7 +84,7 @@ All icons should use `currentColor` so they inherit the text color from CSS:
 
 ### Step 1: Discovery & Requirements
 
-Before generating, gather requirements from user:
+Before generating, the designer agent gathers requirements from the user:
 
 1. **Icon list** — Which icons are needed?
    - Provide names (e.g., home, search, settings, bookmark, share, user, bell, ...)
@@ -301,7 +289,7 @@ Open in browser:
 
 ### Step 5: Iterate with User
 
-Ask user to review:
+Ask the user to review:
 - 「所有 icon 的視覺重量是否一致？」
 - 「在一致性檢查中有沒有特別突兀的？」
 - 「在 16dp 小尺寸下是否清楚辨識？」
@@ -315,11 +303,11 @@ Based on feedback:
 
 ### Step 6: Finalize & Export
 
-Once user approves the full set:
+Once the user approves the full set:
 
 **6a. Create final directory:**
 ```bash
-mkdir -p .skill-archive/icon-creator/<date-name>/final/individual
+mkdir -p .skill-archive/designer/icon/<date-name>/final/individual
 ```
 
 **6b. Copy all approved icons + sprite:**
@@ -366,7 +354,7 @@ Present final deliverables:
 | React component | `Icon.tsx` (if requested) |
 | CSS usage | `<svg><use href="..."/></svg>` |
 
-All files in: `.skill-archive/icon-creator/<yyyy-mm-dd-summaryname>/final/`
+All files in: `.skill-archive/designer/icon/<yyyy-mm-dd-summaryname>/final/`
 
 ---
 

@@ -273,6 +273,42 @@ Family membership is the gate for all features. Without a family, only onboardin
 - Keep `pnpm-lock.yaml` in sync when changing dependencies.
 - PWA limitation: cannot scrape Readmoo book lists (no Content Script). Personal shelf management requires at least one sync from desktop Extension first.
 
+## Agent Orchestration & Rules Layout (`.claude/`)
+
+All development and design go through a **single skill entry: `/develop`**. It triages intent
+(CODE vs DESIGN) and dispatches role agents — it never writes code or assets itself.
+
+```
+.claude/
+├── rules/          # project rules, READ on demand by agents (not auto-magic)
+│   ├── global.md       # universal architecture / performance / lifecycle / side-effects
+│   ├── frontend.md     # Extension + PWA (React/TS) conventions
+│   ├── backend.md      # Worker (Hono/KV) conventions
+│   ├── test.md         # test framework, locations, coverage
+│   └── security-ux-invariants.md
+├── agents/         # role agents (invisible in the slash menu)
+│   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md
+│   └── references/designer/{pencil-mockup,logo,icon,banner}.md
+└── skills/         # slash-menu entries
+    ├── develop/        # SKILL.md (router) + references/{code-cycle,design}.md
+    ├── bump-ver/
+    └── project-init/
+```
+
+- **`coder` / `tester` / `reviewer` are abstract.** `/develop` passes `scope` (`frontend` or
+  `backend`); the agent then `Read`s the matching `.claude/rules/*.md` and runs the right commands.
+  The Fix Cycle (CRITICAL auto-fix / SUGGESTION decision) lives in `/develop`, not in the agents.
+- **Why a top-level `.claude/rules/` here (not per-area role files):** moo is a single repo with
+  just one FE/BE split, so one shared set of rules — sliced by **scope/concern** (`frontend.md`,
+  `backend.md`, `test.md`, `global.md`) — has the least duplication and fits well.
+- **When to switch to the monorepo layout instead:** in a multi-subproject monorepo, each
+  subproject's conventions diverge too much for one shared rules set, so
+  rules are **pushed down** into each subproject's own `.claude/` and sliced by **role**
+  (`coder.md`, `tester.md`, `reviewer.md`); the abstract agent reads `<subproject>/.claude/<role>.md`.
+  Only adopt this for moo if FE/BE/PWA conventions later diverge enough that the shared rules stop fitting.
+- `.claude/rules/` is **not deprecated** and not a remote-magic feature — it is load-bearing because
+  the agents explicitly read it. `.claude/settings.json` is gitignored (personal, per-developer).
+
 ## Local Agent Hooks (optional)
 
 `.claude/hooks/block-ps-herestring.js` is a `PreToolUse` hook that guards against a Windows/PowerShell footgun: using PowerShell here-string syntax `@'...'@` inside an agent's Bash tool. bash treats the leading/trailing `@` as literal characters, silently corrupting `git commit -m` / `gh pr create --body` text (a stray `@` ends up at the start and end). The hook denies any Bash command containing both `@'` and `'@`.

@@ -48,12 +48,12 @@ From the discovered context, extract:
 | ------------------------------------------------------ | ---------------------------------------------------- |
 | **Tech stack** (framework, language, DB, hosting)      | Rules: `frontend.md`, `backend.md`                   |
 | **Project structure** (directory layout)               | Rules: `frontend.md`, `backend.md`                   |
-| **Build/dev commands** (`pnpm dev`, `pnpm test`, etc.) | Rules: all, Skills: team-leads, coders, testers      |
-| **Testing tools** (Vitest, Jest, Playwright, etc.)     | Rules: `test.md`, Skills: testers                    |
-| **API design** (REST, GraphQL, endpoints)              | Rules: `backend.md`, Skills: `be-coder`              |
-| **Data model** (DB schema, KV patterns, etc.)          | Rules: `backend.md`, Skills: `be-coder`, `be-tester` |
-| **UI patterns** (component library, styling approach)  | Rules: `frontend.md`, Skills: `fe-coder`             |
-| **State management** (Redux, Zustand, Context, etc.)   | Rules: `frontend.md`, Skills: `fe-coder`             |
+| **Build/dev commands** (`pnpm dev`, `pnpm test`, etc.) | Rules: all; Agents: `coder`, `tester` (scope map); Skill: `develop` |
+| **Testing tools** (Vitest, Jest, Playwright, etc.)     | Rules: `test.md`; Agent: `tester`                   |
+| **API design** (REST, GraphQL, endpoints)              | Rules: `backend.md`; Agent: `coder` (backend scope) |
+| **Data model** (DB schema, KV patterns, etc.)          | Rules: `backend.md`; Agents: `coder`, `tester` (backend scope) |
+| **UI patterns** (component library, styling approach)  | Rules: `frontend.md`; Agent: `coder` (frontend scope) |
+| **State management** (Redux, Zustand, Context, etc.)   | Rules: `frontend.md`; Agent: `coder` (frontend scope) |
 | **CI/CD pipeline**                                     | Rules: `global.md`                                   |
 | **Naming conventions**                                 | Rules: `global.md`                                   |
 
@@ -66,7 +66,7 @@ Present a table of proposed changes to the user:
 |------|---------|--------|---------|
 | .claude/rules/frontend.md | Tech Stack | Update | React 19 + Vite → Next.js 15 |
 | .claude/rules/backend.md | Project Structure | Rewrite | Cloudflare Workers → Express + PostgreSQL |
-| .claude/skills/be-coder/SKILL.md | Coding Rules | Update | Add ORM conventions |
+| .claude/agents/coder.md | Scope Map (backend) | Update | Add ORM conventions |
 | ... | ... | ... | ... |
 ```
 
@@ -85,7 +85,7 @@ Update each file according to the approved changes. For each file:
 
 1. List all files updated.
 2. Highlight any gaps (e.g., "No testing framework detected — `test.md` left as placeholder").
-3. Suggest next steps (e.g., "Run `/team-lead` to start your first task").
+3. Suggest next steps (e.g., "Run `/develop` to start your first task").
 
 ## What This Skill Updates
 
@@ -98,26 +98,29 @@ Update each file according to the approved changes. For each file:
 | `backend.md`  | Tech stack, project structure, API design, DB/storage patterns, commands      |
 | `test.md`     | Framework & tools, test locations, coverage targets, mock policy              |
 
+### Agents (`.claude/agents/`)
+
+| Agent              | What Gets Customized                                                         |
+| ------------------ | --------------------------------------------------------------------------- |
+| `coder`            | Scope map (frontend/backend working dirs, verify commands), coding rules     |
+| `tester`           | Scope map (test dirs, commands), test tools, mock policy, key scenarios      |
+| `reviewer`         | Review dimensions per scope (frontend framework / backend stack)             |
+| `designer`         | Triage table + surface frames; reference files under `references/designer/`   |
+| `security-auditor` | Audit dimensions adjusted for the stack (extension / API / crypto surfaces)   |
+
 ### Skills (`.claude/skills/`)
 
-| Skill          | What Gets Customized                                              |
-| -------------- | ----------------------------------------------------------------- |
-| `fe-coder`     | Coding rules, framework conventions, boundary (working directory) |
-| `fe-tester`    | Test tools, mock policy, test structure                           |
-| `fe-review`    | Review dimensions adjusted for framework                          |
-| `be-coder`     | Coding rules, framework conventions, DB/API patterns              |
-| `be-tester`    | Test tools, integration test setup, key scenarios                 |
-| `be-review`    | Review dimensions adjusted for backend stack                      |
-| `fe-team-lead` | Verification commands                                             |
-| `be-team-lead` | Verification commands                                             |
-| `team-lead`    | Verification commands                                             |
+| Skill         | What Gets Customized                                                       |
+| ------------- | -------------------------------------------------------------------------- |
+| `develop`     | Verification commands; scope tagging; phase commands in `references/`      |
+| `project-init`| (this file — stays unchanged)                                              |
 
 ## What This Skill Does NOT Change
 
 - Workflow phases (the development lifecycle is universal).
-- Role boundaries (coders don't test, testers don't code).
+- Role boundaries (coders don't test, testers don't code, reviewer is read-only).
 - Review output format (CRITICAL / SUGGESTION structure).
-- Team hierarchy (team-lead → fe/be-team-lead → coder/tester/review).
+- Orchestration model (`develop` dispatches the `coder` / `tester` / `reviewer` / `security-auditor` / `designer` agents directly; the Fix Cycle lives in `develop`).
 
 ## Template Base
 
@@ -130,16 +133,18 @@ This skill assumes the `.claude/` directory follows this base structure:
 │   ├── frontend.md
 │   ├── backend.md
 │   └── test.md
+├── agents/
+│   ├── coder.md
+│   ├── tester.md
+│   ├── reviewer.md
+│   ├── designer.md
+│   ├── security-auditor.md
+│   └── references/designer/{pencil-mockup,logo,icon,banner}.md
 └── skills/
-    ├── team-lead/SKILL.md
-    ├── fe-team-lead/SKILL.md
-    ├── be-team-lead/SKILL.md
-    ├── fe-coder/SKILL.md
-    ├── fe-tester/SKILL.md
-    ├── fe-review/SKILL.md
-    ├── be-coder/SKILL.md
-    ├── be-tester/SKILL.md
-    ├── be-review/SKILL.md
+    ├── develop/
+    │   ├── SKILL.md             # intent router (code vs design)
+    │   └── references/{code-cycle,design}.md
+    ├── bump-ver/SKILL.md
     └── project-init/SKILL.md    # this file (stays unchanged)
 ```
 

@@ -1,29 +1,10 @@
----
-name: fe-designer
-description: >
-  Generate UI mockups using Pencil.dev MCP for frontend features in this project (Chrome Extension Dialog, PWA mobile viewer, landing site).
-  Creates visual previews on the Pencil canvas as `.pen` files for design discussion before code is written.
-  TRIGGER when: user explicitly invokes /fe-designer, or fe-team-lead/team-lead determines a UI mockup would clarify a new feature's layout, states, or interactions before coding.
-  DO NOT TRIGGER when: user wants brand assets like logo / favicon / OG image / banner (use /design-lead or /logo-creator / /banner-creator / /icon-creator), or is writing/reviewing code, or discussing non-UI requirements.
-argument-hint: "[surface] <UI description or feature name>"
-allowed-tools: Read, Grep, Glob, Bash, Agent, AskUserQuestion, mcp__pencil__batch_design, mcp__pencil__batch_get, mcp__pencil__get_screenshot, mcp__pencil__snapshot_layout, mcp__pencil__get_variables, mcp__pencil__set_variables, mcp__pencil__get_editor_state, mcp__pencil__open_document, mcp__pencil__find_empty_space_on_canvas, mcp__pencil__get_guidelines, mcp__pencil__export_nodes, mcp__pencil__replace_all_matching_properties, mcp__pencil__search_all_unique_properties
-model: opus
----
-
-# Frontend Designer (Pencil.dev)
+# Designer Reference: Pencil Layout Mockups
 
 You produce UI mockups for the **MooFamily Bookshelf** project using **Pencil.dev** as the design canvas. Mockups are used to align with the user on layout / states / interactions **before** any code is written.
 
-## Scope vs other skills
+The designer agent reads this reference on demand when the design request is a whole-screen / dialog / page **layout** mockup.
 
-| Skill                                              | Purpose                                                               |
-| -------------------------------------------------- | --------------------------------------------------------------------- |
-| **fe-designer** (this)                             | UI **layout / page / dialog / component** mockups in `.pen` files     |
-| `design-lead`                                      | Brand asset orchestration (logo, favicon, OG image, banner, icon set) |
-| `logo-creator` / `icon-creator` / `banner-creator` | Specific brand SVG asset creation                                     |
-| `fe-coder`                                         | Implements the agreed mockup in React + Tailwind                      |
-
-If the request is for a logo, favicon, brand mark, or marketing banner — **defer to `design-lead`**, do not create them here.
+For brand assets (logo, favicon, UI icon, banner, OG image) the designer agent uses the SVG-based references (`logo.md`, `icon.md`, `banner.md`) instead — this reference is only for Pencil layout mockups.
 
 ## Prerequisites
 
@@ -93,7 +74,7 @@ Pencil MCP operates on the in-memory editor document. File persistence is handle
 
 ### Step 1: Understand the requirement
 
-Read the feature description from `$ARGUMENTS` or conversation context. Identify:
+Read the feature description from the dispatch context or conversation context. Identify:
 
 - Which **surface** is affected: Extension Dialog? PWA? Site? Cross-surface?
 - Which existing screen / dialog tab the feature lives in (Onboarding / Family Shelf / Personal Shelf / Borrow / Family Settings / Verification / Public Share).
@@ -172,7 +153,7 @@ This project does NOT use MUI / Chakra / Ant. The "design system" is Tailwind ut
 | ---------------- | ------------------------------------------------------------------------------------- |
 | Styling system   | Tailwind CSS 3.x — default tokens (neither `extension/` nor `pwa/` extends the theme) |
 | Icons            | `lucide-react` — outlined, 1.5–2 px stroke (already used: `Inbox`, etc.)              |
-| Color            | Default Tailwind palette — no custom brand color yet (see `design-lead` if needed)    |
+| Color            | Default Tailwind palette — no custom brand color yet (see `logo.md` if needed)        |
 | Border radius    | Default Tailwind (`rounded`, `rounded-md`, `rounded-lg`)                              |
 | Spacing unit     | Tailwind 4 px scale                                                                   |
 | Typography       | System font stack — no custom font loaded                                             |
@@ -180,22 +161,20 @@ This project does NOT use MUI / Chakra / Ant. The "design system" is Tailwind ut
 | Layout (Dialog)  | Flex column, `flex: 1`, `minHeight: 0` (see `App.tsx:19` `flexColumnFill`)            |
 | Tabs             | Family Shelf · Personal Shelf · Borrow · Settings (see `App.tsx`)                     |
 
-## When Invoked by Team Lead / fe-team-lead
+## When dispatched by /develop (during a feature's UI work)
 
-The team-lead provides the feature requirements. Create the mockup in Pencil and return:
+The feature's UI work provides the requirements. Create the mockup in Pencil and return:
 
 1. A screenshot of the mockup (via `get_screenshot`).
-2. Annotation notes for the TL to relay to the user.
-3. Component mapping recommendations for `fe-coder` (reuse vs new).
+2. Annotation notes to relay to the user.
+3. Component mapping recommendations for implementation (reuse vs new).
 4. Any open UX questions that need user decision before coding starts.
 
-## When Invoked Standalone
-
-If called directly via `/fe-designer`:
+## When the designer agent is dispatched directly for a mockup
 
 1. Call `get_editor_state` to check if a `.pen` file is already open.
 2. If no editor is active, or the active file is not the target:
-   - Determine the target path: if `$ARGUMENTS` specifies a `.pen` path, use it; otherwise derive from `<surface> <feature-name>` → `design/{surface}/{feature-name}/{name}.pen`. If surface is unclear, ask the user.
+   - Determine the target path: if the request specifies a `.pen` path, use it; otherwise derive from `<surface> <feature-name>` → `design/{surface}/{feature-name}/{name}.pen`. If surface is unclear, ask the user.
    - If the `.pen` file does not exist on disk, create it:
      ```bash
      mkdir -p design/{surface}/{feature-name}/
@@ -204,13 +183,13 @@ If called directly via `/fe-designer`:
    - Call `open_document` with the **absolute** path.
    - Call `get_editor_state` and verify the path matches — if it shows `/pencil-new.pen`, the seed file was not recognized; warn the user.
 3. If `get_editor_state` fails with a WebSocket error, follow the recovery steps in Prerequisites (open a `.pen` file, wait ~10 s, retry up to 3 times).
-4. Ask the user what to design if not specified in `$ARGUMENTS`.
+4. Ask the user what to design if not specified.
 5. Follow the full process above.
 6. After design is complete, remind the user: **「請按 Ctrl+S（Windows）/ Cmd+S（macOS）儲存設計檔」**.
 
 ## Rules
 
-- **Mockup only** — never write production / test code from this skill. Hand off to `fe-coder` via `fe-team-lead` once the mockup is approved.
+- **Mockup only** — never write production / test code from this reference. Hand off to implementation once the mockup is approved.
 - **Always ground in real components** — read `extension/src/dialog/` and `pwa/src/` before drawing; do not invent UI patterns that don't exist in the codebase unless the feature genuinely needs them.
 - **Respect the four security-UX invariants** (see `.claude/rules/security-ux-invariants.md`) when sketching share / save / unbind / settings flows — annotate them on the mockup.
 - **Do not export PNG/JPG to `design/`** — `.pen` only.

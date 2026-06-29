@@ -71,7 +71,7 @@ Testability > Readability > Simplicity > Consistency > Performance > Maintainabi
 
 Any code modification — **regardless of size** — must go through the full cycle:
 
-1. **Write** (coder) → 2. **Typecheck** → 3. **Test** (tester, where applicable) → 4. **Review** (review skill) → 5. **Fix cycle** for any CRITICAL findings → 6. **Report** to user
+1. **Write** (coder agent) → 2. **Typecheck** → 3. **Test** (tester agent, where applicable) → 4. **Review** (reviewer agent) → 5. **Fix cycle** for any CRITICAL findings → 6. **Report** to user
 
 "Size too small" is NEVER a valid reason to skip review. A one-line fix is subject to the same cycle as a 500-line feature. The cost of an extra review round is trivial; the cost of silently shipping unreviewed code is not.
 
@@ -80,9 +80,9 @@ Any code modification — **regardless of size** — must go through the full cy
 - Pure comment / doc changes that touch no executable code.
 - The user explicitly authorizes bypass for a specific task with a phrase such as "skip review", "just write the code", or "no need for the full workflow". Absent such explicit instruction, the cycle is mandatory.
 
-**Enforcement routes:**
-- `/team-lead` orchestrates `/fe-team-lead` and `/be-team-lead`, which in turn run `coder → tester → review → fix` inside their Fix Cycle.
-- Invoking `fe-coder`, `be-coder`, `fe-tester`, `be-tester`, `fe-review`, or `be-review` **directly from team-lead** bypasses the Fix Cycle and is prohibited.
-- When the user invokes a lower-level skill like `/fe-coder` directly, follow that skill's own scope — but still run `pnpm typecheck` and report any lint/type issues before finishing.
+**Enforcement route:**
+- `/develop` is the single entry. On a CODE-intent request it runs the full lifecycle (`requirements → coder → tester → review → fix`) in one session, dispatching the `coder` / `tester` / `reviewer` / `security-auditor` agents (each scoped `frontend` or `backend`). It holds every user gate itself.
+- The Fix Cycle lives in `/develop` (`references/code-cycle.md`). The `coder` / `tester` / `reviewer` agents are dispatched ONLY by `/develop`'s orchestration — invoking an implementation agent in a way that skips the cycle is prohibited.
+- If the user dispatches a single agent directly (e.g. just a `coder`), follow that agent's own scope — but still run `pnpm typecheck` and report any lint/type issues before finishing.
 
 **Self-check before the final report:** ask yourself "did I skip review because the change was small?" If yes, go back and run review. No exceptions.

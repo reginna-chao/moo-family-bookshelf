@@ -2,7 +2,7 @@
 
 UI mockups for MooFamily Bookshelf, authored with [Pencil.dev](https://pencil.dev) and stored as `.pen` files.
 
-Designs are produced by the `fe-designer` skill (`.claude/skills/fe-designer/SKILL.md`) — invoke via `/fe-designer` in Claude Code.
+Designs are produced by the `designer` agent (`.claude/agents/designer.md`, Pencil reference at `.claude/agents/references/designer/pencil-mockup.md`) — dispatched by `/develop` for UI-layout mockups in Claude Code.
 
 ## Folder layout
 
