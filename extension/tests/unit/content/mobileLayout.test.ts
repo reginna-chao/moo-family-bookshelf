@@ -155,6 +155,41 @@ describe("mobileLayout", () => {
       expect(dialog.style.borderRadius).toBe("12px");
       expect(dialog.style.transform).toBe("translate(-50%, -50%)");
     });
+
+    it("sets a fixed 80vh height for the desktop main view", () => {
+      const dialog = document.createElement("div");
+      applyDialogLayout(dialog, false, true);
+      expect(dialog.style.height).toBe("80vh");
+      expect(dialog.style.maxHeight).toBe("80vh");
+      expect(dialog.style.maxWidth).toBe("640px");
+      expect(dialog.style.borderRadius).toBe("12px");
+    });
+
+    it("omits a fixed height for desktop non-main views (default)", () => {
+      const dialog = document.createElement("div");
+      applyDialogLayout(dialog, false);
+      expect(dialog.style.height).toBe("");
+      // Remaining desktop card styles keep it centred and height-capped.
+      expect(dialog.style.maxHeight).toBe("80vh");
+      expect(dialog.style.maxWidth).toBe("640px");
+      expect(dialog.style.borderRadius).toBe("12px");
+    });
+
+    it("clears the fixed height when switching from main to a non-main view", () => {
+      const dialog = document.createElement("div");
+      applyDialogLayout(dialog, false, true);
+      expect(dialog.style.height).toBe("80vh");
+      applyDialogLayout(dialog, false, false);
+      expect(dialog.style.height).toBe("");
+    });
+
+    it("keeps full-screen height on mobile regardless of the view", () => {
+      const dialog = document.createElement("div");
+      applyDialogLayout(dialog, true, true);
+      expect(dialog.style.height).toBe("100vh");
+      applyDialogLayout(dialog, true, false);
+      expect(dialog.style.height).toBe("100vh");
+    });
   });
 
   describe("applyBackdropLayout", () => {
