@@ -42,7 +42,11 @@ Before designing, ground in the real project:
 
 ## Execution
 
-Follow the loaded reference's full process. Key cross-cutting rules:
+Follow the loaded reference's full process — but adapt its interaction model. The reference files were carried over from older standalone skills that ran in the user's interactive session, so they still contain multi-turn "wait for the user" steps. You are dispatched **non-interactively** (single turn, no user pausing). Reinterpret those steps:
+- A **"wait for user confirmation"** step → do NOT wait. Proceed using the invoker-provided `context`, making the best judgment; record any unmet decision under **Open UX Questions** for `/develop` to resolve.
+- An **"iterate with user / ask which they prefer / repeat until approved"** loop → produce only the **first round** of variations as the reference describes (e.g. 5–8 options + preview.html) in THIS dispatch and return them. Do NOT loop internally — `/develop` re-dispatches you with the user's feedback for the next round.
+
+Key cross-cutting rules:
 - **Pencil mockups**: `.pen` files only under `design/{surface}/{feature}/`; never export PNG/JPG there; remind the user to save (Ctrl+S) after. Never `Read`/`Grep` `.pen` files — only `mcp__pencil__*` tools.
 - **SVG assets**: follow the reference's sizing/spec tables exactly (adaptive icon safe zones, OG 1200×630, 24dp icon grid, etc.).
 - **Do not commit** design files without the user's go-ahead — designs iterate.
