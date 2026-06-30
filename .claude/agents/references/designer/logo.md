@@ -1,25 +1,16 @@
----
-name: logo-creator
-description: >
-  Create logos, app icons, favicons, and touch icons for side projects using SVG generation.
-  Supports Google Play adaptive icon spec, Apple Touch Icon, PWA manifest icons, and favicon.
-  TRIGGER when: user wants to create a logo, favicon, app icon, touch icon, brand mark, mascot, emblem, or design a logo.
-  DO NOT TRIGGER when: user wants UI icons for interface (use icon-creator), banners/headers (use banner-creator), or OG images (use banner-creator).
-argument-hint: <project name or brand description>
-allowed-tools: Read, Write, Edit, Bash(open *), Bash(start *), Bash(ls *), Bash(mkdir *), Bash(cp *), Bash(npx sharp-cli *), Bash(node *), Glob, Grep
----
+# Designer Reference: Logo / Favicon / App Icon (SVG)
 
-# Logo Creator Skill
+The designer agent reads this reference on demand when a request is a logo, favicon, app icon, touch icon, brand mark, mascot, or emblem. It describes how to create professional logos and app icons through SVG generation with an iterative design process.
 
-Create professional logos and app icons through SVG generation with an iterative design process.
+When dispatched for a logo task, treat the brand description or project name passed in the request as the input that drives discovery and generation.
 
 ## Scope
 
-| This skill handles | Use another skill |
+| This reference handles | Use another reference |
 |---|---|
-| Logo / brand mark | UI icons → `/icon-creator` |
-| Favicon (SVG/ICO) | Banners / headers → `/banner-creator` |
-| Apple Touch Icon (180×180) | OG Image (1200×630) → `/banner-creator` |
+| Logo / brand mark | UI icons → `icon.md` |
+| Favicon (SVG/ICO) | Banners / headers → `banner.md` |
+| Apple Touch Icon (180×180) | OG Image (1200×630) → `banner.md` |
 | Google Play Icon (512×512) | |
 | Android Adaptive Icon (fg/bg layers) | |
 | PWA manifest icons (192/512) | |
@@ -27,10 +18,10 @@ Create professional logos and app icons through SVG generation with an iterative
 
 ## Output Location
 
-All generated files saved to `.skill-archive/logo-creator/<yyyy-mm-dd-summaryname>/`:
+All generated files saved to `.skill-archive/designer/logo/<yyyy-mm-dd-summaryname>/`:
 
 ```
-.skill-archive/logo-creator/2026-03-26-moo-bookshelf/
+.skill-archive/designer/logo/2026-03-26-moo-bookshelf/
   logo-01.svg
   logo-02.svg
   ...
@@ -279,7 +270,7 @@ Once user approves a logo, generate the target platform assets:
 
 **5a. Create final directory:**
 ```bash
-mkdir -p .skill-archive/logo-creator/<date-name>/final
+mkdir -p .skill-archive/designer/logo/<date-name>/final
 ```
 
 **5b. Master SVG:**
@@ -377,7 +368,7 @@ Present final deliverables table based on selected platforms:
 | `logo-foreground.svg` | 108dp | Adaptive icon foreground |
 | `logo-background.svg` | 108dp | Adaptive icon background |
 
-All files in: `.skill-archive/logo-creator/<yyyy-mm-dd-summaryname>/final/`
+All files in: `.skill-archive/designer/logo/<yyyy-mm-dd-summaryname>/final/`
 
 ---
 

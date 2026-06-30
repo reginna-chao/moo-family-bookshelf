@@ -163,7 +163,7 @@ wrangler secret put BACKUP_TRIGGER_TOKEN --env production
 
 ### 委派方式
 
-這是純後端 feature，可以直接 `/be-team-lead A` 執行完整 Fix Cycle；或繼續走 `/team-lead`（top-level → be-team-lead）。
+這是純後端 feature，用 `/develop A` 執行完整生命週期（會以 backend scope dispatch coder / tester / reviewer 並跑 Fix Cycle）。
 
 ---
 
@@ -223,4 +223,4 @@ pnpm tsx scripts/restore-from-r2.ts --date=2026-04-14 --env=production
 - Cloudflare R2 文件：[https://developers.cloudflare.com/r2/](https://developers.cloudflare.com/r2/)
 - Cron Triggers：[https://developers.cloudflare.com/workers/configuration/cron-triggers/](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
 - Miniflare R2 支援：[https://miniflare.dev/storage/r2](https://miniflare.dev/storage/r2)
-- 相關討論紀錄：本文件為 2026-04-14 `/team-lead` session 設計討論的結論保存
+- 相關討論紀錄：本文件為 2026-04-14 `/team-lead`（現已整併為 `/develop`）session 設計討論的結論保存

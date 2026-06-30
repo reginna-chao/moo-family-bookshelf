@@ -1,24 +1,13 @@
----
-name: banner-creator
-description: >
-  Create banners, headers, hero images, OG images, and cover images for side projects using SVG generation.
-  Supports GitHub README, Open Graph, social media headers, and website heroes.
-  TRIGGER when: user wants to create a banner, header, hero image, cover image, GitHub banner, Twitter header, Open Graph image, OG image, or README banner.
-  DO NOT TRIGGER when: user wants logos/app icons (use logo-creator), UI icons (use icon-creator), or is editing existing design files.
-argument-hint: <project name or banner description>
-allowed-tools: Read, Write, Edit, Bash(open *), Bash(start *), Bash(ls *), Bash(mkdir *), Bash(cp *), Bash(npx sharp-cli *), Bash(node *), Glob, Grep
----
+# Designer Reference: Banners / OG Images / Headers (SVG)
 
-# Banner Creator Skill
-
-Create professional banners, headers, and OG images through SVG generation with an iterative design process.
+This reference is read on demand by the `designer` agent (`.claude/agents/designer.md`) when a request is for a banner, header, hero image, OG image, or cover image. It covers professional banner, header, and OG image generation through SVG with an iterative design process. When dispatched for a banner task, the designer agent follows the workflow and conventions below.
 
 ## Scope
 
-| This skill handles | Use another skill |
+| This reference handles | Use another reference / agent |
 |---|---|
-| GitHub README banner | Logos / app icons → `/logo-creator` |
-| Open Graph image (og:image) | UI icons → `/icon-creator` |
+| GitHub README banner | Logos / app icons → logo reference |
+| Open Graph image (og:image) | UI icons → icon reference |
 | Twitter/X header | |
 | LinkedIn banner | |
 | Website hero image | |
@@ -26,10 +15,10 @@ Create professional banners, headers, and OG images through SVG generation with 
 
 ## Output Location
 
-All generated files saved to `.skill-archive/banner-creator/<yyyy-mm-dd-summaryname>/`:
+All generated files saved to `.skill-archive/designer/banner/<yyyy-mm-dd-summaryname>/`:
 
 ```
-.skill-archive/banner-creator/2026-03-26-moo-bookshelf/
+.skill-archive/designer/banner/2026-03-26-moo-bookshelf/
   banner-01.svg
   banner-02.svg
   ...
@@ -80,6 +69,8 @@ All generated files saved to `.skill-archive/banner-creator/<yyyy-mm-dd-summaryn
 - Avoid small details — OG images are often shown at ~600×315 or smaller
 
 ## Workflow
+
+When the designer agent is dispatched for a banner task, it follows these steps. The banner description or project name comes from the request the designer agent received.
 
 ### Step 1: Discovery & Requirements
 
@@ -274,7 +265,7 @@ Once user approves:
 
 **5a. Create final directory:**
 ```bash
-mkdir -p .skill-archive/banner-creator/<date-name>/final
+mkdir -p .skill-archive/designer/banner/<date-name>/final
 ```
 
 **5b. Copy final SVG:**
@@ -343,7 +334,7 @@ Present final deliverables:
 | README snippet | Markdown embed code | Copy to README.md |
 | OG meta tags | HTML meta tags | Copy to `<head>` |
 
-All files in: `.skill-archive/banner-creator/<yyyy-mm-dd-summaryname>/`
+All files in: `.skill-archive/designer/banner/<yyyy-mm-dd-summaryname>/`
 
 **Note on OG image format:** Social media crawlers (Facebook, Twitter, Slack, Discord)
 do NOT support SVG for og:image. The SVG must be converted to PNG before deployment.

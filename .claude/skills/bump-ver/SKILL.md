@@ -6,7 +6,7 @@ description: >
   generate the bilingual GitHub Release notes file the CD workflow reads at tag time.
   Skips the Fix Cycle — pure release prep, no production code changes.
   TRIGGER when: user explicitly invokes /bump-ver, or asks to bump version / cut a release / update CHANGELOG for a version.
-  DO NOT TRIGGER when: user wants to write code, fix bugs, or run tests. Code changes go through team-lead, not here.
+  DO NOT TRIGGER when: user wants to write code, fix bugs, or run tests. Code changes go through /develop, not here.
 argument-hint: "<x.y.z | patch | minor | major>"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git log*), Bash(git tag*), Bash(git describe*), Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(pnpm typecheck*)
 model: opus
@@ -20,7 +20,7 @@ Cut a release: bump version numbers across all packages, draft CHANGELOG entry f
 
 ## Why this exists
 
-Pure version bumps don't need the team-lead Fix Cycle. This skill encodes the project's release conventions so the user doesn't re-answer the same questions every release.
+Pure version bumps don't need the /develop Fix Cycle. This skill encodes the project's release conventions so the user doesn't re-answer the same questions every release.
 
 ## Encoded conventions (do not re-ask)
 
