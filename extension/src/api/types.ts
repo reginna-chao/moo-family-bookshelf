@@ -31,7 +31,7 @@ export interface PersonalBooks {
   books: BookEntry[];
   lastUpdated: string;
   /** Viewer-private family-shelf preferences (v1.5.0). */
-  familyShelfPrefs?: { hidden: string[] };
+  familyShelfPrefs?: { hidden: string[]; favorites: string[] };
   /** Preserve unknown fields from future schema versions */
   [key: string]: unknown;
 }

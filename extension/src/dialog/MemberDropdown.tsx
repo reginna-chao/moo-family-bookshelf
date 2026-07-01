@@ -5,6 +5,9 @@ import { formSelectStyle } from "./formSelectStyle";
 /** Sentinel filter value for the cross-everyone hidden-books view. */
 export const HIDDEN_FILTER_VALUE = "__hidden__";
 
+/** Sentinel filter value for the cross-everyone favorites view. */
+export const FAVORITE_FILTER_VALUE = "__favorite__";
+
 export type MemberFilterValue = "all-except-self" | "all" | string;
 
 interface MemberInfo {
@@ -40,6 +43,7 @@ export function MemberDropdown({ members, userId, value, onChange }: MemberDropd
           {m.displayName || m.userId.slice(0, 8)}
         </option>
       ))}
+      <option value={FAVORITE_FILTER_VALUE}>我的最愛</option>
       <option value={HIDDEN_FILTER_VALUE}>隱藏的書</option>
     </select>
   );

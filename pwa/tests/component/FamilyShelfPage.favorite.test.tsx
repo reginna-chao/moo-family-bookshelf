@@ -11,29 +11,31 @@ import {
 import React from "react";
 import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
 import { FamilyDataProvider } from "@/hooks/useFamilyData";
-import { HIDDEN_FILTER_VALUE } from "@/hooks/useFamilyShelfBooks";
+import {
+  FAVORITE_FILTER_VALUE,
+  HIDDEN_FILTER_VALUE,
+} from "@/hooks/useFamilyShelfBooks";
 
-/** Walks up from the book title to the nearest card root containing its overflow trigger. */
+/** Walks up from the book title to the nearest card root that holds its overflow trigger. */
 function cardOf(title: string): HTMLElement {
   let el: HTMLElement | null = screen.getByText(title);
   while (el) {
     if (within(el).queryByRole("button", { name: "更多選項" })) return el;
     el = el.parentElement;
   }
-  throw new Error(`overflow trigger not found for card ${title}`);
+  throw new Error(`card root not found for ${title}`);
 }
 
-/** Opens the overflow menu on the given book's card and clicks its hide/unhide item. */
-function triggerHideAction(title: string, itemName: string) {
+/** Clicks the heart toggle on the given book's card. */
+function toggleFavorite(title: string, label: string) {
   const card = cardOf(title);
-  fireEvent.click(within(card).getByRole("button", { name: "更多選項" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: itemName }));
+  fireEvent.click(within(card).getByRole("button", { name: label }));
 }
 
-/** Switches the member dropdown to the cross-everyone hidden view. */
-function enterHiddenView() {
+/** Switches the member dropdown to the cross-everyone favorites view. */
+function enterFavoriteView() {
   fireEvent.change(screen.getByLabelText("篩選成員"), {
-    target: { value: HIDDEN_FILTER_VALUE },
+    target: { value: FAVORITE_FILTER_VALUE },
   });
 }
 
@@ -135,7 +137,7 @@ function aliceTwoBooks() {
   };
 }
 
-describe("FamilyShelfPage — hide feature", () => {
+describe("FamilyShelfPage — favorite feature", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -146,66 +148,72 @@ describe("FamilyShelfPage — hide feature", () => {
     vi.clearAllMocks();
   });
 
-  it("hides a book from the default view and updates the heading count", async () => {
-    const apiClient = createApiClient(aliceTwoBooks());
+  it("「我的最愛」view lists ONLY favorited cards across all members", async () => {
+    const apiClient = createApiClient({
+      ...aliceTwoBooks(),
+      favorites: ["user-alice:b1"],
+    });
     renderPage(apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("書一")).toBeInTheDocument();
     });
-    expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
 
-    triggerHideAction("書一", "隱藏書籍");
-
-    await waitFor(() => {
-      expect(screen.queryByText("書一")).not.toBeInTheDocument();
-    });
-    expect(screen.getByText("(可見 1 本，隱藏 1 本)")).toBeInTheDocument();
-    expect(screen.getByText("書二")).toBeInTheDocument();
-  });
-
-  it("omits the 隱藏 half when M is 0", async () => {
-    const apiClient = createApiClient(aliceTwoBooks());
-    renderPage(apiClient);
+    enterFavoriteView();
 
     await waitFor(() => {
-      expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
+      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
     });
-    expect(screen.queryByText(/隱藏 \d+ 本/)).not.toBeInTheDocument();
+    expect(screen.getByText("書一")).toBeInTheDocument();
+    expect(screen.queryByText("書二")).not.toBeInTheDocument();
   });
 
-  it("「隱藏的書」view lists ONLY hidden cards, and 取消隱藏 returns them to default view", async () => {
+  it("shows favorited books INDEPENDENT of hidden status", async () => {
     const apiClient = createApiClient({
       ...aliceTwoBooks(),
       hidden: ["user-alice:b1"],
+      favorites: ["user-alice:b1"],
     });
     renderPage(apiClient);
 
+    // Default view hides b1.
     await waitFor(() => {
       expect(screen.getByText("書二")).toBeInTheDocument();
     });
     expect(screen.queryByText("書一")).not.toBeInTheDocument();
-    expect(screen.getByText("(可見 1 本，隱藏 1 本)")).toBeInTheDocument();
 
-    enterHiddenView();
+    enterFavoriteView();
+
+    await waitFor(() => {
+      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
+    });
+    // Even though hidden, the favorited b1 shows in the favorites view.
+    expect(screen.getByText("書一")).toBeInTheDocument();
+    expect(screen.queryByText("書二")).not.toBeInTheDocument();
+  });
+
+  it("favoriting a book updates the 最愛 heading count in the favorites view", async () => {
+    const apiClient = createApiClient(aliceTwoBooks());
+    renderPage(apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("書一")).toBeInTheDocument();
     });
-    expect(screen.queryByText("書二")).not.toBeInTheDocument();
 
-    triggerHideAction("書一", "取消隱藏");
+    toggleFavorite("書一", "加入最愛");
+
+    enterFavoriteView();
 
     await waitFor(() => {
-      expect(screen.queryByText("書一")).not.toBeInTheDocument();
+      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
     });
-    expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
+    expect(screen.getByText("書一")).toBeInTheDocument();
   });
 
-  it("flushes the complete hidden array to updateFamilyPrefs after the debounce", async () => {
+  it("flushes the favorites array (with hidden) to updateFamilyPrefs after the debounce", async () => {
     const updateFamilyPrefs = vi
       .fn()
-      .mockResolvedValue({ data: { ok: true, hidden: [] } });
+      .mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } });
     const apiClient = createApiClient({ ...aliceTwoBooks(), updateFamilyPrefs });
     renderPage(apiClient);
 
@@ -214,7 +222,7 @@ describe("FamilyShelfPage — hide feature", () => {
     });
 
     vi.useFakeTimers();
-    triggerHideAction("書一", "隱藏書籍");
+    toggleFavorite("書一", "加入最愛");
     await act(async () => {
       vi.advanceTimersByTime(600);
     });
@@ -223,80 +231,82 @@ describe("FamilyShelfPage — hide feature", () => {
     expect(updateFamilyPrefs).toHaveBeenCalledTimes(1);
     const [userIdArg, prefsArg] = updateFamilyPrefs.mock.calls[0];
     expect(userIdArg).toBe("user-self");
-    expect(prefsArg.hidden).toEqual(["user-alice:b1"]);
-    // Favorites unaffected by a hide toggle, but still sent in the full-replace flush.
-    expect(prefsArg.favorites).toEqual([]);
+    expect(prefsArg.favorites).toEqual(["user-alice:b1"]);
+    expect(prefsArg.hidden).toEqual([]);
   });
 
-  it("ignores an orphan hidden ref: counts unaffected, all real cards shown", async () => {
+  it("keeps 我的最愛 and 隱藏的書 as distinct views", async () => {
     const apiClient = createApiClient({
       ...aliceTwoBooks(),
-      hidden: ["ghost-owner:ghost-book"],
+      hidden: ["user-alice:b2"],
+      favorites: ["user-alice:b1"],
     });
     renderPage(apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("書一")).toBeInTheDocument();
     });
-    expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
-    expect(screen.getByText("書二")).toBeInTheDocument();
+
+    // Favorites view → only b1.
+    enterFavoriteView();
+    await waitFor(() => {
+      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
+    });
+    expect(screen.getByText("書一")).toBeInTheDocument();
+    expect(screen.queryByText("書二")).not.toBeInTheDocument();
+
+    // Hidden view → only b2.
+    fireEvent.change(screen.getByLabelText("篩選成員"), {
+      target: { value: HIDDEN_FILTER_VALUE },
+    });
+    await waitFor(() => {
+      expect(screen.getByText("書二")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("書一")).not.toBeInTheDocument();
   });
 
-  it("can hide self's own book in the 所有人 view", async () => {
-    const apiClient = createApiClient({
-      members: {
-        data: {
-          familyId: "fam-1",
-          ownerId: "user-self",
-          members: [
-            { userId: "user-self", displayName: "Me" },
-            { userId: "user-alice", displayName: "Alice" },
-          ],
-        },
-      },
-      bookshelf: {
-        data: {
-          familyId: "fam-1",
-          members: [
-            {
-              userId: "user-self",
-              displayName: "Me",
-              books: makeBooks([
-                { bookId: "self-1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
-              ]),
-              lastUpdated: "2026-01-01",
-            },
-            {
-              userId: "user-alice",
-              displayName: "Alice",
-              books: makeBooks([
-                { bookId: "b2", title: "Alice的書", author: "B", isShared: BoolFlag.TRUE },
-              ]),
-              lastUpdated: "2026-01-01",
-            },
-          ],
-        },
-      },
-    });
-    renderPage(apiClient);
+  describe("prefs sync-failed banner (S7)", () => {
+    const BANNER_COPY = "⚠️ 偏好同步失敗，變更已暫存本機，下次操作將自動重試。";
 
-    await waitFor(() => {
-      expect(screen.getByText("Alice的書")).toBeInTheDocument();
-    });
-    fireEvent.change(screen.getByLabelText("篩選成員"), {
-      target: { value: "all" },
-    });
+    it("is absent initially and appears when a flush fails, then auto-clears on the next success", async () => {
+      const updateFamilyPrefs = vi
+        .fn()
+        .mockResolvedValueOnce({ error: { code: "KABOOM", message: "nope" } })
+        .mockResolvedValueOnce({ data: { ok: true, hidden: [], favorites: [] } });
+      const apiClient = createApiClient({ ...aliceTwoBooks(), updateFamilyPrefs });
+      renderPage(apiClient);
 
-    await waitFor(() => {
-      expect(screen.getByText("我的書")).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(screen.getByText("書一")).toBeInTheDocument();
+      });
+      // Absent before any flush.
+      expect(screen.queryByText(BANNER_COPY)).not.toBeInTheDocument();
 
-    // Hide self's own book via its card's overflow menu.
-    triggerHideAction("我的書", "隱藏書籍");
+      // First flush fails → banner appears.
+      vi.useFakeTimers();
+      toggleFavorite("書一", "加入最愛");
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
+      vi.useRealTimers();
 
-    await waitFor(() => {
-      expect(screen.queryByText("我的書")).not.toBeInTheDocument();
+      await waitFor(() => {
+        const banner = screen.getByText(BANNER_COPY);
+        expect(banner).toBeInTheDocument();
+        expect(banner).toHaveAttribute("role", "status");
+      });
+
+      // Second flush succeeds → banner auto-clears.
+      vi.useFakeTimers();
+      toggleFavorite("書二", "加入最愛");
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
+      vi.useRealTimers();
+
+      await waitFor(() => {
+        expect(screen.queryByText(BANNER_COPY)).not.toBeInTheDocument();
+      });
     });
-    expect(screen.getByText("Alice的書")).toBeInTheDocument();
   });
 });

@@ -14,11 +14,15 @@ export interface FamilyShelfBookListProps {
   pendingBookIds: Set<string>;
   onBorrow: (book: FamilyShelfBook) => void;
   onToggleHidden: (ownerId: string, bookId: string) => void;
+  /** Whether a copy-scoped card is favorited by the viewer. */
+  isFavorite: (ownerId: string, bookId: string) => boolean;
+  /** Toggle a card's favorite state (v1.5.0). */
+  onToggleFavorite: (ownerId: string, bookId: string) => void;
 }
 
 const gridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fill, minmax(135px, 1fr))",
   gap: 12,
 } as const;
 
@@ -33,6 +37,8 @@ export function FamilyShelfBookList({
   pendingBookIds,
   onBorrow,
   onToggleHidden,
+  isFavorite,
+  onToggleFavorite,
 }: FamilyShelfBookListProps) {
   const hideActionLabel = showHidden ? "取消隱藏" : "隱藏書籍";
   const renderBook = (book: FamilyShelfBook) => {
@@ -48,6 +54,8 @@ export function FamilyShelfBookList({
       onBorrowClick: () => onBorrow(book),
       onHideToggle: () => onToggleHidden(book.ownerId, book.bookId),
       hideActionLabel,
+      isFavorite: isFavorite(book.ownerId, book.bookId),
+      onFavoriteToggle: () => onToggleFavorite(book.ownerId, book.bookId),
     };
     if (viewMode === "row") {
       return <FamilyBookRow key={key} {...shared} />;

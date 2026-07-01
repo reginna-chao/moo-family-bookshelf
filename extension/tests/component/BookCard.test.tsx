@@ -39,13 +39,16 @@ describe("BookCard", () => {
     expect(link.rel).toContain("noopener");
   });
 
-  it("renders book title as a link to readmooUrl", () => {
+  it("renders the book title inside the link to readmooUrl", () => {
     render(<BookCard book={makeBook()} />);
 
-    const titleLink = screen.getByText("測試書籍") as HTMLAnchorElement;
-    expect(titleLink.tagName).toBe("A");
-    expect(titleLink.href).toBe("https://readmoo.com/book/book-1");
-    expect(titleLink.target).toBe("_blank");
+    // After the v1.5.0 reshape the title is a span wrapped by the cover/info link.
+    const title = screen.getByText("測試書籍");
+    expect(title.tagName).toBe("SPAN");
+    const link = title.closest("a") as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.href).toBe("https://readmoo.com/book/book-1");
+    expect(link.target).toBe("_blank");
   });
 
   it("title has ellipsis-related styles for 2-line clamp", () => {
@@ -151,6 +154,70 @@ describe("BookCard", () => {
       fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
       fireEvent.click(screen.getByRole("menuitem", { name: "隱藏書籍" }));
       expect(onHideToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("does NOT expose favorite as an overflow menu item (it is a heart button)", () => {
+      render(
+        <BookCard
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="隱藏書籍"
+          onFavoriteToggle={() => {}}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+      expect(screen.queryByRole("menuitem", { name: "加入最愛" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "取消最愛" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("favorite heart button (v1.5.0)", () => {
+    it("renders the heart button (always visible) when onFavoriteToggle is provided", () => {
+      render(<BookCard book={makeBook()} onFavoriteToggle={() => {}} />);
+      expect(screen.getByRole("button", { name: "加入最愛" })).toBeInTheDocument();
+    });
+
+    it("does not render the heart button when onFavoriteToggle is missing", () => {
+      render(<BookCard book={makeBook()} />);
+      expect(screen.queryByRole("button", { name: "加入最愛" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "取消最愛" })).not.toBeInTheDocument();
+    });
+
+    it("shows the filled/pressed state and 取消最愛 label when isFavorite is true", () => {
+      render(
+        <BookCard book={makeBook()} isFavorite onFavoriteToggle={() => {}} />,
+      );
+      const heart = screen.getByRole("button", { name: "取消最愛" });
+      expect(heart).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("shows the hollow/unpressed state when isFavorite is false", () => {
+      render(<BookCard book={makeBook()} onFavoriteToggle={() => {}} />);
+      const heart = screen.getByRole("button", { name: "加入最愛" });
+      expect(heart).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("calls onFavoriteToggle when the heart is clicked", () => {
+      const onFavoriteToggle = vi.fn();
+      render(<BookCard book={makeBook()} onFavoriteToggle={onFavoriteToggle} />);
+      fireEvent.click(screen.getByRole("button", { name: "加入最愛" }));
+      expect(onFavoriteToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders both the heart and the borrow button in the always-visible action row", () => {
+      render(
+        <BookCard
+          book={makeBook()}
+          showBorrowButton
+          onBorrowClick={() => {}}
+          onHideToggle={() => {}}
+          hideActionLabel="隱藏書籍"
+          onFavoriteToggle={() => {}}
+        />,
+      );
+      expect(screen.getByRole("button", { name: "申請借閱" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "加入最愛" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "更多選項" })).toBeInTheDocument();
     });
   });
 });

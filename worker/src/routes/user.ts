@@ -106,42 +106,76 @@ export function validatePatchDisplayName(body: Record<string, unknown>): Validat
   return { ok: true };
 }
 
-export type ParseFamilyPrefsOk = { ok: true; hidden: string[] };
+/**
+ * The pref "kinds" the family-prefs endpoint accepts. Both are copy-scoped
+ * `"{ownerId}:{bookId}"` ref lists living in the same `familyShelfPrefs`
+ * container. Adding a future kind is a one-line change here.
+ */
+export const FAMILY_PREF_KINDS = ["hidden", "favorites"] as const;
+export type FamilyPrefKind = (typeof FAMILY_PREF_KINDS)[number];
+
+export type ParsedFamilyPrefs = Partial<Record<FamilyPrefKind, string[]>>;
+export type ParseFamilyPrefsOk = { ok: true; prefs: ParsedFamilyPrefs };
 export type ParseFamilyPrefsErr = { ok: false; code: "INVALID_PAYLOAD"; message: string };
 export type ParseFamilyPrefsResult = ParseFamilyPrefsOk | ParseFamilyPrefsErr;
 
+type ParseListResult =
+  | { ok: true; values: string[] }
+  | { ok: false; code: "INVALID_PAYLOAD"; message: string };
+
 /**
- * Validate the `hidden` array from a family-prefs PUT body, deduping entries
- * (first-seen order preserved) before enforcing the max. An empty array is
- * valid and means "clear all hidden". Returns an error descriptor on failure
- * (caller converts to the appropriate HTTP response).
+ * Validate a single pref-kind list: each entry must be a string ref in the
+ * form `"{ownerId}:{bookId}"`, deduped (first-seen order preserved), capped at
+ * `max`. An empty array is valid and means "clear this list".
+ */
+function parsePrefList(kind: FamilyPrefKind, value: unknown[], max: number): ParseListResult {
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || !isValidFamilyPrefRef(entry)) {
+      return {
+        ok: false,
+        code: "INVALID_PAYLOAD",
+        message: `Each ${kind} entry must be a string in the form '{ownerId}:{bookId}'`,
+      };
+    }
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+    values.push(entry);
+  }
+  if (values.length > max) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: `${kind} array exceeds maximum of ${max} entries` };
+  }
+  return { ok: true, values };
+}
+
+/**
+ * Validate the family-prefs PUT body. Each kind in `FAMILY_PREF_KINDS` is
+ * validated only when its key is present in the body; absent kinds are omitted
+ * from the result (the handler preserves their existing KV value). At least one
+ * kind must be present. Returns an error descriptor on failure (caller converts
+ * to the appropriate HTTP response).
  */
 export function parseFamilyPrefs(
   body: Record<string, unknown>,
   max: number,
 ): ParseFamilyPrefsResult {
-  if (!Array.isArray(body.hidden)) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: "hidden array is required" };
-  }
-  const raw = body.hidden as unknown[];
-  const seen = new Set<string>();
-  const hidden: string[] = [];
-  for (const entry of raw) {
-    if (typeof entry !== "string" || !isValidFamilyPrefRef(entry)) {
-      return {
-        ok: false,
-        code: "INVALID_PAYLOAD",
-        message: "Each hidden entry must be a string in the form '{ownerId}:{bookId}'",
-      };
+  const prefs: ParsedFamilyPrefs = {};
+  let anyPresent = false;
+  for (const kind of FAMILY_PREF_KINDS) {
+    if (!(kind in body)) continue;
+    anyPresent = true;
+    if (!Array.isArray(body[kind])) {
+      return { ok: false, code: "INVALID_PAYLOAD", message: `${kind} must be an array` };
     }
-    if (seen.has(entry)) continue;
-    seen.add(entry);
-    hidden.push(entry);
+    const result = parsePrefList(kind, body[kind] as unknown[], max);
+    if (!result.ok) return result;
+    prefs[kind] = result.values;
   }
-  if (hidden.length > max) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: `hidden array exceeds maximum of ${max} entries` };
+  if (!anyPresent) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: "at least one of hidden/favorites array is required" };
   }
-  return { ok: true, hidden };
+  return { ok: true, prefs };
 }
 
 export const userRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
@@ -248,8 +282,7 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     max: 30,
     windowSec: 3600,
   });
-  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return rateLimitResponse as any;
+  if (rateLimitResponse) return rateLimitResponse;
 
   let body: Record<string, unknown> | null;
   try {
@@ -353,8 +386,7 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
     max: 30,
     windowSec: 3600,
   });
-  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return rateLimitResponse as any;
+  if (rateLimitResponse) return rateLimitResponse;
 
   let body: Record<string, unknown> | null;
   try {
@@ -444,7 +476,12 @@ const putFamilyPrefsRoute = createRoute({
   method: "put",
   path: "/{id}/family-prefs",
   tags: ["User"],
-  summary: "Save per-viewer family-shelf preferences (hidden books)",
+  summary: "Save per-viewer family-shelf preferences (hidden and/or favorites)",
+  description:
+    "Save the viewer's private family-shelf preferences. Accepts `hidden` " +
+    "and/or `favorites` arrays of '{ownerId}:{bookId}' refs. A present field " +
+    "full-replaces that list; an absent field preserves its existing value. " +
+    "At least one of the two must be supplied. Returns the full merged container.",
   request: {
     params: UserIdParam,
   },
@@ -489,8 +526,7 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
     max: 60,
     windowSec: 3600,
   });
-  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return rateLimitResponse as any;
+  if (rateLimitResponse) return rateLimitResponse;
 
   let body: Record<string, unknown> | null;
   try {
@@ -504,7 +540,7 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
 
   if (!body) {
     return c.json(
-      { error: { code: "INVALID_PAYLOAD", message: "hidden array is required" } },
+      { error: { code: "INVALID_PAYLOAD", message: "at least one of hidden/favorites array is required" } },
       400,
     );
   }
@@ -512,7 +548,6 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
   if (!parsed.ok) {
     return c.json({ error: { code: parsed.code, message: parsed.message } }, 400);
   }
-  const { hidden } = parsed;
 
   const existing = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
   if (!existing) {
@@ -522,20 +557,27 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
     );
   }
 
-  // Full-overwrite semantics: the client sends the complete desired hidden set
-  // each time. All other fields — books, displayName, publicSharing,
-  // schemaVersion, lastUpdated — are preserved untouched, and no public
-  // snapshot is written (this is a private per-viewer preference). Cross-device
-  // concurrent edits carry a lost-update risk, acceptable for the single-user
-  // scenario.
+  // Per-field merge semantics: a field present in the body full-replaces that
+  // list; an absent field preserves its existing KV value (protecting live
+  // v1.5.0 clients that only send `hidden`). All other record fields — books,
+  // displayName, publicSharing, schemaVersion, lastUpdated — are preserved
+  // untouched, and no public snapshot is written (this is a private per-viewer
+  // preference). Cross-device concurrent edits carry a lost-update risk,
+  // acceptable for the single-user scenario.
+  const existingPrefs = existing.familyShelfPrefs;
+  const merged = {
+    hidden: parsed.prefs.hidden ?? existingPrefs?.hidden ?? [],
+    favorites: parsed.prefs.favorites ?? existingPrefs?.favorites ?? [],
+  };
+
   const record: UserBooksRecord = {
     ...existing,
-    familyShelfPrefs: { hidden },
+    familyShelfPrefs: merged,
   };
 
   await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
 
-  return c.json({ data: { ok: true, hidden } });
+  return c.json({ data: { ok: true, hidden: merged.hidden, favorites: merged.favorites } });
 });
 
 // DELETE /api/user/:id — delete user account

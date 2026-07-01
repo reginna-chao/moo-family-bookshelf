@@ -18,6 +18,10 @@ export interface FamilyBookListProps {
   canBorrow: boolean;
   onBorrow: (book: BookWithMember) => void;
   onToggleHidden: (ownerId: string, bookId: string) => void;
+  /** Whether a copy-scoped card is favorited by the viewer. */
+  isFavorite: (ownerId: string, bookId: string) => boolean;
+  /** Toggle a card's favorite state (v1.5.0). */
+  onToggleFavorite: (ownerId: string, bookId: string) => void;
   onLoadMore: () => void;
 }
 
@@ -36,6 +40,8 @@ export function FamilyBookList({
   canBorrow,
   onBorrow,
   onToggleHidden,
+  isFavorite,
+  onToggleFavorite,
   onLoadMore,
 }: FamilyBookListProps) {
   if (books.length === 0) {
@@ -59,6 +65,8 @@ export function FamilyBookList({
       canBorrow;
     const key = `${book.memberName}-${book.bookId}`;
     const onHideToggle = () => onToggleHidden(book.ownerId, book.bookId);
+    const onFavoriteToggle = () => onToggleFavorite(book.ownerId, book.bookId);
+    const favorited = isFavorite(book.ownerId, book.bookId);
     if (viewMode === "row") {
       return (
         <FamilyBookRow
@@ -69,6 +77,8 @@ export function FamilyBookList({
           onBorrowClick={() => onBorrow(book)}
           onHideToggle={onHideToggle}
           hideActionLabel={hideActionLabel}
+          isFavorite={favorited}
+          onFavoriteToggle={onFavoriteToggle}
         />
       );
     }
@@ -82,6 +92,8 @@ export function FamilyBookList({
         hideActionLabel={hideActionLabel}
         onBorrowClick={() => onBorrow(book)}
         onHideToggle={onHideToggle}
+        isFavorite={favorited}
+        onFavoriteToggle={onFavoriteToggle}
       />
     );
   };

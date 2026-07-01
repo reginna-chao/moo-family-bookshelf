@@ -231,6 +231,160 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
 });
 
 // ===========================================================================
+// PUT /api/user/:id/family-prefs — favorites & merge semantics (Wave F)
+// ===========================================================================
+
+describe("PUT /api/user/:id/family-prefs — favorites & merge semantics", () => {
+  it("response shape is { data: { ok, hidden, favorites } } with both lists", async () => {
+    const { authToken } = await createFamilyAndGetToken("user1");
+    await seedUser("user1");
+
+    const res = await request(
+      "PUT",
+      "/api/user/user1/family-prefs",
+      { hidden: [ref("h1")], favorites: [ref("f1")] },
+      authToken,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.ok).toBe(true);
+    expect(json.data.hidden).toEqual([ref("h1")]);
+    expect(json.data.favorites).toEqual([ref("f1")]);
+  });
+
+  it("favorites-only PUT preserves existing hidden and replaces favorites", async () => {
+    const { authToken } = await createFamilyAndGetToken("user1");
+    await seedUser("user1", {
+      familyShelfPrefs: { hidden: [ref("h1"), ref("h2")], favorites: [] },
+    });
+
+    const res = await request(
+      "PUT",
+      "/api/user/user1/family-prefs",
+      { favorites: [ref("f1"), ref("f2")] },
+      authToken,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    // Response reflects the merged container: hidden preserved, favorites replaced.
+    expect(json.data.hidden).toEqual([ref("h1"), ref("h2")]);
+    expect(json.data.favorites).toEqual([ref("f1"), ref("f2")]);
+
+    // KV read-back confirms the same merge landed on disk.
+    const getRes = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getJson = (await getRes.json()) as Json;
+    expect(getJson.data.familyShelfPrefs.hidden).toEqual([ref("h1"), ref("h2")]);
+    expect(getJson.data.familyShelfPrefs.favorites).toEqual([ref("f1"), ref("f2")]);
+  });
+
+  it("hidden-only PUT (old v1.5.0 client) preserves existing favorites — regression guard", async () => {
+    const { authToken } = await createFamilyAndGetToken("user1");
+    await seedUser("user1", {
+      familyShelfPrefs: { hidden: [], favorites: [ref("f1"), ref("f2")] },
+    });
+
+    // An old client that only knows about `hidden` must NOT wipe favorites.
+    const res = await request(
+      "PUT",
+      "/api/user/user1/family-prefs",
+      { hidden: [ref("h1")] },
+      authToken,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.hidden).toEqual([ref("h1")]);
+    expect(json.data.favorites).toEqual([ref("f1"), ref("f2")]);
+
+    const getRes = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getJson = (await getRes.json()) as Json;
+    expect(getJson.data.familyShelfPrefs.hidden).toEqual([ref("h1")]);
+    expect(getJson.data.familyShelfPrefs.favorites).toEqual([ref("f1"), ref("f2")]);
+  });
+
+  it("PUT with both fields replaces both lists", async () => {
+    const { authToken } = await createFamilyAndGetToken("user1");
+    await seedUser("user1", {
+      familyShelfPrefs: { hidden: [ref("old-h")], favorites: [ref("old-f")] },
+    });
+
+    const res = await request(
+      "PUT",
+      "/api/user/user1/family-prefs",
+      { hidden: [ref("h1")], favorites: [ref("f1")] },
+      authToken,
+    );
+    expect(res.status).toBe(200);
+
+    const getRes = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getJson = (await getRes.json()) as Json;
+    expect(getJson.data.familyShelfPrefs.hidden).toEqual([ref("h1")]);
+    expect(getJson.data.familyShelfPrefs.favorites).toEqual([ref("f1")]);
+  });
+
+  it("defaults an absent field to [] when neither the body nor existing record has it", async () => {
+    const { authToken } = await createFamilyAndGetToken("user1");
+    // Seeded record has no familyShelfPrefs at all.
+    await seedUser("user1");
+
+    const res = await request(
+      "PUT",
+      "/api/user/user1/family-prefs",
+      { favorites: [ref("f1")] },
+      authToken,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    // favorites set from body; hidden defaults to [] (no prior value).
+    expect(json.data.favorites).toEqual([ref("f1")]);
+    expect(json.data.hidden).toEqual([]);
+
+    const getRes = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getJson = (await getRes.json()) as Json;
+    expect(getJson.data.familyShelfPrefs).toEqual({ hidden: [], favorites: [ref("f1")] });
+  });
+
+  it("returns 400 INVALID_PAYLOAD when neither hidden nor favorites is present", async () => {
+    const { authToken } = await createFamilyAndGetToken("user1");
+    await seedUser("user1");
+
+    const res = await request("PUT", "/api/user/user1/family-prefs", { unrelated: true }, authToken);
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("INVALID_PAYLOAD");
+  });
+
+  it("returns 400 INVALID_PAYLOAD for an invalid favorites entry", async () => {
+    const { authToken } = await createFamilyAndGetToken("user1");
+    await seedUser("user1");
+
+    const res = await request(
+      "PUT",
+      "/api/user/user1/family-prefs",
+      { favorites: ["not-a-valid-ref"] },
+      authToken,
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("INVALID_PAYLOAD");
+  });
+
+  it("returns 404 NOT_FOUND for a favorites PUT when no record exists", async () => {
+    const { authToken } = await createFamilyAndGetToken("user1");
+    // No seedUser → record absent.
+
+    const res = await request(
+      "PUT",
+      "/api/user/user1/family-prefs",
+      { favorites: [ref("f1")] },
+      authToken,
+    );
+    expect(res.status).toBe(404);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("NOT_FOUND");
+  });
+});
+
+// ===========================================================================
 // PUT /api/user/:id/family-prefs — per-user rate limit (non-dev mode)
 // ===========================================================================
 

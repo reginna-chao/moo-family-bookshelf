@@ -271,43 +271,73 @@ describe("ApiClient", () => {
   });
 
   describe("updateFamilyPrefs", () => {
-    it("sends PUT to /api/user/:id/family-prefs with a { hidden } body", async () => {
-      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: ["o1:b1"] });
+    it("sends PUT to /api/user/:id/family-prefs with a { hidden, favorites } body", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: ["o1:b1"], favorites: [] });
       const userId = "a".repeat(64);
-      const hidden = ["o1:b1", "o2:b2"];
-      await client.updateFamilyPrefs(userId, hidden);
+      const prefs = { hidden: ["o1:b1", "o2:b2"], favorites: ["o3:b3"] };
+      await client.updateFamilyPrefs(userId, prefs);
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
         `${MOCK_ENDPOINT}/api/user/${userId}/family-prefs`,
         expect.objectContaining({
           method: "PUT",
-          body: JSON.stringify({ hidden }),
+          body: JSON.stringify(prefs),
         }),
       );
     });
 
-    it("unwraps the { data: { ok, hidden } } response envelope", async () => {
-      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: ["o1:b1"] });
+    it("unwraps the { data: { ok, hidden, favorites } } response envelope", async () => {
+      globalThis.fetch = mockFetchSuccess({
+        ok: true,
+        hidden: ["o1:b1"],
+        favorites: ["o3:b3"],
+      });
       const userId = "a".repeat(64);
-      const result = await client.updateFamilyPrefs(userId, ["o1:b1"]);
-      expect(result.data).toEqual({ ok: true, hidden: ["o1:b1"] });
+      const result = await client.updateFamilyPrefs(userId, {
+        hidden: ["o1:b1"],
+        favorites: ["o3:b3"],
+      });
+      expect(result.data).toEqual({
+        ok: true,
+        hidden: ["o1:b1"],
+        favorites: ["o3:b3"],
+      });
     });
 
-    it("sends an empty hidden array as { hidden: [] }", async () => {
-      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: [] });
+    it("sends only the provided list (favorites-only update)", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: [], favorites: ["o3:b3"] });
       const userId = "a".repeat(64);
-      await client.updateFamilyPrefs(userId, []);
+      await client.updateFamilyPrefs(userId, { favorites: ["o3:b3"] });
 
       const body = JSON.parse(
         (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
       );
-      expect(body).toEqual({ hidden: [] });
+      expect(body).toEqual({ favorites: ["o3:b3"] });
+    });
+
+    it("sends empty lists as { hidden: [], favorites: [] }", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: [], favorites: [] });
+      const userId = "a".repeat(64);
+      await client.updateFamilyPrefs(userId, { hidden: [], favorites: [] });
+
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+      );
+      expect(body).toEqual({ hidden: [], favorites: [] });
+    });
+
+    it("rejects a non-hex userId before issuing a request", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: [], favorites: [] });
+      await expect(
+        client.updateFamilyPrefs("invalid-id", { hidden: ["o1:b1"] }),
+      ).rejects.toThrow("Invalid userId");
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
     it("surfaces server error responses through the envelope", async () => {
       globalThis.fetch = mockFetchError("FORBIDDEN", "no access", 403);
       const userId = "a".repeat(64);
-      const result = await client.updateFamilyPrefs(userId, ["o1:b1"]);
+      const result = await client.updateFamilyPrefs(userId, { hidden: ["o1:b1"] });
       expect(result.error).toEqual({ code: "FORBIDDEN", message: "no access" });
     });
   });

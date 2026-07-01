@@ -161,19 +161,21 @@ export interface UserBooksRecord {
   publicSharing?: { shelves: PublicShelf[] };
   /**
    * Per-viewer private family-shelf preferences (v1.5.0+).
-   * `hidden` holds `"{ownerId}:{bookId}"` refs the viewer has hidden from
-   * their own family-shelf view. Container is reserved for future additions
-   * (e.g. favorites in v1.6.0).
+   * Both lists hold copy-scoped `"{ownerId}:{bookId}"` refs:
+   * - `hidden`: refs the viewer has hidden from their own family-shelf view.
+   * - `favorites`: refs the viewer has marked as favorites (我的最愛, v1.6.0+).
+   * Each list is capped independently at `MAX_FAMILY_PREF_ENTRIES`.
    */
-  familyShelfPrefs?: { hidden: string[] };
+  familyShelfPrefs?: { hidden: string[]; favorites: string[] };
   [key: string]: unknown;
 }
 
 /**
  * Max entries allowed in a single familyShelfPrefs list (v1.5.0+).
  *
- * Enforced by `parseFamilyPrefs` in `routes/user.ts`, which returns
- * 400 INVALID_PAYLOAD when the deduped `hidden` array exceeds this count.
+ * This is a PER-LIST cap: `hidden` and `favorites` are each capped at this
+ * count independently. Enforced by `parseFamilyPrefs` in `routes/user.ts`,
+ * which returns 400 INVALID_PAYLOAD when a deduped present list exceeds it.
  *
  * Sizing rationale — kept reachable under the body guard:
  *   The global 256KB request-body guard (`MAX_BODY_SIZE = 262144` in
@@ -186,6 +188,13 @@ export interface UserBooksRecord {
  *   over the real HTTP path. A larger cap (e.g. 10000 ≈ 690KB) would always be
  *   pre-empted by the 413 guard, making the 400 branch dead code. Real hidden
  *   counts are far smaller than 3000, so this cap is ample headroom.
+ *
+ *   Per-list cap vs whole-body guard: the 256KB guard measures the WHOLE
+ *   request body, while this cap is PER-LIST. Over-capping BOTH lists at once
+ *   (`{ hidden: 3001, favorites: 3001 }` ≈ 414KB) exceeds 256KB and is
+ *   pre-empted by the 413 guard, so it never reaches the 400 branch. The 400
+ *   branch stays reachable via a SINGLE over-capped list (the other list small
+ *   or absent, ~207KB total), which stays under 256KB.
  */
 export const MAX_FAMILY_PREF_ENTRIES = 3000;
 

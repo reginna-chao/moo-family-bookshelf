@@ -4,6 +4,7 @@ import {
   MemberDropdown,
   MemberDropdownProps,
   HIDDEN_FILTER_VALUE,
+  FAVORITE_FILTER_VALUE,
 } from "@/dialog/MemberDropdown";
 
 const MEMBERS = [
@@ -30,15 +31,34 @@ describe("MemberDropdown", () => {
     const select = screen.getByRole("combobox", { name: "篩選成員" });
     expect(select).toBeInTheDocument();
 
-    // Check all options: all, all-except-self, self, Alice, Bob, hidden
+    // Check all options: all, all-except-self, self, Alice, Bob, favorite, hidden
     const options = screen.getAllByRole("option");
-    expect(options).toHaveLength(6);
+    expect(options).toHaveLength(7);
     expect(options[0]).toHaveTextContent("所有人的書");
     expect(options[1]).toHaveTextContent("其他家人的書");
     expect(options[2]).toHaveTextContent("自己的書");
     expect(options[3]).toHaveTextContent("Alice");
     expect(options[4]).toHaveTextContent("Bob");
-    expect(options[5]).toHaveTextContent("隱藏的書");
+    expect(options[5]).toHaveTextContent("我的最愛");
+    expect(options[6]).toHaveTextContent("隱藏的書");
+  });
+
+  it("renders the 我的最愛 option before 隱藏的書 with the favorite sentinel value", () => {
+    renderDropdown();
+
+    const options = screen.getAllByRole("option") as HTMLOptionElement[];
+    const favorite = options.find((o) => o.value === FAVORITE_FILTER_VALUE);
+    expect(favorite).toBeDefined();
+    expect(favorite).toHaveTextContent("我的最愛");
+  });
+
+  it("calls onChange with the favorite sentinel when 我的最愛 is selected", () => {
+    const { onChange } = renderDropdown();
+
+    const select = screen.getByRole("combobox", { name: "篩選成員" });
+    fireEvent.change(select, { target: { value: FAVORITE_FILTER_VALUE } });
+
+    expect(onChange).toHaveBeenCalledWith(FAVORITE_FILTER_VALUE);
   });
 
   it("renders the 隱藏的書 option last with the hidden sentinel value", () => {
@@ -67,8 +87,8 @@ describe("MemberDropdown", () => {
     renderDropdown({ members, userId: "user-self" });
 
     const options = screen.getAllByRole("option");
-    // all, all-except-self, self, Alice, hidden (Me should not appear in dynamic list)
-    expect(options).toHaveLength(5);
+    // all, all-except-self, self, Alice, favorite, hidden (Me should not appear in dynamic list)
+    expect(options).toHaveLength(6);
     const optionTexts = options.map((o) => o.textContent);
     expect(optionTexts).not.toContain("Me");
   });
