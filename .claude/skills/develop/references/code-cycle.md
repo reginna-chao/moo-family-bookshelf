@@ -137,9 +137,10 @@ Only when both frontend and backend changed:
 ## Phase 7: Security Scan
 
 Run **once** after the whole feature is complete (all sub-tasks done), not per sub-task.
-1. Pick scope from all changed files since the feature began:
+1. Pick scope(s) from all changed files since the feature began:
    - `extension/src/crypto/` → `crypto`; `worker/src/` → `api`; `extension/src/` → `code` + `extension`; `pwa/src/` → `code`; `.env*`/`wrangler.toml`/CI/CD → `secrets`; deps changed → `deps`; multiple areas → `full`.
-2. Dispatch **`security-auditor`** with that `scope`.
+   - **Business-logic / invariant surfaces → also add `invariants`** (Dimension 8): any change under `worker/src/routes/` (family / bookshelf / member / user / auth) or `worker/src/middleware/auth`, or any FE change to the sharing / save-before-sync flow (`PersonalShelf`, `api/client` sharing calls). These carry the security-UX invariants (Inv-1..5), which the plain `api` / `code` scopes do **not** cover.
+2. Dispatch **`security-auditor`** with that scope (set) plus `mode: changed` and `base_ref: origin/main`, so the scan focuses on the feature's diff + its blast radius instead of re-scanning the whole repo. (Use `mode: repo` only for a deliberate periodic full audit, never for a routine post-feature scan.)
 3. Present findings alongside the final summary.
 4. **CRITICAL** → flag with remediation; recommend fixing before merge (user acknowledgement required). **WARNING** → report, non-blocking.
 
