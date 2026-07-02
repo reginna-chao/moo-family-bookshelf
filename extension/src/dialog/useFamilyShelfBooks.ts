@@ -2,8 +2,12 @@ import { useMemo } from "react";
 import { BoolFlag } from "../api/client";
 import type { BookWithMember } from "./BookCard";
 import type { MemberBooks } from "./FamilyDataContext";
-import { countHidden } from "./familyShelfPrefs";
-import { HIDDEN_FILTER_VALUE, type MemberFilterValue } from "./MemberDropdown";
+import { countHidden, countFavorites } from "./familyShelfPrefs";
+import {
+  HIDDEN_FILTER_VALUE,
+  FAVORITE_FILTER_VALUE,
+  type MemberFilterValue,
+} from "./MemberDropdown";
 
 interface BookOwnership {
   ownerId: string;
@@ -29,8 +33,12 @@ function selectMembers(
   filterMember: MemberFilterValue,
   userId: string,
 ): MemberBooks[] {
-  // Hidden-view spans all members, ignoring member scoping.
-  if (filterMember === "all" || filterMember === HIDDEN_FILTER_VALUE) {
+  // Hidden / favorite views span all members, ignoring member scoping.
+  if (
+    filterMember === "all" ||
+    filterMember === HIDDEN_FILTER_VALUE ||
+    filterMember === FAVORITE_FILTER_VALUE
+  ) {
     return members;
   }
   if (filterMember === "all-except-self") {
@@ -46,26 +54,48 @@ export interface UseFamilyShelfBooksParams {
   updatedBookIds: Set<string>;
   hiddenRefs: Set<string>;
   isHidden: (ownerId: string, bookId: string) => boolean;
+  favoriteRefs: Set<string>;
+  isFavorite: (ownerId: string, bookId: string) => boolean;
 }
 
 export interface UseFamilyShelfBooksResult {
-  /** Books after member-filter and hidden-view filter (pre category/search). */
+  /** Books after member-filter and hidden/favorite-view filter (pre category/search). */
   memberFilteredBooks: FamilyShelfBook[];
   /** Total shared cards across all members (filter-independent). */
   totalBooks: number;
   /** Count of currently-hidden shared cards (orphan refs excluded). */
   hiddenCount: number;
+  /** Count of currently-favorited shared cards (orphan refs excluded). */
+  favoriteCount: number;
   /** totalBooks - hiddenCount. */
   visibleCount: number;
-  /** Localized heading suffix, e.g. "(可見 3 本，隱藏 1 本)". */
+  /** Localized heading suffix; favorite view shows "(最愛 N 本)". */
   headingCount: string;
 }
 
+/** Apply the active view's pre-category/search filter to the flattened books. */
+function applyViewFilter(
+  books: FamilyShelfBook[],
+  showHidden: boolean,
+  showFavorite: boolean,
+  isHidden: (ownerId: string, bookId: string) => boolean,
+  isFavorite: (ownerId: string, bookId: string) => boolean,
+): FamilyShelfBook[] {
+  // Favorite view spans all members and is INDEPENDENT of hidden status.
+  if (showFavorite) {
+    return books.filter((b) => isFavorite(b.ownerId, b.bookId));
+  }
+  return books.filter((b) => {
+    const hidden = isHidden(b.ownerId, b.bookId);
+    return showHidden ? hidden : !hidden;
+  });
+}
+
 /**
- * Family-shelf heading counts + the member/hidden filter pipeline stage.
+ * Family-shelf heading counts + the member/hidden/favorite filter pipeline stage.
  *
- * The hidden-view filter is applied FIRST, before category/search/sort/
- * load-more downstream. Counts are member/search-filter-independent.
+ * The view filter is applied FIRST, before category/search/sort/load-more
+ * downstream. Counts are member/search-filter-independent.
  */
 export function useFamilyShelfBooks({
   members,
@@ -74,36 +104,68 @@ export function useFamilyShelfBooks({
   updatedBookIds,
   hiddenRefs,
   isHidden,
+  favoriteRefs,
+  isFavorite,
 }: UseFamilyShelfBooksParams): UseFamilyShelfBooksResult {
   const showHidden = filterMember === HIDDEN_FILTER_VALUE;
+  const showFavorite = filterMember === FAVORITE_FILTER_VALUE;
   const totalBooks = members.reduce((sum, m) => sum + m.books.length, 0);
 
   const hiddenCount = useMemo(
     () => countHidden(members, hiddenRefs),
     [members, hiddenRefs],
   );
+  const favoriteCount = useMemo(
+    () => countFavorites(members, favoriteRefs),
+    [members, favoriteRefs],
+  );
   const visibleCount = totalBooks - hiddenCount;
 
   const memberFilteredBooks = useMemo(() => {
     const selected = selectMembers(members, filterMember, userId);
     const all = selected.flatMap((m) => toBookWithMember(m, updatedBookIds));
-    // Hidden-filter is applied FIRST, before category/search/sort/load-more.
-    return all.filter((b) => {
-      const hidden = isHidden(b.ownerId, b.bookId);
-      return showHidden ? hidden : !hidden;
-    });
-  }, [members, filterMember, userId, updatedBookIds, isHidden, showHidden]);
+    // View filter is applied FIRST, before category/search/sort/load-more.
+    return applyViewFilter(all, showHidden, showFavorite, isHidden, isFavorite);
+  }, [
+    members,
+    filterMember,
+    userId,
+    updatedBookIds,
+    isHidden,
+    isFavorite,
+    showHidden,
+    showFavorite,
+  ]);
 
-  const headingCount =
-    hiddenCount > 0
-      ? `(可見 ${visibleCount} 本，隱藏 ${hiddenCount} 本)`
-      : `(可見 ${visibleCount} 本)`;
+  const headingCount = buildHeadingCount(
+    showFavorite,
+    favoriteCount,
+    visibleCount,
+    hiddenCount,
+  );
 
   return {
     memberFilteredBooks,
     totalBooks,
     hiddenCount,
+    favoriteCount,
     visibleCount,
     headingCount,
   };
+}
+
+/** Build the localized heading suffix for the active view. */
+function buildHeadingCount(
+  showFavorite: boolean,
+  favoriteCount: number,
+  visibleCount: number,
+  hiddenCount: number,
+): string {
+  if (showFavorite) {
+    return `(最愛 ${favoriteCount} 本)`;
+  }
+  if (hiddenCount > 0) {
+    return `(可見 ${visibleCount} 本，隱藏 ${hiddenCount} 本)`;
+  }
+  return `(可見 ${visibleCount} 本)`;
 }

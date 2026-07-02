@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { BoolFlag, BorrowStatus } from "../api/client";
-import { HIDDEN_FILTER_VALUE, type MemberFilterValue } from "./MemberDropdown";
+import { type MemberFilterValue } from "./MemberDropdown";
 import { useSearch } from "./useSearch";
 import { useLoadMore } from "./useLoadMore";
 import { useFamilyData } from "./FamilyDataContext";
@@ -18,6 +18,27 @@ export interface FamilyShelfProps {
   userId: string;
 }
 
+/** Subtle, non-blocking banner shown when a prefs flush fails; auto-clears on next success. */
+function PrefsSyncFailedNotice() {
+  return (
+    <div
+      role="status"
+      style={{
+        margin: "8px 0",
+        padding: "8px 12px",
+        borderRadius: 8,
+        border: "1px solid #fde68a",
+        background: "#fffbeb",
+        color: "#92400e",
+        fontSize: 12,
+        lineHeight: "1.4",
+      }}
+    >
+      ⚠️ 偏好同步失敗，變更已暫存本機，下次操作將自動重試。
+    </div>
+  );
+}
+
 export function FamilyShelf({ userId }: FamilyShelfProps) {
   const {
     bookshelfMembers: members,
@@ -33,14 +54,16 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     hiddenRefs,
     isHidden,
     toggleHidden,
+    favoriteRefs,
+    isFavorite,
+    toggleFavorite,
+    prefsSyncFailed,
   } = useFamilyData();
   const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [categoryOpen, setCategoryOpen] = useState(false);
   const { viewMode, setViewMode } = useFamilyShelfViewMode();
   const { sort, setSort } = useBookSort("family");
-
-  const showHidden = filterMember === HIDDEN_FILTER_VALUE;
 
   const { memberFilteredBooks, totalBooks, headingCount } = useFamilyShelfBooks({
     members,
@@ -49,6 +72,8 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     updatedBookIds,
     hiddenRefs,
     isHidden,
+    favoriteRefs,
+    isFavorite,
   });
 
   const categoryFilteredBooks = filterByCategory(memberFilteredBooks, categoryFilter);
@@ -152,16 +177,20 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
         onViewModeChange={setViewMode}
       />
 
+      {prefsSyncFailed && <PrefsSyncFailedNotice />}
+
       <FamilyShelfBookList
         books={visibleBooks}
         viewMode={viewMode}
         userId={userId}
         viewerCanLend={viewerCanLend}
-        showHidden={showHidden}
         memberCanLendMap={memberCanLendMap}
         pendingBookIds={pendingBookIds}
         onBorrow={(book) => void handleBorrowClick(book)}
         onToggleHidden={toggleHidden}
+        isHidden={isHidden}
+        isFavorite={isFavorite}
+        onToggleFavorite={toggleFavorite}
       />
 
       {hasMore && (

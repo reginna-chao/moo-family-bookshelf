@@ -6,11 +6,19 @@ import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { HIDDEN_FILTER_VALUE } from "@/dialog/MemberDropdown";
 import { BoolFlag, type ApiClient } from "@/api/client";
 
-/** Returns the grid-card root element that contains a book with the given title. */
+/**
+ * Walks up from the book title to the nearest card root that contains its
+ * overflow trigger. After the v1.5.0 reshape the title lives in a nested info
+ * div while the action row (overflow + favorite) is a sibling, so a plain
+ * `.closest("div")` no longer reaches the shared root.
+ */
 function cardOf(title: string): HTMLElement {
-  const root = screen.getByText(title).closest("div");
-  if (!root) throw new Error(`card root not found for ${title}`);
-  return root;
+  let el: HTMLElement | null = screen.getByText(title);
+  while (el) {
+    if (within(el).queryByRole("button", { name: "更多選項" })) return el;
+    el = el.parentElement;
+  }
+  throw new Error(`card root not found for ${title}`);
 }
 
 /** Opens the overflow menu on the given book's card and clicks its hide/unhide item. */
@@ -237,9 +245,11 @@ describe("FamilyShelf — hide feature", () => {
     vi.useRealTimers();
 
     expect(updateFamilyPrefs).toHaveBeenCalledTimes(1);
-    const [userIdArg, hiddenArg] = updateFamilyPrefs.mock.calls[0];
+    const [userIdArg, prefsArg] = updateFamilyPrefs.mock.calls[0];
     expect(userIdArg).toBe("user-1");
-    expect(hiddenArg).toEqual(["user-2:b1"]);
+    expect(prefsArg.hidden).toEqual(["user-2:b1"]);
+    // Favorites unaffected by a hide toggle, but still sent in the full-replace flush.
+    expect(prefsArg.favorites).toEqual([]);
   });
 
   it("ignores an orphan hidden ref: counts unaffected, all real cards shown", async () => {

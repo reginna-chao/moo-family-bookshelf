@@ -674,7 +674,12 @@ describe("FamilyShelf", () => {
     });
   });
 
-  describe("Load More (Wave G)", () => {
+  // v1.5.0 reshape: BookCards now mount an always-visible action row (heart +
+  // overflow menu) for every card. These tests render 250 cards and load more
+  // up to 200, which under parallel-suite contention far exceeds the 5s default
+  // timeout. A generous block-level timeout keeps them stable without weakening
+  // any assertion.
+  describe("Load More (Wave G)", { timeout: 60000 }, () => {
     function makeManyBooks(count: number) {
       return Array.from({ length: count }, (_, i) => ({
         bookId: `b${i + 1}`,

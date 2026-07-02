@@ -16,7 +16,6 @@ import { useBookSort } from "@/hooks/useBookSort";
 import { sortBooks } from "@/utils/sortBooks";
 import {
   useFamilyShelfBooks,
-  HIDDEN_FILTER_VALUE,
   type BookWithMember,
   type MemberFilterValue,
 } from "@/hooks/useFamilyShelfBooks";
@@ -42,14 +41,16 @@ export function FamilyShelfPage({
     hiddenRefs,
     isHidden,
     toggleHidden,
+    favoriteRefs,
+    isFavorite,
+    toggleFavorite,
+    prefsSyncFailed,
   } = useFamilyData();
   const [filterMember, setFilterMember] =
     useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
   const { viewMode, setViewMode } = useFamilyShelfViewMode(userId);
   const { sort, setSort } = useBookSort(userId, "family");
-
-  const showHidden = filterMember === HIDDEN_FILTER_VALUE;
 
   const memberCanLendMap = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -98,6 +99,8 @@ export function FamilyShelfPage({
     updatedBookIds,
     hiddenRefs,
     isHidden,
+    favoriteRefs,
+    isFavorite,
   });
 
   const categoryFilteredBooks = useMemo(
@@ -165,6 +168,15 @@ export function FamilyShelfPage({
         onSortChange={setSort}
       />
 
+      {prefsSyncFailed && (
+        <div
+          role="status"
+          className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800"
+        >
+          ⚠️ 偏好同步失敗，變更已暫存本機，下次操作將自動重試。
+        </div>
+      )}
+
       {isFiltering && (
         <p className="text-gray-400 text-xs mb-2">
           找到 {visibleBooks.length} 本
@@ -176,7 +188,6 @@ export function FamilyShelfPage({
         viewMode={viewMode}
         userId={userId}
         viewerCanLend={viewerCanLend}
-        showHidden={showHidden}
         isFiltering={isFiltering}
         hasMore={hasMore}
         totalFilteredCount={filteredItems.length}
@@ -185,6 +196,9 @@ export function FamilyShelfPage({
         canBorrow={!!apiClient && !!familyId}
         onBorrow={(book) => void handleBorrowClick(book)}
         onToggleHidden={toggleHidden}
+        isHidden={isHidden}
+        isFavorite={isFavorite}
+        onToggleFavorite={toggleFavorite}
         onLoadMore={loadMore}
       />
     </div>

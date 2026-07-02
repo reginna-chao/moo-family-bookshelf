@@ -1,4 +1,4 @@
-import type { Context } from "hono";
+import type { Context, TypedResponse } from "hono";
 import { createMiddleware } from "hono/factory";
 import { type Env, isDevMode } from "../utils/env";
 import { isPublicRoute, isSensitivePublicRoute } from "../utils/routes";
@@ -64,13 +64,21 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
   },
 );
 
+/** Shape of the 429 JSON body returned by {@link enforcePerUserRateLimit}. */
+interface RateLimitError {
+  error: { code: string; message: string };
+}
+
 /**
  * Per-userId rate limit helper (distinct from the per-IP `rateLimit` middleware).
  *
  * Enforces a configurable ceiling on requests tied to an identifier (typically
  * the authenticated userId) to prevent single-account abuse across rotating IPs.
- * Returns a 429 Response when the limit is exceeded, otherwise increments the
- * counter and returns `null` to let the handler proceed.
+ * Returns a typed 429 JSON response when the limit is exceeded, otherwise
+ * increments the counter and returns `null` to let the handler proceed. The
+ * return type is the concrete `TypedResponse<..., 429, "json">` produced by
+ * `c.json(...)`, so callers can `return` it directly without a cast — the
+ * status literal lets it satisfy an OpenAPIHono handler's declared 429 response.
  *
  * KV key format: `ratelimit:user:{scope}:{userId}:{bucket}` where
  * `bucket = floor(Date.now() / windowMs)`.
@@ -82,7 +90,7 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
 export async function enforcePerUserRateLimit(
   c: Context<{ Bindings: Env }>,
   opts: { userId: string; scope: string; max: number; windowSec: number },
-): Promise<Response | null> {
+): Promise<TypedResponse<RateLimitError, 429, "json"> | null> {
   if (isDevMode(c.env)) return null;
 
   const windowMs = opts.windowSec * 1000;

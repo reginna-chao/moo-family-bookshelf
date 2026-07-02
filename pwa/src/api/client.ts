@@ -53,7 +53,7 @@ export interface PersonalBooks {
   books: BookEntry[];
   lastUpdated: string;
   /** Viewer-private family-shelf preferences (v1.5.0). */
-  familyShelfPrefs?: { hidden: string[] };
+  familyShelfPrefs?: { hidden: string[]; favorites: string[] };
   /** Preserve unknown fields from future schema versions */
   [key: string]: unknown;
 }
@@ -296,16 +296,17 @@ export class ApiClient {
   }
 
   /**
-   * Update viewer-private family-shelf preferences (v1.5.0). Full-replace the
-   * hidden ref list (`{ownerId}:{bookId}`). Stored server-side so the hidden
-   * view stays consistent across Extension and PWA.
+   * Update viewer-private family-shelf preferences (v1.5.0). Each provided list
+   * (`hidden` / `favorites`) full-replaces its server-side counterpart; absent
+   * lists are preserved. Refs are copy-scoped `{ownerId}:{bookId}`. Stored
+   * server-side so the views stay consistent across Extension and PWA.
    */
   async updateFamilyPrefs(
     userId: string,
-    hidden: string[],
-  ): Promise<ApiResponse<{ ok: boolean; hidden: string[] }>> {
+    prefs: { hidden?: string[]; favorites?: string[] },
+  ): Promise<ApiResponse<{ ok: boolean; hidden: string[]; favorites: string[] }>> {
     this.validateHexId(userId, "userId");
-    return this.put(`/api/user/${userId}/family-prefs`, { hidden });
+    return this.put(`/api/user/${userId}/family-prefs`, prefs);
   }
 
   // --- Family Group ---

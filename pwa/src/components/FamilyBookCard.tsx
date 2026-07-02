@@ -1,5 +1,6 @@
 import { BookOpen } from "lucide-react";
 import { BoolFlag } from "@/api/client";
+import { FavoriteButton } from "@/components/FavoriteButton";
 import { LazyCover } from "@/components/LazyCover";
 import { OverflowMenu } from "@/components/OverflowMenu";
 import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
@@ -10,8 +11,12 @@ export interface FamilyBookCardProps {
   showBorrowButton: boolean;
   borrowRequestPending: boolean;
   hideActionLabel: string;
+  /** Whether the viewer has favorited this copy-scoped card (v1.5.0). */
+  isFavorite: boolean;
   onBorrowClick: () => void;
   onHideToggle: () => void;
+  /** Toggle favorite/unfavorite for this copy-scoped card (v1.5.0). */
+  onFavoriteToggle: () => void;
 }
 
 function BorrowControl({
@@ -50,8 +55,10 @@ export function FamilyBookCard({
   showBorrowButton,
   borrowRequestPending,
   hideActionLabel,
+  isFavorite,
   onBorrowClick,
   onHideToggle,
+  onFavoriteToggle,
 }: FamilyBookCardProps) {
   return (
     <div className="block rounded-lg bg-white shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
@@ -95,7 +102,8 @@ export function FamilyBookCard({
           borrowRequestPending={borrowRequestPending}
           onBorrowClick={onBorrowClick}
         />
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1">
+          <FavoriteButton isFavorite={isFavorite} onFavoriteToggle={onFavoriteToggle} />
           <OverflowMenu items={[{ label: hideActionLabel, onSelect: onHideToggle }]} />
         </div>
       </div>
