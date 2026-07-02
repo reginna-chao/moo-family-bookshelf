@@ -15,6 +15,7 @@ import { isValidFamilyId, isValidUserId, isValidRequestId } from "../utils/valid
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
+import { jsonError, type ErrorBody } from "../utils/errors";
 import { FamilyIdParam, RequestIdParamObj } from "../schemas/common";
 
 export const borrowRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
@@ -89,18 +90,12 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return c.json(
-      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
   }
 
   const userId = getAuthenticatedUserId(c);
   if (!userId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   let body: {
@@ -113,10 +108,7 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   if (
@@ -126,26 +118,17 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     !body.bookCoverUrl ||
     !body.ownerId
   ) {
-    return c.json(
-      { error: { code: "MISSING_FIELDS", message: "bookId, bookTitle, bookAuthor, bookCoverUrl, and ownerId are required" } },
-      400,
-    );
+    return jsonError(c, 400, "MISSING_FIELDS", "bookId, bookTitle, bookAuthor, bookCoverUrl, and ownerId are required");
   }
 
   if (typeof body.bookId !== "string" || typeof body.bookTitle !== "string" ||
       typeof body.bookAuthor !== "string" || typeof body.bookCoverUrl !== "string" ||
       typeof body.ownerId !== "string") {
-    return c.json(
-      { error: { code: "INVALID_FIELDS", message: "All fields must be strings" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_FIELDS", "All fields must be strings");
   }
 
   if (!isValidUserId(body.ownerId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "ownerId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "ownerId format is invalid");
   }
 
   // Capture validated fields into locals (narrows types for the rest of the handler)
@@ -164,52 +147,34 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   // Load family record
   const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
   if (!raw) {
-    return c.json(
-      { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
-      404,
-    );
+    return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
   }
 
   const family = normalizeFamilyRecord(raw);
 
   // Verify caller is a family member
   if (!hasMember(family.members, userId)) {
-    return c.json(
-      { error: { code: "NOT_FAMILY_MEMBER", message: "You are not a member of this family" } },
-      403,
-    );
+    return jsonError(c, 403, "NOT_FAMILY_MEMBER", "You are not a member of this family");
   }
 
   // Verify ownerId is a different family member
   if (ownerId === userId) {
-    return c.json(
-      { error: { code: "INVALID_OWNER", message: "Cannot borrow your own book" } },
-      403,
-    );
+    return jsonError(c, 403, "INVALID_OWNER", "Cannot borrow your own book");
   }
 
   if (!hasMember(family.members, ownerId)) {
-    return c.json(
-      { error: { code: "INVALID_OWNER", message: "Owner is not a member of this family" } },
-      403,
-    );
+    return jsonError(c, 403, "INVALID_OWNER", "Owner is not a member of this family");
   }
 
   // Check canLend for both parties
   const borrowerMember = findMember(family.members, userId);
   const ownerMember = findMember(family.members, ownerId);
   if (!borrowerMember || !ownerMember) {
-    return c.json(
-      { error: { code: "INTERNAL_ERROR", message: "Member lookup failed" } },
-      500,
-    );
+    return jsonError(c, 500, "INTERNAL_ERROR", "Member lookup failed");
   }
 
   if (!isMemberLendingEnabled(borrowerMember) || !isMemberLendingEnabled(ownerMember)) {
-    return c.json(
-      { error: { code: "LENDING_DISABLED", message: "Lending is disabled for one or both members" } },
-      403,
-    );
+    return jsonError(c, 403, "LENDING_DISABLED", "Lending is disabled for one or both members");
   }
 
   // Check for duplicate PENDING request (same borrowerId + bookId)
@@ -231,10 +196,7 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     );
 
     if (hasDuplicate) {
-      return c.json(
-        { error: { code: "DUPLICATE_REQUEST", message: "A pending borrow request already exists for this book" } },
-        400,
-      );
+      return jsonError(c, 400, "DUPLICATE_REQUEST", "A pending borrow request already exists for this book");
     }
   }
 
@@ -279,18 +241,12 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return c.json(
-      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
   }
 
   const userId = getAuthenticatedUserId(c);
   if (!userId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
@@ -304,18 +260,12 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
   // Verify caller is a family member
   const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
   if (!raw) {
-    return c.json(
-      { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
-      404,
-    );
+    return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
   }
 
   const family = normalizeFamilyRecord(raw);
   if (!hasMember(family.members, userId)) {
-    return c.json(
-      { error: { code: "NOT_FAMILY_MEMBER", message: "You are not a member of this family" } },
-      403,
-    );
+    return jsonError(c, 403, "NOT_FAMILY_MEMBER", "You are not a member of this family");
   }
 
   // Load borrow index
@@ -339,42 +289,27 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   const requestId = c.req.param("requestId");
 
   if (!isValidRequestId(requestId)) {
-    return c.json(
-      { error: { code: "INVALID_REQUEST_ID", message: "Request ID format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_REQUEST_ID", "Request ID format is invalid");
   }
 
   const userId = getAuthenticatedUserId(c);
   if (!userId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   let body: { status?: number } | null;
   try {
     body = await c.req.json();
   } catch {
-    return c.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   if (body?.status === undefined || body.status === null) {
-    return c.json(
-      { error: { code: "MISSING_FIELDS", message: "status is required" } },
-      400,
-    );
+    return jsonError(c, 400, "MISSING_FIELDS", "status is required");
   }
 
   if (typeof body.status !== "number" || !Number.isInteger(body.status)) {
-    return c.json(
-      { error: { code: "INVALID_FIELDS", message: "status must be an integer" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_FIELDS", "status must be an integer");
   }
 
   const targetStatus = body.status;
@@ -391,10 +326,7 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   // Load borrow record
   const borrowRequest = await c.env.KV.get<BorrowRequest>(kvKeys.borrow(requestId), "json");
   if (!borrowRequest) {
-    return c.json(
-      { error: { code: "REQUEST_NOT_FOUND", message: "Borrow request not found" } },
-      404,
-    );
+    return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
   }
 
   // Validate caller is either borrower or owner
@@ -402,10 +334,7 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   const isOwner = userId === borrowRequest.ownerId;
 
   if (!isBorrower && !isOwner) {
-    return c.json(
-      { error: { code: "FORBIDDEN", message: "You are not authorized to update this request" } },
-      403,
-    );
+    return jsonError(c, 403, "FORBIDDEN", "You are not authorized to update this request");
   }
 
   // Validate status transition (FSM)
@@ -432,7 +361,7 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
 });
 
 interface TransitionError {
-  error: { code: string; message: string };
+  error: ErrorBody["error"];
   status: number;
 }
 

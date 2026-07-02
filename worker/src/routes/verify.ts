@@ -13,6 +13,7 @@ import {
 import { isValidUserId, isValidVerifyMethod, isValidPin, isValidPattern } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { defaultHook, jsonRes } from "../utils/openapi";
+import { jsonError } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
 
 export const verifyRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
@@ -96,10 +97,7 @@ verifyRoutes.openapi(getVerifyRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const record = await c.env.KV.get<VerifyRecord>(kvKeys.verify(userId), "json");
@@ -129,35 +127,23 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId || callerId !== userId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   let body: { method: string; secret?: string; prompted?: number } | null;
   try {
     body = await c.req.json();
   } catch {
-    return c.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   if (!body || !isValidVerifyMethod(body.method)) {
-    return c.json(
-      { error: { code: "INVALID_METHOD", message: "method must be one of: pin, pattern, code, none" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_METHOD", "method must be one of: pin, pattern, code, none");
   }
 
   const method = body.method;
@@ -165,17 +151,11 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
   // Validate secret for pin/pattern
   if (method === "pin") {
     if (!body.secret || typeof body.secret !== "string" || !isValidPin(body.secret)) {
-      return c.json(
-        { error: { code: "INVALID_SECRET", message: "PIN must be 6-12 digits" } },
-        400,
-      );
+      return jsonError(c, 400, "INVALID_SECRET", "PIN must be 6-12 digits");
     }
   } else if (method === "pattern") {
     if (!body.secret || typeof body.secret !== "string" || !isValidPattern(body.secret)) {
-      return c.json(
-        { error: { code: "INVALID_SECRET", message: "Pattern must have 4-9 unique nodes (0-8), comma-separated" } },
-        400,
-      );
+      return jsonError(c, 400, "INVALID_SECRET", "Pattern must have 4-9 unique nodes (0-8), comma-separated");
     }
   }
 
@@ -223,27 +203,18 @@ verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId || callerId !== userId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   // Verify user has 'code' method set
   const verifyRecord = await c.env.KV.get<VerifyRecord>(kvKeys.verify(userId), "json");
   if (!verifyRecord || verifyRecord.method !== "code") {
-    return c.json(
-      { error: { code: "INVALID_METHOD", message: "Verification method must be 'code' to generate OTP" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_METHOD", "Verification method must be 'code' to generate OTP");
   }
 
   const code = generateOtpCode();
@@ -281,18 +252,12 @@ verifyRoutes.openapi(postVerifyPromptedRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId || callerId !== userId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   const existing = await c.env.KV.get<VerifyRecord>(kvKeys.verify(userId), "json");
@@ -334,25 +299,16 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   if (callerId !== userId) {
-    return c.json(
-      { error: { code: "FORBIDDEN", message: "只能為自己產生 QR Token" } },
-      403,
-    );
+    return jsonError(c, 403, "FORBIDDEN", "只能為自己產生 QR Token");
   }
 
   const token = generateQrToken();

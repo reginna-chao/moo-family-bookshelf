@@ -4,6 +4,7 @@ import { kvKeys, type RawFamilyRecord, type UserBooksRecord, normalizeFamilyReco
 import { isValidFamilyId } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { defaultHook, jsonRes } from "../utils/openapi";
+import { jsonError } from "../utils/errors";
 import { FamilyIdParam } from "../schemas/common";
 
 export const bookshelfRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
@@ -33,27 +34,18 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return c.json(
-      { error: { code: "INVALID_FAMILY_ID", message: "Family ID format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
   }
 
   // Verify caller is authenticated and a member of this family
   const userId = getAuthenticatedUserId(c);
   if (!userId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   const memberFamily = await c.env.KV.get(kvKeys.member(userId));
   if (memberFamily !== familyId) {
-    return c.json(
-      { error: { code: "NOT_FOUND", message: "Family not found" } },
-      404,
-    );
+    return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
 
   // Get family members
@@ -63,10 +55,7 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
   );
 
   if (!raw) {
-    return c.json(
-      { error: { code: "FAMILY_NOT_FOUND", message: "Family not found" } },
-      404,
-    );
+    return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
   }
 
   const family = normalizeFamilyRecord(raw);

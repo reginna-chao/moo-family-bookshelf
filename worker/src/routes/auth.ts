@@ -4,6 +4,7 @@ import { kvKeys, TOKEN_TTL_SECONDS, type RawFamilyRecord, normalizeFamilyRecord 
 import { isValidFamilyId, isValidSha256Hex } from "../utils/validation";
 import { getOrGenerateAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 import { defaultHook, jsonRes } from "../utils/openapi";
+import { jsonError } from "../utils/errors";
 
 export const authRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
@@ -40,17 +41,11 @@ authRoutes.openapi(lookupRoute, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   if (!body?.userId || typeof body.userId !== "string" || !isValidSha256Hex(body.userId)) {
-    return c.json(
-      { error: { code: "INVALID_INPUT", message: "userId must be a 64-char hex string" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_INPUT", "userId must be a 64-char hex string");
   }
 
   const userId = body.userId;
@@ -76,20 +71,14 @@ authRoutes.openapi(lookupRoute, async (c) => {
 authRoutes.openapi(refreshRoute, async (c) => {
   const callerId = getAuthenticatedUserId(c);
   if (!callerId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   let body: { userId: string; familyId?: string } | null;
   try {
     body = await c.req.json();
   } catch {
-    return c.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   // Validate input format
@@ -98,34 +87,22 @@ authRoutes.openapi(refreshRoute, async (c) => {
     typeof body.userId !== "string" ||
     !isValidSha256Hex(body.userId)
   ) {
-    return c.json(
-      { error: { code: "INVALID_INPUT", message: "userId must be a 64-char hex string" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_INPUT", "userId must be a 64-char hex string");
   }
 
   // Ensure the authenticated user matches the requested userId
   if (callerId !== body.userId) {
-    return c.json(
-      { error: { code: "REFRESH_FAILED", message: "Token refresh failed" } },
-      401,
-    );
+    return jsonError(c, 401, "REFRESH_FAILED", "Token refresh failed");
   }
 
   // If familyId is provided, verify membership (backward-compatible path)
   if (body.familyId !== undefined) {
     if (typeof body.familyId !== "string" || !isValidFamilyId(body.familyId)) {
-      return c.json(
-        { error: { code: "INVALID_INPUT", message: "familyId must match format xxxx-xxxx" } },
-        400,
-      );
+      return jsonError(c, 400, "INVALID_INPUT", "familyId must match format xxxx-xxxx");
     }
     const storedFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
     if (!storedFamilyId || storedFamilyId !== body.familyId) {
-      return c.json(
-        { error: { code: "REFRESH_FAILED", message: "Token refresh failed" } },
-        401,
-      );
+      return jsonError(c, 401, "REFRESH_FAILED", "Token refresh failed");
     }
   }
 

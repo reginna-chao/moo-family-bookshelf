@@ -2,6 +2,7 @@ import type { Context, TypedResponse } from "hono";
 import { createMiddleware } from "hono/factory";
 import { type Env, isDevMode } from "../utils/env";
 import { isPublicRoute, isSensitivePublicRoute } from "../utils/routes";
+import type { ErrorBody } from "../utils/errors";
 
 /** Standard rate limit: 60 req/min/IP */
 const RATE_LIMIT_STANDARD = 60;
@@ -64,11 +65,6 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
   },
 );
 
-/** Shape of the 429 JSON body returned by {@link enforcePerUserRateLimit}. */
-interface RateLimitError {
-  error: { code: string; message: string };
-}
-
 /**
  * Per-userId rate limit helper (distinct from the per-IP `rateLimit` middleware).
  *
@@ -90,7 +86,7 @@ interface RateLimitError {
 export async function enforcePerUserRateLimit(
   c: Context<{ Bindings: Env }>,
   opts: { userId: string; scope: string; max: number; windowSec: number },
-): Promise<TypedResponse<RateLimitError, 429, "json"> | null> {
+): Promise<(Response & TypedResponse<ErrorBody, 429, "json">) | null> {
   if (isDevMode(c.env)) return null;
 
   const windowMs = opts.windowSec * 1000;
