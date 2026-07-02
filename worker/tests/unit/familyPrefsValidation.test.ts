@@ -211,4 +211,25 @@ describe("parseFamilyPrefs", () => {
       expect(result.message).toBe("favorites array exceeds maximum of 2 entries");
     }
   });
+
+  // --- Non-object body guard (PR #60 WARNING 1 regression) ---
+  //
+  // The param is typed `unknown`; a truthy primitive or array must NOT reach
+  // `kind in body` (which would throw a TypeError → 500). Instead the top guard
+  // returns a clean INVALID_PAYLOAD with a stable message.
+  it.each<{ label: string; body: unknown }>([
+    { label: "a number", body: 5 },
+    { label: "a boolean", body: true },
+    { label: "a string", body: "x" },
+    { label: "an array", body: [ref("b1")] },
+  ])("returns INVALID_PAYLOAD 'must be a JSON object' for $label", ({ body }) => {
+    // The production param is `unknown`; cast satisfies the signature while
+    // deliberately passing a non-object value.
+    const result = parseFamilyPrefs(body as never, 100);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_PAYLOAD");
+      expect(result.message).toBe("request body must be a JSON object");
+    }
+  });
 });

@@ -157,18 +157,26 @@ function parsePrefList(kind: FamilyPrefKind, value: unknown[], max: number): Par
  * to the appropriate HTTP response).
  */
 export function parseFamilyPrefs(
-  body: Record<string, unknown>,
+  body: unknown,
   max: number,
 ): ParseFamilyPrefsResult {
+  // Reject any body that is not a non-null plain object (primitives AND arrays).
+  // The handler's falsy-body guard does not catch truthy primitives (e.g. 5,
+  // true, "x"); without this guard `kind in body` throws a TypeError that
+  // surfaces as 500 instead of a clean 400.
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: "request body must be a JSON object" };
+  }
+  const record = body as Record<string, unknown>;
   const prefs: ParsedFamilyPrefs = {};
   let anyPresent = false;
   for (const kind of FAMILY_PREF_KINDS) {
-    if (!(kind in body)) continue;
+    if (!(kind in record)) continue;
     anyPresent = true;
-    if (!Array.isArray(body[kind])) {
+    if (!Array.isArray(record[kind])) {
       return { ok: false, code: "INVALID_PAYLOAD", message: `${kind} must be an array` };
     }
-    const result = parsePrefList(kind, body[kind] as unknown[], max);
+    const result = parsePrefList(kind, record[kind] as unknown[], max);
     if (!result.ok) return result;
     prefs[kind] = result.values;
   }

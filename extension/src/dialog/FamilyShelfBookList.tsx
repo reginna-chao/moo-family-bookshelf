@@ -9,11 +9,12 @@ export interface FamilyShelfBookListProps {
   viewMode: ViewMode;
   userId: string;
   viewerCanLend: boolean;
-  showHidden: boolean;
   memberCanLendMap: Map<string, boolean>;
   pendingBookIds: Set<string>;
   onBorrow: (book: FamilyShelfBook) => void;
   onToggleHidden: (ownerId: string, bookId: string) => void;
+  /** Whether a copy-scoped card is currently hidden by the viewer. */
+  isHidden: (ownerId: string, bookId: string) => boolean;
   /** Whether a copy-scoped card is favorited by the viewer. */
   isFavorite: (ownerId: string, bookId: string) => boolean;
   /** Toggle a card's favorite state (v1.5.0). */
@@ -32,21 +33,23 @@ export function FamilyShelfBookList({
   viewMode,
   userId,
   viewerCanLend,
-  showHidden,
   memberCanLendMap,
   pendingBookIds,
   onBorrow,
   onToggleHidden,
+  isHidden,
   isFavorite,
   onToggleFavorite,
 }: FamilyShelfBookListProps) {
-  const hideActionLabel = showHidden ? "取消隱藏" : "隱藏書籍";
   const renderBook = (book: FamilyShelfBook) => {
     const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
     const isOwnBook = book.ownerId === userId;
     const showBorrowButton = !isOwnBook && viewerCanLend && ownerCanLend;
     const borrowRequestPending = pendingBookIds.has(book.bookId);
     const key = `${book.memberName}-${book.bookId}`;
+    const hideActionLabel = isHidden(book.ownerId, book.bookId)
+      ? "取消隱藏"
+      : "隱藏書籍";
     const shared = {
       book,
       showBorrowButton,

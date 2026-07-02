@@ -102,6 +102,18 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
     expect(json.error.code).toBe("INVALID_JSON");
   });
 
+  it("returns 400 (not 500) for a valid-JSON primitive body (PR #60 WARNING 1)", async () => {
+    const { authToken } = await createFamilyAndGetToken("user1");
+    await seedUser("user1");
+
+    // `5` is valid JSON but not an object; the parse guard must reject it as a
+    // clean 400 rather than letting `kind in body` throw → 500.
+    const res = await rawRequest("PUT", "/api/user/user1/family-prefs", "5", authToken);
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("INVALID_PAYLOAD");
+  });
+
   it.each<{ label: string; body: unknown }>([
     { label: "hidden missing", body: {} },
     { label: "hidden is not an array", body: { hidden: "not-array" } },

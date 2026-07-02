@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { BoolFlag, BorrowStatus } from "../api/client";
-import { HIDDEN_FILTER_VALUE, type MemberFilterValue } from "./MemberDropdown";
+import { type MemberFilterValue } from "./MemberDropdown";
 import { useSearch } from "./useSearch";
 import { useLoadMore } from "./useLoadMore";
 import { useFamilyData } from "./FamilyDataContext";
@@ -64,8 +64,6 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   const [categoryOpen, setCategoryOpen] = useState(false);
   const { viewMode, setViewMode } = useFamilyShelfViewMode();
   const { sort, setSort } = useBookSort("family");
-
-  const showHidden = filterMember === HIDDEN_FILTER_VALUE;
 
   const { memberFilteredBooks, totalBooks, headingCount } = useFamilyShelfBooks({
     members,
@@ -186,11 +184,11 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
         viewMode={viewMode}
         userId={userId}
         viewerCanLend={viewerCanLend}
-        showHidden={showHidden}
         memberCanLendMap={memberCanLendMap}
         pendingBookIds={pendingBookIds}
         onBorrow={(book) => void handleBorrowClick(book)}
         onToggleHidden={toggleHidden}
+        isHidden={isHidden}
         isFavorite={isFavorite}
         onToggleFavorite={toggleFavorite}
       />

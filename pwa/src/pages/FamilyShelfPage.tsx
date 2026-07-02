@@ -16,7 +16,6 @@ import { useBookSort } from "@/hooks/useBookSort";
 import { sortBooks } from "@/utils/sortBooks";
 import {
   useFamilyShelfBooks,
-  HIDDEN_FILTER_VALUE,
   type BookWithMember,
   type MemberFilterValue,
 } from "@/hooks/useFamilyShelfBooks";
@@ -52,8 +51,6 @@ export function FamilyShelfPage({
   const [categoryFilter, setCategoryFilter] = useState("");
   const { viewMode, setViewMode } = useFamilyShelfViewMode(userId);
   const { sort, setSort } = useBookSort(userId, "family");
-
-  const showHidden = filterMember === HIDDEN_FILTER_VALUE;
 
   const memberCanLendMap = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -191,7 +188,6 @@ export function FamilyShelfPage({
         viewMode={viewMode}
         userId={userId}
         viewerCanLend={viewerCanLend}
-        showHidden={showHidden}
         isFiltering={isFiltering}
         hasMore={hasMore}
         totalFilteredCount={filteredItems.length}
@@ -200,6 +196,7 @@ export function FamilyShelfPage({
         canBorrow={!!apiClient && !!familyId}
         onBorrow={(book) => void handleBorrowClick(book)}
         onToggleHidden={toggleHidden}
+        isHidden={isHidden}
         isFavorite={isFavorite}
         onToggleFavorite={toggleFavorite}
         onLoadMore={loadMore}

@@ -25,6 +25,17 @@ function toggleFavorite(title: string, label: string) {
   fireEvent.click(within(card).getByRole("button", { name: label }));
 }
 
+/** Opens the overflow menu on the given book's card and returns the hide/unhide menuitem's label. */
+function hideMenuLabelOf(title: string): string {
+  const card = cardOf(title);
+  fireEvent.click(within(card).getByRole("button", { name: "更多選項" }));
+  const item = screen
+    .getAllByRole("menuitem")
+    .find((el) => el.textContent === "隱藏書籍" || el.textContent === "取消隱藏");
+  if (!item) throw new Error(`hide menuitem not found for ${title}`);
+  return item.textContent as string;
+}
+
 /** Switches the member dropdown to the cross-everyone favorites view. */
 function enterFavoriteView() {
   fireEvent.change(screen.getByLabelText("篩選成員"), {
@@ -194,6 +205,50 @@ describe("FamilyShelf — favorite feature", () => {
     // Even though hidden, the favorited b1 shows in the favorites view.
     expect(screen.getByText("書一")).toBeInTheDocument();
     expect(screen.queryByText("書二")).not.toBeInTheDocument();
+  });
+
+  it("(W2) shows 取消隱藏 for a hidden+favorited card in the favorites view, per-book", async () => {
+    // b1 is BOTH hidden AND favorited. In the favorites view its overflow menu
+    // must reflect its per-book hidden state (取消隱藏), not the view-level flag.
+    const apiClient = createMockApiClient({
+      ...aliceTwoBooks(),
+      hidden: ["user-2:b1"],
+      favorites: ["user-2:b1"],
+    });
+    renderShelf(apiClient);
+
+    await waitFor(() => {
+      expect(screen.getByText("書二")).toBeInTheDocument();
+    });
+
+    enterFavoriteView();
+
+    await waitFor(() => {
+      expect(screen.getByText("書一")).toBeInTheDocument();
+    });
+    // The favorites view is not the hidden view, yet the card is hidden per-book,
+    // so the label must be 取消隱藏.
+    expect(hideMenuLabelOf("書一")).toBe("取消隱藏");
+  });
+
+  it("(W2) shows 隱藏書籍 for a favorited-but-not-hidden card in the favorites view", async () => {
+    // b1 is favorited but NOT hidden → the hide label stays 隱藏書籍.
+    const apiClient = createMockApiClient({
+      ...aliceTwoBooks(),
+      favorites: ["user-2:b1"],
+    });
+    renderShelf(apiClient);
+
+    await waitFor(() => {
+      expect(screen.getByText("書一")).toBeInTheDocument();
+    });
+
+    enterFavoriteView();
+
+    await waitFor(() => {
+      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
+    });
+    expect(hideMenuLabelOf("書一")).toBe("隱藏書籍");
   });
 
   it("favoriting a book updates the 最愛 heading count in the favorites view", async () => {

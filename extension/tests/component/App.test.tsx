@@ -668,7 +668,11 @@ describe("App", () => {
         expect(screen.getByTestId("onboarding")).toBeInTheDocument();
       });
 
-      expect(onViewChange).toHaveBeenCalledWith("onboarding");
+      // The onViewChange effect can flush a tick after the view renders; wait for
+      // it explicitly so CI parallel load cannot race the bare assertion (PR #60).
+      await waitFor(() => {
+        expect(onViewChange).toHaveBeenCalledWith("onboarding");
+      });
     });
 
     it("reports the main view when familyId and userId exist", async () => {
@@ -680,7 +684,10 @@ describe("App", () => {
         expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
       });
 
-      expect(onViewChange).toHaveBeenCalledWith("main");
+      // Same race guard as the onboarding case: wait for the callback to flush.
+      await waitFor(() => {
+        expect(onViewChange).toHaveBeenCalledWith("main");
+      });
     });
   });
 });
