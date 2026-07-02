@@ -65,7 +65,7 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 | `coder` | production code | `scope`, `requirements`, `files`, `mode` (production/research-only) |
 | `tester` | tests | `scope`, `target`, `scope_intent`, `change_summary` (+ actual diff) |
 | `reviewer` | code review | `scope`, `target`, `business_logic` |
-| `security-auditor` | post-feature security scan | `scope` (full/secrets/deps/code/extension/crypto/api/publish) |
+| `security-auditor` | post-feature security scan | `scope` (full/secrets/deps/code/extension/crypto/api/publish/invariants), `mode` (repo/changed + `base_ref`) — prefer `mode: changed` for a post-feature scan |
 | `designer` | UI mockup or brand/SVG asset | `request`, `context` |
 
 Parallelize across file-disjoint scopes (frontend + backend coders run concurrently); never let two concurrent agents own the same file. Re-review only the files changed by a fix, unless the user asks for a full re-review.
