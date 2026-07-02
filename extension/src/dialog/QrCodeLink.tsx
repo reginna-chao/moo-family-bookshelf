@@ -10,15 +10,6 @@ interface QrCodeLinkProps {
 }
 
 const PATTERN_SIZE = 13;
-const SPIN_KEYFRAME_ID = "qr-link-spin-kf";
-
-// Inject spinner keyframe once per module load (idempotent, SSR-safe).
-if (typeof document !== "undefined" && !document.getElementById(SPIN_KEYFRAME_ID)) {
-  const s = document.createElement("style");
-  s.id = SPIN_KEYFRAME_ID;
-  s.textContent = "@keyframes qrLinkSpin{to{transform:rotate(360deg)}}";
-  document.head.appendChild(s);
-}
 
 const ctaTextStyle: React.CSSProperties = {
   background: "rgba(255,255,255,0.92)", padding: "4px 12px", borderRadius: 6,
@@ -134,6 +125,9 @@ export function QrCodeLink({ syncCode, userId, apiClient }: QrCodeLinkProps) {
 
   return (
     <div style={{ marginBottom: 20 }}>
+      {/* Keyframes rendered in-tree so they resolve inside the shadow root
+          (CSS @keyframes are tree-scoped; head-injected ones don't apply). */}
+      <style>{"@keyframes qrLinkSpin{to{transform:rotate(360deg)}}"}</style>
       <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 6 }}>連結手機</div>
 
       <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>

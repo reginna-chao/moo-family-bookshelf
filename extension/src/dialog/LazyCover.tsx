@@ -11,16 +11,6 @@ export interface LazyCoverProps {
 
 type LoadStatus = "loading" | "loaded" | "error";
 
-const SPINNER_ID = "moo-lazy-cover-spin";
-
-function ensureKeyframe(): void {
-  if (document.getElementById(SPINNER_ID)) return;
-  const style = document.createElement("style");
-  style.id = SPINNER_ID;
-  style.textContent = `@keyframes moo-lazy-spin{to{transform:rotate(360deg)}}`;
-  document.head.appendChild(style);
-}
-
 const spinnerStyle: CSSProperties = {
   position: "absolute",
   top: "50%",
@@ -47,13 +37,18 @@ export const LazyCover = React.memo(function LazyCover({
 
   if (!src) return <>{fallback}</>;
 
-  ensureKeyframe();
-
   if (status === "error") return <>{fallback}</>;
 
   return (
     <div style={{ position: "relative", width, height, ...style }}>
-      {status === "loading" && <div style={spinnerStyle} />}
+      {/* Keyframes rendered in-tree so they resolve inside the shadow root
+          (CSS @keyframes are tree-scoped; head-injected ones don't apply). */}
+      {status === "loading" && (
+        <>
+          <style>{`@keyframes moo-lazy-spin{to{transform:rotate(360deg)}}`}</style>
+          <div style={spinnerStyle} />
+        </>
+      )}
       <img
         src={src}
         alt={alt}

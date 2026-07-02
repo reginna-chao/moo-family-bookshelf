@@ -41,22 +41,9 @@ function BorrowControl({ showBorrowButton, borrowRequestPending, onBorrowClick }
     e.stopPropagation();
     if (!borrowRequestPending && onBorrowClick) onBorrowClick();
   };
+  const className = borrowRequestPending ? "moo-borrow-btn moo-borrow-btn--pending" : "moo-borrow-btn";
   return (
-    <button
-      type="button"
-      disabled={borrowRequestPending}
-      onClick={handleClick}
-      style={{
-        padding: "6px 10px",
-        border: "none",
-        borderRadius: 6,
-        background: borrowRequestPending ? "#e2e8f0" : "#2563eb",
-        color: borrowRequestPending ? "#94a3b8" : "white",
-        fontWeight: 600,
-        fontSize: 12,
-        cursor: borrowRequestPending ? "not-allowed" : "pointer",
-      }}
-    >
+    <button type="button" disabled={borrowRequestPending} onClick={handleClick} className={className}>
       {borrowRequestPending ? "申請中" : "申請借閱"}
     </button>
   );
@@ -71,20 +58,9 @@ export function FilterButton({
   active: boolean;
   onClick: () => void;
 }) {
+  const className = active ? "moo-filter-btn moo-filter-btn--active" : "moo-filter-btn";
   return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "4px 12px",
-        border: active ? "1px solid #2563eb" : "1px solid #e2e8f0",
-        borderRadius: 16,
-        background: active ? "#eff6ff" : "transparent",
-        color: active ? "#2563eb" : "#64748b",
-        fontSize: 13,
-        fontWeight: active ? 600 : 400,
-        cursor: "pointer",
-      }}
-    >
+    <button onClick={onClick} className={className}>
       {label}
     </button>
   );
@@ -108,98 +84,40 @@ export function BookCard({
   const showFavorite = Boolean(onFavoriteToggle);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        borderRadius: 8,
-        background: "#fff",
-        border: "1px solid #f1f5f9",
-        boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-        overflow: "hidden",
-      }}
-    >
-      <a
-        href={book.readmooUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{ display: "block", textDecoration: "none" }}
-      >
-        <div style={{ position: "relative" }}>
-          {/* width/height are only an intrinsic-ratio hint (CLS placeholder); actual size is responsive via the style override below. */}
+    <div className="moo-book-card">
+      <a href={book.readmooUrl} target="_blank" rel="noopener noreferrer" className="moo-book-card__link">
+        <div className="moo-book-card__cover-wrap">
+          {/* width/height are only an intrinsic-ratio hint (CLS placeholder); actual size is
+              responsive via the style override below. LazyCover exposes only a `style` prop
+              (no className), so this one necessary inline style is kept — it mirrors the
+              .moo-book-card__cover class. See report note. */}
           <LazyCover
             src={book.coverUrl}
             alt={book.title}
             width={120}
             height={180}
             style={{ width: "100%", height: "auto", aspectRatio: "3 / 4", borderRadius: 0 }}
-            fallback={<div style={{ width: "100%", aspectRatio: "3 / 4", background: "#f1f5f9" }} />}
+            fallback={<div className="moo-book-card__cover-fallback" />}
           />
           {book.isUpdated === BoolFlag.TRUE && (
-            <span
-              aria-label="新分享書籍"
-              style={{
-                position: "absolute",
-                bottom: 4,
-                left: 4,
-                background: "#dcfce7",
-                color: "#16a34a",
-                fontSize: 12,
-                fontWeight: 600,
-                padding: "1px 6px",
-                borderRadius: 8,
-                lineHeight: "16px",
-              }}
-            >
+            <span aria-label="新分享書籍" className="moo-book-card__updated-badge">
               更新
             </span>
           )}
         </div>
-        <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#1e293b",
-              textAlign: "left",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-              lineHeight: "1.3",
-            }}
-          >
-            {book.title}
-          </span>
-          {book.author && (
-            <span style={{ fontSize: 12, color: "#94a3b8", textAlign: "left" }}>
-              {book.author}
-            </span>
-          )}
-          <span
-            style={{
-              alignSelf: "flex-start",
-              display: "inline-block",
-              fontSize: 12,
-              color: "#2563eb",
-              background: "#eff6ff",
-              padding: "1px 6px",
-              borderRadius: 8,
-            }}
-          >
-            {book.memberName}
-          </span>
+        <div className="moo-book-card__info">
+          <span className="moo-book-card__title">{book.title}</span>
+          {book.author && <span className="moo-book-card__author">{book.author}</span>}
+          <span className="moo-book-card__member">{book.memberName}</span>
         </div>
       </a>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px 8px", marginTop: "auto" }}>
+      <div className="moo-book-card__actions">
         <BorrowControl
           showBorrowButton={showBorrowButton}
           borrowRequestPending={borrowRequestPending}
           onBorrowClick={onBorrowClick}
         />
-        <div style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 2 }}>
+        <div className="moo-book-card__actions-end">
           {showFavorite && onFavoriteToggle && (
             <FavoriteButton isFavorite={isFavorite} onFavoriteToggle={onFavoriteToggle} />
           )}

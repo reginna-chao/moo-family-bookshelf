@@ -28,7 +28,16 @@ export function useDismissableMenu({
     if (!isOpen) return;
 
     function handlePointerDown(e: MouseEvent) {
-      if (isInsideMenu(e.target, triggerRef.current, menuRef.current)) return;
+      // This listener lives on `document`, but the menu may be portaled into an
+      // open shadow root. At the document level `e.target` is retargeted to the
+      // shadow host, so `menu.contains(e.target)` would report a click inside the
+      // menu as "outside" and close it before onClick fires. composedPath()
+      // pierces the shadow boundary and returns the real inner nodes; it also
+      // works identically in light DOM (e.g. BookSortDropdown portaling to body).
+      const path = e.composedPath();
+      const trigger = triggerRef.current;
+      const menu = menuRef.current;
+      if ((trigger && path.includes(trigger)) || (menu && path.includes(menu))) return;
       onCloseRef.current();
     }
     function handleKeyDown(e: KeyboardEvent) {
@@ -52,15 +61,4 @@ export function useDismissableMenu({
     // Refs are stable and onClose is read via onCloseRef; only isOpen should re-subscribe listeners.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
-}
-
-function isInsideMenu(
-  target: EventTarget | null,
-  trigger: HTMLElement | null,
-  menu: HTMLElement | null,
-): boolean {
-  if (!(target instanceof Node)) return false;
-  if (trigger?.contains(target)) return true;
-  if (menu?.contains(target)) return true;
-  return false;
 }

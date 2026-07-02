@@ -247,15 +247,18 @@ function toggleDialog(): void {
     return;
   }
 
-  const existing = document.getElementById(MOO_ELEMENT_IDS.dialog);
-  if (existing) {
-    // Toggle off: tear down the dialog, its backdrop, and ONLY the dialog's
-    // breakpoint watcher. The floating button's watcher must survive so the
-    // button keeps repositioning on later breakpoint changes.
+  // "Already open?" is detected via the light-DOM host: the dialog/backdrop now
+  // live inside the host's shadow tree, so document.getElementById cannot see
+  // them directly.
+  const existingHost = document.getElementById(MOO_ELEMENT_IDS.host);
+  if (existingHost) {
+    // Toggle off: tear down the host (which removes the backdrop + dialog inside
+    // its shadow root) and ONLY the dialog's breakpoint watcher. The floating
+    // button's watcher must survive so the button keeps repositioning on later
+    // breakpoint changes.
     disposeDialogWatcher?.();
     disposeDialogWatcher = null;
-    existing.remove();
-    document.getElementById(MOO_ELEMENT_IDS.backdrop)?.remove();
+    existingHost.remove();
     return;
   }
 
@@ -286,14 +289,22 @@ function toggleDialog(): void {
     "background: rgba(0,0,0,0.4)",
   ].join(";");
 
+  // Light-DOM host owning the Shadow Root. A plain div creates no stacking
+  // context or transform, so the fixed-positioned backdrop/dialog inside still
+  // cover the viewport relative to it. The host is what the toggle-off /
+  // context-invalidation paths remove.
+  const host = document.createElement("div");
+  host.id = MOO_ELEMENT_IDS.host;
+  const shadowRoot = host.attachShadow({ mode: "open" });
+
   // Single close path reused by backdrop click and the mobile close icon.
   // Tears down only the dialog's breakpoint watcher (module-level, so the
   // toggle-off branch can dispose the same one); the button watcher is separate.
+  // Removing the host removes the backdrop + dialog inside its shadow tree.
   const closeDialog = (): void => {
     disposeDialogWatcher?.();
     disposeDialogWatcher = null;
-    dialog.remove();
-    backdrop.remove();
+    host.remove();
   };
   backdrop.addEventListener("click", closeDialog);
 
@@ -307,8 +318,12 @@ function toggleDialog(): void {
   mountPoint.style.cssText = "display:flex;flex-direction:column;flex:1;min-height:0";
   dialog.appendChild(mountPoint);
 
-  document.body.appendChild(backdrop);
-  document.body.appendChild(dialog);
+  // Attach backdrop + dialog INTO the shadow root (isolated from Readmoo CSS),
+  // then attach the host to the page. The scoped stylesheet is injected into
+  // this same shadow root by mountDialog (via container.getRootNode()).
+  shadowRoot.appendChild(backdrop);
+  shadowRoot.appendChild(dialog);
+  document.body.appendChild(host);
 
   // Track the latest breakpoint + view so a change to either re-applies the full
   // layout. View starts non-main (loading); React reports changes via onViewChange.

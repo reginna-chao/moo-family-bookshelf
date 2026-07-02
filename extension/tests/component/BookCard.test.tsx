@@ -51,13 +51,14 @@ describe("BookCard", () => {
     expect(link.target).toBe("_blank");
   });
 
-  it("title has ellipsis-related styles for 2-line clamp", () => {
+  it("title carries the scoped title class (2-line clamp lives in styles.css)", () => {
+    // After the Shadow DOM + scoped-CSS conversion the clamp/ellipsis rules moved
+    // out of inline styles into `.moo-book-card__title` in styles.css. jsdom does
+    // not apply stylesheet rules, so the observable contract is now the class.
     render(<BookCard book={makeBook()} />);
 
-    const titleLink = screen.getByText("測試書籍") as HTMLElement;
-    expect(titleLink.style.overflow).toBe("hidden");
-    expect(titleLink.style.textOverflow).toBe("ellipsis");
-    expect(titleLink.style.webkitLineClamp).toBe("2");
+    const title = screen.getByText("測試書籍") as HTMLElement;
+    expect(title).toHaveClass("moo-book-card__title");
   });
 
   it("renders author when present", () => {
@@ -69,12 +70,16 @@ describe("BookCard", () => {
   it("does not render author span when author is empty", () => {
     const { container } = render(<BookCard book={makeBook({ author: "" })} />);
 
-    // The author span has fontSize 12 and color #94a3b8
-    const spans = container.querySelectorAll("span");
-    const authorSpans = Array.from(spans).filter(
-      (s) => s.style.fontSize === "12px" && s.style.color === "rgb(148, 163, 184)",
-    );
-    expect(authorSpans).toHaveLength(0);
+    // The author is rendered in a span carrying `.moo-book-card__author`.
+    expect(container.querySelector(".moo-book-card__author")).toBeNull();
+  });
+
+  it("renders the author in a span carrying the scoped author class when present", () => {
+    render(<BookCard book={makeBook({ author: "作者A" })} />);
+
+    const author = screen.getByText("作者A");
+    expect(author.tagName).toBe("SPAN");
+    expect(author).toHaveClass("moo-book-card__author");
   });
 
   it("renders member name badge", () => {
@@ -85,13 +90,27 @@ describe("BookCard", () => {
     expect(badge.tagName).toBe("SPAN");
   });
 
-  it("member name badge has blue styling", () => {
+  it("member name badge carries the scoped member class (blue styling in styles.css)", () => {
     render(<BookCard book={makeBook({ memberName: "小明" })} />);
 
     const badge = screen.getByText("小明");
-    expect(badge.style.color).toBe("rgb(37, 99, 235)");
-    expect(badge.style.background).toBe("rgb(239, 246, 255)");
-    expect(badge.style.borderRadius).toBe("8px");
+    expect(badge).toHaveClass("moo-book-card__member");
+  });
+
+  it("renders the 更新 badge when isUpdated is TRUE", () => {
+    render(<BookCard book={makeBook({ isUpdated: BoolFlag.TRUE })} />);
+
+    const badge = screen.getByLabelText("新分享書籍");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent("更新");
+    expect(badge).toHaveClass("moo-book-card__updated-badge");
+  });
+
+  it("does not render the 更新 badge when isUpdated is FALSE", () => {
+    render(<BookCard book={makeBook({ isUpdated: BoolFlag.FALSE })} />);
+
+    expect(screen.queryByLabelText("新分享書籍")).not.toBeInTheDocument();
+    expect(screen.queryByText("更新")).not.toBeInTheDocument();
   });
 
   it("renders with a long title without error", () => {
@@ -237,22 +256,23 @@ describe("FilterButton", () => {
     expect(onClick).toHaveBeenCalledOnce();
   });
 
-  it("has active styling when active is true", () => {
+  it("adds the --active modifier class when active is true", () => {
+    // The active/inactive visual difference moved from inline styles to the
+    // `.moo-filter-btn--active` modifier class (styles.css). The modifier class
+    // is the observable behavioural contract in jsdom.
     render(<FilterButton label="已開放" active={true} onClick={() => {}} />);
 
     const btn = screen.getByText("已開放");
-    expect(btn.style.color).toBe("rgb(37, 99, 235)");
-    expect(btn.style.fontWeight).toBe("600");
-    expect(btn.style.background).toBe("rgb(239, 246, 255)");
+    expect(btn).toHaveClass("moo-filter-btn");
+    expect(btn).toHaveClass("moo-filter-btn--active");
   });
 
-  it("has inactive styling when active is false", () => {
+  it("omits the --active modifier class when active is false", () => {
     render(<FilterButton label="已開放" active={false} onClick={() => {}} />);
 
     const btn = screen.getByText("已開放");
-    expect(btn.style.color).toBe("rgb(100, 116, 139)");
-    expect(btn.style.fontWeight).toBe("400");
-    expect(btn.style.background).toBe("transparent");
+    expect(btn).toHaveClass("moo-filter-btn");
+    expect(btn).not.toHaveClass("moo-filter-btn--active");
   });
 
   it("renders as a button element", () => {

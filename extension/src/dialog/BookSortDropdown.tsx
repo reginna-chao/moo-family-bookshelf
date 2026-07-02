@@ -5,6 +5,7 @@ import type { BookSortMode } from "./sortBooks";
 import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
 import { useDismissableMenu } from "../hooks/useDismissableMenu";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { usePortalContainer } from "./PortalContainerContext";
 
 export interface BookSortDropdownProps {
   value: BookSortMode;
@@ -38,10 +39,11 @@ function optionBackground(selected: boolean, active: boolean): string {
 
 /**
  * Custom sort dropdown (Extension): an icon trigger that opens a portaled
- * listbox of sort modes. The panel is portaled to `document.body` and positioned
- * with `position: fixed` so the Dialog's `overflow: hidden` cannot clip it.
- * Closes on outside click, Escape, scroll, or resize — all listeners attached
- * only while open and removed on cleanup.
+ * listbox of sort modes. The panel is portaled into the dialog's portal
+ * container (the Shadow Root in production, `document.body` on the dev page) and
+ * positioned with `position: fixed` so the Dialog's `overflow: hidden` cannot
+ * clip it. Closes on outside click, Escape, scroll, or resize — all listeners
+ * attached only while open and removed on cleanup.
  */
 export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   const [open, setOpen] = useState(false);
@@ -53,6 +55,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   // to the trigger only after a real open→close — never on the initial mount.
   const wasOpenRef = useRef(false);
   const isMobile = useIsMobile();
+  const portalContainer = usePortalContainer();
   const triggerSize = isMobile ? 32 : 40;
   const isActive = value !== "default";
   const { position, place, reset } = useAnchoredPosition();
@@ -210,7 +213,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
               );
             })}
           </div>,
-          document.body,
+          portalContainer,
         )}
     </div>
   );

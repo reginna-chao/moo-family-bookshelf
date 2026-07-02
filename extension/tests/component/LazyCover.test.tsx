@@ -1,11 +1,15 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { LazyCover } from "@/dialog/LazyCover";
 
-const SPINNER_STYLE_ID = "moo-lazy-cover-spin";
+const SPIN_KEYFRAME = "@keyframes moo-lazy-spin";
 
-function removeInjectedKeyframe(): void {
-  document.getElementById(SPINNER_STYLE_ID)?.remove();
+/** Find the in-tree <style> that defines the spinner keyframes, if present. */
+function keyframeStyleIn(container: HTMLElement): HTMLStyleElement | null {
+  const match = Array.from(container.querySelectorAll("style")).find((el) =>
+    el.textContent?.includes(SPIN_KEYFRAME),
+  );
+  return match ?? null;
 }
 
 function fallbackDiv() {
@@ -13,10 +17,6 @@ function fallbackDiv() {
 }
 
 describe("LazyCover", () => {
-  afterEach(() => {
-    removeInjectedKeyframe();
-  });
-
   describe("empty src", () => {
     it("renders fallback directly when src is empty string", () => {
       render(
@@ -126,8 +126,25 @@ describe("LazyCover", () => {
     });
   });
 
-  describe("keyframe injection", () => {
-    it("injects keyframe style element into document head", () => {
+  describe("keyframe rendering", () => {
+    // Keyframes are rendered as an in-tree <style> (so they resolve inside the
+    // shadow root) rather than injected into document.head. They exist only while
+    // the spinner is visible (status === "loading").
+    it("renders the spinner keyframes as an in-tree style while loading", () => {
+      const { container } = render(
+        <LazyCover
+          src="https://example.com/cover.jpg"
+          alt="book"
+          width={40}
+          height={60}
+          fallback={fallbackDiv()}
+        />,
+      );
+
+      expect(keyframeStyleIn(container)).not.toBeNull();
+    });
+
+    it("does not inject the keyframes into document.head", () => {
       render(
         <LazyCover
           src="https://example.com/cover.jpg"
@@ -138,19 +155,27 @@ describe("LazyCover", () => {
         />,
       );
 
-      expect(document.getElementById(SPINNER_STYLE_ID)).not.toBeNull();
+      const headStyles = Array.from(document.head.querySelectorAll("style")).filter(
+        (el) => el.textContent?.includes(SPIN_KEYFRAME),
+      );
+      expect(headStyles).toHaveLength(0);
     });
 
-    it("injects only one style element for multiple instances", () => {
-      render(
-        <>
-          <LazyCover src="https://a.com/1.jpg" alt="a" width={40} height={60} fallback={fallbackDiv()} />
-          <LazyCover src="https://b.com/2.jpg" alt="b" width={40} height={60} fallback={fallbackDiv()} />
-        </>,
+    it("removes the keyframe style once the image has loaded", () => {
+      const { container } = render(
+        <LazyCover
+          src="https://example.com/cover.jpg"
+          alt="book"
+          width={40}
+          height={60}
+          fallback={fallbackDiv()}
+        />,
       );
+      expect(keyframeStyleIn(container)).not.toBeNull();
 
-      const styles = document.querySelectorAll(`#${SPINNER_STYLE_ID}`);
-      expect(styles).toHaveLength(1);
+      fireEvent.load(screen.getByRole("img"));
+
+      expect(keyframeStyleIn(container)).toBeNull();
     });
   });
 });

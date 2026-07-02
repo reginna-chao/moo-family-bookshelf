@@ -4,6 +4,7 @@ import { MoreHorizontal } from "lucide-react";
 import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
 import { useDismissableMenu } from "../hooks/useDismissableMenu";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { usePortalContainer } from "./PortalContainerContext";
 
 export interface OverflowMenuItem {
   label: string;
@@ -36,10 +37,12 @@ const MENU_Z_INDEX = 100001;
 /**
  * Reusable "⋯" (horizontal meatballs) overflow menu (Extension).
  *
- * The panel is portaled to `document.body` and positioned with `position: fixed`
- * from the trigger's bounding rect, so the Dialog's `overflow: hidden` cannot
- * clip it. Closes on outside click, Escape, item select, scroll, or resize. All
- * listeners are attached only while open and removed on cleanup.
+ * The panel is portaled into the dialog's portal container (the Shadow Root in
+ * production, `document.body` on the dev page) and positioned with
+ * `position: fixed` from the trigger's bounding rect, so the Dialog's
+ * `overflow: hidden` cannot clip it. Closes on outside click, Escape, item
+ * select, scroll, or resize. All listeners are attached only while open and
+ * removed on cleanup.
  */
 export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: OverflowMenuProps) {
   const [open, setOpen] = useState(false);
@@ -47,6 +50,7 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerStyle = triggerStyleFor(tone);
   const isMobile = useIsMobile();
+  const portalContainer = usePortalContainer();
   const triggerSize = isMobile ? 32 : 28;
   const { position, place, reset } = useAnchoredPosition();
 
@@ -148,7 +152,7 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
               </button>
             ))}
           </div>,
-          document.body,
+          portalContainer,
         )}
     </div>
   );
