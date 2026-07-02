@@ -10,6 +10,7 @@ import { borrowRoutes } from "./routes/borrow";
 import { authRoutes } from "./routes/auth";
 import { verifyRoutes } from "./routes/verify";
 import { publicShelfRoutes, publicQueryRoutes } from "./routes/publicShelf";
+import { jsonError } from "./utils/errors";
 import { isDevMode, type Env } from "./utils/env";
 
 export type { Env } from "./utils/env";
@@ -84,30 +85,14 @@ app.use("/api/*", async (c, next) => {
   if (contentLength) {
     const size = parseInt(contentLength, 10);
     if (!Number.isNaN(size) && size > MAX_BODY_SIZE) {
-      return c.json(
-        {
-          error: {
-            code: "PAYLOAD_TOO_LARGE",
-            message: "Request body exceeds 256KB limit",
-          },
-        },
-        413,
-      );
+      return jsonError(c, 413, "PAYLOAD_TOO_LARGE", "Request body exceeds 256KB limit");
     }
   } else if (c.req.method !== "GET" && c.req.method !== "DELETE") {
     // No Content-Length: read body to verify size.
     // Cloudflare edge enforces its own body limit (~100MB) as a backstop.
     const buf = await c.req.raw.clone().arrayBuffer();
     if (buf.byteLength > MAX_BODY_SIZE) {
-      return c.json(
-        {
-          error: {
-            code: "PAYLOAD_TOO_LARGE",
-            message: "Request body exceeds 256KB limit",
-          },
-        },
-        413,
-      );
+      return jsonError(c, 413, "PAYLOAD_TOO_LARGE", "Request body exceeds 256KB limit");
     }
   }
   await next();
@@ -136,7 +121,7 @@ app.get("/api/version", (c) =>
 // Dev-only: OpenAPI spec + Swagger UI
 app.get("/api/_openapi.json", (c) => {
   if (!isDevMode(c.env)) {
-    return c.json({ error: { code: "NOT_FOUND", message: "Route not found" } }, 404);
+    return jsonError(c, 404, "NOT_FOUND", "Route not found");
   }
   const spec = app.getOpenAPI31Document({
     openapi: "3.1.0",
@@ -147,7 +132,7 @@ app.get("/api/_openapi.json", (c) => {
 
 app.get("/api/_docs", async (c) => {
   if (!isDevMode(c.env)) {
-    return c.json({ error: { code: "NOT_FOUND", message: "Route not found" } }, 404);
+    return jsonError(c, 404, "NOT_FOUND", "Route not found");
   }
   const handler = swaggerUI({ url: "/api/_openapi.json" });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -165,17 +150,12 @@ app.route("/api", borrowRoutes);
 app.route("/api", publicQueryRoutes);
 
 // 404 fallback
-app.notFound((c) =>
-  c.json({ error: { code: "NOT_FOUND", message: "Route not found" } }, 404),
-);
+app.notFound((c) => jsonError(c, 404, "NOT_FOUND", "Route not found"));
 
 // Error handler
 app.onError((err, c) => {
   console.error("Unhandled error:", err);
-  return c.json(
-    { error: { code: "INTERNAL_ERROR", message: "Internal server error" } },
-    500,
-  );
+  return jsonError(c, 500, "INTERNAL_ERROR", "Internal server error");
 });
 
 export default app;

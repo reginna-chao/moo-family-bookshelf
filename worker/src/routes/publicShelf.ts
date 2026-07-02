@@ -13,6 +13,7 @@ import {
 import { isValidUserId, isValidRequestId, isValidShareToken, sanitizePublicShelfTitle, isValidExpiresDays } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { defaultHook, jsonRes } from "../utils/openapi";
+import { jsonError, type ErrorBody } from "../utils/errors";
 import { UserIdParam, ShelfIdParam, ShareTokenParam } from "../schemas/common";
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -63,27 +64,16 @@ export async function writePublicSnapshot(
   await kv.put(kvKeys.publicShelf(shelf.shareToken), JSON.stringify(snapshot), opts);
 }
 
-/** Shape of the 401/403 JSON body returned by {@link authGuard}. */
-interface AuthError {
-  error: { code: string; message: string };
-}
-
 function authGuard(
   c: Context<{ Bindings: Env }>,
   userId: string,
-): (Response & TypedResponse<AuthError, 401 | 403, "json">) | null {
+): (Response & TypedResponse<ErrorBody, 401 | 403, "json">) | null {
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
   if (authUserId !== userId) {
-    return c.json(
-      { error: { code: "FORBIDDEN", message: "Cannot access another user's data" } },
-      403,
-    );
+    return jsonError(c, 403, "FORBIDDEN", "Cannot access another user's data");
   }
   return null;
 }
@@ -218,7 +208,7 @@ export const publicShelfRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHoo
 publicShelfRoutes.openapi(getPublicShelvesRoute, async (c) => {
   const userId = c.req.param("id");
   if (!isValidUserId(userId)) {
-    return c.json({ error: { code: "INVALID_USER_ID", message: "userId format is invalid" } }, 400);
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const denied = authGuard(c, userId);
@@ -233,7 +223,7 @@ publicShelfRoutes.openapi(getPublicShelvesRoute, async (c) => {
 publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
   const userId = c.req.param("id");
   if (!isValidUserId(userId)) {
-    return c.json({ error: { code: "INVALID_USER_ID", message: "userId format is invalid" } }, 400);
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const denied = authGuard(c, userId);
@@ -243,26 +233,26 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } }, 400);
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   const title = sanitizePublicShelfTitle(body.title);
   if (title === null) {
-    return c.json({ error: { code: "INVALID_TITLE", message: "Title must be 1–60 characters" } }, 400);
+    return jsonError(c, 400, "INVALID_TITLE", "Title must be 1–60 characters");
   }
   if (!isValidExpiresDays(body.expiresDays)) {
-    return c.json({ error: { code: "INVALID_EXPIRES_DAYS", message: "expiresDays must be 7, 30, 60, 90, or null" } }, 400);
+    return jsonError(c, 400, "INVALID_EXPIRES_DAYS", "expiresDays must be 7, 30, 60, 90, or null");
   }
   const expiresDays = body.expiresDays as number | null;
 
   const record = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
   if (!record) {
-    return c.json({ error: { code: "USER_NOT_FOUND", message: "User books must be synced before creating a public shelf" } }, 400);
+    return jsonError(c, 400, "USER_NOT_FOUND", "User books must be synced before creating a public shelf");
   }
 
   const shelves = record.publicSharing?.shelves ?? [];
   if (shelves.length >= MAX_PUBLIC_SHELVES) {
-    return c.json({ error: { code: "MAX_SHELVES_REACHED", message: `Maximum ${MAX_PUBLIC_SHELVES} public shelf(s) allowed` } }, 409);
+    return jsonError(c, 409, "MAX_SHELVES_REACHED", `Maximum ${MAX_PUBLIC_SHELVES} public shelf(s) allowed`);
   }
 
   const now = Date.now();
@@ -289,10 +279,10 @@ publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
   const shelfId = c.req.param("shelfId");
 
   if (!isValidUserId(userId)) {
-    return c.json({ error: { code: "INVALID_USER_ID", message: "userId format is invalid" } }, 400);
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
   if (!isValidRequestId(shelfId)) {
-    return c.json({ error: { code: "INVALID_SHELF_ID", message: "shelfId format is invalid" } }, 400);
+    return jsonError(c, 400, "INVALID_SHELF_ID", "shelfId format is invalid");
   }
 
   const denied = authGuard(c, userId);
@@ -302,32 +292,32 @@ publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } }, 400);
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   const hasTitle = body.title !== undefined;
   const hasExpires = body.expiresDays !== undefined;
   if (!hasTitle && !hasExpires) {
-    return c.json({ error: { code: "INVALID_PAYLOAD", message: "At least one of title or expiresDays is required" } }, 400);
+    return jsonError(c, 400, "INVALID_PAYLOAD", "At least one of title or expiresDays is required");
   }
 
   let newTitle: string | undefined;
   if (hasTitle) {
     const sanitized = sanitizePublicShelfTitle(body.title);
     if (sanitized === null) {
-      return c.json({ error: { code: "INVALID_TITLE", message: "Title must be 1–60 characters" } }, 400);
+      return jsonError(c, 400, "INVALID_TITLE", "Title must be 1–60 characters");
     }
     newTitle = sanitized;
   }
 
   if (hasExpires && !isValidExpiresDays(body.expiresDays)) {
-    return c.json({ error: { code: "INVALID_EXPIRES_DAYS", message: "expiresDays must be 7, 30, 60, 90, or null" } }, 400);
+    return jsonError(c, 400, "INVALID_EXPIRES_DAYS", "expiresDays must be 7, 30, 60, 90, or null");
   }
   const newExpiresDays = hasExpires ? (body.expiresDays as number | null) : undefined;
 
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
-    return c.json({ error: { code: "SHELF_NOT_FOUND", message: "Public shelf not found" } }, 404);
+    return jsonError(c, 404, "SHELF_NOT_FOUND", "Public shelf not found");
   }
 
   const { record, shelves, idx } = found;
@@ -352,10 +342,10 @@ publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
   const shelfId = c.req.param("shelfId");
 
   if (!isValidUserId(userId)) {
-    return c.json({ error: { code: "INVALID_USER_ID", message: "userId format is invalid" } }, 400);
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
   if (!isValidRequestId(shelfId)) {
-    return c.json({ error: { code: "INVALID_SHELF_ID", message: "shelfId format is invalid" } }, 400);
+    return jsonError(c, 400, "INVALID_SHELF_ID", "shelfId format is invalid");
   }
 
   const denied = authGuard(c, userId);
@@ -363,7 +353,7 @@ publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
 
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
-    return c.json({ error: { code: "SHELF_NOT_FOUND", message: "Public shelf not found" } }, 404);
+    return jsonError(c, 404, "SHELF_NOT_FOUND", "Public shelf not found");
   }
 
   const { record, shelves, idx } = found;
@@ -389,10 +379,10 @@ publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
   const shelfId = c.req.param("shelfId");
 
   if (!isValidUserId(userId)) {
-    return c.json({ error: { code: "INVALID_USER_ID", message: "userId format is invalid" } }, 400);
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
   if (!isValidRequestId(shelfId)) {
-    return c.json({ error: { code: "INVALID_SHELF_ID", message: "shelfId format is invalid" } }, 400);
+    return jsonError(c, 400, "INVALID_SHELF_ID", "shelfId format is invalid");
   }
 
   const denied = authGuard(c, userId);
@@ -400,7 +390,7 @@ publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
 
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
-    return c.json({ error: { code: "SHELF_NOT_FOUND", message: "Public shelf not found" } }, 404);
+    return jsonError(c, 404, "SHELF_NOT_FOUND", "Public shelf not found");
   }
 
   const { record, shelves, idx } = found;
@@ -422,7 +412,7 @@ export const publicQueryRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHoo
 publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
   const shareToken = c.req.param("shareToken");
   if (!isValidShareToken(shareToken)) {
-    return c.json({ error: { code: "INVALID_TOKEN", message: "Invalid share token format" } }, 400);
+    return jsonError(c, 400, "INVALID_TOKEN", "Invalid share token format");
   }
 
   const snapshot = await c.env.KV.get<PublicShelfSnapshot>(
@@ -430,7 +420,7 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
     "json",
   );
   if (!snapshot) {
-    return c.json({ error: { code: "PUBLIC_SHELF_NOT_FOUND", message: "Public shelf not found or expired" } }, 404);
+    return jsonError(c, 404, "PUBLIC_SHELF_NOT_FOUND", "Public shelf not found or expired");
   }
 
   return c.json({

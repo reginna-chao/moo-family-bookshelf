@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import type { Env } from "../utils/env";
 import { kvKeys, type AuthRecord, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isPublicRoute } from "../utils/routes";
+import { jsonError } from "../utils/errors";
 
 // Extend Hono Variables to carry authenticated userId
 declare module "hono" {
@@ -27,37 +28,25 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(
     const authHeader = c.req.header("Authorization");
 
     if (!authHeader) {
-      return c.json(
-        { error: { code: "UNAUTHORIZED", message: "Authorization header required" } },
-        401,
-      );
+      return jsonError(c, 401, "UNAUTHORIZED", "Authorization header required");
     }
 
     const match = authHeader.match(/^Bearer\s+(.+)$/);
     if (!match) {
-      return c.json(
-        { error: { code: "UNAUTHORIZED", message: "Invalid or expired token" } },
-        401,
-      );
+      return jsonError(c, 401, "UNAUTHORIZED", "Invalid or expired token");
     }
 
     const token = match[1];
 
     // Validate token format (64-char hex)
     if (!/^[a-f0-9]{64}$/.test(token)) {
-      return c.json(
-        { error: { code: "UNAUTHORIZED", message: "Invalid or expired token" } },
-        401,
-      );
+      return jsonError(c, 401, "UNAUTHORIZED", "Invalid or expired token");
     }
 
     const userId = await c.env.KV.get(kvKeys.authToken(token));
 
     if (!userId) {
-      return c.json(
-        { error: { code: "UNAUTHORIZED", message: "Invalid or expired token" } },
-        401,
-      );
+      return jsonError(c, 401, "UNAUTHORIZED", "Invalid or expired token");
     }
 
     c.set("authUserId", userId);

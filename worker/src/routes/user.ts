@@ -6,6 +6,7 @@ import { isValidUserId, sanitizeDisplayName, isValidFamilyPrefRef } from "../uti
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
+import { jsonError } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
 
 async function updateAllPublicSnapshots(
@@ -167,24 +168,15 @@ userRoutes.openapi(getUserBooksRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
   if (authUserId !== userId) {
-    return c.json(
-      { error: { code: "FORBIDDEN", message: "Cannot access another user's data" } },
-      403,
-    );
+    return jsonError(c, 403, "FORBIDDEN", "Cannot access another user's data");
   }
 
   const key = kvKeys.user(userId);
@@ -219,24 +211,15 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
   if (authUserId !== userId) {
-    return c.json(
-      { error: { code: "FORBIDDEN", message: "Cannot modify another user's data" } },
-      403,
-    );
+    return jsonError(c, 403, "FORBIDDEN", "Cannot modify another user's data");
   }
 
   // Per-userId write rate limit: max 30 saves per userId per hour.
@@ -255,17 +238,11 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   if (!body || !Array.isArray(body.books)) {
-    return c.json(
-      { error: { code: "INVALID_PAYLOAD", message: "books array is required" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_PAYLOAD", "books array is required");
   }
 
   // Read user record + family membership in parallel (independent reads).
@@ -326,24 +303,15 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
   if (authUserId !== userId) {
-    return c.json(
-      { error: { code: "FORBIDDEN", message: "Cannot modify another user's data" } },
-      403,
-    );
+    return jsonError(c, 403, "FORBIDDEN", "Cannot modify another user's data");
   }
 
   // Per-userId write rate limit: shared scope with PUT (30 writes/hr total).
@@ -360,29 +328,23 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   // --- Validate changes array ---
   if (!body) {
-    return c.json(
-      { error: { code: "INVALID_PAYLOAD", message: "changes array is required" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_PAYLOAD", "changes array is required");
   }
   const parsed = parsePatchChanges(body, MAX_PATCH_CHANGES);
   if (!parsed.ok) {
-    return c.json({ error: { code: parsed.code, message: parsed.message } }, 400);
+    return jsonError(c, 400, parsed.code, parsed.message);
   }
   const { changeMap } = parsed;
 
   // --- Validate optional displayName ---
   const nameCheck = validatePatchDisplayName(body);
   if (!nameCheck.ok) {
-    return c.json({ error: { code: nameCheck.code, message: nameCheck.message } }, 400);
+    return jsonError(c, 400, nameCheck.code, nameCheck.message);
   }
 
   // Read existing record + family membership in parallel
@@ -392,10 +354,7 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   ]);
 
   if (!existing) {
-    return c.json(
-      { error: { code: "NOT_FOUND", message: "User record not found" } },
-      404,
-    );
+    return jsonError(c, 404, "NOT_FOUND", "User record not found");
   }
 
   // Apply changes: update isShared for matching bookIds
@@ -462,24 +421,15 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
   if (authUserId !== userId) {
-    return c.json(
-      { error: { code: "FORBIDDEN", message: "Cannot modify another user's data" } },
-      403,
-    );
+    return jsonError(c, 403, "FORBIDDEN", "Cannot modify another user's data");
   }
 
   // Per-userId write rate limit: max 60 family-prefs saves per userId per hour.
@@ -496,30 +446,21 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
   if (!body) {
-    return c.json(
-      { error: { code: "INVALID_PAYLOAD", message: "hidden array is required" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_PAYLOAD", "hidden array is required");
   }
   const parsed = parseFamilyPrefs(body, MAX_FAMILY_PREF_ENTRIES);
   if (!parsed.ok) {
-    return c.json({ error: { code: parsed.code, message: parsed.message } }, 400);
+    return jsonError(c, 400, parsed.code, parsed.message);
   }
   const { hidden } = parsed;
 
   const existing = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
   if (!existing) {
-    return c.json(
-      { error: { code: "NOT_FOUND", message: "User record not found" } },
-      404,
-    );
+    return jsonError(c, 404, "NOT_FOUND", "User record not found");
   }
 
   // Full-overwrite semantics: the client sends the complete desired hidden set
@@ -559,26 +500,17 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
   const userId = c.req.param("id");
 
   if (!isValidUserId(userId)) {
-    return c.json(
-      { error: { code: "INVALID_USER_ID", message: "userId format is invalid" } },
-      400,
-    );
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   const callerId = getAuthenticatedUserId(c);
 
   if (!callerId) {
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
-      401,
-    );
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
   if (callerId !== userId) {
-    return c.json(
-      { error: { code: "FORBIDDEN", message: "Cannot delete another user's account" } },
-      403,
-    );
+    return jsonError(c, 403, "FORBIDDEN", "Cannot delete another user's account");
   }
 
   // Check family membership
@@ -595,10 +527,7 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
 
       if (record.ownerId === userId) {
         if (record.members.length > 1) {
-          return c.json(
-            { error: { code: "OWNER_CANNOT_DELETE", message: "管理者必須先轉移管理權才能移除帳戶" } },
-            403,
-          );
+          return jsonError(c, 403, "OWNER_CANNOT_DELETE", "管理者必須先轉移管理權才能移除帳戶");
         }
 
         // Single-member owner: delete entire family record
