@@ -21,12 +21,6 @@ export interface FamilyShelfBookListProps {
   onToggleFavorite: (ownerId: string, bookId: string) => void;
 }
 
-const gridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(135px, 1fr))",
-  gap: 12,
-} as const;
-
 /** Renders the family-shelf books in either grid (BookCard) or row layout. */
 export function FamilyShelfBookList({
   books,
@@ -67,7 +61,7 @@ export function FamilyShelfBookList({
   };
 
   return (
-    <div style={viewMode === "grid" ? gridStyle : undefined}>
+    <div className={viewMode === "grid" ? "moo-book-grid" : undefined}>
       {books.map(renderBook)}
     </div>
   );

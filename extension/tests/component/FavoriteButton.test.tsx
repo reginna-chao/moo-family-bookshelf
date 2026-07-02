@@ -24,7 +24,11 @@ describe("FavoriteButton (Extension)", () => {
     // Filled: the svg uses currentColor (red) as fill.
     const svg = btn.querySelector("svg");
     expect(svg?.getAttribute("fill")).toBe("currentColor");
-    expect(btn.style.color).toBe("rgb(239, 68, 68)");
+    // The favorited red (var(--moo-danger-alt)) moved from an inline color to the
+    // `.moo-favorite-btn--active` modifier in styles.css. jsdom does not apply
+    // stylesheet rules, so the modifier class is the observable contract; the
+    // hover shift is now pure CSS `:hover` and is not asserted here.
+    expect(btn).toHaveClass("moo-favorite-btn--active");
   });
 
   it("is a type=button so it never submits an enclosing form", () => {

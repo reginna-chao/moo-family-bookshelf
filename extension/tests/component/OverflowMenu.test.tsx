@@ -292,20 +292,24 @@ describe("OverflowMenu", () => {
   });
 
   describe("responsive sizing", () => {
-    it("renders a 28px trigger on desktop", () => {
+    // The 28px (desktop) / 32px (mobile) trigger sizing moved from inline styles
+    // to `.moo-overflow__trigger` + the `--mobile` modifier in styles.css. jsdom
+    // does not apply stylesheet rules, so the observable contract is the modifier
+    // class presence/absence.
+    it("renders a desktop trigger without the --mobile modifier", () => {
       vi.mocked(useIsMobile).mockReturnValue(false);
       render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
       const trigger = screen.getByRole("button", { name: "更多選項" });
-      expect(trigger.style.width).toBe("28px");
-      expect(trigger.style.height).toBe("28px");
+      expect(trigger).toHaveClass("moo-overflow__trigger");
+      expect(trigger).not.toHaveClass("moo-overflow__trigger--mobile");
     });
 
-    it("renders a 32px trigger on mobile", () => {
+    it("adds the --mobile modifier on the trigger on mobile", () => {
       vi.mocked(useIsMobile).mockReturnValue(true);
       render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
       const trigger = screen.getByRole("button", { name: "更多選項" });
-      expect(trigger.style.width).toBe("32px");
-      expect(trigger.style.height).toBe("32px");
+      expect(trigger).toHaveClass("moo-overflow__trigger");
+      expect(trigger).toHaveClass("moo-overflow__trigger--mobile");
     });
   });
 });

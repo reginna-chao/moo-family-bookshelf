@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 
 export interface FavoriteButtonProps {
   /** Whether the viewer has favorited this copy-scoped card. */
@@ -13,9 +13,11 @@ export interface FavoriteButtonProps {
  *
  * The cards/rows wrap content in an `<a>`, so clicks are stopped from
  * propagating to (and navigating) the link.
+ *
+ * Hover behaviour is CSS-driven (.moo-favorite-btn:hover): not-favorited shifts
+ * grey → red-400 on hover, favorited stays solid red.
  */
 export function FavoriteButton({ isFavorite, onFavoriteToggle }: FavoriteButtonProps) {
-  const [hovered, setHovered] = useState(false);
   const label = isFavorite ? "取消最愛" : "加入最愛";
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -23,12 +25,9 @@ export function FavoriteButton({ isFavorite, onFavoriteToggle }: FavoriteButtonP
     onFavoriteToggle();
   };
 
-  // Inline-style hover (the Extension dialog can't use Tailwind `:hover`):
-  // favorited stays solid red; not-favorited shifts grey → red-400 on hover.
-  const getColor = () => {
-    if (isFavorite) return "#ef4444";
-    return hovered ? "#f87171" : "#94a3b8";
-  };
+  const className = isFavorite
+    ? "moo-favorite-btn moo-favorite-btn--active"
+    : "moo-favorite-btn";
 
   return (
     <button
@@ -37,21 +36,7 @@ export function FavoriteButton({ isFavorite, onFavoriteToggle }: FavoriteButtonP
       aria-pressed={isFavorite}
       title={label}
       onClick={handleClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 28,
-        height: 28,
-        padding: 0,
-        border: "none",
-        borderRadius: 6,
-        background: "transparent",
-        color: getColor(),
-        cursor: "pointer",
-      }}
+      className={className}
     >
       <svg
         width={16}

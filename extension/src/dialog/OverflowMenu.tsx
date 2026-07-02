@@ -19,21 +19,6 @@ export interface OverflowMenuProps {
   tone?: "overlay" | "plain";
 }
 
-interface TriggerStyle {
-  background: string;
-  color: string;
-}
-
-function triggerStyleFor(tone: "overlay" | "plain"): TriggerStyle {
-  if (tone === "plain") {
-    return { background: "transparent", color: "#64748b" };
-  }
-  return { background: "rgba(15, 23, 42, 0.55)", color: "white" };
-}
-
-// Above the Dialog overlay (#moo-family-bookshelf-dialog uses z-index 100000).
-const MENU_Z_INDEX = 100001;
-
 /**
  * Reusable "⋯" (horizontal meatballs) overflow menu (Extension).
  *
@@ -48,11 +33,17 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const triggerStyle = triggerStyleFor(tone);
   const isMobile = useIsMobile();
   const portalContainer = usePortalContainer();
-  const triggerSize = isMobile ? 32 : 28;
   const { position, place, reset } = useAnchoredPosition();
+
+  const triggerClass = [
+    "moo-overflow__trigger",
+    isMobile ? "moo-overflow__trigger--mobile" : "",
+    tone === "plain" ? "moo-overflow__trigger--plain" : "moo-overflow__trigger--overlay",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const setOpenState = (next: boolean) => {
     setOpen(next);
@@ -85,7 +76,7 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
   };
 
   return (
-    <div style={{ position: "relative", display: "inline-flex" }}>
+    <div className="moo-overflow">
       <button
         ref={triggerRef}
         type="button"
@@ -93,19 +84,7 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={handleTriggerClick}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: triggerSize,
-          height: triggerSize,
-          border: "none",
-          borderRadius: 6,
-          background: triggerStyle.background,
-          color: triggerStyle.color,
-          cursor: "pointer",
-          padding: 0,
-        }}
+        className={triggerClass}
       >
         <MoreHorizontal size={16} />
       </button>
@@ -115,18 +94,11 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
             ref={menuRef}
             role="menu"
             aria-label="書籍選項"
+            className="moo-overflow__menu"
             style={{
-              position: "fixed",
               top: position?.top ?? 0,
               left: position?.left ?? 0,
               visibility: position ? "visible" : "hidden",
-              minWidth: 120,
-              background: "white",
-              border: "1px solid #e2e8f0",
-              borderRadius: 8,
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              zIndex: MENU_Z_INDEX,
-              overflow: "hidden",
             }}
           >
             {items.map((item) => (
@@ -135,18 +107,7 @@ export function OverflowMenu({ items, onOpenChange, tone = "overlay" }: Overflow
                 type="button"
                 role="menuitem"
                 onClick={(e) => handleItemClick(e, item)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "none",
-                  background: "transparent",
-                  color: "#334155",
-                  fontSize: 13,
-                  cursor: "pointer",
-                  textAlign: "left",
-                  whiteSpace: "nowrap",
-                }}
+                className="moo-overflow__item"
               >
                 {item.label}
               </button>

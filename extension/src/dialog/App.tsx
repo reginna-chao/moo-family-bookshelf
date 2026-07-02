@@ -26,20 +26,6 @@ import { useIsMobile } from "../hooks/useIsMobile";
 export type View = "loading" | "onboarding" | "main";
 type Tab = "family-shelf" | "personal-shelf" | "borrow" | "settings";
 
-/**
- * Horizontal space (px) reserved at the tab row's right edge on mobile so the
- * content-script close icon (X at top:8px right:8px, 32x32) never overlaps the
- * last tab. 8 (offset) + 32 (icon width) = 40.
- */
-const CLOSE_ICON_RESERVED_PX = 40;
-
-const flexColumnFill: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  flex: 1,
-  minHeight: 0,
-};
-
 interface AppProps {
   /**
    * Notifies the host (content script) of the current top-level view so it can
@@ -183,7 +169,7 @@ export function App({ onViewChange }: AppProps = {}) {
 
   if (view === "onboarding") {
     return (
-      <div style={flexColumnFill}>
+      <div className="moo-app__fill">
         <Onboarding
           onFamilyJoined={handleFamilyJoined}
           apiClient={apiClientRef.current}
@@ -260,108 +246,63 @@ function MainContent({
     { key: "settings", label: "設定" },
   ];
 
-  // Mobile-only tab sizing: tighter buttons + right padding so the content-script
-  // close icon never overlaps the last tab. Desktop values are unchanged.
-  const tabRowPaddingRight = isMobile ? CLOSE_ICON_RESERVED_PX : 0;
-  const tabButtonPadding = isMobile ? "8px 0" : "12px 0";
-  const tabButtonFontSize = isMobile ? 13 : 14;
+  const tabsClass = isMobile ? "moo-tabs moo-tabs--mobile" : "moo-tabs";
 
   return (
-    <div style={flexColumnFill}>
+    <div className="moo-app__fill">
       <VersionWarning apiClient={apiClient} />
-      <nav
-        role="tablist"
-        style={{
-          display: "flex",
-          borderBottom: "1px solid #e2e8f0",
-          alignItems: "center",
-          paddingRight: tabRowPaddingRight,
-        }}
-      >
-        {tabs.map(({ key, label, icon }) => (
-          <button
-            key={key}
-            id={`tab-${key}`}
-            role="tab"
-            aria-selected={activeTab === key}
-            aria-controls={`panel-${key}`}
-            onClick={() => handleTabChange(key)}
-            aria-label={
-              key === "family-shelf" && showRedDot
-                ? "家庭書櫃（有新更新）"
-                : key === "borrow" && incomingPendingCount > 0
-                  ? `借閱（${incomingPendingCount} 個待處理）`
-                  : undefined
-            }
-            style={{
-              flex: 1,
-              padding: tabButtonPadding,
-              border: "none",
-              background: activeTab === key ? "#eff6ff" : "transparent",
-              fontWeight: activeTab === key ? 600 : 400,
-              color: activeTab === key ? "#2563eb" : "#64748b",
-              cursor: "pointer",
-              fontSize: tabButtonFontSize,
-              borderBottom:
-                activeTab === key ? "2px solid #2563eb" : "2px solid transparent",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-            }}
-          >
-            {icon}
-            {label}
-            {key === "family-shelf" && showRedDot && (
-              <span
-                aria-hidden="true"
-                style={{
-                  display: "inline-block",
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: "#ef4444",
-                  marginLeft: 4,
-                  verticalAlign: "middle",
-                }}
-              />
-            )}
-            {key === "borrow" && incomingPendingCount > 0 && (
-              <span
-                aria-hidden="true"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minWidth: 16,
-                  height: 16,
-                  padding: "0 4px",
-                  borderRadius: 8,
-                  background: "#dc2626",
-                  color: "white",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  marginLeft: 4,
-                  lineHeight: 1,
-                }}
-              >
-                {incomingPendingCount}
-              </span>
-            )}
-          </button>
-        ))}
+      <nav role="tablist" className={tabsClass}>
+        {tabs.map(({ key, label, icon }) => {
+          const isActiveTab = activeTab === key;
+          const tabClass = [
+            "moo-tab",
+            isMobile ? "moo-tab--mobile" : "",
+            isActiveTab ? "moo-tab--active" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return (
+            <button
+              key={key}
+              id={`tab-${key}`}
+              role="tab"
+              aria-selected={isActiveTab}
+              aria-controls={`panel-${key}`}
+              onClick={() => handleTabChange(key)}
+              aria-label={
+                key === "family-shelf" && showRedDot
+                  ? "家庭書櫃（有新更新）"
+                  : key === "borrow" && incomingPendingCount > 0
+                    ? `借閱（${incomingPendingCount} 個待處理）`
+                    : undefined
+              }
+              className={tabClass}
+            >
+              {icon}
+              {label}
+              {key === "family-shelf" && showRedDot && (
+                <span aria-hidden="true" className="moo-tab__dot" />
+              )}
+              {key === "borrow" && incomingPendingCount > 0 && (
+                <span aria-hidden="true" className="moo-tab__count">
+                  {incomingPendingCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </nav>
-      <div style={{ padding: 16, overflowY: "auto", flex: 1, minHeight: 0 }}>
-        <div id="panel-family-shelf" role="tabpanel" aria-labelledby="tab-family-shelf" style={{ display: activeTab === "family-shelf" ? "block" : "none" }}>
+      <div className="moo-tab-panels">
+        <div id="panel-family-shelf" role="tabpanel" aria-labelledby="tab-family-shelf" className={panelClass(activeTab === "family-shelf")}>
           {mountedTabs.has("family-shelf") && <FamilyShelf userId={userId} />}
         </div>
-        <div id="panel-personal-shelf" role="tabpanel" aria-labelledby="tab-personal-shelf" style={{ display: activeTab === "personal-shelf" ? "block" : "none" }}>
+        <div id="panel-personal-shelf" role="tabpanel" aria-labelledby="tab-personal-shelf" className={panelClass(activeTab === "personal-shelf")}>
           {mountedTabs.has("personal-shelf") && <PersonalShelf userId={userId} apiClient={apiClient} />}
         </div>
-        <div id="panel-borrow" role="tabpanel" aria-labelledby="tab-borrow" style={{ display: activeTab === "borrow" ? "block" : "none" }}>
+        <div id="panel-borrow" role="tabpanel" aria-labelledby="tab-borrow" className={panelClass(activeTab === "borrow")}>
           {mountedTabs.has("borrow") && <BorrowTab userId={userId} apiClient={apiClient} />}
         </div>
-        <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" style={{ display: activeTab === "settings" ? "block" : "none" }}>
+        <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" className={panelClass(activeTab === "settings")}>
           {mountedTabs.has("settings") && (
             <FamilySettings
               familyId={familyId}
@@ -375,5 +316,10 @@ function MainContent({
       <DialogFooter />
     </div>
   );
+}
+
+/** Class for a tab panel; only the active panel is displayed. */
+function panelClass(active: boolean): string {
+  return active ? "moo-tab-panel moo-tab-panel--active" : "moo-tab-panel";
 }
 

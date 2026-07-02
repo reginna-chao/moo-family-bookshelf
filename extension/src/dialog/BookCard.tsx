@@ -87,16 +87,14 @@ export function BookCard({
     <div className="moo-book-card">
       <a href={book.readmooUrl} target="_blank" rel="noopener noreferrer" className="moo-book-card__link">
         <div className="moo-book-card__cover-wrap">
-          {/* width/height are only an intrinsic-ratio hint (CLS placeholder); actual size is
-              responsive via the style override below. LazyCover exposes only a `style` prop
-              (no className), so this one necessary inline style is kept — it mirrors the
-              .moo-book-card__cover class. See report note. */}
+          {/* width/height are only an intrinsic-ratio hint (CLS placeholder); actual
+              responsive sizing lives in the .moo-book-card__cover class. */}
           <LazyCover
             src={book.coverUrl}
             alt={book.title}
             width={120}
             height={180}
-            style={{ width: "100%", height: "auto", aspectRatio: "3 / 4", borderRadius: 0 }}
+            className="moo-book-card__cover"
             fallback={<div className="moo-book-card__cover-fallback" />}
           />
           {book.isUpdated === BoolFlag.TRUE && (

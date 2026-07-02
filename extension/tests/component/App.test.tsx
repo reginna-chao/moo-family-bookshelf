@@ -298,9 +298,12 @@ describe("App", () => {
       expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
     });
 
-    // The family-shelf tab should be active (default after leave + re-join)
-    const familyShelfButton = screen.getByText("家庭書櫃");
-    expect(familyShelfButton).toHaveStyle({ fontWeight: 600 });
+    // The family-shelf tab should be active (default after leave + re-join).
+    // The active-tab styling moved from an inline fontWeight:600 to the
+    // `.moo-tab--active` modifier in styles.css; jsdom does not apply stylesheet
+    // rules, so the modifier class is the observable contract.
+    const familyShelfButton = screen.getByRole("tab", { name: "家庭書櫃" });
+    expect(familyShelfButton).toHaveClass("moo-tab--active");
   });
 
   it("resets to onboarding when apiClient.onFamilyRemoved is called", async () => {
@@ -548,10 +551,19 @@ describe("App", () => {
       fireEvent.click(screen.getByText("個人書櫃"));
       fireEvent.click(screen.getByText("家庭書櫃"));
 
-      // The personal-shelf panel wrapper is hidden (display:none) while inactive.
+      // The personal-shelf panel wrapper stays mounted but hidden while inactive.
+      // The show/hide moved from an inline `display` toggle to the
+      // `.moo-tab-panel--active` modifier (base `.moo-tab-panel` is display:none
+      // in styles.css). jsdom does not apply stylesheet rules, so the observable
+      // contract is: inactive panels carry the base class WITHOUT the --active
+      // modifier, while the active family-shelf panel has --active.
       const personalPanel = document.getElementById("panel-personal-shelf");
       expect(personalPanel).not.toBeNull();
-      expect(personalPanel!.style.display).toBe("none");
+      expect(personalPanel!).toHaveClass("moo-tab-panel");
+      expect(personalPanel!).not.toHaveClass("moo-tab-panel--active");
+
+      const familyPanel = document.getElementById("panel-family-shelf");
+      expect(familyPanel!).toHaveClass("moo-tab-panel--active");
     });
   });
 
@@ -574,11 +586,17 @@ describe("App", () => {
         expect(screen.getByRole("tablist")).toBeInTheDocument();
       });
 
+      // Desktop tab-row sizing (no right reserve, 12px/14px tabs) lives on the
+      // base `.moo-tabs` / `.moo-tab` classes in styles.css; the mobile overrides
+      // are `--mobile` modifiers. jsdom does not apply stylesheet rules, so the
+      // observable contract is the ABSENCE of the mobile modifiers on desktop.
       const nav = screen.getByRole("tablist");
-      expect(nav.style.paddingRight).toBe("0px");
+      expect(nav).toHaveClass("moo-tabs");
+      expect(nav).not.toHaveClass("moo-tabs--mobile");
 
       const settingsTab = screen.getByRole("tab", { name: "設定" });
-      expect(settingsTab).toHaveStyle({ padding: "12px 0", fontSize: "14px" });
+      expect(settingsTab).toHaveClass("moo-tab");
+      expect(settingsTab).not.toHaveClass("moo-tab--mobile");
     });
 
     it("reserves space for the close icon and tightens tabs on mobile", async () => {
@@ -607,16 +625,26 @@ describe("App", () => {
         expect(screen.getByRole("tablist")).toBeInTheDocument();
       });
 
+      // Mobile adds the `--mobile` modifiers: `.moo-tabs--mobile` reserves the
+      // 40px close-icon gutter and `.moo-tab--mobile` tightens the tabs (8px/13px)
+      // in styles.css. jsdom does not apply stylesheet rules, so the observable
+      // contract is the PRESENCE of those modifiers.
       const nav = screen.getByRole("tablist");
-      expect(nav.style.paddingRight).toBe("40px");
+      expect(nav).toHaveClass("moo-tabs");
+      expect(nav).toHaveClass("moo-tabs--mobile");
 
       const settingsTab = screen.getByRole("tab", { name: "設定" });
-      expect(settingsTab).toHaveStyle({ padding: "8px 0", fontSize: "13px" });
+      expect(settingsTab).toHaveClass("moo-tab");
+      expect(settingsTab).toHaveClass("moo-tab--mobile");
     });
   });
 
   describe("layout styles", () => {
-    it("onboarding wrapper has flex column layout", async () => {
+    // The flex-column fill layout moved from inline styles to the `.moo-app__fill`
+    // class and the scrolling content area to `.moo-tab-panels` in styles.css.
+    // jsdom does not apply stylesheet rules, so the class is the observable
+    // contract for these layout wrappers.
+    it("onboarding wrapper carries the flex-fill layout class", async () => {
       setupChromeMessages({ familyId: null, userId: null });
       render(<App />);
       await waitFor(() => {
@@ -624,13 +652,10 @@ describe("App", () => {
       });
 
       const wrapper = screen.getByTestId("onboarding").parentElement!;
-      expect(wrapper).toHaveStyle({
-        display: "flex",
-        flexDirection: "column",
-      });
+      expect(wrapper).toHaveClass("moo-app__fill");
     });
 
-    it("main view wrapper has flex column layout", async () => {
+    it("main view wrapper carries the flex-fill layout class", async () => {
       setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
       render(<App />);
       await waitFor(() => {
@@ -638,22 +663,23 @@ describe("App", () => {
       });
 
       const wrapper = screen.getByRole("tablist").parentElement!;
-      expect(wrapper).toHaveStyle({
-        display: "flex",
-        flexDirection: "column",
-      });
+      expect(wrapper).toHaveClass("moo-app__fill");
     });
 
-    it("content area uses flex growth instead of fixed max-height", async () => {
+    it("content area uses the flex-growth tab-panels class (no fixed max-height)", async () => {
       setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
       render(<App />);
       await waitFor(() => {
         expect(screen.getByTestId("family-shelf")).toBeInTheDocument();
       });
 
+      // The scrolling container's overflow-y:auto + flex growth (replacing the old
+      // fixed max-height) live on `.moo-tab-panels` in styles.css. The panel wraps
+      // FamilyShelf, and the tab-panels container wraps the panel.
       const panelDiv = screen.getByTestId("family-shelf").parentElement!;
       const contentArea = panelDiv.parentElement!;
-      expect(contentArea.style.overflowY).toBe("auto");
+      expect(contentArea).toHaveClass("moo-tab-panels");
+      // No inline max-height remains (the fixed-height layout is gone).
       expect(contentArea.style.maxHeight).toBe("");
     });
   });

@@ -5,10 +5,44 @@
  * PostCSS/Tailwind never processes it, guaranteeing the bytes shipped match the
  * bytes written here.
  *
- * Pilot scope (v1): the base reset below plus only the classes BookCard.tsx
- * uses. Other dialog components keep their inline styles and render fine inside
- * the shadow root.
+ * Conversion status: BookCard (pilot) + Batch 1 dialog components. Components
+ * outside Batch 1 (PersonalShelf, BorrowTab, FamilySettings, Onboarding, …)
+ * keep their inline styles and render fine inside the shadow root.
+ *
+ * Sections are ordered: tokens → base reset → keyframes → components (in the
+ * order they were converted).
  */
+
+/*
+ * Design tokens. Declared on both :host (production shadow root) and :root (dev
+ * page, where styles.css is injected into document.head — see main.tsx). Values
+ * are the recurring literals harvested from the inline styles being converted;
+ * every var(--moo-*) below equals the exact byte it replaced, so retrofitting is
+ * visually identical.
+ */
+:host,
+:root {
+  --moo-primary: #2563eb; /* accent blue: active tabs, links, primary buttons */
+  --moo-primary-bg: #eff6ff; /* pale blue fill behind active/selected controls */
+  --moo-text: #1e293b; /* default body text (slate-800) */
+  --moo-text-strong: #334155; /* menu items / overlay body (slate-700) */
+  --moo-text-muted: #64748b; /* secondary text, inactive tabs (slate-500) */
+  --moo-text-faint: #94a3b8; /* tertiary text, placeholders, counts (slate-400) */
+  --moo-text-fainter: #cbd5e1; /* hint text (slate-300) */
+  --moo-border: #e2e8f0; /* default control/divider border (slate-200) */
+  --moo-surface: #fff; /* card / menu surfaces */
+  --moo-surface-alt: #f1f5f9; /* subtle fills, fallbacks (slate-100) */
+  --moo-danger: #dc2626; /* destructive / count badge (red-600) */
+  --moo-danger-alt: #ef4444; /* error text, red dot (red-500) */
+  --moo-favorite-hover: #f87171; /* heart hover (red-400) */
+  --moo-success: #16a34a; /* "更新" badge text (green-600) */
+  --moo-success-bg: #dcfce7; /* "更新" badge fill (green-100) */
+  --moo-warn-bg: #fffbeb; /* warning banner fill (amber-50) */
+  --moo-warn-border: #f59e0b; /* warning banner border (amber-500) */
+  --moo-warn-border-soft: #fde68a; /* softer warning border (amber-200) */
+  --moo-warn-text: #92400e; /* warning banner text (amber-800) */
+  --moo-warn-link: #d97706; /* warning banner link (amber-600) */
+}
 
 /*
  * Base reset scoped to the shadow tree. Readmoo's page styles cannot cross the
@@ -18,7 +52,7 @@
  */
 :host {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-  color: #1e293b;
+  color: var(--moo-text);
   line-height: normal;
 }
 
@@ -28,6 +62,72 @@
   box-sizing: border-box;
 }
 
+/* ── Keyframes ────────────────────────────────────────────────────────── */
+
+@keyframes moo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes moo-lazy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Form select ──────────────────────────────────────────────────────── */
+/* Shadow-scoped chevron for <select class="moo-form-select">; replaces the
+   retired light-DOM assets/style.css rule (dialog now lives in a shadow root). */
+
+.moo-form-select {
+  --moo-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: var(--moo-form-select-bg-img);
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px 12px;
+}
+
+/* ── Spin ─────────────────────────────────────────────────────────────── */
+/* 1s cadence for .moo-spin (PersonalShelf syncing icon); the __spinner
+   classes elsewhere use 0.8s — kept intentionally separate. */
+
+.moo-spin {
+  animation: moo-spin 1s linear infinite;
+}
+
+/* ── LazyCover ────────────────────────────────────────────────────────── */
+
+.moo-lazy-cover {
+  position: relative;
+}
+
+.moo-lazy-cover__spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin-top: -10px;
+  margin-left: -10px;
+  border: 2px solid var(--moo-border);
+  border-top-color: var(--moo-primary);
+  border-radius: 50%;
+  animation: moo-lazy-spin 0.8s linear infinite;
+}
+
+.moo-lazy-cover__img {
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.2s ease-in;
+}
+
+.moo-lazy-cover__img--loaded {
+  opacity: 1;
+}
+
 /* ── BookCard ─────────────────────────────────────────────────────────── */
 
 .moo-book-card {
@@ -35,8 +135,8 @@
   flex-direction: column;
   height: 100%;
   border-radius: 8px;
-  background: #fff;
-  border: 1px solid #f1f5f9;
+  background: var(--moo-surface);
+  border: 1px solid var(--moo-surface-alt);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   overflow: hidden;
 }
@@ -50,25 +150,26 @@
   position: relative;
 }
 
-/*
- * The cover <img> sizing lives inline on <LazyCover> (it exposes only a `style`
- * prop, no className), so there is deliberately no `.moo-book-card__cover` rule
- * here — the inline style is: width:100%; height:auto; aspect-ratio:3/4;
- * border-radius:0.
- */
+/* Responsive cover sizing, applied to <LazyCover> via its className prop. */
+.moo-book-card__cover {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  border-radius: 0;
+}
 
 .moo-book-card__cover-fallback {
   width: 100%;
   aspect-ratio: 3 / 4;
-  background: #f1f5f9;
+  background: var(--moo-surface-alt);
 }
 
 .moo-book-card__updated-badge {
   position: absolute;
   bottom: 4px;
   left: 4px;
-  background: #dcfce7;
-  color: #16a34a;
+  background: var(--moo-success-bg);
+  color: var(--moo-success);
   font-size: 12px;
   font-weight: 600;
   padding: 1px 6px;
@@ -86,7 +187,7 @@
 .moo-book-card__title {
   font-size: 13px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--moo-text);
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -98,7 +199,7 @@
 
 .moo-book-card__author {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--moo-text-faint);
   text-align: left;
 }
 
@@ -106,8 +207,8 @@
   align-self: flex-start;
   display: inline-block;
   font-size: 12px;
-  color: #2563eb;
-  background: #eff6ff;
+  color: var(--moo-primary);
+  background: var(--moo-primary-bg);
   padding: 1px 6px;
   border-radius: 8px;
 }
@@ -133,7 +234,7 @@
   padding: 6px 10px;
   border: none;
   border-radius: 6px;
-  background: #2563eb;
+  background: var(--moo-primary);
   color: white;
   font-weight: 600;
   font-size: 12px;
@@ -141,8 +242,8 @@
 }
 
 .moo-borrow-btn--pending {
-  background: #e2e8f0;
-  color: #94a3b8;
+  background: var(--moo-border);
+  color: var(--moo-text-faint);
   cursor: not-allowed;
 }
 
@@ -150,18 +251,762 @@
 
 .moo-filter-btn {
   padding: 4px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--moo-border);
   border-radius: 16px;
   background: transparent;
-  color: #64748b;
+  color: var(--moo-text-muted);
   font-size: 13px;
   font-weight: 400;
   cursor: pointer;
 }
 
 .moo-filter-btn--active {
-  border: 1px solid #2563eb;
-  background: #eff6ff;
-  color: #2563eb;
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
   font-weight: 600;
+}
+
+/* ── App (main view: layout, tab row) ─────────────────────────────────── */
+
+.moo-app__fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.moo-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--moo-border);
+  align-items: center;
+}
+
+/*
+ * Mobile reserves 40px at the right edge (8px offset + 32px close icon) so the
+ * content-script close icon never overlaps the last tab. Desktop has no reserve.
+ */
+.moo-tabs--mobile {
+  padding-right: 40px;
+}
+
+.moo-tab {
+  flex: 1;
+  padding: 12px 0;
+  border: none;
+  background: transparent;
+  font-weight: 400;
+  color: var(--moo-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.moo-tab--mobile {
+  padding: 8px 0;
+  font-size: 13px;
+}
+
+.moo-tab--active {
+  background: var(--moo-primary-bg);
+  font-weight: 600;
+  color: var(--moo-primary);
+  border-bottom: 2px solid var(--moo-primary);
+}
+
+.moo-tab__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--moo-danger-alt);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.moo-tab__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--moo-danger);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 4px;
+  line-height: 1;
+}
+
+.moo-tab-panels {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.moo-tab-panel {
+  display: none;
+}
+
+.moo-tab-panel--active {
+  display: block;
+}
+
+/* ── FamilyShelf ──────────────────────────────────────────────────────── */
+
+.moo-prefs-sync-notice {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--moo-warn-border-soft);
+  background: var(--moo-warn-bg);
+  color: var(--moo-warn-text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.moo-load-more {
+  width: 100%;
+  padding: 10px 0;
+  margin-top: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ── FamilyShelfToolbar ───────────────────────────────────────────────── */
+
+.moo-toolbar__heading {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.moo-toolbar__count {
+  font-weight: 400;
+  color: var(--moo-text-faint);
+  margin-left: 8px;
+  font-size: 13px;
+}
+
+.moo-toolbar__row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.moo-toolbar__grow {
+  flex: 1;
+}
+
+/* ── FamilyShelfBookList ──────────────────────────────────────────────── */
+
+.moo-book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+  gap: 12px;
+}
+
+/* ── FamilyShelfStatus (error / empty) ────────────────────────────────── */
+
+.moo-shelf-status {
+  padding: 16px;
+}
+
+.moo-shelf-status--center {
+  text-align: center;
+}
+
+.moo-shelf-status__error-text {
+  color: var(--moo-danger-alt);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.moo-shelf-status__retry {
+  padding: 8px 16px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-shelf-status__empty-title {
+  color: var(--moo-text-faint);
+  margin-top: 16px;
+}
+
+.moo-shelf-status__empty-hint {
+  color: var(--moo-text-fainter);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+/* ── FamilyBookRow ────────────────────────────────────────────────────── */
+
+.moo-book-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--moo-border);
+  text-decoration: none;
+  color: inherit;
+}
+
+.moo-book-row__cover-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.moo-book-row__cover {
+  width: 40px;
+  height: 60px;
+  border-radius: 3px;
+}
+
+.moo-book-row__cover-fallback {
+  width: 40px;
+  height: 60px;
+  background: var(--moo-surface-alt);
+  border-radius: 3px;
+}
+
+.moo-book-row__updated-badge {
+  position: absolute;
+  bottom: -2px;
+  left: -2px;
+  background: var(--moo-success-bg);
+  color: var(--moo-success);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 6px;
+  line-height: 14px;
+}
+
+.moo-book-row__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.moo-book-row__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--moo-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moo-book-row__author {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moo-book-row__member {
+  font-size: 12px;
+  color: var(--moo-primary);
+  background: var(--moo-primary-bg);
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.moo-book-row__borrow-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.moo-book-row__borrow-btn--pending {
+  background: var(--moo-text-faint);
+  cursor: not-allowed;
+}
+
+.moo-book-row__favorite {
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.moo-book-row__menu {
+  flex-shrink: 0;
+}
+
+/* ── FavoriteButton ───────────────────────────────────────────────────── */
+
+.moo-favorite-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-faint);
+  cursor: pointer;
+}
+
+/* Hover shifts the hollow (not-favorited) heart grey → red-400. */
+.moo-favorite-btn:hover {
+  color: var(--moo-favorite-hover);
+}
+
+/* Favorited: solid red, and stays red on hover (overrides the hover rule). */
+.moo-favorite-btn--active,
+.moo-favorite-btn--active:hover {
+  color: var(--moo-danger-alt);
+}
+
+/* ── OverflowMenu ─────────────────────────────────────────────────────── */
+
+.moo-overflow {
+  position: relative;
+  display: inline-flex;
+}
+
+.moo-overflow__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.moo-overflow__trigger--mobile {
+  width: 32px;
+  height: 32px;
+}
+
+.moo-overflow__trigger--overlay {
+  background: rgba(15, 23, 42, 0.55);
+  color: white;
+}
+
+.moo-overflow__trigger--plain {
+  background: transparent;
+  color: var(--moo-text-muted);
+}
+
+/* z-index 100001 = one above the Dialog overlay (#moo-family-bookshelf-dialog). */
+.moo-overflow__menu {
+  position: fixed;
+  min-width: 120px;
+  background: white;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100001;
+  overflow: hidden;
+}
+
+.moo-overflow__item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--moo-text-strong);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* ── BookSortDropdown ─────────────────────────────────────────────────── */
+
+.moo-sort {
+  position: relative;
+  display: inline-flex;
+}
+
+.moo-sort__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--moo-text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.moo-sort__trigger--mobile {
+  width: 32px;
+  height: 32px;
+}
+
+.moo-sort__trigger--active {
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+/* z-index 100001 = one above the Dialog overlay (#moo-family-bookshelf-dialog). */
+.moo-sort__menu {
+  position: fixed;
+  min-width: 140px;
+  background: white;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100001;
+  overflow: hidden;
+  outline: none;
+}
+
+.moo-sort__option {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--moo-text-strong);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Keyboard-active but unselected: neutral grey highlight. */
+.moo-sort__option--active {
+  background: var(--moo-surface-alt);
+}
+
+/* Selected (blue) wins over the active highlight. */
+.moo-sort__option--selected {
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+/* ── CategoryDropdown ─────────────────────────────────────────────────── */
+
+.moo-category {
+  position: relative;
+}
+
+.moo-category__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--moo-text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.moo-category__trigger--mobile {
+  width: 32px;
+  height: 32px;
+}
+
+.moo-category__trigger--active {
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+/* top matches the trigger height so the menu drops directly below it. */
+.moo-category__menu {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  min-width: 180px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+}
+
+.moo-category__menu--mobile {
+  top: 32px;
+}
+
+.moo-category__option {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--moo-text-strong);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.moo-category__option--selected {
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+.moo-category__option-count {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+}
+
+/* ── ViewModeToggle ───────────────────────────────────────────────────── */
+
+.moo-view-toggle {
+  display: inline-flex;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.moo-view-toggle__btn {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--moo-border);
+  background: transparent;
+  color: var(--moo-text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.moo-view-toggle__btn--mobile {
+  width: 32px;
+  height: 32px;
+}
+
+.moo-view-toggle__btn--active {
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+/* Segment corners (mirrors getSegmentBorderRadius, radius 6): first rounds the
+   left corners, last rounds the right corners. */
+.moo-view-toggle__btn--first {
+  border-radius: 6px 0 0 6px;
+}
+
+.moo-view-toggle__btn--last {
+  border-radius: 0 6px 6px 0;
+}
+
+/* ── SearchBar ────────────────────────────────────────────────────────── */
+
+.moo-search {
+  margin-bottom: 12px;
+}
+
+.moo-search__field {
+  position: relative;
+}
+
+.moo-search__icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--moo-text-faint);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.moo-search__input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px 0 32px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* Mobile: 32px-tall touch target to match the toolbar icon buttons. */
+.moo-search__input--mobile {
+  height: 32px;
+}
+
+.moo-search__count {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+/* ── StatusFilterBar ──────────────────────────────────────────────────── */
+
+.moo-status-filter {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* ── DialogFooter ─────────────────────────────────────────────────────── */
+
+.moo-footer {
+  border-top: 1px solid var(--moo-border);
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+
+.moo-footer--wide {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Narrow layout nudges the version line below the disclaimer. */
+.moo-footer__version {
+  margin-top: 2px;
+}
+
+.moo-footer__env {
+  margin-left: 4px;
+}
+
+/* ── EnvBadge ─────────────────────────────────────────────────────────── */
+
+.moo-env-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 18px;
+  user-select: none;
+}
+
+.moo-env-badge--local {
+  background: #fedbdb;
+  color: #d81d1d;
+  border: 1px solid #fd9393;
+}
+
+.moo-env-badge--dev {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #93c5fd;
+}
+
+/* ── LoadingState ─────────────────────────────────────────────────────── */
+
+.moo-loading-state {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+}
+
+.moo-loading-state__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--moo-border);
+  border-top-color: var(--moo-primary);
+  border-radius: 50%;
+  animation: moo-spin 0.8s linear infinite;
+}
+
+.moo-loading-state__message {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+/* ── LoadingOverlay ───────────────────────────────────────────────────── */
+
+.moo-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border-radius: 12px;
+}
+
+.moo-loading-overlay__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--moo-border);
+  border-top-color: var(--moo-primary);
+  border-radius: 50%;
+  animation: moo-spin 0.8s linear infinite;
+  margin-bottom: 16px;
+}
+
+.moo-loading-overlay__message {
+  color: var(--moo-text-strong);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ── VersionWarning ───────────────────────────────────────────────────── */
+
+.moo-version-warning {
+  background: var(--moo-warn-bg);
+  border: 1px solid var(--moo-warn-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 16px 0;
+  font-size: 12px;
+  color: var(--moo-warn-text);
+  line-height: 1.5;
+}
+
+.moo-version-warning__link {
+  color: var(--moo-warn-link);
+  margin-left: 4px;
+  text-decoration: underline;
 }

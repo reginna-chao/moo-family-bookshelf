@@ -57,20 +57,24 @@ describe("ViewModeToggle", () => {
   });
 
   describe("responsive sizing", () => {
-    it("renders 40px buttons on desktop", () => {
+    // The 40px (desktop) / 32px (mobile) button sizing moved from inline styles
+    // to `.moo-view-toggle__btn` + the `--mobile` modifier in styles.css. jsdom
+    // does not apply stylesheet rules, so the observable contract is the modifier
+    // class presence/absence.
+    it("renders desktop buttons without the --mobile modifier", () => {
       vi.mocked(useIsMobile).mockReturnValue(false);
       render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
       const grid = screen.getByLabelText("切換為網格檢視");
-      expect(grid.style.width).toBe("40px");
-      expect(grid.style.height).toBe("40px");
+      expect(grid).toHaveClass("moo-view-toggle__btn");
+      expect(grid).not.toHaveClass("moo-view-toggle__btn--mobile");
     });
 
-    it("renders 32px buttons on mobile", () => {
+    it("adds the --mobile modifier on the buttons on mobile", () => {
       vi.mocked(useIsMobile).mockReturnValue(true);
       render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
       const grid = screen.getByLabelText("切換為網格檢視");
-      expect(grid.style.width).toBe("32px");
-      expect(grid.style.height).toBe("32px");
+      expect(grid).toHaveClass("moo-view-toggle__btn");
+      expect(grid).toHaveClass("moo-view-toggle__btn--mobile");
     });
   });
 });

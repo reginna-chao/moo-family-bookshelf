@@ -68,18 +68,24 @@ describe("SearchBar", () => {
   });
 
   describe("responsive sizing", () => {
-    it("uses a 32px-tall input on mobile", () => {
+    // The 32px-tall mobile input height moved from an inline style to the
+    // `.moo-search__input--mobile` modifier in styles.css (desktop 40px lives on
+    // the base `.moo-search__input`). jsdom does not apply stylesheet rules, so
+    // the observable contract is the modifier class presence/absence.
+    it("adds the --mobile modifier on the input on mobile", () => {
       vi.mocked(useIsMobile).mockReturnValue(true);
       renderSearchBar();
       const input = screen.getByLabelText("搜尋書名或作者");
-      expect(input.style.height).toBe("32px");
+      expect(input).toHaveClass("moo-search__input");
+      expect(input).toHaveClass("moo-search__input--mobile");
     });
 
-    it("does not pin the input height on desktop", () => {
+    it("renders the desktop input without the --mobile modifier", () => {
       vi.mocked(useIsMobile).mockReturnValue(false);
       renderSearchBar();
       const input = screen.getByLabelText("搜尋書名或作者");
-      expect(input.style.height).toBe("");
+      expect(input).toHaveClass("moo-search__input");
+      expect(input).not.toHaveClass("moo-search__input--mobile");
     });
   });
 });

@@ -37,7 +37,6 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
   const categories = React.useMemo(() => buildCategories(books), [books]);
   const popoverRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
-  const triggerSize = isMobile ? 32 : 40;
 
   useEffect(() => {
     if (!open) return;
@@ -53,66 +52,39 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
   if (categories.length <= 1) return null;
 
   const isActive = value !== "";
+  const triggerClass = [
+    "moo-category__trigger",
+    isMobile ? "moo-category__trigger--mobile" : "",
+    isActive ? "moo-category__trigger--active" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const menuClass = isMobile
+    ? "moo-category__menu moo-category__menu--mobile"
+    : "moo-category__menu";
+  const optionClass = (selected: boolean) =>
+    selected ? "moo-category__option moo-category__option--selected" : "moo-category__option";
 
   return (
-    <div ref={popoverRef} style={{ position: "relative" }}>
+    <div ref={popoverRef} className="moo-category">
       <button
         onClick={onToggle}
         aria-label="篩選分類"
         aria-expanded={open}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: triggerSize,
-          height: triggerSize,
-          border: isActive ? "1px solid #2563eb" : "1px solid #e2e8f0",
-          borderRadius: 8,
-          background: isActive ? "#eff6ff" : "white",
-          color: isActive ? "#2563eb" : "#94a3b8",
-          cursor: "pointer",
-          flexShrink: 0,
-        }}
+        className={triggerClass}
       >
         <SlidersHorizontal size={16} />
       </button>
       {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: triggerSize,
-            right: 0,
-            minWidth: 180,
-            maxHeight: 240,
-            overflowY: "auto",
-            background: "white",
-            border: "1px solid #e2e8f0",
-            borderRadius: 8,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-            zIndex: 50,
-          }}
-          role="listbox"
-          aria-label="分類選單"
-        >
+        <div className={menuClass} role="listbox" aria-label="分類選單">
           <button
             role="option"
             aria-selected={value === ""}
             onClick={() => { onChange(""); onToggle(); }}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              width: "100%",
-              padding: "8px 12px",
-              border: "none",
-              background: value === "" ? "#eff6ff" : "transparent",
-              color: value === "" ? "#2563eb" : "#334155",
-              fontSize: 13,
-              cursor: "pointer",
-              textAlign: "left",
-            }}
+            className={optionClass(value === "")}
           >
             <span>全部分類</span>
-            <span style={{ color: "#94a3b8", fontSize: 12 }}>{books.length}</span>
+            <span className="moo-category__option-count">{books.length}</span>
           </button>
           {categories.map((cat) => (
             <button
@@ -120,21 +92,10 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
               role="option"
               aria-selected={value === cat.value}
               onClick={() => { onChange(cat.value); onToggle(); }}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                width: "100%",
-                padding: "8px 12px",
-                border: "none",
-                background: value === cat.value ? "#eff6ff" : "transparent",
-                color: value === cat.value ? "#2563eb" : "#334155",
-                fontSize: 13,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
+              className={optionClass(value === cat.value)}
             >
               <span>{cat.label}</span>
-              <span style={{ color: "#94a3b8", fontSize: 12 }}>{cat.count}</span>
+              <span className="moo-category__option-count">{cat.count}</span>
             </button>
           ))}
         </div>

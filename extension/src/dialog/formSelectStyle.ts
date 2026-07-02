@@ -3,15 +3,19 @@ import type { CSSProperties } from "react";
 /**
  * Shared inline style for native `<select className="moo-form-select">` elements.
  *
- * The only responsive difference is vertical padding: mobile trims the combined
- * top+bottom padding by 6px (8px -> 5px each side) to fit tighter viewports,
- * while left/right padding stays 12px on both breakpoints. `width` is left to the
- * call site so auto-width and full-width selects can share this base.
+ * Height is pinned to match the toolbar icon buttons (`.moo-view-toggle__btn`,
+ * `.moo-sort__trigger`): 40px desktop / 32px mobile. Selects center their text
+ * natively, so we drop explicit vertical padding and rely on the fixed height
+ * (with border-box so the border is included). Horizontal padding stays 12px;
+ * `paddingRight` leaves room for the native chevron. `width` is left to the call
+ * site so auto-width and full-width selects can share this base.
  */
 export function formSelectStyle(isMobile: boolean): CSSProperties {
-  const padding = isMobile ? "5px 12px" : "8px 12px";
+  const height = isMobile ? 32 : 40;
   return {
-    padding,
+    boxSizing: "border-box",
+    height,
+    padding: "0 12px",
     paddingRight: "2.25rem",
     border: "1px solid #e2e8f0",
     borderRadius: 8,

@@ -24,9 +24,6 @@
       ],
       "js": [
         "content.js"
-      ],
-      "css": [
-        "assets/style.css"
       ]
     }
   ],

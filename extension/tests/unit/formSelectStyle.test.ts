@@ -3,10 +3,15 @@ import type { CSSProperties } from "react";
 import { formSelectStyle } from "@/dialog/formSelectStyle";
 
 /**
- * Keys shared verbatim across both breakpoints. `padding` and `fontSize` are
- * asserted separately because they are the responsive-vs-regression focus.
+ * Keys shared verbatim across both breakpoints. `height` and `fontSize` are
+ * asserted separately: `height` is the responsive value, `fontSize` is the
+ * regression guard. The design change pinned a fixed `height` (40 desktop / 32
+ * mobile) with `boxSizing: "border-box"` and dropped vertical padding, so the
+ * horizontal-only `padding: "0 12px"` is now shared across breakpoints too.
  */
 const SHARED_KEYS = {
+  boxSizing: "border-box",
+  padding: "0 12px",
   paddingRight: "2.25rem",
   border: "1px solid #e2e8f0",
   borderRadius: 8,
@@ -17,31 +22,44 @@ const SHARED_KEYS = {
 } as const;
 
 describe("formSelectStyle", () => {
-  it.each<{ name: string; isMobile: boolean; padding: string }>([
-    { name: "desktop", isMobile: false, padding: "8px 12px" },
-    { name: "mobile", isMobile: true, padding: "5px 12px" },
-  ])("returns $padding padding on $name", ({ isMobile, padding }) => {
-    expect(formSelectStyle(isMobile).padding).toBe(padding);
+  it.each<{ name: string; isMobile: boolean; height: number }>([
+    { name: "desktop", isMobile: false, height: 40 },
+    { name: "mobile", isMobile: true, height: 32 },
+  ])("returns height $height on $name", ({ isMobile, height }) => {
+    // Height is the responsive dimension now (40 desktop / 32 mobile), pinned to
+    // match the toolbar icon buttons; vertical padding was removed.
+    expect(formSelectStyle(isMobile).height).toBe(height);
+  });
+
+  it.each<{ name: string; isMobile: boolean }>([
+    { name: "desktop", isMobile: false },
+    { name: "mobile", isMobile: true },
+  ])("keeps horizontal padding '0 12px' on $name", ({ isMobile }) => {
+    // Padding is horizontal-only and identical across breakpoints; height now
+    // carries the responsive behaviour.
+    expect(formSelectStyle(isMobile).padding).toBe("0 12px");
   });
 
   it.each<{ name: string; isMobile: boolean }>([
     { name: "desktop", isMobile: false },
     { name: "mobile", isMobile: true },
   ])("keeps fontSize at 14 on $name (regression guard)", ({ isMobile }) => {
-    // fontSize must NOT change across breakpoints — only vertical padding does.
+    // fontSize must NOT change across breakpoints — only height does.
     expect(formSelectStyle(isMobile).fontSize).toBe(14);
   });
 
   it.each<{ name: string; isMobile: boolean }>([
     { name: "desktop", isMobile: false },
     { name: "mobile", isMobile: true },
-  ])("includes all shared non-padding keys on $name", ({ isMobile }) => {
+  ])("includes all shared non-height keys on $name", ({ isMobile }) => {
     expect(formSelectStyle(isMobile)).toMatchObject(SHARED_KEYS);
   });
 
   it("returns the full expected style object on desktop", () => {
     const expected: CSSProperties = {
-      padding: "8px 12px",
+      boxSizing: "border-box",
+      height: 40,
+      padding: "0 12px",
       paddingRight: "2.25rem",
       border: "1px solid #e2e8f0",
       borderRadius: 8,
@@ -56,7 +74,9 @@ describe("formSelectStyle", () => {
 
   it("returns the full expected style object on mobile", () => {
     const expected: CSSProperties = {
-      padding: "5px 12px",
+      boxSizing: "border-box",
+      height: 32,
+      padding: "0 12px",
       paddingRight: "2.25rem",
       border: "1px solid #e2e8f0",
       borderRadius: 8,
@@ -80,7 +100,8 @@ describe("formSelectStyle", () => {
     // Calling with the other branch must not retroactively alter the first object.
     formSelectStyle(true);
     expect(desktop).toEqual(snapshot);
-    expect(desktop.padding).toBe("8px 12px");
+    // height is the responsive value now, so it is the meaningful cross-call guard.
+    expect(desktop.height).toBe(40);
   });
 
   it("returns a fresh object each call (no shared mutable singleton)", () => {

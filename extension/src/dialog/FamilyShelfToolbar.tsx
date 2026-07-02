@@ -9,8 +9,6 @@ import type { FamilyShelfBook } from "./useFamilyShelfBooks";
 
 type ViewMode = "grid" | "row";
 
-const rowStyle = { display: "flex", gap: 8, marginBottom: 12 } as const;
-
 export interface FamilyShelfToolbarProps {
   headingCount: string;
   members: MemberBooks[];
@@ -57,15 +55,13 @@ export function FamilyShelfToolbar({
 }: FamilyShelfToolbarProps) {
   return (
     <>
-      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
+      <h3 className="moo-toolbar__heading">
         家庭開放書櫃
-        <span style={{ fontWeight: 400, color: "#94a3b8", marginLeft: 8, fontSize: 13 }}>
-          {headingCount}
-        </span>
+        <span className="moo-toolbar__count">{headingCount}</span>
       </h3>
 
-      <div style={rowStyle}>
-        <div style={{ flex: 1 }}>
+      <div className="moo-toolbar__row">
+        <div className="moo-toolbar__grow">
           <MemberDropdown
             members={members}
             userId={userId}
@@ -75,8 +71,8 @@ export function FamilyShelfToolbar({
         </div>
         <BookSortDropdown value={sort} onChange={onSortChange} />
       </div>
-      <div style={rowStyle}>
-        <div style={{ flex: 1 }}>
+      <div className="moo-toolbar__row">
+        <div className="moo-toolbar__grow">
           <SearchBar
             value={searchTerm}
             onChange={onSearchChange}

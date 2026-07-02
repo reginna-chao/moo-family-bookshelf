@@ -1,7 +1,7 @@
 import React from "react";
 import { LayoutGrid, Rows3 } from "lucide-react";
 import type { FamilyShelfViewMode } from "./useFamilyShelfViewMode";
-import { type SegmentPosition, getSegmentBorderRadius } from "./segmentBorderRadius";
+import type { SegmentPosition } from "./segmentBorderRadius";
 import { useIsMobile } from "../hooks/useIsMobile";
 
 export interface ViewModeToggleProps {
@@ -14,30 +14,26 @@ interface ToggleButtonProps {
   ariaLabel: string;
   onClick: () => void;
   children: React.ReactNode;
-  size: number;
-  position?: SegmentPosition;
+  isMobile: boolean;
+  position: Extract<SegmentPosition, "first" | "last">;
 }
 
-function ToggleButton({ active, ariaLabel, onClick, children, size, position }: ToggleButtonProps) {
+function ToggleButton({ active, ariaLabel, onClick, children, isMobile, position }: ToggleButtonProps) {
+  const className = [
+    "moo-view-toggle__btn",
+    isMobile ? "moo-view-toggle__btn--mobile" : "",
+    active ? "moo-view-toggle__btn--active" : "",
+    `moo-view-toggle__btn--${position}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <button
       type="button"
       aria-label={ariaLabel}
       aria-pressed={active}
       onClick={onClick}
-      style={{
-        width: size,
-        height: size,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        border: active ? "1px solid #2563eb" : "1px solid #e2e8f0",
-        borderRadius: getSegmentBorderRadius(position),
-        background: active ? "#eff6ff" : "transparent",
-        color: active ? "#2563eb" : "#64748b",
-        cursor: "pointer",
-        padding: 0,
-      }}
+      className={className}
     >
       {children}
     </button>
@@ -46,18 +42,13 @@ function ToggleButton({ active, ariaLabel, onClick, children, size, position }: 
 
 export function ViewModeToggle({ mode, onChange }: ViewModeToggleProps) {
   const isMobile = useIsMobile();
-  const size = isMobile ? 32 : 40;
   return (
-    <div
-      role="group"
-      aria-label="家庭書櫃顯示模式"
-      style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden" }}
-    >
+    <div role="group" aria-label="家庭書櫃顯示模式" className="moo-view-toggle">
       <ToggleButton
         active={mode === "grid"}
         ariaLabel="切換為網格檢視"
         onClick={() => onChange("grid")}
-        size={size}
+        isMobile={isMobile}
         position="first"
       >
         <LayoutGrid size={18} />
@@ -66,7 +57,7 @@ export function ViewModeToggle({ mode, onChange }: ViewModeToggleProps) {
         active={mode === "row"}
         ariaLabel="切換為列表檢視"
         onClick={() => onChange("row")}
-        size={size}
+        isMobile={isMobile}
         position="last"
       >
         <Rows3 size={18} />

@@ -145,22 +145,26 @@ describe("CategoryFilter", () => {
   });
 
   describe("responsive sizing", () => {
+    // The 40px (desktop) / 32px (mobile) trigger sizing moved from inline styles
+    // to `.moo-category__trigger` + the `--mobile` modifier in styles.css. jsdom
+    // does not apply stylesheet rules, so the observable contract is the modifier
+    // class presence/absence.
     const books = makeBooks(["奇幻冒險", "韓國耽美", "軍事戰略"]);
 
-    it("renders a 40px trigger on desktop", () => {
+    it("renders a desktop trigger without the --mobile modifier", () => {
       vi.mocked(useIsMobile).mockReturnValue(false);
       render(<CategoryFilter {...defaultProps} books={books} />);
       const trigger = screen.getByLabelText("篩選分類");
-      expect(trigger.style.width).toBe("40px");
-      expect(trigger.style.height).toBe("40px");
+      expect(trigger).toHaveClass("moo-category__trigger");
+      expect(trigger).not.toHaveClass("moo-category__trigger--mobile");
     });
 
-    it("renders a 32px trigger on mobile", () => {
+    it("adds the --mobile modifier on the trigger on mobile", () => {
       vi.mocked(useIsMobile).mockReturnValue(true);
       render(<CategoryFilter {...defaultProps} books={books} />);
       const trigger = screen.getByLabelText("篩選分類");
-      expect(trigger.style.width).toBe("32px");
-      expect(trigger.style.height).toBe("32px");
+      expect(trigger).toHaveClass("moo-category__trigger");
+      expect(trigger).toHaveClass("moo-category__trigger--mobile");
     });
   });
 });

@@ -4,12 +4,9 @@ import { LazyCover } from "@/dialog/LazyCover";
 
 const SPIN_KEYFRAME = "@keyframes moo-lazy-spin";
 
-/** Find the in-tree <style> that defines the spinner keyframes, if present. */
-function keyframeStyleIn(container: HTMLElement): HTMLStyleElement | null {
-  const match = Array.from(container.querySelectorAll("style")).find((el) =>
-    el.textContent?.includes(SPIN_KEYFRAME),
-  );
-  return match ?? null;
+/** Find the spinner element (visible only while status === "loading"), if present. */
+function spinnerIn(container: HTMLElement): HTMLElement | null {
+  return container.querySelector<HTMLElement>(".moo-lazy-cover__spinner");
 }
 
 function fallbackDiv() {
@@ -32,12 +29,18 @@ describe("LazyCover", () => {
         <LazyCover src="" alt="book" width={40} height={60} fallback={fallbackDiv()} />,
       );
 
-      expect(container.querySelector('[style*="animation"]')).toBeNull();
+      // Empty src renders only the fallback — no wrapper, so no spinner element.
+      expect(spinnerIn(container)).toBeNull();
     });
   });
 
   describe("loading state", () => {
-    it("renders img with opacity 0 and shows spinner while loading", () => {
+    it("renders the not-yet-loaded img and shows the spinner while loading", () => {
+      // The opacity-0 → opacity-1 fade moved from inline `style.opacity` to the
+      // `.moo-lazy-cover__img--loaded` modifier in styles.css. jsdom does not
+      // apply stylesheet rules, so the observable contracts are: (a) the img
+      // carries the base class WITHOUT the --loaded modifier while loading, and
+      // (b) the spinner element (`.moo-lazy-cover__spinner`) is present.
       const { container } = render(
         <LazyCover
           src="https://example.com/cover.jpg"
@@ -50,10 +53,10 @@ describe("LazyCover", () => {
 
       const img = screen.getByRole("img");
       expect(img).toHaveAttribute("src", "https://example.com/cover.jpg");
-      expect(img.style.opacity).toBe("0");
+      expect(img).toHaveClass("moo-lazy-cover__img");
+      expect(img).not.toHaveClass("moo-lazy-cover__img--loaded");
 
-      const spinner = container.querySelector('[style*="animation"]');
-      expect(spinner).not.toBeNull();
+      expect(spinnerIn(container)).not.toBeNull();
     });
 
     it("sets loading='lazy' and decoding='async' on img", () => {
@@ -88,7 +91,9 @@ describe("LazyCover", () => {
   });
 
   describe("loaded state", () => {
-    it("shows img with opacity 1 and removes spinner after load", () => {
+    it("adds the --loaded modifier to the img and removes the spinner after load", () => {
+      // After load the img gains `.moo-lazy-cover__img--loaded` (opacity → 1 in
+      // styles.css) and the spinner element is unmounted.
       const { container } = render(
         <LazyCover
           src="https://example.com/cover.jpg"
@@ -101,8 +106,8 @@ describe("LazyCover", () => {
 
       fireEvent.load(screen.getByRole("img"));
 
-      expect(screen.getByRole("img").style.opacity).toBe("1");
-      expect(container.querySelector('[style*="animation"]')).toBeNull();
+      expect(screen.getByRole("img")).toHaveClass("moo-lazy-cover__img--loaded");
+      expect(spinnerIn(container)).toBeNull();
       expect(screen.queryByTestId("fallback")).not.toBeInTheDocument();
     });
   });
@@ -126,11 +131,12 @@ describe("LazyCover", () => {
     });
   });
 
-  describe("keyframe rendering", () => {
-    // Keyframes are rendered as an in-tree <style> (so they resolve inside the
-    // shadow root) rather than injected into document.head. They exist only while
-    // the spinner is visible (status === "loading").
-    it("renders the spinner keyframes as an in-tree style while loading", () => {
+  describe("spinner lifecycle", () => {
+    // The spinner keyframes moved from an in-tree <style> into styles.css
+    // (`@keyframes moo-lazy-spin`, applied via `.moo-lazy-cover__spinner`).
+    // LazyCover no longer renders any <style> block, so the spinner ELEMENT's
+    // presence (only while status === "loading") is the observable contract.
+    it("renders the spinner element while loading", () => {
       const { container } = render(
         <LazyCover
           src="https://example.com/cover.jpg"
@@ -141,11 +147,11 @@ describe("LazyCover", () => {
         />,
       );
 
-      expect(keyframeStyleIn(container)).not.toBeNull();
+      expect(spinnerIn(container)).not.toBeNull();
     });
 
-    it("does not inject the keyframes into document.head", () => {
-      render(
+    it("never injects a keyframe <style> into document.head", () => {
+      const { container } = render(
         <LazyCover
           src="https://example.com/cover.jpg"
           alt="book"
@@ -155,13 +161,19 @@ describe("LazyCover", () => {
         />,
       );
 
+      // Neither document.head nor the component subtree carries an inline
+      // @keyframes block — the animation is defined once in styles.css.
       const headStyles = Array.from(document.head.querySelectorAll("style")).filter(
         (el) => el.textContent?.includes(SPIN_KEYFRAME),
       );
       expect(headStyles).toHaveLength(0);
+      const subtreeStyles = Array.from(container.querySelectorAll("style")).filter(
+        (el) => el.textContent?.includes(SPIN_KEYFRAME),
+      );
+      expect(subtreeStyles).toHaveLength(0);
     });
 
-    it("removes the keyframe style once the image has loaded", () => {
+    it("removes the spinner element once the image has loaded", () => {
       const { container } = render(
         <LazyCover
           src="https://example.com/cover.jpg"
@@ -171,11 +183,11 @@ describe("LazyCover", () => {
           fallback={fallbackDiv()}
         />,
       );
-      expect(keyframeStyleIn(container)).not.toBeNull();
+      expect(spinnerIn(container)).not.toBeNull();
 
       fireEvent.load(screen.getByRole("img"));
 
-      expect(keyframeStyleIn(container)).toBeNull();
+      expect(spinnerIn(container)).toBeNull();
     });
   });
 });
