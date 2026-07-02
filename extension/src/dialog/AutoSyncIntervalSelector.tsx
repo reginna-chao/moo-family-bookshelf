@@ -1,7 +1,6 @@
 import React from "react";
 import type { AutoSyncInterval } from "./useAutoSyncInterval";
 import { useIsMobile } from "../hooks/useIsMobile";
-import { formSelectStyle } from "./formSelectStyle";
 
 export interface AutoSyncIntervalSelectorProps {
   value: AutoSyncInterval;
@@ -22,8 +21,7 @@ export function AutoSyncIntervalSelector({ value, onChange }: AutoSyncIntervalSe
       value={value}
       onChange={(e) => onChange(e.target.value as AutoSyncInterval)}
       aria-label="自動同步頻率"
-      className="moo-form-select"
-      style={formSelectStyle(isMobile)}
+      className={isMobile ? "moo-form-select moo-form-select--mobile" : "moo-form-select"}
     >
       {OPTIONS.map((opt) => (
         <option key={opt.value} value={opt.value}>

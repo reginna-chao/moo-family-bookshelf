@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import browser from "webextension-polyfill";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
@@ -22,6 +22,20 @@ import { useFamilyData } from "./FamilyDataContext";
 import { getReportLinks } from "moo-family-bookshelf-shared/config/links";
 
 const reportLinks = getReportLinks({ appVersion: __APP_VERSION__ });
+
+function sectionHeaderClass(open: boolean): string {
+  return open
+    ? "moo-settings__section-header moo-settings__section-header--open"
+    : "moo-settings__section-header";
+}
+
+function switchTrackClass(on: boolean): string {
+  return on ? "moo-switch__track moo-switch__track--on" : "moo-switch__track";
+}
+
+function switchKnobClass(on: boolean): string {
+  return on ? "moo-switch__knob moo-switch__knob--on" : "moo-switch__knob";
+}
 
 export interface FamilySettingsProps {
   familyId: string;
@@ -160,17 +174,6 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     inviteCopiedTimerRef.current = setTimeout(() => setInviteCopied(false), 2000);
   };
 
-  const dangerBtnBase: React.CSSProperties = { width: "100%", padding: 12,
-    border: "1px solid #ef4444", borderRadius: 8, background: "transparent",
-    color: "#ef4444", fontWeight: 600, fontSize: 14 };
-
-  const sectionHeaderStyle: React.CSSProperties = {
-    display: "flex", alignItems: "center", gap: 6,
-    fontSize: 16, fontWeight: 600,
-    background: "none", border: "none", cursor: "pointer", padding: 0,
-    color: "#1e293b", width: "100%",
-  };
-
   const handleLeaveConfirm = async () => {
     setLeaveState("leaving");
     setLeaveError("");
@@ -224,7 +227,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
       <button
         onClick={() => setPersonalOpen(!personalOpen)}
         aria-expanded={personalOpen}
-        style={{ ...sectionHeaderStyle, marginBottom: personalOpen ? 12 : 0 }}
+        className={sectionHeaderClass(personalOpen)}
       >
         {personalOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         個人設定
@@ -232,144 +235,81 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
       {personalOpen && (
         <>
           <DisplayNameEditor {...displayNameState} userId={userId} />
-          <div style={{ marginBottom: 20 }}>
+          <div className="moo-settings__block">
             <button
               role="switch"
               aria-checked={syncArchived === BoolFlag.TRUE}
               aria-label="同步封存書籍"
               onClick={handleToggleSyncArchived}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 14,
-                color: "#334155",
-                cursor: "pointer",
-                background: "transparent",
-                border: "none",
-                padding: 0,
-              }}
+              className="moo-switch"
             >
-              <span style={{
-                display: "inline-block",
-                width: 32,
-                height: 18,
-                borderRadius: 9,
-                background: syncArchived === BoolFlag.TRUE ? "#2563eb" : "#cbd5e1",
-                position: "relative",
-                transition: "background 0.2s",
-                flexShrink: 0,
-              }}>
-                <span style={{
-                  display: "block",
-                  width: 14,
-                  height: 14,
-                  borderRadius: 7,
-                  background: "#fff",
-                  position: "absolute",
-                  top: 2,
-                  left: syncArchived === BoolFlag.TRUE ? 16 : 2,
-                  transition: "left 0.2s",
-                }} />
+              <span className={switchTrackClass(syncArchived === BoolFlag.TRUE)}>
+                <span className={switchKnobClass(syncArchived === BoolFlag.TRUE)} />
               </span>
               同步封存書籍
             </button>
-            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6, marginBottom: 0 }}>
-              啟用後，同步時會一併讀取已封存的書籍
-            </div>
+            <div className="moo-settings__hint">啟用後，同步時會一併讀取已封存的書籍</div>
           </div>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ color: "#334155", fontSize: 14, marginBottom: 6 }}>
-              自動同步頻率
-            </div>
+          <div className="moo-settings__block">
+            <div className="moo-settings__label">自動同步頻率</div>
             <AutoSyncIntervalSelector value={autoSyncInterval} onChange={setAutoSyncInterval} />
-            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
-              家庭書櫃自動讀取書單的頻率；手動同步不受此限制
-            </div>
+            <div className="moo-settings__hint">家庭書櫃自動讀取書單的頻率；手動同步不受此限制</div>
           </div>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ color: "#334155", fontSize: 14, marginBottom: 6 }}>
-              家庭書櫃按鈕大小
-            </div>
+          <div className="moo-settings__block">
+            <div className="moo-settings__label">家庭書櫃按鈕大小</div>
             <FloatingIconSizeSelector size={iconSize} onChange={setIconSize} />
-            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
-              在讀墨頁面顯示的家庭書櫃按鈕大小
-            </div>
+            <div className="moo-settings__hint">在讀墨頁面顯示的家庭書櫃按鈕大小</div>
           </div>
         </>
       )}
-      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 4 }} />
+      <div className="moo-settings__divider" />
       <button
         onClick={() => setFamilyOpen(!familyOpen)}
         aria-expanded={familyOpen}
-        style={{ ...sectionHeaderStyle, marginBottom: familyOpen ? 12 : 0 }}
+        className={sectionHeaderClass(familyOpen)}
       >
         {familyOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         家庭設定
       </button>
       {familyOpen && (
         <>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 6 }}>家庭同步碼</div>
-            <div style={{
-              padding: 12, background: "#f8fafc", borderRadius: 8, marginBottom: 8,
-              display: "flex", alignItems: "center", gap: 8,
-            }}>
-              <span data-testid="sync-code" style={{ flex: 1, wordBreak: "break-all", fontSize: 13, fontFamily: "monospace" }}>
+          <div className="moo-settings__block">
+            <div className="moo-settings__group-label">家庭同步碼</div>
+            <div className="moo-settings__sync-code-box">
+              <span data-testid="sync-code" className="moo-settings__sync-code-text">
                 {syncCode ?? "載入中..."}
               </span>
             </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+            <div className="moo-settings__copy-row">
               <button
                 onClick={handleCopy}
                 disabled={!syncCode}
-                style={{
-                  flex: 1, padding: 10, border: "1px solid #2563eb", borderRadius: 8,
-                  background: copied ? "#eff6ff" : "transparent", color: "#2563eb",
-                  fontWeight: 600, cursor: syncCode ? "pointer" : "not-allowed",
-                  opacity: syncCode ? 1 : 0.5, fontSize: 14,
-                }}
+                className={copied ? "moo-settings__copy-btn moo-settings__copy-btn--copied" : "moo-settings__copy-btn"}
               >
                 {copied ? "已複製" : "複製同步碼"}
               </button>
               <button
                 onClick={() => void handleInviteCopy()}
                 disabled={!syncCode}
-                style={{
-                  flex: 1, padding: 10, border: "1px solid #10b981", borderRadius: 8,
-                  background: inviteCopied ? "#ecfdf5" : "transparent", color: "#10b981",
-                  fontWeight: 600, cursor: syncCode ? "pointer" : "not-allowed",
-                  opacity: syncCode ? 1 : 0.5, fontSize: 14,
-                }}
+                className={inviteCopied ? "moo-settings__invite-btn moo-settings__invite-btn--copied" : "moo-settings__invite-btn"}
               >
                 {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
               </button>
             </div>
-            <div style={{ color: "#94a3b8", fontSize: 12 }}>
-              將同步碼或邀請連結分享給家人即可加入書櫃
-            </div>
+            <div className="moo-settings__hint">將同步碼或邀請連結分享給家人即可加入書櫃</div>
             {syncCode && <InviteQrCode syncCode={syncCode} />}
           </div>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
+          <div className="moo-settings__block">
+            <div className="moo-settings__group-label moo-settings__group-label--members">
               家庭成員{!membersLoading && !membersError ? ` (${members.length})` : ""}
             </div>
             {membersLoading && (
-              <div style={{ color: "#94a3b8", fontSize: 14, textAlign: "center", padding: 12 }}>
-                載入中...
-              </div>
+              <div className="moo-settings__members-loading">載入中...</div>
             )}
             {!membersLoading && membersError && (
-              <div style={{ textAlign: "center", padding: 12 }}>
-                <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{membersError}</div>
-                <button
-                  onClick={() => void fetchMembers()}
-                  style={{
-                    padding: "6px 16px", border: "1px solid #2563eb", borderRadius: 6,
-                    background: "transparent", color: "#2563eb", fontWeight: 600,
-                    cursor: "pointer", fontSize: 13,
-                  }}
-                >
+              <div className="moo-settings__members-error">
+                <div className="moo-settings__error-text">{membersError}</div>
+                <button onClick={() => void fetchMembers()} className="moo-settings__retry-btn">
                   重試
                 </button>
               </div>
@@ -385,61 +325,39 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
                 familyEndpoint={familyEndpoint}
               />
             )}
-            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
-              基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
-            </div>
+            <div className="moo-settings__hint">基於讀墨家庭帳戶限制，每個家庭最多 2 位成員</div>
           </div>
         </>
       )}
-      <div style={{ marginBottom: 20 }}>
-        {leaveError && (
-          <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{leaveError}</div>
-        )}
+      <div className="moo-settings__block">
+        {leaveError && <div className="moo-settings__error-text">{leaveError}</div>}
         {leaveState === "idle" && (
-          <button onClick={() => setLeaveState("confirming")} style={{ ...dangerBtnBase, cursor: "pointer" }}>
+          <button onClick={() => setLeaveState("confirming")} className="moo-settings__danger-btn">
             離開家庭
           </button>
         )}
         {leaveState === "confirming" && (
           <div>
-            <div style={{ color: "#64748b", fontSize: 14, marginBottom: 8, textAlign: "center" }}>
-              確定要離開嗎？
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => void handleLeaveConfirm()}
-                style={{
-                  flex: 1, padding: 12, border: "none", borderRadius: 8,
-                  background: "#ef4444", color: "white", fontWeight: 600,
-                  cursor: "pointer", fontSize: 14,
-                }}
-              >
+            <div className="moo-settings__confirm-prompt">確定要離開嗎？</div>
+            <div className="moo-settings__confirm-row">
+              <button onClick={() => void handleLeaveConfirm()} className="moo-settings__confirm-yes">
                 確定離開
               </button>
-              <button
-                onClick={() => setLeaveState("idle")}
-                style={{
-                  flex: 1, padding: 12, border: "1px solid #e2e8f0", borderRadius: 8,
-                  background: "transparent", color: "#64748b", fontWeight: 600,
-                  cursor: "pointer", fontSize: 14,
-                }}
-              >
+              <button onClick={() => setLeaveState("idle")} className="moo-settings__confirm-no">
                 取消
               </button>
             </div>
           </div>
         )}
         {leaveState === "leaving" && (
-          <button disabled style={{ ...dangerBtnBase, cursor: "not-allowed", opacity: 0.5 }}>
-            離開中...
-          </button>
+          <button disabled className="moo-settings__danger-btn">離開中...</button>
         )}
       </div>
-      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginBottom: 16 }}>
+      <div className="moo-settings__section-divider">
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
           aria-expanded={mobileOpen}
-          style={{ ...sectionHeaderStyle, marginBottom: mobileOpen ? 12 : 0 }}
+          className={sectionHeaderClass(mobileOpen)}
         >
           {mobileOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           手機版登入
@@ -453,51 +371,30 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           </>
         )}
       </div>
-      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 16 }}>
-        {deleteError && (
-          <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{deleteError}</div>
-        )}
+      <div className="moo-settings__section-divider--spaced">
+        {deleteError && <div className="moo-settings__error-text">{deleteError}</div>}
         {deleteState === "idle" && (
-          <button
-            onClick={() => setDeleteState("confirming")}
-            style={{ ...dangerBtnBase, cursor: "pointer" }}
-          >
+          <button onClick={() => setDeleteState("confirming")} className="moo-settings__danger-btn">
             移除帳戶
           </button>
         )}
         {deleteState === "confirming" && (
           <div>
-            <div style={{
-              background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8,
-              padding: 12, marginBottom: 12,
-            }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#b91c1c", marginBottom: 8 }}>
-                確定要移除帳戶嗎？
-              </div>
-              <ul style={{ fontSize: 12, color: "#ef4444", margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+            <div className="moo-settings__delete-warning">
+              <div className="moo-settings__delete-warning-title">確定要移除帳戶嗎？</div>
+              <ul className="moo-settings__delete-warning-list">
                 <li>將移除墨家書櫃中的所有資料</li>
                 <li>不影響你的讀墨帳號及書籍</li>
                 <li>下次登入時將重新設定</li>
               </ul>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => void handleDeleteConfirm()}
-                style={{
-                  flex: 1, padding: 12, border: "none", borderRadius: 8,
-                  background: "#ef4444", color: "white", fontWeight: 600,
-                  cursor: "pointer", fontSize: 14,
-                }}
-              >
+            <div className="moo-settings__confirm-row">
+              <button onClick={() => void handleDeleteConfirm()} className="moo-settings__confirm-yes">
                 確定移除
               </button>
               <button
                 onClick={() => { setDeleteState("idle"); setDeleteError(""); }}
-                style={{
-                  flex: 1, padding: 12, border: "1px solid #e2e8f0", borderRadius: 8,
-                  background: "transparent", color: "#64748b", fontWeight: 600,
-                  cursor: "pointer", fontSize: 14,
-                }}
+                className="moo-settings__confirm-no"
               >
                 取消
               </button>
@@ -505,17 +402,12 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           </div>
         )}
         {deleteState === "deleting" && (
-          <button disabled style={{ ...dangerBtnBase, cursor: "not-allowed", opacity: 0.5 }}>
-            移除中...
-          </button>
+          <button disabled className="moo-settings__danger-btn">移除中...</button>
         )}
       </div>
-      <div style={{
-        borderTop: "1px solid #e2e8f0", paddingTop: 16, marginTop: 16,
-        textAlign: "center",
-      }}>
-        <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>問題回報</div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
+      <div className="moo-settings__report">
+        <div className="moo-settings__report-label">問題回報</div>
+        <div className="moo-settings__report-links">
           {reportLinks.map((link) => (
             <a
               key={link.name}
@@ -523,7 +415,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
               target="_blank"
               rel="noopener noreferrer"
               title={link.name}
-              style={{ color: "#94a3b8", textDecoration: "none",  display: 'inline-block' }}
+              className="moo-settings__report-link"
             >
               <svg
                 aria-hidden="true"

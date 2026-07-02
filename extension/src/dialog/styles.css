@@ -49,6 +49,9 @@
   --moo-error-bg: #fef2f2; /* error alert fill (red-50) */
   --moo-error-border: #fecaca; /* error alert border (red-200) */
   --moo-error-text: #b91c1c; /* error alert text (red-700) */
+  /* Batch 3 additions (recurring ≥2× across the converted components). */
+  --moo-invite: #10b981; /* invite-link button border + text (emerald-500) */
+  --moo-danger-border: #fca5a5; /* soft danger border / QR error fill (red-300) */
 }
 
 /*
@@ -95,6 +98,30 @@
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   background-size: 16px 12px;
+  /* Box props (retired formSelectStyle helper). Height is pinned to match the
+     toolbar icon buttons; selects center text natively so vertical padding is 0
+     and box-sizing includes the border. */
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 12px;
+  padding-right: 2.25rem;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  font-size: 14px;
+  background-color: white;
+  color: var(--moo-text-strong);
+  cursor: pointer;
+  outline: none;
+}
+
+/* Mobile: 32px touch target to match the toolbar icon buttons. */
+.moo-form-select--mobile {
+  height: 32px;
+}
+
+/* Full-width variant (MemberDropdown spread `width: "100%"`). */
+.moo-form-select--full {
+  width: 100%;
 }
 
 /* ── Spin ─────────────────────────────────────────────────────────────── */
@@ -1790,4 +1817,1028 @@
   display: flex;
   justify-content: flex-end;
   margin-top: 14px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Batch 3: FamilySettings, MemberList, DisplayNameEditor, PublicShareDialog,
+   QrCodeLink, InviteQrCode, FloatingIconSizeSelector, AutoSyncIntervalSelector
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── FloatingIconSizeSelector ─────────────────────────────────────────── */
+
+.moo-icon-size {
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.moo-icon-size__segment {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid var(--moo-border);
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.moo-icon-size__segment--active {
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+  font-weight: 600;
+}
+
+/* Segment corners (mirrors getSegmentBorderRadius, radius 6). */
+.moo-icon-size__segment--first {
+  border-radius: 6px 0 0 6px;
+}
+
+.moo-icon-size__segment--middle {
+  border-radius: 0;
+}
+
+.moo-icon-size__segment--last {
+  border-radius: 0 6px 6px 0;
+}
+
+/* ── Toggle switch (shared: FamilySettings syncArchived + MemberList canLend) ──
+   Byte-identical between the two before conversion: 32×18 track, 14×14 knob,
+   blue-on / slate-off, 0.2s transitions. */
+
+.moo-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--moo-text-strong);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+/* MemberList's canLend toggle differs from FamilySettings' by inline-flex (vs
+   flex) and 13px font; kept as an explicit modifier rather than silently unified. */
+.moo-switch--inline {
+  display: inline-flex;
+  font-size: 13px;
+}
+
+.moo-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.moo-switch__track {
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--moo-text-fainter);
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.moo-switch__track--on {
+  background: var(--moo-primary);
+}
+
+.moo-switch__knob {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: #fff;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: left 0.2s;
+}
+
+.moo-switch__knob--on {
+  left: 16px;
+}
+
+/* ── FamilySettings ───────────────────────────────────────────────────── */
+
+.moo-settings__section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--moo-text);
+  width: 100%;
+}
+
+/* Collapsed section header has no bottom gap; open header nudges content down. */
+.moo-settings__section-header--open {
+  margin-bottom: 12px;
+}
+
+.moo-settings__block {
+  margin-bottom: 20px;
+}
+
+.moo-settings__label {
+  color: var(--moo-text-strong);
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+/* Bolder slate-500 heading used for 家庭同步碼 / 家庭成員 / 顯示名稱 groups. */
+.moo-settings__group-label {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+/* 家庭成員 heading originally had marginBottom 8 (others 6); preserve the 2px. */
+.moo-settings__group-label--members {
+  margin-bottom: 8px;
+}
+
+.moo-settings__hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+.moo-settings__divider {
+  border-top: 1px solid var(--moo-border);
+  padding-top: 16px;
+  margin-top: 4px;
+}
+
+.moo-settings__sync-code-box {
+  padding: 12px;
+  background: var(--moo-surface-subtle);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moo-settings__sync-code-text {
+  flex: 1;
+  word-break: break-all;
+  font-size: 13px;
+  font-family: monospace;
+}
+
+.moo-settings__copy-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+/* Sync-code copy button (blue). Disabled + copied states are modifiers. */
+.moo-settings__copy-btn {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.moo-settings__copy-btn--copied {
+  background: var(--moo-primary-bg);
+}
+
+.moo-settings__copy-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Invite-link copy button (emerald). */
+.moo-settings__invite-btn {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--moo-invite);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-invite);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.moo-settings__invite-btn--copied {
+  background: #ecfdf5;
+}
+
+.moo-settings__invite-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.moo-settings__members-loading {
+  color: var(--moo-text-faint);
+  font-size: 14px;
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-settings__members-error {
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-settings__error-text {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.moo-settings__retry-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* Danger (leave / delete) outline button. */
+.moo-settings__danger-btn {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-danger-alt);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-danger-alt);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.moo-settings__danger-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.moo-settings__confirm-prompt {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.moo-settings__confirm-row {
+  display: flex;
+  gap: 8px;
+}
+
+.moo-settings__confirm-yes {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-danger-alt);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.moo-settings__confirm-no {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* Delete-account section divider (has margin-bottom, unlike the personal one). */
+.moo-settings__section-divider {
+  border-top: 1px solid var(--moo-border);
+  padding-top: 16px;
+  margin-bottom: 16px;
+}
+
+.moo-settings__section-divider--spaced {
+  border-top: 1px solid var(--moo-border);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+.moo-settings__delete-warning {
+  background: var(--moo-error-bg);
+  border: 1px solid var(--moo-error-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.moo-settings__delete-warning-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moo-error-text);
+  margin-bottom: 8px;
+}
+
+.moo-settings__delete-warning-list {
+  font-size: 12px;
+  color: var(--moo-danger-alt);
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+
+.moo-settings__report {
+  border-top: 1px solid var(--moo-border);
+  padding-top: 16px;
+  margin-top: 16px;
+  text-align: center;
+}
+
+.moo-settings__report-label {
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.moo-settings__report-links {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.moo-settings__report-link {
+  color: var(--moo-text-faint);
+  text-decoration: none;
+  display: inline-block;
+}
+
+/* ── MemberList ───────────────────────────────────────────────────────── */
+
+.moo-member-list__error {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.moo-member-list__table {
+  background: var(--moo-surface-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.moo-member-list__row {
+  padding: 10px 12px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--moo-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.moo-member-list__row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.moo-member-list__name {
+  font-family: monospace;
+  font-size: 13px;
+}
+
+/* 管理員 badge (amber) / (你) badge (blue). */
+.moo-member-list__badge {
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.moo-member-list__badge--owner {
+  color: var(--moo-warn-border);
+}
+
+.moo-member-list__badge--self {
+  color: var(--moo-primary);
+}
+
+/* Small outline action button (transfer / remove / delete-readmoo-name). */
+.moo-member-list__small-btn {
+  padding: 4px 10px;
+  border: 1px solid;
+  border-radius: 6px;
+  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.moo-member-list__small-btn--primary {
+  border-color: var(--moo-primary);
+  color: var(--moo-primary);
+}
+
+.moo-member-list__small-btn--danger {
+  border-color: var(--moo-danger-alt);
+  color: var(--moo-danger-alt);
+}
+
+/* The delete-readmoo-name button drops the left margin (first in its own row). */
+.moo-member-list__small-btn--flush {
+  margin-left: 0;
+}
+
+/* Only the delete-readmoo-name button is ever disabled (while deleting). The
+   original kept cursor:pointer and only dimmed opacity, so we do the same. */
+.moo-member-list__small-btn:disabled {
+  opacity: 0.5;
+}
+
+.moo-member-list__toggle-hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.moo-member-list__readmoo {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.moo-member-list__readmoo-name {
+  font-size: 13px;
+  color: var(--moo-text-strong);
+}
+
+.moo-member-list__readmoo-empty {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  line-height: 1.5;
+}
+
+/* MemberList confirm dialogs (remove / transfer / custom-endpoint transfer). */
+.moo-member-list__confirm {
+  background: var(--moo-error-bg);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.moo-member-list__confirm--warn {
+  background: var(--moo-warn-bg);
+}
+
+.moo-member-list__confirm-text {
+  font-size: 13px;
+  color: var(--moo-text-muted);
+  margin-bottom: 8px;
+}
+
+.moo-member-list__confirm-warn-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--moo-text-strong);
+  margin-bottom: 8px;
+}
+
+.moo-member-list__endpoint {
+  padding: 6px;
+  background: var(--moo-surface-subtle);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-all;
+  margin-bottom: 8px;
+}
+
+.moo-member-list__confirm-warn-body {
+  font-size: 13px;
+  color: var(--moo-text-muted);
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+.moo-member-list__confirm-warn-list {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  margin: 0 0 12px 0;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+
+.moo-member-list__confirm-row {
+  display: flex;
+  gap: 8px;
+}
+
+.moo-member-list__confirm-row--end {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.moo-member-list__confirm-yes {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--moo-danger-alt);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__confirm-yes:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.moo-member-list__confirm-no {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--moo-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__confirm-no:disabled {
+  cursor: not-allowed;
+}
+
+/* Endpoint-transfer action buttons (auto-width, not flex:1). */
+.moo-member-list__endpoint-cancel {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__endpoint-cancel:disabled {
+  cursor: not-allowed;
+}
+
+.moo-member-list__endpoint-keep {
+  padding: 8px 14px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__endpoint-keep:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.moo-member-list__endpoint-clear {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--moo-primary);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__endpoint-clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── DisplayNameEditor ────────────────────────────────────────────────── */
+
+.moo-name-editor {
+  margin-bottom: 20px;
+}
+
+.moo-name-editor__label {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.moo-name-editor__hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.moo-name-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moo-name-editor__input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.moo-name-editor__icon-btn {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.moo-name-editor__icon-btn:disabled {
+  cursor: not-allowed;
+}
+
+/* The cancel (X) button dims while saving; confirm does not. */
+.moo-name-editor__icon-btn--dim:disabled {
+  opacity: 0.5;
+}
+
+.moo-name-editor__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--moo-border);
+  border-top-color: var(--moo-primary);
+  border-radius: 50%;
+  animation: moo-spin 0.8s linear infinite;
+}
+
+.moo-name-editor__error {
+  color: var(--moo-danger-alt);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.moo-name-editor__value {
+  font-size: 14px;
+  color: var(--moo-text-strong);
+}
+
+/* ── PublicShareDialog ────────────────────────────────────────────────── */
+
+.moo-public-share__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.moo-public-share {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.moo-public-share__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.moo-public-share__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.moo-public-share__icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--moo-text-slate600);
+  display: flex;
+}
+
+.moo-public-share__error {
+  background: var(--moo-error-bg);
+  color: var(--moo-danger);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.moo-public-share__muted {
+  color: var(--moo-text-faint);
+  text-align: center;
+  padding: 16px;
+}
+
+.moo-public-share__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.moo-public-share__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.moo-public-share__input {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+}
+
+/* The expires <select> shares the input chrome (.moo-public-share__input) but
+   adds its own chevron + room for it, and a compact mobile vertical padding.
+   It intentionally does NOT use .moo-form-select, whose 40px height / 12px
+   padding / slate border would override the 6px/10px input look. */
+.moo-public-share__select {
+  --moo-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: var(--moo-form-select-bg-img);
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px 12px;
+  padding-right: 2.25rem;
+}
+
+.moo-public-share__select--mobile {
+  padding: 4px 10px;
+  padding-right: 2.25rem;
+}
+
+.moo-public-share__url-input {
+  flex: 1;
+  font-size: 12px;
+}
+
+.moo-public-share__link-label {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  margin: 0 0 4px;
+}
+
+.moo-public-share__url-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.moo-public-share__copied {
+  font-size: 11px;
+  color: var(--moo-success);
+}
+
+.moo-public-share__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.moo-public-share__primary-btn {
+  padding: 8px 14px;
+  background: var(--moo-primary);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.moo-public-share__secondary-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--moo-text-fainter);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.moo-public-share__danger-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--moo-danger-border);
+  color: var(--moo-danger);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.moo-public-share__confirm {
+  background: var(--moo-warn-bg);
+  border: 1px solid #fbbf24;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.moo-public-share__confirm-text {
+  margin: 0;
+  font-size: 13px;
+}
+
+.moo-public-share__confirm-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ── QrCodeLink ───────────────────────────────────────────────────────── */
+
+.moo-qr-link {
+  margin-bottom: 20px;
+}
+
+.moo-qr-link__label {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.moo-qr-link__box {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+/* CTA text pill layered over the blurred placeholder. */
+.moo-qr-link__cta {
+  background: rgba(255, 255, 255, 0.92);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--moo-text);
+}
+
+.moo-qr-link__cta--spaced {
+  margin-bottom: 4px;
+}
+
+.moo-qr-link__cta--error {
+  color: var(--moo-error-text);
+  max-width: 180px;
+  text-align: center;
+}
+
+.moo-qr-link__regen {
+  padding: 6px 14px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--moo-primary);
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.moo-qr-link__button {
+  position: relative;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.moo-qr-link__button--loading {
+  cursor: wait;
+}
+
+.moo-qr-link__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.moo-qr-link__placeholder {
+  display: grid;
+  filter: blur(8px);
+}
+
+.moo-qr-link__copy-btn {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.moo-qr-link__copy-btn--copied {
+  background: var(--moo-primary-bg);
+}
+
+.moo-qr-link__copy-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.moo-qr-link__hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-top: 6px;
+  text-align: center;
+}
+
+.moo-qr-link__hint--small {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* ── InviteQrCode ─────────────────────────────────────────────────────── */
+
+.moo-invite-qr {
+  margin-top: 12px;
+}
+
+.moo-invite-qr__label {
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.moo-invite-qr__loading {
+  color: var(--moo-text-faint);
+  font-size: 14px;
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-invite-qr__error {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-invite-qr__box {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.moo-invite-qr__hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  text-align: center;
 }

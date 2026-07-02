@@ -34,14 +34,12 @@ export function DisplayNameEditor({
   const saving = nameSaveState === "saving";
 
   return (
-    <div style={{ marginBottom: 20 }}>
-      <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600, marginBottom: 4 }}>顯示名稱</div>
-      <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 6 }}>
-        此名稱僅用於家庭書櫃，不影響讀墨帳號
-      </div>
+    <div className="moo-name-editor">
+      <div className="moo-name-editor__label">顯示名稱</div>
+      <div className="moo-name-editor__hint">此名稱僅用於家庭書櫃，不影響讀墨帳號</div>
       {editing ? (
         <>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }} aria-busy={saving}>
+          <div className="moo-name-editor__row" aria-busy={saving}>
             <input
               ref={inputRef}
               type="text"
@@ -58,63 +56,40 @@ export function DisplayNameEditor({
               maxLength={20}
               placeholder="輸入顯示名稱"
               disabled={saving}
-              style={{
-                flex: 1, padding: 10, border: "1px solid #e2e8f0", borderRadius: 8,
-                fontSize: 14, boxSizing: "border-box",
-              }}
+              className="moo-name-editor__input"
             />
             <button
               onClick={() => void handleConfirm()}
               disabled={saving}
               aria-label={saving ? "儲存中" : "確認儲存"}
-              style={{
-                background: "transparent", border: "none", padding: 4,
-                cursor: saving ? "not-allowed" : "pointer",
-              }}
+              className="moo-name-editor__icon-btn"
             >
               {saving ? (
-                <div style={{
-                  width: 16, height: 16,
-                  border: "2px solid #e2e8f0",
-                  borderTopColor: "#2563eb",
-                  borderRadius: "50%",
-                  animation: "moo-spin 0.8s linear infinite",
-                }} />
+                <div className="moo-name-editor__spinner" />
               ) : (
-                <Check size={16} style={{ color: "#2563eb" }} />
+                <Check size={16} style={{ color: "var(--moo-primary)" }} />
               )}
             </button>
             <button
               onClick={handleCancel}
               disabled={saving}
               aria-label="取消編輯"
-              style={{
-                background: "transparent", border: "none", padding: 4,
-                cursor: saving ? "not-allowed" : "pointer",
-                opacity: saving ? 0.5 : 1,
-              }}
+              className="moo-name-editor__icon-btn moo-name-editor__icon-btn--dim"
             >
-              <X size={16} style={{ color: "#94a3b8" }} />
+              <X size={16} style={{ color: "var(--moo-text-faint)" }} />
             </button>
           </div>
-          {nameSaveError && (
-            <div style={{ color: "#ef4444", fontSize: 12, marginTop: 6 }}>
-              {nameSaveError}
-            </div>
-          )}
-          <style>{`@keyframes moo-spin { to { transform: rotate(360deg); } }`}</style>
+          {nameSaveError && <div className="moo-name-editor__error">{nameSaveError}</div>}
         </>
       ) : (
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 14, color: "#334155" }}>
-            {savedDisplayName || userId.slice(0, 8)}
-          </span>
+        <div className="moo-name-editor__row">
+          <span className="moo-name-editor__value">{savedDisplayName || userId.slice(0, 8)}</span>
           <button
             onClick={() => setEditing(true)}
             aria-label="編輯顯示名稱"
-            style={{ background: "transparent", border: "none", padding: 4, cursor: "pointer" }}
+            className="moo-name-editor__icon-btn"
           >
-            <Pencil size={16} style={{ color: "#94a3b8" }} />
+            <Pencil size={16} style={{ color: "var(--moo-text-faint)" }} />
           </button>
         </div>
       )}

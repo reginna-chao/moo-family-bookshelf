@@ -1,45 +1,37 @@
 import React from "react";
 import type { FloatingIconSize } from "./useFloatingIconSize";
-import { type SegmentPosition, getSegmentBorderRadius } from "./segmentBorderRadius";
 
 export interface FloatingIconSizeSelectorProps {
   size: FloatingIconSize;
   onChange: (size: FloatingIconSize) => void;
 }
 
+type SegmentModifier = "first" | "middle" | "last";
+
 interface SegmentProps {
   active: boolean;
   ariaLabel: string;
   label: string;
   onClick: () => void;
-  position?: SegmentPosition;
+  position: SegmentModifier;
 }
 
 function Segment({ active, ariaLabel, label, onClick, position }: SegmentProps) {
+  const className = [
+    "moo-icon-size__segment",
+    active ? "moo-icon-size__segment--active" : "",
+    `moo-icon-size__segment--${position}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <button
-      type="button"
-      aria-label={ariaLabel}
-      aria-pressed={active}
-      onClick={onClick}
-      style={{
-        flex: 1,
-        padding: "6px 0",
-        border: active ? "1px solid #2563eb" : "1px solid #e2e8f0",
-        borderRadius: getSegmentBorderRadius(position),
-        background: active ? "#eff6ff" : "transparent",
-        color: active ? "#2563eb" : "#64748b",
-        fontSize: 13,
-        fontWeight: active ? 600 : 400,
-        cursor: "pointer",
-      }}
-    >
+    <button type="button" aria-label={ariaLabel} aria-pressed={active} onClick={onClick} className={className}>
       {label}
     </button>
   );
 }
 
-function getSegmentPosition(index: number, total: number): SegmentPosition {
+function getSegmentPosition(index: number, total: number): SegmentModifier {
   if (index === 0) return "first";
   if (index === total - 1) return "last";
   return "middle";
@@ -54,11 +46,7 @@ const OPTIONS: Array<{ size: FloatingIconSize; label: string; ariaLabel: string 
 
 export function FloatingIconSizeSelector({ size, onChange }: FloatingIconSizeSelectorProps) {
   return (
-    <div
-      role="group"
-      aria-label="家庭書櫃按鈕大小"
-      style={{ display: "flex", borderRadius: 6, overflow: "hidden" }}
-    >
+    <div role="group" aria-label="家庭書櫃按鈕大小" className="moo-icon-size">
       {OPTIONS.map((opt, index) => (
         <Segment
           key={opt.size}
