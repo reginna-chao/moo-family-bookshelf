@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
-import type { Context } from "hono";
+import type { Context, TypedResponse } from "hono";
 import type { Env } from "../utils/env";
 import {
   kvKeys,
@@ -63,7 +63,15 @@ export async function writePublicSnapshot(
   await kv.put(kvKeys.publicShelf(shelf.shareToken), JSON.stringify(snapshot), opts);
 }
 
-function authGuard(c: Context<{ Bindings: Env }>, userId: string): Response | null {
+/** Shape of the 401/403 JSON body returned by {@link authGuard}. */
+interface AuthError {
+  error: { code: string; message: string };
+}
+
+function authGuard(
+  c: Context<{ Bindings: Env }>,
+  userId: string,
+): (Response & TypedResponse<AuthError, 401 | 403, "json">) | null {
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
     return c.json(
@@ -214,8 +222,7 @@ publicShelfRoutes.openapi(getPublicShelvesRoute, async (c) => {
   }
 
   const denied = authGuard(c, userId);
-  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return denied as any;
+  if (denied) return denied;
 
   const record = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
   const shelves = record?.publicSharing?.shelves ?? [];
@@ -230,8 +237,7 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
   }
 
   const denied = authGuard(c, userId);
-  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return denied as any;
+  if (denied) return denied;
 
   let body: Record<string, unknown>;
   try {
@@ -290,8 +296,7 @@ publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
   }
 
   const denied = authGuard(c, userId);
-  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return denied as any;
+  if (denied) return denied;
 
   let body: Record<string, unknown>;
   try {
@@ -354,8 +359,7 @@ publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
   }
 
   const denied = authGuard(c, userId);
-  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return denied as any;
+  if (denied) return denied;
 
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
@@ -392,8 +396,7 @@ publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
   }
 
   const denied = authGuard(c, userId);
-  if (denied) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return denied as any;
+  if (denied) return denied;
 
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
