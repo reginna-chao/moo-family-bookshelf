@@ -143,16 +143,14 @@ export function PatternLock({ onComplete, mode, error }: PatternLockProps) {
         : "再次繪製圖形確認";
 
   return (
-    <div style={{ textAlign: "center" }}>
-      <div style={{ fontSize: 14, color: "#334155", marginBottom: 12, fontWeight: 500 }}>
-        {label}
-      </div>
+    <div className="moo-secret-entry">
+      <div className="moo-secret-entry__label">{label}</div>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
         width={CANVAS_SIZE}
         height={CANVAS_SIZE}
-        style={{ touchAction: "none", cursor: "pointer", display: "block", margin: "0 auto" }}
+        className="moo-pattern-lock__svg"
         onMouseDown={handleStart}
         onMouseMove={handleMove}
         onMouseUp={handleEnd}
@@ -202,9 +200,7 @@ export function PatternLock({ onComplete, mode, error }: PatternLockProps) {
           );
         })}
       </svg>
-      {displayError && (
-        <div style={{ color: "#ef4444", fontSize: 13, marginTop: 8 }}>{displayError}</div>
-      )}
+      {displayError && <div className="moo-secret-entry__error">{displayError}</div>}
       {mode === "setup" && setupStep === "confirm" && (
         <button
           onClick={() => {
@@ -213,10 +209,7 @@ export function PatternLock({ onComplete, mode, error }: PatternLockProps) {
             reset();
             setMismatchError("");
           }}
-          style={{
-            marginTop: 8, background: "transparent", border: "none",
-            color: "#64748b", fontSize: 13, cursor: "pointer", textDecoration: "underline",
-          }}
+          className="moo-secret-entry__reset"
         >
           重新設定
         </button>

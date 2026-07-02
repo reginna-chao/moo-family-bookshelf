@@ -169,6 +169,9 @@ export function createCloseIcon(
   button.setAttribute("aria-label", "關閉");
   button.title = "關閉";
   button.innerHTML = CLOSE_ICON_SVG;
+  // Bootstrap styles kept as inline cssText (NOT a moo-* class): the close icon
+  // is appended to the dialog before mountDialog() imports styles.css into the
+  // shadow root, so a class would flash unstyled. See index.ts (toggleDialog).
   button.style.cssText = [
     "position: absolute",
     "top: 2px",

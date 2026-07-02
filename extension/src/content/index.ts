@@ -264,6 +264,10 @@ function toggleDialog(): void {
 
   const dialog = document.createElement("div");
   dialog.id = MOO_ELEMENT_IDS.dialog;
+  // Bootstrap styles kept as inline cssText (NOT moo-* classes): these elements
+  // are built and shown before mountDialog() dynamically imports styles.css into
+  // the shadow root, so class-based styling would flash unstyled. The small
+  // duplication cost is not worth a second bootstrap stylesheet.
   // Layout-independent base styles; position/size are set per-breakpoint below.
   dialog.style.cssText = [
     "position: fixed",

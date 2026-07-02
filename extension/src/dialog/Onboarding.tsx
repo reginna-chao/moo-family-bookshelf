@@ -138,7 +138,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   };
 
   return (
-    <div style={{ position: "relative", minHeight: 200 }}>
+    <div className="moo-onboarding">
       {(isAutoSetupActive ||
         flow.state === "syncing-books" ||
         flow.state === "recovering" ||

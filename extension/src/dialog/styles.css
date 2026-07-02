@@ -2842,3 +2842,600 @@
   font-size: 12px;
   text-align: center;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Batch 4: Onboarding, OnboardingViews, RecoveryChoiceView, RecoveryJoinView,
+   SoloRecoveryConfirmView, VerificationSettings, PatternLock, PinInput
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Onboarding (relative container hosting the LoadingOverlay) ────────── */
+
+.moo-onboarding {
+  position: relative;
+  min-height: 200px;
+}
+
+/* ── OnboardingViews (Welcome / Created / Error / Idle) ────────────────── */
+/* Shared 24px-padded panel wrapping every onboarding view. */
+
+.moo-onboarding-view {
+  padding: 24px;
+}
+
+.moo-onboarding-view__heading {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+/* ErrorView heading is red; the rest inherit the default text color. */
+.moo-onboarding-view__heading--error {
+  color: var(--moo-danger-alt);
+}
+
+/* Body paragraph. Base = slate-500, marginBottom 24 / 14px. The --gap16
+   modifier covers the CreatedView (16) spacing variant. */
+.moo-onboarding-view__body {
+  color: var(--moo-text-muted);
+  margin-bottom: 24px;
+  font-size: 14px;
+}
+
+.moo-onboarding-view__body--gap16 {
+  margin-bottom: 16px;
+}
+
+/* Full-width solid primary button (Welcome start / Created continue / Idle
+   create / Error primary action). Byte differences are pushed to modifiers. */
+.moo-onboarding-view__primary {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* WelcomeView's start button: 14px padding + 16px font (vs the 12/default). */
+.moo-onboarding-view__primary--welcome {
+  padding: 14px;
+  font-size: 16px;
+}
+
+/* ErrorView action buttons carry an 8px bottom gap. */
+.moo-onboarding-view__primary--gap8 {
+  margin-bottom: 8px;
+}
+
+/* Copy button toggles a pale-blue fill once copied (else transparent), and is
+   an outline (blue border) button rather than solid. */
+.moo-onboarding-view__copy {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-onboarding-view__copy--copied {
+  background: var(--moo-primary-bg);
+}
+
+/* ErrorView secondary action (outline blue). */
+.moo-onboarding-view__secondary {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Sync-code display box (CreatedView). */
+.moo-onboarding-view__code-box {
+  padding: 12px;
+  background: var(--moo-surface-subtle);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moo-onboarding-view__code-text {
+  flex: 1;
+  word-break: break-all;
+  font-size: 13px;
+  font-family: monospace;
+}
+
+/* Fine-print footer note (Welcome / Idle). Idle adds line-height 1.6 via --lh. */
+.moo-onboarding-view__note {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-top: 16px;
+  text-align: center;
+}
+
+.moo-onboarding-view__note--lh {
+  line-height: 1.6;
+}
+
+/* IdleView "或" divider between create and join. */
+.moo-onboarding-view__divider {
+  text-align: center;
+  margin: 12px 0;
+  color: var(--moo-text-faint);
+}
+
+/* IdleView create button: blue solid, greys to blue-300 while processing. */
+.moo-onboarding-view__create {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-onboarding-view__create--busy {
+  background: var(--moo-primary-strong);
+  cursor: not-allowed;
+}
+
+/* IdleView sync-code input wrapper + input. */
+.moo-onboarding-view__input-wrap {
+  margin-bottom: 12px;
+}
+
+.moo-onboarding-view__input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+/* IdleView join button (outline blue), dimmed + not-allowed when disabled. */
+.moo-onboarding-view__join {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-onboarding-view__join--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── RecoveryChoiceView ───────────────────────────────────────────────── */
+
+.moo-recovery-choice__account {
+  color: var(--moo-text-muted);
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.moo-recovery-choice__body {
+  color: var(--moo-text-muted);
+  margin-bottom: 24px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Primary (輸入同步碼重新加入): solid blue, 14px font, 12px bottom gap. */
+.moo-recovery-choice__primary {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* Secondary (略過): outline blue, 14px font, dims + not-allowed while loading. */
+.moo-recovery-choice__secondary {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.moo-recovery-choice__secondary--loading {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ── RecoveryJoinView ─────────────────────────────────────────────────── */
+
+.moo-recovery-join__body {
+  color: var(--moo-text-muted);
+  margin-bottom: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.moo-recovery-join__field {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+/* Reveal-toggle input: reserves 40px right padding for the eye button. */
+.moo-recovery-join__input {
+  width: 100%;
+  padding: 12px;
+  padding-right: 40px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+.moo-recovery-join__reveal {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--moo-text-faint);
+  padding: 4px;
+}
+
+/* Join button: solid blue, greys to blue-300 + dims when disabled. */
+.moo-recovery-join__submit {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.moo-recovery-join__submit--disabled {
+  background: var(--moo-primary-strong);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Underlined text "返回" link-button; not-allowed while processing. */
+.moo-recovery-join__back {
+  width: 100%;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.moo-recovery-join__back--disabled {
+  cursor: not-allowed;
+}
+
+/* ── SoloRecoveryConfirmView ──────────────────────────────────────────── */
+
+/* Info callout (blue-100 fill / blue-800 text). Both literals are one-offs. */
+.moo-solo-recovery__info {
+  padding: 12px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  background: #dbeafe;
+  color: #1e40af;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.moo-solo-recovery__body {
+  color: var(--moo-text-muted);
+  margin-bottom: 24px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Confirm button: solid blue, dims + not-allowed while loading. */
+.moo-solo-recovery__confirm {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.moo-solo-recovery__confirm--loading {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Back button: outline blue, 14px font. */
+.moo-solo-recovery__back {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* ── VerificationSettings ─────────────────────────────────────────────── */
+
+.moo-verify {
+  margin-bottom: 16px;
+}
+
+.moo-verify__loading {
+  color: var(--moo-text-faint);
+  font-size: 14px;
+  padding: 8px;
+}
+
+.moo-verify__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moo-text-muted);
+  margin-bottom: 8px;
+}
+
+.moo-verify__current {
+  font-size: 13px;
+  color: var(--moo-text-muted);
+  margin-bottom: 12px;
+}
+
+.moo-verify__tip {
+  background: var(--moo-surface-alt);
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.moo-verify__methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Method pill. Base = unselected (slate border/text, transparent). The
+   --active modifier applies the blue selected look; both share padding/font.
+   The 2px blue active border differs from the 1px slate default, so it is a
+   full border re-declaration rather than a color-only override. */
+.moo-verify__method {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--moo-border);
+  background: transparent;
+  color: var(--moo-text-muted);
+}
+
+.moo-verify__method--active {
+  border: 2px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+.moo-verify__method:disabled {
+  cursor: not-allowed;
+}
+
+.moo-verify__none-warning {
+  margin-bottom: 12px;
+}
+
+/* Amber warning card (fill #fef3c7 one-off, softer amber border token). */
+.moo-verify__none-box {
+  background: #fef3c7;
+  border: 1px solid var(--moo-warn-border-soft);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.moo-verify__none-text {
+  font-size: 13px;
+  color: var(--moo-warn-text);
+}
+
+/* Confirm-no-verify button (amber outline). #b45309 text is a one-off amber-700. */
+.moo-verify__none-confirm {
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--moo-warn-border);
+  background: var(--moo-warn-bg);
+  color: #b45309;
+  cursor: pointer;
+}
+
+.moo-verify__none-confirm:disabled {
+  cursor: not-allowed;
+}
+
+.moo-verify__otp {
+  margin-top: 8px;
+}
+
+.moo-verify__otp-display {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.moo-verify__otp-code {
+  font-size: 24px;
+  font-weight: 700;
+  font-family: monospace;
+  color: var(--moo-primary);
+  letter-spacing: 4px;
+  margin-bottom: 4px;
+}
+
+.moo-verify__otp-countdown {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+}
+
+/* Generate-OTP button (blue outline pill). */
+.moo-verify__otp-generate {
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+  cursor: pointer;
+}
+
+/* Inline save-status lines. */
+.moo-verify__status {
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.moo-verify__status--saving {
+  color: var(--moo-text-muted);
+}
+
+.moo-verify__status--saved {
+  color: var(--moo-invite);
+}
+
+.moo-verify__status--error {
+  color: var(--moo-danger-alt);
+}
+
+/* ── PatternLock / PinInput (shared secret-entry chrome) ──────────────── */
+
+.moo-secret-entry {
+  text-align: center;
+}
+
+.moo-secret-entry__label {
+  font-size: 14px;
+  color: var(--moo-text-strong);
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+
+.moo-secret-entry__error {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+/* PinInput's error sits closer (4px) than PatternLock's (8px). */
+.moo-secret-entry__error--tight {
+  margin-top: 4px;
+}
+
+/* Underlined "重新設定" reset link (shared by both). */
+.moo-secret-entry__reset {
+  margin-top: 8px;
+  background: transparent;
+  border: none;
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* ── PatternLock ──────────────────────────────────────────────────────── */
+
+/* touch-action:none keeps drag gestures from scrolling the page mid-draw. */
+.moo-pattern-lock__svg {
+  touch-action: none;
+  cursor: pointer;
+  display: block;
+  margin: 0 auto;
+}
+
+/* ── PinInput ─────────────────────────────────────────────────────────── */
+
+.moo-pin-input__hint {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  margin-bottom: 8px;
+}
+
+.moo-pin-input__row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* Field border color is state-driven (error → filled → empty) and stays inline;
+   the static box metrics live here. */
+.moo-pin-input__field {
+  width: 200px;
+  height: 44px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+  border-radius: 8px;
+  outline: none;
+  background: var(--moo-surface-subtle);
+  letter-spacing: 4px;
+}
+
+.moo-pin-input__submit {
+  padding: 0 20px;
+  height: 44px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  background: var(--moo-primary);
+  color: #fff;
+  cursor: pointer;
+}
