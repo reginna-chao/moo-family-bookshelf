@@ -142,8 +142,7 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     max: 10,
     windowSec: 60,
   });
-  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return rateLimitResponse as any;
+  if (rateLimitResponse) return rateLimitResponse;
 
   // Load family record
   const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
@@ -256,8 +255,7 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
     max: 60,
     windowSec: 60,
   });
-  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return rateLimitResponse as any;
+  if (rateLimitResponse) return rateLimitResponse;
 
   // Verify caller is a family member
   const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
@@ -323,8 +321,7 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
     max: 30,
     windowSec: 60,
   });
-  if (rateLimitResponse) // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return rateLimitResponse as any;
+  if (rateLimitResponse) return rateLimitResponse;
 
   // Load borrow record
   const borrowRequest = await c.env.KV.get<BorrowRequest>(kvKeys.borrow(requestId), "json");

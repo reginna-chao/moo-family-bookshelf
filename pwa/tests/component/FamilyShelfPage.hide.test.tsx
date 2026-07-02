@@ -66,6 +66,7 @@ function makeBooks(
 
 interface MockOpts {
   hidden?: string[];
+  favorites?: string[];
   members?: unknown;
   bookshelf?: unknown;
   updateFamilyPrefs?: ReturnType<typeof vi.fn>;
@@ -74,11 +75,16 @@ interface MockOpts {
 function createApiClient(opts: MockOpts = {}) {
   return {
     getPersonalBooks: vi.fn().mockResolvedValue({
-      data: { familyShelfPrefs: { hidden: opts.hidden ?? [] } },
+      data: {
+        familyShelfPrefs: {
+          hidden: opts.hidden ?? [],
+          favorites: opts.favorites ?? [],
+        },
+      },
     }),
     updateFamilyPrefs:
       opts.updateFamilyPrefs ??
-      vi.fn().mockResolvedValue({ data: { ok: true, hidden: [] } }),
+      vi.fn().mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } }),
     getFamilyMembers: vi.fn().mockResolvedValue(
       opts.members ?? {
         data: { familyId: "fam-1", ownerId: "user-self", members: [] },
@@ -215,9 +221,11 @@ describe("FamilyShelfPage — hide feature", () => {
     vi.useRealTimers();
 
     expect(updateFamilyPrefs).toHaveBeenCalledTimes(1);
-    const [userIdArg, hiddenArg] = updateFamilyPrefs.mock.calls[0];
+    const [userIdArg, prefsArg] = updateFamilyPrefs.mock.calls[0];
     expect(userIdArg).toBe("user-self");
-    expect(hiddenArg).toEqual(["user-alice:b1"]);
+    expect(prefsArg.hidden).toEqual(["user-alice:b1"]);
+    // Favorites unaffected by a hide toggle, but still sent in the full-replace flush.
+    expect(prefsArg.favorites).toEqual([]);
   });
 
   it("ignores an orphan hidden ref: counts unaffected, all real cards shown", async () => {

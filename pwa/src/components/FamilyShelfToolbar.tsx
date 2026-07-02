@@ -5,6 +5,7 @@ import type { BookSortMode } from "@/utils/sortBooks";
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import {
   HIDDEN_FILTER_VALUE,
+  FAVORITE_FILTER_VALUE,
   type BookWithMember,
   type MemberFilterValue,
 } from "@/hooks/useFamilyShelfBooks";
@@ -86,6 +87,7 @@ export function FamilyShelfToolbar({
               {m.displayName || m.userId.slice(0, 8)}
             </option>
           ))}
+          <option value={FAVORITE_FILTER_VALUE}>我的最愛</option>
           <option value={HIDDEN_FILTER_VALUE}>隱藏的書</option>
         </select>
         <BookSortDropdown value={sort} onChange={onSortChange} />

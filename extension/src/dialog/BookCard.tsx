@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React from "react";
 import { BookEntry, BoolFlag } from "../api/client";
+import { FavoriteButton } from "./FavoriteButton";
 import { LazyCover } from "./LazyCover";
-import { OverflowMenu } from "./OverflowMenu";
+import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
 
 export interface BookWithMember extends BookEntry {
   memberName: string;
@@ -10,7 +11,7 @@ export interface BookWithMember extends BookEntry {
 
 export interface BookCardProps {
   book: BookWithMember;
-  /** Show the "申請借閱" hover overlay (FamilyShelf context only). */
+  /** Show the "申請借閱" action button (FamilyShelf context only). */
   showBorrowButton?: boolean;
   /** Triggered when user clicks the borrow button. */
   onBorrowClick?: () => void;
@@ -20,6 +21,45 @@ export interface BookCardProps {
   onHideToggle?: () => void;
   /** Label for the hide/unhide menu item, e.g. "隱藏書籍" / "取消隱藏". */
   hideActionLabel?: string;
+  /** Whether the viewer has favorited this copy-scoped card (v1.5.0). */
+  isFavorite?: boolean;
+  /** Toggle favorite/unfavorite for this copy-scoped card (v1.5.0). */
+  onFavoriteToggle?: () => void;
+}
+
+interface BorrowControlProps {
+  showBorrowButton: boolean;
+  borrowRequestPending: boolean;
+  onBorrowClick?: () => void;
+}
+
+/** Left-side borrow control in the action row. Renders nothing when not borrowable. */
+function BorrowControl({ showBorrowButton, borrowRequestPending, onBorrowClick }: BorrowControlProps) {
+  if (!showBorrowButton) return null;
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!borrowRequestPending && onBorrowClick) onBorrowClick();
+  };
+  return (
+    <button
+      type="button"
+      disabled={borrowRequestPending}
+      onClick={handleClick}
+      style={{
+        padding: "6px 10px",
+        border: "none",
+        borderRadius: 6,
+        background: borrowRequestPending ? "#e2e8f0" : "#2563eb",
+        color: borrowRequestPending ? "#94a3b8" : "white",
+        fontWeight: 600,
+        fontSize: 12,
+        cursor: borrowRequestPending ? "not-allowed" : "pointer",
+      }}
+    >
+      {borrowRequestPending ? "申請中" : "申請借閱"}
+    </button>
+  );
 }
 
 export function FilterButton({
@@ -57,149 +97,115 @@ export function BookCard({
   borrowRequestPending = false,
   onHideToggle,
   hideActionLabel,
+  isFavorite = false,
+  onFavoriteToggle,
 }: BookCardProps) {
-  const [hover, setHover] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const overlayVisible = showBorrowButton && hover;
-  const showMenu = Boolean(onHideToggle && hideActionLabel);
-  const menuVisible = showMenu && (hover || menuOpen);
+  const menuItems: OverflowMenuItem[] = [];
+  if (onHideToggle && hideActionLabel) {
+    menuItems.push({ label: hideActionLabel, onSelect: onHideToggle });
+  }
+  const showMenu = menuItems.length > 0;
+  const showFavorite = Boolean(onFavoriteToggle);
 
   return (
     <div
-      style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        borderRadius: 8,
+        background: "#fff",
+        border: "1px solid #f1f5f9",
+        boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+        overflow: "hidden",
+      }}
     >
       <a
         href={book.readmooUrl}
         target="_blank"
         rel="noopener noreferrer"
-        style={{ display: "block", textDecoration: "none", position: "relative" }}
+        style={{ display: "block", textDecoration: "none" }}
       >
-        <LazyCover
-          src={book.coverUrl}
-          alt={book.title}
-          width={120}
-          height={180}
-          style={{ borderRadius: 4 }}
-          fallback={<div style={{ width: 120, height: 180, background: "#f1f5f9", borderRadius: 4 }} />}
-        />
-        {book.isUpdated === BoolFlag.TRUE && (
-          <span
-            aria-label="新分享書籍"
-            style={{
-              position: "absolute",
-              bottom: 4,
-              left: 4,
-              background: "#dcfce7",
-              color: "#16a34a",
-              fontSize: 12,
-              fontWeight: 600,
-              padding: "1px 6px",
-              borderRadius: 8,
-              lineHeight: "16px",
-            }}
-          >
-            更新
-          </span>
-        )}
-        {showBorrowButton && (
-          <div
-            aria-hidden={!overlayVisible}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "rgba(15, 23, 42, 0.55)",
-              borderRadius: 4,
-              opacity: overlayVisible ? 1 : 0,
-              pointerEvents: overlayVisible ? "auto" : "none",
-              transition: "opacity 0.15s",
-            }}
-          >
-            <button
-              type="button"
-              disabled={borrowRequestPending}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!borrowRequestPending && onBorrowClick) onBorrowClick();
-              }}
+        <div style={{ position: "relative" }}>
+          {/* width/height are only an intrinsic-ratio hint (CLS placeholder); actual size is responsive via the style override below. */}
+          <LazyCover
+            src={book.coverUrl}
+            alt={book.title}
+            width={120}
+            height={180}
+            style={{ width: "100%", height: "auto", aspectRatio: "3 / 4", borderRadius: 0 }}
+            fallback={<div style={{ width: "100%", aspectRatio: "3 / 4", background: "#f1f5f9" }} />}
+          />
+          {book.isUpdated === BoolFlag.TRUE && (
+            <span
+              aria-label="新分享書籍"
               style={{
-                padding: "6px 10px",
-                border: "none",
-                borderRadius: 6,
-                background: borrowRequestPending ? "#94a3b8" : "#2563eb",
-                color: "white",
-                fontWeight: 600,
+                position: "absolute",
+                bottom: 4,
+                left: 4,
+                background: "#dcfce7",
+                color: "#16a34a",
                 fontSize: 12,
-                cursor: borrowRequestPending ? "not-allowed" : "pointer",
+                fontWeight: 600,
+                padding: "1px 6px",
+                borderRadius: 8,
+                lineHeight: "16px",
               }}
             >
-              {borrowRequestPending ? "申請中" : "申請借閱"}
-            </button>
-          </div>
-        )}
-        {showMenu && hideActionLabel && onHideToggle && (
-          <div
+              更新
+            </span>
+          )}
+        </div>
+        <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+          <span
             style={{
-              position: "absolute",
-              top: 4,
-              right: 4,
-              opacity: menuVisible ? 1 : 0,
-              pointerEvents: menuVisible ? "auto" : "none",
-              transition: "opacity 0.15s",
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#1e293b",
+              textAlign: "left",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              lineHeight: "1.3",
             }}
           >
-            <OverflowMenu
-              items={[{ label: hideActionLabel, onSelect: onHideToggle }]}
-              onOpenChange={setMenuOpen}
-            />
-          </div>
-        )}
+            {book.title}
+          </span>
+          {book.author && (
+            <span style={{ fontSize: 12, color: "#94a3b8", textAlign: "left" }}>
+              {book.author}
+            </span>
+          )}
+          <span
+            style={{
+              alignSelf: "flex-start",
+              display: "inline-block",
+              fontSize: 12,
+              color: "#2563eb",
+              background: "#eff6ff",
+              padding: "1px 6px",
+              borderRadius: 8,
+            }}
+          >
+            {book.memberName}
+          </span>
+        </div>
       </a>
-      <a
-        href={book.readmooUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{
-          fontSize: 13,
-          fontWeight: 600,
-          color: "#1e293b",
-          textDecoration: "none",
-          textAlign: "center",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
-          lineHeight: "1.3",
-          maxWidth: "100%",
-        }}
-      >
-        {book.title}
-      </a>
-      {book.author && (
-        <span style={{ fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
-          {book.author}
-        </span>
-      )}
-      <span
-        style={{
-          fontSize: 12,
-          color: "#2563eb",
-          background: "#eff6ff",
-          padding: "1px 6px",
-          borderRadius: 8,
-        }}
-      >
-        {book.memberName}
-      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px 8px", marginTop: "auto" }}>
+        <BorrowControl
+          showBorrowButton={showBorrowButton}
+          borrowRequestPending={borrowRequestPending}
+          onBorrowClick={onBorrowClick}
+        />
+        <div style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 2 }}>
+          {showFavorite && onFavoriteToggle && (
+            <FavoriteButton isFavorite={isFavorite} onFavoriteToggle={onFavoriteToggle} />
+          )}
+          {showMenu && <OverflowMenu items={menuItems} tone="plain" />}
+        </div>
+      </div>
     </div>
   );
 }

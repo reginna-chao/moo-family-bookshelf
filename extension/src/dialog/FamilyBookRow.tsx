@@ -1,8 +1,9 @@
 import React from "react";
 import { BoolFlag } from "../api/client";
 import type { BookWithMember } from "./BookCard";
+import { FavoriteButton } from "./FavoriteButton";
 import { LazyCover } from "./LazyCover";
-import { OverflowMenu } from "./OverflowMenu";
+import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
 
 export interface FamilyBookRowProps {
   book: BookWithMember;
@@ -13,6 +14,10 @@ export interface FamilyBookRowProps {
   onHideToggle?: () => void;
   /** Label for the hide/unhide menu item, e.g. "隱藏書籍" / "取消隱藏". */
   hideActionLabel?: string;
+  /** Whether the viewer has favorited this copy-scoped card (v1.5.0). */
+  isFavorite?: boolean;
+  /** Toggle favorite/unfavorite for this copy-scoped card (v1.5.0). */
+  onFavoriteToggle?: () => void;
 }
 
 export function FamilyBookRow({
@@ -22,7 +27,13 @@ export function FamilyBookRow({
   borrowRequestPending = false,
   onHideToggle,
   hideActionLabel,
+  isFavorite = false,
+  onFavoriteToggle,
 }: FamilyBookRowProps) {
+  const menuItems: OverflowMenuItem[] = [];
+  if (onHideToggle && hideActionLabel) {
+    menuItems.push({ label: hideActionLabel, onSelect: onHideToggle });
+  }
   const handleBorrow = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -133,12 +144,14 @@ export function FamilyBookRow({
           {borrowRequestPending ? "申請中" : "申請借閱"}
         </button>
       )}
-      {onHideToggle && hideActionLabel && (
+      {onFavoriteToggle && (
+        <span style={{ flexShrink: 0, display: "inline-flex" }}>
+          <FavoriteButton isFavorite={isFavorite} onFavoriteToggle={onFavoriteToggle} />
+        </span>
+      )}
+      {menuItems.length > 0 && (
         <span style={{ flexShrink: 0 }}>
-          <OverflowMenu
-            items={[{ label: hideActionLabel, onSelect: onHideToggle }]}
-            tone="plain"
-          />
+          <OverflowMenu items={menuItems} tone="plain" />
         </span>
       )}
     </a>

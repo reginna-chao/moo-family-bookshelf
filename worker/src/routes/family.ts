@@ -254,8 +254,7 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     max: 10,
     windowSec: 3600,
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (rateLimitResponse) return rateLimitResponse as any;
+  if (rateLimitResponse) return rateLimitResponse;
 
   // Check if user already belongs to a different family (before verify to avoid leaking membership info)
   const existingFamily = await c.env.KV.get(kvKeys.member(body.userId));

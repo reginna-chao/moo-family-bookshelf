@@ -70,8 +70,11 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
  *
  * Enforces a configurable ceiling on requests tied to an identifier (typically
  * the authenticated userId) to prevent single-account abuse across rotating IPs.
- * Returns a 429 Response when the limit is exceeded, otherwise increments the
- * counter and returns `null` to let the handler proceed.
+ * Returns a typed 429 JSON response when the limit is exceeded, otherwise
+ * increments the counter and returns `null` to let the handler proceed. The
+ * return type is the concrete `TypedResponse<..., 429, "json">` produced by
+ * `c.json(...)`, so callers can `return` it directly without a cast — the
+ * status literal lets it satisfy an OpenAPIHono handler's declared 429 response.
  *
  * KV key format: `ratelimit:user:{scope}:{userId}:{bucket}` where
  * `bucket = floor(Date.now() / windowMs)`.

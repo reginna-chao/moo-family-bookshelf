@@ -20,27 +20,19 @@ function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
 }
 
 /**
- * The borrow button is rendered inside an overlay that becomes visible
- * (and accessible) only on hover. Helper to trigger hover on the card root.
+ * After the v1.5.0 reshape the action row (borrow + favorite + hide) is ALWAYS
+ * visible — there is no hover overlay. Borrow keeps the "申請借閱" / "申請中"
+ * semantics and is only rendered when showBorrowButton is true.
  */
-function hoverCard(container: HTMLElement) {
-  const cardRoot = container.firstChild as HTMLElement;
-  fireEvent.mouseEnter(cardRoot);
-}
-
 describe("BookCard borrow button", () => {
-  it("does not render any borrow button overlay when showBorrowButton is omitted", () => {
-    const { container } = render(<BookCard book={makeBook()} />);
+  it("does not render a borrow button when showBorrowButton is omitted", () => {
+    render(<BookCard book={makeBook()} />);
 
-    // The button text is never present (overlay isn't rendered at all)
     expect(screen.queryByText("申請借閱")).not.toBeInTheDocument();
     expect(screen.queryByText("申請中")).not.toBeInTheDocument();
-    // Even after hover, no overlay
-    hoverCard(container);
-    expect(screen.queryByText("申請借閱")).not.toBeInTheDocument();
   });
 
-  it("does not render any borrow button overlay when showBorrowButton is false", () => {
+  it("does not render a borrow button when showBorrowButton is false", () => {
     render(
       <BookCard
         book={makeBook()}
@@ -52,7 +44,7 @@ describe("BookCard borrow button", () => {
     expect(screen.queryByText("申請借閱")).not.toBeInTheDocument();
   });
 
-  it("renders 申請借閱 button (in hover overlay) when showBorrowButton is true", () => {
+  it("renders the 申請借閱 button (always visible) when showBorrowButton is true", () => {
     render(
       <BookCard
         book={makeBook()}
@@ -61,28 +53,9 @@ describe("BookCard borrow button", () => {
       />,
     );
 
-    // The button is always in the DOM when showBorrowButton=true (revealed on hover via CSS)
-    const btn = screen.getByText("申請借閱");
+    const btn = screen.getByRole("button", { name: "申請借閱" });
     expect(btn).toBeInTheDocument();
     expect(btn.tagName).toBe("BUTTON");
-  });
-
-  it("button is hidden (overlay aria-hidden) before hover and visible after hover", () => {
-    const { container } = render(
-      <BookCard
-        book={makeBook()}
-        showBorrowButton={true}
-        onBorrowClick={() => {}}
-      />,
-    );
-
-    const btn = screen.getByText("申請借閱");
-    const overlay = btn.parentElement as HTMLElement;
-    expect(overlay.getAttribute("aria-hidden")).toBe("true");
-
-    hoverCard(container);
-
-    expect(overlay.getAttribute("aria-hidden")).toBe("false");
   });
 
   it("renders 申請中 (disabled) when borrowRequestPending is true", () => {
@@ -95,12 +68,11 @@ describe("BookCard borrow button", () => {
       />,
     );
 
-    const btn = screen.getByText("申請中") as HTMLButtonElement;
-    expect(btn.tagName).toBe("BUTTON");
+    const btn = screen.getByRole("button", { name: "申請中" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
   });
 
-  it("does NOT call onBorrowClick when button is disabled (pending)", () => {
+  it("does NOT call onBorrowClick when the button is disabled (pending)", () => {
     const onBorrowClick = vi.fn();
     render(
       <BookCard
@@ -111,12 +83,12 @@ describe("BookCard borrow button", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("申請中"));
+    fireEvent.click(screen.getByRole("button", { name: "申請中" }));
 
     expect(onBorrowClick).not.toHaveBeenCalled();
   });
 
-  it("calls onBorrowClick exactly once when borrow button is clicked", () => {
+  it("calls onBorrowClick exactly once when the borrow button is clicked", () => {
     const onBorrowClick = vi.fn();
     render(
       <BookCard
@@ -126,7 +98,7 @@ describe("BookCard borrow button", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("申請借閱"));
+    fireEvent.click(screen.getByRole("button", { name: "申請借閱" }));
 
     expect(onBorrowClick).toHaveBeenCalledTimes(1);
   });
@@ -141,8 +113,7 @@ describe("BookCard borrow button", () => {
       />,
     );
 
-    const btn = screen.getByText("申請借閱");
-    const result = fireEvent.click(btn);
+    const result = fireEvent.click(screen.getByRole("button", { name: "申請借閱" }));
 
     // fireEvent.click returns false when defaultPrevented
     expect(result).toBe(false);

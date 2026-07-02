@@ -86,6 +86,15 @@ interface FamilyDataState {
   isHidden: (ownerId: string, bookId: string) => boolean;
   /** Toggle a card's hidden state (optimistic + debounced server flush). */
   toggleHidden: (ownerId: string, bookId: string) => void;
+
+  /** Viewer-private family-shelf favorite refs (v1.5.0). */
+  favoriteRefs: Set<string>;
+  /** Whether a given copy-scoped card is favorited by the viewer. */
+  isFavorite: (ownerId: string, bookId: string) => boolean;
+  /** Toggle a card's favorite state (optimistic + debounced server flush). */
+  toggleFavorite: (ownerId: string, bookId: string) => void;
+  /** True when the latest prefs flush failed; changes stay staged locally. */
+  prefsSyncFailed: boolean;
 }
 
 const FamilyDataContext = createContext<FamilyDataState | null>(null);
@@ -154,11 +163,16 @@ export function FamilyDataProvider({
 
   const hasBookshelfUpdates = freshUpdateBookIds.size > 0;
 
-  // --- Viewer-private hidden prefs (v1.5.0) ---
-  const { hiddenRefs, isHidden, toggleHidden } = useFamilyShelfPrefs(
-    userId,
-    apiClient,
-  );
+  // --- Viewer-private family-shelf prefs (hidden + favorites) (v1.5.0) ---
+  const {
+    hiddenRefs,
+    isHidden,
+    toggleHidden,
+    favoriteRefs,
+    isFavorite,
+    toggleFavorite,
+    syncFailed: prefsSyncFailed,
+  } = useFamilyShelfPrefs(userId, apiClient);
 
   const mountedRef = useRef(true);
   const membersRef = useRef<FamilyMember[]>([]);
@@ -440,6 +454,10 @@ export function FamilyDataProvider({
       hiddenRefs,
       isHidden,
       toggleHidden,
+      favoriteRefs,
+      isFavorite,
+      toggleFavorite,
+      prefsSyncFailed,
     }),
     [
       familyId,
@@ -467,6 +485,10 @@ export function FamilyDataProvider({
       hiddenRefs,
       isHidden,
       toggleHidden,
+      favoriteRefs,
+      isFavorite,
+      toggleFavorite,
+      prefsSyncFailed,
     ],
   );
 
