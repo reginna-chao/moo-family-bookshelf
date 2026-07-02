@@ -27,94 +27,31 @@ export function FloatingActionBar({
   const saveLabel = isSaving ? "儲存中..." : isSaved ? "已儲存" : "儲存變更";
   const saveDisabled = !isDirty || isSaving;
 
+  const cancelClass = hasSelection
+    ? "moo-action-bar__cancel moo-action-bar__cancel--pushed"
+    : "moo-action-bar__cancel";
+  const saveClass = hasSelection ? "moo-action-bar__save" : "moo-action-bar__save moo-action-bar__save--grow";
+
   return (
-    <div
-      style={{
-        position: "sticky",
-        bottom: 0,
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "10px 12px",
-        background: "#ffffff",
-        borderTop: "1px solid #e2e8f0",
-        boxShadow: "0 -2px 8px rgba(0,0,0,0.06)",
-        borderRadius: "0 0 8px 8px",
-        flexWrap: "wrap",
-      }}
-    >
+    <div className="moo-action-bar">
       {hasSelection && (
         <>
-          <span style={{ fontSize: 13, color: "#475569", fontWeight: 500 }}>
-            已選 {selectedCount} 本
-          </span>
-          <button
-            onClick={onBatchShare}
-            style={{
-              padding: "6px 14px",
-              border: "none",
-              borderRadius: 6,
-              background: "#16a34a",
-              color: "white",
-              fontWeight: 600,
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
+          <span className="moo-action-bar__count">已選 {selectedCount} 本</span>
+          <button onClick={onBatchShare} className="moo-action-bar__btn moo-action-bar__btn--share">
             設為開放
           </button>
-          <button
-            onClick={onBatchHide}
-            style={{
-              padding: "6px 14px",
-              border: "none",
-              borderRadius: 6,
-              background: "#64748b",
-              color: "white",
-              fontWeight: 600,
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
+          <button onClick={onBatchHide} className="moo-action-bar__btn moo-action-bar__btn--hide">
             設為隱藏
           </button>
         </>
       )}
       {isDirty && (
-        <button
-          onClick={onCancel}
-          disabled={isSaving}
-          style={{
-            marginLeft: hasSelection ? "auto" : 0,
-            padding: "6px 14px",
-            border: "1px solid #94a3b8",
-            borderRadius: 6,
-            background: "transparent",
-            color: isSaving ? "#94a3b8" : "#475569",
-            fontWeight: 600,
-            fontSize: 13,
-            cursor: isSaving ? "not-allowed" : "pointer",
-          }}
-        >
+        <button onClick={onCancel} disabled={isSaving} className={cancelClass}>
           取消變更
         </button>
       )}
       {isDirty && (
-        <button
-          onClick={onSave}
-          disabled={saveDisabled}
-          style={{
-            padding: "6px 14px",
-            border: "none",
-            borderRadius: 6,
-            background: saveDisabled ? "#e2e8f0" : "#2563eb",
-            color: saveDisabled ? "#94a3b8" : "white",
-            fontWeight: 600,
-            fontSize: 13,
-            cursor: saveDisabled ? "not-allowed" : "pointer",
-            flex: hasSelection ? undefined : 1,
-          }}
-        >
+        <button onClick={onSave} disabled={saveDisabled} className={saveClass}>
           {saveLabel}
         </button>
       )}

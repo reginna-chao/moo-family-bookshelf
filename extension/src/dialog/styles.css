@@ -42,6 +42,13 @@
   --moo-warn-border-soft: #fde68a; /* softer warning border (amber-200) */
   --moo-warn-text: #92400e; /* warning banner text (amber-800) */
   --moo-warn-link: #d97706; /* warning banner link (amber-600) */
+  /* Batch 2 additions (recurring ≥2× across the converted components). */
+  --moo-text-slate600: #475569; /* button/label text (slate-600) */
+  --moo-primary-strong: #93c5fd; /* syncing-in-progress fill (blue-300) */
+  --moo-surface-subtle: #f8fafc; /* list-row default fill (slate-50) */
+  --moo-error-bg: #fef2f2; /* error alert fill (red-50) */
+  --moo-error-border: #fecaca; /* error alert border (red-200) */
+  --moo-error-text: #b91c1c; /* error alert text (red-700) */
 }
 
 /*
@@ -1009,4 +1016,778 @@
   color: var(--moo-warn-link);
   margin-left: 4px;
   text-decoration: underline;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Batch 2: PersonalShelf, BookRow, FloatingActionBar, BorrowTab,
+   BorrowSection, BorrowRequestCard, ManualLendDialog, ReadmooMemberPicker
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── PersonalShelf ────────────────────────────────────────────────────── */
+
+.moo-shelf {
+  display: flex;
+  flex-direction: column;
+}
+
+.moo-shelf__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.moo-shelf__heading {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.moo-shelf__heading-count {
+  font-weight: 400;
+  color: var(--moo-text-faint);
+  margin-left: 8px;
+  font-size: 13px;
+}
+
+.moo-shelf__header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Public-share / sync toolbar buttons. Desktop = pill with label; the
+   --icon modifier collapses to a 32px square icon button on mobile. */
+.moo-shelf__tool-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  color: var(--moo-primary);
+  background: transparent;
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.moo-shelf__tool-btn--icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+  font-size: inherit;
+  white-space: normal;
+}
+
+/* Sync button while a sync is running: solid blue-300 fill + not-allowed. */
+.moo-shelf__tool-btn--syncing {
+  background: var(--moo-primary-strong);
+  cursor: not-allowed;
+}
+
+.moo-shelf__progress {
+  margin-top: -4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  text-align: right;
+}
+
+.moo-shelf__sync-error {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.moo-shelf__archive-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--moo-border);
+}
+
+.moo-shelf__archive-tab {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  background: transparent;
+  font-weight: 400;
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.moo-shelf__archive-tab--active {
+  font-weight: 600;
+  color: var(--moo-primary);
+  border-bottom: 2px solid var(--moo-primary);
+}
+
+.moo-shelf__filter-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+.moo-shelf__search-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.moo-shelf__grow {
+  flex: 1;
+}
+
+.moo-shelf__select-all-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.moo-shelf__select-all {
+  padding: 4px 10px;
+  border: 1px solid var(--moo-text-fainter);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-slate600);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.moo-shelf__empty {
+  color: var(--moo-text-faint);
+  text-align: center;
+  margin-top: 24px;
+}
+
+.moo-shelf__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.moo-shelf__load-more {
+  width: 100%;
+  padding: 10px 0;
+  margin-top: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Shared centered padding block for the loading / error early returns. */
+.moo-shelf__state {
+  padding: 16px;
+}
+
+.moo-shelf__state--center {
+  text-align: center;
+  color: var(--moo-text-muted);
+}
+
+.moo-shelf__state-error {
+  color: var(--moo-danger-alt);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.moo-shelf__state-retry {
+  padding: 8px 16px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── BookRow (PersonalShelf list item) ────────────────────────────────── */
+
+.moo-shelf-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--moo-surface-subtle);
+  cursor: pointer;
+}
+
+.moo-shelf-row--selected {
+  background: var(--moo-primary-bg);
+}
+
+.moo-shelf-row__checkbox {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* Owns the cover sizing (LazyCover className path): 40×60 with 4px radius. */
+.moo-shelf-row__cover {
+  width: 40px;
+  height: 60px;
+  border-radius: 4px;
+}
+
+.moo-shelf-row__cover-fallback {
+  width: 40px;
+  height: 60px;
+  background: var(--moo-border);
+  border-radius: 4px;
+}
+
+.moo-shelf-row__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.moo-shelf-row__title-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.moo-shelf-row__title {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.moo-shelf-row__archived-badge {
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: var(--moo-warn-text);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.moo-shelf-row__author {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  margin-top: 1px;
+}
+
+.moo-shelf-row__toggle {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--moo-surface-alt);
+  color: var(--moo-text-faint);
+  cursor: pointer;
+}
+
+.moo-shelf-row__toggle--on {
+  background: var(--moo-success-bg);
+  color: var(--moo-success);
+}
+
+/* ── FloatingActionBar ────────────────────────────────────────────────── */
+
+.moo-action-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--moo-surface);
+  border-top: 1px solid var(--moo-border);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
+  border-radius: 0 0 8px 8px;
+  flex-wrap: wrap;
+}
+
+.moo-action-bar__count {
+  font-size: 13px;
+  color: var(--moo-text-slate600);
+  font-weight: 500;
+}
+
+.moo-action-bar__btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.moo-action-bar__btn--share {
+  background: var(--moo-success);
+}
+
+.moo-action-bar__btn--hide {
+  background: var(--moo-text-muted);
+}
+
+.moo-action-bar__cancel {
+  padding: 6px 14px;
+  border: 1px solid var(--moo-text-faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-slate600);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Pushed to the right edge when a selection is present. */
+.moo-action-bar__cancel--pushed {
+  margin-left: auto;
+}
+
+.moo-action-bar__cancel:disabled {
+  color: var(--moo-text-faint);
+  cursor: not-allowed;
+}
+
+.moo-action-bar__save {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Fills the bar when there is no selection (save is the only trailing action). */
+.moo-action-bar__save--grow {
+  flex: 1;
+}
+
+.moo-action-bar__save:disabled {
+  background: var(--moo-border);
+  color: var(--moo-text-faint);
+  cursor: not-allowed;
+}
+
+/* ── BorrowTab ────────────────────────────────────────────────────────── */
+
+.moo-borrow-tab__heading {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.moo-borrow-tab__alert {
+  padding: 8px;
+  margin-bottom: 12px;
+  background: var(--moo-error-bg);
+  border: 1px solid var(--moo-error-border);
+  border-radius: 6px;
+  color: var(--moo-error-text);
+  font-size: 13px;
+}
+
+.moo-borrow-tab__state {
+  padding: 16px;
+}
+
+.moo-borrow-tab__state--center {
+  text-align: center;
+  color: var(--moo-text-muted);
+}
+
+.moo-borrow-tab__state-error {
+  color: var(--moo-danger-alt);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.moo-borrow-tab__state-retry {
+  padding: 8px 16px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── BorrowSection ────────────────────────────────────────────────────── */
+
+.moo-borrow-section {
+  margin-bottom: 20px;
+}
+
+.moo-borrow-section__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moo-text);
+  margin: 0 0 8px 0;
+}
+
+.moo-borrow-section__title-count {
+  color: var(--moo-text-faint);
+  font-weight: 400;
+  margin-left: 6px;
+  font-size: 12px;
+}
+
+.moo-borrow-section__empty {
+  color: var(--moo-text-faint);
+  font-size: 13px;
+  margin: 0;
+}
+
+.moo-borrow-section__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.moo-borrow-section__archived {
+  margin-top: 12px;
+}
+
+.moo-borrow-section__toggle {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--moo-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-borrow-section__archived-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ── BorrowRequestCard ────────────────────────────────────────────────── */
+
+.moo-request-card {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: var(--moo-surface);
+  align-items: flex-start;
+}
+
+.moo-request-card__cover {
+  width: 48px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--moo-surface-alt);
+  flex-shrink: 0;
+}
+
+.moo-request-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.moo-request-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--moo-text);
+  line-height: 1.3;
+}
+
+.moo-request-card__author {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+}
+
+.moo-request-card__party {
+  font-size: 12px;
+  color: var(--moo-text-slate600);
+}
+
+.moo-request-card__party-name {
+  font-weight: 600;
+}
+
+.moo-request-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.moo-request-card__status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* Per-status badge palette (mirrors the retired STATUS_STYLE map). */
+.moo-request-card__status--pending {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.moo-request-card__status--lent {
+  background: var(--moo-success-bg);
+  color: #15803d;
+}
+
+.moo-request-card__status--returned {
+  background: var(--moo-border);
+  color: var(--moo-text-slate600);
+}
+
+.moo-request-card__status--rejected {
+  background: #fee2e2;
+  color: var(--moo-error-text);
+}
+
+.moo-request-card__status--cancelled {
+  background: var(--moo-border);
+  color: var(--moo-text-muted);
+}
+
+.moo-request-card__time {
+  font-size: 11px;
+  color: var(--moo-text-faint);
+}
+
+.moo-request-card__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.moo-request-card__action {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid;
+  background: transparent;
+  color: var(--moo-text-slate600);
+  border-color: var(--moo-text-fainter);
+}
+
+.moo-request-card__action--primary {
+  background: var(--moo-primary);
+  color: white;
+  border-color: var(--moo-primary);
+}
+
+.moo-request-card__action--danger {
+  color: var(--moo-danger);
+  border-color: var(--moo-danger);
+}
+
+.moo-request-card__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Modal shell (ManualLendDialog + ReadmooMemberPicker) ─────────────── */
+/* Both modals share the same fixed-overlay + centered-card chrome. Rendered
+   inline inside the shadow root (no portal), matching the pre-conversion JS. */
+
+.moo-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.moo-modal {
+  background: var(--moo-surface);
+  border-radius: 12px;
+  padding: 20px;
+  width: 320px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.moo-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.moo-modal__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.moo-modal__close {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--moo-text-slate600);
+  flex-shrink: 0;
+}
+
+.moo-modal__cancel {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--moo-text-fainter);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--moo-text-slate600);
+}
+
+/* Restore the original unstyled-button color for the member picker's cancel
+   button: it had no explicit color before the shared shell (UA default). */
+.moo-member-picker__cancel {
+  color: buttontext;
+}
+
+.moo-modal__error {
+  background: var(--moo-error-bg);
+  color: var(--moo-error-text);
+  border: 1px solid var(--moo-error-border);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+/* ── ManualLendDialog ─────────────────────────────────────────────────── */
+
+.moo-manual-lend__body {
+  font-size: 12px;
+  color: var(--moo-text-slate600);
+  margin: 0 0 8px;
+  line-height: 1.6;
+}
+
+.moo-manual-lend__checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 16px;
+  cursor: pointer;
+}
+
+.moo-manual-lend__checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.moo-manual-lend__checkbox-text {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+}
+
+.moo-manual-lend__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.moo-manual-lend__confirm {
+  padding: 6px 14px;
+  background: var(--moo-primary);
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+}
+
+.moo-manual-lend__confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── ReadmooMemberPicker ──────────────────────────────────────────────── */
+
+.moo-member-picker__help {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.moo-member-picker__empty {
+  color: var(--moo-text-faint);
+  font-size: 13px;
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-member-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.moo-member-picker__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: var(--moo-surface);
+  cursor: pointer;
+  font-size: 14px;
+  text-align: left;
+}
+
+.moo-member-picker__avatar {
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.moo-member-picker__name {
+  font-weight: 600;
+  color: var(--moo-text);
+}
+
+.moo-member-picker__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
 }
