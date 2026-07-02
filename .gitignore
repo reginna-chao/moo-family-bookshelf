@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 .pnpm-store/
+# nested lockfiles — workspace uses the root pnpm-lock.yaml only
+extension/pnpm-lock.yaml
+worker/pnpm-lock.yaml
 
 # Build output
 dist/
