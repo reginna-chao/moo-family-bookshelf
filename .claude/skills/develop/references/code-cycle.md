@@ -2,6 +2,16 @@
 
 The full development lifecycle for a code change. You (the `/develop` orchestrator) run every phase in THIS session and hold every user gate yourself — dispatch the `coder` / `tester` / `reviewer` / `security-auditor` agents via the Agent tool, always passing `scope` (`frontend` or `backend`). See `SKILL.md` §1–§3 for hard rules, stop discipline, and the dispatch quick-reference.
 
+## Phase 0: Branch Preflight (before any code)
+
+Guarantee the change lands on its own clean branch off `origin/main`, so another task's commits can never contaminate this PR's diff. Do this once, up front — silently if already clean, otherwise fix it before Phase 1.
+
+1. `git fetch origin`.
+2. **Base:** unless the user named a base branch or asked to continue an existing branch, base the task on `origin/main`.
+3. **Isolation check:** run `git log --oneline origin/main..HEAD`. If it is non-empty — the current worktree/branch already carries unrelated commits — do NOT commit on top. Cut a fresh branch from `origin/main`: `git checkout -b <type>/<slug> origin/main` (or create a new worktree from `origin/main`).
+4. **Name it meaningfully:** `<type>/<short-kebab-slug>` — conventional type (`feat`/`fix`/`refactor`/`docs`/`test`/`chore`) + a concise English task slug (e.g. `fix/save-before-sync`). Never keep an opaque auto-generated worktree name (`claude/angry-moore-3651ca`) as the PR branch — rename first.
+5. Re-confirm `git log --oneline origin/main..HEAD` is empty before starting Phase 1. See `.claude/rules/global.md` → "Branch & Worktree Hygiene".
+
 ## Phase 1: Requirements Analysis (collaborative — iterate until confirmed)
 
 1. Read the requirement carefully.

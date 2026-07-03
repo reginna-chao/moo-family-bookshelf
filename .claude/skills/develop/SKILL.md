@@ -72,7 +72,7 @@ Parallelize across file-disjoint scopes (frontend + backend coders run concurren
 
 ## §4 References
 
-- `references/code-cycle.md` — the CODE lifecycle: requirements + risk analysis → API contract → coder → verify-before-test gate → tester → review → Fix Cycle (CRITICAL auto-fix / SUGGESTION decision with 🟢🟡🔴 TL 建議) → cross-scope validation → security scan → commit.
+- `references/code-cycle.md` — the CODE lifecycle: branch preflight (fresh from origin/main) → requirements + risk analysis → API contract → coder → verify-before-test gate → tester → review → Fix Cycle (CRITICAL auto-fix / SUGGESTION decision with 🟢🟡🔴 TL 建議) → cross-scope validation → security scan → commit.
 - `references/design.md` — the DESIGN orchestration: triage (brand assets / add icon / style consultation) → brief → dispatch `designer` → Review & Deliver (integration snippets) → commit.
 
 Read the one the §0 fork selected. Do not preload both.

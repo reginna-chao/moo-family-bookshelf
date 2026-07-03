@@ -12,6 +12,12 @@
 - Follow conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`.
 - Run `pnpm lint` and `pnpm test` before pushing.
 
+#### Branch & Worktree Hygiene
+
+- **Branch fresh from `origin/main` by default.** Unless the user explicitly names a base or asks you to continue an existing branch, start every task by `git fetch origin` then branching from `origin/main`. Never build your change on top of whatever branch/worktree happens to be checked out.
+- **Never inherit another task's commits.** Before your first commit, confirm `git log --oneline origin/main..HEAD` contains only your own work. If the current worktree/branch already carries unrelated in-progress commits (another feature, a stale worktree), do NOT stack on it — cut a fresh branch from `origin/main` first. This is what stops an unrelated commit from leaking into your PR diff.
+- **Name branches meaningfully:** `<type>/<short-kebab-slug>`, where `<type>` is a conventional-commit category (`feat` / `fix` / `refactor` / `docs` / `test` / `chore`) and the slug concisely describes the task in English (e.g. `fix/dropdown-scroll-dismiss`, `refactor/security-auditor`). Do NOT keep an opaque auto-generated worktree name like `claude/angry-moore-3651ca` — rename to a meaningful branch before committing / opening the PR.
+
 ### Self-Improvement
 
 - When file architecture changes, update corresponding `.claude/rules/*.md` to reflect new structure.
