@@ -51,15 +51,10 @@ export async function openDialog(page: Page): Promise<Locator> {
   try {
     // First: wait for React to mount anything (including "載入中...")
     await expect(root).not.toBeEmpty({ timeout: 30_000 });
-    // Then: wait for the loading state to resolve
-    await page.waitForFunction(
-      (sel) => {
-        const el = document.querySelector(sel);
-        return el && !el.textContent?.includes("載入中...");
-      },
-      "#moo-family-bookshelf-root",
-      { timeout: 30_000 },
-    );
+    // Then: wait for the loading state to resolve. Uses a locator (which pierces
+    // the open shadow root) rather than document.querySelector in waitForFunction,
+    // which cannot cross the shadow boundary.
+    await expect(root).not.toContainText("載入中...", { timeout: 30_000 });
   } catch (e) {
     const rootContent = await root.innerHTML().catch(() => "(unreadable)");
     throw new Error(

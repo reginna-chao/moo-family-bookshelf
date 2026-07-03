@@ -10,8 +10,12 @@ export interface DismissableMenuOptions {
 /**
  * Encapsulates the dismissal side effects shared by portaled popup menus
  * (Extension): while open, closes the menu on outside click, Escape, scroll
- * (capture phase), or resize. All four listeners are attached only while open
- * and removed together on cleanup.
+ * (capture phase), or resize. Scroll is observed both at `window` (dev page /
+ * light DOM and window-level scroll) and, when the trigger lives inside an open
+ * shadow root, on that `ShadowRoot` in capture phase — `scroll` events are
+ * `composed: false`, so a scroll inside the shadow tree never reaches `window`;
+ * the shadow root is the top of the propagation path for those events. All
+ * listeners are attached only while open and removed together on cleanup.
  */
 export function useDismissableMenu({
   isOpen,
@@ -48,15 +52,26 @@ export function useDismissableMenu({
       onCloseRef.current();
     }
 
+    // A scroll inside an open shadow tree does not reach `window` (scroll events
+    // are composed: false). Also listen on the trigger's ShadowRoot in capture
+    // phase so scrolling the dialog's panels dismisses the menu; keep the window
+    // listener for the dev page / light DOM and window-level scroll.
+    const scrollRoot = triggerRef.current?.getRootNode();
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("scroll", handleClose, true);
     window.addEventListener("resize", handleClose);
+    if (scrollRoot instanceof ShadowRoot) {
+      scrollRoot.addEventListener("scroll", handleClose, true);
+    }
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("scroll", handleClose, true);
       window.removeEventListener("resize", handleClose);
+      if (scrollRoot instanceof ShadowRoot) {
+        scrollRoot.removeEventListener("scroll", handleClose, true);
+      }
     };
     // Refs are stable and onClose is read via onCloseRef; only isOpen should re-subscribe listeners.
     // eslint-disable-next-line react-hooks/exhaustive-deps
