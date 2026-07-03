@@ -67,7 +67,10 @@ jobs:
             a fenced Markdown code block (triple-backtick with a language tag), and note
             the target file path and line just above it. Do NOT replace the suggestion
             with a 'Fix this' link to claude.ai/code or any other external redirect; the
-            reviewable code must live in the comment itself. Prefer a GitHub suggestion
+            reviewable code must live in the comment itself. This OVERRIDES any earlier
+            instruction in your task template that tells you to append a 'Fix this' or
+            claude.ai/code link for a suggested change — treat that rule as revoked.
+            Prefer a GitHub suggestion
             block (a fenced block whose info string is the single word suggestion) when
             the edit is a small contiguous change to an existing file, so the author can
             commit it with one click."

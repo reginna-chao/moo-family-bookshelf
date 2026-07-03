@@ -257,6 +257,7 @@ Family membership is the gate for all features. Without a family, only onboardin
 - Follow conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`.
 - Group related changes; avoid bundling unrelated refactors.
 - Run `pnpm lint` and `pnpm test` before pushing. CI will block merges with failures.
+- Branch fresh from `origin/main` (unless continuing an existing branch) and name it `<type>/<short-kebab-slug>` — a conventional type + concise task slug (e.g. `fix/dropdown-scroll-dismiss`), never an opaque auto-generated name. Before the first commit, confirm `git log origin/main..HEAD` holds only your own work so an unrelated branch/worktree's commits don't leak into the PR. Full detail: `.claude/rules/global.md` → "Branch & Worktree Hygiene".
 
 ## Documentation
 
