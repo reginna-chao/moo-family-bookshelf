@@ -169,6 +169,14 @@ export function PublicShareDialog({
 
 // ── Sub-components ────────────────────────────────────────────
 
+/** Shared input chrome; adds the 32px-height mobile modifier when applicable. */
+function useInputClass(): string {
+  const isMobile = useIsMobile();
+  return isMobile
+    ? "moo-public-share__input moo-public-share__input--mobile"
+    : "moo-public-share__input";
+}
+
 interface CreateFormProps {
   title: string; expiresDays: number | null; saving: boolean;
   onTitleChange: (v: string) => void; onExpiresDaysChange: (v: number | null) => void;
@@ -176,11 +184,12 @@ interface CreateFormProps {
 }
 
 function CreateForm({ title, expiresDays, saving, onTitleChange, onExpiresDaysChange, onCreate }: CreateFormProps) {
+  const inputClass = useInputClass();
   return (
     <div className="moo-public-share__form">
       <label className="moo-public-share__field">
         標題
-        <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60} className="moo-public-share__input" />
+        <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60} className={inputClass} />
       </label>
       <ExpiresSelect value={expiresDays} onChange={onExpiresDaysChange} />
       <button onClick={onCreate} disabled={saving || !title.trim()} className="moo-public-share__primary-btn">
@@ -203,17 +212,18 @@ function ActiveShelf({
   onTitleChange, onExpiresDaysChange, onCopy, onResetToken, onDelete,
   onConfirmAction, onCancelConfirm,
 }: ActiveShelfProps) {
+  const inputClass = useInputClass();
   return (
     <div className="moo-public-share__form">
       <label className="moo-public-share__field">
         標題
-        <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60} className="moo-public-share__input" />
+        <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60} className={inputClass} />
       </label>
       <ExpiresSelect value={expiresDays} onChange={onExpiresDaysChange} />
       <div>
         <p className="moo-public-share__link-label">公開連結</p>
         <div className="moo-public-share__url-row">
-          <input value={publicUrl} readOnly className="moo-public-share__input moo-public-share__url-input" />
+          <input value={publicUrl} readOnly className={`${inputClass} moo-public-share__url-input`} />
           <button onClick={onCopy} className="moo-public-share__icon-btn" title="複製連結">
             <Copy size={14} />
           </button>

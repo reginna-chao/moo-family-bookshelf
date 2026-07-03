@@ -26,16 +26,17 @@ function renderDialog(apiClient: ApiClient) {
 }
 
 /**
- * The ExpiresSelect vertical-padding refactor moved from inline styles into the
+ * The form controls follow the app-wide fixed-height standard, applied via the
  * shadow-scoped `.moo-public-share__*` classes in styles.css:
  *
- * - `.moo-public-share__input`  — shared input chrome (6px/10px base padding)
- * - `.moo-public-share__select` — desktop select: inherits the 6px input padding,
+ * - `.moo-public-share__input`  — shared input chrome (40px desktop height)
+ * - `.moo-public-share__input--mobile`  — 32px mobile height
+ * - `.moo-public-share__select` — desktop select: inherits the 40px input chrome,
  *                                  adds the chevron + `padding-right: 2.25rem`
- * - `.moo-public-share__select--mobile` — compact 4px vertical padding
+ * - `.moo-public-share__select--mobile` — 32px mobile height for the select
  *
  * jsdom does not apply stylesheet rules, so the observable contract is the class
- * list, not computed inline styles. The select-vs-mobile distinction and the
+ * list, not computed heights. The select-vs-mobile distinction and the
  * "sibling title input keeps the base input chrome" intent are asserted via the
  * class contract below.
  */
@@ -53,7 +54,7 @@ describe("PublicShareDialog · ExpiresSelect class contract", () => {
     expect(select).not.toHaveClass("moo-public-share__select--mobile");
   });
 
-  it("adds the --mobile modifier (compact padding) to the expires select on mobile", async () => {
+  it("adds the --mobile modifier (32px height) to the expires select on mobile", async () => {
     vi.mocked(useIsMobile).mockReturnValue(true);
     renderDialog(makeApiClient());
 
@@ -67,14 +68,15 @@ describe("PublicShareDialog · ExpiresSelect class contract", () => {
     { mode: "desktop", isMobile: false },
     { mode: "mobile", isMobile: true },
   ])(
-    "leaves the sibling title input on the base input chrome (no select modifier) on $mode",
+    "gives the sibling title input the base input chrome without the select modifiers on $mode",
     async ({ isMobile }) => {
       vi.mocked(useIsMobile).mockReturnValue(isMobile);
       renderDialog(makeApiClient());
 
       const input = await screen.findByRole("textbox");
       expect(input).toHaveClass("moo-public-share__input");
-      // The title input must not pick up the select's padding modifiers.
+      // The title input shares the input chrome (and picks up `--mobile` on
+      // mobile), but must never gain the select-specific chevron/height modifiers.
       expect(input).not.toHaveClass("moo-public-share__select");
       expect(input).not.toHaveClass("moo-public-share__select--mobile");
     },

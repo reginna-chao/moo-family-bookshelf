@@ -2582,18 +2582,28 @@
   font-weight: 500;
 }
 
+/* Unified with the app-wide control height standard (desktop 40px / mobile
+   32px), matching .moo-search__input / .moo-form-select. box-sizing:border-box
+   comes from the global `*` reset. Border uses the standard --moo-border
+   (#e2e8f0), matching every other control in the app. */
 .moo-public-share__input {
-  padding: 6px 10px;
-  border: 1px solid #d1d5db;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--moo-border);
   border-radius: 6px;
   font-size: 13px;
   outline: none;
 }
 
+.moo-public-share__input--mobile {
+  height: 32px;
+}
+
 /* The expires <select> shares the input chrome (.moo-public-share__input) but
-   adds its own chevron + room for it, and a compact mobile vertical padding.
-   It intentionally does NOT use .moo-form-select, whose 40px height / 12px
-   padding / slate border would override the 6px/10px input look. */
+   adds its own chevron + room for it. The chevron is vertically centered via
+   `right 0.75rem center`, which stays centered at both the 40px and 32px
+   heights. It intentionally does NOT use .moo-form-select; it inherits the
+   input chrome (border/height) via .moo-public-share__input. */
 .moo-public-share__select {
   --moo-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
   -webkit-appearance: none;
@@ -2606,8 +2616,7 @@
 }
 
 .moo-public-share__select--mobile {
-  padding: 4px 10px;
-  padding-right: 2.25rem;
+  height: 32px;
 }
 
 .moo-public-share__url-input {
