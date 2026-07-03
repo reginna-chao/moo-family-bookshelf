@@ -22,6 +22,7 @@ import {
   createCloseIcon,
   placeFloatingButton,
 } from "./mobileLayout";
+import { SHELL_BOOTSTRAP_CSS, SHELL_STYLE_MARKER } from "./shellStyles";
 import {
   DEFAULT_API_ENDPOINT,
   FLOATING_ICON_SIZE_KEY,
@@ -241,6 +242,20 @@ function attachBadge(button: HTMLElement, count: number): void {
   button.appendChild(badge);
 }
 
+/**
+ * Inject the shell bootstrap stylesheet into the dialog's shadow root.
+ * Idempotent: a marked <style> is skipped, mirroring mountDialog's scoped-style
+ * injection. Kept separate from the full styles.css so the content-script IIFE
+ * never bundles the dialog stylesheet.
+ */
+function injectShellStyles(shadowRoot: ShadowRoot): void {
+  if (shadowRoot.querySelector(`style[${SHELL_STYLE_MARKER}]`)) return;
+  const style = document.createElement("style");
+  style.setAttribute(SHELL_STYLE_MARKER, "");
+  style.textContent = SHELL_BOOTSTRAP_CSS;
+  shadowRoot.appendChild(style);
+}
+
 function toggleDialog(): void {
   if (!isExtensionContextValid()) {
     teardownMooFamilyUI();
@@ -264,34 +279,18 @@ function toggleDialog(): void {
 
   const dialog = document.createElement("div");
   dialog.id = MOO_ELEMENT_IDS.dialog;
-  // Bootstrap styles kept as inline cssText (NOT moo-* classes): these elements
-  // are built and shown before mountDialog() dynamically imports styles.css into
-  // the shadow root, so class-based styling would flash unstyled. The small
-  // duplication cost is not worth a second bootstrap stylesheet.
-  // Layout-independent base styles; position/size are set per-breakpoint below.
-  dialog.style.cssText = [
-    "position: fixed",
-    "z-index: 100000",
-    "background: white",
-    "box-shadow: 0 8px 32px rgba(0,0,0,0.2)",
-    "overflow: hidden",
-    "display: flex",
-    "flex-direction: column",
-    "min-height: 200px",
-  ].join(";");
+  // Static structural styles live in SHELL_BOOTSTRAP_CSS (class `.moo-shell-dialog`),
+  // injected into the shadow root before this element is appended so it never
+  // flashes unstyled ahead of the full styles.css (loaded later by mountDialog).
+  // The id is retained for getElementById / E2E selectors. Per-breakpoint
+  // position/size/border-radius/height stay JS-driven via applyDialogLayout.
+  dialog.className = "moo-shell-dialog";
 
-  // Backdrop
+  // Backdrop — static full-viewport overlay via `.moo-shell-backdrop`; its
+  // mobile/desktop `display` toggle stays inline via applyBackdropLayout.
   const backdrop = document.createElement("div");
   backdrop.id = MOO_ELEMENT_IDS.backdrop;
-  backdrop.style.cssText = [
-    "position: fixed",
-    "top: 0",
-    "left: 0",
-    "width: 100vw",
-    "height: 100vh",
-    "z-index: 99999",
-    "background: rgba(0,0,0,0.4)",
-  ].join(";");
+  backdrop.className = "moo-shell-backdrop";
 
   // Light-DOM host owning the Shadow Root. A plain div creates no stacking
   // context or transform, so the fixed-positioned backdrop/dialog inside still
@@ -300,6 +299,13 @@ function toggleDialog(): void {
   const host = document.createElement("div");
   host.id = MOO_ELEMENT_IDS.host;
   const shadowRoot = host.attachShadow({ mode: "open" });
+
+  // Inject the tiny bootstrap stylesheet IMMEDIATELY — before the backdrop/dialog
+  // are appended — so the shell's `moo-shell-*` classes resolve the instant those
+  // elements render (no flash of unstyled content). The full scoped styles.css is
+  // injected into this same root later by mountDialog. The marker attribute gives
+  // idempotency parity with that main injection.
+  injectShellStyles(shadowRoot);
 
   // Single close path reused by backdrop click and the mobile close icon.
   // Tears down only the dialog's breakpoint watcher (module-level, so the
@@ -316,10 +322,10 @@ function toggleDialog(): void {
   const closeIcon = createCloseIcon(closeDialog, false);
   dialog.appendChild(closeIcon);
 
-  // Mount point for React app
+  // Mount point for React app — static flex-column fill via `.moo-shell-mount`.
   const mountPoint = document.createElement("div");
   mountPoint.id = MOO_ELEMENT_IDS.root;
-  mountPoint.style.cssText = "display:flex;flex-direction:column;flex:1;min-height:0";
+  mountPoint.className = "moo-shell-mount";
   dialog.appendChild(mountPoint);
 
   // Attach backdrop + dialog INTO the shadow root (isolated from Readmoo CSS),

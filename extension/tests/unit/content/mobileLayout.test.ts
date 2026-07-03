@@ -7,6 +7,7 @@ import {
   createCloseIcon,
   placeFloatingButton,
 } from "@/content/mobileLayout";
+import { SHELL_BOOTSTRAP_CSS } from "@/content/shellStyles";
 import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
 
 type ChangeListener = () => void;
@@ -217,8 +218,14 @@ describe("mobileLayout", () => {
 
     it("is a 32px touch target with an accessible label", () => {
       const btn = createCloseIcon(vi.fn(), true);
-      expect(btn.style.width).toBe("32px");
-      expect(btn.style.height).toBe("32px");
+      // The static 32px size moved from inline cssText to the `.moo-shell-close`
+      // class in SHELL_BOOTSTRAP_CSS (injected into the shadow root). jsdom does
+      // not reflect stylesheet rules onto `.style`, so the class is now the
+      // observable contract for the size — assert the class here and pin the
+      // actual px value against the source stylesheet below.
+      expect(btn.classList.contains("moo-shell-close")).toBe(true);
+      expect(SHELL_BOOTSTRAP_CSS).toMatch(/\.moo-shell-close\s*\{[^}]*width:\s*32px/);
+      expect(SHELL_BOOTSTRAP_CSS).toMatch(/\.moo-shell-close\s*\{[^}]*height:\s*32px/);
       expect(btn.getAttribute("aria-label")).toBe("關閉");
     });
 
