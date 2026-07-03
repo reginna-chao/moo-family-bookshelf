@@ -1,8 +1,9 @@
 import React from "react";
 import { LayoutGrid, Rows3 } from "lucide-react";
 import type { FamilyShelfViewMode } from "./useFamilyShelfViewMode";
-import type { SegmentPosition } from "./segmentBorderRadius";
 import { useIsMobile } from "../hooks/useIsMobile";
+
+type SegmentPosition = "first" | "middle" | "last";
 
 export interface ViewModeToggleProps {
   mode: FamilyShelfViewMode;

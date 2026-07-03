@@ -850,8 +850,8 @@
   color: var(--moo-primary);
 }
 
-/* Segment corners (mirrors getSegmentBorderRadius, radius 6): first rounds the
-   left corners, last rounds the right corners. */
+/* Segment corners (radius 6): first rounds the left corners, last rounds the
+   right corners. */
 .moo-view-toggle__btn--first {
   border-radius: 6px 0 0 6px;
 }
@@ -1105,6 +1105,7 @@
   padding: 0;
   justify-content: center;
   gap: 0;
+  font-weight: 400;
   font-size: inherit;
   white-space: normal;
 }
@@ -1850,7 +1851,7 @@
   font-weight: 600;
 }
 
-/* Segment corners (mirrors getSegmentBorderRadius, radius 6). */
+/* Segment corners (radius 6): first rounds the left corners, last the right. */
 .moo-icon-size__segment--first {
   border-radius: 6px 0 0 6px;
 }
