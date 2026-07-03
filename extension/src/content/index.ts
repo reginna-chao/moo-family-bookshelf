@@ -22,6 +22,7 @@ import {
   createCloseIcon,
   placeFloatingButton,
 } from "./mobileLayout";
+import { SHELL_BOOTSTRAP_CSS, SHELL_STYLE_MARKER } from "./shellStyles";
 import {
   DEFAULT_API_ENDPOINT,
   FLOATING_ICON_SIZE_KEY,
@@ -241,59 +242,79 @@ function attachBadge(button: HTMLElement, count: number): void {
   button.appendChild(badge);
 }
 
+/**
+ * Inject the shell bootstrap stylesheet into the dialog's shadow root.
+ * Idempotent: a marked <style> is skipped, mirroring mountDialog's scoped-style
+ * injection. Kept separate from the full styles.css so the content-script IIFE
+ * never bundles the dialog stylesheet.
+ */
+function injectShellStyles(shadowRoot: ShadowRoot): void {
+  if (shadowRoot.querySelector(`style[${SHELL_STYLE_MARKER}]`)) return;
+  const style = document.createElement("style");
+  style.setAttribute(SHELL_STYLE_MARKER, "");
+  style.textContent = SHELL_BOOTSTRAP_CSS;
+  shadowRoot.appendChild(style);
+}
+
 function toggleDialog(): void {
   if (!isExtensionContextValid()) {
     teardownMooFamilyUI();
     return;
   }
 
-  const existing = document.getElementById(MOO_ELEMENT_IDS.dialog);
-  if (existing) {
-    // Toggle off: tear down the dialog, its backdrop, and ONLY the dialog's
-    // breakpoint watcher. The floating button's watcher must survive so the
-    // button keeps repositioning on later breakpoint changes.
+  // "Already open?" is detected via the light-DOM host: the dialog/backdrop now
+  // live inside the host's shadow tree, so document.getElementById cannot see
+  // them directly.
+  const existingHost = document.getElementById(MOO_ELEMENT_IDS.host);
+  if (existingHost) {
+    // Toggle off: tear down the host (which removes the backdrop + dialog inside
+    // its shadow root) and ONLY the dialog's breakpoint watcher. The floating
+    // button's watcher must survive so the button keeps repositioning on later
+    // breakpoint changes.
     disposeDialogWatcher?.();
     disposeDialogWatcher = null;
-    existing.remove();
-    document.getElementById(MOO_ELEMENT_IDS.backdrop)?.remove();
+    existingHost.remove();
     return;
   }
 
   const dialog = document.createElement("div");
   dialog.id = MOO_ELEMENT_IDS.dialog;
-  // Layout-independent base styles; position/size are set per-breakpoint below.
-  dialog.style.cssText = [
-    "position: fixed",
-    "z-index: 100000",
-    "background: white",
-    "box-shadow: 0 8px 32px rgba(0,0,0,0.2)",
-    "overflow: hidden",
-    "display: flex",
-    "flex-direction: column",
-    "min-height: 200px",
-  ].join(";");
+  // Static structural styles live in SHELL_BOOTSTRAP_CSS (class `.moo-shell-dialog`),
+  // injected into the shadow root before this element is appended so it never
+  // flashes unstyled ahead of the full styles.css (loaded later by mountDialog).
+  // The id is retained for getElementById / E2E selectors. Per-breakpoint
+  // position/size/border-radius/height stay JS-driven via applyDialogLayout.
+  dialog.className = "moo-shell-dialog";
 
-  // Backdrop
+  // Backdrop — static full-viewport overlay via `.moo-shell-backdrop`; its
+  // mobile/desktop `display` toggle stays inline via applyBackdropLayout.
   const backdrop = document.createElement("div");
   backdrop.id = MOO_ELEMENT_IDS.backdrop;
-  backdrop.style.cssText = [
-    "position: fixed",
-    "top: 0",
-    "left: 0",
-    "width: 100vw",
-    "height: 100vh",
-    "z-index: 99999",
-    "background: rgba(0,0,0,0.4)",
-  ].join(";");
+  backdrop.className = "moo-shell-backdrop";
+
+  // Light-DOM host owning the Shadow Root. A plain div creates no stacking
+  // context or transform, so the fixed-positioned backdrop/dialog inside still
+  // cover the viewport relative to it. The host is what the toggle-off /
+  // context-invalidation paths remove.
+  const host = document.createElement("div");
+  host.id = MOO_ELEMENT_IDS.host;
+  const shadowRoot = host.attachShadow({ mode: "open" });
+
+  // Inject the tiny bootstrap stylesheet IMMEDIATELY — before the backdrop/dialog
+  // are appended — so the shell's `moo-shell-*` classes resolve the instant those
+  // elements render (no flash of unstyled content). The full scoped styles.css is
+  // injected into this same root later by mountDialog. The marker attribute gives
+  // idempotency parity with that main injection.
+  injectShellStyles(shadowRoot);
 
   // Single close path reused by backdrop click and the mobile close icon.
   // Tears down only the dialog's breakpoint watcher (module-level, so the
   // toggle-off branch can dispose the same one); the button watcher is separate.
+  // Removing the host removes the backdrop + dialog inside its shadow tree.
   const closeDialog = (): void => {
     disposeDialogWatcher?.();
     disposeDialogWatcher = null;
-    dialog.remove();
-    backdrop.remove();
+    host.remove();
   };
   backdrop.addEventListener("click", closeDialog);
 
@@ -301,14 +322,18 @@ function toggleDialog(): void {
   const closeIcon = createCloseIcon(closeDialog, false);
   dialog.appendChild(closeIcon);
 
-  // Mount point for React app
+  // Mount point for React app — static flex-column fill via `.moo-shell-mount`.
   const mountPoint = document.createElement("div");
   mountPoint.id = MOO_ELEMENT_IDS.root;
-  mountPoint.style.cssText = "display:flex;flex-direction:column;flex:1;min-height:0";
+  mountPoint.className = "moo-shell-mount";
   dialog.appendChild(mountPoint);
 
-  document.body.appendChild(backdrop);
-  document.body.appendChild(dialog);
+  // Attach backdrop + dialog INTO the shadow root (isolated from Readmoo CSS),
+  // then attach the host to the page. The scoped stylesheet is injected into
+  // this same shadow root by mountDialog (via container.getRootNode()).
+  shadowRoot.appendChild(backdrop);
+  shadowRoot.appendChild(dialog);
+  document.body.appendChild(host);
 
   // Track the latest breakpoint + view so a change to either re-applies the full
   // layout. View starts non-main (loading); React reports changes via onViewChange.

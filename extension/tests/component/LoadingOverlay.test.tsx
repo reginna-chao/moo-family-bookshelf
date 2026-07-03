@@ -20,4 +20,27 @@ describe("LoadingOverlay", () => {
     rerender(<LoadingOverlay message="完成！" />);
     expect(screen.getByText("完成！")).toBeInTheDocument();
   });
+
+  it("carries the scoped overlay class (fixed/full-screen cover lives in styles.css)", () => {
+    // After the Shadow DOM + scoped-CSS conversion the absolute/full-screen cover
+    // and z-index rules moved out of inline styles into `.moo-loading-overlay` in
+    // styles.css. jsdom does not apply stylesheet rules, so the observable
+    // contract that the overlay covers the Dialog content is now the class.
+    render(<LoadingOverlay message="載入中..." />);
+    const overlay = screen.getByTestId("loading-overlay");
+    expect(overlay).toHaveClass("moo-loading-overlay");
+  });
+
+  it("spinner carries the scoped spinner class (size/animation live in styles.css)", () => {
+    render(<LoadingOverlay message="載入中..." />);
+    const overlay = screen.getByTestId("loading-overlay");
+    const spinner = overlay.querySelector(".moo-loading-overlay__spinner");
+    expect(spinner).toBeInTheDocument();
+  });
+
+  it("message carries the scoped message class (color/weight live in styles.css)", () => {
+    render(<LoadingOverlay message="正在同步書單..." />);
+    const message = screen.getByText("正在同步書單...");
+    expect(message).toHaveClass("moo-loading-overlay__message");
+  });
 });

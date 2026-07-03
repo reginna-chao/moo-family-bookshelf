@@ -354,7 +354,7 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
 
   if (borrowRequestsState === "idle" || borrowRequestsState === "loading") {
     return (
-      <div style={{ padding: 16, textAlign: "center", color: "#64748b" }}>
+      <div className="moo-borrow-tab__state moo-borrow-tab__state--center">
         載入借閱資料中...
       </div>
     );
@@ -362,21 +362,13 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
 
   if (borrowRequestsState === "error") {
     return (
-      <div style={{ padding: 16 }}>
-        <p style={{ color: "#ef4444", fontSize: 14, marginBottom: 12 }}>
+      <div className="moo-borrow-tab__state">
+        <p className="moo-borrow-tab__state-error">
           {borrowRequestsError ?? "載入失敗"}
         </p>
         <button
           onClick={() => void refreshBorrowRequests()}
-          style={{
-            padding: "8px 16px",
-            border: "1px solid #2563eb",
-            borderRadius: 8,
-            background: "transparent",
-            color: "#2563eb",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
+          className="moo-borrow-tab__state-retry"
         >
           重試
         </button>
@@ -386,20 +378,9 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
 
   return (
     <div>
-      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>借閱管理</h3>
+      <h3 className="moo-borrow-tab__heading">借閱管理</h3>
       {actionError && (
-        <div
-          role="alert"
-          style={{
-            padding: 8,
-            marginBottom: 12,
-            background: "#fef2f2",
-            border: "1px solid #fecaca",
-            borderRadius: 6,
-            color: "#b91c1c",
-            fontSize: 13,
-          }}
-        >
+        <div role="alert" className="moo-borrow-tab__alert">
           {actionError}
         </div>
       )}

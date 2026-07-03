@@ -1,0 +1,3451 @@
+/*
+ * Scoped stylesheet for the MooFamily dialog, injected into the dialog's Shadow
+ * Root (see mountDialog in main.tsx). Every class is prefixed `moo-` and every
+ * rule is authored by hand — this file is imported as a raw string (`?raw`) so
+ * PostCSS/Tailwind never processes it, guaranteeing the bytes shipped match the
+ * bytes written here.
+ *
+ * Conversion status: BookCard (pilot) + Batch 1 dialog components. Components
+ * outside Batch 1 (PersonalShelf, BorrowTab, FamilySettings, Onboarding, …)
+ * keep their inline styles and render fine inside the shadow root.
+ *
+ * Sections are ordered: tokens → base reset → keyframes → components (in the
+ * order they were converted).
+ */
+
+/*
+ * Design tokens. Declared on both :host (production shadow root) and :root (dev
+ * page, where styles.css is injected into document.head — see main.tsx). Values
+ * are the recurring literals harvested from the inline styles being converted;
+ * every var(--moo-*) below equals the exact byte it replaced, so retrofitting is
+ * visually identical.
+ */
+:host,
+:root {
+  --moo-primary: #2563eb; /* accent blue: active tabs, links, primary buttons */
+  --moo-primary-bg: #eff6ff; /* pale blue fill behind active/selected controls */
+  --moo-text: #1e293b; /* default body text (slate-800) */
+  --moo-text-strong: #334155; /* menu items / overlay body (slate-700) */
+  --moo-text-muted: #64748b; /* secondary text, inactive tabs (slate-500) */
+  --moo-text-faint: #94a3b8; /* tertiary text, placeholders, counts (slate-400) */
+  --moo-text-fainter: #cbd5e1; /* hint text (slate-300) */
+  --moo-border: #e2e8f0; /* default control/divider border (slate-200) */
+  --moo-surface: #fff; /* card / menu surfaces */
+  --moo-surface-alt: #f1f5f9; /* subtle fills, fallbacks (slate-100) */
+  --moo-danger: #dc2626; /* destructive / count badge (red-600) */
+  --moo-danger-alt: #ef4444; /* error text, red dot (red-500) */
+  --moo-favorite-hover: #f87171; /* heart hover (red-400) */
+  --moo-success: #16a34a; /* "更新" badge text (green-600) */
+  --moo-success-bg: #dcfce7; /* "更新" badge fill (green-100) */
+  --moo-warn-bg: #fffbeb; /* warning banner fill (amber-50) */
+  --moo-warn-border: #f59e0b; /* warning banner border (amber-500) */
+  --moo-warn-border-soft: #fde68a; /* softer warning border (amber-200) */
+  --moo-warn-text: #92400e; /* warning banner text (amber-800) */
+  --moo-warn-link: #d97706; /* warning banner link (amber-600) */
+  /* Batch 2 additions (recurring ≥2× across the converted components). */
+  --moo-text-slate600: #475569; /* button/label text (slate-600) */
+  --moo-primary-strong: #93c5fd; /* syncing-in-progress fill (blue-300) */
+  --moo-surface-subtle: #f8fafc; /* list-row default fill (slate-50) */
+  --moo-error-bg: #fef2f2; /* error alert fill (red-50) */
+  --moo-error-border: #fecaca; /* error alert border (red-200) */
+  --moo-error-text: #b91c1c; /* error alert text (red-700) */
+  /* Batch 3 additions (recurring ≥2× across the converted components). */
+  --moo-invite: #10b981; /* invite-link button border + text (emerald-500) */
+  --moo-danger-border: #fca5a5; /* soft danger border / QR error fill (red-300) */
+}
+
+/*
+ * Base reset scoped to the shadow tree. Readmoo's page styles cannot cross the
+ * shadow boundary, but inheritable properties (font-family, color) still leak
+ * in through the host, so we pin them here on the shadow-root children wrapper.
+ * :host targets the shadow root's host element from inside the shadow tree.
+ */
+:host {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--moo-text);
+  line-height: normal;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* ── Keyframes ────────────────────────────────────────────────────────── */
+
+@keyframes moo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes moo-lazy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Form select ──────────────────────────────────────────────────────── */
+/* Shadow-scoped chevron for <select class="moo-form-select">; replaces the
+   retired light-DOM assets/style.css rule (dialog now lives in a shadow root). */
+
+.moo-form-select {
+  --moo-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: var(--moo-form-select-bg-img);
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px 12px;
+  /* Box props (retired formSelectStyle helper). Height is pinned to match the
+     toolbar icon buttons; selects center text natively so vertical padding is 0
+     and box-sizing includes the border. */
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 12px;
+  padding-right: 2.25rem;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  font-size: 14px;
+  background-color: white;
+  color: var(--moo-text-strong);
+  cursor: pointer;
+  outline: none;
+}
+
+/* Mobile: 32px touch target to match the toolbar icon buttons. */
+.moo-form-select--mobile {
+  height: 32px;
+}
+
+/* Full-width variant (MemberDropdown spread `width: "100%"`). */
+.moo-form-select--full {
+  width: 100%;
+}
+
+/* ── Spin ─────────────────────────────────────────────────────────────── */
+/* 1s cadence for .moo-spin (PersonalShelf syncing icon); the __spinner
+   classes elsewhere use 0.8s — kept intentionally separate. */
+
+.moo-spin {
+  animation: moo-spin 1s linear infinite;
+}
+
+/* ── LazyCover ────────────────────────────────────────────────────────── */
+
+.moo-lazy-cover {
+  position: relative;
+}
+
+.moo-lazy-cover__spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin-top: -10px;
+  margin-left: -10px;
+  border: 2px solid var(--moo-border);
+  border-top-color: var(--moo-primary);
+  border-radius: 50%;
+  animation: moo-lazy-spin 0.8s linear infinite;
+}
+
+.moo-lazy-cover__img {
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.2s ease-in;
+}
+
+.moo-lazy-cover__img--loaded {
+  opacity: 1;
+}
+
+/* ── BookCard ─────────────────────────────────────────────────────────── */
+
+.moo-book-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-radius: 8px;
+  background: var(--moo-surface);
+  border: 1px solid var(--moo-surface-alt);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+.moo-book-card__link {
+  display: block;
+  text-decoration: none;
+}
+
+.moo-book-card__cover-wrap {
+  position: relative;
+}
+
+/* Responsive cover sizing, applied to <LazyCover> via its className prop. */
+.moo-book-card__cover {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  border-radius: 0;
+}
+
+.moo-book-card__cover-fallback {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  background: var(--moo-surface-alt);
+}
+
+.moo-book-card__updated-badge {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  background: var(--moo-success-bg);
+  color: var(--moo-success);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  line-height: 16px;
+}
+
+.moo-book-card__info {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.moo-book-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--moo-text);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.3;
+}
+
+.moo-book-card__author {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  text-align: left;
+}
+
+.moo-book-card__member {
+  align-self: flex-start;
+  display: inline-block;
+  font-size: 12px;
+  color: var(--moo-primary);
+  background: var(--moo-primary-bg);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.moo-book-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 8px;
+  margin-top: auto;
+}
+
+.moo-book-card__actions-end {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ── BorrowControl ────────────────────────────────────────────────────── */
+
+.moo-borrow-btn {
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.moo-borrow-btn--pending {
+  background: var(--moo-border);
+  color: var(--moo-text-faint);
+  cursor: not-allowed;
+}
+
+/* ── FilterButton ─────────────────────────────────────────────────────── */
+
+.moo-filter-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--moo-border);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.moo-filter-btn--active {
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+  font-weight: 600;
+}
+
+/* ── App (main view: layout, tab row) ─────────────────────────────────── */
+
+.moo-app__fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.moo-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--moo-border);
+  align-items: center;
+}
+
+/*
+ * Mobile reserves 40px at the right edge (8px offset + 32px close icon) so the
+ * content-script close icon never overlaps the last tab. Desktop has no reserve.
+ */
+.moo-tabs--mobile {
+  padding-right: 40px;
+}
+
+.moo-tab {
+  flex: 1;
+  padding: 12px 0;
+  border: none;
+  background: transparent;
+  font-weight: 400;
+  color: var(--moo-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.moo-tab--mobile {
+  padding: 8px 0;
+  font-size: 13px;
+}
+
+.moo-tab--active {
+  background: var(--moo-primary-bg);
+  font-weight: 600;
+  color: var(--moo-primary);
+  border-bottom: 2px solid var(--moo-primary);
+}
+
+.moo-tab__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--moo-danger-alt);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.moo-tab__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--moo-danger);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 4px;
+  line-height: 1;
+}
+
+.moo-tab-panels {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.moo-tab-panel {
+  display: none;
+}
+
+.moo-tab-panel--active {
+  display: block;
+}
+
+/* ── FamilyShelf ──────────────────────────────────────────────────────── */
+
+.moo-prefs-sync-notice {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--moo-warn-border-soft);
+  background: var(--moo-warn-bg);
+  color: var(--moo-warn-text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.moo-load-more {
+  width: 100%;
+  padding: 10px 0;
+  margin-top: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ── FamilyShelfToolbar ───────────────────────────────────────────────── */
+
+.moo-toolbar__heading {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.moo-toolbar__count {
+  font-weight: 400;
+  color: var(--moo-text-faint);
+  margin-left: 8px;
+  font-size: 13px;
+}
+
+.moo-toolbar__row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.moo-toolbar__grow {
+  flex: 1;
+}
+
+/* ── FamilyShelfBookList ──────────────────────────────────────────────── */
+
+.moo-book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+  gap: 12px;
+}
+
+/* ── FamilyShelfStatus (error / empty) ────────────────────────────────── */
+
+.moo-shelf-status {
+  padding: 16px;
+}
+
+.moo-shelf-status--center {
+  text-align: center;
+}
+
+.moo-shelf-status__error-text {
+  color: var(--moo-danger-alt);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.moo-shelf-status__retry {
+  padding: 8px 16px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-shelf-status__empty-title {
+  color: var(--moo-text-faint);
+  margin-top: 16px;
+}
+
+.moo-shelf-status__empty-hint {
+  color: var(--moo-text-fainter);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+/* ── FamilyBookRow ────────────────────────────────────────────────────── */
+
+.moo-book-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--moo-border);
+  text-decoration: none;
+  color: inherit;
+}
+
+.moo-book-row__cover-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.moo-book-row__cover {
+  width: 40px;
+  height: 60px;
+  border-radius: 3px;
+}
+
+.moo-book-row__cover-fallback {
+  width: 40px;
+  height: 60px;
+  background: var(--moo-surface-alt);
+  border-radius: 3px;
+}
+
+.moo-book-row__updated-badge {
+  position: absolute;
+  bottom: -2px;
+  left: -2px;
+  background: var(--moo-success-bg);
+  color: var(--moo-success);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 6px;
+  line-height: 14px;
+}
+
+.moo-book-row__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.moo-book-row__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--moo-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moo-book-row__author {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moo-book-row__member {
+  font-size: 12px;
+  color: var(--moo-primary);
+  background: var(--moo-primary-bg);
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.moo-book-row__borrow-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.moo-book-row__borrow-btn--pending {
+  background: var(--moo-text-faint);
+  cursor: not-allowed;
+}
+
+.moo-book-row__favorite {
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.moo-book-row__menu {
+  flex-shrink: 0;
+}
+
+/* ── FavoriteButton ───────────────────────────────────────────────────── */
+
+.moo-favorite-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-faint);
+  cursor: pointer;
+}
+
+/* Hover shifts the hollow (not-favorited) heart grey → red-400. */
+.moo-favorite-btn:hover {
+  color: var(--moo-favorite-hover);
+}
+
+/* Favorited: solid red, and stays red on hover (overrides the hover rule). */
+.moo-favorite-btn--active,
+.moo-favorite-btn--active:hover {
+  color: var(--moo-danger-alt);
+}
+
+/* ── OverflowMenu ─────────────────────────────────────────────────────── */
+
+.moo-overflow {
+  position: relative;
+  display: inline-flex;
+}
+
+.moo-overflow__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.moo-overflow__trigger--mobile {
+  width: 32px;
+  height: 32px;
+}
+
+.moo-overflow__trigger--overlay {
+  background: rgba(15, 23, 42, 0.55);
+  color: white;
+}
+
+.moo-overflow__trigger--plain {
+  background: transparent;
+  color: var(--moo-text-muted);
+}
+
+/* z-index 100001 = one above the Dialog overlay (#moo-family-bookshelf-dialog). */
+.moo-overflow__menu {
+  position: fixed;
+  min-width: 120px;
+  background: white;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100001;
+  overflow: hidden;
+}
+
+.moo-overflow__item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--moo-text-strong);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* ── BookSortDropdown ─────────────────────────────────────────────────── */
+
+.moo-sort {
+  position: relative;
+  display: inline-flex;
+}
+
+.moo-sort__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--moo-text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.moo-sort__trigger--mobile {
+  width: 32px;
+  height: 32px;
+}
+
+.moo-sort__trigger--active {
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+/* z-index 100001 = one above the Dialog overlay (#moo-family-bookshelf-dialog). */
+.moo-sort__menu {
+  position: fixed;
+  min-width: 140px;
+  background: white;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100001;
+  overflow: hidden;
+  outline: none;
+}
+
+.moo-sort__option {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--moo-text-strong);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Keyboard-active but unselected: neutral grey highlight. */
+.moo-sort__option--active {
+  background: var(--moo-surface-alt);
+}
+
+/* Selected (blue) wins over the active highlight. */
+.moo-sort__option--selected {
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+/* ── CategoryDropdown ─────────────────────────────────────────────────── */
+
+.moo-category {
+  position: relative;
+}
+
+.moo-category__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--moo-text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.moo-category__trigger--mobile {
+  width: 32px;
+  height: 32px;
+}
+
+.moo-category__trigger--active {
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+/* top matches the trigger height so the menu drops directly below it. */
+.moo-category__menu {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  min-width: 180px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+}
+
+.moo-category__menu--mobile {
+  top: 32px;
+}
+
+.moo-category__option {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--moo-text-strong);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.moo-category__option--selected {
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+.moo-category__option-count {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+}
+
+/* ── ViewModeToggle ───────────────────────────────────────────────────── */
+
+.moo-view-toggle {
+  display: inline-flex;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.moo-view-toggle__btn {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--moo-border);
+  background: transparent;
+  color: var(--moo-text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.moo-view-toggle__btn--mobile {
+  width: 32px;
+  height: 32px;
+}
+
+.moo-view-toggle__btn--active {
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+/* Segment corners (radius 6): first rounds the left corners, last rounds the
+   right corners. */
+.moo-view-toggle__btn--first {
+  border-radius: 6px 0 0 6px;
+}
+
+.moo-view-toggle__btn--last {
+  border-radius: 0 6px 6px 0;
+}
+
+/* ── SearchBar ────────────────────────────────────────────────────────── */
+
+.moo-search {
+  margin-bottom: 12px;
+}
+
+.moo-search__field {
+  position: relative;
+}
+
+.moo-search__icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--moo-text-faint);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.moo-search__input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px 0 32px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* Mobile: 32px-tall touch target to match the toolbar icon buttons. */
+.moo-search__input--mobile {
+  height: 32px;
+}
+
+.moo-search__count {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+/* ── StatusFilterBar ──────────────────────────────────────────────────── */
+
+.moo-status-filter {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* ── DialogFooter ─────────────────────────────────────────────────────── */
+
+.moo-footer {
+  border-top: 1px solid var(--moo-border);
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+
+.moo-footer--wide {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Narrow layout nudges the version line below the disclaimer. */
+.moo-footer__version {
+  margin-top: 2px;
+}
+
+.moo-footer__env {
+  margin-left: 4px;
+}
+
+/* ── EnvBadge ─────────────────────────────────────────────────────────── */
+
+.moo-env-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 18px;
+  user-select: none;
+}
+
+.moo-env-badge--local {
+  background: #fedbdb;
+  color: #d81d1d;
+  border: 1px solid #fd9393;
+}
+
+.moo-env-badge--dev {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #93c5fd;
+}
+
+/* ── LoadingState ─────────────────────────────────────────────────────── */
+
+.moo-loading-state {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+}
+
+.moo-loading-state__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--moo-border);
+  border-top-color: var(--moo-primary);
+  border-radius: 50%;
+  animation: moo-spin 0.8s linear infinite;
+}
+
+.moo-loading-state__message {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+/* ── LoadingOverlay ───────────────────────────────────────────────────── */
+
+.moo-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border-radius: 12px;
+}
+
+.moo-loading-overlay__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--moo-border);
+  border-top-color: var(--moo-primary);
+  border-radius: 50%;
+  animation: moo-spin 0.8s linear infinite;
+  margin-bottom: 16px;
+}
+
+.moo-loading-overlay__message {
+  color: var(--moo-text-strong);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ── VersionWarning ───────────────────────────────────────────────────── */
+
+.moo-version-warning {
+  background: var(--moo-warn-bg);
+  border: 1px solid var(--moo-warn-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 16px 0;
+  font-size: 12px;
+  color: var(--moo-warn-text);
+  line-height: 1.5;
+}
+
+.moo-version-warning__link {
+  color: var(--moo-warn-link);
+  margin-left: 4px;
+  text-decoration: underline;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Batch 2: PersonalShelf, BookRow, FloatingActionBar, BorrowTab,
+   BorrowSection, BorrowRequestCard, ManualLendDialog, ReadmooMemberPicker
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── PersonalShelf ────────────────────────────────────────────────────── */
+
+.moo-shelf {
+  display: flex;
+  flex-direction: column;
+}
+
+.moo-shelf__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.moo-shelf__heading {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.moo-shelf__heading-count {
+  font-weight: 400;
+  color: var(--moo-text-faint);
+  margin-left: 8px;
+  font-size: 13px;
+}
+
+.moo-shelf__header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Public-share / sync toolbar buttons. Desktop = pill with label; the
+   --icon modifier collapses to a 32px square icon button on mobile. */
+.moo-shelf__tool-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  color: var(--moo-primary);
+  background: transparent;
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.moo-shelf__tool-btn--icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+  font-weight: 400;
+  font-size: inherit;
+  white-space: normal;
+}
+
+/* Sync button while a sync is running: solid blue-300 fill + not-allowed. */
+.moo-shelf__tool-btn--syncing {
+  background: var(--moo-primary-strong);
+  cursor: not-allowed;
+}
+
+.moo-shelf__progress {
+  margin-top: -4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  text-align: right;
+}
+
+.moo-shelf__sync-error {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.moo-shelf__archive-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--moo-border);
+}
+
+.moo-shelf__archive-tab {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  background: transparent;
+  font-weight: 400;
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.moo-shelf__archive-tab--active {
+  font-weight: 600;
+  color: var(--moo-primary);
+  border-bottom: 2px solid var(--moo-primary);
+}
+
+.moo-shelf__filter-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+.moo-shelf__search-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.moo-shelf__grow {
+  flex: 1;
+}
+
+.moo-shelf__select-all-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.moo-shelf__select-all {
+  padding: 4px 10px;
+  border: 1px solid var(--moo-text-fainter);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-slate600);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.moo-shelf__empty {
+  color: var(--moo-text-faint);
+  text-align: center;
+  margin-top: 24px;
+}
+
+.moo-shelf__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.moo-shelf__load-more {
+  width: 100%;
+  padding: 10px 0;
+  margin-top: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Shared centered padding block for the loading / error early returns. */
+.moo-shelf__state {
+  padding: 16px;
+}
+
+.moo-shelf__state--center {
+  text-align: center;
+  color: var(--moo-text-muted);
+}
+
+.moo-shelf__state-error {
+  color: var(--moo-danger-alt);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.moo-shelf__state-retry {
+  padding: 8px 16px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── BookRow (PersonalShelf list item) ────────────────────────────────── */
+
+.moo-shelf-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--moo-surface-subtle);
+  cursor: pointer;
+}
+
+.moo-shelf-row--selected {
+  background: var(--moo-primary-bg);
+}
+
+.moo-shelf-row__checkbox {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* Owns the cover sizing (LazyCover className path): 40×60 with 4px radius. */
+.moo-shelf-row__cover {
+  width: 40px;
+  height: 60px;
+  border-radius: 4px;
+}
+
+.moo-shelf-row__cover-fallback {
+  width: 40px;
+  height: 60px;
+  background: var(--moo-border);
+  border-radius: 4px;
+}
+
+.moo-shelf-row__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.moo-shelf-row__title-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.moo-shelf-row__title {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.moo-shelf-row__archived-badge {
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: var(--moo-warn-text);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.moo-shelf-row__author {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  margin-top: 1px;
+}
+
+.moo-shelf-row__toggle {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--moo-surface-alt);
+  color: var(--moo-text-faint);
+  cursor: pointer;
+}
+
+.moo-shelf-row__toggle--on {
+  background: var(--moo-success-bg);
+  color: var(--moo-success);
+}
+
+/* ── FloatingActionBar ────────────────────────────────────────────────── */
+
+.moo-action-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--moo-surface);
+  border-top: 1px solid var(--moo-border);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
+  border-radius: 0 0 8px 8px;
+  flex-wrap: wrap;
+}
+
+.moo-action-bar__count {
+  font-size: 13px;
+  color: var(--moo-text-slate600);
+  font-weight: 500;
+}
+
+.moo-action-bar__btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.moo-action-bar__btn--share {
+  background: var(--moo-success);
+}
+
+.moo-action-bar__btn--hide {
+  background: var(--moo-text-muted);
+}
+
+.moo-action-bar__cancel {
+  padding: 6px 14px;
+  border: 1px solid var(--moo-text-faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-slate600);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Pushed to the right edge when a selection is present. */
+.moo-action-bar__cancel--pushed {
+  margin-left: auto;
+}
+
+.moo-action-bar__cancel:disabled {
+  color: var(--moo-text-faint);
+  cursor: not-allowed;
+}
+
+.moo-action-bar__save {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Fills the bar when there is no selection (save is the only trailing action). */
+.moo-action-bar__save--grow {
+  flex: 1;
+}
+
+.moo-action-bar__save:disabled {
+  background: var(--moo-border);
+  color: var(--moo-text-faint);
+  cursor: not-allowed;
+}
+
+/* ── BorrowTab ────────────────────────────────────────────────────────── */
+
+.moo-borrow-tab__heading {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.moo-borrow-tab__alert {
+  padding: 8px;
+  margin-bottom: 12px;
+  background: var(--moo-error-bg);
+  border: 1px solid var(--moo-error-border);
+  border-radius: 6px;
+  color: var(--moo-error-text);
+  font-size: 13px;
+}
+
+.moo-borrow-tab__state {
+  padding: 16px;
+}
+
+.moo-borrow-tab__state--center {
+  text-align: center;
+  color: var(--moo-text-muted);
+}
+
+.moo-borrow-tab__state-error {
+  color: var(--moo-danger-alt);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.moo-borrow-tab__state-retry {
+  padding: 8px 16px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── BorrowSection ────────────────────────────────────────────────────── */
+
+.moo-borrow-section {
+  margin-bottom: 20px;
+}
+
+.moo-borrow-section__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moo-text);
+  margin: 0 0 8px 0;
+}
+
+.moo-borrow-section__title-count {
+  color: var(--moo-text-faint);
+  font-weight: 400;
+  margin-left: 6px;
+  font-size: 12px;
+}
+
+.moo-borrow-section__empty {
+  color: var(--moo-text-faint);
+  font-size: 13px;
+  margin: 0;
+}
+
+.moo-borrow-section__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.moo-borrow-section__archived {
+  margin-top: 12px;
+}
+
+.moo-borrow-section__toggle {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--moo-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-borrow-section__archived-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ── BorrowRequestCard ────────────────────────────────────────────────── */
+
+.moo-request-card {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: var(--moo-surface);
+  align-items: flex-start;
+}
+
+.moo-request-card__cover {
+  width: 48px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--moo-surface-alt);
+  flex-shrink: 0;
+}
+
+.moo-request-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.moo-request-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--moo-text);
+  line-height: 1.3;
+}
+
+.moo-request-card__author {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+}
+
+.moo-request-card__party {
+  font-size: 12px;
+  color: var(--moo-text-slate600);
+}
+
+.moo-request-card__party-name {
+  font-weight: 600;
+}
+
+.moo-request-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.moo-request-card__status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* Per-status badge palette (mirrors the retired STATUS_STYLE map). */
+.moo-request-card__status--pending {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.moo-request-card__status--lent {
+  background: var(--moo-success-bg);
+  color: #15803d;
+}
+
+.moo-request-card__status--returned {
+  background: var(--moo-border);
+  color: var(--moo-text-slate600);
+}
+
+.moo-request-card__status--rejected {
+  background: #fee2e2;
+  color: var(--moo-error-text);
+}
+
+.moo-request-card__status--cancelled {
+  background: var(--moo-border);
+  color: var(--moo-text-muted);
+}
+
+.moo-request-card__time {
+  font-size: 11px;
+  color: var(--moo-text-faint);
+}
+
+.moo-request-card__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.moo-request-card__action {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid;
+  background: transparent;
+  color: var(--moo-text-slate600);
+  border-color: var(--moo-text-fainter);
+}
+
+.moo-request-card__action--primary {
+  background: var(--moo-primary);
+  color: white;
+  border-color: var(--moo-primary);
+}
+
+.moo-request-card__action--danger {
+  color: var(--moo-danger);
+  border-color: var(--moo-danger);
+}
+
+.moo-request-card__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Modal shell (ManualLendDialog + ReadmooMemberPicker) ─────────────── */
+/* Both modals share the same fixed-overlay + centered-card chrome. Rendered
+   inline inside the shadow root (no portal), matching the pre-conversion JS. */
+
+.moo-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.moo-modal {
+  background: var(--moo-surface);
+  border-radius: 12px;
+  padding: 20px;
+  width: 320px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.moo-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.moo-modal__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.moo-modal__close {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--moo-text-slate600);
+  flex-shrink: 0;
+}
+
+.moo-modal__cancel {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--moo-text-fainter);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--moo-text-slate600);
+}
+
+/* Restore the original unstyled-button color for the member picker's cancel
+   button: it had no explicit color before the shared shell (UA default). */
+.moo-member-picker__cancel {
+  color: buttontext;
+}
+
+.moo-modal__error {
+  background: var(--moo-error-bg);
+  color: var(--moo-error-text);
+  border: 1px solid var(--moo-error-border);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+/* ── ManualLendDialog ─────────────────────────────────────────────────── */
+
+.moo-manual-lend__body {
+  font-size: 12px;
+  color: var(--moo-text-slate600);
+  margin: 0 0 8px;
+  line-height: 1.6;
+}
+
+.moo-manual-lend__checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 16px;
+  cursor: pointer;
+}
+
+.moo-manual-lend__checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.moo-manual-lend__checkbox-text {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+}
+
+.moo-manual-lend__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.moo-manual-lend__confirm {
+  padding: 6px 14px;
+  background: var(--moo-primary);
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+}
+
+.moo-manual-lend__confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── ReadmooMemberPicker ──────────────────────────────────────────────── */
+
+.moo-member-picker__help {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.moo-member-picker__empty {
+  color: var(--moo-text-faint);
+  font-size: 13px;
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-member-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.moo-member-picker__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: var(--moo-surface);
+  cursor: pointer;
+  font-size: 14px;
+  text-align: left;
+}
+
+.moo-member-picker__avatar {
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.moo-member-picker__name {
+  font-weight: 600;
+  color: var(--moo-text);
+}
+
+.moo-member-picker__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Batch 3: FamilySettings, MemberList, DisplayNameEditor, PublicShareDialog,
+   QrCodeLink, InviteQrCode, FloatingIconSizeSelector, AutoSyncIntervalSelector
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── FloatingIconSizeSelector ─────────────────────────────────────────── */
+
+.moo-icon-size {
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.moo-icon-size__segment {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid var(--moo-border);
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.moo-icon-size__segment--active {
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+  font-weight: 600;
+}
+
+/* Segment corners (radius 6): first rounds the left corners, last the right. */
+.moo-icon-size__segment--first {
+  border-radius: 6px 0 0 6px;
+}
+
+.moo-icon-size__segment--middle {
+  border-radius: 0;
+}
+
+.moo-icon-size__segment--last {
+  border-radius: 0 6px 6px 0;
+}
+
+/* ── Toggle switch (shared: FamilySettings syncArchived + MemberList canLend) ──
+   Byte-identical between the two before conversion: 32×18 track, 14×14 knob,
+   blue-on / slate-off, 0.2s transitions. */
+
+.moo-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--moo-text-strong);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+/* MemberList's canLend toggle differs from FamilySettings' by inline-flex (vs
+   flex) and 13px font; kept as an explicit modifier rather than silently unified. */
+.moo-switch--inline {
+  display: inline-flex;
+  font-size: 13px;
+}
+
+.moo-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.moo-switch__track {
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--moo-text-fainter);
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.moo-switch__track--on {
+  background: var(--moo-primary);
+}
+
+.moo-switch__knob {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: #fff;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: left 0.2s;
+}
+
+.moo-switch__knob--on {
+  left: 16px;
+}
+
+/* ── FamilySettings ───────────────────────────────────────────────────── */
+
+.moo-settings__section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--moo-text);
+  width: 100%;
+}
+
+/* Collapsed section header has no bottom gap; open header nudges content down. */
+.moo-settings__section-header--open {
+  margin-bottom: 12px;
+}
+
+.moo-settings__block {
+  margin-bottom: 20px;
+}
+
+.moo-settings__label {
+  color: var(--moo-text-strong);
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+/* Bolder slate-500 heading used for 家庭同步碼 / 家庭成員 / 顯示名稱 groups. */
+.moo-settings__group-label {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+/* 家庭成員 heading originally had marginBottom 8 (others 6); preserve the 2px. */
+.moo-settings__group-label--members {
+  margin-bottom: 8px;
+}
+
+.moo-settings__hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+.moo-settings__divider {
+  border-top: 1px solid var(--moo-border);
+  padding-top: 16px;
+  margin-top: 4px;
+}
+
+.moo-settings__sync-code-box {
+  padding: 12px;
+  background: var(--moo-surface-subtle);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moo-settings__sync-code-text {
+  flex: 1;
+  word-break: break-all;
+  font-size: 13px;
+  font-family: monospace;
+}
+
+.moo-settings__copy-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+/* Sync-code copy button (blue). Disabled + copied states are modifiers. */
+.moo-settings__copy-btn {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.moo-settings__copy-btn--copied {
+  background: var(--moo-primary-bg);
+}
+
+.moo-settings__copy-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Invite-link copy button (emerald). */
+.moo-settings__invite-btn {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--moo-invite);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-invite);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.moo-settings__invite-btn--copied {
+  background: #ecfdf5;
+}
+
+.moo-settings__invite-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.moo-settings__members-loading {
+  color: var(--moo-text-faint);
+  font-size: 14px;
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-settings__members-error {
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-settings__error-text {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.moo-settings__retry-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* Danger (leave / delete) outline button. */
+.moo-settings__danger-btn {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-danger-alt);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-danger-alt);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.moo-settings__danger-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.moo-settings__confirm-prompt {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.moo-settings__confirm-row {
+  display: flex;
+  gap: 8px;
+}
+
+.moo-settings__confirm-yes {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-danger-alt);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.moo-settings__confirm-no {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* Delete-account section divider (has margin-bottom, unlike the personal one). */
+.moo-settings__section-divider {
+  border-top: 1px solid var(--moo-border);
+  padding-top: 16px;
+  margin-bottom: 16px;
+}
+
+.moo-settings__section-divider--spaced {
+  border-top: 1px solid var(--moo-border);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+.moo-settings__delete-warning {
+  background: var(--moo-error-bg);
+  border: 1px solid var(--moo-error-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.moo-settings__delete-warning-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moo-error-text);
+  margin-bottom: 8px;
+}
+
+.moo-settings__delete-warning-list {
+  font-size: 12px;
+  color: var(--moo-danger-alt);
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+
+.moo-settings__report {
+  border-top: 1px solid var(--moo-border);
+  padding-top: 16px;
+  margin-top: 16px;
+  text-align: center;
+}
+
+.moo-settings__report-label {
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.moo-settings__report-links {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.moo-settings__report-link {
+  color: var(--moo-text-faint);
+  text-decoration: none;
+  display: inline-block;
+}
+
+/* ── MemberList ───────────────────────────────────────────────────────── */
+
+.moo-member-list__error {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.moo-member-list__table {
+  background: var(--moo-surface-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.moo-member-list__row {
+  padding: 10px 12px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--moo-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.moo-member-list__row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.moo-member-list__name {
+  font-family: monospace;
+  font-size: 13px;
+}
+
+/* 管理員 badge (amber) / (你) badge (blue). */
+.moo-member-list__badge {
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.moo-member-list__badge--owner {
+  color: var(--moo-warn-border);
+}
+
+.moo-member-list__badge--self {
+  color: var(--moo-primary);
+}
+
+/* Small outline action button (transfer / remove / delete-readmoo-name). */
+.moo-member-list__small-btn {
+  padding: 4px 10px;
+  border: 1px solid;
+  border-radius: 6px;
+  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.moo-member-list__small-btn--primary {
+  border-color: var(--moo-primary);
+  color: var(--moo-primary);
+}
+
+.moo-member-list__small-btn--danger {
+  border-color: var(--moo-danger-alt);
+  color: var(--moo-danger-alt);
+}
+
+/* The delete-readmoo-name button drops the left margin (first in its own row). */
+.moo-member-list__small-btn--flush {
+  margin-left: 0;
+}
+
+/* Only the delete-readmoo-name button is ever disabled (while deleting). The
+   original kept cursor:pointer and only dimmed opacity, so we do the same. */
+.moo-member-list__small-btn:disabled {
+  opacity: 0.5;
+}
+
+.moo-member-list__toggle-hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.moo-member-list__readmoo {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.moo-member-list__readmoo-name {
+  font-size: 13px;
+  color: var(--moo-text-strong);
+}
+
+.moo-member-list__readmoo-empty {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  line-height: 1.5;
+}
+
+/* MemberList confirm dialogs (remove / transfer / custom-endpoint transfer). */
+.moo-member-list__confirm {
+  background: var(--moo-error-bg);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.moo-member-list__confirm--warn {
+  background: var(--moo-warn-bg);
+}
+
+.moo-member-list__confirm-text {
+  font-size: 13px;
+  color: var(--moo-text-muted);
+  margin-bottom: 8px;
+}
+
+.moo-member-list__confirm-warn-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--moo-text-strong);
+  margin-bottom: 8px;
+}
+
+.moo-member-list__endpoint {
+  padding: 6px;
+  background: var(--moo-surface-subtle);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-all;
+  margin-bottom: 8px;
+}
+
+.moo-member-list__confirm-warn-body {
+  font-size: 13px;
+  color: var(--moo-text-muted);
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+.moo-member-list__confirm-warn-list {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  margin: 0 0 12px 0;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+
+.moo-member-list__confirm-row {
+  display: flex;
+  gap: 8px;
+}
+
+.moo-member-list__confirm-row--end {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.moo-member-list__confirm-yes {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--moo-danger-alt);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__confirm-yes:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.moo-member-list__confirm-no {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--moo-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__confirm-no:disabled {
+  cursor: not-allowed;
+}
+
+/* Endpoint-transfer action buttons (auto-width, not flex:1). */
+.moo-member-list__endpoint-cancel {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__endpoint-cancel:disabled {
+  cursor: not-allowed;
+}
+
+.moo-member-list__endpoint-keep {
+  padding: 8px 14px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__endpoint-keep:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.moo-member-list__endpoint-clear {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--moo-primary);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moo-member-list__endpoint-clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── DisplayNameEditor ────────────────────────────────────────────────── */
+
+.moo-name-editor {
+  margin-bottom: 20px;
+}
+
+.moo-name-editor__label {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.moo-name-editor__hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.moo-name-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moo-name-editor__input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.moo-name-editor__icon-btn {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.moo-name-editor__icon-btn:disabled {
+  cursor: not-allowed;
+}
+
+/* The cancel (X) button dims while saving; confirm does not. */
+.moo-name-editor__icon-btn--dim:disabled {
+  opacity: 0.5;
+}
+
+.moo-name-editor__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--moo-border);
+  border-top-color: var(--moo-primary);
+  border-radius: 50%;
+  animation: moo-spin 0.8s linear infinite;
+}
+
+.moo-name-editor__error {
+  color: var(--moo-danger-alt);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.moo-name-editor__value {
+  font-size: 14px;
+  color: var(--moo-text-strong);
+}
+
+/* ── PublicShareDialog ────────────────────────────────────────────────── */
+
+.moo-public-share__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.moo-public-share {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.moo-public-share__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.moo-public-share__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.moo-public-share__icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--moo-text-slate600);
+  display: flex;
+}
+
+.moo-public-share__error {
+  background: var(--moo-error-bg);
+  color: var(--moo-danger);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.moo-public-share__muted {
+  color: var(--moo-text-faint);
+  text-align: center;
+  padding: 16px;
+}
+
+.moo-public-share__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.moo-public-share__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Unified with the app-wide control height standard (desktop 40px / mobile
+   32px), matching .moo-search__input / .moo-form-select. box-sizing:border-box
+   comes from the global `*` reset. Border uses the standard --moo-border
+   (#e2e8f0), matching every other control in the app. */
+.moo-public-share__input {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--moo-border);
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+}
+
+.moo-public-share__input--mobile {
+  height: 32px;
+}
+
+/* The expires <select> shares the input chrome (.moo-public-share__input) but
+   adds its own chevron + room for it. The chevron is vertically centered via
+   `right 0.75rem center`, which stays centered at both the 40px and 32px
+   heights. It intentionally does NOT use .moo-form-select; it inherits the
+   input chrome (border/height) via .moo-public-share__input. */
+.moo-public-share__select {
+  --moo-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: var(--moo-form-select-bg-img);
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px 12px;
+  padding-right: 2.25rem;
+}
+
+.moo-public-share__select--mobile {
+  height: 32px;
+}
+
+.moo-public-share__url-input {
+  flex: 1;
+  font-size: 12px;
+}
+
+.moo-public-share__link-label {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  margin: 0 0 4px;
+}
+
+.moo-public-share__url-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.moo-public-share__copied {
+  font-size: 11px;
+  color: var(--moo-success);
+}
+
+.moo-public-share__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.moo-public-share__primary-btn {
+  padding: 8px 14px;
+  background: var(--moo-primary);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.moo-public-share__secondary-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--moo-text-fainter);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.moo-public-share__danger-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--moo-danger-border);
+  color: var(--moo-danger);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.moo-public-share__confirm {
+  background: var(--moo-warn-bg);
+  border: 1px solid #fbbf24;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.moo-public-share__confirm-text {
+  margin: 0;
+  font-size: 13px;
+}
+
+.moo-public-share__confirm-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ── QrCodeLink ───────────────────────────────────────────────────────── */
+
+.moo-qr-link {
+  margin-bottom: 20px;
+}
+
+.moo-qr-link__label {
+  color: var(--moo-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.moo-qr-link__box {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+/* CTA text pill layered over the blurred placeholder. */
+.moo-qr-link__cta {
+  background: rgba(255, 255, 255, 0.92);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--moo-text);
+}
+
+.moo-qr-link__cta--spaced {
+  margin-bottom: 4px;
+}
+
+.moo-qr-link__cta--error {
+  color: var(--moo-error-text);
+  max-width: 180px;
+  text-align: center;
+}
+
+.moo-qr-link__regen {
+  padding: 6px 14px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--moo-primary);
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.moo-qr-link__button {
+  position: relative;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.moo-qr-link__button--loading {
+  cursor: wait;
+}
+
+.moo-qr-link__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.moo-qr-link__placeholder {
+  display: grid;
+  filter: blur(8px);
+}
+
+.moo-qr-link__copy-btn {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.moo-qr-link__copy-btn--copied {
+  background: var(--moo-primary-bg);
+}
+
+.moo-qr-link__copy-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.moo-qr-link__hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-top: 6px;
+  text-align: center;
+}
+
+.moo-qr-link__hint--small {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* ── InviteQrCode ─────────────────────────────────────────────────────── */
+
+.moo-invite-qr {
+  margin-top: 12px;
+}
+
+.moo-invite-qr__label {
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.moo-invite-qr__loading {
+  color: var(--moo-text-faint);
+  font-size: 14px;
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-invite-qr__error {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  text-align: center;
+  padding: 12px;
+}
+
+.moo-invite-qr__box {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.moo-invite-qr__hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Batch 4: Onboarding, OnboardingViews, RecoveryChoiceView, RecoveryJoinView,
+   SoloRecoveryConfirmView, VerificationSettings, PatternLock, PinInput
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Onboarding (relative container hosting the LoadingOverlay) ────────── */
+
+.moo-onboarding {
+  position: relative;
+  min-height: 200px;
+}
+
+/* ── OnboardingViews (Welcome / Created / Error / Idle) ────────────────── */
+/* Shared 24px-padded panel wrapping every onboarding view. */
+
+.moo-onboarding-view {
+  padding: 24px;
+}
+
+.moo-onboarding-view__heading {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+/* ErrorView heading is red; the rest inherit the default text color. */
+.moo-onboarding-view__heading--error {
+  color: var(--moo-danger-alt);
+}
+
+/* Body paragraph. Base = slate-500, marginBottom 24 / 14px. The --gap16
+   modifier covers the CreatedView (16) spacing variant. */
+.moo-onboarding-view__body {
+  color: var(--moo-text-muted);
+  margin-bottom: 24px;
+  font-size: 14px;
+}
+
+.moo-onboarding-view__body--gap16 {
+  margin-bottom: 16px;
+}
+
+/* Full-width solid primary button (Welcome start / Created continue / Idle
+   create / Error primary action). Byte differences are pushed to modifiers. */
+.moo-onboarding-view__primary {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* WelcomeView's start button: 14px padding + 16px font (vs the 12/default). */
+.moo-onboarding-view__primary--welcome {
+  padding: 14px;
+  font-size: 16px;
+}
+
+/* ErrorView action buttons carry an 8px bottom gap. */
+.moo-onboarding-view__primary--gap8 {
+  margin-bottom: 8px;
+}
+
+/* Copy button toggles a pale-blue fill once copied (else transparent), and is
+   an outline (blue border) button rather than solid. */
+.moo-onboarding-view__copy {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-onboarding-view__copy--copied {
+  background: var(--moo-primary-bg);
+}
+
+/* ErrorView secondary action (outline blue). */
+.moo-onboarding-view__secondary {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Sync-code display box (CreatedView). */
+.moo-onboarding-view__code-box {
+  padding: 12px;
+  background: var(--moo-surface-subtle);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moo-onboarding-view__code-text {
+  flex: 1;
+  word-break: break-all;
+  font-size: 13px;
+  font-family: monospace;
+}
+
+/* Fine-print footer note (Welcome / Idle). Idle adds line-height 1.6 via --lh. */
+.moo-onboarding-view__note {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin-top: 16px;
+  text-align: center;
+}
+
+.moo-onboarding-view__note--lh {
+  line-height: 1.6;
+}
+
+/* IdleView "或" divider between create and join. */
+.moo-onboarding-view__divider {
+  text-align: center;
+  margin: 12px 0;
+  color: var(--moo-text-faint);
+}
+
+/* IdleView create button: blue solid, greys to blue-300 while processing. */
+.moo-onboarding-view__create {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-onboarding-view__create--busy {
+  background: var(--moo-primary-strong);
+  cursor: not-allowed;
+}
+
+/* IdleView sync-code input wrapper + input. */
+.moo-onboarding-view__input-wrap {
+  margin-bottom: 12px;
+}
+
+.moo-onboarding-view__input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+/* IdleView join button (outline blue), dimmed + not-allowed when disabled. */
+.moo-onboarding-view__join {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moo-onboarding-view__join--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── RecoveryChoiceView ───────────────────────────────────────────────── */
+
+.moo-recovery-choice__account {
+  color: var(--moo-text-muted);
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.moo-recovery-choice__body {
+  color: var(--moo-text-muted);
+  margin-bottom: 24px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Primary (輸入同步碼重新加入): solid blue, 14px font, 12px bottom gap. */
+.moo-recovery-choice__primary {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* Secondary (略過): outline blue, 14px font, dims + not-allowed while loading. */
+.moo-recovery-choice__secondary {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.moo-recovery-choice__secondary--loading {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ── RecoveryJoinView ─────────────────────────────────────────────────── */
+
+.moo-recovery-join__body {
+  color: var(--moo-text-muted);
+  margin-bottom: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.moo-recovery-join__field {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+/* Reveal-toggle input: reserves 40px right padding for the eye button. */
+.moo-recovery-join__input {
+  width: 100%;
+  padding: 12px;
+  padding-right: 40px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+.moo-recovery-join__reveal {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--moo-text-faint);
+  padding: 4px;
+}
+
+/* Join button: solid blue, greys to blue-300 + dims when disabled. */
+.moo-recovery-join__submit {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.moo-recovery-join__submit--disabled {
+  background: var(--moo-primary-strong);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Underlined text "返回" link-button; not-allowed while processing. */
+.moo-recovery-join__back {
+  width: 100%;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  color: var(--moo-text-muted);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.moo-recovery-join__back--disabled {
+  cursor: not-allowed;
+}
+
+/* ── SoloRecoveryConfirmView ──────────────────────────────────────────── */
+
+/* Info callout (blue-100 fill / blue-800 text). Both literals are one-offs. */
+.moo-solo-recovery__info {
+  padding: 12px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  background: #dbeafe;
+  color: #1e40af;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.moo-solo-recovery__body {
+  color: var(--moo-text-muted);
+  margin-bottom: 24px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Confirm button: solid blue, dims + not-allowed while loading. */
+.moo-solo-recovery__confirm {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--moo-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.moo-solo-recovery__confirm--loading {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Back button: outline blue, 14px font. */
+.moo-solo-recovery__back {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--moo-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--moo-primary);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* ── VerificationSettings ─────────────────────────────────────────────── */
+
+.moo-verify {
+  margin-bottom: 16px;
+}
+
+.moo-verify__loading {
+  color: var(--moo-text-faint);
+  font-size: 14px;
+  padding: 8px;
+}
+
+.moo-verify__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moo-text-muted);
+  margin-bottom: 8px;
+}
+
+.moo-verify__current {
+  font-size: 13px;
+  color: var(--moo-text-muted);
+  margin-bottom: 12px;
+}
+
+.moo-verify__tip {
+  background: var(--moo-surface-alt);
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.moo-verify__methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Method pill. Base = unselected (slate border/text, transparent). The
+   --active modifier applies the blue selected look; both share padding/font.
+   The 2px blue active border differs from the 1px slate default, so it is a
+   full border re-declaration rather than a color-only override. */
+.moo-verify__method {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--moo-border);
+  background: transparent;
+  color: var(--moo-text-muted);
+}
+
+.moo-verify__method--active {
+  border: 2px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+}
+
+.moo-verify__method:disabled {
+  cursor: not-allowed;
+}
+
+.moo-verify__none-warning {
+  margin-bottom: 12px;
+}
+
+/* Amber warning card (fill #fef3c7 one-off, softer amber border token). */
+.moo-verify__none-box {
+  background: #fef3c7;
+  border: 1px solid var(--moo-warn-border-soft);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.moo-verify__none-text {
+  font-size: 13px;
+  color: var(--moo-warn-text);
+}
+
+/* Confirm-no-verify button (amber outline). #b45309 text is a one-off amber-700. */
+.moo-verify__none-confirm {
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--moo-warn-border);
+  background: var(--moo-warn-bg);
+  color: #b45309;
+  cursor: pointer;
+}
+
+.moo-verify__none-confirm:disabled {
+  cursor: not-allowed;
+}
+
+.moo-verify__otp {
+  margin-top: 8px;
+}
+
+.moo-verify__otp-display {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.moo-verify__otp-code {
+  font-size: 24px;
+  font-weight: 700;
+  font-family: monospace;
+  color: var(--moo-primary);
+  letter-spacing: 4px;
+  margin-bottom: 4px;
+}
+
+.moo-verify__otp-countdown {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+}
+
+/* Generate-OTP button (blue outline pill). */
+.moo-verify__otp-generate {
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--moo-primary);
+  background: var(--moo-primary-bg);
+  color: var(--moo-primary);
+  cursor: pointer;
+}
+
+/* Inline save-status lines. */
+.moo-verify__status {
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.moo-verify__status--saving {
+  color: var(--moo-text-muted);
+}
+
+.moo-verify__status--saved {
+  color: var(--moo-invite);
+}
+
+.moo-verify__status--error {
+  color: var(--moo-danger-alt);
+}
+
+/* ── PatternLock / PinInput (shared secret-entry chrome) ──────────────── */
+
+.moo-secret-entry {
+  text-align: center;
+}
+
+.moo-secret-entry__label {
+  font-size: 14px;
+  color: var(--moo-text-strong);
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+
+.moo-secret-entry__error {
+  color: var(--moo-danger-alt);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+/* PinInput's error sits closer (4px) than PatternLock's (8px). */
+.moo-secret-entry__error--tight {
+  margin-top: 4px;
+}
+
+/* Underlined "重新設定" reset link (shared by both). */
+.moo-secret-entry__reset {
+  margin-top: 8px;
+  background: transparent;
+  border: none;
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* ── PatternLock ──────────────────────────────────────────────────────── */
+
+/* touch-action:none keeps drag gestures from scrolling the page mid-draw. */
+.moo-pattern-lock__svg {
+  touch-action: none;
+  cursor: pointer;
+  display: block;
+  margin: 0 auto;
+}
+
+/* ── PinInput ─────────────────────────────────────────────────────────── */
+
+.moo-pin-input__hint {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  margin-bottom: 8px;
+}
+
+.moo-pin-input__row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* Field border color is state-driven (error → filled → empty) and stays inline;
+   the static box metrics live here. */
+.moo-pin-input__field {
+  width: 200px;
+  height: 44px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+  border-radius: 8px;
+  outline: none;
+  background: var(--moo-surface-subtle);
+  letter-spacing: 4px;
+}
+
+.moo-pin-input__submit {
+  padding: 0 20px;
+  height: 44px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  background: var(--moo-primary);
+  color: #fff;
+  cursor: pointer;
+}

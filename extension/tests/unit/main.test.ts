@@ -51,9 +51,10 @@ describe("mountDialog", () => {
 
     mountDialog(container, { onViewChange });
 
-    // <StrictMode><App onViewChange={...} /></StrictMode>
+    // <StrictMode><PortalContainerContext.Provider><App onViewChange={...} /></Provider></StrictMode>
     const renderArg = mockRender.mock.calls[0][0];
-    expect(renderArg.props.children.props.onViewChange).toBe(onViewChange);
+    const app = renderArg.props.children.props.children;
+    expect(app.props.onViewChange).toBe(onViewChange);
   });
 
   it("mounts without options (backward compatible)", async () => {
@@ -63,7 +64,94 @@ describe("mountDialog", () => {
     expect(() => mountDialog(container)).not.toThrow();
 
     const renderArg = mockRender.mock.calls[0][0];
-    expect(renderArg.props.children.props.onViewChange).toBeUndefined();
+    const app = renderArg.props.children.props.children;
+    expect(app.props.onViewChange).toBeUndefined();
+  });
+});
+
+describe("mountDialog scoped-style injection", () => {
+  const STYLE_SELECTOR = "style[data-moo-dialog-styles]";
+
+  // NOTE: under Vitest the `./styles.css?raw` import resolves to an EMPTY string
+  // (Vite's CSS plugin intercepts the `.css` extension before `?raw` in the test
+  // transform). The real build inlines the stylesheet bytes correctly — verified
+  // manually on a live Readmoo page. These tests therefore assert the injection
+  // *contract* (right root, single element, idempotent) rather than CSS content.
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Remove any stylesheet a previous case injected into document.head.
+    document.head.querySelectorAll(STYLE_SELECTOR).forEach((el) => el.remove());
+  });
+
+  afterEach(() => {
+    document.head.querySelectorAll(STYLE_SELECTOR).forEach((el) => el.remove());
+  });
+
+  it("injects exactly one scoped <style> into the shadow root (not document.head) when mounted inside a ShadowRoot", async () => {
+    const { mountDialog } = await import("@/dialog/main");
+
+    const host = document.createElement("div");
+    const shadow = host.attachShadow({ mode: "open" });
+    const container = document.createElement("div");
+    shadow.appendChild(container);
+    document.body.appendChild(host);
+
+    mountDialog(container);
+
+    const shadowStyles = shadow.querySelectorAll(STYLE_SELECTOR);
+    expect(shadowStyles).toHaveLength(1);
+    expect(shadowStyles[0].tagName).toBe("STYLE");
+    // Isolation: nothing leaked into the page's document.head.
+    expect(document.head.querySelectorAll(STYLE_SELECTOR)).toHaveLength(0);
+
+    host.remove();
+  });
+
+  it("injects the scoped <style> into document.head when mounted into a plain (non-shadow) container", async () => {
+    const { mountDialog } = await import("@/dialog/main");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    mountDialog(container);
+
+    const headStyles = document.head.querySelectorAll(STYLE_SELECTOR);
+    expect(headStyles).toHaveLength(1);
+    expect(headStyles[0].tagName).toBe("STYLE");
+
+    container.remove();
+  });
+
+  it("does not duplicate the <style> when mountDialog runs twice against the same shadow root", async () => {
+    const { mountDialog } = await import("@/dialog/main");
+
+    const host = document.createElement("div");
+    const shadow = host.attachShadow({ mode: "open" });
+    const container = document.createElement("div");
+    shadow.appendChild(container);
+    document.body.appendChild(host);
+
+    mountDialog(container);
+    mountDialog(container);
+
+    expect(shadow.querySelectorAll(STYLE_SELECTOR)).toHaveLength(1);
+
+    host.remove();
+  });
+
+  it("does not duplicate the <style> when mountDialog runs twice against document.head", async () => {
+    const { mountDialog } = await import("@/dialog/main");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    mountDialog(container);
+    mountDialog(container);
+
+    expect(document.head.querySelectorAll(STYLE_SELECTOR)).toHaveLength(1);
+
+    container.remove();
   });
 });
 

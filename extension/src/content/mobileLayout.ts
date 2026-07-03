@@ -169,23 +169,13 @@ export function createCloseIcon(
   button.setAttribute("aria-label", "關閉");
   button.title = "關閉";
   button.innerHTML = CLOSE_ICON_SVG;
-  button.style.cssText = [
-    "position: absolute",
-    "top: 2px",
-    "right: 4px",
-    "z-index: 1",
-    "width: 32px",
-    "height: 32px",
-    "display: inline-flex",
-    "align-items: center",
-    "justify-content: center",
-    "padding: 0",
-    "border: none",
-    "border-radius: 8px",
-    "background: transparent",
-    "color: #64748b",
-    "cursor: pointer",
-  ].join(";");
+  // Static structural styles live in SHELL_BOOTSTRAP_CSS (class `.moo-shell-close`),
+  // injected into the shadow root before this button is appended so it never
+  // flashes unstyled ahead of the full styles.css (loaded later by mountDialog).
+  // The id is retained for getElementById / E2E selectors. Only the mobile/
+  // desktop `display` toggle stays inline (dynamic) — the class omits `display`
+  // so it never fights this per-breakpoint value.
+  button.className = "moo-shell-close";
   button.style.display = isMobile ? "inline-flex" : "none";
   button.addEventListener("click", onClose);
   return button;

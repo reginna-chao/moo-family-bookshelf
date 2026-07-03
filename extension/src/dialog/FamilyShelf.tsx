@@ -21,19 +21,7 @@ export interface FamilyShelfProps {
 /** Subtle, non-blocking banner shown when a prefs flush fails; auto-clears on next success. */
 function PrefsSyncFailedNotice() {
   return (
-    <div
-      role="status"
-      style={{
-        margin: "8px 0",
-        padding: "8px 12px",
-        borderRadius: 8,
-        border: "1px solid #fde68a",
-        background: "#fffbeb",
-        color: "#92400e",
-        fontSize: 12,
-        lineHeight: "1.4",
-      }}
-    >
+    <div role="status" className="moo-prefs-sync-notice">
       ⚠️ 偏好同步失敗，變更已暫存本機，下次操作將自動重試。
     </div>
   );
@@ -194,11 +182,7 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
       />
 
       {hasMore && (
-        <button onClick={loadMore} style={{
-          width: "100%", padding: "10px 0", marginTop: 12, border: "1px solid #2563eb",
-          borderRadius: 8, background: "transparent", color: "#2563eb",
-          fontWeight: 500, fontSize: 13, cursor: "pointer",
-        }}>
+        <button onClick={loadMore} className="moo-load-more">
           載入更多（已顯示 {visibleBooks.length} / 共 {filteredItems.length} 本）
         </button>
       )}

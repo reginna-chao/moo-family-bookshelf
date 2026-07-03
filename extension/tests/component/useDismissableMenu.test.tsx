@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { useRef } from "react";
+import { render, screen, fireEvent, cleanup, renderHook } from "@testing-library/react";
+import { useRef, createRef, type RefObject } from "react";
 import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 
 interface HarnessProps {
@@ -152,6 +152,113 @@ describe("useDismissableMenu", () => {
 
       expect(onCloseB).toHaveBeenCalledTimes(1);
       expect(onCloseA).not.toHaveBeenCalled();
+    });
+  });
+
+  // Regression coverage for the shadow-root scroll listener. The dialog is
+  // injected into an OPEN shadow root; `scroll` events are `composed: false`,
+  // so a scroll originating inside the shadow tree never crosses the shadow
+  // boundary to reach `window`. The window-only listener therefore missed those
+  // scrolls and the menu stayed open. The hook now also attaches a capture-phase
+  // `scroll` listener on the trigger's ShadowRoot (the top of the propagation
+  // path for those events). These tests drive the hook with real DOM refs so
+  // that `triggerRef.current.getRootNode()` genuinely returns a `ShadowRoot`.
+  describe("shadow root scroll (composed: false)", () => {
+    // Tracks hosts created per test so afterEach can detach them and let the
+    // shadow tree (and any listeners the hook attached to it) be released.
+    let hosts: HTMLElement[] = [];
+
+    function mountInShadowRoot(onClose: () => void) {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      hosts.push(host);
+      const shadowRoot = host.attachShadow({ mode: "open" });
+
+      // Trigger lives INSIDE the shadow root, so getRootNode() -> shadowRoot.
+      const trigger = document.createElement("button");
+      shadowRoot.appendChild(trigger);
+      // A scrollable panel inside the shadow tree; scroll events from here are
+      // composed: false and do not reach window.
+      const innerScrollContainer = document.createElement("div");
+      shadowRoot.appendChild(innerScrollContainer);
+      const menu = document.createElement("div");
+      shadowRoot.appendChild(menu);
+
+      const triggerRef = createRef<HTMLElement>() as RefObject<HTMLElement>;
+      const menuRef = createRef<HTMLElement>() as RefObject<HTMLElement>;
+      triggerRef.current = trigger;
+      menuRef.current = menu;
+
+      const view = renderHook(
+        ({ isOpen }: { isOpen: boolean }) =>
+          useDismissableMenu({ isOpen, onClose, triggerRef, menuRef }),
+        { initialProps: { isOpen: true } },
+      );
+
+      return { view, shadowRoot, innerScrollContainer };
+    }
+
+    afterEach(() => {
+      for (const host of hosts) host.remove();
+      hosts = [];
+    });
+
+    it("calls onClose on a scroll originating inside the shadow tree", () => {
+      const onClose = vi.fn();
+      const { innerScrollContainer } = mountInShadowRoot(onClose);
+
+      // bubbles: false + composed: false mirrors a real element scroll; this
+      // event never reaches window, so only the ShadowRoot listener can catch it.
+      innerScrollContainer.dispatchEvent(new Event("scroll", { bubbles: false }));
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("still calls onClose on a window scroll when the trigger is in light DOM", () => {
+      const onClose = vi.fn();
+      const triggerRef = createRef<HTMLElement>() as RefObject<HTMLElement>;
+      const menuRef = createRef<HTMLElement>() as RefObject<HTMLElement>;
+      const trigger = document.createElement("button");
+      const menu = document.createElement("div");
+      document.body.appendChild(trigger);
+      document.body.appendChild(menu);
+      triggerRef.current = trigger;
+      menuRef.current = menu;
+
+      renderHook(() =>
+        useDismissableMenu({ isOpen: true, onClose, triggerRef, menuRef }),
+      );
+
+      window.dispatchEvent(new Event("scroll"));
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+
+      trigger.remove();
+      menu.remove();
+    });
+
+    it("removes the shadow-root scroll listener on unmount", () => {
+      const onClose = vi.fn();
+      const { view, innerScrollContainer } = mountInShadowRoot(onClose);
+
+      view.unmount();
+      onClose.mockClear();
+
+      innerScrollContainer.dispatchEvent(new Event("scroll", { bubbles: false }));
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("removes the shadow-root scroll listener when isOpen transitions to false", () => {
+      const onClose = vi.fn();
+      const { view, innerScrollContainer } = mountInShadowRoot(onClose);
+
+      view.rerender({ isOpen: false });
+      onClose.mockClear();
+
+      innerScrollContainer.dispatchEvent(new Event("scroll", { bubbles: false }));
+
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 });

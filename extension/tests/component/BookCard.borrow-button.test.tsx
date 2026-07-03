@@ -56,6 +56,10 @@ describe("BookCard borrow button", () => {
     const btn = screen.getByRole("button", { name: "申請借閱" });
     expect(btn).toBeInTheDocument();
     expect(btn.tagName).toBe("BUTTON");
+    // Enabled (non-pending) state omits the --pending modifier class.
+    expect(btn).toHaveClass("moo-borrow-btn");
+    expect(btn).not.toHaveClass("moo-borrow-btn--pending");
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("renders 申請中 (disabled) when borrowRequestPending is true", () => {
@@ -70,6 +74,9 @@ describe("BookCard borrow button", () => {
 
     const btn = screen.getByRole("button", { name: "申請中" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+    // Pending state adds the --pending modifier class (styles the disabled look).
+    expect(btn).toHaveClass("moo-borrow-btn");
+    expect(btn).toHaveClass("moo-borrow-btn--pending");
   });
 
   it("does NOT call onBorrowClick when the button is disabled (pending)", () => {

@@ -142,10 +142,13 @@ describe("CreatedView", () => {
   });
 
   it("sync code is displayed in monospace font", () => {
+    // After the Shadow DOM + scoped-CSS conversion the monospace font moved from
+    // an inline style to `.moo-onboarding-view__code-text` in styles.css. jsdom
+    // does not apply stylesheet rules, so the observable contract is now the class.
     render(<CreatedView {...defaultProps} />);
 
     const codeEl = screen.getByText(/moo-abc123/);
-    expect(codeEl.style.fontFamily).toBe("monospace");
+    expect(codeEl).toHaveClass("moo-onboarding-view__code-text");
   });
 
   it("renders sync code with @host suffix when present", () => {
@@ -189,11 +192,15 @@ describe("CreatedView", () => {
 
 describe("ErrorView", () => {
   it("renders error heading with red color", () => {
+    // The red color moved from an inline style to the `--error` heading modifier
+    // in styles.css. jsdom does not apply stylesheet rules, so assert the base
+    // heading class plus the error modifier that carries the danger color.
     render(<ErrorView errorMessage="測試錯誤" actions={[{ label: "重試", onClick: () => {} }]} />);
 
     const heading = screen.getByText("發生錯誤");
     expect(heading).toBeInTheDocument();
-    expect(heading.style.color).toBe("rgb(239, 68, 68)");
+    expect(heading).toHaveClass("moo-onboarding-view__heading");
+    expect(heading).toHaveClass("moo-onboarding-view__heading--error");
   });
 
   it("renders error message text", () => {
@@ -236,6 +243,9 @@ describe("ErrorView", () => {
   });
 
   it("primary variant renders filled blue button", () => {
+    // The filled-blue vs outlined styling moved from inline styles to scoped
+    // classes in styles.css. jsdom does not apply stylesheet rules, so the
+    // observable contract is the primary class (and the absence of secondary).
     render(
       <ErrorView
         errorMessage="錯誤"
@@ -244,13 +254,14 @@ describe("ErrorView", () => {
     );
 
     const btn = screen.getByRole("button", { name: "確認" });
-    // primary: background blue (#2563eb), no separate border (border="none" is the default/empty)
-    expect(btn.style.background).toBe("rgb(37, 99, 235)");
-    // JSDOM normalizes border:"none" to empty string — verify button exists with correct bg
-    expect(btn.style.color).toBe("white");
+    expect(btn).toHaveClass("moo-onboarding-view__primary");
+    expect(btn).not.toHaveClass("moo-onboarding-view__secondary");
   });
 
   it("secondary variant renders outlined button", () => {
+    // Outlined (transparent bg + blue border) styling now lives in the
+    // `moo-onboarding-view__secondary` class. Assert the secondary class is
+    // present and the primary class is absent so the two variants stay distinct.
     render(
       <ErrorView
         errorMessage="錯誤"
@@ -259,9 +270,8 @@ describe("ErrorView", () => {
     );
 
     const btn = screen.getByRole("button", { name: "取消" });
-    // secondary: transparent background, blue border
-    expect(btn.style.background).toBe("transparent");
-    expect(btn.style.border).toBe("1px solid rgb(37, 99, 235)");
+    expect(btn).toHaveClass("moo-onboarding-view__secondary");
+    expect(btn).not.toHaveClass("moo-onboarding-view__primary");
   });
 
   it("triggers correct onClick for each action independently", () => {

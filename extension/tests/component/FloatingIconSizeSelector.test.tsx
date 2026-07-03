@@ -47,22 +47,48 @@ describe("FloatingIconSizeSelector", () => {
     expect(screen.getByRole("group", { name: "家庭書櫃按鈕大小" })).toBeInTheDocument();
   });
 
-  it("clips the segmented container so child border-radius is masked", () => {
+  // The segmented-control container clip (overflow: hidden) and per-segment
+  // corner radii moved from inline styles into the shadow-scoped
+  // `.moo-icon-size` / `.moo-icon-size__segment--{first,middle,last}` classes in
+  // styles.css. jsdom does not apply stylesheet rules, so the observable
+  // contract is the class list, not computed inline styles.
+  it("carries the segmented-container class that clips child corners", () => {
     render(<FloatingIconSizeSelector size="medium" onChange={vi.fn()} />);
 
     const container = screen.getByRole("group", { name: "家庭書櫃按鈕大小" });
-    expect(container.style.overflow).toBe("hidden");
-    expect(container.style.borderRadius).toBe("6px");
+    expect(container).toHaveClass("moo-icon-size");
   });
 
-  it.each<{ label: string; expected: string }>([
-    { label: "僅圖示", expected: "6px 0 0 6px" },
-    { label: "小尺寸", expected: "0" },
-    { label: "中尺寸", expected: "0" },
-    { label: "大尺寸", expected: "0 6px 6px 0" },
-  ])("renders '$label' segment with border-radius '$expected'", ({ label, expected }) => {
-    render(<FloatingIconSizeSelector size="medium" onChange={vi.fn()} />);
+  it.each<{ label: string; position: string }>([
+    { label: "僅圖示", position: "first" },
+    { label: "小尺寸", position: "middle" },
+    { label: "中尺寸", position: "middle" },
+    { label: "大尺寸", position: "last" },
+  ])(
+    "tags the '$label' segment with the --$position corner modifier",
+    ({ label, position }) => {
+      render(<FloatingIconSizeSelector size="medium" onChange={vi.fn()} />);
 
-    expect(screen.getByLabelText(label).style.borderRadius).toBe(expected);
-  });
+      const segment = screen.getByLabelText(label);
+      expect(segment).toHaveClass("moo-icon-size__segment");
+      expect(segment).toHaveClass(`moo-icon-size__segment--${position}`);
+    },
+  );
+
+  it.each<{ current: FloatingIconSize; active: string; inactive: string[] }>([
+    { current: "icon", active: "僅圖示", inactive: ["小尺寸", "中尺寸", "大尺寸"] },
+    { current: "small", active: "小尺寸", inactive: ["僅圖示", "中尺寸", "大尺寸"] },
+    { current: "medium", active: "中尺寸", inactive: ["僅圖示", "小尺寸", "大尺寸"] },
+    { current: "large", active: "大尺寸", inactive: ["僅圖示", "小尺寸", "中尺寸"] },
+  ])(
+    "highlights only the selected '$current' segment with the --active modifier",
+    ({ current, active, inactive }) => {
+      render(<FloatingIconSizeSelector size={current} onChange={vi.fn()} />);
+
+      expect(screen.getByLabelText(active)).toHaveClass("moo-icon-size__segment--active");
+      for (const label of inactive) {
+        expect(screen.getByLabelText(label)).not.toHaveClass("moo-icon-size__segment--active");
+      }
+    },
+  );
 });

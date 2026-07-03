@@ -11,6 +11,11 @@ describe("AutoSyncIntervalSelector", () => {
     const select = screen.getByLabelText("自動同步頻率");
     expect(select).toBeInTheDocument();
 
+    // Contract: this select is auto-width and must NOT carry the full-width
+    // modifier (that is MemberDropdown's; see MemberDropdown.tsx).
+    expect(select).toHaveClass("moo-form-select");
+    expect(select).not.toHaveClass("moo-form-select--full");
+
     const options = screen.getAllByRole("option");
     expect(options).toHaveLength(4);
     expect(options.map((o) => o.textContent)).toEqual(["每天", "每 7 天", "每 30 天", "永不"]);

@@ -61,51 +61,54 @@ describe("DialogFooter", () => {
       expect(useMediaQuery).toHaveBeenCalledWith("(min-width: 576px)");
     });
 
-    it("uses narrow column layout below 576px", () => {
+    // The row-vs-column layout, flexShrink, and version marginTop moved from
+    // inline styles to `.moo-footer` (base) + the `.moo-footer--wide` modifier and
+    // `.moo-footer__version` class in styles.css. jsdom does not apply stylesheet
+    // rules, so the modifier/class presence is the observable contract. flexShrink
+    // lives on the base `.moo-footer` (both breakpoints), so its guard is that the
+    // base class is always present.
+    it("uses narrow column layout below 576px (no --wide modifier)", () => {
       vi.mocked(useMediaQuery).mockReturnValue(false);
       render(<DialogFooter />);
       const footer = screen.getByTestId("dialog-footer");
-      expect(footer.style.display).not.toBe("flex");
+      expect(footer).toHaveClass("moo-footer");
+      expect(footer).not.toHaveClass("moo-footer--wide");
     });
 
-    it("uses wide row layout at 576px and above", () => {
+    it("uses wide row layout at 576px and above (adds --wide modifier)", () => {
       vi.mocked(useMediaQuery).mockReturnValue(true);
       render(<DialogFooter />);
       const footer = screen.getByTestId("dialog-footer");
-      expect(footer).toHaveStyle({
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-      });
+      expect(footer).toHaveClass("moo-footer");
+      expect(footer).toHaveClass("moo-footer--wide");
     });
 
-    it("applies flexShrink 0 in narrow mode", () => {
+    it("carries the base moo-footer class (flexShrink 0) in narrow mode", () => {
       vi.mocked(useMediaQuery).mockReturnValue(false);
       render(<DialogFooter />);
       const footer = screen.getByTestId("dialog-footer");
-      expect(footer.style.flexShrink).toBe("0");
+      expect(footer).toHaveClass("moo-footer");
     });
 
-    it("applies flexShrink 0 in wide mode", () => {
+    it("carries the base moo-footer class (flexShrink 0) in wide mode", () => {
       vi.mocked(useMediaQuery).mockReturnValue(true);
       render(<DialogFooter />);
       const footer = screen.getByTestId("dialog-footer");
-      expect(footer.style.flexShrink).toBe("0");
+      expect(footer).toHaveClass("moo-footer");
     });
 
-    it("applies marginTop to version div in narrow mode", () => {
+    it("applies the version class (marginTop) in narrow mode", () => {
       vi.mocked(useMediaQuery).mockReturnValue(false);
       render(<DialogFooter />);
       const versionDiv = screen.getByText(/墨家書櫃 v\d+\.\d+\.\d+/).closest("div")!;
-      expect(versionDiv.style.marginTop).toBe("2px");
+      expect(versionDiv).toHaveClass("moo-footer__version");
     });
 
-    it("does not apply marginTop to version div in wide mode", () => {
+    it("does not apply the version class (marginTop) in wide mode", () => {
       vi.mocked(useMediaQuery).mockReturnValue(true);
       render(<DialogFooter />);
       const versionDiv = screen.getByText(/墨家書櫃 v\d+\.\d+\.\d+/).closest("div")!;
-      expect(versionDiv.style.marginTop).toBe("");
+      expect(versionDiv).not.toHaveClass("moo-footer__version");
     });
   });
 });

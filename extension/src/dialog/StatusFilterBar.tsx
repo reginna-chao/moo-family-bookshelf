@@ -16,13 +16,7 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
 
 export function StatusFilterBar({ value, onChange }: StatusFilterBarProps) {
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 8,
-        marginBottom: 12,
-      }}
-    >
+    <div className="moo-status-filter">
       {STATUS_OPTIONS.map((opt) => (
         <FilterButton
           key={opt.value}

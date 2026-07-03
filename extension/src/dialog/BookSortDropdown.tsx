@@ -5,6 +5,7 @@ import type { BookSortMode } from "./sortBooks";
 import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
 import { useDismissableMenu } from "../hooks/useDismissableMenu";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { usePortalContainer } from "./PortalContainerContext";
 
 export interface BookSortDropdownProps {
   value: BookSortMode;
@@ -17,9 +18,6 @@ const OPTIONS: Array<{ value: BookSortMode; label: string }> = [
   { value: "author", label: "依作者排序" },
 ];
 
-// Above the Dialog overlay (#moo-family-bookshelf-dialog uses z-index 100000).
-const MENU_Z_INDEX = 100001;
-
 // Clamp an index to the option list bounds (↑/↓ stop at edges, no wrap-around).
 function clampIndex(index: number): number {
   if (index < 0) return 0;
@@ -29,19 +27,20 @@ function clampIndex(index: number): number {
 
 // Selected (blue) wins; a keyboard-active but unselected option gets a neutral
 // grey highlight; everything else is transparent. Keeps the existing selected
-// colour semantics untouched.
-function optionBackground(selected: boolean, active: boolean): string {
-  if (selected) return "#eff6ff";
-  if (active) return "#f1f5f9";
-  return "transparent";
+// colour semantics untouched. Mirrors the .moo-sort__option modifier rules.
+function optionClass(selected: boolean, active: boolean): string {
+  if (selected) return "moo-sort__option moo-sort__option--selected";
+  if (active) return "moo-sort__option moo-sort__option--active";
+  return "moo-sort__option";
 }
 
 /**
  * Custom sort dropdown (Extension): an icon trigger that opens a portaled
- * listbox of sort modes. The panel is portaled to `document.body` and positioned
- * with `position: fixed` so the Dialog's `overflow: hidden` cannot clip it.
- * Closes on outside click, Escape, scroll, or resize — all listeners attached
- * only while open and removed on cleanup.
+ * listbox of sort modes. The panel is portaled into the dialog's portal
+ * container (the Shadow Root in production, `document.body` on the dev page) and
+ * positioned with `position: fixed` so the Dialog's `overflow: hidden` cannot
+ * clip it. Closes on outside click, Escape, scroll, or resize — all listeners
+ * attached only while open and removed on cleanup.
  */
 export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   const [open, setOpen] = useState(false);
@@ -53,10 +52,18 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   // to the trigger only after a real open→close — never on the initial mount.
   const wasOpenRef = useRef(false);
   const isMobile = useIsMobile();
-  const triggerSize = isMobile ? 32 : 40;
+  const portalContainer = usePortalContainer();
   const isActive = value !== "default";
   const { position, place, reset } = useAnchoredPosition();
   const optionId = useId();
+
+  const triggerClass = [
+    "moo-sort__trigger",
+    isMobile ? "moo-sort__trigger--mobile" : "",
+    isActive ? "moo-sort__trigger--active" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const optionIdFor = (mode: BookSortMode) => `${optionId}-${mode}`;
 
@@ -133,7 +140,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   };
 
   return (
-    <div style={{ position: "relative", display: "inline-flex" }}>
+    <div className="moo-sort">
       <button
         ref={triggerRef}
         type="button"
@@ -141,19 +148,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
         aria-label="排序方式"
         aria-haspopup="listbox"
         aria-expanded={open}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: triggerSize,
-          height: triggerSize,
-          border: isActive ? "1px solid #2563eb" : "1px solid #e2e8f0",
-          borderRadius: 8,
-          background: isActive ? "#eff6ff" : "white",
-          color: isActive ? "#2563eb" : "#94a3b8",
-          cursor: "pointer",
-          flexShrink: 0,
-        }}
+        className={triggerClass}
       >
         <ArrowDownWideNarrow size={16} />
       </button>
@@ -166,19 +161,11 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
             tabIndex={-1}
             aria-activedescendant={optionIdFor(activeValue)}
             onKeyDown={handleListKeyDown}
+            className="moo-sort__menu"
             style={{
-              position: "fixed",
               top: position?.top ?? 0,
               left: position?.left ?? 0,
               visibility: position ? "visible" : "hidden",
-              minWidth: 140,
-              background: "white",
-              border: "1px solid #e2e8f0",
-              borderRadius: 8,
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              zIndex: MENU_Z_INDEX,
-              overflow: "hidden",
-              outline: "none",
             }}
           >
             {OPTIONS.map((opt) => {
@@ -192,25 +179,14 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
                   role="option"
                   aria-selected={selected}
                   onClick={() => handleSelect(opt.value)}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    padding: "8px 12px",
-                    border: "none",
-                    background: optionBackground(selected, active),
-                    color: selected ? "#2563eb" : "#334155",
-                    fontSize: 13,
-                    cursor: "pointer",
-                    textAlign: "left",
-                    whiteSpace: "nowrap",
-                  }}
+                  className={optionClass(selected, active)}
                 >
                   {opt.label}
                 </button>
               );
             })}
           </div>,
-          document.body,
+          portalContainer,
         )}
     </div>
   );

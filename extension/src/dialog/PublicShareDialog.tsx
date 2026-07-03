@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Copy, RefreshCw, Trash2 } from "lucide-react";
 import type { ApiClient } from "../api/client";
 import type { PublicShelf } from "../api/types";
@@ -136,18 +136,18 @@ export function PublicShareDialog({
   const publicUrl = shelf ? apiClient.getPublicShelfUrl(shelf.shareToken, pwaOrigin) : "";
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
-        <div style={headerStyle}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>公開書櫃分享</h3>
-          <button onClick={onClose} style={iconBtnStyle}><X size={16} /></button>
+    <div className="moo-public-share__overlay" onClick={onClose}>
+      <div className="moo-public-share" onClick={(e) => e.stopPropagation()}>
+        <div className="moo-public-share__header">
+          <h3 className="moo-public-share__title">公開書櫃分享</h3>
+          <button onClick={onClose} className="moo-public-share__icon-btn"><X size={16} /></button>
         </div>
 
-        {errorMsg && <div role="alert" style={errorStyle}>{errorMsg}</div>}
+        {errorMsg && <div role="alert" className="moo-public-share__error">{errorMsg}</div>}
 
-        {viewState === "loading" && <p style={muted}>載入中...</p>}
+        {viewState === "loading" && <p className="moo-public-share__muted">載入中...</p>}
 
-        {viewState === "error" && !errorMsg && <p style={muted}>載入失敗</p>}
+        {viewState === "error" && !errorMsg && <p className="moo-public-share__muted">載入失敗</p>}
 
         {viewState === "empty" && (
           <CreateForm title={title} expiresDays={expiresDays} saving={saving}
@@ -169,6 +169,14 @@ export function PublicShareDialog({
 
 // ── Sub-components ────────────────────────────────────────────
 
+/** Shared input chrome; adds the 32px-height mobile modifier when applicable. */
+function useInputClass(): string {
+  const isMobile = useIsMobile();
+  return isMobile
+    ? "moo-public-share__input moo-public-share__input--mobile"
+    : "moo-public-share__input";
+}
+
 interface CreateFormProps {
   title: string; expiresDays: number | null; saving: boolean;
   onTitleChange: (v: string) => void; onExpiresDaysChange: (v: number | null) => void;
@@ -176,14 +184,15 @@ interface CreateFormProps {
 }
 
 function CreateForm({ title, expiresDays, saving, onTitleChange, onExpiresDaysChange, onCreate }: CreateFormProps) {
+  const inputClass = useInputClass();
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <label style={labelStyle}>
+    <div className="moo-public-share__form">
+      <label className="moo-public-share__field">
         標題
-        <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60} style={inputStyle} />
+        <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60} className={inputClass} />
       </label>
       <ExpiresSelect value={expiresDays} onChange={onExpiresDaysChange} />
-      <button onClick={onCreate} disabled={saving || !title.trim()} style={primaryBtnStyle}>
+      <button onClick={onCreate} disabled={saving || !title.trim()} className="moo-public-share__primary-btn">
         {saving ? "建立中..." : "啟用公開書櫃"}
       </button>
     </div>
@@ -203,39 +212,40 @@ function ActiveShelf({
   onTitleChange, onExpiresDaysChange, onCopy, onResetToken, onDelete,
   onConfirmAction, onCancelConfirm,
 }: ActiveShelfProps) {
+  const inputClass = useInputClass();
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <label style={labelStyle}>
+    <div className="moo-public-share__form">
+      <label className="moo-public-share__field">
         標題
-        <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60} style={inputStyle} />
+        <input value={title} onChange={(e) => onTitleChange(e.target.value)} maxLength={60} className={inputClass} />
       </label>
       <ExpiresSelect value={expiresDays} onChange={onExpiresDaysChange} />
       <div>
-        <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 4px" }}>公開連結</p>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <input value={publicUrl} readOnly style={{ ...inputStyle, flex: 1, fontSize: 12 }} />
-          <button onClick={onCopy} style={iconBtnStyle} title="複製連結">
+        <p className="moo-public-share__link-label">公開連結</p>
+        <div className="moo-public-share__url-row">
+          <input value={publicUrl} readOnly className={`${inputClass} moo-public-share__url-input`} />
+          <button onClick={onCopy} className="moo-public-share__icon-btn" title="複製連結">
             <Copy size={14} />
           </button>
         </div>
-        {copied && <span style={{ fontSize: 11, color: "#16a34a" }}>已複製</span>}
+        {copied && <span className="moo-public-share__copied">已複製</span>}
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={onResetToken} disabled={saving} style={secondaryBtnStyle}>
+      <div className="moo-public-share__actions">
+        <button onClick={onResetToken} disabled={saving} className="moo-public-share__secondary-btn">
           <RefreshCw size={12} /> 重設網址
         </button>
-        <button onClick={onDelete} disabled={saving} style={dangerBtnStyle}>
+        <button onClick={onDelete} disabled={saving} className="moo-public-share__danger-btn">
           <Trash2 size={12} /> 關閉公開分享
         </button>
       </div>
       {confirm && (
-        <div style={confirmBoxStyle}>
-          <p style={{ margin: 0, fontSize: 13 }}>
+        <div className="moo-public-share__confirm">
+          <p className="moo-public-share__confirm-text">
             {confirm === "reset" ? "重設網址後，舊連結將立即失效。確定繼續？" : "確定關閉公開分享？公開連結將立即失效。"}
           </p>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={onConfirmAction} style={primaryBtnStyle}>確定</button>
-            <button onClick={onCancelConfirm} style={secondaryBtnStyle}>取消</button>
+          <div className="moo-public-share__confirm-row">
+            <button onClick={onConfirmAction} className="moo-public-share__primary-btn">確定</button>
+            <button onClick={onCancelConfirm} className="moo-public-share__secondary-btn">取消</button>
           </div>
         </div>
       )}
@@ -245,13 +255,15 @@ function ActiveShelf({
 
 function ExpiresSelect({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
   const isMobile = useIsMobile();
+  const className = isMobile
+    ? "moo-public-share__input moo-public-share__select moo-public-share__select--mobile"
+    : "moo-public-share__input moo-public-share__select";
   return (
-    <label style={labelStyle}>
+    <label className="moo-public-share__field">
       過期時間
       <select value={value === null ? "null" : String(value)}
         onChange={(e) => onChange(e.target.value === "null" ? null : Number(e.target.value))}
-        className="moo-form-select"
-        style={{ ...inputStyle, paddingRight: "2.25rem", ...(isMobile ? { padding: "4px 10px", paddingRight: "2.25rem" } : {}) }}>
+        className={className}>
         {EXPIRES_OPTIONS.map((opt) => (
           <option key={String(opt.value)} value={opt.value === null ? "null" : String(opt.value)}>
             {opt.label}
@@ -261,43 +273,3 @@ function ExpiresSelect({ value, onChange }: { value: number | null; onChange: (v
     </label>
   );
 }
-
-// ── Styles ────────────────────────────────────────────────────
-
-const overlayStyle: CSSProperties = {
-  position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
-  display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100,
-};
-const dialogStyle: CSSProperties = {
-  background: "#fff", borderRadius: 12, padding: 20, width: 360,
-  maxHeight: "80vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
-};
-const headerStyle: CSSProperties = {
-  display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16,
-};
-const labelStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 13, fontWeight: 500 };
-const inputStyle: CSSProperties = {
-  padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, outline: "none",
-};
-const iconBtnStyle: CSSProperties = {
-  background: "none", border: "none", cursor: "pointer", padding: 4, color: "#475569", display: "flex",
-};
-const primaryBtnStyle: CSSProperties = {
-  padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none",
-  borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: "pointer",
-};
-const secondaryBtnStyle: CSSProperties = {
-  padding: "6px 12px", background: "transparent", border: "1px solid #cbd5e1",
-  borderRadius: 6, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
-};
-const dangerBtnStyle: CSSProperties = {
-  padding: "6px 12px", background: "transparent", border: "1px solid #fca5a5", color: "#dc2626",
-  borderRadius: 6, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
-};
-const errorStyle: CSSProperties = {
-  background: "#fef2f2", color: "#dc2626", padding: "8px 12px", borderRadius: 6, fontSize: 13, marginBottom: 12,
-};
-const muted: CSSProperties = { color: "#94a3b8", textAlign: "center", padding: 16 };
-const confirmBoxStyle: CSSProperties = {
-  background: "#fffbeb", border: "1px solid #fbbf24", borderRadius: 8, padding: 12,
-};

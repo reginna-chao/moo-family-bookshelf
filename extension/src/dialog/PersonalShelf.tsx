@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, CSSProperties } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import browser from "webextension-polyfill";
 import { Share2, RefreshCw } from "lucide-react";
 import { ApiClient, BoolFlag } from "../api/client";
@@ -25,47 +25,13 @@ export interface PersonalShelfProps {
   pageSize?: number;
 }
 
-function archiveTabStyle(active: boolean): CSSProperties {
-  return {
-    flex: 1, padding: "8px 0", border: "none", background: "transparent",
-    fontWeight: active ? 600 : 400, color: active ? "#2563eb" : "#64748b",
-    fontSize: 13, cursor: "pointer",
-    borderBottom: active ? "2px solid #2563eb" : "2px solid transparent",
-  };
+function toolButtonClass(isMobile: boolean, extra = ""): string {
+  const base = isMobile ? "moo-shelf__tool-btn moo-shelf__tool-btn--icon" : "moo-shelf__tool-btn";
+  return extra ? `${base} ${extra}` : base;
 }
 
-function publicShareButtonStyle(isMobile: boolean): CSSProperties {
-  if (isMobile) {
-    return {
-      width: 32, height: 32, padding: 0, display: "flex",
-      alignItems: "center", justifyContent: "center",
-      border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
-      background: "transparent", cursor: "pointer",
-    };
-  }
-  return {
-    padding: "6px 12px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
-    background: "transparent", fontWeight: 500, fontSize: 13, cursor: "pointer",
-    whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4,
-  };
-}
-
-function syncButtonStyle(isMobile: boolean, isSyncing: boolean): CSSProperties {
-  const background = isSyncing ? "#93c5fd" : "transparent";
-  const cursor = isSyncing ? "not-allowed" : "pointer";
-  if (isMobile) {
-    return {
-      width: 32, height: 32, padding: 0, display: "flex",
-      alignItems: "center", justifyContent: "center",
-      border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
-      background, cursor,
-    };
-  }
-  return {
-    padding: "6px 12px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb",
-    background, fontWeight: 500, fontSize: 13, cursor, whiteSpace: "nowrap",
-    display: "flex", alignItems: "center", gap: 4,
-  };
+function archiveTabClass(active: boolean): string {
+  return active ? "moo-shelf__archive-tab moo-shelf__archive-tab--active" : "moo-shelf__archive-tab";
 }
 
 export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProps) {
@@ -186,19 +152,18 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
 
   if (status === "loading") {
     return (
-      <div style={{ padding: 16, textAlign: "center", color: "#64748b" }}>
+      <div className="moo-shelf__state moo-shelf__state--center">
         <div>載入中...</div>
       </div>
     );
   }
   if (status === "error") {
     return (
-      <div style={{ padding: 16 }}>
-        <p style={{ color: "#ef4444", fontSize: 14, marginBottom: 12 }}>{errorMessage}</p>
-        <button onClick={() => setStatus("ready")} style={{
-          padding: "8px 16px", border: "1px solid #2563eb", borderRadius: 8,
-          background: "transparent", color: "#2563eb", fontWeight: 600, cursor: "pointer",
-        }}>返回</button>
+      <div className="moo-shelf__state">
+        <p className="moo-shelf__state-error">{errorMessage}</p>
+        <button onClick={() => setStatus("ready")} className="moo-shelf__state-retry">
+          返回
+        </button>
       </div>
     );
   }
@@ -212,17 +177,17 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>個人書櫃管理
-          <span style={{ fontWeight: 400, color: "#94a3b8", marginLeft: 8, fontSize: 13 }}>({currentViewBooks.length} 本)</span>
+    <div className="moo-shelf">
+      <div className="moo-shelf__header">
+        <h3 className="moo-shelf__heading">個人書櫃管理
+          <span className="moo-shelf__heading-count">({currentViewBooks.length} 本)</span>
         </h3>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div className="moo-shelf__header-actions">
           <button
             onClick={() => setShowPublicShare(true)}
             aria-label="公開分享"
             title="公開分享"
-            style={publicShareButtonStyle(isMobile)}
+            className={toolButtonClass(isMobile)}
           >
             <Share2 size={13} />
             {!isMobile && "公開分享"}
@@ -232,7 +197,7 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
             disabled={isSyncing}
             aria-label={syncLabel}
             title={syncLabel}
-            style={syncButtonStyle(isMobile, isSyncing)}
+            className={toolButtonClass(isMobile, isSyncing ? "moo-shelf__tool-btn--syncing" : "")}
           >
             <RefreshCw size={13} className={isSyncing ? "moo-spin" : undefined} />
             {!isMobile && syncLabel}
@@ -241,23 +206,21 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
       </div>
 
       {progressMessage && (
-        <div style={{ marginTop: -4, marginBottom: 8, fontSize: 12, color: "#64748b", textAlign: "right" }}>
-          {progressMessage}
-        </div>
+        <div className="moo-shelf__progress">{progressMessage}</div>
       )}
 
       {syncStatus === "error" && syncError && (
-        <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{syncError}</p>
+        <p className="moo-shelf__sync-error">{syncError}</p>
       )}
 
       {syncArchived === BoolFlag.TRUE && (
-        <div role="tablist" style={{ display: "flex", gap: 0, marginBottom: 8, borderBottom: "1px solid #e2e8f0" }}>
+        <div role="tablist" className="moo-shelf__archive-tabs">
           <button role="tab" aria-selected={archiveView === "active"}
-            onClick={() => handleArchiveViewChange("active")} style={archiveTabStyle(archiveView === "active")}>
+            onClick={() => handleArchiveViewChange("active")} className={archiveTabClass(archiveView === "active")}>
             未封存 ({activeBooks.length})
           </button>
           <button role="tab" aria-selected={archiveView === "archived"}
-            onClick={() => handleArchiveViewChange("archived")} style={archiveTabStyle(archiveView === "archived")}>
+            onClick={() => handleArchiveViewChange("archived")} className={archiveTabClass(archiveView === "archived")}>
             封存 ({archivedBooks.length})
           </button>
         </div>
@@ -265,14 +228,14 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
 
       {currentViewBooks.length > 0 && (
         <>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
-            <div style={{ flex: 1 }}>
+          <div className="moo-shelf__filter-row">
+            <div className="moo-shelf__grow">
               <StatusFilterBar value={statusFilter} onChange={handleStatusFilterChange} />
             </div>
             <BookSortDropdown value={sort} onChange={setSort} />
           </div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <div style={{ flex: 1 }}>
+          <div className="moo-shelf__search-row">
+            <div className="moo-shelf__grow">
               <SearchBar
                 value={searchTerm} onChange={setSearchTerm}
                 totalCount={categoryFilteredBooks.length} filteredCount={displayedBooks.length} isFiltering={isFiltering}
@@ -283,22 +246,21 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
               open={categoryOpen} onToggle={() => setCategoryOpen(prev => !prev)}
             />
           </div>
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-            <button onClick={handleSelectAll} style={{
-              padding: "4px 10px", border: "1px solid #cbd5e1", borderRadius: 6,
-              background: "transparent", color: "#475569", fontSize: 12, fontWeight: 500, cursor: "pointer",
-            }}>{allVisibleSelected ? "取消全選" : "全選"}</button>
+          <div className="moo-shelf__select-all-row">
+            <button onClick={handleSelectAll} className="moo-shelf__select-all">
+              {allVisibleSelected ? "取消全選" : "全選"}
+            </button>
           </div>
         </>
       )}
 
       {currentViewBooks.length === 0 && (
-        <p style={{ color: "#94a3b8", textAlign: "center", marginTop: 24 }}>
+        <p className="moo-shelf__empty">
           {archiveView === "archived" ? "尚無封存書籍" : "尚無書籍"}
         </p>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="moo-shelf__list">
         {displayedBooks.map((book) => (
           <BookRow
             key={book.bookId}
@@ -312,11 +274,7 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
       </div>
 
       {hasMore && (
-        <button onClick={loadMore} style={{
-          width: "100%", padding: "10px 0", marginTop: 12, border: "1px solid #2563eb",
-          borderRadius: 8, background: "transparent", color: "#2563eb",
-          fontWeight: 500, fontSize: 13, cursor: "pointer",
-        }}>
+        <button onClick={loadMore} className="moo-shelf__load-more">
           載入更多（已顯示 {displayedBooks.length} / 共 {filteredItems.length} 本）
         </button>
       )}

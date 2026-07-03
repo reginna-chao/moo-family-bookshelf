@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect } from "react";
+import { useEffect } from "react";
 import { X } from "lucide-react";
 import type { ReadmooMember } from "../content/readmoo-lend";
 
@@ -48,11 +48,11 @@ export function ReadmooMemberPicker({
       role="dialog"
       aria-modal="true"
       aria-label="選擇讀墨家庭成員"
-      style={overlayStyle}
+      className="moo-modal-overlay"
     >
-      <div style={dialogStyle}>
-        <div style={headerStyle}>
-          <h3 style={titleStyle}>
+      <div className="moo-modal">
+        <div className="moo-modal__header">
+          <h3 className="moo-modal__title">
             請選擇「{borrowerName}」對應的讀墨家庭成員
           </h3>
           <button
@@ -60,30 +60,30 @@ export function ReadmooMemberPicker({
             aria-label="關閉"
             onClick={onCancel}
             disabled={saving}
-            style={closeBtnStyle}
+            className="moo-modal__close"
           >
             <X size={16} />
           </button>
         </div>
-        <p style={helpStyle}>
+        <p className="moo-member-picker__help">
           選擇後將自動記錄此對應關係，下次借出時不再詢問。
         </p>
         {errorMessage && (
-          <div role="alert" style={errorStyle}>
+          <div role="alert" className="moo-modal__error">
             {errorMessage}
           </div>
         )}
         {options.length === 0 ? (
-          <div style={emptyStyle}>讀墨清單中沒有可選的家庭成員。</div>
+          <div className="moo-member-picker__empty">讀墨清單中沒有可選的家庭成員。</div>
         ) : (
-          <ul style={listStyle}>
+          <ul className="moo-member-picker__list">
             {options.map((member) => (
               <li key={member.name}>
                 <button
                   type="button"
                   onClick={() => onPick(member)}
                   disabled={saving}
-                  style={itemBtnStyle}
+                  className="moo-member-picker__item"
                 >
                   {member.avatar && (
                     <img
@@ -91,21 +91,21 @@ export function ReadmooMemberPicker({
                       alt=""
                       width={32}
                       height={32}
-                      style={avatarStyle}
+                      className="moo-member-picker__avatar"
                     />
                   )}
-                  <span style={nameStyle}>{member.name}</span>
+                  <span className="moo-member-picker__name">{member.name}</span>
                 </button>
               </li>
             ))}
           </ul>
         )}
-        <div style={footerStyle}>
+        <div className="moo-member-picker__footer">
           <button
             type="button"
             onClick={onCancel}
             disabled={saving}
-            style={cancelBtnStyle}
+            className="moo-modal__cancel moo-member-picker__cancel"
           >
             {saving ? "處理中..." : "取消"}
           </button>
@@ -114,109 +114,3 @@ export function ReadmooMemberPicker({
     </div>
   );
 }
-
-// ── Styles ────────────────────────────────────────────────────
-
-const overlayStyle: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.4)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 200,
-};
-const dialogStyle: CSSProperties = {
-  background: "#fff",
-  borderRadius: 12,
-  padding: 20,
-  width: 320,
-  maxHeight: "80vh",
-  overflowY: "auto",
-  boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
-};
-const headerStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 8,
-  marginBottom: 12,
-};
-const titleStyle: CSSProperties = {
-  fontSize: 14,
-  fontWeight: 600,
-  margin: 0,
-  lineHeight: 1.4,
-};
-const closeBtnStyle: CSSProperties = {
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  padding: 4,
-  color: "#475569",
-  flexShrink: 0,
-};
-const helpStyle: CSSProperties = {
-  fontSize: 12,
-  color: "#64748b",
-  margin: "0 0 12px",
-  lineHeight: 1.5,
-};
-const errorStyle: CSSProperties = {
-  background: "#fef2f2",
-  color: "#b91c1c",
-  border: "1px solid #fecaca",
-  padding: "6px 10px",
-  borderRadius: 6,
-  fontSize: 12,
-  marginBottom: 12,
-};
-const emptyStyle: CSSProperties = {
-  color: "#94a3b8",
-  fontSize: 13,
-  textAlign: "center",
-  padding: 12,
-};
-const listStyle: CSSProperties = {
-  listStyle: "none",
-  margin: 0,
-  padding: 0,
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-};
-const itemBtnStyle: CSSProperties = {
-  width: "100%",
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  padding: "8px 10px",
-  border: "1px solid #e2e8f0",
-  borderRadius: 8,
-  background: "#fff",
-  cursor: "pointer",
-  fontSize: 14,
-  textAlign: "left",
-};
-const avatarStyle: CSSProperties = {
-  borderRadius: "50%",
-  flexShrink: 0,
-  objectFit: "cover",
-};
-const nameStyle: CSSProperties = {
-  fontWeight: 600,
-  color: "#1e293b",
-};
-const footerStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  marginTop: 14,
-};
-const cancelBtnStyle: CSSProperties = {
-  padding: "6px 14px",
-  background: "transparent",
-  border: "1px solid #cbd5e1",
-  borderRadius: 6,
-  fontSize: 13,
-  cursor: "pointer",
-};

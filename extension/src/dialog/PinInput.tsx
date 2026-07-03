@@ -90,15 +90,17 @@ export function PinInput({ onComplete, mode, error }: PinInputProps) {
         ? "設定 PIN 碼"
         : "再次輸入 PIN 碼確認";
 
+  // Border color is state-driven (error → filled → empty); the other field
+  // metrics live in the .moo-pin-input__field class.
+  const fieldBorderColor = displayError ? "#ef4444" : pin ? "#2563eb" : "#cbd5e1";
+
   return (
-    <div style={{ textAlign: "center" }}>
-      <div style={{ fontSize: 14, color: "#334155", marginBottom: 12, fontWeight: 500 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
+    <div className="moo-secret-entry">
+      <div className="moo-secret-entry__label">{label}</div>
+      <div className="moo-pin-input__hint">
         {PIN_MIN}-{PIN_MAX} 位數字
       </div>
-      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 8 }}>
+      <div className="moo-pin-input__row">
         <input
           ref={inputRef}
           type="password"
@@ -108,38 +110,15 @@ export function PinInput({ onComplete, mode, error }: PinInputProps) {
           onKeyDown={handleKeyDown}
           aria-label="PIN 碼輸入"
           placeholder={`輸入 ${PIN_MIN}-${PIN_MAX} 位數字`}
-          style={{
-            width: 200,
-            height: 44,
-            textAlign: "center",
-            fontSize: 18,
-            fontWeight: 600,
-            border: `2px solid ${displayError ? "#ef4444" : pin ? "#2563eb" : "#cbd5e1"}`,
-            borderRadius: 8,
-            outline: "none",
-            background: "#f8fafc",
-            letterSpacing: 4,
-          }}
+          className="moo-pin-input__field"
+          style={{ border: `2px solid ${fieldBorderColor}` }}
         />
-        <button
-          onClick={handleSubmit}
-          style={{
-            padding: "0 20px",
-            height: 44,
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 600,
-            border: "none",
-            background: "#2563eb",
-            color: "#ffffff",
-            cursor: "pointer",
-          }}
-        >
+        <button onClick={handleSubmit} className="moo-pin-input__submit">
           確認
         </button>
       </div>
       {displayError && (
-        <div style={{ color: "#ef4444", fontSize: 13, marginTop: 4 }}>{displayError}</div>
+        <div className="moo-secret-entry__error moo-secret-entry__error--tight">{displayError}</div>
       )}
       {mode === "setup" && setupStep === "confirm" && (
         <button
@@ -149,10 +128,7 @@ export function PinInput({ onComplete, mode, error }: PinInputProps) {
             setLocalError("");
             resetInput();
           }}
-          style={{
-            marginTop: 8, background: "transparent", border: "none",
-            color: "#64748b", fontSize: 13, cursor: "pointer", textDecoration: "underline",
-          }}
+          className="moo-secret-entry__reset"
         >
           重新設定
         </button>

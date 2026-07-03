@@ -1,11 +1,12 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { LazyCover } from "@/dialog/LazyCover";
 
-const SPINNER_STYLE_ID = "moo-lazy-cover-spin";
+const SPIN_KEYFRAME = "@keyframes moo-lazy-spin";
 
-function removeInjectedKeyframe(): void {
-  document.getElementById(SPINNER_STYLE_ID)?.remove();
+/** Find the spinner element (visible only while status === "loading"), if present. */
+function spinnerIn(container: HTMLElement): HTMLElement | null {
+  return container.querySelector<HTMLElement>(".moo-lazy-cover__spinner");
 }
 
 function fallbackDiv() {
@@ -13,10 +14,6 @@ function fallbackDiv() {
 }
 
 describe("LazyCover", () => {
-  afterEach(() => {
-    removeInjectedKeyframe();
-  });
-
   describe("empty src", () => {
     it("renders fallback directly when src is empty string", () => {
       render(
@@ -32,12 +29,18 @@ describe("LazyCover", () => {
         <LazyCover src="" alt="book" width={40} height={60} fallback={fallbackDiv()} />,
       );
 
-      expect(container.querySelector('[style*="animation"]')).toBeNull();
+      // Empty src renders only the fallback — no wrapper, so no spinner element.
+      expect(spinnerIn(container)).toBeNull();
     });
   });
 
   describe("loading state", () => {
-    it("renders img with opacity 0 and shows spinner while loading", () => {
+    it("renders the not-yet-loaded img and shows the spinner while loading", () => {
+      // The opacity-0 → opacity-1 fade moved from inline `style.opacity` to the
+      // `.moo-lazy-cover__img--loaded` modifier in styles.css. jsdom does not
+      // apply stylesheet rules, so the observable contracts are: (a) the img
+      // carries the base class WITHOUT the --loaded modifier while loading, and
+      // (b) the spinner element (`.moo-lazy-cover__spinner`) is present.
       const { container } = render(
         <LazyCover
           src="https://example.com/cover.jpg"
@@ -50,10 +53,10 @@ describe("LazyCover", () => {
 
       const img = screen.getByRole("img");
       expect(img).toHaveAttribute("src", "https://example.com/cover.jpg");
-      expect(img.style.opacity).toBe("0");
+      expect(img).toHaveClass("moo-lazy-cover__img");
+      expect(img).not.toHaveClass("moo-lazy-cover__img--loaded");
 
-      const spinner = container.querySelector('[style*="animation"]');
-      expect(spinner).not.toBeNull();
+      expect(spinnerIn(container)).not.toBeNull();
     });
 
     it("sets loading='lazy' and decoding='async' on img", () => {
@@ -88,7 +91,9 @@ describe("LazyCover", () => {
   });
 
   describe("loaded state", () => {
-    it("shows img with opacity 1 and removes spinner after load", () => {
+    it("adds the --loaded modifier to the img and removes the spinner after load", () => {
+      // After load the img gains `.moo-lazy-cover__img--loaded` (opacity → 1 in
+      // styles.css) and the spinner element is unmounted.
       const { container } = render(
         <LazyCover
           src="https://example.com/cover.jpg"
@@ -101,8 +106,8 @@ describe("LazyCover", () => {
 
       fireEvent.load(screen.getByRole("img"));
 
-      expect(screen.getByRole("img").style.opacity).toBe("1");
-      expect(container.querySelector('[style*="animation"]')).toBeNull();
+      expect(screen.getByRole("img")).toHaveClass("moo-lazy-cover__img--loaded");
+      expect(spinnerIn(container)).toBeNull();
       expect(screen.queryByTestId("fallback")).not.toBeInTheDocument();
     });
   });
@@ -126,9 +131,13 @@ describe("LazyCover", () => {
     });
   });
 
-  describe("keyframe injection", () => {
-    it("injects keyframe style element into document head", () => {
-      render(
+  describe("spinner lifecycle", () => {
+    // The spinner keyframes moved from an in-tree <style> into styles.css
+    // (`@keyframes moo-lazy-spin`, applied via `.moo-lazy-cover__spinner`).
+    // LazyCover no longer renders any <style> block, so the spinner ELEMENT's
+    // presence (only while status === "loading") is the observable contract.
+    it("renders the spinner element while loading", () => {
+      const { container } = render(
         <LazyCover
           src="https://example.com/cover.jpg"
           alt="book"
@@ -138,19 +147,47 @@ describe("LazyCover", () => {
         />,
       );
 
-      expect(document.getElementById(SPINNER_STYLE_ID)).not.toBeNull();
+      expect(spinnerIn(container)).not.toBeNull();
     });
 
-    it("injects only one style element for multiple instances", () => {
-      render(
-        <>
-          <LazyCover src="https://a.com/1.jpg" alt="a" width={40} height={60} fallback={fallbackDiv()} />
-          <LazyCover src="https://b.com/2.jpg" alt="b" width={40} height={60} fallback={fallbackDiv()} />
-        </>,
+    it("never injects a keyframe <style> into document.head", () => {
+      const { container } = render(
+        <LazyCover
+          src="https://example.com/cover.jpg"
+          alt="book"
+          width={40}
+          height={60}
+          fallback={fallbackDiv()}
+        />,
       );
 
-      const styles = document.querySelectorAll(`#${SPINNER_STYLE_ID}`);
-      expect(styles).toHaveLength(1);
+      // Neither document.head nor the component subtree carries an inline
+      // @keyframes block — the animation is defined once in styles.css.
+      const headStyles = Array.from(document.head.querySelectorAll("style")).filter(
+        (el) => el.textContent?.includes(SPIN_KEYFRAME),
+      );
+      expect(headStyles).toHaveLength(0);
+      const subtreeStyles = Array.from(container.querySelectorAll("style")).filter(
+        (el) => el.textContent?.includes(SPIN_KEYFRAME),
+      );
+      expect(subtreeStyles).toHaveLength(0);
+    });
+
+    it("removes the spinner element once the image has loaded", () => {
+      const { container } = render(
+        <LazyCover
+          src="https://example.com/cover.jpg"
+          alt="book"
+          width={40}
+          height={60}
+          fallback={fallbackDiv()}
+        />,
+      );
+      expect(spinnerIn(container)).not.toBeNull();
+
+      fireEvent.load(screen.getByRole("img"));
+
+      expect(spinnerIn(container)).toBeNull();
     });
   });
 });

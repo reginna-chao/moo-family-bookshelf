@@ -20,81 +20,36 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
     onSelect(book.bookId);
   };
 
+  const rowClass = selected ? "moo-shelf-row moo-shelf-row--selected" : "moo-shelf-row";
+  const toggleClass = isOn ? "moo-shelf-row__toggle moo-shelf-row__toggle--on" : "moo-shelf-row__toggle";
+
   return (
-    <div
-      onClick={handleRowClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: 8,
-        borderRadius: 8,
-        background: selected ? "#eff6ff" : "#f8fafc",
-        cursor: "pointer",
-      }}
-    >
+    <div onClick={handleRowClick} className={rowClass}>
       <input
         type="checkbox"
         checked={selected}
         onChange={() => onSelect(book.bookId)}
         aria-label={`選取 ${book.title}`}
-        style={{ flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
+        className="moo-shelf-row__checkbox"
       />
       <LazyCover
         src={book.coverUrl}
         alt={book.title}
         width={40}
         height={60}
-        style={{ borderRadius: 4 }}
-        fallback={<div style={{ width: 40, height: 60, background: "#e2e8f0", borderRadius: 4 }} />}
+        className="moo-shelf-row__cover"
+        fallback={<div className="moo-shelf-row__cover-fallback" />}
       />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span style={{
-            fontSize: 14,
-            fontWeight: 500,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            minWidth: 0,
-          }}>
-            {book.title}
-          </span>
+      <div className="moo-shelf-row__info">
+        <div className="moo-shelf-row__title-line">
+          <span className="moo-shelf-row__title">{book.title}</span>
           {book.isArchived === BoolFlag.TRUE && (
-            <span style={{
-              fontSize: 12,
-              padding: "1px 5px",
-              borderRadius: 4,
-              background: "#fef3c7",
-              color: "#92400e",
-              fontWeight: 500,
-              flexShrink: 0,
-            }}>
-              封存
-            </span>
+            <span className="moo-shelf-row__archived-badge">封存</span>
           )}
         </div>
-        {book.author && (
-          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 1 }}>
-            {book.author}
-          </div>
-        )}
+        {book.author && <div className="moo-shelf-row__author">{book.author}</div>}
       </div>
-      <button
-        data-toggle-btn
-        onClick={() => onToggle(book.bookId)}
-        style={{
-          flexShrink: 0,
-          padding: "2px 8px",
-          borderRadius: 10,
-          border: "none",
-          fontSize: 12,
-          fontWeight: 600,
-          background: isOn ? "#dcfce7" : "#f1f5f9",
-          color: isOn ? "#16a34a" : "#94a3b8",
-          cursor: "pointer",
-        }}
-      >
+      <button data-toggle-btn onClick={() => onToggle(book.bookId)} className={toggleClass}>
         {isOn ? "開放" : "未開放"}
       </button>
     </div>
