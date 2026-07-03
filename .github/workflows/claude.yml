@@ -55,8 +55,20 @@ jobs:
           # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
           # prompt: 'Update the pull request description to include a summary of changes.'
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
+          # Response-format guidance for GitHub comments: when Claude proposes a code
+          # change, it must write the actual code inline in the comment as a fenced code
+          # block, NOT hand the reader a "Fix this ->" claude.ai/code deep link. Steered
+          # via --append-system-prompt so the comment-driven task itself is untouched.
+          # (No literal backticks in the value — they would be shell-interpreted when the
+          # action forwards claude_args; the intent is spelled out in words instead.)
+          claude_args: >-
+            --append-system-prompt "When you propose a code change in a GitHub PR or
+            issue comment, write the actual suggested code directly in the comment inside
+            a fenced Markdown code block (triple-backtick with a language tag), and note
+            the target file path and line just above it. Do NOT replace the suggestion
+            with a 'Fix this' link to claude.ai/code or any other external redirect; the
+            reviewable code must live in the comment itself. Prefer a GitHub suggestion
+            block (a fenced block whose info string is the single word suggestion) when
+            the edit is a small contiguous change to an existing file, so the author can
+            commit it with one click."
 
