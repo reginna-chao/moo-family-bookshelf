@@ -322,6 +322,9 @@
  */
 .moo-tabs--mobile {
   padding-right: 40px;
+  /* Icon + 4-char labels overflow the phone dialog: scroll instead of squishing. */
+  white-space: nowrap;
+  overflow-x: auto;
 }
 
 .moo-tab {
@@ -341,8 +344,11 @@
 }
 
 .moo-tab--mobile {
-  padding: 8px 0;
-  font-size: 13px;
+  /* Size to content and scroll (see .moo-tabs--mobile) rather than flex:1 squish. */
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .moo-tab--active {
@@ -425,6 +431,7 @@
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 12px;
+  margin-top: 6px;
 }
 
 .moo-toolbar__count {
@@ -538,12 +545,16 @@
 }
 
 .moo-book-row__title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--moo-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.moo-book-row__title--mobile {
+  font-size: 13px;
 }
 
 .moo-book-row__author {
@@ -562,6 +573,12 @@
   border-radius: 8px;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* Mobile: badge stacks under the author, left-aligned, not stretched full width. */
+.moo-book-row__member--stacked {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 .moo-book-row__borrow-btn {
@@ -816,6 +833,88 @@
 .moo-category__option-count {
   color: var(--moo-text-faint);
   font-size: 12px;
+}
+
+/* ── MemberDropdown ───────────────────────────────────────────────────── */
+/* Custom icon+text dropdown. Reuses .moo-category__option* for the menu rows,
+   but needs its own trigger/menu: the trigger fills .moo-toolbar__grow (flex:1)
+   instead of being a fixed 40px square, and the menu aligns to the trigger. */
+
+.moo-member-filter {
+  position: relative;
+  width: 100%;
+}
+
+.moo-member-filter__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--moo-text-strong);
+  font-size: 14px;
+  cursor: pointer;
+  outline: none;
+}
+
+.moo-member-filter__trigger--mobile {
+  height: 32px;
+}
+
+.moo-member-filter__current {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.moo-member-filter__current-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moo-member-filter__chevron {
+  flex-shrink: 0;
+  color: var(--moo-text-faint);
+}
+
+/* top matches the trigger height so the menu drops directly below it;
+   left/right:0 makes it span the full trigger width. */
+.moo-member-filter__menu {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  right: 0;
+  min-width: 180px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid var(--moo-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+}
+
+.moo-member-filter__menu--mobile {
+  top: 32px;
+}
+
+.moo-member-filter__option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── ViewModeToggle ───────────────────────────────────────────────────── */
@@ -1297,6 +1396,10 @@
   min-width: 0;
 }
 
+.moo-shelf-row__title--mobile {
+  font-size: 13px;
+}
+
 .moo-shelf-row__archived-badge {
   font-size: 12px;
   padding: 1px 5px;
@@ -1419,6 +1522,7 @@
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 12px;
+  margin-top: 6px;
 }
 
 .moo-borrow-tab__alert {

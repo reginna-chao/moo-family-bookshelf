@@ -92,7 +92,13 @@ export function FamilyShelfPage({
     [apiClient, familyId, refreshBorrowRequests],
   );
 
-  const { memberFilteredBooks, totalBooks, headingCount } = useFamilyShelfBooks({
+  const {
+    memberFilteredBooks,
+    totalBooks,
+    headingCount,
+    favoriteCount,
+    hiddenCount,
+  } = useFamilyShelfBooks({
     members,
     filterMember,
     userId,
@@ -166,6 +172,8 @@ export function FamilyShelfPage({
         userId={userId}
         sort={sort}
         onSortChange={setSort}
+        favoriteCount={favoriteCount}
+        hiddenCount={hiddenCount}
       />
 
       {prefsSyncFailed && (

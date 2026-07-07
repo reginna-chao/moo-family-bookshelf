@@ -18,6 +18,8 @@ export interface FamilyBookRowProps {
   isFavorite?: boolean;
   /** Toggle favorite/unfavorite for this copy-scoped card (v1.5.0). */
   onFavoriteToggle?: () => void;
+  /** On mobile, stack the owner badge below the author instead of as a sibling. */
+  isMobile?: boolean;
 }
 
 export function FamilyBookRow({
@@ -29,6 +31,7 @@ export function FamilyBookRow({
   hideActionLabel,
   isFavorite = false,
   onFavoriteToggle,
+  isMobile = false,
 }: FamilyBookRowProps) {
   const menuItems: OverflowMenuItem[] = [];
   if (onHideToggle && hideActionLabel) {
@@ -67,10 +70,23 @@ export function FamilyBookRow({
         )}
       </div>
       <div className="moo-book-row__info">
-        <div className="moo-book-row__title">{book.title}</div>
+        <div
+          className={
+            isMobile
+              ? "moo-book-row__title moo-book-row__title--mobile"
+              : "moo-book-row__title"
+          }
+        >
+          {book.title}
+        </div>
         {book.author && <div className="moo-book-row__author">{book.author}</div>}
+        {isMobile && (
+          <span className="moo-book-row__member moo-book-row__member--stacked">
+            {book.memberName}
+          </span>
+        )}
       </div>
-      <span className="moo-book-row__member">{book.memberName}</span>
+      {!isMobile && <span className="moo-book-row__member">{book.memberName}</span>}
       {showBorrowButton && (
         <button
           type="button"

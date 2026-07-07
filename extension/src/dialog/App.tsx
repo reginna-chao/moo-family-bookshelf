@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import browser from "webextension-polyfill";
-import { Inbox } from "lucide-react";
+import { Inbox, Library, BookOpen, Settings } from "lucide-react";
 import { ApiClient, BorrowStatus } from "../api/client";
 import {
   USER_ID_KEY,
@@ -239,11 +239,11 @@ function MainContent({
     (r) => r.ownerId === userId && r.status === BorrowStatus.PENDING,
   ).length;
 
-  const tabs: Array<{ key: Tab; label: string; icon?: React.ReactNode }> = [
-    { key: "family-shelf", label: "家庭書櫃" },
-    { key: "personal-shelf", label: "個人書櫃" },
+  const tabs: Array<{ key: Tab; label: string; icon: React.ReactNode }> = [
+    { key: "family-shelf", label: "家庭書櫃", icon: <Library size={14} aria-hidden="true" /> },
+    { key: "personal-shelf", label: "個人書櫃", icon: <BookOpen size={14} aria-hidden="true" /> },
     { key: "borrow", label: "借閱", icon: <Inbox size={14} aria-hidden="true" /> },
-    { key: "settings", label: "設定" },
+    { key: "settings", label: "設定", icon: <Settings size={14} aria-hidden="true" /> },
   ];
 
   const tabsClass = isMobile ? "moo-tabs moo-tabs--mobile" : "moo-tabs";

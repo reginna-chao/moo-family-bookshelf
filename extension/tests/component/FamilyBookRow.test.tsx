@@ -102,6 +102,48 @@ describe("FamilyBookRow", () => {
     expect(link).toHaveAttribute("target", "_blank");
   });
 
+  describe("owner badge placement (isMobile)", () => {
+    it("renders the owner badge as a trailing sibling on desktop (isMobile omitted)", () => {
+      const { container } = render(<FamilyBookRow book={makeBook({ memberName: "Alice" })} />);
+
+      const badge = screen.getByText("Alice");
+      // Desktop badge is the trailing `.moo-book-row__member` sibling of __info,
+      // NOT a descendant of __info, and NOT stacked.
+      expect(badge).toHaveClass("moo-book-row__member");
+      expect(badge).not.toHaveClass("moo-book-row__member--stacked");
+      const info = container.querySelector(".moo-book-row__info");
+      expect(info).not.toBeNull();
+      expect(info?.contains(badge)).toBe(false);
+    });
+
+    it("renders the owner badge stacked inside __info on mobile (isMobile true)", () => {
+      const { container } = render(
+        <FamilyBookRow book={makeBook({ memberName: "Alice" })} isMobile />,
+      );
+
+      const badge = screen.getByText("Alice");
+      expect(badge).toHaveClass("moo-book-row__member");
+      expect(badge).toHaveClass("moo-book-row__member--stacked");
+      const info = container.querySelector(".moo-book-row__info");
+      expect(info).not.toBeNull();
+      expect(info?.contains(badge)).toBe(true);
+      // Exactly one owner badge exists — no trailing desktop sibling as well.
+      expect(container.querySelectorAll(".moo-book-row__member")).toHaveLength(1);
+    });
+
+    it("appends the --mobile title modifier only when isMobile is true", () => {
+      const { container: desktop } = render(<FamilyBookRow book={makeBook()} />);
+      expect(
+        desktop.querySelector(".moo-book-row__title--mobile"),
+      ).toBeNull();
+
+      const { container: mobile } = render(<FamilyBookRow book={makeBook()} isMobile />);
+      expect(
+        mobile.querySelector(".moo-book-row__title--mobile"),
+      ).not.toBeNull();
+    });
+  });
+
   describe("hide action overflow menu (v1.5.0)", () => {
     it("renders the overflow trigger when onHideToggle and label are provided", () => {
       render(

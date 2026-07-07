@@ -267,6 +267,7 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
             book={book}
             selected={selectedIds.has(book.bookId)}
             isDirty={dirtyBookIds.has(book.bookId)}
+            isMobile={isMobile}
             onSelect={handleSelect}
             onToggle={handleToggle}
           />

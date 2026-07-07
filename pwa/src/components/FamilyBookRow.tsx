@@ -76,7 +76,7 @@ export function FamilyBookRow({
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
+        <p className="text-[13px] md:text-sm font-medium text-gray-900 truncate">{book.title}</p>
         <p className="text-xs text-gray-500 truncate">{book.author}</p>
       </div>
       <span className="text-xs text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap">
