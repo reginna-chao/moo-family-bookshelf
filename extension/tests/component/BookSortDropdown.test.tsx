@@ -5,15 +5,23 @@ import { BookSortDropdown } from "@/dialog/BookSortDropdown";
 import type { BookSortMode } from "@/dialog/sortBooks";
 
 /**
- * BookSortDropdown is now a custom listbox dropdown (no native <select>):
+ * BookSortDropdown is a custom listbox dropdown (no native <select>):
  *  - trigger <button aria-label="排序方式" aria-haspopup="listbox" aria-expanded>
- *  - opens a portaled <div role="listbox"> with 3 <button role="option">.
+ *  - opens a portaled <div role="listbox"> with 5 <button role="option">.
  * The menu is portaled to document.body, but it lives in the same jsdom
  * document, so screen queries still find it. Use queryByRole("option") to
  * assert presence/absence.
  */
 
-const OPTION_LABELS = ["預設順序", "依書名排序", "依作者排序"];
+const OPTIONS: Array<{ value: BookSortMode; label: string }> = [
+  { value: "default", label: "預設順序" },
+  { value: "title-asc", label: "書名 A → Z" },
+  { value: "title-desc", label: "書名 Z → A" },
+  { value: "author-asc", label: "作者 A → Z" },
+  { value: "author-desc", label: "作者 Z → A" },
+];
+
+const OPTION_LABELS = OPTIONS.map((o) => o.label);
 
 describe("BookSortDropdown", () => {
   afterEach(() => {
@@ -37,7 +45,7 @@ describe("BookSortDropdown", () => {
     }
   });
 
-  it("opens the menu and shows all three options when the trigger is clicked", () => {
+  it("opens the menu and shows all five options in order when the trigger is clicked", () => {
     render(<BookSortDropdown value="default" onChange={vi.fn()} />);
 
     const trigger = screen.getByRole("button", { name: "排序方式" });
@@ -45,43 +53,46 @@ describe("BookSortDropdown", () => {
 
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     const options = screen.getAllByRole("option");
-    expect(options).toHaveLength(3);
+    expect(options).toHaveLength(5);
     expect(options.map((o) => o.textContent)).toEqual(OPTION_LABELS);
   });
 
   it("marks only the option matching the value prop as aria-selected", () => {
-    render(<BookSortDropdown value="title" onChange={vi.fn()} />);
+    render(<BookSortDropdown value="title-desc" onChange={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "排序方式" }));
 
-    const selected = screen.getByRole("option", { name: "依書名排序" });
+    const selected = screen.getByRole("option", { name: "書名 Z → A" });
     expect(selected).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("option", { name: "預設順序" })).toHaveAttribute("aria-selected", "false");
-    expect(screen.getByRole("option", { name: "依作者排序" })).toHaveAttribute("aria-selected", "false");
+    for (const { label } of OPTIONS.filter((o) => o.value !== "title-desc")) {
+      expect(screen.getByRole("option", { name: label })).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+    }
   });
 
-  it.each<{ label: string; expected: BookSortMode }>([
-    { label: "預設順序", expected: "default" },
-    { label: "依書名排序", expected: "title" },
-    { label: "依作者排序", expected: "author" },
-  ])("calls onChange('$expected') and closes when selecting $label", ({ label, expected }) => {
-    const onChange = vi.fn();
-    render(<BookSortDropdown value="default" onChange={onChange} />);
+  it.each<{ label: string; expected: BookSortMode }>(OPTIONS.map((o) => ({ label: o.label, expected: o.value })))(
+    "calls onChange('$expected') and closes when selecting $label",
+    ({ label, expected }) => {
+      const onChange = vi.fn();
+      render(<BookSortDropdown value="default" onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "排序方式" }));
-    fireEvent.click(screen.getByRole("option", { name: label }));
+      fireEvent.click(screen.getByRole("button", { name: "排序方式" }));
+      fireEvent.click(screen.getByRole("option", { name: label }));
 
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith(expected);
-    // Menu closes after selection.
-    expect(screen.queryByRole("option")).not.toBeInTheDocument();
-  });
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith(expected);
+      // Menu closes after selection.
+      expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    },
+  );
 
   it("closes the menu on an outside mousedown", () => {
     render(<BookSortDropdown value="default" onChange={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "排序方式" }));
-    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(screen.getAllByRole("option")).toHaveLength(5);
 
     fireEvent.mouseDown(document.body);
 
@@ -92,7 +103,7 @@ describe("BookSortDropdown", () => {
     render(<BookSortDropdown value="default" onChange={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "排序方式" }));
-    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(screen.getAllByRole("option")).toHaveLength(5);
 
     fireEvent.keyDown(document, { key: "Escape" });
 
@@ -126,8 +137,8 @@ describe("BookSortDropdown", () => {
     });
 
     it("seeds aria-activedescendant from the current value on open", () => {
-      const { listbox } = openMenu("title");
-      expect(activeOptionId(listbox)).toBe(optionId("依書名排序"));
+      const { listbox } = openMenu("author-asc");
+      expect(activeOptionId(listbox)).toBe(optionId("作者 A → Z"));
     });
 
     it("defaults the active descendant to the first option when value is default", () => {
@@ -135,26 +146,24 @@ describe("BookSortDropdown", () => {
       expect(activeOptionId(listbox)).toBe(optionId("預設順序"));
     });
 
-    it("moves the active descendant down with ArrowDown", () => {
+    it("moves the active descendant down through every option with ArrowDown", () => {
       const { listbox } = openMenu("default");
       expect(activeOptionId(listbox)).toBe(optionId("預設順序"));
 
-      fireEvent.keyDown(listbox, { key: "ArrowDown" });
-      expect(activeOptionId(listbox)).toBe(optionId("依書名排序"));
-
-      fireEvent.keyDown(listbox, { key: "ArrowDown" });
-      expect(activeOptionId(listbox)).toBe(optionId("依作者排序"));
+      for (const { label } of OPTIONS.slice(1)) {
+        fireEvent.keyDown(listbox, { key: "ArrowDown" });
+        expect(activeOptionId(listbox)).toBe(optionId(label));
+      }
     });
 
-    it("moves the active descendant up with ArrowUp", () => {
-      const { listbox } = openMenu("author");
-      expect(activeOptionId(listbox)).toBe(optionId("依作者排序"));
+    it("moves the active descendant up through every option with ArrowUp", () => {
+      const { listbox } = openMenu("author-desc");
+      expect(activeOptionId(listbox)).toBe(optionId("作者 Z → A"));
 
-      fireEvent.keyDown(listbox, { key: "ArrowUp" });
-      expect(activeOptionId(listbox)).toBe(optionId("依書名排序"));
-
-      fireEvent.keyDown(listbox, { key: "ArrowUp" });
-      expect(activeOptionId(listbox)).toBe(optionId("預設順序"));
+      for (const { label } of [...OPTIONS].reverse().slice(1)) {
+        fireEvent.keyDown(listbox, { key: "ArrowUp" });
+        expect(activeOptionId(listbox)).toBe(optionId(label));
+      }
     });
 
     it("stops at the first option when ArrowUp is pressed at the top (no wrap)", () => {
@@ -167,17 +176,17 @@ describe("BookSortDropdown", () => {
     });
 
     it("stops at the last option when ArrowDown is pressed at the bottom (no wrap)", () => {
-      const { listbox } = openMenu("author");
-      expect(activeOptionId(listbox)).toBe(optionId("依作者排序"));
+      const { listbox } = openMenu("author-desc");
+      expect(activeOptionId(listbox)).toBe(optionId("作者 Z → A"));
 
       fireEvent.keyDown(listbox, { key: "ArrowDown" });
 
-      expect(activeOptionId(listbox)).toBe(optionId("依作者排序"));
+      expect(activeOptionId(listbox)).toBe(optionId("作者 Z → A"));
     });
 
     it("jumps to the first option on Home", () => {
-      const { listbox } = openMenu("author");
-      expect(activeOptionId(listbox)).toBe(optionId("依作者排序"));
+      const { listbox } = openMenu("author-desc");
+      expect(activeOptionId(listbox)).toBe(optionId("作者 Z → A"));
 
       fireEvent.keyDown(listbox, { key: "Home" });
 
@@ -190,19 +199,19 @@ describe("BookSortDropdown", () => {
 
       fireEvent.keyDown(listbox, { key: "End" });
 
-      expect(activeOptionId(listbox)).toBe(optionId("依作者排序"));
+      expect(activeOptionId(listbox)).toBe(optionId("作者 Z → A"));
     });
 
     it("selects the active option with Enter, closes, restores focus, and reports the value", () => {
       const onChange = vi.fn();
       const { trigger, listbox } = openMenu("default", onChange);
 
-      // Move active to the second option, then commit with Enter.
+      // Move active to the second option (title-asc), then commit with Enter.
       fireEvent.keyDown(listbox, { key: "ArrowDown" });
       fireEvent.keyDown(listbox, { key: "Enter" });
 
       expect(onChange).toHaveBeenCalledTimes(1);
-      expect(onChange).toHaveBeenCalledWith("title");
+      expect(onChange).toHaveBeenCalledWith("title-asc");
       expect(screen.queryByRole("option")).not.toBeInTheDocument();
       expect(document.activeElement).toBe(trigger);
     });
@@ -211,12 +220,12 @@ describe("BookSortDropdown", () => {
       const onChange = vi.fn();
       const { trigger, listbox } = openMenu("default", onChange);
 
-      // Move active to the third option, then commit with Space.
+      // Jump to the last option (author-desc), then commit with Space.
       fireEvent.keyDown(listbox, { key: "End" });
       fireEvent.keyDown(listbox, { key: " " });
 
       expect(onChange).toHaveBeenCalledTimes(1);
-      expect(onChange).toHaveBeenCalledWith("author");
+      expect(onChange).toHaveBeenCalledWith("author-desc");
       expect(screen.queryByRole("option")).not.toBeInTheDocument();
       expect(document.activeElement).toBe(trigger);
     });

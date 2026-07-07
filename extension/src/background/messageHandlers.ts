@@ -12,6 +12,7 @@
 
 import browser from "webextension-polyfill";
 import { BoolFlag } from "../api/client";
+import { normalizeSortMode } from "../dialog/sortBooks";
 import { readFamilyId } from "../storage/familyId";
 import { showSyncErrorBadge, clearSyncErrorBadge } from "./badge";
 import {
@@ -198,11 +199,9 @@ async function handleGetBookSort(
   }
   const key = shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
   const result = await browser.storage.local.get([key]);
-  const stored = result[key];
-  const sort =
-    stored === "default" || stored === "title" || stored === "author"
-      ? stored
-      : "default";
+  // Normalize legacy stored values (`title`/`author`) to their canonical
+  // `-asc` form so persisted preferences survive the schema change.
+  const sort = normalizeSortMode(result[key]);
   return { sort };
 }
 
@@ -214,11 +213,16 @@ async function handleSetBookSort(
   if (shelf !== "family" && shelf !== "personal") {
     return { ok: false, error: "shelf must be 'family' or 'personal'" };
   }
-  if (value !== "default" && value !== "title" && value !== "author") {
-    return { ok: false, error: "sort must be 'default', 'title', or 'author'" };
+  // Normalize accepts canonical values and legacy aliases; a value that is
+  // neither maps to "default". Only an explicit "default" is a valid reason to
+  // store "default" — reject any other unrecognized value rather than silently
+  // downgrading a genuinely intended sort mode.
+  const normalized = normalizeSortMode(value);
+  if (normalized === "default" && value !== "default") {
+    return { ok: false, error: "invalid sort mode" };
   }
   const key = shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
-  await browser.storage.local.set({ [key]: value });
+  await browser.storage.local.set({ [key]: normalized });
   return { ok: true };
 }
 

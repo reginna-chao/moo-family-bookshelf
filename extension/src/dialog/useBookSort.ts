@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import browser from "webextension-polyfill";
 import type { BookSortMode } from "./sortBooks";
+import { normalizeSortMode } from "./sortBooks";
 
 export type BookSortShelf = "family" | "personal";
 
 const DEFAULT_SORT: BookSortMode = "default";
-
-function isSortMode(value: unknown): value is BookSortMode {
-  return value === "default" || value === "title" || value === "author";
-}
 
 export interface UseBookSortReturn {
   sort: BookSortMode;
@@ -32,9 +29,10 @@ export function useBookSort(shelf: BookSortShelf): UseBookSortReturn {
           shelf,
         })) as { sort?: unknown } | undefined;
         if (cancelled) return;
-        if (isSortMode(response?.sort)) {
-          setSortState(response.sort);
-        }
+        // Background may return a legacy value (`title`/`author`); normalize to
+        // the canonical `-asc` form before applying so stored preferences carry
+        // over without a migration. Unrecognized values normalize to default.
+        setSortState(normalizeSortMode(response?.sort));
       } catch {
         // Background unavailable — keep default
       }
