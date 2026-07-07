@@ -1,16 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { BookSortMode } from "@/utils/sortBooks";
+import { normalizeSortMode } from "@/utils/sortBooks";
 import { namespacedKey } from "@/hooks/useAuth";
 
 export type BookSortShelf = "family" | "personal";
 
-function isSortMode(value: unknown): value is BookSortMode {
-  return value === "default" || value === "title" || value === "author";
-}
-
 function readSort(storageKey: string): BookSortMode {
-  const stored = localStorage.getItem(storageKey);
-  return isSortMode(stored) ? stored : "default";
+  return normalizeSortMode(localStorage.getItem(storageKey));
 }
 
 export interface UseBookSortReturn {

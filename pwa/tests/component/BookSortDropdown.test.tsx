@@ -9,44 +9,55 @@ afterEach(cleanup);
 
 /** Opens the popover by clicking the trigger and returns its listbox. */
 function openListbox(): HTMLElement {
-  fireEvent.click(screen.getByLabelText("書籍排序"));
-  return screen.getByRole("listbox", { name: "書籍排序選單" });
+  fireEvent.click(screen.getByLabelText("排序方式"));
+  return screen.getByRole("listbox", { name: "排序方式選單" });
 }
 
 describe("BookSortDropdown", () => {
   it("renders the trigger button with an aria-label and starts closed", () => {
     render(<BookSortDropdown value="default" onChange={vi.fn()} />);
 
-    const trigger = screen.getByLabelText("書籍排序");
+    const trigger = screen.getByLabelText("排序方式");
     expect(trigger).toBeInTheDocument();
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
-  it("opens the listbox with three options when the trigger is clicked", () => {
+  it("opens the listbox with five 繁中 options when the trigger is clicked", () => {
     render(<BookSortDropdown value="default" onChange={vi.fn()} />);
 
     const listbox = openListbox();
     const options = within(listbox).getAllByRole("option");
-    expect(options).toHaveLength(3);
-    expect(options[0]).toHaveTextContent("預設順序");
-    expect(options[1]).toHaveTextContent("依書名排序");
-    expect(options[2]).toHaveTextContent("依作者排序");
-    expect(screen.getByLabelText("書籍排序")).toHaveAttribute("aria-expanded", "true");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "預設順序",
+      "書名 A → Z",
+      "書名 Z → A",
+      "作者 A → Z",
+      "作者 Z → A",
+    ]);
+    expect(screen.getByLabelText("排序方式")).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("marks the option matching value as selected", () => {
-    render(<BookSortDropdown value="author" onChange={vi.fn()} />);
+  it.each<{ value: BookSortMode; label: string }>([
+    { value: "default", label: "預設順序" },
+    { value: "title-asc", label: "書名 A → Z" },
+    { value: "title-desc", label: "書名 Z → A" },
+    { value: "author-asc", label: "作者 A → Z" },
+    { value: "author-desc", label: "作者 Z → A" },
+  ])("marks option '$label' as selected when value is '$value'", ({ value, label }) => {
+    render(<BookSortDropdown value={value} onChange={vi.fn()} />);
 
     const listbox = openListbox();
-    const selected = within(listbox).getByRole("option", { name: "依作者排序" });
+    const selected = within(listbox).getByRole("option", { name: label });
     expect(selected).toHaveAttribute("aria-selected", "true");
   });
 
   it.each<{ label: string; expected: BookSortMode }>([
     { label: "預設順序", expected: "default" },
-    { label: "依書名排序", expected: "title" },
-    { label: "依作者排序", expected: "author" },
+    { label: "書名 A → Z", expected: "title-asc" },
+    { label: "書名 Z → A", expected: "title-desc" },
+    { label: "作者 A → Z", expected: "author-asc" },
+    { label: "作者 Z → A", expected: "author-desc" },
   ])("calls onChange('$expected') and closes when selecting $label", ({ label, expected }) => {
     const onChange = vi.fn();
     render(<BookSortDropdown value="default" onChange={onChange} />);
@@ -62,10 +73,10 @@ describe("BookSortDropdown", () => {
 
   it("applies active styling when value is not 'default'", () => {
     const { rerender } = render(<BookSortDropdown value="default" onChange={vi.fn()} />);
-    expect(screen.getByLabelText("書籍排序").className).not.toContain("border-blue-500");
+    expect(screen.getByLabelText("排序方式").className).not.toContain("border-blue-500");
 
-    rerender(<BookSortDropdown value="title" onChange={vi.fn()} />);
-    expect(screen.getByLabelText("書籍排序").className).toContain("border-blue-500");
+    rerender(<BookSortDropdown value="title-asc" onChange={vi.fn()} />);
+    expect(screen.getByLabelText("排序方式").className).toContain("border-blue-500");
   });
 
   it("closes the popover on an outside mousedown", () => {

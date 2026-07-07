@@ -43,11 +43,34 @@ describe("useBookSort", () => {
     { shelf: "family" },
     { shelf: "personal" },
   ])("reads sort from background for shelf '$shelf'", async ({ shelf }) => {
-    mockSendMessage({ sort: "title" });
+    mockSendMessage({ sort: "title-desc" });
     const { result } = renderHook(() => useBookSort(shelf));
     await waitFor(() => {
-      expect(result.current.sort).toBe("title");
+      expect(result.current.sort).toBe("title-desc");
     });
+  });
+
+  it.each<{ stored: string; expected: string }>([
+    { stored: "title", expected: "title-asc" },
+    { stored: "author", expected: "author-asc" },
+  ])(
+    "normalizes legacy read-back value '$stored' to '$expected'",
+    async ({ stored, expected }) => {
+      mockSendMessage({ sort: stored });
+      const { result } = renderHook(() => useBookSort("family"));
+      await waitFor(() => {
+        expect(result.current.sort).toBe(expected);
+      });
+    },
+  );
+
+  it("normalizes an unrecognized read-back value to 'default'", async () => {
+    mockSendMessage({ sort: "bogus" });
+    const { result } = renderHook(() => useBookSort("family"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.sort).toBe("default");
   });
 
   it("sends correct shelf in GET_BOOK_SORT message", () => {
@@ -75,10 +98,10 @@ describe("useBookSort", () => {
     const { result } = renderHook(() => useBookSort("family"));
 
     act(() => {
-      result.current.setSort("author");
+      result.current.setSort("author-desc");
     });
 
-    expect(result.current.sort).toBe("author");
+    expect(result.current.sort).toBe("author-desc");
   });
 
   it("sends SET_BOOK_SORT with correct shelf and sort", () => {
@@ -86,13 +109,13 @@ describe("useBookSort", () => {
     const { result } = renderHook(() => useBookSort("personal"));
 
     act(() => {
-      result.current.setSort("title");
+      result.current.setSort("title-asc");
     });
 
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       type: "SET_BOOK_SORT",
       shelf: "personal",
-      sort: "title",
+      sort: "title-asc",
     });
   });
 
@@ -101,9 +124,9 @@ describe("useBookSort", () => {
     const { result } = renderHook(() => useBookSort("family"));
 
     act(() => {
-      result.current.setSort("title");
+      result.current.setSort("title-asc");
     });
-    expect(result.current.sort).toBe("title");
+    expect(result.current.sort).toBe("title-asc");
 
     await waitFor(() => {
       expect(result.current.sort).toBe("default");

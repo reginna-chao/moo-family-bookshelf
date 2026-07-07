@@ -402,21 +402,35 @@ describe("background service worker", () => {
       expect(response).toEqual({ sort: "default" });
     });
 
-    it("returns stored value for family shelf", async () => {
+    it("returns canonical stored value for family shelf", async () => {
       vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [FAMILY_SHELF_SORT_KEY]: "title",
+        [FAMILY_SHELF_SORT_KEY]: "title-desc",
       });
       const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
-      expect(response).toEqual({ sort: "title" });
+      expect(response).toEqual({ sort: "title-desc" });
     });
 
-    it("returns stored value for personal shelf", async () => {
+    it("returns canonical stored value for personal shelf", async () => {
       vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [PERSONAL_SHELF_SORT_KEY]: "author",
+        [PERSONAL_SHELF_SORT_KEY]: "author-desc",
       });
       const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "personal" });
-      expect(response).toEqual({ sort: "author" });
+      expect(response).toEqual({ sort: "author-desc" });
     });
+
+    it.each([
+      { stored: "title", expected: "title-asc" },
+      { stored: "author", expected: "author-asc" },
+    ])(
+      "normalizes legacy stored value '$stored' to '$expected'",
+      async ({ stored, expected }) => {
+        vi.mocked(browser.storage.local.get).mockResolvedValue({
+          [FAMILY_SHELF_SORT_KEY]: stored,
+        });
+        const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
+        expect(response).toEqual({ sort: expected });
+      },
+    );
 
     it("returns 'default' for invalid shelf", async () => {
       const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "invalid" });
@@ -434,10 +448,10 @@ describe("background service worker", () => {
 
   describe("SET_BOOK_SORT", () => {
     it.each(
-      (["default", "title", "author"] as const).flatMap((sort) =>
-        (["family", "personal"] as const).map((shelf) => ({ sort, shelf })),
+      (["default", "title-asc", "title-desc", "author-asc", "author-desc"] as const).flatMap(
+        (sort) => (["family", "personal"] as const).map((shelf) => ({ sort, shelf })),
       ),
-    )("writes '$sort' for '$shelf' to correct storage key", async ({ sort, shelf }) => {
+    )("writes canonical '$sort' for '$shelf' to correct storage key", async ({ sort, shelf }) => {
       const response = await sendMessage({ type: "SET_BOOK_SORT", shelf, sort });
       expect(response).toEqual({ ok: true });
       const expectedKey = shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
@@ -446,17 +460,42 @@ describe("background service worker", () => {
       });
     });
 
+    it.each([
+      { legacy: "title", stored: "title-asc" },
+      { legacy: "author", stored: "author-asc" },
+    ])(
+      "accepts legacy value '$legacy' and writes normalized '$stored'",
+      async ({ legacy, stored }) => {
+        const response = await sendMessage({ type: "SET_BOOK_SORT", shelf: "family", sort: legacy });
+        expect(response).toEqual({ ok: true });
+        expect(browser.storage.local.set).toHaveBeenCalledWith({
+          [FAMILY_SHELF_SORT_KEY]: stored,
+        });
+      },
+    );
+
     it("rejects invalid shelf without writing", async () => {
-      const response = await sendMessage({ type: "SET_BOOK_SORT", shelf: "invalid", sort: "title" });
+      const response = await sendMessage({
+        type: "SET_BOOK_SORT",
+        shelf: "invalid",
+        sort: "title-asc",
+      });
       expect(response).toEqual({ ok: false, error: expect.any(String) });
       expect(browser.storage.local.set).not.toHaveBeenCalled();
     });
 
-    it("rejects invalid sort without writing", async () => {
-      const response = await sendMessage({ type: "SET_BOOK_SORT", shelf: "family", sort: "bogus" });
-      expect(response).toEqual({ ok: false, error: expect.any(String) });
-      expect(browser.storage.local.set).not.toHaveBeenCalled();
-    });
+    it.each(["bogus", "title-up", ""])(
+      "rejects unrecognized sort value '%s' without writing",
+      async (invalidSort) => {
+        const response = await sendMessage({
+          type: "SET_BOOK_SORT",
+          shelf: "family",
+          sort: invalidSort,
+        });
+        expect(response).toEqual({ ok: false, error: expect.any(String) });
+        expect(browser.storage.local.set).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe("sync error badge messages", () => {

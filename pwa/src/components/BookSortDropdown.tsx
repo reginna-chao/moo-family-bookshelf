@@ -9,8 +9,10 @@ export interface BookSortDropdownProps {
 
 const OPTIONS: Array<{ value: BookSortMode; label: string }> = [
   { value: "default", label: "預設順序" },
-  { value: "title", label: "依書名排序" },
-  { value: "author", label: "依作者排序" },
+  { value: "title-asc", label: "書名 A → Z" },
+  { value: "title-desc", label: "書名 Z → A" },
+  { value: "author-asc", label: "作者 A → Z" },
+  { value: "author-desc", label: "作者 Z → A" },
 ];
 
 /**
@@ -45,7 +47,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
     <div ref={popoverRef} className="relative flex-shrink-0">
       <button
         onClick={handleToggle}
-        aria-label="書籍排序"
+        aria-label="排序方式"
         aria-expanded={open}
         className={`flex items-center justify-center w-10 h-10 rounded-lg border transition-colors ${
           isActive
@@ -59,7 +61,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
         <div
           className="absolute top-12 right-0 min-w-[160px] max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-50"
           role="listbox"
-          aria-label="書籍排序選單"
+          aria-label="排序方式選單"
         >
           {OPTIONS.map((opt) => {
             const selected = opt.value === value;
