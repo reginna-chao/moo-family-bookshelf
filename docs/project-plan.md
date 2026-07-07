@@ -998,8 +998,8 @@ jobs:
 - [x] **#36 web-ext 打包 + AMO CD**
   - `web-ext` lint / build / sign；`.github/workflows/cicd.yml` 新增 Firefox release job（`v*` tag 觸發，與既有 `release-extension` 並列）
   - 需 GitHub Secrets：`AMO_JWT_ISSUER` / `AMO_JWT_SECRET`（須向 Mozilla AMO 申請）
-- [ ] **#37 文件**：`README` / `worker/DEPLOY.md` 補 Firefox 安裝說明；`site/` 加「Available on Firefox for Android™」入口
-- [ ] **#38 實機驗證（需手動）**：Firefox Desktop + Android（Fenix）載入、content script 注入 `read.readmoo.com`、`storage.sync`（需登入 Firefox 帳號，已有 sync code fallback）、`#/me` / `#/library` 爬取流程
+- [x] **#37 文件**：`README` / `worker/DEPLOY.md` 補 Firefox 安裝說明；`site/` 加「Available on Firefox for Android™」入口
+- [x] **#38 實機驗證（需手動）**：Firefox Desktop + Android（Fenix）載入、content script 注入 `read.readmoo.com`、`storage.sync`（需登入 Firefox 帳號，已有 sync code fallback）、`#/me` / `#/library` 爬取流程
 
 > ⚠️ E2E（Playwright）目前僅載入 Chrome；Firefox E2E 視成本決定，**預設先不擴充**，列為後續追蹤。
 > ⚠️ 版號與 CHANGELOG 不在 Wave M 內手動處理 — 於 release 前以 `/bump-ver` 統一 bump 至 `v1.5.0` 並自動產生涵蓋隱藏書籍 + Firefox 的條目。
@@ -1013,7 +1013,7 @@ jobs:
 
 ##### Wave F — 家庭書櫃我的最愛（觀看者私有）
 
-- [ ] **#11 家庭書櫃可標記「我的最愛」+ 篩選只看最愛**
+- [x] **#11 家庭書櫃可標記「我的最愛」+ 篩選只看最愛**
   - **語意（與隱藏對稱）**：最愛是觀看者私有標記，只在家庭書櫃作用、只影響自己、不公開給家人（家人不知道我把哪些書加最愛）。
   - **資料模型**：沿用 Phase 9 的 `familyShelfPrefs` 容器，擴充 `favorites: string[]`（同樣 `{ownerId}:{bookId}` copy-scoped）。
     schema 與 API 形狀無需新增——`PUT /api/user/:id/family-prefs` body 擴充 `favorites` 欄位即可。
