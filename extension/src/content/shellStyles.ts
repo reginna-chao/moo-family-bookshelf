@@ -56,17 +56,17 @@ export const SHELL_BOOTSTRAP_CSS = `
 }
 .moo-shell-close {
   position: absolute;
-  top: 2px;
-  right: 4px;
+  top: 0;
+  right: 0;
   z-index: 1;
-  width: 32px;
-  height: 32px;
+  width: 35px;
+  height: 35px;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: none;
-  border-radius: 8px;
-  background: transparent;
+  border-radius: 0;
+  background: #fff;
   color: #64748b;
   cursor: pointer;
 }

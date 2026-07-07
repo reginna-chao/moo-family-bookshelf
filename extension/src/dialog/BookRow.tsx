@@ -6,11 +6,12 @@ interface BookRowProps {
   book: BookEntry;
   selected: boolean;
   isDirty?: boolean;
+  isMobile?: boolean;
   onSelect: (bookId: string) => void;
   onToggle: (bookId: string) => void;
 }
 
-export const BookRow = React.memo(function BookRow({ book, selected, onSelect, onToggle }: BookRowProps) {
+export const BookRow = React.memo(function BookRow({ book, selected, isMobile = false, onSelect, onToggle }: BookRowProps) {
   const isOn = book.isShared === BoolFlag.TRUE;
 
   const handleRowClick = (e: React.MouseEvent) => {
@@ -42,7 +43,15 @@ export const BookRow = React.memo(function BookRow({ book, selected, onSelect, o
       />
       <div className="moo-shelf-row__info">
         <div className="moo-shelf-row__title-line">
-          <span className="moo-shelf-row__title">{book.title}</span>
+          <span
+            className={
+              isMobile
+                ? "moo-shelf-row__title moo-shelf-row__title--mobile"
+                : "moo-shelf-row__title"
+            }
+          >
+            {book.title}
+          </span>
           {book.isArchived === BoolFlag.TRUE && (
             <span className="moo-shelf-row__archived-badge">封存</span>
           )}

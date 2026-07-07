@@ -166,6 +166,22 @@ describe("App", () => {
     });
   });
 
+  it("renders a lucide icon inside each tab alongside its label", async () => {
+    setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+    });
+
+    for (const label of ["家庭書櫃", "個人書櫃", "借閱", "設定"]) {
+      const tab = screen.getByRole("tab", { name: label });
+      // lucide-react renders an <svg>; the icon must sit alongside the label text.
+      expect(tab.querySelector("svg")).not.toBeNull();
+      expect(tab).toHaveTextContent(label);
+    }
+  });
+
   it("shows DialogFooter in main view", async () => {
     setupChromeMessages({ familyId: "fam-1", userId: "user-1" });
 

@@ -15,6 +15,8 @@ export interface FamilyShelfToolbarProps {
   userId: string;
   filterMember: MemberFilterValue;
   onMemberFilterChange: (value: MemberFilterValue) => void;
+  favoriteCount: number;
+  hiddenCount: number;
   sort: BookSortMode;
   onSortChange: (sort: BookSortMode) => void;
   searchTerm: string;
@@ -38,6 +40,8 @@ export function FamilyShelfToolbar({
   userId,
   filterMember,
   onMemberFilterChange,
+  favoriteCount,
+  hiddenCount,
   sort,
   onSortChange,
   searchTerm,
@@ -67,6 +71,8 @@ export function FamilyShelfToolbar({
             userId={userId}
             value={filterMember}
             onChange={onMemberFilterChange}
+            favoriteCount={favoriteCount}
+            hiddenCount={hiddenCount}
           />
         </div>
         <BookSortDropdown value={sort} onChange={onSortChange} />

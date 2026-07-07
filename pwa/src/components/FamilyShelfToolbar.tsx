@@ -1,11 +1,10 @@
 import { CategoryFilter } from "@/components/CategoryFilter";
 import { ViewModeToggle } from "@/components/ViewModeToggle";
 import { BookSortDropdown } from "@/components/BookSortDropdown";
+import { MemberDropdown } from "@/components/MemberDropdown";
 import type { BookSortMode } from "@/utils/sortBooks";
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import {
-  HIDDEN_FILTER_VALUE,
-  FAVORITE_FILTER_VALUE,
   type BookWithMember,
   type MemberFilterValue,
 } from "@/hooks/useFamilyShelfBooks";
@@ -27,6 +26,8 @@ export interface FamilyShelfToolbarProps {
   userId: string;
   sort: BookSortMode;
   onSortChange: (sort: BookSortMode) => void;
+  favoriteCount: number;
+  hiddenCount: number;
 }
 
 /** Family-shelf header + filter controls (PWA). */
@@ -45,6 +46,8 @@ export function FamilyShelfToolbar({
   userId,
   sort,
   onSortChange,
+  favoriteCount,
+  hiddenCount,
 }: FamilyShelfToolbarProps) {
   return (
     <>
@@ -73,23 +76,14 @@ export function FamilyShelfToolbar({
       </div>
 
       <div className="flex gap-2 mb-4">
-        <select
+        <MemberDropdown
+          members={members}
+          userId={userId}
           value={filterMember}
-          onChange={(e) => onMemberFilterChange(e.target.value as MemberFilterValue)}
-          aria-label="篩選成員"
-          className="moo-form-select flex-1 rounded-lg border border-gray-300 pl-3 pr-9 py-2.5 text-sm bg-white focus:border-blue-500 outline-none"
-        >
-          <option value="all">所有人的書</option>
-          <option value="all-except-self">其他家人的書</option>
-          <option value={userId}>自己的書</option>
-          {members.filter((m) => m.userId !== userId).map((m) => (
-            <option key={m.userId} value={m.userId}>
-              {m.displayName || m.userId.slice(0, 8)}
-            </option>
-          ))}
-          <option value={FAVORITE_FILTER_VALUE}>我的最愛</option>
-          <option value={HIDDEN_FILTER_VALUE}>隱藏的書</option>
-        </select>
+          onChange={onMemberFilterChange}
+          favoriteCount={favoriteCount}
+          hiddenCount={hiddenCount}
+        />
         <BookSortDropdown value={sort} onChange={onSortChange} />
       </div>
     </>

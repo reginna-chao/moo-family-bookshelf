@@ -6,6 +6,7 @@ import {
   fireEvent,
   waitFor,
   act,
+  within,
 } from "@testing-library/react";
 import React from "react";
 import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
@@ -71,6 +72,20 @@ function renderWithProvider(props: ReturnType<typeof createProps>) {
       <FamilyShelfPage userId={props.userId} />
     </FamilyDataProvider>,
   );
+}
+
+/**
+ * Opens the custom member dropdown and clicks the option whose label matches.
+ * Options render as `label + count`, so we match the label substring.
+ */
+function selectMemberOption(optionLabel: string) {
+  fireEvent.click(screen.getByLabelText("篩選成員"));
+  const listbox = screen.getByRole("listbox", { name: "成員選單" });
+  const option = within(listbox)
+    .getAllByRole("option")
+    .find((el) => el.textContent?.startsWith(optionLabel));
+  if (!option) throw new Error(`member option not found: ${optionLabel}`);
+  fireEvent.click(option);
 }
 
 describe("FamilyShelfPage", () => {
@@ -339,9 +354,7 @@ describe("FamilyShelfPage", () => {
     });
 
     // Switch to "所有人"
-    fireEvent.change(screen.getByLabelText("篩選成員"), {
-      target: { value: "all" },
-    });
+    selectMemberOption("所有人的書");
 
     await waitFor(() => {
       expect(screen.getByText("My Book")).toBeInTheDocument();
@@ -476,9 +489,7 @@ describe("FamilyShelfPage", () => {
     });
 
     // Switch to "all" filter to see self's books
-    fireEvent.change(screen.getByLabelText("篩選成員"), {
-      target: { value: "all" },
-    });
+    selectMemberOption("所有人的書");
 
     await waitFor(() => {
       expect(screen.getByText("My Book")).toBeInTheDocument();

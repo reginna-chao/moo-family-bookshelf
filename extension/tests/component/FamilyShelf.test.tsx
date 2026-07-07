@@ -59,6 +59,16 @@ function makeMemberBooks(books: Array<{ bookId: string; title: string; author: s
   return books;
 }
 
+/**
+ * Drive the custom MemberDropdown (rewritten from a native `<select>`):
+ * open the trigger, then click the option matching `optionName`. Replaces the
+ * old `fireEvent.change(select, { target: { value } })` interaction.
+ */
+function selectMemberFilter(optionName: RegExp) {
+  fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+  fireEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
 describe("FamilyShelf", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -410,7 +420,7 @@ describe("FamilyShelf", () => {
     });
 
     // Change filter to "all"
-    fireEvent.change(screen.getByLabelText("篩選成員"), { target: { value: "all" } });
+    selectMemberFilter(/所有人的書/);
 
     await waitFor(() => {
       expect(screen.getByText("我的書")).toBeInTheDocument();
@@ -550,7 +560,7 @@ describe("FamilyShelf", () => {
     await waitFor(() => {
       expect(screen.getByText("Alice的書")).toBeInTheDocument();
     });
-    fireEvent.change(screen.getByLabelText("篩選成員"), { target: { value: "all" } });
+    selectMemberFilter(/所有人的書/);
 
     await waitFor(() => {
       expect(screen.getByText("我的書")).toBeInTheDocument();
@@ -601,7 +611,7 @@ describe("FamilyShelf", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
     });
-    fireEvent.change(screen.getByLabelText("篩選成員"), { target: { value: "all" } });
+    selectMemberFilter(/所有人的書/);
 
     await waitFor(() => {
       expect(screen.getByText("我的書")).toBeInTheDocument();
@@ -824,7 +834,7 @@ describe("FamilyShelf", () => {
       });
 
       // Switch member dropdown — should reset visibleCount
-      fireEvent.change(screen.getByLabelText("篩選成員"), { target: { value: "user-2" } });
+      selectMemberFilter(/Alice/);
 
       // Alice has 250 books → after reset, visible = 100
       await waitFor(() => {

@@ -1,6 +1,7 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useDismissableMenu } from "../hooks/useDismissableMenu";
 
 const UNCATEGORIZED = "未分類";
 
@@ -35,19 +36,11 @@ function buildCategories(books: { category: string }[]): CategoryOption[] {
 
 export function CategoryFilter({ books, value, onChange, open, onToggle }: CategoryFilterProps) {
   const categories = React.useMemo(() => buildCategories(books), [books]);
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        onToggle();
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open, onToggle]);
+  useDismissableMenu({ isOpen: open, onClose: onToggle, triggerRef, menuRef });
 
   if (categories.length <= 1) return null;
 
@@ -66,18 +59,22 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
     selected ? "moo-category__option moo-category__option--selected" : "moo-category__option";
 
   return (
-    <div ref={popoverRef} className="moo-category">
+    <div className="moo-category">
       <button
+        ref={triggerRef}
+        type="button"
         onClick={onToggle}
         aria-label="篩選分類"
+        aria-haspopup="listbox"
         aria-expanded={open}
         className={triggerClass}
       >
         <SlidersHorizontal size={16} />
       </button>
       {open && (
-        <div className={menuClass} role="listbox" aria-label="分類選單">
+        <div ref={menuRef} className={menuClass} role="listbox" aria-label="分類選單">
           <button
+            type="button"
             role="option"
             aria-selected={value === ""}
             onClick={() => { onChange(""); onToggle(); }}
@@ -89,6 +86,7 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
           {categories.map((cat) => (
             <button
               key={cat.value}
+              type="button"
               role="option"
               aria-selected={value === cat.value}
               onClick={() => { onChange(cat.value); onToggle(); }}
