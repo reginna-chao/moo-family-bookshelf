@@ -11,10 +11,6 @@ import {
 import React from "react";
 import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
 import { FamilyDataProvider } from "@/hooks/useFamilyData";
-import {
-  FAVORITE_FILTER_VALUE,
-  HIDDEN_FILTER_VALUE,
-} from "@/hooks/useFamilyShelfBooks";
 
 /** Walks up from the book title to the nearest card root that holds its overflow trigger. */
 function cardOf(title: string): HTMLElement {
@@ -43,11 +39,23 @@ function hideMenuLabelOf(title: string): string {
   return item.textContent as string;
 }
 
+/**
+ * Opens the custom member dropdown and clicks the option whose label matches.
+ * Options render as `label + count`, so we match the label substring.
+ */
+function selectMemberOption(optionLabel: string) {
+  fireEvent.click(screen.getByLabelText("篩選成員"));
+  const listbox = screen.getByRole("listbox", { name: "成員選單" });
+  const option = within(listbox)
+    .getAllByRole("option")
+    .find((el) => el.textContent?.startsWith(optionLabel));
+  if (!option) throw new Error(`member option not found: ${optionLabel}`);
+  fireEvent.click(option);
+}
+
 /** Switches the member dropdown to the cross-everyone favorites view. */
 function enterFavoriteView() {
-  fireEvent.change(screen.getByLabelText("篩選成員"), {
-    target: { value: FAVORITE_FILTER_VALUE },
-  });
+  selectMemberOption("我的最愛");
 }
 
 vi.mock("@/api/client", async (importOriginal) => {
@@ -311,9 +319,7 @@ describe("FamilyShelfPage — favorite feature", () => {
     expect(screen.queryByText("書二")).not.toBeInTheDocument();
 
     // Hidden view → only b2.
-    fireEvent.change(screen.getByLabelText("篩選成員"), {
-      target: { value: HIDDEN_FILTER_VALUE },
-    });
+    selectMemberOption("隱藏的書");
     await waitFor(() => {
       expect(screen.getByText("書二")).toBeInTheDocument();
     });

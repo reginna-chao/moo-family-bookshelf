@@ -216,16 +216,16 @@ describe("mobileLayout", () => {
       expect(desktopBtn.style.display).toBe("none");
     });
 
-    it("is a 32px touch target with an accessible label", () => {
+    it("is a 35px touch target with an accessible label", () => {
       const btn = createCloseIcon(vi.fn(), true);
-      // The static 32px size moved from inline cssText to the `.moo-shell-close`
+      // The static size moved from inline cssText to the `.moo-shell-close`
       // class in SHELL_BOOTSTRAP_CSS (injected into the shadow root). jsdom does
       // not reflect stylesheet rules onto `.style`, so the class is now the
       // observable contract for the size — assert the class here and pin the
       // actual px value against the source stylesheet below.
       expect(btn.classList.contains("moo-shell-close")).toBe(true);
-      expect(SHELL_BOOTSTRAP_CSS).toMatch(/\.moo-shell-close\s*\{[^}]*width:\s*32px/);
-      expect(SHELL_BOOTSTRAP_CSS).toMatch(/\.moo-shell-close\s*\{[^}]*height:\s*32px/);
+      expect(SHELL_BOOTSTRAP_CSS).toMatch(/\.moo-shell-close\s*\{[^}]*width:\s*35px/);
+      expect(SHELL_BOOTSTRAP_CSS).toMatch(/\.moo-shell-close\s*\{[^}]*height:\s*35px/);
       expect(btn.getAttribute("aria-label")).toBe("關閉");
     });
 

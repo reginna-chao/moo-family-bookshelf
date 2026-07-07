@@ -1,6 +1,7 @@
 import { BookCard } from "./BookCard";
 import { FamilyBookRow } from "./FamilyBookRow";
 import type { FamilyShelfBook } from "./useFamilyShelfBooks";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 type ViewMode = "grid" | "row";
 
@@ -35,6 +36,7 @@ export function FamilyShelfBookList({
   isFavorite,
   onToggleFavorite,
 }: FamilyShelfBookListProps) {
+  const isMobile = useIsMobile();
   const renderBook = (book: FamilyShelfBook) => {
     const ownerCanLend = memberCanLendMap.get(book.ownerId) ?? true;
     const isOwnBook = book.ownerId === userId;
@@ -55,7 +57,7 @@ export function FamilyShelfBookList({
       onFavoriteToggle: () => onToggleFavorite(book.ownerId, book.bookId),
     };
     if (viewMode === "row") {
-      return <FamilyBookRow key={key} {...shared} />;
+      return <FamilyBookRow key={key} {...shared} isMobile={isMobile} />;
     }
     return <BookCard key={key} {...shared} />;
   };

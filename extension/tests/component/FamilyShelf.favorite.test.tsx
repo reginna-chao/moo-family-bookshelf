@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
-import { FAVORITE_FILTER_VALUE, HIDDEN_FILTER_VALUE } from "@/dialog/MemberDropdown";
 import { BoolFlag, type ApiClient } from "@/api/client";
 
 /**
@@ -36,11 +35,18 @@ function hideMenuLabelOf(title: string): string {
   return item.textContent as string;
 }
 
+/**
+ * Drive the custom MemberDropdown (rewritten from a native `<select>`):
+ * open the trigger, then click the option matching `optionName`.
+ */
+function selectMemberFilter(optionName: RegExp) {
+  fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+  fireEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
 /** Switches the member dropdown to the cross-everyone favorites view. */
 function enterFavoriteView() {
-  fireEvent.change(screen.getByLabelText("篩選成員"), {
-    target: { value: FAVORITE_FILTER_VALUE },
-  });
+  selectMemberFilter(/我的最愛/);
 }
 
 vi.mock("@/dialog/useSearch", () => ({
@@ -317,9 +323,7 @@ describe("FamilyShelf — favorite feature", () => {
     expect(screen.queryByText("書二")).not.toBeInTheDocument();
 
     // Hidden view → only b2.
-    fireEvent.change(screen.getByLabelText("篩選成員"), {
-      target: { value: HIDDEN_FILTER_VALUE },
-    });
+    selectMemberFilter(/隱藏的書/);
     await waitFor(() => {
       expect(screen.getByText("書二")).toBeInTheDocument();
     });

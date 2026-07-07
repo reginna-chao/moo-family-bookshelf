@@ -132,7 +132,10 @@ test.describe("Book Sharing", () => {
     // Change the filter to "所有人的書" to see our own shared books.
     const dropdown = dialog.getByLabel("篩選成員");
     if (await dropdown.isVisible()) {
-      await dropdown.selectOption({ label: "所有人的書" });
+      // Member filter is now a custom dropdown (button + listbox), not a <select>:
+      // open the trigger, then pick the option.
+      await dropdown.click();
+      await dialog.getByRole("option", { name: "所有人的書" }).click();
 
       // Wait for re-render after filter change — use BookCard's <a> tag to avoid
       // strict mode violation from hidden PersonalShelf tab's <span> elements

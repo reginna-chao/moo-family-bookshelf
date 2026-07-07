@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
-import { HIDDEN_FILTER_VALUE } from "@/dialog/MemberDropdown";
 import { BoolFlag, type ApiClient } from "@/api/client";
 
 /**
@@ -28,11 +27,18 @@ function triggerHideAction(title: string, itemName: string) {
   fireEvent.click(screen.getByRole("menuitem", { name: itemName }));
 }
 
+/**
+ * Drive the custom MemberDropdown (rewritten from a native `<select>`):
+ * open the trigger, then click the option matching `optionName`.
+ */
+function selectMemberFilter(optionName: RegExp) {
+  fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+  fireEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
 /** Switches the member dropdown to the cross-everyone hidden view. */
 function enterHiddenView() {
-  fireEvent.change(screen.getByLabelText("篩選成員"), {
-    target: { value: HIDDEN_FILTER_VALUE },
-  });
+  selectMemberFilter(/隱藏的書/);
 }
 
 // Mock useSearch to avoid debounce complexity in tests
@@ -304,7 +310,7 @@ describe("FamilyShelf — hide feature", () => {
     await waitFor(() => {
       expect(screen.getByText("Alice的書")).toBeInTheDocument();
     });
-    fireEvent.change(screen.getByLabelText("篩選成員"), { target: { value: "all" } });
+    selectMemberFilter(/所有人的書/);
 
     await waitFor(() => {
       expect(screen.getByText("我的書")).toBeInTheDocument();
