@@ -1023,6 +1023,57 @@ jobs:
   - **成員變更語意**：與隱藏完全相同——孤兒紀錄（`(ownerId, bookId)` 不在當前書櫃）渲染時忽略，新成員不繼承。
   - **前置依賴**：Phase 9 的 `familyShelfPrefs` 容器與 `family-prefs` 端點須先上線（v1.5.0）。
 
+### Phase 11：技術債與稽核改善 backlog（2026-07 雙模型稽核）
+
+> 2026-07-08~09 以 Opus 4.8 + Fable 5 **雙模型**對全專案做架構 / 資安 / 測試稽核，交叉比對後分批修復。
+> 本節記錄**已修復並合併**的項目與**經評估暫緩**的 backlog（附優先級與「是否需要處理」判斷）。
+> **整體結論**：安全與正確性問題已於 Batch 1–3 全數清除並合併進 `main`；**剩餘 backlog 皆為可選的技術債 / 擴充性，無「必須立即處理」項目**，可依需要排入未來 minor。
+
+#### 已完成並合併
+
+- [x] **Batch 1 — Worker 安全與驗證硬化（PR #68）**
+  - **SEC-1**：`POST /api/family/:id/join` 的 existing-member 重連路徑補上驗證閘門，關閉「知道成員 email 即可鑄造其 token」的帳號接管；前端同步補「復原 / 加入時輸入 PIN/pattern 重試」配套（含 OTP 引導與載入失敗訊息）
+  - **BE-1**：`PUT /user/:id/books` 改用欄位 allowlist，阻斷未驗證欄位 / prototype pollution / `body.userId` IDOR 寫入；`familyShelfPrefs` 走 `parseFamilyPrefs` 上限檢查
+  - **BE-8**：`UserIdSchema` 收緊為嚴格 64-hex（與 auth 路徑一致）；**BE-3**：書櫃聚合端點加 per-user 限流；**BE-9**：移除誤導的 `toPublicRecord` 死碼
+  - **TEST-1**：補書櫃隱私過濾（`isShared === TRUE`）測試——刪掉過濾行即失敗
+- [x] **Batch 2 — 前端生命週期清理（PR #69）**
+  - **FE-5**：`PublicShareDialog` 的標題 debounce / 「已複製」旗標補 unmount cleanup（抽 `useDebouncedCallback` / `useTimedFlag`），避免關閉對話框後仍發網路寫入 + 卸載後 setState
+  - **FE-4**：移除 PWA 的 `window` CustomEvent bus，改直接呼叫 context 既有方法（順帶消除同源 spoof 面）
+- [x] **Batch 3 — 測試韌性與 CI 覆蓋率（PR #70）**
+  - **TEST-2**：Invariant #5（設定跨 unbind/rebind 保留）整合測試；**TEST-3**：`useTokenRefresh` 主動刷新排程器補測（原本零測試）；**TEST-8**：改正名實不符的測試（名稱寫 403、實斷言 404）
+  - **TEST-4**：CI 改跑 `test:coverage` 真正 enforce 覆蓋率門檻（pwa 首次補門檻、extension 補 `src/api` ≥80% per-dir）+ `testTimeout: 30000` 穩定化慢測試
+
+#### 待評估 backlog（經評估暫緩，**非待辦**，依需要再啟動）
+
+##### 🟡 中優先 — 維護性（drift 風險；雙平台長期並行才值得）
+
+- [ ] **FE-1 抽取 extension↔pwa 重複邏輯至 `shared/`**（~530 行逐字重複：`useFamilyShelfPrefs` / `useFamilyShelfBooks` / `updateTracking` / `sortBooks` / API 型別）
+  - **是否需要處理**：視產品路線。#67（排序降冪）已示範重複會持續 drift（兩版 `sortBooks` 變數名已分岔）。若 Extension 與 PWA 都長期維護 → 值得；若一邊為次要 → 不划算。**大型重構、有回歸風險，建議獨立批次進行。**
+- [ ] **S3 / FE-3 / BE-6 / BE-7 分層與拆分**：`useOnboardingFlow`（525 行 god-hook）、`FamilyDataContext`（500 行）、Worker 缺資料存取層（`KV.get`+normalize 複製 10+ 處）、`join` handler（~120 行）
+  - **是否需要處理**：非 bug，純可維護性。可隨相關檔案下次改動時**漸進處理**，不必專門開工。
+
+##### 🟢 低優先 — 擴充性（N=2 現在不痛，規模到了再做）
+
+- [ ] **BE-2 書櫃聚合改 snapshot**（現為每成員讀完整 `user:{id}` 記錄後前端過濾）
+- [ ] **BE-4 rate limiter 改用原生 Workers Rate Limiting binding**（現以 KV 計數，限流器本身消耗寫入配額）
+- [ ] **BE-5 borrow index 改增量 / 終態清理**（現為 append-only，每次操作掃全歷史）
+  - **是否需要處理**：三項都是「隨成員數 / 歷史長度放大」的擴充性，目前 2 人家庭 + 低流量不觸發。到 `maxMembers` 調高或流量成長再啟動即可。
+
+##### ⚪ 低優先 — 零星清理與 DX
+
+- [ ] **BE-10/11** 統一驗證錯誤碼（`defaultHook` 現一律回 `INVALID_JSON`）+ 接上 zod-openapi 實際驗證；**BE-12** 補 publicShelf / OTP / QR 的 per-user 限流；**BE-13** 非原子多鍵寫入的部分失敗清理
+- [ ] **FE-6** 拆 >200 行大檔（`SettingsPage` 557 行等）；**FE-7** 收斂 props drilling；**FE-8** 抽共用 `useDismissable`（點外關閉重複 8 次）
+- [ ] **TEST-5/6/7** 補測：PWA 驗證 UI（`PatternLock` / `PinInput`）+ `pwa/src/crypto/hash`、`scraper-archive.ts`、`useQrLinkState.ts`
+- [ ] **SEC-3** dev 相依套件 bump（vitest / vite / shell-quote 等；皆 `devDependencies`，不入 production bundle，對使用者零影響）
+- [ ] **文件不一致**：integration 測試實際使用 in-memory `createMockKV()`，而非 `test.md` / 本計畫書第八章所述的 Miniflare。擇一收斂：改用 Miniflare，或更新文件（`test.md` + 本計畫書 + `CLAUDE.md`）反映實情。
+
+##### 不修（設計固有 / 已評估接受）
+
+- **`deriveUserId` 靜態 salt**（`moo:` prefix）：userId 必須從 email 決定性推導，無法改用 per-user 隨機 salt，屬設計固有，非可修 bug。
+- **`/auth/lookup` 回傳 `familyId` / `memberCount`**：帳號復原流程（換裝置 rejoin）需要此欄位；且 SEC-1 上線後，即使洩漏 familyId 也無法用於冒充（有設驗證者）。殘餘僅「知道某 email 者得知其是否使用本服務 + 家庭人數」的低敏感度資訊，接受。
+
+> **完成狀態**：Batch 1–3 已於 2026-07-08~09 合併（#68 / #69 / #70），各批皆走完整 coder→tester→reviewer→Fix Cycle→（安全掃描）週期，全綠合併。待評估 backlog 尚未排入具體版本。
+
 ---
 
 ## 十一、專案結構（預覽）
@@ -1086,4 +1137,4 @@ moo-family-bookshelf/
 
 ---
 
-*最後更新：2026-06-15（v1.5.0 範圍調整：新增 Wave M Firefox 跨瀏覽器支援（含 Firefox for Android™），與隱藏書籍同 release；我的最愛維持 v1.6.0、不延後）*
+*最後更新：2026-07-09（新增 Phase 11：技術債與稽核改善 backlog — 記錄 2026-07 雙模型稽核的 Batch 1–3 已修復項目（#68/#69/#70）與經評估暫緩的 backlog）*
