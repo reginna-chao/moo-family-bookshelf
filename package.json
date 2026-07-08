@@ -1,6 +1,6 @@
 {
   "name": "moo-family-bookshelf",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "description": "Chrome Extension for Readmoo family account members to browse each other's shared books",
   "license": "MIT",
