@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { SettingsPage } from "@/pages/SettingsPage";
-import { FamilyDataProvider } from "@/hooks/useFamilyData";
-import { BoolFlag, type ApiClient } from "@/api/client";
+import { FamilyDataProvider, useFamilyData } from "@/hooks/useFamilyData";
+import { type ApiClient } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 
 // Mock syncCode module
@@ -52,6 +52,36 @@ function renderWithProvider(props = defaultProps) {
       apiClient={props.apiClient}
     >
       <SettingsPage {...props} />
+    </FamilyDataProvider>,
+  );
+}
+
+/**
+ * A bare consumer of the FamilyData context. Renders the members the provider
+ * currently holds so a test can assert what `updateMemberDisplayName` pushed
+ * into the shared context (the direct-call replacement for the removed
+ * `displayNameChanged` CustomEvent), independent of SettingsPage's own UI.
+ */
+function MembersProbe() {
+  const { members } = useFamilyData();
+  return (
+    <ul data-testid="members-probe">
+      {members.map((m) => (
+        <li key={m.userId}>{m.displayName}</li>
+      ))}
+    </ul>
+  );
+}
+
+function renderWithProbe(props = defaultProps) {
+  return render(
+    <FamilyDataProvider
+      familyId={props.familyId}
+      userId={props.userId}
+      apiClient={props.apiClient}
+    >
+      <SettingsPage {...props} />
+      <MembersProbe />
     </FamilyDataProvider>,
   );
 }
@@ -334,21 +364,26 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("dispatches displayNameChanged CustomEvent after successful save", async () => {
+  it("pushes the trimmed name into the family context after a successful save", async () => {
     mockUpdateDisplayName.mockResolvedValue({ data: { ok: true } });
-    mockGetFamilyMembers.mockResolvedValue({
-      data: {
-        members: [{ userId: defaultProps.userId, displayName: "Alice" }],
-        ownerId: defaultProps.userId,
-      },
-    });
+    // Mount load returns "Alice"; the post-save reload is left pending so it
+    // cannot clobber the optimistic context update. Any change the probe shows
+    // therefore comes from `updateMemberDisplayName`, not the reload.
+    mockGetFamilyMembers.mockReset();
+    mockGetFamilyMembers
+      .mockResolvedValueOnce({
+        data: {
+          members: [{ userId: defaultProps.userId, displayName: "Alice" }],
+          ownerId: defaultProps.userId,
+        },
+      })
+      .mockReturnValue(new Promise(() => {}));
 
-    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    renderWithProbe();
 
-    renderWithProvider();
-
+    const probe = () => screen.getByTestId("members-probe");
     await waitFor(() => {
-      expect(screen.getByText("Alice")).toBeInTheDocument();
+      expect(within(probe()).getByText("Alice")).toBeInTheDocument();
     });
 
     // Edit name
@@ -365,19 +400,14 @@ describe("SettingsPage", () => {
       );
     });
 
-    // Verify CustomEvent was dispatched
+    // Context now reflects the new name (direct call replaces the CustomEvent).
     await waitFor(() => {
-      const dispatchedEvents = dispatchSpy.mock.calls
-        .map(([event]) => event)
-        .filter((e): e is CustomEvent => e instanceof CustomEvent && e.type === "displayNameChanged");
-      expect(dispatchedEvents.length).toBe(1);
-      expect(dispatchedEvents[0].detail).toEqual({ displayName: "新名字" });
+      expect(within(probe()).getByText("新名字")).toBeInTheDocument();
     });
-
-    dispatchSpy.mockRestore();
+    expect(within(probe()).queryByText("Alice")).not.toBeInTheDocument();
   });
 
-  it("does not dispatch CustomEvent when display name update fails", async () => {
+  it("does not touch the family context when the display name update fails", async () => {
     mockUpdateDisplayName.mockResolvedValue({
       error: { code: "INVALID", message: "名稱格式不正確" },
     });
@@ -388,30 +418,25 @@ describe("SettingsPage", () => {
       },
     });
 
-    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    renderWithProbe();
 
-    renderWithProvider();
-
+    const probe = () => screen.getByTestId("members-probe");
     await waitFor(() => {
-      expect(screen.getByText("Alice")).toBeInTheDocument();
+      expect(within(probe()).getByText("Alice")).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
     const input = screen.getByRole("textbox", { name: "顯示名稱" });
-    fireEvent.change(input, { target: { value: "Bad" } });
+    fireEvent.change(input, { target: { value: "新名字" } });
     fireEvent.click(screen.getByRole("button", { name: "確認修改名稱" }));
 
     await waitFor(() => {
       expect(screen.getByText("名稱格式不正確")).toBeInTheDocument();
     });
 
-    // Verify no CustomEvent was dispatched
-    const dispatchedEvents = dispatchSpy.mock.calls
-      .map(([event]) => event)
-      .filter((e): e is CustomEvent => e instanceof CustomEvent && e.type === "displayNameChanged");
-    expect(dispatchedEvents.length).toBe(0);
-
-    dispatchSpy.mockRestore();
+    // Failed save must leave the shared context untouched.
+    expect(within(probe()).getByText("Alice")).toBeInTheDocument();
+    expect(within(probe()).queryByText("新名字")).not.toBeInTheDocument();
   });
 
   it("shows error when display name update fails", async () => {
