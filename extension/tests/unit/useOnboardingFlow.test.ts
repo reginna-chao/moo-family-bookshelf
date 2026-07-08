@@ -39,10 +39,12 @@ vi.mock("@/crypto/syncCode", () => ({
 import { useOnboardingFlow } from "@/dialog/useOnboardingFlow";
 import { deriveUserId } from "@/crypto/hash";
 import {
+  performJoin,
   performSoloRecovery,
   tryAutoRecovery,
 } from "@/dialog/onboardingFlow";
 import type { ApiClient } from "@/api/client";
+import type { VerifyMethod } from "@/api/types";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
@@ -378,6 +380,176 @@ describe("useOnboardingFlow", () => {
       });
 
       expect(result.current.state).toBe("welcome");
+    });
+  });
+
+  /**
+   * SEC-1: an existing verification-enabled member reconnecting on a fresh
+   * device gets VERIFICATION_REQUIRED. Every join path must bridge to the
+   * "verify-prompt" state (not a generic error / silent recovery-choice
+   * fallback), retry with the secret, and restore the prior view on cancel.
+   */
+  describe("verification prompt bridge (verify-prompt)", () => {
+    function apiClientWithFamily(method: VerifyMethod = "pin"): ApiClient {
+      return createMockApiClient({
+        lookupUser: vi.fn().mockResolvedValue({
+          data: { existingFamilyId: "fam-existing", memberCount: 2 },
+        }),
+        getVerifyMethod: vi.fn().mockResolvedValue({ data: { method, prompted: 0 } }),
+      });
+    }
+
+    it("auto-recovery: VERIFICATION_REQUIRED routes to verify-prompt and fetches the method", async () => {
+      vi.mocked(tryAutoRecovery).mockResolvedValue({
+        recovered: false,
+        errorCode: "VERIFICATION_REQUIRED",
+      });
+      const { result } = renderFlow(apiClientWithFamily("pattern"));
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+
+      expect(result.current.state).toBe("verify-prompt");
+      expect(result.current.verify.active).toBe(true);
+      expect(result.current.verify.method).toBe("pattern");
+    });
+
+    it("auto-recovery: entering the correct secret retries and completes the join", async () => {
+      const onFamilyJoined = vi.fn();
+      // First (no secret) fails with verification; retry (with secret) succeeds.
+      vi.mocked(tryAutoRecovery).mockImplementation(async (opts) => {
+        if (opts.verifySecret) {
+          opts.onFamilyJoined(opts.familyId, opts.userId);
+          return { recovered: true };
+        }
+        return { recovered: false, errorCode: "VERIFICATION_REQUIRED" };
+      });
+      const { result } = renderFlow(
+        apiClientWithFamily(),
+        createMockAutoSetup(),
+        onFamilyJoined,
+      );
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      await act(async () => {
+        await result.current.verify.submit("123456");
+      });
+
+      expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", expect.any(String));
+      const lastCall = vi.mocked(tryAutoRecovery).mock.calls.at(-1);
+      expect(lastCall?.[0].verifySecret).toBe("123456");
+    });
+
+    it("auto-recovery: cancel returns to the recovery-choice screen", async () => {
+      vi.mocked(tryAutoRecovery).mockResolvedValue({
+        recovered: false,
+        errorCode: "VERIFICATION_REQUIRED",
+      });
+      const { result } = renderFlow(apiClientWithFamily());
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      act(() => {
+        result.current.verify.cancel();
+      });
+
+      expect(result.current.state).toBe("recovery-choice");
+      expect(result.current.verify.active).toBe(false);
+    });
+
+    it("manual join: VERIFICATION_REQUIRED routes to verify-prompt, then the secret completes the join", async () => {
+      const onFamilyJoined = vi.fn();
+      vi.mocked(performJoin).mockImplementation(async (opts) => {
+        if (opts.verifySecret) {
+          return { ok: true, familyId: "fam-joined", userId: opts.userId };
+        }
+        return {
+          ok: false,
+          errorCode: "VERIFICATION_REQUIRED",
+          errorMessage: "需要驗證",
+        };
+      });
+      const api = createMockApiClient({
+        getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
+      });
+      const { result } = renderFlow(api, createMockAutoSetup(), onFamilyJoined);
+
+      // Land in idle first so a manual join is possible.
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      act(() => {
+        result.current.setSyncCodeInput("moo-fam-joined");
+      });
+
+      await act(async () => {
+        await result.current.handleJoin();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      await act(async () => {
+        await result.current.verify.submit("654321");
+      });
+
+      expect(onFamilyJoined).toHaveBeenCalledWith("fam-joined", expect.any(String));
+    });
+
+    it("manual join: cancel returns to the idle screen", async () => {
+      vi.mocked(performJoin).mockResolvedValue({
+        ok: false,
+        errorCode: "VERIFICATION_REQUIRED",
+        errorMessage: "需要驗證",
+      });
+      const api = createMockApiClient({
+        getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
+      });
+      const { result } = renderFlow(api);
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      act(() => {
+        result.current.setSyncCodeInput("moo-fam-joined");
+      });
+      await act(async () => {
+        await result.current.handleJoin();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      act(() => {
+        result.current.verify.cancel();
+      });
+
+      expect(result.current.state).toBe("idle");
+    });
+
+    it("solo recovery: VERIFICATION_REQUIRED routes to verify-prompt", async () => {
+      // Reach solo-recovery-confirm, then confirm with a verification failure.
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
+      const { result } = await driveToRecoveryChoice(apiClientWithFamily());
+      await act(async () => {
+        await result.current.handleRecoveryChoiceSkip();
+      });
+      expect(result.current.state).toBe("solo-recovery-confirm");
+
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+        recovered: false,
+        errorCode: "VERIFICATION_REQUIRED",
+      });
+      await act(async () => {
+        await result.current.handleSoloRecoveryConfirm();
+      });
+
+      expect(result.current.state).toBe("verify-prompt");
+      expect(result.current.verify.active).toBe(true);
     });
   });
 });

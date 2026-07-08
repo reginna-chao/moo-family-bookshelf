@@ -82,12 +82,15 @@ async function persistJoinCredentials(opts: {
 
 export interface RecoveryResult {
   recovered: boolean;
+  /** Backend error code when recovery failed (e.g. VERIFICATION_REQUIRED). */
+  errorCode?: string;
 }
 
 /**
  * Attempt to rejoin an existing family.
- * Returns { recovered: true } on success, { recovered: false } if the
- * join request fails.
+ * Returns { recovered: true } on success, or { recovered: false, errorCode }
+ * if the join request fails — the code lets callers distinguish a
+ * verification-required/failed/locked error from a generic failure.
  */
 export async function tryAutoRecovery(opts: {
   familyId: string;
@@ -96,13 +99,16 @@ export async function tryAutoRecovery(opts: {
   apiClient: ApiClient;
   autoSetup: ReturnType<typeof useAutoSetup>;
   onFamilyJoined: (familyId: string, userId: string) => void;
+  /** PWA login verification secret (PIN/pattern) for verification-enabled users. */
+  verifySecret?: string;
 }): Promise<RecoveryResult> {
   const joinRes = await opts.apiClient.joinFamily(
     opts.familyId,
     opts.userId,
     opts.displayName,
+    opts.verifySecret !== undefined ? { verifySecret: opts.verifySecret } : undefined,
   );
-  if (joinRes.error) return { recovered: false };
+  if (joinRes.error) return { recovered: false, errorCode: joinRes.error.code };
 
   const joinData = joinRes.data;
 
@@ -134,6 +140,8 @@ export async function tryAutoRecovery(opts: {
 
 export interface SoloRecoveryResult {
   recovered: boolean;
+  /** Backend error code when recovery failed (e.g. VERIFICATION_REQUIRED). */
+  errorCode?: string;
 }
 
 /**
@@ -146,13 +154,16 @@ export async function performSoloRecovery(opts: {
   apiClient: ApiClient;
   autoSetup: ReturnType<typeof useAutoSetup>;
   onFamilyJoined: (familyId: string, userId: string) => void;
+  /** PWA login verification secret (PIN/pattern) for verification-enabled users. */
+  verifySecret?: string;
 }): Promise<SoloRecoveryResult> {
   const joinRes = await opts.apiClient.joinFamily(
     opts.familyId,
     opts.userId,
     opts.displayName,
+    opts.verifySecret !== undefined ? { verifySecret: opts.verifySecret } : undefined,
   );
-  if (joinRes.error) return { recovered: false };
+  if (joinRes.error) return { recovered: false, errorCode: joinRes.error.code };
 
   const joinData = joinRes.data;
 
@@ -261,6 +272,8 @@ export async function performJoin(opts: {
   userId: string;
   displayName: string;
   apiClient: ApiClient;
+  /** PWA login verification secret (PIN/pattern) for verification-enabled users. */
+  verifySecret?: string;
 }): Promise<PerformJoinResult> {
   const decoded = decodeSyncCode(opts.syncCodeInput);
 
@@ -278,6 +291,7 @@ export async function performJoin(opts: {
     decoded.familyId,
     opts.userId,
     opts.displayName,
+    opts.verifySecret !== undefined ? { verifySecret: opts.verifySecret } : undefined,
   );
   if (response.error) {
     return {

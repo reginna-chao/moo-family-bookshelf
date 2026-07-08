@@ -102,7 +102,7 @@ describe("performSoloRecovery", () => {
     expect(onFamilyJoined).toHaveBeenCalledWith("fam-solo-1", "user-abc");
   });
 
-  it("calls joinFamily without keyFingerprint", async () => {
+  it("calls joinFamily with undefined verify opts when no secret is given", async () => {
     const apiClient = createMockApiClient();
     const autoSetup = createMockAutoSetup();
 
@@ -119,6 +119,7 @@ describe("performSoloRecovery", () => {
       "fam-solo-1",
       "user-abc",
       "Test User",
+      undefined,
     );
   });
 
@@ -189,7 +190,7 @@ describe("performSoloRecovery", () => {
     );
   });
 
-  it("returns { recovered: false } when joinFamily returns an error", async () => {
+  it("returns { recovered: false, errorCode } when joinFamily returns an error", async () => {
     const onFamilyJoined = vi.fn();
     const apiClient = createMockApiClient({
       joinFamily: vi.fn().mockResolvedValue({
@@ -207,7 +208,7 @@ describe("performSoloRecovery", () => {
       onFamilyJoined,
     });
 
-    expect(result).toEqual({ recovered: false });
+    expect(result).toEqual({ recovered: false, errorCode: "ERR" });
     expect(onFamilyJoined).not.toHaveBeenCalled();
   });
 
@@ -321,7 +322,7 @@ describe("performJoin", () => {
     vi.restoreAllMocks();
   });
 
-  it("calls joinFamily without keyFingerprint", async () => {
+  it("calls joinFamily with undefined verify opts when no secret is given", async () => {
     const apiClient = createMockApiClient();
 
     await performJoin({
@@ -335,6 +336,7 @@ describe("performJoin", () => {
       "fam-join-1",
       "user-x",
       "Name",
+      undefined,
     );
   });
 
@@ -421,6 +423,158 @@ describe("performJoin", () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "SET_FAMILY_ID", familyId: "fam-join-1" }),
     );
+  });
+});
+
+/**
+ * SEC-1: existing verification-enabled members hit VERIFICATION_REQUIRED on a
+ * fresh device. The three join flows must (a) forward the collected verifySecret
+ * into joinFamily's opts, and (b) the two recovery flows must surface the
+ * backend errorCode on failure so the caller can open the verification prompt
+ * instead of silently dropping to a generic error.
+ */
+describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(decodeSyncCode).mockReturnValue({ familyId: "fam-join-1" });
+    vi.mocked(chrome.storage.local.set).mockImplementation(
+      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+    );
+    vi.mocked(chrome.storage.local.get).mockImplementation(
+      (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        if (typeof callback === "function") callback({});
+        return Promise.resolve({}) as unknown as void;
+      },
+    );
+    vi.mocked(chrome.storage.sync.set).mockImplementation(
+      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+    );
+    vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("tryAutoRecovery forwards verifySecret into joinFamily opts", async () => {
+    const apiClient = createMockApiClient();
+
+    await tryAutoRecovery({
+      familyId: "fam-existing",
+      userId: "user-abc",
+      displayName: "Test User",
+      apiClient,
+      autoSetup: createMockAutoSetup(),
+      onFamilyJoined: vi.fn(),
+      verifySecret: "123456",
+    });
+
+    expect(apiClient.joinFamily).toHaveBeenCalledWith(
+      "fam-existing",
+      "user-abc",
+      "Test User",
+      { verifySecret: "123456" },
+    );
+  });
+
+  it("performSoloRecovery forwards verifySecret into joinFamily opts", async () => {
+    const apiClient = createMockApiClient();
+
+    await performSoloRecovery({
+      familyId: "fam-solo-1",
+      userId: "user-abc",
+      displayName: "Test User",
+      apiClient,
+      autoSetup: createMockAutoSetup(),
+      onFamilyJoined: vi.fn(),
+      verifySecret: "654321",
+    });
+
+    expect(apiClient.joinFamily).toHaveBeenCalledWith(
+      "fam-solo-1",
+      "user-abc",
+      "Test User",
+      { verifySecret: "654321" },
+    );
+  });
+
+  it("performJoin forwards verifySecret into joinFamily opts", async () => {
+    const apiClient = createMockApiClient();
+
+    await performJoin({
+      syncCodeInput: "moo-fam-join-1",
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+      verifySecret: "778899",
+    });
+
+    expect(apiClient.joinFamily).toHaveBeenCalledWith(
+      "fam-join-1",
+      "user-x",
+      "Name",
+      { verifySecret: "778899" },
+    );
+  });
+
+  it("tryAutoRecovery surfaces VERIFICATION_REQUIRED errorCode on failure", async () => {
+    const onFamilyJoined = vi.fn();
+    const apiClient = createMockApiClient({
+      joinFamily: vi.fn().mockResolvedValue({
+        error: { code: "VERIFICATION_REQUIRED", message: "需要驗證" },
+      }),
+    });
+
+    const result = await tryAutoRecovery({
+      familyId: "fam-existing",
+      userId: "user-abc",
+      displayName: "Test User",
+      apiClient,
+      autoSetup: createMockAutoSetup(),
+      onFamilyJoined,
+    });
+
+    expect(result).toEqual({ recovered: false, errorCode: "VERIFICATION_REQUIRED" });
+    expect(onFamilyJoined).not.toHaveBeenCalled();
+  });
+
+  it("performSoloRecovery surfaces VERIFICATION_LOCKED errorCode on failure", async () => {
+    const apiClient = createMockApiClient({
+      joinFamily: vi.fn().mockResolvedValue({
+        error: { code: "VERIFICATION_LOCKED", message: "已鎖定" },
+      }),
+    });
+
+    const result = await performSoloRecovery({
+      familyId: "fam-solo-1",
+      userId: "user-abc",
+      displayName: "Test User",
+      apiClient,
+      autoSetup: createMockAutoSetup(),
+      onFamilyJoined: vi.fn(),
+    });
+
+    expect(result).toEqual({ recovered: false, errorCode: "VERIFICATION_LOCKED" });
+  });
+
+  it("success side-effects still fire when no verifySecret is needed", async () => {
+    const onFamilyJoined = vi.fn();
+    const apiClient = createMockApiClient();
+    const autoSetup = createMockAutoSetup();
+
+    const result = await tryAutoRecovery({
+      familyId: "fam-existing",
+      userId: "user-abc",
+      displayName: "Test User",
+      apiClient,
+      autoSetup,
+      onFamilyJoined,
+    });
+
+    expect(result).toEqual({ recovered: true });
+    expect(apiClient.setAuthToken).toHaveBeenCalledWith("tok");
+    expect(autoSetup.syncBooks).toHaveBeenCalled();
+    expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", "user-abc");
   });
 });
 
