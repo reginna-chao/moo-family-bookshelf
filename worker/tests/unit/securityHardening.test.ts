@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app, { isAllowedOrigin } from "../../src/index";
 import { isPublicRoute, isSensitivePublicRoute } from "../../src/utils/routes";
 import { createMockKV } from "../helpers/mockKv";
+import { USER1, USER2, USER4, USER5, OWNER1, makeUserId } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -223,7 +224,7 @@ describe("isSensitivePublicRoute", () => {
 describe("Request body size limit", () => {
   it("should return 413 when Content-Length exceeds 256KB", async () => {
     const res = await request("POST", "/api/family", {
-      body: JSON.stringify({ userId: "user1" }),
+      body: JSON.stringify({ userId: USER1 }),
       headers: { "Content-Length": "300000" },
     });
     expect(res.status).toBe(413);
@@ -234,7 +235,7 @@ describe("Request body size limit", () => {
 
   it("should allow requests within the 256KB limit", async () => {
     const res = await request("POST", "/api/family", {
-      body: JSON.stringify({ userId: "user1" }),
+      body: JSON.stringify({ userId: USER1 }),
       headers: { "Content-Length": "100" },
     });
     // Should pass through to the route handler (201 = family created)
@@ -243,7 +244,7 @@ describe("Request body size limit", () => {
 
   it("should allow requests without Content-Length header", async () => {
     const res = await request("POST", "/api/family", {
-      body: JSON.stringify({ userId: "user1" }),
+      body: JSON.stringify({ userId: USER1 }),
     });
     // Should pass through
     expect(res.status).toBe(201);
@@ -251,7 +252,7 @@ describe("Request body size limit", () => {
 
   it("should return 413 for Content-Length exactly at boundary (262145)", async () => {
     const res = await request("POST", "/api/family", {
-      body: JSON.stringify({ userId: "user1" }),
+      body: JSON.stringify({ userId: USER1 }),
       headers: { "Content-Length": "262145" },
     });
     expect(res.status).toBe(413);
@@ -259,7 +260,7 @@ describe("Request body size limit", () => {
 
   it("should allow Content-Length exactly at 262144 (256KB)", async () => {
     const res = await request("POST", "/api/family", {
-      body: JSON.stringify({ userId: "user1" }),
+      body: JSON.stringify({ userId: USER1 }),
       headers: { "Content-Length": "262144" },
     });
     // Should pass to handler, not be rejected by size check
@@ -293,13 +294,13 @@ describe("Rate limit tiers", () => {
     // Send 3 requests — all should succeed
     for (let i = 0; i < 3; i++) {
       const res = await request("POST", "/api/family", {
-        body: JSON.stringify({ userId: `user${i}` }),
+        body: JSON.stringify({ userId: makeUserId(i) }),
       });
       expect(res.status).not.toBe(429);
     }
     // 4th request should be rate-limited
     const res = await request("POST", "/api/family", {
-      body: JSON.stringify({ userId: "user_extra" }),
+      body: JSON.stringify({ userId: USER4 }),
     });
     expect(res.status).toBe(429);
     const json = (await res.json()) as Json;
@@ -309,7 +310,7 @@ describe("Rate limit tiers", () => {
   it("should rate-limit sensitive route POST /api/family/:id/join after 3 requests", async () => {
     // Create a family first (uses 1 of the sensitive budget)
     const createRes = await request("POST", "/api/family", {
-      body: JSON.stringify({ userId: "owner" }),
+      body: JSON.stringify({ userId: OWNER1 }),
     });
     const family = (await createRes.json()) as Json;
     const familyId = family.data.familyId;
@@ -317,13 +318,13 @@ describe("Rate limit tiers", () => {
     // Use up remaining sensitive budget (we already used 1 for create)
     for (let i = 0; i < 2; i++) {
       await request("POST", `/api/family/${familyId}/join`, {
-        body: JSON.stringify({ userId: `joiner${i}` }),
+        body: JSON.stringify({ userId: makeUserId(100 + i) }),
       });
     }
 
     // 4th sensitive request should be rate-limited
     const res = await request("POST", `/api/family/${familyId}/join`, {
-      body: JSON.stringify({ userId: "joiner_extra" }),
+      body: JSON.stringify({ userId: USER5 }),
     });
     expect(res.status).toBe(429);
   });
@@ -332,13 +333,13 @@ describe("Rate limit tiers", () => {
     // Exhaust sensitive limit (3 requests)
     for (let i = 0; i < 3; i++) {
       await request("POST", "/api/family", {
-        body: JSON.stringify({ userId: `user${i}` }),
+        body: JSON.stringify({ userId: makeUserId(i) }),
       });
     }
 
     // Public (non-sensitive) route should still work (separate counter)
     const lookupRes = await request("POST", "/api/auth/lookup", {
-      body: JSON.stringify({ userId: "test" }),
+      body: JSON.stringify({ userId: USER2 }),
     });
     expect(lookupRes.status).not.toBe(429);
 
@@ -351,13 +352,13 @@ describe("Rate limit tiers", () => {
     // POST /api/auth/lookup is public but not sensitive
     for (let i = 0; i < 10; i++) {
       const res = await request("POST", "/api/auth/lookup", {
-        body: JSON.stringify({ userId: `user${i}` }),
+        body: JSON.stringify({ userId: makeUserId(i) }),
       });
       expect(res.status).not.toBe(429);
     }
     // 11th request should be rate-limited
     const res = await request("POST", "/api/auth/lookup", {
-      body: JSON.stringify({ userId: "user_extra" }),
+      body: JSON.stringify({ userId: USER4 }),
     });
     expect(res.status).toBe(429);
   });
@@ -411,7 +412,7 @@ describe("Security headers", () => {
 
   it("should set security headers on API success responses", async () => {
     const res = await request("POST", "/api/family", {
-      body: JSON.stringify({ userId: "user1" }),
+      body: JSON.stringify({ userId: USER1 }),
     });
     expect(res.status).toBe(201);
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");

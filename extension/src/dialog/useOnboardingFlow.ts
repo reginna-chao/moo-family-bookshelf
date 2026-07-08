@@ -16,6 +16,11 @@ import {
   performSoloRecovery,
   tryAutoRecovery,
 } from "./onboardingFlow";
+import {
+  isVerificationError,
+  useVerificationPrompt,
+  type UseVerificationPromptResult,
+} from "./useVerificationPrompt";
 
 export type OnboardingState =
   | "welcome"
@@ -28,6 +33,7 @@ export type OnboardingState =
   | "recovery-choice"
   | "recovery-join"
   | "solo-recovery-confirm"
+  | "verify-prompt"
   | "error";
 
 /** States where the user is actively on a recovery-flow view. */
@@ -69,12 +75,18 @@ export interface UseOnboardingFlowResult {
   handleSoloRecoveryConfirm: () => Promise<void>;
   /** From solo-recovery-confirm: user wants to go back to the choice screen */
   handleSoloRecoveryBack: () => void;
+  /** Verification challenge controller (shown when state === "verify-prompt"). */
+  verify: UseVerificationPromptResult;
 }
 
 export function useOnboardingFlow(
   opts: UseOnboardingFlowOptions,
 ): UseOnboardingFlowResult {
   const { apiClient, onFamilyJoined, autoSetup } = opts;
+
+  const verify = useVerificationPrompt(apiClient);
+  // Stable reference for hook deps (verify.begin is useCallback-memoized).
+  const verifyBegin = verify.begin;
 
   const [state, setState] = useState<OnboardingState>("welcome");
   const [errorMessage, setErrorMessage] = useState("");
@@ -132,6 +144,35 @@ export function useOnboardingFlow(
     setErrorActions([]);
   }, [autoSetup]);
 
+  /**
+   * Shared bridge for the recovery flows (auto-recovery + solo recovery): if a
+   * failed join carried a verification error code, open the verification prompt
+   * (state → "verify-prompt") and wire up a retry that re-runs the same flow
+   * with the collected secret. Returns true when the prompt took over so the
+   * caller can stop; false to fall back to its own error handling.
+   */
+  const promptRecoveryVerification = useCallback(
+    async (params: {
+      errorCode: string | undefined;
+      userId: string;
+      run: (verifySecret: string) => Promise<{ recovered: boolean; errorCode?: string }>;
+      onCancel: () => void;
+    }): Promise<boolean> => {
+      if (!isVerificationError(params.errorCode)) return false;
+      setState("verify-prompt");
+      await verifyBegin(params.errorCode, {
+        userId: params.userId,
+        retry: async (secret) => {
+          const result = await params.run(secret);
+          return { ok: result.recovered, errorCode: result.errorCode };
+        },
+        onCancel: params.onCancel,
+      });
+      return true;
+    },
+    [verifyBegin],
+  );
+
   const handleStart = useCallback(async () => {
     const result = await autoSetup.scrapeProfile();
     if (!result) return;
@@ -150,7 +191,7 @@ export function useOnboardingFlow(
 
           // Attempt auto-recovery directly (no key needed anymore)
           setState("recovering");
-          const { recovered } = await tryAutoRecovery({
+          const recovery = await tryAutoRecovery({
             familyId: existingFamilyId,
             userId,
             displayName: result.displayName,
@@ -158,11 +199,32 @@ export function useOnboardingFlow(
             autoSetup,
             onFamilyJoined,
           });
-          if (recovered) return;
+          if (recovery.recovered) return;
+          const backToChoice = () => {
+            recoveryActiveRef.current = true;
+            setState("recovery-choice");
+          };
+          // Verification-enabled member on a new device: prompt for the secret
+          // and retry, instead of silently dropping to the generic screen.
+          const handled = await promptRecoveryVerification({
+            errorCode: recovery.errorCode,
+            userId,
+            run: (verifySecret) =>
+              tryAutoRecovery({
+                familyId: existingFamilyId,
+                userId,
+                displayName: result.displayName,
+                apiClient,
+                autoSetup,
+                onFamilyJoined,
+                verifySecret,
+              }),
+            onCancel: backToChoice,
+          });
+          if (handled) return;
           // Auto-recovery attempted but failed (e.g. backend join error).
           // Surface the recovery-choice screen so the user can decide.
-          recoveryActiveRef.current = true;
-          setState("recovery-choice");
+          backToChoice();
           return;
         }
       }
@@ -171,7 +233,7 @@ export function useOnboardingFlow(
     }
 
     setState("idle");
-  }, [apiClient, autoSetup, onFamilyJoined]);
+  }, [apiClient, autoSetup, onFamilyJoined, promptRecoveryVerification]);
 
   const handleCreate = useCallback(async () => {
     const email = userEmailRef.current;
@@ -197,7 +259,7 @@ export function useOnboardingFlow(
         recoveryFamilyIdRef.current = existingFamilyId;
 
         setState("recovering");
-        const { recovered } = await tryAutoRecovery({
+        const recovery = await tryAutoRecovery({
           familyId: existingFamilyId,
           userId,
           displayName: userDisplayNameRef.current,
@@ -205,10 +267,29 @@ export function useOnboardingFlow(
           autoSetup,
           onFamilyJoined,
         });
-        if (recovered) return;
+        if (recovery.recovered) return;
+        const backToChoice = () => {
+          recoveryActiveRef.current = true;
+          setState("recovery-choice");
+        };
+        const handled = await promptRecoveryVerification({
+          errorCode: recovery.errorCode,
+          userId,
+          run: (verifySecret) =>
+            tryAutoRecovery({
+              familyId: existingFamilyId,
+              userId,
+              displayName: userDisplayNameRef.current,
+              apiClient,
+              autoSetup,
+              onFamilyJoined,
+              verifySecret,
+            }),
+          onCancel: backToChoice,
+        });
+        if (handled) return;
         // Auto-recovery failed — let the user choose how to proceed.
-        recoveryActiveRef.current = true;
-        setState("recovery-choice");
+        backToChoice();
         return;
       }
 
@@ -227,7 +308,17 @@ export function useOnboardingFlow(
       setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
       setState("error");
     }
-  }, [apiClient, autoSetup, handleRetry, onFamilyJoined]);
+  }, [apiClient, autoSetup, handleRetry, onFamilyJoined, promptRecoveryVerification]);
+
+  const finishJoin = useCallback(
+    async (familyId: string, userId: string) => {
+      // Auto-sync books after joining; sync is best-effort, proceed regardless.
+      setState("syncing-books");
+      await autoSetup.syncBooks({ userId, apiClient });
+      onFamilyJoined(familyId, userId);
+    },
+    [apiClient, autoSetup, onFamilyJoined],
+  );
 
   const handleJoin = useCallback(async () => {
     const email = userEmailRef.current;
@@ -245,29 +336,41 @@ export function useOnboardingFlow(
         apiClient,
       });
 
-      if (!result.ok) {
-        if (
-          result.errorCode === "VERIFICATION_REQUIRED" ||
-          result.errorCode === "VERIFICATION_FAILED" ||
-          result.errorCode === "VERIFICATION_LOCKED"
-        ) {
-          const message =
-            result.errorCode === "VERIFICATION_LOCKED"
-              ? "此家庭的驗證已暫時鎖定，請稍後再試，或向家人索取新的同步碼。"
-              : "同步碼可能不正確或已失效，請確認後重試，或向家人索取最新的同步碼。";
-          setErrorMessage(message);
-        } else {
-          setErrorMessage(result.errorMessage);
-        }
-        setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
-        setState("error");
+      if (result.ok) {
+        await finishJoin(result.familyId, result.userId);
         return;
       }
 
-      // Auto-sync books after joining; sync is best-effort, proceed regardless
-      setState("syncing-books");
-      await autoSetup.syncBooks({ userId: result.userId, apiClient });
-      onFamilyJoined(result.familyId, result.userId);
+      // Verification-enabled member reconnecting: prompt for the secret and
+      // retry the same join with it, rather than failing the sync code.
+      if (isVerificationError(result.errorCode)) {
+        setState("verify-prompt");
+        await verifyBegin(result.errorCode, {
+          userId,
+          retry: async (verifySecret) => {
+            const retryResult = await performJoin({
+              syncCodeInput: syncCodeInputRef.current,
+              userId,
+              displayName: userDisplayNameRef.current,
+              apiClient,
+              verifySecret,
+            });
+            if (retryResult.ok) {
+              await finishJoin(retryResult.familyId, retryResult.userId);
+              return { ok: true };
+            }
+            return { ok: false, errorCode: retryResult.errorCode };
+          },
+          onCancel: () => {
+            setState(recoveryActiveRef.current ? "recovery-join" : "idle");
+          },
+        });
+        return;
+      }
+
+      setErrorMessage(result.errorMessage);
+      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setState("error");
     } catch (err) {
       if (err instanceof SyncCodeError) {
         setErrorMessage(`同步碼格式錯誤：${err.message}`);
@@ -277,7 +380,7 @@ export function useOnboardingFlow(
       setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
       setState("error");
     }
-  }, [apiClient, autoSetup, handleRetry, onFamilyJoined]);
+  }, [apiClient, handleRetry, finishJoin, verifyBegin]);
 
   const handleContinueAfterCreate = useCallback(async () => {
     setState("syncing-books");
@@ -316,12 +419,28 @@ export function useOnboardingFlow(
         onFamilyJoined,
       });
       if (solo.recovered) return;
+      const handled = await promptRecoveryVerification({
+        errorCode: solo.errorCode,
+        userId,
+        run: (verifySecret) =>
+          performSoloRecovery({
+            familyId,
+            userId,
+            displayName: userDisplayNameRef.current,
+            apiClient,
+            autoSetup,
+            onFamilyJoined,
+            verifySecret,
+          }),
+        onCancel: () => setState("solo-recovery-confirm"),
+      });
+      if (handled) return;
     } catch {
       // Solo recovery failed — fall through to confirmation
     }
 
     setState("solo-recovery-confirm");
-  }, [apiClient, autoSetup, onFamilyJoined]);
+  }, [apiClient, autoSetup, onFamilyJoined, promptRecoveryVerification]);
 
   const handleRecoveryJoinBack = useCallback(() => {
     setState("recovery-choice");
@@ -354,6 +473,22 @@ export function useOnboardingFlow(
         onFamilyJoined,
       });
       if (solo.recovered) return;
+      const handled = await promptRecoveryVerification({
+        errorCode: solo.errorCode,
+        userId,
+        run: (verifySecret) =>
+          performSoloRecovery({
+            familyId,
+            userId,
+            displayName: userDisplayNameRef.current,
+            apiClient,
+            autoSetup,
+            onFamilyJoined,
+            verifySecret,
+          }),
+        onCancel: () => setState("solo-recovery-confirm"),
+      });
+      if (handled) return;
       setErrorMessage("恢復失敗，請重試。");
       setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
       setState("error");
@@ -362,7 +497,7 @@ export function useOnboardingFlow(
       setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
       setState("error");
     }
-  }, [apiClient, autoSetup, handleRetry, onFamilyJoined]);
+  }, [apiClient, autoSetup, handleRetry, onFamilyJoined, promptRecoveryVerification]);
 
   return {
     state,
@@ -385,5 +520,6 @@ export function useOnboardingFlow(
     handleRecoveryJoinBack,
     handleSoloRecoveryConfirm,
     handleSoloRecoveryBack,
+    verify,
   };
 }

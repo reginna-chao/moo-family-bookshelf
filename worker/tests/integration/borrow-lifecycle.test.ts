@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { BorrowStatus } from "../../src/kv/schema";
+import { USER1, USER2 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -44,10 +45,10 @@ beforeEach(() => {
 describe("Borrow Lifecycle Integration", () => {
   it("should complete full lifecycle: create family → add members → create borrow → approve → return", async () => {
     // Step 1: Create family with user1 as owner
-    const { familyId, authToken: token1 } = await createFamilyAndGetToken("user1", "Alice");
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1, "Alice");
 
     // Step 2: user2 joins the family
-    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, "user2", "Bob");
+    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "Bob");
 
     // Verify both members are in the family
     const membersRes = await request("GET", `/api/family/${familyId}/members`, undefined, token1);
@@ -61,7 +62,7 @@ describe("Borrow Lifecycle Integration", () => {
       bookTitle: "TypeScript Handbook",
       bookAuthor: "Microsoft",
       bookCoverUrl: "https://example.com/ts-cover.jpg",
-      ownerId: "user1",
+      ownerId: USER1,
     };
 
     const createRes = await request("POST", `/api/family/${familyId}/borrow`, borrowBody, token2);
@@ -70,9 +71,9 @@ describe("Borrow Lifecycle Integration", () => {
     const requestId = createJson.data.requestId;
 
     expect(createJson.data.status).toBe(BorrowStatus.PENDING);
-    expect(createJson.data.borrowerId).toBe("user2");
+    expect(createJson.data.borrowerId).toBe(USER2);
     expect(createJson.data.borrowerName).toBe("Bob");
-    expect(createJson.data.ownerId).toBe("user1");
+    expect(createJson.data.ownerId).toBe(USER1);
 
     // Step 4: Verify the request shows up in GET list
     const listRes1 = await request("GET", `/api/family/${familyId}/borrow`, undefined, token1);
@@ -127,8 +128,8 @@ describe("Borrow Lifecycle Integration", () => {
   });
 
   it("should complete the rejection flow: PENDING → REJECTED", async () => {
-    const { familyId, authToken: token1 } = await createFamilyAndGetToken("user1", "Alice");
-    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, "user2", "Bob");
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1, "Alice");
+    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "Bob");
 
     // Create a borrow request
     const createRes = await request(
@@ -139,7 +140,7 @@ describe("Borrow Lifecycle Integration", () => {
         bookTitle: "Rejected Book",
         bookAuthor: "Author",
         bookCoverUrl: "https://example.com/cover.jpg",
-        ownerId: "user1",
+        ownerId: USER1,
       },
       token2,
     );
@@ -167,8 +168,8 @@ describe("Borrow Lifecycle Integration", () => {
   });
 
   it("should complete the cancellation flow: PENDING → CANCELLED", async () => {
-    const { familyId, authToken: token1 } = await createFamilyAndGetToken("user1", "Alice");
-    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, "user2", "Bob");
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1, "Alice");
+    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "Bob");
 
     // Create a borrow request
     const createRes = await request(
@@ -179,7 +180,7 @@ describe("Borrow Lifecycle Integration", () => {
         bookTitle: "Cancelled Book",
         bookAuthor: "Author",
         bookCoverUrl: "https://example.com/cover.jpg",
-        ownerId: "user1",
+        ownerId: USER1,
       },
       token2,
     );
@@ -207,8 +208,8 @@ describe("Borrow Lifecycle Integration", () => {
   });
 
   it("should handle multiple concurrent borrow requests for different books", async () => {
-    const { familyId, authToken: token1 } = await createFamilyAndGetToken("user1", "Alice");
-    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, "user2", "Bob");
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1, "Alice");
+    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "Bob");
 
     const books = [
       { bookId: "book-1", bookTitle: "Book One", bookAuthor: "Author 1", bookCoverUrl: "https://example.com/1.jpg" },
@@ -222,7 +223,7 @@ describe("Borrow Lifecycle Integration", () => {
       const res = await request(
         "POST",
         `/api/family/${familyId}/borrow`,
-        { ...book, ownerId: "user1" },
+        { ...book, ownerId: USER1 },
         token2,
       );
       expect(res.status).toBe(201);

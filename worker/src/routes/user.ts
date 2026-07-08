@@ -187,6 +187,67 @@ export function parseFamilyPrefs(
   return { ok: true, prefs };
 }
 
+export type ParseBooksOk = { ok: true; books: BookEntry[] };
+export type ParseBooksErr = { ok: false; code: "INVALID_PAYLOAD"; message: string };
+export type ParseBooksResult = ParseBooksOk | ParseBooksErr;
+
+/** Coerce a raw isShared/isArchived value to a BoolFlag. Any truthy-1 maps to TRUE, everything else FALSE. */
+function toBoolFlag(value: unknown): BoolFlag {
+  return value === BoolFlag.TRUE ? BoolFlag.TRUE : BoolFlag.FALSE;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * Validate and normalize the `books` array from a PUT body. Rejects the whole
+ * payload if any entry is not an object with a non-empty string `bookId`.
+ * Every entry is rebuilt from an explicit field allowlist so unvalidated client
+ * fields never reach KV; isShared/isArchived are normalized to BoolFlag.
+ */
+export function parseBooks(rawBooks: unknown[], maxBooks: number): ParseBooksResult {
+  if (rawBooks.length > maxBooks) {
+    return { ok: false, code: "INVALID_PAYLOAD", message: `books array exceeds maximum of ${maxBooks}` };
+  }
+  const books: BookEntry[] = [];
+  for (const entry of rawBooks) {
+    if (typeof entry !== "object" || entry === null) {
+      return { ok: false, code: "INVALID_PAYLOAD", message: "Each book must be an object" };
+    }
+    const e = entry as Record<string, unknown>;
+    if (typeof e.bookId !== "string" || e.bookId.length === 0) {
+      return { ok: false, code: "INVALID_PAYLOAD", message: "Each book requires a non-empty string bookId" };
+    }
+    const book: BookEntry = {
+      bookId: e.bookId,
+      title: asString(e.title),
+      author: asString(e.author),
+      isbn: asString(e.isbn),
+      coverUrl: asString(e.coverUrl),
+      readmooUrl: asString(e.readmooUrl),
+      category: asString(e.category),
+      isShared: toBoolFlag(e.isShared),
+    };
+    if (e.isArchived !== undefined) {
+      book.isArchived = toBoolFlag(e.isArchived);
+    }
+    books.push(book);
+  }
+  return { ok: true, books };
+}
+
+/**
+ * Max books accepted in a single PUT — matches the PATCH change cap.
+ *
+ * Reachability note: over the real HTTP path this count-cap's 400 branch is
+ * effectively unreachable, because 10001 minimal book entries far exceed the
+ * 256KB request-body guard (`MAX_BODY_SIZE` in `index.ts`) and get rejected
+ * with 413 first. The count-cap therefore mainly protects direct `parseBooks`
+ * pure-function callers, where no body-size guard applies.
+ */
+export const MAX_PUT_BOOKS = 10000;
+
 export const userRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 // GET /api/user/:id/books
@@ -286,6 +347,31 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     return jsonError(c, 400, "INVALID_PAYLOAD", "books array is required");
   }
 
+  // Validate + normalize each book entry from an explicit allowlist. The raw
+  // client payload is never spread into KV.
+  const parsedBooks = parseBooks(body.books as unknown[], MAX_PUT_BOOKS);
+  if (!parsedBooks.ok) {
+    return jsonError(c, 400, parsedBooks.code, parsedBooks.message);
+  }
+
+  // familyShelfPrefs, when sent via this endpoint (the Extension round-trips the
+  // saved record on sync), MUST pass the same ref-format/dedupe/cap checks as the
+  // dedicated /family-prefs endpoint. Absent → preserve existing KV value.
+  // Validation boundary: an empty `familyShelfPrefs: {}` (both keys absent) makes
+  // parseFamilyPrefs return 400 and fails the whole PUT — deliberate, since real
+  // Extension/PWA clients always round-trip a full `{ hidden, favorites }` object.
+  let parsedPrefs: { hidden: string[]; favorites: string[] } | undefined;
+  if (body.familyShelfPrefs !== undefined) {
+    const prefsResult = parseFamilyPrefs(body.familyShelfPrefs, MAX_FAMILY_PREF_ENTRIES);
+    if (!prefsResult.ok) {
+      return jsonError(c, 400, prefsResult.code, prefsResult.message);
+    }
+    parsedPrefs = {
+      hidden: prefsResult.prefs.hidden ?? [],
+      favorites: prefsResult.prefs.favorites ?? [],
+    };
+  }
+
   // Read user record + family membership in parallel (independent reads).
   const [existing, memberFamilyId] = await Promise.all([
     c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json"),
@@ -297,14 +383,16 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
   // client-supplied value when there is no family membership / family record.
   const serverDisplayName = await resolveDisplayName(c.env.KV, userId, memberFamilyId, body.displayName);
 
+  // Build the persisted record from a fixed allowlist only. userId always comes
+  // from the authenticated path param, never from body.userId.
   const record: UserBooksRecord = {
-    ...body,
-    books: body.books,
     schemaVersion: typeof body.schemaVersion === "number" ? body.schemaVersion : 1,
-    userId: typeof body.userId === "string" ? body.userId : userId,
+    userId,
     displayName: serverDisplayName,
+    books: parsedBooks.books,
     lastUpdated: new Date().toISOString(),
     publicSharing: existing?.publicSharing,
+    familyShelfPrefs: parsedPrefs ?? existing?.familyShelfPrefs,
   };
 
   await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));

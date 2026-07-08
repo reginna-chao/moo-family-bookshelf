@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import type { VerifyRecord } from "../../src/kv/schema";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -197,7 +196,7 @@ describe("Join with QR token bypass", () => {
     expect(stored).toBeNull();
   });
 
-  it("should succeed on reused qrToken because existing members skip verification", async () => {
+  it("should reject reused qrToken: existing member with PIN set still must verify (SEC-1)", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
     const userAuthToken = await seedAuthToken(VALID_USER_ID);
@@ -214,20 +213,47 @@ describe("Join with QR token bypass", () => {
     const qrJson = (await qrRes.json()) as Json;
     const qrToken = qrJson.data.token;
 
-    // First use succeeds (new member join via QR bypass)
-    await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
+    // First use succeeds (new member join via one-time QR bypass, token consumed)
+    const firstRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
       body: JSON.stringify({ userId: VALID_USER_ID, qrToken }),
     });
+    expect(firstRes.status).toBe(200);
 
-    // Second use — token is deleted, but user is now an existing member
-    // so verification is skipped entirely (auto-recovery / multi-device flow)
+    // Second use — token is deleted. Since SEC-1 the verification gate runs
+    // BEFORE the existing-member branch, so an existing member with a PIN set
+    // and no valid qrToken/verifySecret is now rejected (was 200 pre-SEC-1).
     const secondRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
       body: JSON.stringify({ userId: VALID_USER_ID, qrToken }),
     });
 
-    expect(secondRes.status).toBe(200);
+    expect(secondRes.status).toBe(403);
     const json = (await secondRes.json()) as Json;
-    expect(json.data.authToken).toBeDefined();
+    expect(json.error.code).toBe("VERIFICATION_REQUIRED");
+  });
+
+  it("should still consume the qrToken on the first (successful) join", async () => {
+    await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+
+    const userAuthToken = await seedAuthToken(VALID_USER_ID);
+    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
+      headers: { Authorization: `Bearer ${userAuthToken}` },
+    });
+
+    const qrRes = await request("POST", `/api/user/${VALID_USER_ID}/qr-token`, {
+      body: JSON.stringify({}),
+      headers: { Authorization: `Bearer ${userAuthToken}` },
+    });
+    const qrJson = (await qrRes.json()) as Json;
+    const qrToken = qrJson.data.token;
+
+    await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
+      body: JSON.stringify({ userId: VALID_USER_ID, qrToken }),
+    });
+
+    // One-time token must be gone after the successful bypass.
+    const stored = await kv.get(`qr:${qrToken}`);
+    expect(stored).toBeNull();
   });
 
   it("should fall through to verification when qrToken has wrong userId", async () => {

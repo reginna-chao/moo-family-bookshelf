@@ -41,6 +41,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
       data: { familyId: "fam-123", members: ["user-1"], createdAt: "2026-01-01" },
     }),
     getFamilyBookshelf: vi.fn(),
+    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
     setAuthToken: vi.fn(),
@@ -846,11 +847,12 @@ describe("Onboarding", () => {
         expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", expect.any(String));
       });
 
-      // Should have called joinFamily with the existing family (no keyFingerprint opts)
+      // Should have called joinFamily with the existing family (no verify secret opts)
       expect(mockApi.joinFamily).toHaveBeenCalledWith(
         "fam-existing",
         expect.any(String), // userId
         expect.any(String), // displayName
+        undefined, // no verifySecret
       );
     });
 
@@ -1096,59 +1098,87 @@ describe("Onboarding", () => {
           expect.any(String),
         );
       });
-      // Solo recovery calls joinFamily without opts
+      // Solo recovery calls joinFamily without a verify secret (4th arg undefined)
       expect(joinFamilyMock).toHaveBeenCalledWith(
         "fam-confirm-solo",
         expect.any(String),
         expect.any(String),
+        undefined,
       );
     });
   });
 
-  describe("handleJoin sync code error responses", () => {
-    const SYNC_CODE_ERROR_MESSAGE =
-      "同步碼可能不正確或已失效，請確認後重試，或向家人索取最新的同步碼。";
-    const LOCKED_MESSAGE =
-      "此家庭的驗證已暫時鎖定，請稍後再試，或向家人索取新的同步碼。";
+  /**
+   * SEC-1: a manual sync-code join that hits a verification error must open the
+   * verification prompt (heading "需要驗證") so the member can supply their
+   * PIN/pattern — it must NOT be mislabeled as a generic sync-code error.
+   */
+  describe("handleJoin verification error responses", () => {
+    async function joinWithError(
+      code: string,
+      overrides: Partial<ApiClient> = {},
+    ) {
+      const mockApi = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code, message: "verification" },
+        }),
+        ...overrides,
+      });
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
+        target: { value: "moo-abcd-efgh-validKey123" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
+        await flushMicrotasks();
+      });
+    }
 
     it.each([
-      ["VERIFICATION_REQUIRED", "Verification required", SYNC_CODE_ERROR_MESSAGE],
-      ["VERIFICATION_FAILED", "Verification failed", SYNC_CODE_ERROR_MESSAGE],
-      ["VERIFICATION_LOCKED", "驗證已鎖定，請稍後再試", LOCKED_MESSAGE],
+      "VERIFICATION_REQUIRED",
+      "VERIFICATION_FAILED",
+      "VERIFICATION_LOCKED",
     ] as const)(
-      "maps server error %s to a user-facing message",
-      async (code, backendMessage, expectedUiMessage) => {
-        const mockApi = createMockApiClient({
-          joinFamily: vi.fn().mockResolvedValue({
-            error: { code, message: backendMessage },
-          }),
-        });
-
-        renderOnboarding({ apiClient: mockApi });
-
-        await clickStartAndWait();
+      "routes server error %s to the verification prompt, not a sync-code error",
+      async (code) => {
+        await joinWithError(code);
 
         await waitFor(() => {
-          expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+          expect(screen.getByText("需要驗證")).toBeInTheDocument();
         });
-
-        fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
-          target: { value: "moo-abcd-efgh-validKey123" },
-        });
-
-        await act(async () => {
-          fireEvent.click(screen.getByText("加入家庭公開書櫃"));
-        });
-
-        await waitFor(() => {
-          expect(screen.getByText("發生錯誤")).toBeInTheDocument();
-          expect(screen.getByText(expectedUiMessage)).toBeInTheDocument();
-        });
-
-        expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: "我知道了" })).not.toBeInTheDocument();
+        // The old stopgap that mislabeled this as a sync-code error is gone.
+        expect(screen.queryByText("發生錯誤")).not.toBeInTheDocument();
       },
     );
+
+    it("renders the PIN challenge when the backend method is PIN", async () => {
+      await joinWithError("VERIFICATION_REQUIRED", {
+        getVerifyMethod: vi
+          .fn()
+          .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("請輸入 PIN 碼")).toBeInTheDocument();
+      });
+    });
+
+    it("shows the locked message for VERIFICATION_LOCKED", async () => {
+      await joinWithError("VERIFICATION_LOCKED");
+
+      await waitFor(() => {
+        expect(screen.getByText("驗證已鎖定，請稍後再試")).toBeInTheDocument();
+      });
+    });
   });
 
   describe("copy sync code", () => {

@@ -11,6 +11,7 @@ import {
   RecoveryJoinView,
   SoloRecoveryConfirmView,
 } from "./OnboardingRecoveryViews";
+import { VerificationPrompt } from "./VerificationPrompt";
 import { useOnboardingFlow } from "./useOnboardingFlow";
 
 export interface OnboardingProps {
@@ -122,6 +123,19 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
           onConfirm={flow.handleSoloRecoveryConfirm}
           onBack={flow.handleSoloRecoveryBack}
           isLoading={isProcessing}
+        />
+      );
+    }
+    if (effectiveState === "verify-prompt") {
+      return (
+        <VerificationPrompt
+          method={flow.verify.method}
+          methodError={flow.verify.methodError}
+          error={flow.verify.error}
+          locked={flow.verify.locked}
+          submitting={flow.verify.submitting}
+          onSubmit={(secret) => void flow.verify.submit(secret)}
+          onCancel={flow.verify.cancel}
         />
       );
     }

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { kvKeys } from "../../src/kv/schema";
+import { USER1, USER2 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -30,7 +31,7 @@ function rawRequest(method: string, path: string, rawBody: string, authToken?: s
   );
 }
 
-async function createFamily(userId = "user1") {
+async function createFamily(userId = USER1) {
   const res = await request("POST", "/api/family", { userId });
   const json = (await res.json()) as Json;
   return {
@@ -40,8 +41,8 @@ async function createFamily(userId = "user1") {
 }
 
 async function createFamilyWithTwoMembers() {
-  const { familyId, authToken: token1 } = await createFamily("user1");
-  const joinRes = await request("POST", `/api/family/${familyId}/join`, { userId: "user2" });
+  const { familyId, authToken: token1 } = await createFamily(USER1);
+  const joinRes = await request("POST", `/api/family/${familyId}/join`, { userId: USER2 });
   const joinJson = (await joinRes.json()) as Json;
   const token2 = joinJson.data.authToken as string;
   return { familyId, token1, token2 };
@@ -90,7 +91,7 @@ describe("PUT /api/family/:id/transfer edge cases", () => {
     const res = await request(
       "PUT",
       "/api/family/INVALID/transfer",
-      { newOwnerId: "user2" },
+      { newOwnerId: USER2 },
       token1,
     );
     expect(res.status).toBe(400);
@@ -104,7 +105,7 @@ describe("PUT /api/family/:id/transfer edge cases", () => {
     const res = await request(
       "PUT",
       `/api/family/${familyId}/transfer`,
-      { newOwnerId: "user2" },
+      { newOwnerId: USER2 },
     );
     expect(res.status).toBe(401);
   });
@@ -151,7 +152,7 @@ describe("DELETE /api/family/:id/member/:uid edge cases", () => {
 
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user2`,
+      `/api/family/${familyId}/member/${USER2}`,
       undefined,
       token1,
     );
@@ -167,7 +168,7 @@ describe("DELETE /api/family/:id/member/:uid edge cases", () => {
 
 describe("POST /api/family/:id/join edge cases", () => {
   it("should return 400 INVALID_FAMILY_ID for invalid family ID on join", async () => {
-    const res = await request("POST", "/api/family/INVALID/join", { userId: "user1" });
+    const res = await request("POST", "/api/family/INVALID/join", { userId: USER1 });
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_FAMILY_ID");
@@ -181,7 +182,7 @@ describe("POST /api/family/:id/join edge cases", () => {
   });
 
   it("should return 400 MISSING_USER_ID when userId is missing on join", async () => {
-    const { familyId } = await createFamily("user1");
+    const { familyId } = await createFamily(USER1);
     const res = await request("POST", `/api/family/${familyId}/join`, {});
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
@@ -189,7 +190,7 @@ describe("POST /api/family/:id/join edge cases", () => {
   });
 
   it("should return 400 INVALID_USER_ID for invalid userId on join", async () => {
-    const { familyId } = await createFamily("user1");
+    const { familyId } = await createFamily(USER1);
     const res = await request("POST", `/api/family/${familyId}/join`, { userId: "user<script>" });
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
@@ -203,7 +204,7 @@ describe("POST /api/family/:id/join edge cases", () => {
 
 describe("GET /api/family/:id/members edge cases", () => {
   it("should return 400 INVALID_FAMILY_ID for invalid family ID", async () => {
-    const { authToken } = await createFamily("user1");
+    const { authToken } = await createFamily(USER1);
 
     const res = await request("GET", "/api/family/INVALID/members", undefined, authToken);
     expect(res.status).toBe(400);
@@ -212,7 +213,7 @@ describe("GET /api/family/:id/members edge cases", () => {
   });
 
   it("should return 404 NOT_FOUND when user is not a member of the family", async () => {
-    const { authToken } = await createFamily("user1");
+    const { authToken } = await createFamily(USER1);
 
     // user1 is a member of their own family, not abcd-1234
     const res = await request("GET", "/api/family/abcd-1234/members", undefined, authToken);
@@ -222,7 +223,7 @@ describe("GET /api/family/:id/members edge cases", () => {
   });
 
   it("should return 404 FAMILY_NOT_FOUND when family record is deleted", async () => {
-    const { familyId, authToken } = await createFamily("user1");
+    const { familyId, authToken } = await createFamily(USER1);
 
     // Delete the family record from KV but keep the member mapping
     await kv.delete(`family:${familyId}`);
@@ -240,7 +241,7 @@ describe("GET /api/family/:id/members edge cases", () => {
 
 describe("PUT /api/family/:id/member/:uid/displayName edge cases", () => {
   it("should return 400 INVALID_USER_ID for invalid target userId", async () => {
-    const { familyId, authToken } = await createFamily("user1");
+    const { familyId, authToken } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
@@ -289,7 +290,7 @@ describe("Index fallback routes", () => {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: "user1" }),
+        body: JSON.stringify({ userId: USER1 }),
       },
       { KV: brokenKv },
     );
@@ -305,11 +306,11 @@ describe("Index fallback routes", () => {
 
 describe("Single-member owner leave family", () => {
   it("should allow single-member owner to leave and delete family record", async () => {
-    const { familyId, authToken } = await createFamily("user1");
+    const { familyId, authToken } = await createFamily(USER1);
 
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user1`,
+      `/api/family/${familyId}/member/${USER1}`,
       undefined,
       authToken,
     );
@@ -320,9 +321,9 @@ describe("Single-member owner leave family", () => {
     // Verify family record is deleted
     expect(await kv.get(kvKeys.family(familyId))).toBeNull();
     // Verify member reverse lookup is deleted
-    expect(await kv.get(kvKeys.member("user1"))).toBeNull();
+    expect(await kv.get(kvKeys.member(USER1))).toBeNull();
     // Verify auth token is deleted
-    expect(await kv.get(kvKeys.auth("user1"))).toBeNull();
+    expect(await kv.get(kvKeys.auth(USER1))).toBeNull();
   });
 
   it("should still block multi-member owner from leaving", async () => {
@@ -330,7 +331,7 @@ describe("Single-member owner leave family", () => {
 
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user1`,
+      `/api/family/${familyId}/member/${USER1}`,
       undefined,
       token1,
     );
