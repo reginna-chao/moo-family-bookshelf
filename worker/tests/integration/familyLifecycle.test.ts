@@ -767,8 +767,10 @@ describe("Family Bookshelf Aggregation", () => {
     expect(json.data.members[1].displayName).toBe("Bob");
   });
 
-  it("should return 403 for authenticated user accessing another family's bookshelf", async () => {
-    // user1 is in their own family, so accessing a different family returns 403
+  it("should return 404 (not 403) for an authenticated user accessing another family's bookshelf — info-hiding", async () => {
+    // A non-member gets 404 NOT_FOUND, never 403. This is deliberate: returning
+    // 403 would confirm the family exists, letting an outsider probe which family
+    // ids are real. 404 keeps the family's very existence hidden from non-members.
     const { authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
