@@ -10,7 +10,7 @@ import {
 } from "@testing-library/react";
 import React from "react";
 import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
-import { FamilyDataProvider } from "@/hooks/useFamilyData";
+import { FamilyDataProvider, useFamilyData } from "@/hooks/useFamilyData";
 
 // Mock API client
 vi.mock("@/api/client", async (importOriginal) => {
@@ -450,7 +450,7 @@ describe("FamilyShelfPage", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  it("updates member display name on displayNameChanged CustomEvent", async () => {
+  it("updates member display name when the context method is called", async () => {
     mockGetFamilyMembers.mockResolvedValue({
       data: { familyId: "fam-1", ownerId: "user-self", members: [
         { userId: "user-self", displayName: "Me" },
@@ -481,7 +481,28 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    renderWithProvider(defaultProps);
+    // Drive the update through the real context method (the direct-call path
+    // that replaced the removed `displayNameChanged` CustomEvent). A settings
+    // display-name save calls exactly this: updateMemberDisplayName(userId, name).
+    function RenameTrigger() {
+      const { updateMemberDisplayName } = useFamilyData();
+      return (
+        <button onClick={() => updateMemberDisplayName("user-self", "新名字")}>
+          rename-self
+        </button>
+      );
+    }
+
+    render(
+      <FamilyDataProvider
+        familyId={defaultProps.familyId}
+        userId={defaultProps.userId}
+        apiClient={defaultProps.apiClient}
+      >
+        <RenameTrigger />
+        <FamilyShelfPage userId={defaultProps.userId} />
+      </FamilyDataProvider>,
+    );
 
     // Wait for data to load
     await waitFor(() => {
@@ -498,14 +519,10 @@ describe("FamilyShelfPage", () => {
     // The current user's display name "Me" appears on their book card
     expect(screen.getByText("Me")).toBeInTheDocument();
 
-    // Dispatch CustomEvent to update display name
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent("displayNameChanged", { detail: { displayName: "新名字" } }),
-      );
-    });
+    // Invoke the context method (as SettingsPage does after a name save).
+    fireEvent.click(screen.getByText("rename-self"));
 
-    // Verify the current user's name updates
+    // Verify the current user's name updates on the family shelf
     await waitFor(() => {
       expect(screen.getByText("新名字")).toBeInTheDocument();
     });

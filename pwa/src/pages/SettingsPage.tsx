@@ -117,6 +117,7 @@ export function SettingsPage({
     membersError: ctxMembersError,
     refreshMembers: loadMembers,
     refreshBookshelf,
+    updateMemberDisplayName,
   } = useFamilyData();
   const membersLoading = membersState === "loading";
   const membersError = ctxMembersError || null;
@@ -152,16 +153,15 @@ export function SettingsPage({
       }
       setCurrentName(trimmed);
       setEditingName(false);
-      window.dispatchEvent(
-        new CustomEvent("displayNameChanged", { detail: { displayName: trimmed } }),
-      );
+      // Reflect the new name in the family shelf / members list immediately
+      updateMemberDisplayName(userId, trimmed);
       void loadMembers();
     } catch (err) {
       setNameError(err instanceof Error ? err.message : "更新失敗");
     } finally {
       setNameSaving(false);
     }
-  }, [nameInput, currentName, apiClient, familyId, userId, loadMembers]);
+  }, [nameInput, currentName, apiClient, familyId, userId, loadMembers, updateMemberDisplayName]);
 
   // --- Leave family ---
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");

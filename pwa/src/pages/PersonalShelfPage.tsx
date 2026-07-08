@@ -10,6 +10,7 @@ import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
 import { BookRow } from "@/components/BookRow";
 import { PublicShareDialog } from "@/components/PublicShareDialog";
 import { namespacedKey } from "@/hooks/useAuth";
+import { useFamilyData } from "@/hooks/useFamilyData";
 import { useBookSort } from "@/hooks/useBookSort";
 import { sortBooks } from "@/utils/sortBooks";
 import { BookSortDropdown } from "@/components/BookSortDropdown";
@@ -40,6 +41,7 @@ export function PersonalShelfPage({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
   const [showPublicShare, setShowPublicShare] = useState(false);
+  const { refreshBookshelf } = useFamilyData();
   const { sort, setSort } = useBookSort(userId, "personal");
   const originalBooksRef = useRef<BookEntry[]>([]);
   /** Raw server response — kept so save can spread back unknown fields from future versions */
@@ -163,14 +165,14 @@ export function PersonalShelfPage({
       }
       clearDirty();
       setState("saved");
-      // Signal FamilyShelfPage to re-fetch
-      window.dispatchEvent(new CustomEvent("personalShelfSaved"));
+      // Refresh the aggregated family bookshelf so it reflects the saved shares
+      void refreshBookshelf();
       setTimeout(() => setState("ready"), 1500);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setState("error");
     }
-  }, [userId, displayName, books, apiClient, clearDirty, dirtyBookIds]);
+  }, [userId, displayName, books, apiClient, clearDirty, dirtyBookIds, refreshBookshelf]);
 
   const handleCancelChanges = useCallback(() => {
     setBooks(originalBooksRef.current);

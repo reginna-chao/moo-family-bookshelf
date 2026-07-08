@@ -11,6 +11,15 @@ import { PersonalShelfPage } from "@/pages/PersonalShelfPage";
 
 import { BoolFlag, type PersonalBooks, type ApiClient } from "@/api/client";
 
+// PersonalShelfPage now pulls `refreshBookshelf` from the FamilyData context to
+// refresh the aggregated family shelf after a save (replaces the removed
+// `personalShelfSaved` window CustomEvent). Mock the context hook to isolate the
+// page and spy on the direct call — mirrors BorrowPage.test.tsx's approach.
+const mockRefreshBookshelf = vi.fn(async () => {});
+vi.mock("@/hooks/useFamilyData", () => ({
+  useFamilyData: () => ({ refreshBookshelf: mockRefreshBookshelf }),
+}));
+
 const mockGetPersonalBooks = vi.fn();
 const mockUpdatePersonalBooks = vi.fn();
 const mockPatchPersonalBooks = vi.fn();
@@ -76,6 +85,7 @@ describe("PersonalShelfPage", () => {
     mockUpdatePersonalBooks.mockReset();
     mockPatchPersonalBooks.mockReset();
     mockPatchPersonalBooks.mockResolvedValue({ data: { ok: true, applied: 1 } });
+    mockRefreshBookshelf.mockClear();
     defaultProps = createProps();
   });
 
@@ -313,23 +323,39 @@ describe("PersonalShelfPage", () => {
     });
   });
 
-  it("dispatches personalShelfSaved event after a successful PATCH save", async () => {
+  it("refreshes the family bookshelf via context after a successful PATCH save", async () => {
     await renderWithBooks([
       { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
     ]);
 
     mockPatchPersonalBooks.mockResolvedValue({ data: { ok: true, applied: 1 } });
-    const listener = vi.fn();
-    window.addEventListener("personalShelfSaved", listener);
+
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+    fireEvent.click(screen.getByText("設為開放"));
+    fireEvent.click(screen.getByText("儲存變更"));
+
+    // The removed `personalShelfSaved` CustomEvent is now a direct context call:
+    // saving the personal shelf re-fetches the aggregated family bookshelf.
+    await waitFor(() => {
+      expect(mockRefreshBookshelf).toHaveBeenCalled();
+    });
+  });
+
+  it("does not refresh the family bookshelf when the save fails", async () => {
+    await renderWithBooks([
+      { bookId: "b1", title: "書籍一", author: "作者A", isShared: BoolFlag.FALSE },
+    ]);
+
+    mockPatchPersonalBooks.mockRejectedValue(new Error("儲存失敗"));
 
     fireEvent.click(screen.getByLabelText("選取 書籍一"));
     fireEvent.click(screen.getByText("設為開放"));
     fireEvent.click(screen.getByText("儲存變更"));
 
     await waitFor(() => {
-      expect(listener).toHaveBeenCalled();
+      expect(screen.getByText("儲存失敗")).toBeInTheDocument();
     });
-    window.removeEventListener("personalShelfSaved", listener);
+    expect(mockRefreshBookshelf).not.toHaveBeenCalled();
   });
 
   it("floating action bar hidden when not dirty and no selection", async () => {

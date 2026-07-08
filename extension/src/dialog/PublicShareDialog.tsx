@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { X, Copy, RefreshCw, Trash2 } from "lucide-react";
 import type { ApiClient } from "../api/client";
 import type { PublicShelf } from "../api/types";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useDebouncedCallback } from "../hooks/useDebouncedCallback";
+import { useTimedFlag } from "../hooks/useTimedFlag";
 
 export interface PublicShareDialogProps {
   userId: string;
@@ -32,9 +34,17 @@ export function PublicShareDialog({
   const [expiresDays, setExpiresDays] = useState<number | null>(30);
   const [errorMsg, setErrorMsg] = useState("");
   const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, markCopied] = useTimedFlag(2000);
   const [confirm, setConfirm] = useState<"reset" | "delete" | null>(null);
-  const titleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const syncTitle = useDebouncedCallback((shelfId: string, newTitle: string) => {
+    void (async () => {
+      try {
+        const { shelf: updated } = await apiClient.updatePublicShelf(userId, shelfId, { title: newTitle });
+        setShelf(updated);
+      } catch { /* title sync failure is non-critical */ }
+    })();
+  }, 1000);
 
   const loadShelves = useCallback(async () => {
     setViewState("loading");
@@ -76,13 +86,7 @@ export function PublicShareDialog({
   const handleTitleChange = (newTitle: string) => {
     setTitle(newTitle);
     if (!shelf) return;
-    clearTimeout(titleTimerRef.current);
-    titleTimerRef.current = setTimeout(async () => {
-      try {
-        const { shelf: updated } = await apiClient.updatePublicShelf(userId, shelf.shelfId, { title: newTitle });
-        setShelf(updated);
-      } catch { /* title sync failure is non-critical */ }
-    }, 1000);
+    syncTitle(shelf.shelfId, newTitle);
   };
 
   const handleExpiresDaysChange = async (value: number | null) => {
@@ -129,8 +133,7 @@ export function PublicShareDialog({
     if (!shelf) return;
     const url = apiClient.getPublicShelfUrl(shelf.shareToken, pwaOrigin);
     await navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    markCopied();
   };
 
   const publicUrl = shelf ? apiClient.getPublicShelfUrl(shelf.shareToken, pwaOrigin) : "";

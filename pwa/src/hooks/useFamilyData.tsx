@@ -356,25 +356,6 @@ export function FamilyDataProvider({
     })();
   }, [refreshMembers, refreshBookshelf, refreshBorrowRequests]);
 
-  // Cross-component sync: re-fetch bookshelf when PersonalShelf saves
-  useEffect(() => {
-    const handler = () => {
-      void refreshBookshelf();
-    };
-    window.addEventListener("personalShelfSaved", handler);
-    return () => window.removeEventListener("personalShelfSaved", handler);
-  }, [refreshBookshelf]);
-
-  // Cross-component sync: update display name when changed in settings
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ displayName: string }>).detail;
-      updateMemberDisplayName(userId, detail.displayName);
-    };
-    window.addEventListener("displayNameChanged", handler);
-    return () => window.removeEventListener("displayNameChanged", handler);
-  }, [userId, updateMemberDisplayName]);
-
   const value = useMemo<FamilyDataState>(
     () => ({
       familyId,
