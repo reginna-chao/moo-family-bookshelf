@@ -3,6 +3,7 @@ import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { kvKeys, BorrowStatus, BoolFlag, type BorrowRequest, type FamilyRecord } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
+import { NOBODY, USER1, USER2, USER3 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -19,7 +20,7 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-async function createFamilyAndGetToken(userId = "user1") {
+async function createFamilyAndGetToken(userId = USER1) {
   const res = await request("POST", "/api/family", { userId, displayName: "User1" });
   const json = (await res.json()) as Json;
   return {
@@ -40,8 +41,8 @@ async function joinFamilyAndGetToken(familyId: string, userId: string, displayNa
 }
 
 async function createFamilyWithTwoMembers() {
-  const { familyId, authToken: token1 } = await createFamilyAndGetToken("user1");
-  const { authToken: token2 } = await joinFamilyAndGetToken(familyId, "user2", "User2");
+  const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1);
+  const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "User2");
   return { familyId, token1, token2 };
 }
 
@@ -50,7 +51,7 @@ const validBorrowBody = {
   bookTitle: "Test Book",
   bookAuthor: "Test Author",
   bookCoverUrl: "https://example.com/cover.jpg",
-  ownerId: "user1",
+  ownerId: USER1,
 };
 
 beforeEach(() => {
@@ -70,7 +71,7 @@ describe("POST /api/family/:id/borrow", () => {
       bookTitle: "Test Book",
       bookAuthor: "Test Author",
       bookCoverUrl: "https://example.com/cover.jpg",
-      ownerId: "user1",
+      ownerId: USER1,
     };
 
     const res = await request("POST", `/api/family/${familyId}/borrow`, body, token2);
@@ -80,9 +81,9 @@ describe("POST /api/family/:id/borrow", () => {
     const data = json.data;
     expect(data.requestId).toBeDefined();
     expect(data.familyId).toBe(familyId);
-    expect(data.borrowerId).toBe("user2");
+    expect(data.borrowerId).toBe(USER2);
     expect(data.borrowerName).toBe("User2");
-    expect(data.ownerId).toBe("user1");
+    expect(data.ownerId).toBe(USER1);
     expect(data.bookId).toBe("book-123");
     expect(data.bookTitle).toBe("Test Book");
     expect(data.bookAuthor).toBe("Test Author");
@@ -107,7 +108,7 @@ describe("POST /api/family/:id/borrow", () => {
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { bookTitle: "T", bookAuthor: "A", bookCoverUrl: "U", ownerId: "user1" },
+      { bookTitle: "T", bookAuthor: "A", bookCoverUrl: "U", ownerId: USER1 },
       token2,
     );
     expect(res.status).toBe(400);
@@ -121,7 +122,7 @@ describe("POST /api/family/:id/borrow", () => {
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { bookId: "b1", bookAuthor: "A", bookCoverUrl: "U", ownerId: "user1" },
+      { bookId: "b1", bookAuthor: "A", bookCoverUrl: "U", ownerId: USER1 },
       token2,
     );
     expect(res.status).toBe(400);
@@ -135,7 +136,7 @@ describe("POST /api/family/:id/borrow", () => {
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { bookId: "b1", bookTitle: "T", bookCoverUrl: "U", ownerId: "user1" },
+      { bookId: "b1", bookTitle: "T", bookCoverUrl: "U", ownerId: USER1 },
       token2,
     );
     expect(res.status).toBe(400);
@@ -149,7 +150,7 @@ describe("POST /api/family/:id/borrow", () => {
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { bookId: "b1", bookTitle: "T", bookAuthor: "A", ownerId: "user1" },
+      { bookId: "b1", bookTitle: "T", bookAuthor: "A", ownerId: USER1 },
       token2,
     );
     expect(res.status).toBe(400);
@@ -203,7 +204,7 @@ describe("POST /api/family/:id/borrow", () => {
     const { familyId } = await createFamilyWithTwoMembers();
 
     // Create user3 with their own family, then try to borrow from familyId
-    const { authToken: token3 } = await createFamilyAndGetToken("user3");
+    const { authToken: token3 } = await createFamilyAndGetToken(USER3);
 
     const res = await request(
       "POST",
@@ -222,7 +223,7 @@ describe("POST /api/family/:id/borrow", () => {
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { ...validBorrowBody, ownerId: "user1" },
+      { ...validBorrowBody, ownerId: USER1 },
       token1, // user1 trying to borrow from user1
     );
     expect(res.status).toBe(403);
@@ -236,7 +237,7 @@ describe("POST /api/family/:id/borrow", () => {
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { ...validBorrowBody, ownerId: "user999" },
+      { ...validBorrowBody, ownerId: NOBODY },
       token2,
     );
     expect(res.status).toBe(403);
@@ -250,7 +251,7 @@ describe("POST /api/family/:id/borrow", () => {
     // Owner (user1) disables lending for user1
     await request(
       "PATCH",
-      `/api/family/${familyId}/member/user1`,
+      `/api/family/${familyId}/member/${USER1}`,
       { canLend: BoolFlag.FALSE },
       token1,
     );
@@ -258,7 +259,7 @@ describe("POST /api/family/:id/borrow", () => {
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { ...validBorrowBody, ownerId: "user1" },
+      { ...validBorrowBody, ownerId: USER1 },
       token2,
     );
     expect(res.status).toBe(403);
@@ -272,7 +273,7 @@ describe("POST /api/family/:id/borrow", () => {
     // Owner (user1) disables lending for user2 (borrower)
     await request(
       "PATCH",
-      `/api/family/${familyId}/member/user2`,
+      `/api/family/${familyId}/member/${USER2}`,
       { canLend: BoolFlag.FALSE },
       token1,
     );
@@ -280,7 +281,7 @@ describe("POST /api/family/:id/borrow", () => {
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { ...validBorrowBody, ownerId: "user1" },
+      { ...validBorrowBody, ownerId: USER1 },
       token2,
     );
     expect(res.status).toBe(403);
@@ -291,7 +292,7 @@ describe("POST /api/family/:id/borrow", () => {
   it("should return 400 DUPLICATE_REQUEST if PENDING request exists for same borrower + bookId", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
-    const body = { ...validBorrowBody, ownerId: "user1" };
+    const body = { ...validBorrowBody, ownerId: USER1 };
 
     // First request should succeed
     const res1 = await request("POST", `/api/family/${familyId}/borrow`, body, token2);
@@ -307,8 +308,8 @@ describe("POST /api/family/:id/borrow", () => {
   it("should allow duplicate request for different bookId", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
-    const body1 = { ...validBorrowBody, ownerId: "user1", bookId: "book-1" };
-    const body2 = { ...validBorrowBody, ownerId: "user1", bookId: "book-2" };
+    const body1 = { ...validBorrowBody, ownerId: USER1, bookId: "book-1" };
+    const body2 = { ...validBorrowBody, ownerId: USER1, bookId: "book-2" };
 
     const res1 = await request("POST", `/api/family/${familyId}/borrow`, body1, token2);
     expect(res1.status).toBe(201);
@@ -320,7 +321,7 @@ describe("POST /api/family/:id/borrow", () => {
   it("should store borrow request in KV", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
-    const body = { ...validBorrowBody, ownerId: "user1" };
+    const body = { ...validBorrowBody, ownerId: USER1 };
     const res = await request("POST", `/api/family/${familyId}/borrow`, body, token2);
     expect(res.status).toBe(201);
 
@@ -383,13 +384,13 @@ describe("GET /api/family/:id/borrow", () => {
     await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { ...validBorrowBody, ownerId: "user1", bookId: "book-1" },
+      { ...validBorrowBody, ownerId: USER1, bookId: "book-1" },
       token2,
     );
     await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { ...validBorrowBody, ownerId: "user1", bookId: "book-2" },
+      { ...validBorrowBody, ownerId: USER1, bookId: "book-2" },
       token2,
     );
 
@@ -425,7 +426,7 @@ describe("GET /api/family/:id/borrow", () => {
     const { familyId } = await createFamilyWithTwoMembers();
 
     // user3 is not in the family
-    const { authToken: token3 } = await createFamilyAndGetToken("user3");
+    const { authToken: token3 } = await createFamilyAndGetToken(USER3);
 
     const res = await request("GET", `/api/family/${familyId}/borrow`, undefined, token3);
     expect(res.status).toBe(403);
@@ -462,7 +463,7 @@ describe("PATCH /api/borrow/:requestId", () => {
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { ...validBorrowBody, ownerId: "user1" },
+      { ...validBorrowBody, ownerId: USER1 },
       token2,
     );
     const json = (await res.json()) as Json;
@@ -741,7 +742,7 @@ describe("PATCH /api/borrow/:requestId", () => {
     const requestId = await createPendingBorrowRequest(familyId, token2);
 
     // Create user3 with their own token
-    const { authToken: token3 } = await createFamilyAndGetToken("user3");
+    const { authToken: token3 } = await createFamilyAndGetToken(USER3);
 
     const res = await request(
       "PATCH",

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { kvKeys } from "../../src/kv/schema";
+import { ALICE, BOB, NOBODY, USER1, USER2, USER3 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -38,7 +39,7 @@ function rawRequest(method: string, path: string, rawBody: string) {
   );
 }
 
-async function createFamily(userId = "user1", displayName?: string) {
+async function createFamily(userId = USER1, displayName?: string) {
   const body: Record<string, string> = { userId };
   if (displayName !== undefined) body.displayName = displayName;
   const res = await request("POST", "/api/family", body);
@@ -53,9 +54,9 @@ async function createFamily(userId = "user1", displayName?: string) {
 }
 
 async function createFamilyWithTwoMembers() {
-  const { familyId, authToken: token1 } = await createFamily("user1");
+  const { familyId, authToken: token1 } = await createFamily(USER1);
   const joinRes = await request("POST", `/api/family/${familyId}/join`, {
-    userId: "user2",
+    userId: USER2,
   });
   const joinJson = (await joinRes.json()) as Json;
   const token2 = joinJson.data.authToken as string;
@@ -76,21 +77,21 @@ beforeEach(() => {
 
 describe("Family Lifecycle", () => {
   it("should create a family with default empty displayName", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1" });
+    const res = await request("POST", "/api/family", { userId: USER1 });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.familyId).toBeDefined();
-    expect(json.data.ownerId).toBe("user1");
-    expect(json.data.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
+    expect(json.data.ownerId).toBe(USER1);
+    expect(json.data.members).toEqual([{ userId: USER1, displayName: "", canLend: 1 }]);
     expect(json.data.maxMembers).toBe(2);
     expect(json.data.authToken).toBeDefined();
   });
 
   it("should create a family with a custom displayName", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1", displayName: "Alice" });
+    const res = await request("POST", "/api/family", { userId: USER1, displayName: "Alice" });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
-    expect(json.data.members).toEqual([{ userId: "user1", displayName: "Alice", canLend: 1 }]);
+    expect(json.data.members).toEqual([{ userId: USER1, displayName: "Alice", canLend: 1 }]);
   });
 
   it("should reject create without userId", async () => {
@@ -101,22 +102,22 @@ describe("Family Lifecycle", () => {
   });
 
   it("should allow joining a family and return updated record", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1");
+    const { familyId, authToken: token1 } = await createFamily(USER1);
 
     const joinRes = await request(
       "POST",
       `/api/family/${familyId}/join`,
-      { userId: "user2", displayName: "Bob" },
+      { userId: USER2, displayName: "Bob" },
     );
     expect(joinRes.status).toBe(200);
     const joinJson = (await joinRes.json()) as Json;
     // Mutation returns updated FamilyRecord
     expect(joinJson.data.familyId).toBe(familyId);
     expect(joinJson.data.members).toEqual([
-      { userId: "user1", displayName: "", canLend: 1 },
-      { userId: "user2", displayName: "Bob", canLend: 1 },
+      { userId: USER1, displayName: "", canLend: 1 },
+      { userId: USER2, displayName: "Bob", canLend: 1 },
     ]);
-    expect(joinJson.data.ownerId).toBe("user1");
+    expect(joinJson.data.ownerId).toBe(USER1);
     expect(joinJson.data.authToken).toBeDefined();
 
     // Verify via GET /members (requires auth)
@@ -128,14 +129,14 @@ describe("Family Lifecycle", () => {
     );
     const members = ((await membersRes.json()) as Json).data;
     expect(members.members).toEqual([
-      { userId: "user1", displayName: "", canLend: 1 },
-      { userId: "user2", displayName: "Bob", canLend: 1 },
+      { userId: USER1, displayName: "", canLend: 1 },
+      { userId: USER2, displayName: "Bob", canLend: 1 },
     ]);
   });
 
   it("should return 404 for joining non-existent family", async () => {
     const res = await request("POST", "/api/family/aaaa-zzzz/join", {
-      userId: "user1",
+      userId: USER1,
     });
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
@@ -143,11 +144,11 @@ describe("Family Lifecycle", () => {
   });
 
   it("should not duplicate member on re-join", async () => {
-    const { familyId } = await createFamily("user1");
+    const { familyId } = await createFamily(USER1);
 
     // Re-joining returns a new auth token (old one is invalidated)
     const rejoinRes = await request("POST", `/api/family/${familyId}/join`, {
-      userId: "user1",
+      userId: USER1,
     });
     const rejoinJson = (await rejoinRes.json()) as Json;
     const newToken = rejoinJson.data.authToken as string;
@@ -159,7 +160,7 @@ describe("Family Lifecycle", () => {
       newToken,
     );
     const members = ((await membersRes.json()) as Json).data;
-    expect(members.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
+    expect(members.members).toEqual([{ userId: USER1, displayName: "", canLend: 1 }]);
   });
 
   it("should allow leaving a family and return updated record", async () => {
@@ -167,14 +168,14 @@ describe("Family Lifecycle", () => {
 
     const leaveRes = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user2`,
+      `/api/family/${familyId}/member/${USER2}`,
       undefined,
       token2,
     );
     expect(leaveRes.status).toBe(200);
     const leaveJson = (await leaveRes.json()) as Json;
     // Mutation returns updated FamilyRecord
-    expect(leaveJson.data.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
+    expect(leaveJson.data.members).toEqual([{ userId: USER1, displayName: "", canLend: 1 }]);
 
     // Verify via GET /members
     const membersRes = await request(
@@ -184,7 +185,7 @@ describe("Family Lifecycle", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data;
-    expect(members.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
+    expect(members.members).toEqual([{ userId: USER1, displayName: "", canLend: 1 }]);
   });
 });
 
@@ -194,14 +195,14 @@ describe("Family Lifecycle", () => {
 
 describe("Family creation response fields", () => {
   it("should include ownerId matching the creator", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1" });
+    const res = await request("POST", "/api/family", { userId: USER1 });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
-    expect(json.data.ownerId).toBe("user1");
+    expect(json.data.ownerId).toBe(USER1);
   });
 
   it("should include maxMembers defaulting to 2", async () => {
-    const res = await request("POST", "/api/family", { userId: "user1" });
+    const res = await request("POST", "/api/family", { userId: USER1 });
     expect(res.status).toBe(201);
     const json = (await res.json()) as Json;
     expect(json.data.maxMembers).toBe(2);
@@ -214,12 +215,12 @@ describe("Family creation response fields", () => {
 
 describe("Family member limit", () => {
   it("should allow joining when under maxMembers", async () => {
-    const { familyId } = await createFamily("user1");
+    const { familyId } = await createFamily(USER1);
 
     const joinRes = await request(
       "POST",
       `/api/family/${familyId}/join`,
-      { userId: "user2" },
+      { userId: USER2 },
     );
     expect(joinRes.status).toBe(200);
   });
@@ -228,7 +229,7 @@ describe("Family member limit", () => {
     const { familyId } = await createFamilyWithTwoMembers();
 
     const joinRes = await request("POST", `/api/family/${familyId}/join`, {
-      userId: "user3",
+      userId: USER3,
     });
     expect(joinRes.status).toBe(409);
     const json = (await joinRes.json()) as Json;
@@ -246,13 +247,13 @@ describe("DELETE /api/family/:id/member/:uid", () => {
 
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user2`,
+      `/api/family/${familyId}/member/${USER2}`,
       undefined,
       token1,
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
+    expect(json.data.members).toEqual([{ userId: USER1, displayName: "", canLend: 1 }]);
 
     const membersRes = await request(
       "GET",
@@ -261,7 +262,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data.members;
-    expect(members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
+    expect(members).toEqual([{ userId: USER1, displayName: "", canLend: 1 }]);
   });
 
   it("should reject owner trying to remove self with OWNER_CANNOT_LEAVE", async () => {
@@ -269,7 +270,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
 
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user1`,
+      `/api/family/${familyId}/member/${USER1}`,
       undefined,
       token1,
     );
@@ -283,13 +284,13 @@ describe("DELETE /api/family/:id/member/:uid", () => {
 
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user2`,
+      `/api/family/${familyId}/member/${USER2}`,
       undefined,
       token2,
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
+    expect(json.data.members).toEqual([{ userId: USER1, displayName: "", canLend: 1 }]);
 
     const membersRes = await request(
       "GET",
@@ -298,7 +299,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
       token1,
     );
     const members = ((await membersRes.json()) as Json).data.members;
-    expect(members).toEqual([{ userId: "user1", displayName: "", canLend: 1 }]);
+    expect(members).toEqual([{ userId: USER1, displayName: "", canLend: 1 }]);
   });
 
   it("should reject non-owner trying to remove other member with NOT_OWNER", async () => {
@@ -306,7 +307,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
 
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user1`,
+      `/api/family/${familyId}/member/${USER1}`,
       undefined,
       token2,
     );
@@ -316,11 +317,11 @@ describe("DELETE /api/family/:id/member/:uid", () => {
   });
 
   it("should return 401 when no auth token is provided", async () => {
-    const { familyId } = await createFamily("user1");
+    const { familyId } = await createFamily(USER1);
 
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user2`,
+      `/api/family/${familyId}/member/${USER2}`,
     );
     expect(res.status).toBe(401);
   });
@@ -330,7 +331,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
 
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user999`,
+      `/api/family/${familyId}/member/${NOBODY}`,
       undefined,
       token1,
     );
@@ -345,7 +346,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
     // No auth token provided → 401
     const res = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user2`,
+      `/api/family/${familyId}/member/${USER2}`,
     );
     expect(res.status).toBe(401);
   });
@@ -362,15 +363,15 @@ describe("PUT /api/family/:id/transfer", () => {
     const res = await request(
       "PUT",
       `/api/family/${familyId}/transfer`,
-      { userId: "user1", newOwnerId: "user2" },
+      { userId: USER1, newOwnerId: USER2 },
       token1,
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.ownerId).toBe("user2");
+    expect(json.data.ownerId).toBe(USER2);
     expect(json.data.members).toEqual([
-      { userId: "user1", displayName: "", canLend: 1 },
-      { userId: "user2", displayName: "", canLend: 1 },
+      { userId: USER1, displayName: "", canLend: 1 },
+      { userId: USER2, displayName: "", canLend: 1 },
     ]);
 
     // Verify via GET /members
@@ -381,7 +382,7 @@ describe("PUT /api/family/:id/transfer", () => {
       token1,
     );
     const data = ((await membersRes.json()) as Json).data;
-    expect(data.ownerId).toBe("user2");
+    expect(data.ownerId).toBe(USER2);
   });
 
   it("should reject transfer by non-owner with NOT_OWNER", async () => {
@@ -390,7 +391,7 @@ describe("PUT /api/family/:id/transfer", () => {
     const res = await request(
       "PUT",
       `/api/family/${familyId}/transfer`,
-      { userId: "user2", newOwnerId: "user2" },
+      { userId: USER2, newOwnerId: USER2 },
       token2,
     );
     expect(res.status).toBe(403);
@@ -404,7 +405,7 @@ describe("PUT /api/family/:id/transfer", () => {
     const res = await request(
       "PUT",
       `/api/family/${familyId}/transfer`,
-      { userId: "user1", newOwnerId: "user999" },
+      { userId: USER1, newOwnerId: NOBODY },
       token1,
     );
     expect(res.status).toBe(400);
@@ -418,7 +419,7 @@ describe("PUT /api/family/:id/transfer", () => {
     const res = await request(
       "PUT",
       `/api/family/${familyId}/transfer`,
-      { userId: "user1", newOwnerId: "user1" },
+      { userId: USER1, newOwnerId: USER1 },
       token1,
     );
     expect(res.status).toBe(400);
@@ -433,7 +434,7 @@ describe("PUT /api/family/:id/transfer", () => {
     const res1 = await request(
       "PUT",
       `/api/family/${familyId}/transfer`,
-      { userId: "user1" },
+      { userId: USER1 },
       token1,
     );
     expect(res1.status).toBe(400);
@@ -450,12 +451,12 @@ describe("PUT /api/family/:id/transfer", () => {
 
   it("should return 404 for non-existent family", async () => {
     // Need a valid token to pass auth middleware
-    const { authToken: token1 } = await createFamily("user1");
+    const { authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
       "/api/family/aaaa-zzzz/transfer",
-      { userId: "user1", newOwnerId: "user2" },
+      { userId: USER1, newOwnerId: USER2 },
       token1,
     );
     expect(res.status).toBe(404);
@@ -470,7 +471,7 @@ describe("PUT /api/family/:id/transfer", () => {
     const transferRes = await request(
       "PUT",
       `/api/family/${familyId}/transfer`,
-      { userId: "user1", newOwnerId: "user2" },
+      { userId: USER1, newOwnerId: USER2 },
       token1,
     );
     expect(transferRes.status).toBe(200);
@@ -478,14 +479,14 @@ describe("PUT /api/family/:id/transfer", () => {
     // Old owner (user1) leaves — now a non-owner, should succeed
     const leaveRes = await request(
       "DELETE",
-      `/api/family/${familyId}/member/user1`,
+      `/api/family/${familyId}/member/${USER1}`,
       undefined,
       token1,
     );
     expect(leaveRes.status).toBe(200);
     const leaveJson = (await leaveRes.json()) as Json;
-    expect(leaveJson.data.members).toEqual([{ userId: "user2", displayName: "", canLend: 1 }]);
-    expect(leaveJson.data.ownerId).toBe("user2");
+    expect(leaveJson.data.members).toEqual([{ userId: USER2, displayName: "", canLend: 1 }]);
+    expect(leaveJson.data.ownerId).toBe(USER2);
   });
 });
 
@@ -495,7 +496,7 @@ describe("PUT /api/family/:id/transfer", () => {
 
 describe("GET /api/family/:id/members response", () => {
   it("should include ownerId in the response", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1");
+    const { familyId, authToken: token1 } = await createFamily(USER1);
 
     const membersRes = await request(
       "GET",
@@ -505,11 +506,11 @@ describe("GET /api/family/:id/members response", () => {
     );
     expect(membersRes.status).toBe(200);
     const data = ((await membersRes.json()) as Json).data;
-    expect(data.ownerId).toBe("user1");
+    expect(data.ownerId).toBe(USER1);
   });
 
   it("should return members as { userId, displayName }[]", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1", "Alice");
+    const { familyId, authToken: token1 } = await createFamily(USER1, "Alice");
 
     const membersRes = await request(
       "GET",
@@ -519,7 +520,7 @@ describe("GET /api/family/:id/members response", () => {
     );
     expect(membersRes.status).toBe(200);
     const data = ((await membersRes.json()) as Json).data;
-    expect(data.members).toEqual([{ userId: "user1", displayName: "Alice", canLend: 1 }]);
+    expect(data.members).toEqual([{ userId: USER1, displayName: "Alice", canLend: 1 }]);
   });
 
   it("should normalize legacy record without ownerId/maxMembers", async () => {
@@ -527,18 +528,18 @@ describe("GET /api/family/:id/members response", () => {
     const legacyRecord = {
       familyId: "abcd-ef01",
       members: [
-        { userId: "alice", displayName: "Alice" },
-        { userId: "bob", displayName: "Bob" },
+        { userId: ALICE, displayName: "Alice" },
+        { userId: BOB, displayName: "Bob" },
       ],
       createdAt: "2025-01-01T00:00:00.000Z",
     };
     await kv.put(kvKeys.family("abcd-ef01"), JSON.stringify(legacyRecord));
     // Insert member reverse lookup so auth membership check passes
-    await kv.put(kvKeys.member("alice"), "abcd-ef01");
+    await kv.put(kvKeys.member(ALICE), "abcd-ef01");
 
     // Generate a token for alice to authenticate
     const { generateAuthToken } = await import("../../src/middleware/auth");
-    const aliceToken = await generateAuthToken(kv, "alice");
+    const aliceToken = await generateAuthToken(kv, ALICE);
 
     const res = await request(
       "GET",
@@ -549,12 +550,12 @@ describe("GET /api/family/:id/members response", () => {
     expect(res.status).toBe(200);
     const data = ((await res.json()) as Json).data;
     // ownerId defaults to first member's userId
-    expect(data.ownerId).toBe("alice");
+    expect(data.ownerId).toBe(ALICE);
     // maxMembers defaults to 2
     expect(data.maxMembers).toBe(2);
     expect(data.members).toEqual([
-      { userId: "alice", displayName: "Alice", canLend: 1 },
-      { userId: "bob", displayName: "Bob", canLend: 1 },
+      { userId: ALICE, displayName: "Alice", canLend: 1 },
+      { userId: BOB, displayName: "Bob", canLend: 1 },
     ]);
   });
 
@@ -572,19 +573,19 @@ describe("GET /api/family/:id/members response", () => {
 describe("Join edge cases", () => {
   it("should return 409 ALREADY_IN_FAMILY when user belongs to another family", async () => {
     // Create two families
-    const familyA = await createFamily("user1");
-    const familyB = await createFamily("user3");
+    const familyA = await createFamily(USER1);
+    const familyB = await createFamily(USER3);
 
     // user2 joins family A
     await request("POST", `/api/family/${familyA.familyId}/join`, {
-      userId: "user2",
+      userId: USER2,
     });
 
     // user2 tries to join family B → should be rejected
     const res = await request(
       "POST",
       `/api/family/${familyB.familyId}/join`,
-      { userId: "user2" },
+      { userId: USER2 },
     );
     expect(res.status).toBe(409);
     const json = (await res.json()) as Json;
@@ -615,7 +616,7 @@ describe("Input validation", () => {
 
   it("should reject displayName exceeding 20 characters on create", async () => {
     const res = await request("POST", "/api/family", {
-      userId: "user1",
+      userId: USER1,
       displayName: "a".repeat(21),
     });
     expect(res.status).toBe(400);
@@ -624,9 +625,9 @@ describe("Input validation", () => {
   });
 
   it("should reject displayName exceeding 20 characters on join", async () => {
-    const { familyId } = await createFamily("user1");
+    const { familyId } = await createFamily(USER1);
     const res = await request("POST", `/api/family/${familyId}/join`, {
-      userId: "user2",
+      userId: USER2,
       displayName: "a".repeat(21),
     });
     expect(res.status).toBe(400);
@@ -636,7 +637,7 @@ describe("Input validation", () => {
 
   it("should trim whitespace from displayName", async () => {
     const res = await request("POST", "/api/family", {
-      userId: "user1",
+      userId: USER1,
       displayName: "  Alice  ",
     });
     expect(res.status).toBe(201);
@@ -652,26 +653,26 @@ describe("Input validation", () => {
 describe("Personal Books", () => {
   it("should return null for user with no books", async () => {
     // Need an auth token to access protected endpoint
-    const { authToken: token1 } = await createFamily("user1");
+    const { authToken: token1 } = await createFamily(USER1);
 
-    const res = await request("GET", "/api/user/user1/books", undefined, token1);
+    const res = await request("GET", `/api/user/${USER1}/books`, undefined, token1);
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data).toBeNull();
   });
 
   it("should save and retrieve books, returning updated record", async () => {
-    const { authToken: token1 } = await createFamily("user1");
+    const { authToken: token1 } = await createFamily(USER1);
     const personalBooks = {
       schemaVersion: 1,
-      userId: "user1",
+      userId: USER1,
       displayName: "Test",
       books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 0 }],
     };
 
     const putRes = await request(
       "PUT",
-      "/api/user/user1/books",
+      `/api/user/${USER1}/books`,
       personalBooks,
       token1,
     );
@@ -682,7 +683,7 @@ describe("Personal Books", () => {
     expect(putJson.data.books[0].bookId).toBe("b1");
     expect(putJson.data.lastUpdated).toBeDefined();
 
-    const getRes = await request("GET", "/api/user/user1/books", undefined, token1);
+    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, token1);
     const json = (await getRes.json()) as Json;
     expect(json.data.books).toHaveLength(1);
     expect(json.data.books[0].bookId).toBe("b1");
@@ -690,11 +691,11 @@ describe("Personal Books", () => {
   });
 
   it("should reject missing books array", async () => {
-    const { authToken: token1 } = await createFamily("user1");
+    const { authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
-      "/api/user/user1/books",
+      `/api/user/${USER1}/books`,
       {},
       token1,
     );
@@ -711,12 +712,12 @@ describe("Family Bookshelf Aggregation", () => {
     const { familyId, token1, token2 } = await createFamilyWithTwoMembers();
 
     // Both members save books (each with their own token)
-    await request("PUT", "/api/user/user1/books", {
-      schemaVersion: 1, userId: "user1", displayName: "User1",
+    await request("PUT", `/api/user/${USER1}/books`, {
+      schemaVersion: 1, userId: USER1, displayName: "User1",
       books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
     }, token1);
-    await request("PUT", "/api/user/user2/books", {
-      schemaVersion: 1, userId: "user2", displayName: "User2",
+    await request("PUT", `/api/user/${USER2}/books`, {
+      schemaVersion: 1, userId: USER2, displayName: "User2",
       books: [{ bookId: "b2", title: "Book 2", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
     }, token2);
 
@@ -737,21 +738,21 @@ describe("Family Bookshelf Aggregation", () => {
   });
 
   it("should include displayName in bookshelf response", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1", "Alice");
+    const { familyId, authToken: token1 } = await createFamily(USER1, "Alice");
 
     // Join with displayName
     const joinRes = await request("POST", `/api/family/${familyId}/join`, {
-      userId: "user2",
+      userId: USER2,
       displayName: "Bob",
     });
     const token2 = ((await joinRes.json()) as Json).data.authToken;
 
-    await request("PUT", "/api/user/user1/books", {
-      schemaVersion: 1, userId: "user1", displayName: "Alice",
+    await request("PUT", `/api/user/${USER1}/books`, {
+      schemaVersion: 1, userId: USER1, displayName: "Alice",
       books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
     }, token1);
-    await request("PUT", "/api/user/user2/books", {
-      schemaVersion: 1, userId: "user2", displayName: "Bob",
+    await request("PUT", `/api/user/${USER2}/books`, {
+      schemaVersion: 1, userId: USER2, displayName: "Bob",
       books: [{ bookId: "b2", title: "Book 2", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
     }, token2);
 
@@ -768,7 +769,7 @@ describe("Family Bookshelf Aggregation", () => {
 
   it("should return 403 for authenticated user accessing another family's bookshelf", async () => {
     // user1 is in their own family, so accessing a different family returns 403
-    const { authToken: token1 } = await createFamily("user1");
+    const { authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "GET",
@@ -782,7 +783,7 @@ describe("Family Bookshelf Aggregation", () => {
   });
 
   it("should return 401 for unauthenticated bookshelf request", async () => {
-    const { familyId } = await createFamily("user1");
+    const { familyId } = await createFamily(USER1);
 
     const res = await request("GET", `/api/family/${familyId}/bookshelf`);
     expect(res.status).toBe(401);
@@ -791,15 +792,15 @@ describe("Family Bookshelf Aggregation", () => {
   it("should not include former member after leave", async () => {
     const { familyId, token1, token2 } = await createFamilyWithTwoMembers();
 
-    await request("PUT", "/api/user/user2/books", {
-      schemaVersion: 1, userId: "user2", displayName: "User2",
+    await request("PUT", `/api/user/${USER2}/books`, {
+      schemaVersion: 1, userId: USER2, displayName: "User2",
       books: [{ bookId: "b2", title: "Book 2", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 0 }],
     }, token2);
 
     // user2 leaves
     await request(
       "DELETE",
-      `/api/family/${familyId}/member/user2`,
+      `/api/family/${familyId}/member/${USER2}`,
       undefined,
       token2,
     );
@@ -813,7 +814,7 @@ describe("Family Bookshelf Aggregation", () => {
     );
     const json = (await res.json()) as Json;
     expect(json.data.members).toHaveLength(1);
-    expect(json.data.members[0].userId).toBe("user1");
+    expect(json.data.members[0].userId).toBe(USER1);
   });
 });
 
@@ -823,17 +824,17 @@ describe("Family Bookshelf Aggregation", () => {
 
 describe("PUT /api/family/:id/member/:uid/displayName", () => {
   it("should update own display name", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1");
+    const { familyId, authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user1/displayName`,
+      `/api/family/${familyId}/member/${USER1}/displayName`,
       { displayName: "Alice" },
       token1,
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data).toEqual({ userId: "user1", displayName: "Alice" });
+    expect(json.data).toEqual({ userId: USER1, displayName: "Alice" });
 
     // Verify via GET /members
     const membersRes = await request(
@@ -847,11 +848,11 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should allow setting display name to empty string", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1", "OldName");
+    const { familyId, authToken: token1 } = await createFamily(USER1, "OldName");
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user1/displayName`,
+      `/api/family/${familyId}/member/${USER1}/displayName`,
       { displayName: "" },
       token1,
     );
@@ -861,11 +862,11 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should trim whitespace from display name", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1");
+    const { familyId, authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user1/displayName`,
+      `/api/family/${familyId}/member/${USER1}/displayName`,
       { displayName: "  Alice  " },
       token1,
     );
@@ -875,11 +876,11 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should reject display name exceeding 20 characters", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1");
+    const { familyId, authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user1/displayName`,
+      `/api/family/${familyId}/member/${USER1}/displayName`,
       { displayName: "a".repeat(21) },
       token1,
     );
@@ -889,11 +890,11 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should allow display name of exactly 20 characters", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1");
+    const { familyId, authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user1/displayName`,
+      `/api/family/${familyId}/member/${USER1}/displayName`,
       { displayName: "a".repeat(20) },
       token1,
     );
@@ -903,11 +904,11 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should reject missing displayName field", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1");
+    const { familyId, authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user1/displayName`,
+      `/api/family/${familyId}/member/${USER1}/displayName`,
       {},
       token1,
     );
@@ -917,11 +918,11 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should reject non-string displayName", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1");
+    const { familyId, authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user1/displayName`,
+      `/api/family/${familyId}/member/${USER1}/displayName`,
       { displayName: 123 },
       token1,
     );
@@ -931,11 +932,11 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should return 401 without auth token", async () => {
-    const { familyId } = await createFamily("user1");
+    const { familyId } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user1/displayName`,
+      `/api/family/${familyId}/member/${USER1}/displayName`,
       { displayName: "Alice" },
     );
     expect(res.status).toBe(401);
@@ -946,7 +947,7 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user2/displayName`,
+      `/api/family/${familyId}/member/${USER2}/displayName`,
       { displayName: "Hacked" },
       token1,
     );
@@ -956,13 +957,13 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should return 404 when user is not a member of the family", async () => {
-    const { familyId } = await createFamily("user1");
+    const { familyId } = await createFamily(USER1);
     // Create a separate family for user2 to get a valid token
-    const { authToken: token2 } = await createFamily("user2");
+    const { authToken: token2 } = await createFamily(USER2);
 
     const res = await request(
       "PUT",
-      `/api/family/${familyId}/member/user2/displayName`,
+      `/api/family/${familyId}/member/${USER2}/displayName`,
       { displayName: "Test" },
       token2,
     );
@@ -976,11 +977,11 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should return 404 for non-existent family", async () => {
-    const { authToken: token1 } = await createFamily("user1");
+    const { authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
       "PUT",
-      "/api/family/aaaa-zzzz/member/user1/displayName",
+      `/api/family/aaaa-zzzz/member/${USER1}/displayName`,
       { displayName: "Test" },
       token1,
     );
@@ -990,10 +991,10 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   });
 
   it("should return 400 for invalid JSON body", async () => {
-    const { familyId, authToken: token1 } = await createFamily("user1");
+    const { familyId, authToken: token1 } = await createFamily(USER1);
 
     const res = app.request(
-      `/api/family/${familyId}/member/user1/displayName`,
+      `/api/family/${familyId}/member/${USER1}/displayName`,
       {
         method: "PUT",
         headers: {

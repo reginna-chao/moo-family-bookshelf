@@ -1,7 +1,11 @@
 import { z } from "@hono/zod-openapi";
 
-export const UserIdSchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 export const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
+// userIds are SHA-256 hex digests derived from the account email (see
+// extension crypto/hash.ts). Enforce the strict 64-hex rule everywhere,
+// matching the auth routes' Sha256HexSchema — there is no legitimate
+// non-hex userId.
+export const UserIdSchema = Sha256HexSchema;
 export const FamilyIdSchema = z.string().regex(/^[a-z0-9]{4}-[a-z0-9]{4}$/);
 export const RequestIdSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 export const ShareTokenSchema = z.string().regex(/^[a-f0-9]{32}$/);

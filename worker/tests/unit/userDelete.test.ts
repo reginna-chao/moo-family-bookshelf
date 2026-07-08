@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { kvKeys } from "../../src/kv/schema";
+import { OWNER1, USER1, USER2, NOBODY } from "../helpers/ids";
+
+/** A valid 64-hex id for the "not in any family" solo-user scenario. */
+const SOLO_USER = "5".repeat(64);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -18,7 +22,7 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-async function createFamilyAndGetToken(userId = "user1") {
+async function createFamilyAndGetToken(userId = USER1) {
   const res = await request("POST", "/api/family", { userId });
   const json = (await res.json()) as Json;
   return {
@@ -43,7 +47,7 @@ beforeEach(() => {
 
 describe("DELETE /api/user/:id", () => {
   it("should successfully delete account when user is not in any family", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
     // Leave family first by removing member key (simulate no family)
     // Instead, create a user with books but no family membership
@@ -52,14 +56,14 @@ describe("DELETE /api/user/:id", () => {
     // Let's create a second user who joins then leaves, keeping their token.
 
     // Create family with owner, join as user2, then user2 leaves family
-    const { familyId } = await createFamilyAndGetToken("owner1");
-    const { authToken: user2Token } = await joinFamily(familyId, "user2");
+    const { familyId } = await createFamilyAndGetToken(OWNER1);
+    const { authToken: user2Token } = await joinFamily(familyId, USER2);
 
     // User2 leaves family
-    await request("DELETE", `/api/family/${familyId}/member/user2`, undefined, user2Token);
+    await request("DELETE", `/api/family/${familyId}/member/${USER2}`, undefined, user2Token);
 
     // Save some books for user2
-    await request("PUT", "/api/user/user2/books", { schemaVersion: 1, userId: "user2", displayName: "User2", books: [] }, user2Token);
+    await request("PUT", `/api/user/${USER2}/books`, { schemaVersion: 1, userId: USER2, displayName: "User2", books: [] }, user2Token);
 
     // Now user2 has no family but has books and auth token
     // Re-generate token since leaving family deletes it
@@ -68,10 +72,10 @@ describe("DELETE /api/user/:id", () => {
 
     // Simpler approach: directly set up KV state
     kv = createMockKV();
-    const { authToken: freshToken } = await createFamilyAndGetToken("user2");
+    const { authToken: freshToken } = await createFamilyAndGetToken(USER2);
 
     // Save books
-    await request("PUT", "/api/user/user2/books", { schemaVersion: 1, userId: "user2", displayName: "User2", books: [] }, freshToken);
+    await request("PUT", `/api/user/${USER2}/books`, { schemaVersion: 1, userId: USER2, displayName: "User2", books: [] }, freshToken);
 
     // Transfer ownership is not possible with single member. Let's just test with a user
     // who was never in a family — but they need an auth token.
@@ -85,30 +89,30 @@ describe("DELETE /api/user/:id", () => {
 
     // Manually set up a user with auth token but no family
     const tokenHex = "a".repeat(64);
-    await kv.put(kvKeys.auth("solo-user"), JSON.stringify({ token: tokenHex, createdAt: new Date().toISOString() }));
-    await kv.put(kvKeys.authToken(tokenHex), "solo-user");
-    await kv.put(kvKeys.user("solo-user"), JSON.stringify({ schemaVersion: 1, userId: "solo-user", displayName: "Solo", books: [], lastUpdated: new Date().toISOString() }));
+    await kv.put(kvKeys.auth(SOLO_USER), JSON.stringify({ token: tokenHex, createdAt: new Date().toISOString() }));
+    await kv.put(kvKeys.authToken(tokenHex), SOLO_USER);
+    await kv.put(kvKeys.user(SOLO_USER), JSON.stringify({ schemaVersion: 1, userId: SOLO_USER, displayName: "Solo", books: [], lastUpdated: new Date().toISOString() }));
 
-    const res = await request("DELETE", "/api/user/solo-user", undefined, tokenHex);
+    const res = await request("DELETE", `/api/user/${SOLO_USER}`, undefined, tokenHex);
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.ok).toBe(true);
 
     // Verify KV cleanup
-    expect(await kv.get(kvKeys.user("solo-user"))).toBeNull();
-    expect(await kv.get(kvKeys.auth("solo-user"))).toBeNull();
+    expect(await kv.get(kvKeys.user(SOLO_USER))).toBeNull();
+    expect(await kv.get(kvKeys.auth(SOLO_USER))).toBeNull();
     expect(await kv.get(kvKeys.authToken(tokenHex))).toBeNull();
   });
 
   it("should successfully delete account when user is in family but not owner", async () => {
-    const { familyId } = await createFamilyAndGetToken("owner1");
-    const { authToken: user2Token } = await joinFamily(familyId, "user2");
+    const { familyId } = await createFamilyAndGetToken(OWNER1);
+    const { authToken: user2Token } = await joinFamily(familyId, USER2);
 
     // Save user2 books
-    await request("PUT", "/api/user/user2/books", { schemaVersion: 1, userId: "user2", displayName: "User2", books: [] }, user2Token);
+    await request("PUT", `/api/user/${USER2}/books`, { schemaVersion: 1, userId: USER2, displayName: "User2", books: [] }, user2Token);
 
     // Delete user2 account
-    const res = await request("DELETE", "/api/user/user2", undefined, user2Token);
+    const res = await request("DELETE", `/api/user/${USER2}`, undefined, user2Token);
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.ok).toBe(true);
@@ -116,41 +120,42 @@ describe("DELETE /api/user/:id", () => {
     // Verify user2 removed from family members
     const familyRaw = await kv.get(kvKeys.family(familyId), "json") as Json;
     expect(familyRaw.members).toHaveLength(1);
-    expect(familyRaw.members[0].userId).toBe("owner1");
+    expect(familyRaw.members[0].userId).toBe(OWNER1);
 
     // Verify all user2 KV keys cleaned up
-    expect(await kv.get(kvKeys.user("user2"))).toBeNull();
-    expect(await kv.get(kvKeys.member("user2"))).toBeNull();
-    expect(await kv.get(kvKeys.auth("user2"))).toBeNull();
+    expect(await kv.get(kvKeys.user(USER2))).toBeNull();
+    expect(await kv.get(kvKeys.member(USER2))).toBeNull();
+    expect(await kv.get(kvKeys.auth(USER2))).toBeNull();
   });
 
   it("should return 401 UNAUTHORIZED for unauthenticated request", async () => {
-    const res = await request("DELETE", "/api/user/user1");
+    const res = await request("DELETE", `/api/user/${USER1}`);
     expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("UNAUTHORIZED");
   });
 
   it("should return 403 FORBIDDEN when deleting another user's account", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("DELETE", "/api/user/other-user", undefined, authToken);
+    // A valid-format userId that differs from the authenticated caller (USER1)
+    const res = await request("DELETE", `/api/user/${NOBODY}`, undefined, authToken);
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("FORBIDDEN");
   });
 
   it("should return 403 OWNER_CANNOT_DELETE when multi-member owner tries to delete", async () => {
-    const { familyId } = await createFamilyAndGetToken("owner1");
-    await joinFamily(familyId, "user2");
+    const { familyId } = await createFamilyAndGetToken(OWNER1);
+    await joinFamily(familyId, USER2);
 
     // Re-get token for owner1 (joining user2 doesn't invalidate owner1's token)
     // Actually owner1's token is still valid. Let's get it fresh.
     const tokenHex = "b".repeat(64);
-    await kv.put(kvKeys.auth("owner1"), JSON.stringify({ token: tokenHex, createdAt: new Date().toISOString() }));
-    await kv.put(kvKeys.authToken(tokenHex), "owner1");
+    await kv.put(kvKeys.auth(OWNER1), JSON.stringify({ token: tokenHex, createdAt: new Date().toISOString() }));
+    await kv.put(kvKeys.authToken(tokenHex), OWNER1);
 
-    const res = await request("DELETE", "/api/user/owner1", undefined, tokenHex);
+    const res = await request("DELETE", `/api/user/${OWNER1}`, undefined, tokenHex);
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("OWNER_CANNOT_DELETE");
@@ -158,28 +163,28 @@ describe("DELETE /api/user/:id", () => {
   });
 
   it("should allow single-member owner to delete account and clean up family", async () => {
-    const { familyId, authToken } = await createFamilyAndGetToken("owner1");
+    const { familyId, authToken } = await createFamilyAndGetToken(OWNER1);
 
     // Save books for owner1
-    await request("PUT", "/api/user/owner1/books", { schemaVersion: 1, userId: "owner1", displayName: "Owner", books: [] }, authToken);
+    await request("PUT", `/api/user/${OWNER1}/books`, { schemaVersion: 1, userId: OWNER1, displayName: "Owner", books: [] }, authToken);
 
     // Verify family exists
     expect(await kv.get(kvKeys.family(familyId))).not.toBeNull();
 
-    const res = await request("DELETE", "/api/user/owner1", undefined, authToken);
+    const res = await request("DELETE", `/api/user/${OWNER1}`, undefined, authToken);
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.ok).toBe(true);
 
     // Verify all KV keys cleaned up
     expect(await kv.get(kvKeys.family(familyId))).toBeNull();
-    expect(await kv.get(kvKeys.user("owner1"))).toBeNull();
-    expect(await kv.get(kvKeys.member("owner1"))).toBeNull();
-    expect(await kv.get(kvKeys.auth("owner1"))).toBeNull();
+    expect(await kv.get(kvKeys.user(OWNER1))).toBeNull();
+    expect(await kv.get(kvKeys.member(OWNER1))).toBeNull();
+    expect(await kv.get(kvKeys.auth(OWNER1))).toBeNull();
   });
 
   it("should return 400 INVALID_USER_ID for invalid userId format", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
     const res = await request("DELETE", "/api/user/user<script>", undefined, authToken);
     expect(res.status).toBe(400);
@@ -188,25 +193,25 @@ describe("DELETE /api/user/:id", () => {
   });
 
   it("should clean up all KV keys after deletion", async () => {
-    const { familyId } = await createFamilyAndGetToken("owner1");
-    const { authToken: user2Token } = await joinFamily(familyId, "user2");
+    const { familyId } = await createFamilyAndGetToken(OWNER1);
+    const { authToken: user2Token } = await joinFamily(familyId, USER2);
 
     // Save user2 books
-    await request("PUT", "/api/user/user2/books", { schemaVersion: 1, userId: "user2", displayName: "User2", books: [] }, user2Token);
+    await request("PUT", `/api/user/${USER2}/books`, { schemaVersion: 1, userId: USER2, displayName: "User2", books: [] }, user2Token);
 
     // Verify keys exist before deletion
-    expect(await kv.get(kvKeys.user("user2"))).not.toBeNull();
-    expect(await kv.get(kvKeys.member("user2"))).not.toBeNull();
-    expect(await kv.get(kvKeys.auth("user2"))).not.toBeNull();
+    expect(await kv.get(kvKeys.user(USER2))).not.toBeNull();
+    expect(await kv.get(kvKeys.member(USER2))).not.toBeNull();
+    expect(await kv.get(kvKeys.auth(USER2))).not.toBeNull();
 
     // Delete
-    const res = await request("DELETE", "/api/user/user2", undefined, user2Token);
+    const res = await request("DELETE", `/api/user/${USER2}`, undefined, user2Token);
     expect(res.status).toBe(200);
 
     // Verify all keys deleted
-    expect(await kv.get(kvKeys.user("user2"))).toBeNull();
-    expect(await kv.get(kvKeys.member("user2"))).toBeNull();
-    expect(await kv.get(kvKeys.auth("user2"))).toBeNull();
+    expect(await kv.get(kvKeys.user(USER2))).toBeNull();
+    expect(await kv.get(kvKeys.member(USER2))).toBeNull();
+    expect(await kv.get(kvKeys.auth(USER2))).toBeNull();
 
     // Verify the auth token reverse-lookup is also deleted
     // (We can't easily check without knowing the token, but deleteAuthToken handles it)

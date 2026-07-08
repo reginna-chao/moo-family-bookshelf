@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import type { Env } from "../utils/env";
-import { kvKeys, BoolFlag, BorrowStatus, type BorrowRequest, type FamilyMember, type FamilyRecord, type RawFamilyRecord, type QrTokenRecord, type UserBooksRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { kvKeys, BoolFlag, BorrowStatus, type BorrowRequest, type FamilyMember, type RawFamilyRecord, type QrTokenRecord, type UserBooksRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
 import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName, sanitizeShortString } from "../utils/validation";
 import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
@@ -15,10 +15,6 @@ export const familyRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 function invalidDisplayNameResponse(c: Context<{ Bindings: Env }>) {
   return jsonError(c, 400, "INVALID_DISPLAY_NAME", "displayName must be a string of 20 characters or fewer");
-}
-
-function toPublicRecord(record: FamilyRecord): FamilyRecord {
-  return record;
 }
 
 // --- Route definitions ---
@@ -210,7 +206,7 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
   const authToken = await generateAuthToken(c.env.KV, body.userId);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
-  return c.json({ data: { ...toPublicRecord(record), authToken, expiresAt } }, 201);
+  return c.json({ data: { ...record, authToken, expiresAt } }, 201);
 });
 
 // POST /api/family/:id/join
@@ -273,26 +269,14 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Existing members are reconnecting from a new device, not joining for the first time.
-  // They were already verified when they originally joined. The Extension authenticates
-  // via the user's Readmoo login (scraping email → deriving userId), which is sufficient
-  // proof of identity. Skip verification and maxMembers check for them.
+  // Existing members are reconnecting from a new device, not joining for the first
+  // time. They still MUST pass the same verification gate as new members: knowing an
+  // email-derived userId + familyId alone must not mint that member's token. The
+  // maxMembers capacity check, by contrast, applies only to new members (an existing
+  // member must never be blocked from reconnecting by a full family).
   const isExistingMember = hasMember(record.members, body.userId);
 
-  if (isExistingMember) {
-    // Update displayName if changed
-    const member = findMember(record.members, body.userId);
-    if (member && displayName !== "" && member.displayName !== displayName) {
-      member.displayName = displayName;
-      await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
-    }
-
-    const authToken = await getOrGenerateAuthToken(c.env.KV, body.userId);
-    const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
-    return c.json({ data: { ...toPublicRecord(record), authToken, expiresAt } });
-  }
-
-  // --- New member flow: verification + capacity check ---
+  // --- Verification gate (both existing-member reconnect and new-member join) ---
 
   // QR token bypass: if a valid one-time QR token is provided, skip verification.
   let skipVerification = false;
@@ -318,6 +302,21 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     }
   }
 
+  if (isExistingMember) {
+    // Update displayName if changed
+    const member = findMember(record.members, body.userId);
+    if (member && displayName !== "" && member.displayName !== displayName) {
+      member.displayName = displayName;
+      await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+    }
+
+    const authToken = await getOrGenerateAuthToken(c.env.KV, body.userId);
+    const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
+    return c.json({ data: { ...record, authToken, expiresAt } });
+  }
+
+  // --- New member flow: capacity check ---
+
   // NOTE: No atomic compare-and-swap in KV. Concurrent joins could bypass
   // maxMembers limit. Acceptable for 2-person families with low concurrency.
   if (record.members.length >= record.maxMembers) {
@@ -333,7 +332,7 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   const authToken = await generateAuthToken(c.env.KV, body.userId);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
-  return c.json({ data: { ...toPublicRecord(record), authToken, expiresAt } });
+  return c.json({ data: { ...record, authToken, expiresAt } });
 });
 
 // DELETE /api/family/:id/member/:uid
@@ -410,7 +409,7 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     deleteAuthToken(c.env.KV, targetUserId),
   ]);
 
-  return c.json({ data: toPublicRecord(record) });
+  return c.json({ data: record });
 });
 
 // GET /api/family/:id/members
@@ -443,7 +442,7 @@ familyRoutes.openapi(listMembersRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  return c.json({ data: toPublicRecord(record) });
+  return c.json({ data: record });
 });
 
 // PUT /api/family/:id/member/:uid/displayName — update display name
@@ -672,7 +671,7 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
   }
   await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
 
-  return c.json({ data: toPublicRecord(record) });
+  return c.json({ data: record });
 });
 
 // PUT /api/family/:id/endpoint — update family API endpoint
@@ -772,7 +771,7 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
 
   await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
 
-  return c.json({ data: toPublicRecord(record) });
+  return c.json({ data: record });
 });
 
 /**

@@ -167,7 +167,6 @@ export interface UserBooksRecord {
    * Each list is capped independently at `MAX_FAMILY_PREF_ENTRIES`.
    */
   familyShelfPrefs?: { hidden: string[]; favorites: string[] };
-  [key: string]: unknown;
 }
 
 /**

@@ -3,6 +3,7 @@ import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { kvKeys } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
+import { USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -31,7 +32,7 @@ function rawRequest(method: string, path: string, rawBody: string, authToken?: s
   );
 }
 
-async function createFamilyAndGetToken(userId = "user1") {
+async function createFamilyAndGetToken(userId = USER1) {
   const res = await request("POST", "/api/family", { userId });
   const json = (await res.json()) as Json;
   return {
@@ -50,14 +51,14 @@ beforeEach(() => {
 
 describe("GET /api/user/:id/books", () => {
   it("should return 401 UNAUTHORIZED when no auth token is provided", async () => {
-    const res = await request("GET", "/api/user/user1/books");
+    const res = await request("GET", `/api/user/${USER1}/books`);
     expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("UNAUTHORIZED");
   });
 
   it("should return 400 INVALID_USER_ID for invalid userId", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
     const res = await request("GET", "/api/user/user<script>/books", undefined, authToken);
     expect(res.status).toBe(400);
@@ -66,28 +67,28 @@ describe("GET /api/user/:id/books", () => {
   });
 
   it("should return 403 FORBIDDEN when accessing another user's books", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("GET", "/api/user/user2/books", undefined, authToken);
+    const res = await request("GET", `/api/user/${USER2}/books`, undefined, authToken);
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("FORBIDDEN");
   });
 
   it("should return data when user has books", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
     // Save books first
     const personalBooks = {
       schemaVersion: 1,
-      userId: "user1",
+      userId: USER1,
       displayName: "Test",
       books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 0 }],
     };
-    await request("PUT", "/api/user/user1/books", personalBooks, authToken);
+    await request("PUT", `/api/user/${USER1}/books`, personalBooks, authToken);
 
     // Then retrieve
-    const res = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const res = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.books).toHaveLength(1);
@@ -102,14 +103,14 @@ describe("GET /api/user/:id/books", () => {
 
 describe("PUT /api/user/:id/books", () => {
   it("should return 401 UNAUTHORIZED when no auth token is provided", async () => {
-    const res = await request("PUT", "/api/user/user1/books", { books: [] });
+    const res = await request("PUT", `/api/user/${USER1}/books`, { books: [] });
     expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("UNAUTHORIZED");
   });
 
   it("should return 400 INVALID_USER_ID for invalid userId on PUT", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
     const res = await request("PUT", "/api/user/user<script>/books", { books: [] }, authToken);
     expect(res.status).toBe(400);
@@ -118,36 +119,36 @@ describe("PUT /api/user/:id/books", () => {
   });
 
   it("should return 403 FORBIDDEN when modifying another user's books", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PUT", "/api/user/user2/books", { books: [] }, authToken);
+    const res = await request("PUT", `/api/user/${USER2}/books`, { books: [] }, authToken);
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("FORBIDDEN");
   });
 
   it("should return 400 INVALID_JSON for malformed request body on PUT", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await rawRequest("PUT", "/api/user/user1/books", "{not valid}", authToken);
+    const res = await rawRequest("PUT", `/api/user/${USER1}/books`, "{not valid}", authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_JSON");
   });
 
   it("should return 400 INVALID_PAYLOAD when books is not an array", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PUT", "/api/user/user1/books", { books: "not-array" }, authToken);
+    const res = await request("PUT", `/api/user/${USER1}/books`, { books: "not-array" }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("should return 400 INVALID_PAYLOAD when books is missing", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PUT", "/api/user/user1/books", {}, authToken);
+    const res = await request("PUT", `/api/user/${USER1}/books`, {}, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
@@ -224,9 +225,9 @@ describe("PUT /:id/books per-user rate limit", () => {
 
   it("should bypass per-user rate limit in dev mode", async () => {
     // Use the existing dev-mode request helper (has DEV_MODE: "1")
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
     for (let i = 0; i < 31; i++) {
-      const res = await request("PUT", "/api/user/user1/books", validBody, authToken);
+      const res = await request("PUT", `/api/user/${USER1}/books`, validBody, authToken);
       expect(res.status).toBe(200);
     }
   });
@@ -260,14 +261,14 @@ describe("PATCH /api/user/:id/books", () => {
   // --- Auth & validation ---
 
   it("should return 401 UNAUTHORIZED when no auth token is provided", async () => {
-    const res = await request("PATCH", "/api/user/user1/books", { changes: [{ bookId: "b1", isShared: 1 }] });
+    const res = await request("PATCH", `/api/user/${USER1}/books`, { changes: [{ bookId: "b1", isShared: 1 }] });
     expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("UNAUTHORIZED");
   });
 
   it("should return 400 INVALID_USER_ID for invalid userId", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
     const res = await request("PATCH", "/api/user/user<script>/books", { changes: [{ bookId: "b1", isShared: 1 }] }, authToken);
     expect(res.status).toBe(400);
@@ -276,101 +277,101 @@ describe("PATCH /api/user/:id/books", () => {
   });
 
   it("should return 403 FORBIDDEN when patching another user's books", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PATCH", "/api/user/user2/books", { changes: [{ bookId: "b1", isShared: 1 }] }, authToken);
+    const res = await request("PATCH", `/api/user/${USER2}/books`, { changes: [{ bookId: "b1", isShared: 1 }] }, authToken);
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("FORBIDDEN");
   });
 
   it("should return 400 INVALID_JSON for malformed body", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await rawRequest("PATCH", "/api/user/user1/books", "{not valid json}", authToken);
+    const res = await rawRequest("PATCH", `/api/user/${USER1}/books`, "{not valid json}", authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_JSON");
   });
 
   it("should return 400 INVALID_PAYLOAD when changes is missing", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PATCH", "/api/user/user1/books", {}, authToken);
+    const res = await request("PATCH", `/api/user/${USER1}/books`, {}, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("should return 400 INVALID_PAYLOAD when changes is not an array", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PATCH", "/api/user/user1/books", { changes: "not-array" }, authToken);
+    const res = await request("PATCH", `/api/user/${USER1}/books`, { changes: "not-array" }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("should return 400 INVALID_PAYLOAD when changes is empty array", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PATCH", "/api/user/user1/books", { changes: [] }, authToken);
+    const res = await request("PATCH", `/api/user/${USER1}/books`, { changes: [] }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("should return 400 INVALID_PAYLOAD when changes exceeds 1000 entries", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
     const bigChanges = Array.from({ length: 1001 }, (_, i) => ({ bookId: `b${i}`, isShared: 1 }));
-    const res = await request("PATCH", "/api/user/user1/books", { changes: bigChanges }, authToken);
+    const res = await request("PATCH", `/api/user/${USER1}/books`, { changes: bigChanges }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("should return 400 INVALID_PAYLOAD when a change has empty bookId", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PATCH", "/api/user/user1/books", { changes: [{ bookId: "", isShared: 1 }] }, authToken);
+    const res = await request("PATCH", `/api/user/${USER1}/books`, { changes: [{ bookId: "", isShared: 1 }] }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("should return 400 INVALID_PAYLOAD when a change has non-string bookId", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PATCH", "/api/user/user1/books", { changes: [{ bookId: 123, isShared: 1 }] }, authToken);
+    const res = await request("PATCH", `/api/user/${USER1}/books`, { changes: [{ bookId: 123, isShared: 1 }] }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("should return 400 INVALID_PAYLOAD when isShared is not 0 or 1", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PATCH", "/api/user/user1/books", { changes: [{ bookId: "b1", isShared: 2 }] }, authToken);
+    const res = await request("PATCH", `/api/user/${USER1}/books`, { changes: [{ bookId: "b1", isShared: 2 }] }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("should return 400 INVALID_PAYLOAD when isShared is a string", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PATCH", "/api/user/user1/books", { changes: [{ bookId: "b1", isShared: "yes" }] }, authToken);
+    const res = await request("PATCH", `/api/user/${USER1}/books`, { changes: [{ bookId: "b1", isShared: "yes" }] }, authToken);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("should return 400 INVALID_PAYLOAD when displayName is empty string", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
-    await seedBooksForUser("user1", authToken);
+    const { authToken } = await createFamilyAndGetToken(USER1);
+    await seedBooksForUser(USER1, authToken);
 
-    const res = await request("PATCH", "/api/user/user1/books", {
+    const res = await request("PATCH", `/api/user/${USER1}/books`, {
       changes: [{ bookId: "b1", isShared: 1 }],
       displayName: "",
     }, authToken);
@@ -380,10 +381,10 @@ describe("PATCH /api/user/:id/books", () => {
   });
 
   it("should return 404 NOT_FOUND when user record does not exist", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
     // Do NOT seed books — user record is absent
 
-    const res = await request("PATCH", "/api/user/user1/books", { changes: [{ bookId: "b1", isShared: 1 }] }, authToken);
+    const res = await request("PATCH", `/api/user/${USER1}/books`, { changes: [{ bookId: "b1", isShared: 1 }] }, authToken);
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("NOT_FOUND");
@@ -392,10 +393,10 @@ describe("PATCH /api/user/:id/books", () => {
   // --- Happy path ---
 
   it("should apply changes and return applied count", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
-    await seedBooksForUser("user1", authToken);
+    const { authToken } = await createFamilyAndGetToken(USER1);
+    await seedBooksForUser(USER1, authToken);
 
-    const res = await request("PATCH", "/api/user/user1/books", {
+    const res = await request("PATCH", `/api/user/${USER1}/books`, {
       changes: [
         { bookId: "b1", isShared: 1 },
         { bookId: "b2", isShared: 1 },
@@ -408,7 +409,7 @@ describe("PATCH /api/user/:id/books", () => {
     expect(json.data.applied).toBe(2);
 
     // Verify via GET
-    const getRes = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.books.find((b: Json) => b.bookId === "b1").isShared).toBe(1);
     expect(getJson.data.books.find((b: Json) => b.bookId === "b2").isShared).toBe(1);
@@ -416,10 +417,10 @@ describe("PATCH /api/user/:id/books", () => {
   });
 
   it("should silently skip unknown bookIds and not count them in applied", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
-    await seedBooksForUser("user1", authToken);
+    const { authToken } = await createFamilyAndGetToken(USER1);
+    await seedBooksForUser(USER1, authToken);
 
-    const res = await request("PATCH", "/api/user/user1/books", {
+    const res = await request("PATCH", `/api/user/${USER1}/books`, {
       changes: [
         { bookId: "b1", isShared: 1 },
         { bookId: "nonexistent", isShared: 1 },
@@ -431,72 +432,72 @@ describe("PATCH /api/user/:id/books", () => {
     expect(json.data.applied).toBe(1);
 
     // Verify b1 was updated
-    const getRes = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.books.find((b: Json) => b.bookId === "b1").isShared).toBe(1);
   });
 
   it("should update displayName when provided and user is not in a family", async () => {
     // Seed books directly via KV (not in a family)
-    const token = await generateAuthToken(kv, "solo_user");
+    const token = await generateAuthToken(kv, USER3);
     const record = {
       schemaVersion: 1,
-      userId: "solo_user",
+      userId: USER3,
       displayName: "Old Name",
       books: [sampleBook("b1")],
       lastUpdated: new Date().toISOString(),
     };
-    await kv.put(kvKeys.user("solo_user"), JSON.stringify(record));
+    await kv.put(kvKeys.user(USER3), JSON.stringify(record));
 
-    const res = await request("PATCH", "/api/user/solo_user/books", {
+    const res = await request("PATCH", `/api/user/${USER3}/books`, {
       changes: [{ bookId: "b1", isShared: 1 }],
       displayName: "New Name",
     }, token);
 
     expect(res.status).toBe(200);
 
-    const getRes = await request("GET", "/api/user/solo_user/books", undefined, token);
+    const getRes = await request("GET", `/api/user/${USER3}/books`, undefined, token);
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.displayName).toBe("New Name");
   });
 
   it("should NOT overwrite displayName when omitted from body", async () => {
     // Seed user directly (not in family) with a known displayName
-    const token = await generateAuthToken(kv, "solo_user2");
+    const token = await generateAuthToken(kv, USER4);
     const record = {
       schemaVersion: 1,
-      userId: "solo_user2",
+      userId: USER4,
       displayName: "Keep This Name",
       books: [sampleBook("b1"), sampleBook("b2")],
       lastUpdated: new Date().toISOString(),
     };
-    await kv.put(kvKeys.user("solo_user2"), JSON.stringify(record));
+    await kv.put(kvKeys.user(USER4), JSON.stringify(record));
 
     // PATCH without displayName in body
-    const res = await request("PATCH", "/api/user/solo_user2/books", {
+    const res = await request("PATCH", `/api/user/${USER4}/books`, {
       changes: [{ bookId: "b1", isShared: 1 }],
     }, token);
 
     expect(res.status).toBe(200);
 
     // Verify displayName was preserved from the original record
-    const getRes = await request("GET", "/api/user/solo_user2/books", undefined, token);
+    const getRes = await request("GET", `/api/user/${USER4}/books`, undefined, token);
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.displayName).toBe("Keep This Name");
   });
 
   it("should preserve other book fields (title, author, coverUrl, etc.) when patching isShared", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
+    const { authToken } = await createFamilyAndGetToken(USER1);
     const originalBooks = [
       { bookId: "b1", title: "My Book", author: "Jane", isbn: "978-xxx", coverUrl: "https://img/b1.jpg", readmooUrl: "https://readmoo.com/book/b1", category: "sci-fi", isShared: 0 },
     ];
-    await seedBooksForUser("user1", authToken, originalBooks);
+    await seedBooksForUser(USER1, authToken, originalBooks);
 
-    await request("PATCH", "/api/user/user1/books", {
+    await request("PATCH", `/api/user/${USER1}/books`, {
       changes: [{ bookId: "b1", isShared: 1 }],
     }, authToken);
 
-    const getRes = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
     const getJson = (await getRes.json()) as Json;
     const book = getJson.data.books.find((b: Json) => b.bookId === "b1");
     expect(book.title).toBe("My Book");
@@ -509,22 +510,22 @@ describe("PATCH /api/user/:id/books", () => {
   });
 
   it("should refresh lastUpdated after PATCH", async () => {
-    const { authToken } = await createFamilyAndGetToken("user1");
-    await seedBooksForUser("user1", authToken);
+    const { authToken } = await createFamilyAndGetToken(USER1);
+    await seedBooksForUser(USER1, authToken);
 
     // Get original lastUpdated
-    const getRes1 = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getRes1 = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
     const getJson1 = (await getRes1.json()) as Json;
     const originalLastUpdated = getJson1.data.lastUpdated;
 
     // Small delay to ensure timestamp differs
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    await request("PATCH", "/api/user/user1/books", {
+    await request("PATCH", `/api/user/${USER1}/books`, {
       changes: [{ bookId: "b1", isShared: 1 }],
     }, authToken);
 
-    const getRes2 = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getRes2 = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
     const getJson2 = (await getRes2.json()) as Json;
     expect(getJson2.data.lastUpdated).not.toBe(originalLastUpdated);
   });
@@ -533,16 +534,16 @@ describe("PATCH /api/user/:id/books", () => {
 
   it("should use family record displayName (not client value) when user is in a family", async () => {
     // Create family with a known displayName for user1
-    const createRes = await request("POST", "/api/family", { userId: "user1", displayName: "Family Name" });
+    const createRes = await request("POST", "/api/family", { userId: USER1, displayName: "Family Name" });
     const createJson = (await createRes.json()) as Json;
     const familyId = createJson.data.familyId as string;
     const authToken = createJson.data.authToken as string;
 
     // Seed books for user1
-    await seedBooksForUser("user1", authToken);
+    await seedBooksForUser(USER1, authToken);
 
     // PATCH with a client-supplied displayName that should be IGNORED
-    const res = await request("PATCH", "/api/user/user1/books", {
+    const res = await request("PATCH", `/api/user/${USER1}/books`, {
       changes: [{ bookId: "b1", isShared: 1 }],
       displayName: "Client Tried This",
     }, authToken);
@@ -550,7 +551,7 @@ describe("PATCH /api/user/:id/books", () => {
     expect(res.status).toBe(200);
 
     // Verify displayName is from family record, not from client
-    const getRes = await request("GET", "/api/user/user1/books", undefined, authToken);
+    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.displayName).toBe("Family Name");
   });
@@ -559,19 +560,19 @@ describe("PATCH /api/user/:id/books", () => {
 
   it("should not rewrite KV when all bookIds are unknown and no displayName provided", async () => {
     // Seed user directly with a fixed lastUpdated (not in a family)
-    const token = await generateAuthToken(kv, "noop_user");
+    const token = await generateAuthToken(kv, USER5);
     const fixedTimestamp = "2020-01-01T00:00:00.000Z";
     const record = {
       schemaVersion: 1,
-      userId: "noop_user",
+      userId: USER5,
       displayName: "NoOp User",
       books: [sampleBook("b1")],
       lastUpdated: fixedTimestamp,
     };
-    await kv.put(kvKeys.user("noop_user"), JSON.stringify(record));
+    await kv.put(kvKeys.user(USER5), JSON.stringify(record));
 
     // PATCH with a bookId that doesn't exist — no displayName
-    const res = await request("PATCH", "/api/user/noop_user/books", {
+    const res = await request("PATCH", `/api/user/${USER5}/books`, {
       changes: [{ bookId: "nonexistent", isShared: 1 }],
     }, token);
 
@@ -581,7 +582,7 @@ describe("PATCH /api/user/:id/books", () => {
     expect(json.data.applied).toBe(0);
 
     // Verify KV was NOT rewritten — lastUpdated should still be the original fixed timestamp
-    const getRes = await request("GET", "/api/user/noop_user/books", undefined, token);
+    const getRes = await request("GET", `/api/user/${USER5}/books`, undefined, token);
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.lastUpdated).toBe(fixedTimestamp);
   });

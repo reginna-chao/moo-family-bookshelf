@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { BorrowStatus, kvKeys, type BorrowRequest } from "../../src/kv/schema";
+import { ALICE, BOB, CHARLIE } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -71,27 +72,27 @@ beforeEach(() => {
 describe("Borrow Cancellation on Member Removal", () => {
   it("auto-cancels PENDING requests where removed member is borrower OR owner", async () => {
     // 3-person family: Alice (owner), Bob, Carol
-    const { familyId, authToken: aliceToken } = await createFamilyAndGetToken("alice", "Alice");
+    const { familyId, authToken: aliceToken } = await createFamilyAndGetToken(ALICE, "Alice");
 
     // Bump maxMembers to 3 directly in KV so we can have Alice + Bob + Carol
     const raw = await kv.get<Json>(kvKeys.family(familyId), "json");
     raw.maxMembers = 3;
     await kv.put(kvKeys.family(familyId), JSON.stringify(raw));
 
-    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, "bob", "Bob");
-    const { authToken: carolToken } = await joinFamilyAndGetToken(familyId, "carol", "Carol");
+    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, BOB, "Bob");
+    const { authToken: carolToken } = await joinFamilyAndGetToken(familyId, CHARLIE, "Carol");
 
     // Bob borrows from Alice (Bob = borrower)
-    const reqBobBorrows = await createBorrowRequest(familyId, bobToken, "alice", "1");
+    const reqBobBorrows = await createBorrowRequest(familyId, bobToken, ALICE, "1");
     // Carol borrows from Bob (Bob = owner)
-    const reqBobOwns = await createBorrowRequest(familyId, carolToken, "bob", "2");
+    const reqBobOwns = await createBorrowRequest(familyId, carolToken, BOB, "2");
     // Carol borrows from Alice (Bob is unrelated)
-    const reqUnrelated = await createBorrowRequest(familyId, carolToken, "alice", "3");
+    const reqUnrelated = await createBorrowRequest(familyId, carolToken, ALICE, "3");
 
     // Alice removes Bob
     const removeRes = await request(
       "DELETE",
-      `/api/family/${familyId}/member/bob`,
+      `/api/family/${familyId}/member/${BOB}`,
       undefined,
       aliceToken,
     );
@@ -106,11 +107,11 @@ describe("Borrow Cancellation on Member Removal", () => {
   });
 
   it("preserves LENT requests when a member is removed", async () => {
-    const { familyId, authToken: aliceToken } = await createFamilyAndGetToken("alice", "Alice");
-    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, "bob", "Bob");
+    const { familyId, authToken: aliceToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     // Bob borrows from Alice → PENDING
-    const requestId = await createBorrowRequest(familyId, bobToken, "alice", "lent");
+    const requestId = await createBorrowRequest(familyId, bobToken, ALICE, "lent");
 
     // Alice approves → LENT
     const approveRes = await request(
@@ -124,7 +125,7 @@ describe("Borrow Cancellation on Member Removal", () => {
     // Alice removes Bob
     const removeRes = await request(
       "DELETE",
-      `/api/family/${familyId}/member/bob`,
+      `/api/family/${familyId}/member/${BOB}`,
       undefined,
       aliceToken,
     );
@@ -136,13 +137,13 @@ describe("Borrow Cancellation on Member Removal", () => {
   });
 
   it("only cancels PENDING; leaves LENT and REJECTED unchanged on member removal", async () => {
-    const { familyId, authToken: aliceToken } = await createFamilyAndGetToken("alice", "Alice");
-    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, "bob", "Bob");
+    const { familyId, authToken: aliceToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     // Three Bob-involving requests in different states
-    const pendingId = await createBorrowRequest(familyId, bobToken, "alice", "pending");
-    const lentId = await createBorrowRequest(familyId, bobToken, "alice", "lent");
-    const rejectedId = await createBorrowRequest(familyId, bobToken, "alice", "rejected");
+    const pendingId = await createBorrowRequest(familyId, bobToken, ALICE, "pending");
+    const lentId = await createBorrowRequest(familyId, bobToken, ALICE, "lent");
+    const rejectedId = await createBorrowRequest(familyId, bobToken, ALICE, "rejected");
 
     await request(
       "PATCH",
@@ -165,7 +166,7 @@ describe("Borrow Cancellation on Member Removal", () => {
     // Alice removes Bob
     const removeRes = await request(
       "DELETE",
-      `/api/family/${familyId}/member/bob`,
+      `/api/family/${familyId}/member/${BOB}`,
       undefined,
       aliceToken,
     );
@@ -178,19 +179,19 @@ describe("Borrow Cancellation on Member Removal", () => {
   });
 
   it("succeeds even when family has no borrow index", async () => {
-    const { familyId, authToken: aliceToken } = await createFamilyAndGetToken("alice", "Alice");
-    await joinFamilyAndGetToken(familyId, "bob", "Bob");
+    const { familyId, authToken: aliceToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     // No borrow requests exist; removing Bob should still succeed without errors
     const removeRes = await request(
       "DELETE",
-      `/api/family/${familyId}/member/bob`,
+      `/api/family/${familyId}/member/${BOB}`,
       undefined,
       aliceToken,
     );
     expect(removeRes.status).toBe(200);
     const json = (await removeRes.json()) as Json;
-    expect(json.data.members).toEqual([{ userId: "alice", displayName: "Alice", canLend: 1 }]);
+    expect(json.data.members).toEqual([{ userId: ALICE, displayName: "Alice", canLend: 1 }]);
 
     // Confirm there is still no borrow index
     const idx = await kv.get(kvKeys.borrowsByFamily(familyId));

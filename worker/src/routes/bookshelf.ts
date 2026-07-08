@@ -1,8 +1,9 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
-import { kvKeys, type RawFamilyRecord, type UserBooksRecord, normalizeFamilyRecord } from "../kv/schema";
+import { kvKeys, BoolFlag, type RawFamilyRecord, type UserBooksRecord, normalizeFamilyRecord } from "../kv/schema";
 import { isValidFamilyId } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
+import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 import { FamilyIdParam } from "../schemas/common";
@@ -24,6 +25,7 @@ const getFamilyBookshelfRoute = createRoute({
     400: jsonRes("Invalid family ID"),
     401: jsonRes("Unauthorized"),
     404: jsonRes("Family not found"),
+    429: jsonRes("Rate limit exceeded"),
   },
 });
 
@@ -42,6 +44,17 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
   if (!userId) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
+
+  // Per-userId rate limit: this is the most expensive endpoint (N KV reads,
+  // one per family member). Layered on top of the per-IP limit to cap fan-out
+  // cost from a single authenticated caller. Mirrors the borrow-list guard.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    scope: "bookshelf",
+    max: 30,
+    windowSec: 60,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   const memberFamily = await c.env.KV.get(kvKeys.member(userId));
   if (memberFamily !== familyId) {
@@ -67,7 +80,7 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
         kvKeys.user(member.userId),
         "json",
       );
-      const sharedBooks = (record?.books ?? []).filter((b) => b.isShared === 1);
+      const sharedBooks = (record?.books ?? []).filter((b) => b.isShared === BoolFlag.TRUE);
       return {
         userId: member.userId,
         displayName: member.displayName,
