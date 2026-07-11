@@ -60,7 +60,7 @@ export function BorrowSection({
                   key={req.requestId}
                   request={req}
                   otherPartyName={resolveOtherPartyName(req)}
-                  actions={[]}
+                  actions={renderActions(req)}
                 />
               ))}
             </div>

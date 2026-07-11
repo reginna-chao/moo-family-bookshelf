@@ -43,11 +43,10 @@ interface BorrowAction {
   disabled?: boolean;
 }
 
+// Only PENDING requests stay in the active area. Once lent (LENT), a request
+// moves to the history area — where its「標記已歸還」action is still available.
 function isActive(request: BorrowRequest): boolean {
-  return (
-    request.status === BorrowStatus.PENDING ||
-    request.status === BorrowStatus.LENT
-  );
+  return request.status === BorrowStatus.PENDING;
 }
 
 function sortNewestFirst(a: BorrowRequest, b: BorrowRequest): number {
@@ -208,7 +207,7 @@ function BorrowSectionView({
                   key={req.requestId}
                   request={req}
                   otherPartyName={resolveOtherPartyName(req)}
-                  actions={[]}
+                  actions={renderActions(req)}
                 />
               ))}
             </div>

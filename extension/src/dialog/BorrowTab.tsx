@@ -28,10 +28,9 @@ export interface BorrowTabProps {
   apiClient: ApiClient;
 }
 
-const ACTIVE_STATUSES = new Set<BorrowStatus>([
-  BorrowStatus.PENDING,
-  BorrowStatus.LENT,
-]);
+// Only PENDING requests stay in the active area. Once lent (LENT), a request
+// moves to the history area — where its「標記已歸還」action is still available.
+const ACTIVE_STATUSES = new Set<BorrowStatus>([BorrowStatus.PENDING]);
 
 function isActive(request: BorrowRequest): boolean {
   return ACTIVE_STATUSES.has(request.status);
