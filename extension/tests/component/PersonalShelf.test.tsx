@@ -171,7 +171,10 @@ describe("PersonalShelf", () => {
     const defaultMembers: FamilyMember[] = [
       { userId: "user-abc123", displayName: "小明" },
     ];
-    mockUseFamilyData.mockReturnValue({ members: defaultMembers });
+    mockUseFamilyData.mockReturnValue({
+      members: defaultMembers,
+      applyBorrowStatus: vi.fn(),
+    });
     // Reset useBookSync mock to default
     mockUseBookSync.mockReturnValue({
       syncStatus: "idle",
@@ -703,6 +706,7 @@ describe("PersonalShelf", () => {
       // displayName ("小明") must be ignored in favour of this context value.
       mockUseFamilyData.mockReturnValue({
         members: [{ userId: "user-abc123", displayName: "伺服器名稱" }],
+        applyBorrowStatus: vi.fn(),
       });
 
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });

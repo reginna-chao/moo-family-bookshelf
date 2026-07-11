@@ -15,6 +15,10 @@ export type SyncStatus = "idle" | "syncing" | "done" | "error";
 export interface UseBookSyncOptions {
   userId: string;
   apiClient: ApiClient;
+  /** Enables auto-return detection on sync (owner's returned books → RETURNED). */
+  familyId?: string;
+  /** Called with the auto-returned requestIds after a sync returned ≥1 book. */
+  onAutoReturned?: (requestIds: string[]) => void;
 }
 
 export interface UseBookSyncReturn {
@@ -29,7 +33,12 @@ export interface UseBookSyncReturn {
   progressMessage: string;
 }
 
-export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookSyncReturn {
+export function useBookSync({
+  userId,
+  apiClient,
+  familyId,
+  onAutoReturned,
+}: UseBookSyncOptions): UseBookSyncReturn {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [syncError, setSyncError] = useState("");
   const [lastSyncBooks, setLastSyncBooks] = useState<BookEntry[]>([]);
@@ -37,6 +46,13 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
   const [progressMessage, setProgressMessage] = useState("");
   const autoSyncTriggered = useRef(false);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latest familyId + auto-return callback held in refs so the sync effect /
+  // manual-sync callback can read them without widening their dependency arrays
+  // (and without re-triggering the once-per-session auto sync).
+  const familyIdRef = useRef(familyId);
+  familyIdRef.current = familyId;
+  const onAutoReturnedRef = useRef(onAutoReturned);
+  onAutoReturnedRef.current = onAutoReturned;
 
   useEffect(() => {
     return () => {
@@ -62,6 +78,7 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
           navigate: true,
           userId,
           apiClient,
+          familyId: familyIdRef.current,
           onProgress: (page, count) =>
             setProgressMessage(formatScrapeProgress(page, count)),
         });
@@ -70,6 +87,10 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
           setLastSyncBooks(result.books);
           setSyncStatus("done");
           setAutoSyncDone(true);
+          const returnedIds = result.autoReturnedRequestIds;
+          if (returnedIds && returnedIds.length > 0) {
+            onAutoReturnedRef.current?.(returnedIds);
+          }
           if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
           statusTimerRef.current = setTimeout(() => setSyncStatus("idle"), 2000);
         } else {
@@ -96,6 +117,7 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
       navigate: true,
       userId,
       apiClient,
+      familyId: familyIdRef.current,
       onProgress: (page, count) =>
         setProgressMessage(formatScrapeProgress(page, count)),
     });
@@ -103,6 +125,10 @@ export function useBookSync({ userId, apiClient }: UseBookSyncOptions): UseBookS
     if (result.success) {
       setLastSyncBooks(result.books);
       setSyncStatus("done");
+      const returnedIds = result.autoReturnedRequestIds;
+      if (returnedIds && returnedIds.length > 0) {
+        onAutoReturnedRef.current?.(returnedIds);
+      }
       if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
       statusTimerRef.current = setTimeout(() => setSyncStatus("idle"), 2000);
     } else {

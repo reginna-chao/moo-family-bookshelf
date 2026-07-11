@@ -17,15 +17,18 @@ interface MockFamilyData {
   borrowRequestsState: "idle" | "loading" | "loaded" | "error";
   borrowRequestsError: string | null;
   refreshBorrowRequests: () => Promise<void>;
+  applyBorrowStatus: (requestId: string, status: BorrowStatus) => void;
   members: FamilyMember[];
 }
 
 const mockRefreshBorrowRequests = vi.fn(async () => {});
+const mockApplyBorrowStatus = vi.fn();
 let mockFamilyData: MockFamilyData = {
   borrowRequests: [],
   borrowRequestsState: "loaded",
   borrowRequestsError: null,
   refreshBorrowRequests: mockRefreshBorrowRequests,
+  applyBorrowStatus: mockApplyBorrowStatus,
   members: [],
 };
 
@@ -69,6 +72,7 @@ function setMockFamilyData(partial: Partial<MockFamilyData>) {
     borrowRequestsState: "loaded",
     borrowRequestsError: null,
     refreshBorrowRequests: mockRefreshBorrowRequests,
+    applyBorrowStatus: mockApplyBorrowStatus,
     members: [],
     ...partial,
   };
@@ -83,6 +87,7 @@ function renderPage() {
 describe("BorrowPage", () => {
   beforeEach(() => {
     mockRefreshBorrowRequests.mockClear();
+    mockApplyBorrowStatus.mockClear();
     mockUpdateBorrowStatus.mockReset();
     setMockFamilyData({});
     localStorage.clear();
@@ -179,7 +184,7 @@ describe("BorrowPage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders LENT request with 標記已歸還 button (incoming side)", () => {
+  it("renders LENT request in the history area with 標記已歸還 button (incoming side)", () => {
     setMockFamilyData({
       borrowRequestsState: "loaded",
       borrowRequests: [
@@ -193,6 +198,9 @@ describe("BorrowPage", () => {
     });
     renderPage();
 
+    // LENT is archived now: hidden until the history toggle is expanded.
+    expect(screen.queryByText("標記已歸還")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("顯示歷史紀錄 (1)"));
     expect(screen.getByText("標記已歸還")).toBeInTheDocument();
   });
 
@@ -290,7 +298,7 @@ describe("BorrowPage", () => {
     });
   });
 
-  it("clicking 標記已歸還 calls updateBorrowStatus with RETURNED", async () => {
+  it("clicking 標記已歸還 in the history area calls updateBorrowStatus with RETURNED", async () => {
     mockUpdateBorrowStatus.mockResolvedValue({ requestId: "req-3" });
     setMockFamilyData({
       borrowRequestsState: "loaded",
@@ -305,6 +313,8 @@ describe("BorrowPage", () => {
     });
     renderPage();
 
+    // Reveal the LENT card from the collapsed history area first.
+    fireEvent.click(screen.getByText("顯示歷史紀錄 (1)"));
     fireEvent.click(screen.getByText("標記已歸還"));
 
     await waitFor(() => {
@@ -315,7 +325,7 @@ describe("BorrowPage", () => {
     });
   });
 
-  it("calls refreshBorrowRequests after successful status update", async () => {
+  it("optimistically applies status locally after a successful update (no re-fetch)", async () => {
     mockUpdateBorrowStatus.mockResolvedValue({ requestId: "req-1" });
     setMockFamilyData({
       borrowRequestsState: "loaded",
@@ -333,8 +343,13 @@ describe("BorrowPage", () => {
     fireEvent.click(screen.getByText("拒絕"));
 
     await waitFor(() => {
-      expect(mockRefreshBorrowRequests).toHaveBeenCalled();
+      expect(mockApplyBorrowStatus).toHaveBeenCalledWith(
+        "req-1",
+        BorrowStatus.REJECTED,
+      );
     });
+    // Optimistic update replaces the re-fetch entirely.
+    expect(mockRefreshBorrowRequests).not.toHaveBeenCalled();
   });
 
   it("shows error state with retry button when borrowRequestsState is error", () => {
@@ -372,7 +387,8 @@ describe("BorrowPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent("更新出錯");
     });
-    // refreshBorrowRequests must NOT be called on failure
+    // On failure neither the optimistic apply nor a re-fetch may run.
+    expect(mockApplyBorrowStatus).not.toHaveBeenCalled();
     expect(mockRefreshBorrowRequests).not.toHaveBeenCalled();
   });
 

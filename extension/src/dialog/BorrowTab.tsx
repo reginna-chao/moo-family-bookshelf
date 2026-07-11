@@ -13,7 +13,9 @@ import {
   ReadmooMember,
   closeLendDialog,
   decideLendAction,
+  dismissOpenDialogs,
   openLendDialogForBook,
+  restoreLibrarySearch,
   selectMemberByName,
   waitForLendDialogClose,
 } from "../content/readmoo-lend";
@@ -26,10 +28,9 @@ export interface BorrowTabProps {
   apiClient: ApiClient;
 }
 
-const ACTIVE_STATUSES = new Set<BorrowStatus>([
-  BorrowStatus.PENDING,
-  BorrowStatus.LENT,
-]);
+// Only PENDING requests stay in the active area. Once lent (LENT), a request
+// moves to the history area — where its「標記已歸還」action is still available.
+const ACTIVE_STATUSES = new Set<BorrowStatus>([BorrowStatus.PENDING]);
 
 function isActive(request: BorrowRequest): boolean {
   return ACTIVE_STATUSES.has(request.status);
@@ -68,6 +69,7 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     borrowRequestsState,
     borrowRequestsError,
     refreshBorrowRequests,
+    applyBorrowStatus,
     members,
     familyId,
     updateMember,
@@ -89,14 +91,16 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
       setPendingRequestId(requestId);
       try {
         await apiClient.updateBorrowStatus(requestId, status);
-        await refreshBorrowRequests();
+        // Optimistic local update — the PATCH response already confirms success.
+        // Re-fetching here would risk KV read-after-write returning stale data.
+        applyBorrowStatus(requestId, status);
       } catch (err) {
         setActionError(err instanceof Error ? err.message : "更新失敗");
       } finally {
         setPendingRequestId(null);
       }
     },
-    [apiClient, refreshBorrowRequests],
+    [apiClient, applyBorrowStatus],
   );
 
   /**
@@ -137,12 +141,20 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     async (request: BorrowRequest) => {
       setActionError(null);
       setPendingRequestId(request.requestId);
+      // Only set once the search has actually been submitted (successful return
+      // from openLendDialogForBook). Stays null if it throws before searching
+      // (e.g. NOT_ON_LIBRARY), so we skip the restore in that case.
+      let previousQuery: string | null = null;
       try {
         const borrower = members.find((m) => m.userId === request.borrowerId);
         const readmooName = borrower?.readmooName;
 
-        const { lendDialog, members: readmooMembers } =
-          await openLendDialogForBook(request.bookId);
+        const {
+          lendDialog,
+          members: readmooMembers,
+          previousQuery: prev,
+        } = await openLendDialogForBook(request.bookId, request.bookTitle);
+        previousQuery = prev;
         const decision = decideLendAction(readmooMembers, readmooName);
 
         let target: ReadmooMember | undefined = decision.target;
@@ -176,15 +188,29 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
           );
         }
         await apiClient.updateBorrowStatus(request.requestId, BorrowStatus.LENT);
-        await refreshBorrowRequests();
+        // Optimistic local update instead of re-fetch (KV eventual consistency).
+        applyBorrowStatus(request.requestId, BorrowStatus.LENT);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "借出失敗";
         setActionError(`自動借出失敗：${msg}`);
       } finally {
+        // Restore the user's prior library search state. Runs after the whole
+        // flow (including the picker cancel early-return) so no click lands on a
+        // detached card node. Best-effort inside restoreLibrarySearch.
+        if (previousQuery !== null) {
+          // ORDER MATTERS: dismiss any lingering .book-detail-modal BEFORE
+          // restoring. Post-success failures (MEMBER_NOT_FOUND, CONFIRM_TIMEOUT,
+          // updateBorrowStatus throw) and picker cancel can leave the detail
+          // modal open; restoring re-renders the grid, and a still-open modal
+          // would otherwise stack on top of it. On success this also tidies up
+          // any leftover detail modal — an intended improvement.
+          dismissOpenDialogs();
+          await restoreLibrarySearch(previousQuery);
+        }
         setPendingRequestId(null);
       }
     },
-    [apiClient, members, refreshBorrowRequests, requestPick],
+    [apiClient, members, applyBorrowStatus, requestPick],
   );
 
   const handlePickerPick = useCallback(

@@ -10,6 +10,12 @@ import cssText from "./styles.css?raw";
 interface MountDialogOptions {
   /** Called whenever the dialog's top-level view changes (loading/onboarding/main). */
   onViewChange?: (view: View) => void;
+  /**
+   * Called with the count of incoming PENDING borrow requests whenever it
+   * changes while the dialog is mounted — lets the host keep the floating
+   * button's badge live (including clearing it at 0).
+   */
+  onPendingBorrowCountChange?: (count: number) => void;
 }
 
 /** Marker attribute so we never inject the scoped stylesheet twice into a root. */
@@ -58,7 +64,10 @@ export function mountDialog(
   root.render(
     <React.StrictMode>
       <PortalContainerContext.Provider value={portalContainer}>
-        <App onViewChange={options?.onViewChange} />
+        <App
+          onViewChange={options?.onViewChange}
+          onPendingBorrowCountChange={options?.onPendingBorrowCountChange}
+        />
       </PortalContainerContext.Provider>
     </React.StrictMode>,
   );

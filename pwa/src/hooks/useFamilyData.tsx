@@ -64,6 +64,12 @@ interface FamilyDataState {
   borrowRequestsState: BorrowLoadState;
   borrowRequestsError: string | null;
   refreshBorrowRequests: () => Promise<void>;
+  /**
+   * Optimistically set a borrow request's status locally after a successful
+   * PATCH, without re-fetching. Avoids KV eventual-consistency read-after-write
+   * clobbering the confirmed state back to stale data.
+   */
+  applyBorrowStatus: (requestId: string, status: BorrowStatus) => void;
   /** Count of incoming PENDING requests for the current user (drives borrow tab badge). */
   incomingPendingCount: number;
 
@@ -296,6 +302,15 @@ export function FamilyDataProvider({
     }
   }, [familyId, apiClient]);
 
+  const applyBorrowStatus = useCallback(
+    (requestId: string, status: BorrowStatus) => {
+      setBorrowRequests((prev) =>
+        prev.map((r) => (r.requestId === requestId ? { ...r, status } : r)),
+      );
+    },
+    [],
+  );
+
   const incomingPendingCount = useMemo(() => {
     let count = 0;
     for (const r of borrowRequests) {
@@ -373,6 +388,7 @@ export function FamilyDataProvider({
       borrowRequestsState,
       borrowRequestsError,
       refreshBorrowRequests,
+      applyBorrowStatus,
       incomingPendingCount,
       refreshMembers,
       refreshBookshelf,
@@ -404,6 +420,7 @@ export function FamilyDataProvider({
       borrowRequestsState,
       borrowRequestsError,
       refreshBorrowRequests,
+      applyBorrowStatus,
       incomingPendingCount,
       refreshMembers,
       refreshBookshelf,

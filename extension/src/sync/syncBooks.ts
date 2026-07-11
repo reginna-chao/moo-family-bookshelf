@@ -27,6 +27,7 @@ import {
   type ScrapeProgressCallback,
 } from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
+import { detectReturnedRequests, applyAutoReturns } from "./autoReturn";
 
 /** User-configurable auto-sync frequency */
 export type AutoSyncInterval = "daily" | "weekly" | "monthly" | "never";
@@ -103,12 +104,53 @@ export interface SyncBooksOptions {
   apiClient: ApiClient;
   /** Optional progress callback for the paginated scrape (Wave G) */
   onProgress?: ScrapeProgressCallback;
+  /**
+   * When present, enables best-effort auto-return detection after upload: books
+   * that reappeared in the scrape get their LENT borrow requests marked RETURNED.
+   */
+  familyId?: string;
 }
 
 export interface SyncBooksResult {
   success: boolean;
   books: BookEntry[];
   error?: string;
+  /**
+   * RequestIds of LENT requests auto-marked RETURNED this sync (best-effort).
+   * Callers can derive the count via `.length` and apply the local status change.
+   */
+  autoReturnedRequestIds?: string[];
+}
+
+/**
+ * Best-effort auto-return detection: a lent Readmoo book vanishes from the
+ * library while lent, so its reappearance in `scrapedBooks` means it is back in
+ * the owner's hands → mark its LENT request RETURNED. One extra list call + N
+ * patches (N = actual returns). All failures are swallowed (console.warn) so
+ * this never affects the main sync result. Returns the successfully-returned
+ * requestIds.
+ */
+async function runAutoReturn(
+  apiClient: ApiClient,
+  familyId: string,
+  ownerId: string,
+  scrapedBooks: ScrapedBook[],
+): Promise<string[]> {
+  try {
+    const requests = await apiClient.listBorrowRequests(familyId);
+    const scrapedBookIds = new Set(scrapedBooks.map((b) => b.bookId));
+    const returned = detectReturnedRequests(
+      requests,
+      scrapedBookIds,
+      ownerId,
+      Date.now(),
+    );
+    if (returned.length === 0) return [];
+    return await applyAutoReturns(apiClient, returned);
+  } catch (err) {
+    console.warn("[syncBooks] Auto-return detection failed:", err);
+    return [];
+  }
 }
 
 /**
@@ -129,7 +171,7 @@ export interface SyncBooksResult {
  * 7. Update lastSyncAt
  */
 export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksResult> {
-  const { navigate, userId, apiClient, onProgress } = options;
+  const { navigate, userId, apiClient, onProgress, familyId } = options;
   const originalHash = window.location.hash;
   const isOnLibrary = originalHash.includes("#/library");
 
@@ -200,7 +242,13 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     // honours the user's configured interval before syncing again.
     await browser.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now() });
 
-    return { success: true, books: merged };
+    // Step 8 (best-effort, does NOT block/affect the sync result): auto-detect
+    // returned books and mark their LENT requests RETURNED.
+    const autoReturnedRequestIds = familyId
+      ? await runAutoReturn(apiClient, familyId, userId, allScrapedBooks)
+      : undefined;
+
+    return { success: true, books: merged, autoReturnedRequestIds };
   } catch (err) {
     // Restore navigation on error
     if (navigate && !isOnLibrary) {

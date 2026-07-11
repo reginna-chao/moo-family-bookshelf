@@ -206,12 +206,24 @@ async function updatePendingBorrowBadge(button: HTMLElement): Promise<void> {
     const pending = requests.filter(
       (r) => r.status === BorrowStatus.PENDING && r.ownerId === userId,
     ).length;
-    if (pending > 0) {
-      attachBadge(button, pending);
-    }
+    updateBadge(button, pending);
   } catch {
     // ignore — best-effort enhancement
   }
+}
+
+/**
+ * Single entry point for badge updates: attaches/replaces the badge when
+ * count > 0, removes any existing badge when count <= 0. All callers (initial
+ * fetch + the dialog's live count callback) go through this so the 0 case is
+ * handled consistently.
+ */
+function updateBadge(button: HTMLElement, count: number): void {
+  if (count <= 0) {
+    button.querySelector(`#${MOO_ELEMENT_IDS.button}-badge`)?.remove();
+    return;
+  }
+  attachBadge(button, count);
 }
 
 function attachBadge(button: HTMLElement, count: number): void {
@@ -365,6 +377,13 @@ function toggleDialog(): void {
         onViewChange: (view) => {
           currentIsMainView = view === "main";
           relayout();
+        },
+        // Keep the floating button badge in sync with live borrow-request
+        // changes while the dialog is open. The button element still exists in
+        // the light DOM while the dialog host is mounted, so look it up by id.
+        onPendingBorrowCountChange: (count) => {
+          const button = document.getElementById(MOO_ELEMENT_IDS.button);
+          if (button) updateBadge(button, count);
         },
       });
     })

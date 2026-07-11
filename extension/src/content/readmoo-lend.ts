@@ -17,7 +17,18 @@
  * Letting the user click OK manually keeps the integration safe.
  */
 
-const ATTR_BOOK_ID = "data-moo-book-id";
+import { submitSearch, waitForBookCard } from "./readmoo-search";
+import { ReadmooLendError, waitForElement } from "./readmoo-dom";
+
+// Re-export shared DOM primitives so existing importers (tests, BorrowTab) keep
+// importing them from "./readmoo-lend" unchanged. Definitions live in readmoo-dom
+// to break the readmoo-lend ↔ readmoo-search module cycle.
+export {
+  ReadmooLendError,
+  findBookCardInLibrary,
+  waitForElement,
+} from "./readmoo-dom";
+
 const LIBRARY_HASH = "#/library";
 const READMOO_LIBRARY_URL = "https://read.readmoo.com/#/library";
 
@@ -26,19 +37,12 @@ export const READMOO_LEND_DEFAULTS = {
   modalOpenTimeoutMs: 5000,
   lendDialogOpenTimeoutMs: 5000,
   lendDialogCloseTimeoutMs: 60000,
-  bookCardSettleMs: 200,
+  hoverSettleMs: 300,
 } as const;
 
 export interface ReadmooMember {
   name: string;
   avatar: string;
-}
-
-export class ReadmooLendError extends Error {
-  constructor(public code: string, message: string) {
-    super(message);
-    this.name = "ReadmooLendError";
-  }
 }
 
 function wait(ms: number): Promise<void> {
@@ -66,26 +70,15 @@ export function ensureOnLibraryPage(): boolean {
 }
 
 /**
- * Find the `.library-item` element matching the given bookId.
+ * Open Readmoo's `.book-detail-modal` for a library card.
  *
- * Relies on the fiber-bridge having stamped `data-moo-book-id` on
- * library-item nodes. If the book is not on the currently-rendered
- * page (lazy loading / pagination), returns null.
- */
-export function findBookCardInLibrary(bookId: string): HTMLElement | null {
-  const selector = `.library-item[${ATTR_BOOK_ID}="${cssEscape(bookId)}"]`;
-  return document.querySelector<HTMLElement>(selector);
-}
-
-function cssEscape(value: string): string {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(value);
-  }
-  return value.replace(/"/g, '\\"');
-}
-
-/**
- * Click the book card to open Readmoo's `.book-detail-modal`.
+ * Verified against production read.readmoo.com (2026-07-11): the modal is opened
+ * by the hover-revealed 「⋯」 overlay button, NOT the title/cover. The card's
+ * `.cover-img` sits inside `a.reader-link` (opens the reader) and must never be
+ * clicked. Working sequence: dispatch `mouseenter`+`mouseover` on the card to
+ * reveal `.openbook-overlay`, wait ~300ms for it to render, then dispatch a
+ * single `click` on `.openbook-overlay .detail span` (the ellipsis button).
+ *
  * Returns the modal element once it appears, or throws on timeout.
  */
 export async function openBookDetailModal(
@@ -93,18 +86,25 @@ export async function openBookDetailModal(
   timeoutMs: number = READMOO_LEND_DEFAULTS.modalOpenTimeoutMs,
 ): Promise<HTMLElement> {
   bookCard.scrollIntoView({ block: "center", behavior: "instant" });
-  await wait(READMOO_LEND_DEFAULTS.bookCardSettleMs);
+  await wait(READMOO_LEND_DEFAULTS.hoverSettleMs);
 
-  // Trigger Readmoo's "open detail" UI: hover then click typical title/cover area
-  const target =
-    bookCard.querySelector<HTMLElement>(".info .title") ??
-    bookCard.querySelector<HTMLElement>(".cover-img") ??
-    bookCard;
-  target.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-  target.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-  target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-  target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  // Reveal the hover overlay by hovering the card itself.
+  bookCard.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+  bookCard.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  await wait(READMOO_LEND_DEFAULTS.hoverSettleMs);
+
+  // Click the 「⋯」 detail button inside the overlay. NEVER target a.reader-link
+  // or .cover-img — those open the Readmoo reader.
+  const trigger =
+    bookCard.querySelector<HTMLElement>(".openbook-overlay .detail span") ??
+    bookCard.querySelector<HTMLElement>(".openbook-overlay .detail");
+  if (!trigger) {
+    throw new ReadmooLendError(
+      "DETAIL_TRIGGER_NOT_FOUND",
+      "找不到書籍詳情按鈕，可能是讀墨已改版，請改用「手動借出」",
+    );
+  }
+  trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
   return waitForElement<HTMLElement>(".book-detail-modal", timeoutMs);
 }
@@ -290,36 +290,6 @@ export function waitForLendDialogClose(
 }
 
 /**
- * Wait for an element matching `selector` to appear in the DOM.
- * Used by openBookDetailModal.
- */
-function waitForElement<T extends HTMLElement>(
-  selector: string,
-  timeoutMs: number,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector<T>(selector);
-    if (existing) {
-      resolve(existing);
-      return;
-    }
-    const observer = new MutationObserver(() => {
-      const found = document.querySelector<T>(selector);
-      if (found) {
-        observer.disconnect();
-        clearTimeout(timer);
-        resolve(found);
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-    const timer = setTimeout(() => {
-      observer.disconnect();
-      reject(new ReadmooLendError("ELEMENT_TIMEOUT", `等待元素逾時：${selector}`));
-    }, timeoutMs);
-  });
-}
-
-/**
  * Close any open Readmoo modal/dialog gracefully.
  * Used as cleanup if our automation needs to abort partway.
  */
@@ -338,10 +308,14 @@ export function dismissOpenDialogs(): void {
  *   a) selectMemberByName + waitForLendDialogClose (auto-lend flow)
  *   b) extractReadmooMembers + show selection UI (readmooName setup flow)
  */
-export async function openLendDialogForBook(bookId: string): Promise<{
+export async function openLendDialogForBook(
+  bookId: string,
+  bookTitle: string,
+): Promise<{
   lendDialog: HTMLElement;
   detailModal: HTMLElement;
   members: ReadmooMember[];
+  previousQuery: string;
 }> {
   if (!isOnLibraryPage()) {
     throw new ReadmooLendError(
@@ -349,15 +323,61 @@ export async function openLendDialogForBook(bookId: string): Promise<{
       "請先前往讀墨書庫頁面（read.readmoo.com）",
     );
   }
-  const bookCard = findBookCardInLibrary(bookId);
-  if (!bookCard) {
-    throw new ReadmooLendError(
-      "BOOK_NOT_FOUND",
-      "在書庫中找不到此書，可能在其他頁面或已歸還",
-    );
+  // Readmoo's library grid is infinite-scroll, so the target book may not be in
+  // the rendered DOM. Filter the library by title via Readmoo's own search, then
+  // match the resulting card by exact bookId. `previousQuery` lets the caller
+  // restore the user's prior search state once the whole flow finishes.
+  const previousQuery = await submitSearch(bookTitle);
+  try {
+    const bookCard = await waitForBookCard(bookId);
+    if (!bookCard) {
+      // Strict mode: even if the search returned a single card, we require an
+      // exact data-moo-book-id match — no title fallback (product decision).
+      throw new ReadmooLendError(
+        "BOOK_NOT_FOUND",
+        `在書庫中搜尋不到《${bookTitle}》，請改用「手動借出」`,
+      );
+    }
+    // TIMING: do NOT restore the search on the success path here. Restoring
+    // re-renders the grid and detaches this card node; the detail-modal click
+    // below must run against the still-attached card. The caller restores only
+    // after the full flow completes.
+    const detailModal = await openBookDetailModal(bookCard);
+    const lendDialog = await clickLendButton(detailModal);
+    const members = extractReadmooMembers(lendDialog);
+    return { lendDialog, detailModal, members, previousQuery };
+  } catch (err) {
+    // Any failure AFTER the search succeeded owns the restore here, so the user
+    // is never left with a filtered library. ORDER MATTERS: clickLendButton may
+    // have already opened the detail modal, so dismiss lingering modals FIRST,
+    // then restore. Restoring re-renders the grid, and a still-open modal would
+    // otherwise stack on top of the re-rendered library. restoreLibrarySearch is
+    // best-effort, so it never masks the original error we rethrow.
+    dismissOpenDialogs();
+    await restoreLibrarySearch(previousQuery);
+    throw err;
   }
-  const detailModal = await openBookDetailModal(bookCard);
-  const lendDialog = await clickLendButton(detailModal);
-  const members = extractReadmooMembers(lendDialog);
-  return { lendDialog, detailModal, members };
+}
+
+/**
+ * Restore the library grid to the user's previous search state after the lending
+ * flow completes. If the user had a keyword, re-applies it; otherwise submits an
+ * empty query to clear Readmoo's filter and restore the full library.
+ *
+ * TIMING: MUST run only after the lending flow has fully finished (detail modal
+ * opened, member clicked, dialog closed). Restoring mid-flow re-renders the grid
+ * and detaches the card node any pending click depends on.
+ *
+ * Best-effort: swallows all errors so a restore failure never masks the primary
+ * lending result.
+ */
+export async function restoreLibrarySearch(
+  previousQuery: string,
+  timeoutMs?: number,
+): Promise<void> {
+  try {
+    await submitSearch(previousQuery, timeoutMs);
+  } catch {
+    // Ignore — restoring the library view is non-critical.
+  }
 }
