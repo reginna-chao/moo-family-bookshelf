@@ -19,7 +19,12 @@ vi.mock("@/sync/mergeBooks", () => ({
 
 import { syncBooks, type SyncBooksOptions } from "@/sync/syncBooks";
 import { scrapeBooks, scrapeArchivedBooks } from "@/content/scraper";
-import { BoolFlag, type ApiClient } from "@/api/client";
+import {
+  BoolFlag,
+  BorrowStatus,
+  type ApiClient,
+  type BorrowRequest,
+} from "@/api/client";
 import {
   AUTO_SYNC_INTERVAL_KEY,
   LAST_SYNC_AT_KEY,
@@ -525,5 +530,210 @@ describe("syncBooks — full flow", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("同步失敗");
+  });
+});
+
+describe("syncBooks — auto-return (familyId branch)", () => {
+  const USER_ID = "user-123";
+  const FAMILY_ID = "fam-1";
+  // A book the user still owns a LENT request for. Scraping it back means it
+  // reappeared in the library → its request should be auto-marked RETURNED.
+  const LENT_BOOK_ID = "book-lent";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { hash: "#/library" },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function setupStorage(data: Record<string, unknown>) {
+    const store = toStorageKeys(data);
+    vi.mocked(chrome.storage.local.get).mockImplementation(
+      (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        const keyList = Array.isArray(keys) ? keys : [keys];
+        const result: Record<string, unknown> = {};
+        for (const key of keyList) {
+          if (typeof key === "string" && key in store) {
+            result[key] = store[key];
+          }
+        }
+        if (typeof callback === "function") {
+          callback(result);
+          return undefined as unknown as Promise<Record<string, unknown>>;
+        }
+        return Promise.resolve(result) as unknown as Promise<Record<string, unknown>>;
+      },
+    );
+    vi.mocked(chrome.storage.local.set).mockImplementation(
+      (_items: Record<string, unknown>, _callback?: () => void) => {
+        return Promise.resolve();
+      },
+    );
+  }
+
+  function makeLentRequest(overrides: Partial<BorrowRequest> = {}): BorrowRequest {
+    return {
+      requestId: "req-lent",
+      familyId: FAMILY_ID,
+      borrowerId: "user-borrower",
+      borrowerName: "Borrower",
+      ownerId: USER_ID,
+      bookId: LENT_BOOK_ID,
+      bookTitle: "借出的書",
+      bookAuthor: "作者",
+      bookCoverUrl: "",
+      status: BorrowStatus.LENT,
+      createdAt: "2020-01-01T00:00:00.000Z",
+      // Lent long ago, so it clears the 30-min residue guard.
+      updatedAt: "2020-01-01T00:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  function scrapeLentBook() {
+    vi.mocked(scrapeBooks).mockResolvedValue([
+      {
+        bookId: LENT_BOOK_ID,
+        title: "借出的書",
+        author: "作者",
+        coverUrl: "",
+        readmooUrl: `https://readmoo.com/book/${LENT_BOOK_ID}`,
+        category: "",
+        isArchived: BoolFlag.FALSE,
+      },
+    ]);
+  }
+
+  it("marks a reappeared LENT book RETURNED and reports the requestIds", async () => {
+    setupStorage(makeStorageData({ syncArchived: 0 }));
+    scrapeLentBook();
+
+    const updateBorrowStatus = vi
+      .fn()
+      .mockResolvedValue(makeLentRequest({ status: BorrowStatus.RETURNED }));
+    const listBorrowRequests = vi
+      .fn()
+      .mockResolvedValue([makeLentRequest()]);
+    const apiClient: ApiClient = {
+      getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+      updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+      listBorrowRequests,
+      updateBorrowStatus,
+    } as unknown as ApiClient;
+
+    const result = await syncBooks({
+      navigate: false,
+      userId: USER_ID,
+      apiClient,
+      familyId: FAMILY_ID,
+    });
+
+    expect(result.success).toBe(true);
+    expect(listBorrowRequests).toHaveBeenCalledWith(FAMILY_ID);
+    expect(updateBorrowStatus).toHaveBeenCalledWith(
+      "req-lent",
+      BorrowStatus.RETURNED,
+    );
+    expect(result.autoReturnedRequestIds).toEqual(["req-lent"]);
+  });
+
+  it("does not PATCH when no LENT book reappeared (no requestIds)", async () => {
+    setupStorage(makeStorageData({ syncArchived: 0 }));
+    // Scrape returns a DIFFERENT book than the lent one.
+    vi.mocked(scrapeBooks).mockResolvedValue([
+      {
+        bookId: "some-other-book",
+        title: "其他書",
+        author: "",
+        coverUrl: "",
+        readmooUrl: "https://readmoo.com/book/some-other-book",
+        category: "",
+        isArchived: BoolFlag.FALSE,
+      },
+    ]);
+
+    const updateBorrowStatus = vi.fn();
+    const listBorrowRequests = vi
+      .fn()
+      .mockResolvedValue([makeLentRequest()]);
+    const apiClient: ApiClient = {
+      getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+      updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+      listBorrowRequests,
+      updateBorrowStatus,
+    } as unknown as ApiClient;
+
+    const result = await syncBooks({
+      navigate: false,
+      userId: USER_ID,
+      apiClient,
+      familyId: FAMILY_ID,
+    });
+
+    expect(result.success).toBe(true);
+    expect(listBorrowRequests).toHaveBeenCalledWith(FAMILY_ID);
+    expect(updateBorrowStatus).not.toHaveBeenCalled();
+    expect(result.autoReturnedRequestIds).toEqual([]);
+  });
+
+  it("swallows a listBorrowRequests failure without affecting the sync result", async () => {
+    setupStorage(makeStorageData({ syncArchived: 0 }));
+    scrapeLentBook();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const updateBorrowStatus = vi.fn();
+    const apiClient: ApiClient = {
+      getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+      updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+      listBorrowRequests: vi
+        .fn()
+        .mockRejectedValue(new Error("borrow list down")),
+      updateBorrowStatus,
+    } as unknown as ApiClient;
+
+    const result = await syncBooks({
+      navigate: false,
+      userId: USER_ID,
+      apiClient,
+      familyId: FAMILY_ID,
+    });
+
+    // The main sync still succeeds; auto-return is best-effort.
+    expect(result.success).toBe(true);
+    expect(result.autoReturnedRequestIds).toEqual([]);
+    expect(updateBorrowStatus).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("skips auto-return entirely when no familyId is provided", async () => {
+    setupStorage(makeStorageData({ syncArchived: 0 }));
+    scrapeLentBook();
+
+    const listBorrowRequests = vi.fn();
+    const updateBorrowStatus = vi.fn();
+    const apiClient: ApiClient = {
+      getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+      updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+      listBorrowRequests,
+      updateBorrowStatus,
+    } as unknown as ApiClient;
+
+    const result = await syncBooks({
+      navigate: false,
+      userId: USER_ID,
+      apiClient,
+      // no familyId
+    });
+
+    expect(result.success).toBe(true);
+    expect(listBorrowRequests).not.toHaveBeenCalled();
+    expect(updateBorrowStatus).not.toHaveBeenCalled();
+    expect(result.autoReturnedRequestIds).toBeUndefined();
   });
 });

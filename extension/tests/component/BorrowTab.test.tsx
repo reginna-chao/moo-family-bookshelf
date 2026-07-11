@@ -183,7 +183,7 @@ describe("BorrowTab", () => {
     expect(screen.queryByText("拒絕")).not.toBeInTheDocument();
   });
 
-  it("renders LENT incoming request with 標記已歸還 button", async () => {
+  it("renders LENT incoming request in the history area with 標記已歸還 button", async () => {
     const apiClient = createMockApiClient({
       listBorrowRequests: vi
         .fn()
@@ -191,6 +191,15 @@ describe("BorrowTab", () => {
     });
 
     renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+    // LENT no longer sits in the active inbox — it lives under the collapsed
+    // history toggle. The button appears only after expanding history.
+    await waitFor(() => {
+      expect(screen.getByText("顯示歷史紀錄 (1)")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("標記已歸還")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("顯示歷史紀錄 (1)"));
 
     await waitFor(() => {
       expect(screen.getByText("標記已歸還")).toBeInTheDocument();
@@ -321,7 +330,7 @@ describe("BorrowTab", () => {
     });
   });
 
-  it("clicking 標記已歸還 calls updateBorrowStatus with RETURNED", async () => {
+  it("clicking 標記已歸還 in the history area calls updateBorrowStatus with RETURNED", async () => {
     const updateBorrowStatus = vi
       .fn()
       .mockResolvedValue(makeRequest({ status: BorrowStatus.RETURNED }));
@@ -333,6 +342,12 @@ describe("BorrowTab", () => {
     });
 
     renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+    // Expand history to reach the LENT card's action.
+    await waitFor(() => {
+      expect(screen.getByText("顯示歷史紀錄 (1)")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("顯示歷史紀錄 (1)"));
 
     await waitFor(() => {
       expect(screen.getByText("標記已歸還")).toBeInTheDocument();
@@ -348,11 +363,12 @@ describe("BorrowTab", () => {
     });
   });
 
-  it("refreshes borrow requests after a successful action", async () => {
+  it("optimistically updates status without re-fetching after a successful action", async () => {
+    // listBorrowRequests would return stale PENDING data on a re-fetch; the
+    // optimistic path must NOT call it again, so the card flips to LENT locally.
     const listBorrowRequests = vi
       .fn()
-      .mockResolvedValueOnce([makeRequest({ status: BorrowStatus.PENDING })])
-      .mockResolvedValueOnce([makeRequest({ status: BorrowStatus.LENT })]);
+      .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]);
     const apiClient = createMockApiClient({
       listBorrowRequests,
       updateBorrowStatus: vi
@@ -369,9 +385,15 @@ describe("BorrowTab", () => {
 
     fireEvent.click(screen.getByText("同意借閱"));
 
+    // After approval the request is LENT locally: it leaves the active inbox
+    // (同意借閱 gone) and moves into the collapsed history area.
     await waitFor(() => {
-      expect(listBorrowRequests).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText("同意借閱")).not.toBeInTheDocument();
+      expect(screen.getByText("顯示歷史紀錄 (1)")).toBeInTheDocument();
     });
+
+    // The list endpoint was never hit a second time (no KV read-after-write).
+    expect(listBorrowRequests).toHaveBeenCalledTimes(1);
   });
 
   it("shows error message when updateBorrowStatus fails", async () => {
