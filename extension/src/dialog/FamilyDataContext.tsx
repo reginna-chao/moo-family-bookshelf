@@ -13,6 +13,7 @@ import {
   BookEntry,
   BoolFlag,
   BorrowRequest,
+  BorrowStatus,
   FamilyMember,
   FamilyGroup,
   FamilyBookshelf,
@@ -65,6 +66,12 @@ interface FamilyDataState {
   borrowRequestsState: BorrowLoadState;
   borrowRequestsError: string | null;
   refreshBorrowRequests: () => Promise<void>;
+  /**
+   * Optimistically set a borrow request's status locally after a successful
+   * PATCH, without re-fetching. Avoids KV eventual-consistency read-after-write
+   * clobbering the confirmed state back to stale data.
+   */
+  applyBorrowStatus: (requestId: string, status: BorrowStatus) => void;
 
   /** Refresh functions for child components */
   refreshMembers: () => Promise<void>;
@@ -321,6 +328,15 @@ export function FamilyDataProvider({
     }
   }, [familyId, apiClient]);
 
+  const applyBorrowStatus = useCallback(
+    (requestId: string, status: BorrowStatus) => {
+      setBorrowRequests((prev) =>
+        prev.map((r) => (r.requestId === requestId ? { ...r, status } : r)),
+      );
+    },
+    [],
+  );
+
   const updateMemberDisplayName = useCallback(
     (targetUserId: string, displayName: string) => {
       setMembers((prev) =>
@@ -444,6 +460,7 @@ export function FamilyDataProvider({
       borrowRequestsState,
       borrowRequestsError,
       refreshBorrowRequests,
+      applyBorrowStatus,
       refreshMembers,
       refreshBookshelf,
       updateMemberDisplayName,
@@ -475,6 +492,7 @@ export function FamilyDataProvider({
       borrowRequestsState,
       borrowRequestsError,
       refreshBorrowRequests,
+      applyBorrowStatus,
       refreshMembers,
       refreshBookshelf,
       updateMemberDisplayName,

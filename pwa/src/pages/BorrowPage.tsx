@@ -224,6 +224,7 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
     borrowRequestsState,
     borrowRequestsError,
     refreshBorrowRequests,
+    applyBorrowStatus,
     members,
   } = useFamilyData();
 
@@ -245,14 +246,16 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
       setPendingRequestId(requestId);
       try {
         await apiClient.updateBorrowStatus(requestId, status);
-        await refreshBorrowRequests();
+        // Optimistic local update — the PATCH response already confirms success.
+        // Re-fetching here would risk KV read-after-write returning stale data.
+        applyBorrowStatus(requestId, status);
       } catch (err) {
         setActionError(err instanceof Error ? err.message : "更新失敗");
       } finally {
         setPendingRequestId(null);
       }
     },
-    [apiClient, refreshBorrowRequests],
+    [apiClient, applyBorrowStatus],
   );
 
   const handleManualLend = useCallback(

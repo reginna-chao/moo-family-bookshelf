@@ -69,6 +69,7 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     borrowRequestsState,
     borrowRequestsError,
     refreshBorrowRequests,
+    applyBorrowStatus,
     members,
     familyId,
     updateMember,
@@ -90,14 +91,16 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
       setPendingRequestId(requestId);
       try {
         await apiClient.updateBorrowStatus(requestId, status);
-        await refreshBorrowRequests();
+        // Optimistic local update — the PATCH response already confirms success.
+        // Re-fetching here would risk KV read-after-write returning stale data.
+        applyBorrowStatus(requestId, status);
       } catch (err) {
         setActionError(err instanceof Error ? err.message : "更新失敗");
       } finally {
         setPendingRequestId(null);
       }
     },
-    [apiClient, refreshBorrowRequests],
+    [apiClient, applyBorrowStatus],
   );
 
   /**
@@ -185,7 +188,8 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
           );
         }
         await apiClient.updateBorrowStatus(request.requestId, BorrowStatus.LENT);
-        await refreshBorrowRequests();
+        // Optimistic local update instead of re-fetch (KV eventual consistency).
+        applyBorrowStatus(request.requestId, BorrowStatus.LENT);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "借出失敗";
         setActionError(`自動借出失敗：${msg}`);
@@ -206,7 +210,7 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
         setPendingRequestId(null);
       }
     },
-    [apiClient, members, refreshBorrowRequests, requestPick],
+    [apiClient, members, applyBorrowStatus, requestPick],
   );
 
   const handlePickerPick = useCallback(

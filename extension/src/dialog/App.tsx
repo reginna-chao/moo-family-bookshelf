@@ -33,9 +33,15 @@ interface AppProps {
    * fixed desktop height; "loading"/"onboarding" size to their content.
    */
   onViewChange?: (view: View) => void;
+  /**
+   * Notifies the host of the incoming PENDING borrow count so it can keep the
+   * floating button badge live. Only fires while the main view (and its
+   * FamilyDataProvider) is mounted.
+   */
+  onPendingBorrowCountChange?: (count: number) => void;
 }
 
-export function App({ onViewChange }: AppProps = {}) {
+export function App({ onViewChange, onPendingBorrowCountChange }: AppProps = {}) {
   const [view, setView] = useState<View>("loading");
   const [activeTab, setActiveTab] = useState<Tab>("family-shelf");
   const [familyId, setFamilyId] = useState<string | null>(null);
@@ -192,6 +198,7 @@ export function App({ onViewChange }: AppProps = {}) {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         onLeave={handleLeaveFamily}
+        onPendingBorrowCountChange={onPendingBorrowCountChange}
       />
     </FamilyDataProvider>
   );
@@ -204,6 +211,7 @@ interface MainContentProps {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
   onLeave: () => void;
+  onPendingBorrowCountChange?: (count: number) => void;
 }
 
 function MainContent({
@@ -213,6 +221,7 @@ function MainContent({
   activeTab,
   onTabChange,
   onLeave,
+  onPendingBorrowCountChange,
 }: MainContentProps) {
   const { hasBookshelfUpdates, markBookshelfSeen, borrowRequests } = useFamilyData();
   const isMobile = useIsMobile();
@@ -238,6 +247,14 @@ function MainContent({
   const incomingPendingCount = borrowRequests.filter(
     (r) => r.ownerId === userId && r.status === BorrowStatus.PENDING,
   ).length;
+
+  // Report the incoming-pending count to the host so it can keep the floating
+  // button badge live (including clearing it at 0). Fires on every change while
+  // mounted — including the first data load — and never after unmount (effects
+  // don't run post-unmount), so no cleanup is required.
+  useEffect(() => {
+    onPendingBorrowCountChange?.(incomingPendingCount);
+  }, [incomingPendingCount, onPendingBorrowCountChange]);
 
   const tabs: Array<{ key: Tab; label: string; icon: React.ReactNode }> = [
     { key: "family-shelf", label: "家庭書櫃", icon: <Library size={14} aria-hidden="true" /> },
