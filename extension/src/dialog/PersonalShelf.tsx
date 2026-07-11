@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import browser from "webextension-polyfill";
 import { Share2, RefreshCw } from "lucide-react";
-import { ApiClient, BoolFlag } from "../api/client";
+import { ApiClient, BoolFlag, BorrowStatus } from "../api/client";
 import { BookRow } from "./BookRow";
 import { StatusFilterBar, StatusFilter } from "./StatusFilterBar";
 import { SearchBar } from "./SearchBar";
@@ -36,7 +36,7 @@ function archiveTabClass(active: boolean): string {
 
 export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProps) {
   const isMobile = useIsMobile();
-  const { members, familyId, refreshBorrowRequests } = useFamilyData();
+  const { members, familyId, applyBorrowStatus } = useFamilyData();
   const selfMember = members.find((m) => m.userId === userId);
   const displayName = selfMember?.displayName ?? "";
 
@@ -49,11 +49,22 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
   const [showPublicShare, setShowPublicShare] = useState(false);
   const { sort, setSort } = useBookSort("personal");
 
+  // Apply auto-returns locally (optimistic) rather than re-fetching — consistent
+  // with the other borrow flows and avoids KV read-after-write staleness.
+  const handleAutoReturned = useCallback(
+    (requestIds: string[]) => {
+      for (const requestId of requestIds) {
+        applyBorrowStatus(requestId, BorrowStatus.RETURNED);
+      }
+    },
+    [applyBorrowStatus],
+  );
+
   const { syncStatus, syncError, triggerManualSync, lastSyncBooks, progressMessage } = useBookSync({
     userId,
     apiClient,
     familyId,
-    onAutoReturned: refreshBorrowRequests,
+    onAutoReturned: handleAutoReturned,
   });
 
   const {

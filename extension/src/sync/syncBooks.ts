@@ -115,8 +115,11 @@ export interface SyncBooksResult {
   success: boolean;
   books: BookEntry[];
   error?: string;
-  /** Number of LENT requests auto-marked RETURNED this sync (best-effort). */
-  autoReturnedCount?: number;
+  /**
+   * RequestIds of LENT requests auto-marked RETURNED this sync (best-effort).
+   * Callers can derive the count via `.length` and apply the local status change.
+   */
+  autoReturnedRequestIds?: string[];
 }
 
 /**
@@ -124,14 +127,15 @@ export interface SyncBooksResult {
  * library while lent, so its reappearance in `scrapedBooks` means it is back in
  * the owner's hands → mark its LENT request RETURNED. One extra list call + N
  * patches (N = actual returns). All failures are swallowed (console.warn) so
- * this never affects the main sync result.
+ * this never affects the main sync result. Returns the successfully-returned
+ * requestIds.
  */
 async function runAutoReturn(
   apiClient: ApiClient,
   familyId: string,
   ownerId: string,
   scrapedBooks: ScrapedBook[],
-): Promise<number> {
+): Promise<string[]> {
   try {
     const requests = await apiClient.listBorrowRequests(familyId);
     const scrapedBookIds = new Set(scrapedBooks.map((b) => b.bookId));
@@ -141,11 +145,11 @@ async function runAutoReturn(
       ownerId,
       Date.now(),
     );
-    if (returned.length === 0) return 0;
+    if (returned.length === 0) return [];
     return await applyAutoReturns(apiClient, returned);
   } catch (err) {
     console.warn("[syncBooks] Auto-return detection failed:", err);
-    return 0;
+    return [];
   }
 }
 
@@ -240,11 +244,11 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
 
     // Step 8 (best-effort, does NOT block/affect the sync result): auto-detect
     // returned books and mark their LENT requests RETURNED.
-    const autoReturnedCount = familyId
+    const autoReturnedRequestIds = familyId
       ? await runAutoReturn(apiClient, familyId, userId, allScrapedBooks)
       : undefined;
 
-    return { success: true, books: merged, autoReturnedCount };
+    return { success: true, books: merged, autoReturnedRequestIds };
   } catch (err) {
     // Restore navigation on error
     if (navigate && !isOnLibrary) {

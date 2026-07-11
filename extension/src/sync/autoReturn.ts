@@ -41,17 +41,18 @@ export function detectReturnedRequests(
 /**
  * Side effect: mark each detected request RETURNED via the API, one by one
  * (no batch endpoint exists; the count is naturally tiny). A per-request failure
- * is logged and skipped. Returns the number of successful updates.
+ * is logged and skipped. Returns the requestIds that were successfully updated
+ * so callers can apply the same status change to their local state.
  */
 export async function applyAutoReturns(
   apiClient: ApiClient,
   requests: BorrowRequest[],
-): Promise<number> {
-  let count = 0;
+): Promise<string[]> {
+  const succeeded: string[] = [];
   for (const request of requests) {
     try {
       await apiClient.updateBorrowStatus(request.requestId, BorrowStatus.RETURNED);
-      count++;
+      succeeded.push(request.requestId);
     } catch (err) {
       console.warn(
         `[autoReturn] Failed to mark request ${request.requestId} as RETURNED:`,
@@ -59,5 +60,5 @@ export async function applyAutoReturns(
       );
     }
   }
-  return count;
+  return succeeded;
 }

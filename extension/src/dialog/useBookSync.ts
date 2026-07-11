@@ -17,8 +17,8 @@ export interface UseBookSyncOptions {
   apiClient: ApiClient;
   /** Enables auto-return detection on sync (owner's returned books → RETURNED). */
   familyId?: string;
-  /** Called after a sync that auto-returned ≥1 book, so the borrow list can refresh. */
-  onAutoReturned?: () => void;
+  /** Called with the auto-returned requestIds after a sync returned ≥1 book. */
+  onAutoReturned?: (requestIds: string[]) => void;
 }
 
 export interface UseBookSyncReturn {
@@ -87,8 +87,9 @@ export function useBookSync({
           setLastSyncBooks(result.books);
           setSyncStatus("done");
           setAutoSyncDone(true);
-          if (result.autoReturnedCount && result.autoReturnedCount > 0) {
-            onAutoReturnedRef.current?.();
+          const returnedIds = result.autoReturnedRequestIds;
+          if (returnedIds && returnedIds.length > 0) {
+            onAutoReturnedRef.current?.(returnedIds);
           }
           if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
           statusTimerRef.current = setTimeout(() => setSyncStatus("idle"), 2000);
@@ -124,8 +125,9 @@ export function useBookSync({
     if (result.success) {
       setLastSyncBooks(result.books);
       setSyncStatus("done");
-      if (result.autoReturnedCount && result.autoReturnedCount > 0) {
-        onAutoReturnedRef.current?.();
+      const returnedIds = result.autoReturnedRequestIds;
+      if (returnedIds && returnedIds.length > 0) {
+        onAutoReturnedRef.current?.(returnedIds);
       }
       if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
       statusTimerRef.current = setTimeout(() => setSyncStatus("idle"), 2000);
