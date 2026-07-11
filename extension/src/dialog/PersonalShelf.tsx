@@ -36,7 +36,7 @@ function archiveTabClass(active: boolean): string {
 
 export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProps) {
   const isMobile = useIsMobile();
-  const { members } = useFamilyData();
+  const { members, familyId, refreshBorrowRequests } = useFamilyData();
   const selfMember = members.find((m) => m.userId === userId);
   const displayName = selfMember?.displayName ?? "";
 
@@ -52,6 +52,8 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
   const { syncStatus, syncError, triggerManualSync, lastSyncBooks, progressMessage } = useBookSync({
     userId,
     apiClient,
+    familyId,
+    onAutoReturned: refreshBorrowRequests,
   });
 
   const {
