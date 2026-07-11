@@ -42,11 +42,15 @@ function injectScopedStyles(rootNode: Node): void {
 /**
  * Mount the Dialog React app into the given container element.
  * Used by the content script to inject the UI into the page.
+ *
+ * Returns an unmount handle: the caller MUST call it when tearing down the
+ * dialog so the React root's effects/cleanups run and the root is released
+ * (removing the host DOM alone leaks the root).
  */
 export function mountDialog(
   container: HTMLElement,
   options?: MountDialogOptions,
-): void {
+): () => void {
   // Single source of truth for the "shadow root vs dev page" decision: compute
   // the container's root node once and reuse it for both style injection and the
   // portal container.
@@ -71,6 +75,8 @@ export function mountDialog(
       </PortalContainerContext.Provider>
     </React.StrictMode>,
   );
+
+  return () => root.unmount();
 }
 
 // Standalone mount for the dialog dev page (dialog/index.html)
