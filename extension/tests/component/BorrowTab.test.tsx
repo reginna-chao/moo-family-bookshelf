@@ -8,6 +8,7 @@ const mockOpenLendDialogForBook = vi.fn();
 const mockSelectMemberByName = vi.fn();
 const mockWaitForLendDialogClose = vi.fn().mockResolvedValue(true);
 const mockCloseLendDialog = vi.fn();
+const mockRestoreLibrarySearch = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/content/readmoo-lend", async () => {
   // Pull in the real `decideLendAction` so picker / fast-match branching is
   // exercised exactly as in production. Only the side-effecting helpers are
@@ -24,6 +25,7 @@ vi.mock("@/content/readmoo-lend", async () => {
     selectMemberByName: (...args: unknown[]) => mockSelectMemberByName(...args),
     waitForLendDialogClose: (...args: unknown[]) => mockWaitForLendDialogClose(...args),
     closeLendDialog: (...args: unknown[]) => mockCloseLendDialog(...args),
+    restoreLibrarySearch: (...args: unknown[]) => mockRestoreLibrarySearch(...args),
   };
 });
 
@@ -93,10 +95,12 @@ describe("BorrowTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Default: readmoo-lend automation succeeds (returns a fake lend dialog).
+    // `previousQuery` is what BorrowTab passes to restoreLibrarySearch in finally.
     mockOpenLendDialogForBook.mockResolvedValue({
       lendDialog: document.createElement("div"),
       detailModal: document.createElement("div"),
       members: [{ name: "Alice", avatar: "" }],
+      previousQuery: "",
     });
     // selectMemberByName now returns boolean: true=found+clicked, false=not found.
     mockSelectMemberByName.mockReturnValue(true);
@@ -829,6 +833,108 @@ describe("BorrowTab", () => {
         );
       });
       expect(screen.queryByText("手動借出提醒")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("restore library search after approve", () => {
+    it("restores the user's prior search after a successful approve", async () => {
+      const updateBorrowStatus = vi
+        .fn()
+        .mockResolvedValue(makeRequest({ status: BorrowStatus.LENT }));
+      const apiClient = createMockApiClient({
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+        updateBorrowStatus,
+      });
+      mockOpenLendDialogForBook.mockResolvedValue({
+        lendDialog: document.createElement("div"),
+        detailModal: document.createElement("div"),
+        members: [{ name: "Alice", avatar: "" }],
+        previousQuery: "科幻小說",
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("同意借閱")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("同意借閱"));
+
+      await waitFor(() => {
+        expect(mockRestoreLibrarySearch).toHaveBeenCalledWith("科幻小說");
+      });
+    });
+
+    it("restores the user's prior search when the picker is cancelled", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-1",
+            ownerId: OWNER_ID,
+            members: [
+              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
+              { userId: BORROWER_ID, displayName: "Alice", canLend: BoolFlag.TRUE },
+            ],
+          },
+        }),
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+      });
+      mockOpenLendDialogForBook.mockResolvedValue({
+        lendDialog: document.createElement("div"),
+        detailModal: document.createElement("div"),
+        members: [
+          { name: "Alice", avatar: "" },
+          { name: "Bob", avatar: "" },
+        ],
+        previousQuery: "推理",
+      });
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("同意借閱")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("同意借閱"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/請選擇「Alice」對應的讀墨家庭成員/),
+        ).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+      await waitFor(() => {
+        expect(mockRestoreLibrarySearch).toHaveBeenCalledWith("推理");
+      });
+    });
+
+    it("does NOT restore when openLendDialogForBook rejects before searching (NOT_ON_LIBRARY)", async () => {
+      const apiClient = createMockApiClient({
+        listBorrowRequests: vi
+          .fn()
+          .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+      });
+      mockOpenLendDialogForBook.mockRejectedValue(
+        new Error("請先前往讀墨書庫頁面（read.readmoo.com）"),
+      );
+
+      renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("同意借閱")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("同意借閱"));
+
+      // The error surfaces and previousQuery stayed null → no restore attempt.
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          "請先前往讀墨書庫頁面",
+        );
+      });
+      expect(mockRestoreLibrarySearch).not.toHaveBeenCalled();
     });
   });
 });

@@ -3,8 +3,8 @@
  * `.library-item` divs require a hover event to reveal `.openbook` links.
  */
 
-import browser from "webextension-polyfill";
 import { BoolFlag } from "../api/client";
+import { requestFiberData } from "./fiber-data";
 import {
   paginateLibrary,
   type ScrapeBooksOptions,
@@ -76,32 +76,6 @@ function extractCoverUrl(item: Element): string {
   const src = img?.src ?? "";
   // Return empty string for placeholder so mergeBooks preserves real cover URL.
   return src.endsWith(PLACEHOLDER_COVER) ? "" : src;
-}
-
-/** Inject the fiber-bridge script into the page's main world. */
-function injectFiberBridge(): void {
-  if (document.documentElement.hasAttribute("data-moo-fiber-bridge")) return;
-  document.documentElement.setAttribute("data-moo-fiber-bridge", "1");
-  const script = document.createElement("script");
-  script.src = browser.runtime.getURL("fiber-bridge.js");
-  script.onload = () => script.remove();
-  document.documentElement.appendChild(script);
-}
-
-/** Request the fiber bridge to stamp `data-moo-book-id` on all `.library-item` elements. */
-async function requestFiberData(): Promise<void> {
-  injectFiberBridge();
-  await wait(100); // ensure the injected script has loaded
-
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => resolve(), 2000);
-    document.addEventListener(
-      "moo-fiber-data",
-      () => { clearTimeout(timeout); resolve(); },
-      { once: true },
-    );
-    document.dispatchEvent(new CustomEvent("moo-request-fiber-data"));
-  });
 }
 
 /** Read book ID from `data-moo-book-id` attribute stamped by the fiber bridge. */

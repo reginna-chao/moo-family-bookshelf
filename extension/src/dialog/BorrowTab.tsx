@@ -13,7 +13,9 @@ import {
   ReadmooMember,
   closeLendDialog,
   decideLendAction,
+  dismissOpenDialogs,
   openLendDialogForBook,
+  restoreLibrarySearch,
   selectMemberByName,
   waitForLendDialogClose,
 } from "../content/readmoo-lend";
@@ -137,12 +139,20 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     async (request: BorrowRequest) => {
       setActionError(null);
       setPendingRequestId(request.requestId);
+      // Only set once the search has actually been submitted (successful return
+      // from openLendDialogForBook). Stays null if it throws before searching
+      // (e.g. NOT_ON_LIBRARY), so we skip the restore in that case.
+      let previousQuery: string | null = null;
       try {
         const borrower = members.find((m) => m.userId === request.borrowerId);
         const readmooName = borrower?.readmooName;
 
-        const { lendDialog, members: readmooMembers } =
-          await openLendDialogForBook(request.bookId);
+        const {
+          lendDialog,
+          members: readmooMembers,
+          previousQuery: prev,
+        } = await openLendDialogForBook(request.bookId, request.bookTitle);
+        previousQuery = prev;
         const decision = decideLendAction(readmooMembers, readmooName);
 
         let target: ReadmooMember | undefined = decision.target;
@@ -181,6 +191,19 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
         const msg = err instanceof Error ? err.message : "借出失敗";
         setActionError(`自動借出失敗：${msg}`);
       } finally {
+        // Restore the user's prior library search state. Runs after the whole
+        // flow (including the picker cancel early-return) so no click lands on a
+        // detached card node. Best-effort inside restoreLibrarySearch.
+        if (previousQuery !== null) {
+          // ORDER MATTERS: dismiss any lingering .book-detail-modal BEFORE
+          // restoring. Post-success failures (MEMBER_NOT_FOUND, CONFIRM_TIMEOUT,
+          // updateBorrowStatus throw) and picker cancel can leave the detail
+          // modal open; restoring re-renders the grid, and a still-open modal
+          // would otherwise stack on top of it. On success this also tidies up
+          // any leftover detail modal — an intended improvement.
+          dismissOpenDialogs();
+          await restoreLibrarySearch(previousQuery);
+        }
         setPendingRequestId(null);
       }
     },
