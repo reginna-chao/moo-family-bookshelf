@@ -50,22 +50,53 @@ import "@/content/index";
 /** One macrotask hop. */
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
+// Wall-clock budget for the load-tolerant waits below. The file's testTimeout is
+// 30s (see extension/vitest.config.ts); 10s leaves ample margin while still
+// failing fast with context. Interval kept small so a prompt import resolves
+// with near-zero added latency.
+const WAIT_TIMEOUT_MS = 10_000;
+const WAIT_INTERVAL_MS = 10;
+
 /**
- * Deterministically wait for the async open path (runtime dynamic import →
- * mountDialog) to reach the expected mount count. Polling avoids depending on a
- * fixed number of ticks, which is flaky when the import resolution latency
- * varies under a loaded full-suite run.
+ * Poll `isReady` on a wall-clock deadline (`vi.waitFor`) rather than a fixed
+ * number of ticks: under a saturated full-suite run the content script's runtime
+ * dynamic import (vite-node fetch/transform) can take far more than a fixed tick
+ * budget to resolve, so an iteration-capped poll would give up early. On timeout
+ * we throw the described error so a genuine failure surfaces clearly instead of a
+ * cryptic downstream call-count / missing-element diff.
  */
-async function waitForMountCount(count: number): Promise<void> {
-  for (let i = 0; i < 100 && mockMountDialog.mock.calls.length < count; i++) {
-    await tick();
-  }
+async function waitForCondition(
+  isReady: () => boolean,
+  describeTimeout: () => string,
+): Promise<void> {
+  await vi.waitFor(
+    () => {
+      if (!isReady()) throw new Error(describeTimeout());
+    },
+    { timeout: WAIT_TIMEOUT_MS, interval: WAIT_INTERVAL_MS },
+  );
 }
 
 /**
- * Let a pending dynamic import settle when we expect NO mount (race-guard test).
- * A few ticks give the import ample time to resolve so a broken guard would be
- * caught; the race guard keeps the count at 0 regardless of when it resolves.
+ * Wait for the async open path (runtime dynamic import → mountDialog) to reach
+ * the expected mount count.
+ */
+async function waitForMountCount(count: number): Promise<void> {
+  await waitForCondition(
+    () => mockMountDialog.mock.calls.length >= count,
+    () =>
+      `timed out waiting for mountDialog to be called ${count}x; saw ${mockMountDialog.mock.calls.length}x`,
+  );
+}
+
+/**
+ * Fixed 3-tick flush used only by `beforeAll` to let the top-level init's button
+ * injection settle before the first test. Three ticks suffice on this path
+ * because it has no real async wait: the `waitForPageReady` mock resolves
+ * immediately and the `chrome.storage` mock is already resolved, so injection
+ * completes within a couple of microtask/macrotask hops. It is also
+ * self-healing — every `beforeEach` runs `ensureButtonInjected` (a load-tolerant
+ * deadline wait) as a backstop, so a slow warm-up never wedges a test.
  */
 const settle = async (): Promise<void> => {
   await tick();
@@ -87,15 +118,20 @@ function hostExists(): boolean {
  * Re-inject the floating button if a prior test's teardown removed it (the
  * context-invalidation path runs `cleanupMooFamilyUI`, which removes the button
  * too). A hashchange re-runs the content script's `waitAndInjectButton`; the
- * mocked `waitForPageReady` resolves immediately, so the button reappears within
- * a few ticks. No-op when the button is already present (injection is idempotent).
+ * mocked `waitForPageReady` resolves immediately, so the button reappears once
+ * the injection microtasks settle. A wall-clock deadline (`vi.waitFor`) keeps
+ * this robust under a saturated full-suite run, where a fixed tick budget could
+ * give up before injection completes and leave later `getButton()` calls
+ * throwing. No-op when the button is already present (injection is idempotent).
  */
 async function ensureButtonInjected(): Promise<void> {
   if (document.getElementById(MOO_ELEMENT_IDS.button)) return;
   window.dispatchEvent(new Event("hashchange"));
-  for (let i = 0; i < 100 && !document.getElementById(MOO_ELEMENT_IDS.button); i++) {
-    await tick();
-  }
+  await waitForCondition(
+    () => document.getElementById(MOO_ELEMENT_IDS.button) !== null,
+    () =>
+      "timed out waiting for the floating button to be re-injected after hashchange",
+  );
 }
 
 const getURLMock = browser.runtime.getURL as unknown as ReturnType<typeof vi.fn>;
