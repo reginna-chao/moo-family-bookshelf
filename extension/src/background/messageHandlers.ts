@@ -20,7 +20,6 @@ import {
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
   SYNC_ARCHIVED_KEY,
-  FAMILY_SHELF_VIEW_MODE_KEY,
   FLOATING_ICON_SIZE_KEY,
   AUTO_SYNC_INTERVAL_KEY,
   FAMILY_SHELF_SORT_KEY,
@@ -45,8 +44,6 @@ export type BackgroundMessage =
   | { type: "CLEAR_FAMILY_ID" }
   | { type: "GET_SYNC_ARCHIVED" }
   | { type: "SET_SYNC_ARCHIVED"; syncArchived: number }
-  | { type: "GET_FAMILY_SHELF_VIEW_MODE" }
-  | { type: "SET_FAMILY_SHELF_VIEW_MODE"; viewMode: string }
   | { type: "GET_FLOATING_ICON_SIZE" }
   | { type: "SET_FLOATING_ICON_SIZE"; size: string }
   | { type: "GET_AUTO_SYNC_INTERVAL" }
@@ -127,24 +124,6 @@ async function handleSetSyncArchived(
     return { ok: false, error: "syncArchived must be 0 or 1" };
   }
   await browser.storage.local.set({ [SYNC_ARCHIVED_KEY]: value });
-  return { ok: true };
-}
-
-async function handleGetFamilyShelfViewMode(): Promise<unknown> {
-  const result = await browser.storage.local.get([FAMILY_SHELF_VIEW_MODE_KEY]);
-  const stored = result[FAMILY_SHELF_VIEW_MODE_KEY];
-  const viewMode = stored === "row" ? "row" : "grid";
-  return { viewMode };
-}
-
-async function handleSetFamilyShelfViewMode(
-  message: Extract<BackgroundMessage, { type: "SET_FAMILY_SHELF_VIEW_MODE" }>,
-): Promise<unknown> {
-  const value = message.viewMode;
-  if (value !== "grid" && value !== "row") {
-    return { ok: false, error: "viewMode must be 'grid' or 'row'" };
-  }
-  await browser.storage.local.set({ [FAMILY_SHELF_VIEW_MODE_KEY]: value });
   return { ok: true };
 }
 
@@ -277,8 +256,6 @@ export const messageHandlers: MessageHandlerMap = {
   CLEAR_FAMILY_ID: handleClearFamilyId,
   GET_SYNC_ARCHIVED: handleGetSyncArchived,
   SET_SYNC_ARCHIVED: handleSetSyncArchived,
-  GET_FAMILY_SHELF_VIEW_MODE: handleGetFamilyShelfViewMode,
-  SET_FAMILY_SHELF_VIEW_MODE: handleSetFamilyShelfViewMode,
   GET_FLOATING_ICON_SIZE: handleGetFloatingIconSize,
   SET_FLOATING_ICON_SIZE: handleSetFloatingIconSize,
   GET_AUTO_SYNC_INTERVAL: handleGetAutoSyncInterval,

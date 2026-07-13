@@ -5,7 +5,6 @@ import {
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
   API_ENDPOINT_KEY,
-  FAMILY_SHELF_VIEW_MODE_KEY,
   FLOATING_ICON_SIZE_KEY,
   AUTO_SYNC_INTERVAL_KEY,
   FAMILY_SHELF_SORT_KEY,
@@ -244,54 +243,6 @@ describe("background service worker", () => {
       });
       expect(browser.storage.sync.set).not.toHaveBeenCalled();
     });
-  });
-
-  describe("GET_FAMILY_SHELF_VIEW_MODE", () => {
-    it("returns 'grid' when storage has no value", async () => {
-      const response = await sendMessage({ type: "GET_FAMILY_SHELF_VIEW_MODE" });
-      expect(response).toEqual({ viewMode: "grid" });
-    });
-
-    it("returns 'row' when storage has 'row'", async () => {
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [FAMILY_SHELF_VIEW_MODE_KEY]: "row",
-      });
-      const response = await sendMessage({ type: "GET_FAMILY_SHELF_VIEW_MODE" });
-      expect(response).toEqual({ viewMode: "row" });
-    });
-
-    it("returns 'grid' when storage has invalid value", async () => {
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [FAMILY_SHELF_VIEW_MODE_KEY]: "foo",
-      });
-      const response = await sendMessage({ type: "GET_FAMILY_SHELF_VIEW_MODE" });
-      expect(response).toEqual({ viewMode: "grid" });
-    });
-  });
-
-  describe("SET_FAMILY_SHELF_VIEW_MODE", () => {
-    it.each(["grid", "row"] as const)("writes '%s' to local storage and responds ok", async (mode) => {
-      const response = await sendMessage({
-        type: "SET_FAMILY_SHELF_VIEW_MODE",
-        viewMode: mode,
-      });
-      expect(response).toEqual({ ok: true });
-      expect(browser.storage.local.set).toHaveBeenCalledWith({
-        [FAMILY_SHELF_VIEW_MODE_KEY]: mode,
-      });
-    });
-
-    it.each(["foo", undefined, 42, ""])(
-      "rejects invalid value '%s' without writing",
-      async (invalidValue) => {
-        const response = await sendMessage({
-          type: "SET_FAMILY_SHELF_VIEW_MODE",
-          viewMode: invalidValue,
-        });
-        expect(response).toEqual({ ok: false, error: expect.any(String) });
-        expect(browser.storage.local.set).not.toHaveBeenCalled();
-      },
-    );
   });
 
   describe("GET_FLOATING_ICON_SIZE", () => {

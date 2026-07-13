@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import browser from "webextension-polyfill";
+import { useCallback, useEffect, useState } from "react";
+import {
+  readFamilyShelfViewMode,
+  writeFamilyShelfViewMode,
+  type FamilyShelfViewMode,
+} from "../storage/viewMode";
 
-export type FamilyShelfViewMode = "grid" | "row";
+export type { FamilyShelfViewMode };
 
 const DEFAULT_VIEW_MODE: FamilyShelfViewMode = "grid";
-
-function isViewMode(value: unknown): value is FamilyShelfViewMode {
-  return value === "grid" || value === "row";
-}
 
 export interface UseFamilyShelfViewModeReturn {
   viewMode: FamilyShelfViewMode;
@@ -16,25 +16,17 @@ export interface UseFamilyShelfViewModeReturn {
 
 export function useFamilyShelfViewMode(): UseFamilyShelfViewModeReturn {
   const [viewMode, setViewModeState] = useState<FamilyShelfViewMode>(DEFAULT_VIEW_MODE);
-  const viewModeRef = useRef(viewMode);
-
-  useEffect(() => {
-    viewModeRef.current = viewMode;
-  }, [viewMode]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = (await browser.runtime.sendMessage({
-          type: "GET_FAMILY_SHELF_VIEW_MODE",
-        })) as { viewMode?: unknown } | undefined;
-        if (cancelled) return;
-        if (isViewMode(response?.viewMode)) {
-          setViewModeState(response.viewMode);
+        const stored = await readFamilyShelfViewMode();
+        if (!cancelled) {
+          setViewModeState(stored);
         }
       } catch {
-        // Background unavailable — keep default
+        // storage.local unavailable — keep default
       }
     })();
     return () => {
@@ -42,24 +34,19 @@ export function useFamilyShelfViewMode(): UseFamilyShelfViewModeReturn {
     };
   }, []);
 
-  const setViewMode = useCallback((mode: FamilyShelfViewMode) => {
-    const prev = viewModeRef.current;
-    if (prev === mode) return;
-    setViewModeState(mode);
-    void (async () => {
-      try {
-        const response = (await browser.runtime.sendMessage({
-          type: "SET_FAMILY_SHELF_VIEW_MODE",
-          viewMode: mode,
-        })) as { ok?: boolean } | undefined;
-        if (!response?.ok) {
-          setViewModeState(prev);
-        }
-      } catch {
-        setViewModeState(prev);
-      }
-    })();
-  }, []);
+  const setViewMode = useCallback(
+    (mode: FamilyShelfViewMode) => {
+      if (viewMode === mode) return;
+      setViewModeState(mode);
+      // Fire-and-forget: direct storage.local writes in the dialog context are
+      // reliable, so we do NOT roll the UI back on a storage hiccup — a lost
+      // persistence is better UX than snapping the view back under the user.
+      void writeFamilyShelfViewMode(mode).catch(() => {
+        // Ignore write failures; UI state remains authoritative.
+      });
+    },
+    [viewMode],
+  );
 
   return { viewMode, setViewMode };
 }

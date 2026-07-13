@@ -1,117 +1,142 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useFamilyShelfViewMode } from "@/dialog/useFamilyShelfViewMode";
+import { FAMILY_SHELF_VIEW_MODE_KEY } from "@/constants";
 
 /**
- * Production reads/writes the view mode via the promise-based
- * `browser.runtime.sendMessage(msg)` (webextension-polyfill). The mock returns a
- * Promise resolving to the response keyed by message type — there is no Chrome
- * callback argument. The mount read is async, so assertions on the loaded value
- * use `waitFor`.
+ * The hook now reads/writes the view mode via DIRECT `browser.storage.local`
+ * access (storage/viewMode.ts) instead of `browser.runtime.sendMessage`
+ * round-trips to the background — the Firefox sleeping-event-page fix. The test
+ * mock aliases `chrome.*` and `browser.*` to the same spies (see tests/setup.ts),
+ * so mocking `chrome.storage.local.{get,set}` observes exactly what production
+ * calls through `browser.storage.local`.
+ *
+ * The mount read is async, so assertions on the loaded value use `waitFor`.
+ * `setViewMode` writes fire-and-forget with a swallowed catch and NEVER rolls the
+ * UI back on a storage failure — a lost persistence beats snapping the view back
+ * under the user.
  */
-function mockSendMessage(
-  getResponse: Record<string, unknown>,
-  setResponse: Record<string, unknown> = { ok: true },
-) {
-  vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    ((message: unknown) => {
-      const msg = message as Record<string, unknown>;
-      if (msg.type === "GET_FAMILY_SHELF_VIEW_MODE") {
-        return Promise.resolve(getResponse);
-      }
-      if (msg.type === "SET_FAMILY_SHELF_VIEW_MODE") {
-        return Promise.resolve(setResponse);
-      }
-      return Promise.resolve(undefined);
-    }) as typeof chrome.runtime.sendMessage,
-  );
+function mockStoredViewMode(value: unknown) {
+  vi.mocked(chrome.storage.local.get).mockResolvedValue({
+    [FAMILY_SHELF_VIEW_MODE_KEY]: value,
+  } as never);
+}
+
+async function flushMicrotasks() {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
 }
 
 describe("useFamilyShelfViewMode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: empty storage → read normalizes to "grid".
+    vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
+    vi.mocked(chrome.storage.local.set).mockResolvedValue(undefined as never);
   });
 
-  it("defaults to 'grid'", () => {
-    mockSendMessage({ viewMode: "grid" });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("defaults to 'grid' before the stored value resolves", async () => {
+    mockStoredViewMode("row");
     const { result } = renderHook(() => useFamilyShelfViewMode());
+    // Synchronous initial render, before the async mount read settles.
     expect(result.current.viewMode).toBe("grid");
+    // Settle the pending mount read inside act() to avoid a leaked update.
+    await flushMicrotasks();
   });
 
-  it("reads 'row' from background on mount", async () => {
-    mockSendMessage({ viewMode: "row" });
+  it("reads 'row' from storage.local on mount", async () => {
+    mockStoredViewMode("row");
     const { result } = renderHook(() => useFamilyShelfViewMode());
     await waitFor(() => {
       expect(result.current.viewMode).toBe("row");
     });
   });
 
-  it("keeps 'grid' when the background message rejects", async () => {
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      (() => Promise.reject(new Error("background unavailable"))) as typeof chrome.runtime.sendMessage,
+  it("keeps 'grid' when the storage.local read rejects", async () => {
+    vi.mocked(chrome.storage.local.get).mockRejectedValue(
+      new Error("storage.local unavailable"),
     );
     const { result } = renderHook(() => useFamilyShelfViewMode());
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
+    await flushMicrotasks();
     expect(result.current.viewMode).toBe("grid");
   });
 
-  it("optimistically updates state when setViewMode is called", () => {
-    mockSendMessage({ viewMode: "grid" });
+  it.each(["list", 42, null, undefined, "ROW", ""])(
+    "normalizes the unknown stored value %o to 'grid'",
+    async (stored) => {
+      mockStoredViewMode(stored);
+      const { result } = renderHook(() => useFamilyShelfViewMode());
+      await flushMicrotasks();
+      expect(result.current.viewMode).toBe("grid");
+    },
+  );
+
+  it("updates state immediately when setViewMode is called", async () => {
     const { result } = renderHook(() => useFamilyShelfViewMode());
-
-    act(() => {
-      result.current.setViewMode("row");
-    });
-
-    expect(result.current.viewMode).toBe("row");
-  });
-
-  it("sends SET_FAMILY_SHELF_VIEW_MODE message on setViewMode", () => {
-    mockSendMessage({ viewMode: "grid" });
-    const { result } = renderHook(() => useFamilyShelfViewMode());
-
-    act(() => {
-      result.current.setViewMode("row");
-    });
-
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "SET_FAMILY_SHELF_VIEW_MODE",
-      viewMode: "row",
-    });
-  });
-
-  it("rolls back state when SET responds with ok: false", async () => {
-    mockSendMessage({ viewMode: "grid" }, { ok: false });
-    const { result } = renderHook(() => useFamilyShelfViewMode());
-
-    act(() => {
-      result.current.setViewMode("row");
-    });
-    // Optimistic: now "row"
-    expect(result.current.viewMode).toBe("row");
-
-    // Wait for the rejected/ok:false response to trigger rollback
     await waitFor(() => {
       expect(result.current.viewMode).toBe("grid");
     });
+
+    act(() => {
+      result.current.setViewMode("row");
+    });
+
+    expect(result.current.viewMode).toBe("row");
   });
 
-  it("does not send message when setting same mode", () => {
-    mockSendMessage({ viewMode: "grid" });
+  it("writes the new mode to storage.local on setViewMode", async () => {
     const { result } = renderHook(() => useFamilyShelfViewMode());
+    await waitFor(() => {
+      expect(result.current.viewMode).toBe("grid");
+    });
 
-    vi.mocked(chrome.runtime.sendMessage).mockClear();
+    act(() => {
+      result.current.setViewMode("row");
+    });
+
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({
+      [FAMILY_SHELF_VIEW_MODE_KEY]: "row",
+    });
+  });
+
+  it("does NOT revert the state when the storage.local write fails", async () => {
+    vi.mocked(chrome.storage.local.set).mockRejectedValue(
+      new Error("storage write failed"),
+    );
+    const { result } = renderHook(() => useFamilyShelfViewMode());
+    // Ensure the mount read settled (still "grid" from empty storage).
+    await waitFor(() => {
+      expect(result.current.viewMode).toBe("grid");
+    });
+
+    act(() => {
+      result.current.setViewMode("row");
+    });
+    expect(result.current.viewMode).toBe("row");
+
+    // Flush the rejected write's microtask. Without rollback the UI must stay
+    // "row" — this is the inverse of the old (removed) rollback behavior.
+    await flushMicrotasks();
+    expect(result.current.viewMode).toBe("row");
+  });
+
+  it("does not write to storage.local when setting the same mode", async () => {
+    const { result } = renderHook(() => useFamilyShelfViewMode());
+    await waitFor(() => {
+      expect(result.current.viewMode).toBe("grid");
+    });
+
+    vi.mocked(chrome.storage.local.set).mockClear();
 
     act(() => {
       result.current.setViewMode("grid");
     });
 
-    // Only GET was called on mount; no SET call
-    const setCalls = vi.mocked(chrome.runtime.sendMessage).mock.calls.filter(
-      (call) => (call[0] as unknown as Record<string, unknown>).type === "SET_FAMILY_SHELF_VIEW_MODE",
-    );
-    expect(setCalls).toHaveLength(0);
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
   });
 });
