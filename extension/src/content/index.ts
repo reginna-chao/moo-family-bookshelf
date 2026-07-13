@@ -37,7 +37,10 @@ import { BorrowStatus, type BorrowRequest } from "../api/types";
 
 const APP_ENV = getAppEnv();
 
-/** Shape of the code-split dialog module loaded at runtime via getURL(). */
+/**
+ * Shape of the code-split dialog module loaded at runtime via getURL().
+ * `mountDialog` returns an unmount handle we must retain and call on close.
+ */
 type DialogModule = typeof import("../dialog/main");
 
 /** Disposer for the floating button's breakpoint watcher (see injection). */
@@ -47,11 +50,48 @@ let disposeButtonWatcher: (() => void) | null = null;
 let disposeDialogWatcher: (() => void) | null = null;
 
 /**
+ * Unmount handle for the dialog's React root, returned by mountDialog. Held at
+ * module scope because mount (inside a dynamic import) and the teardown paths
+ * are separate calls that must share it across the open/close lifecycle.
+ */
+let unmountDialogApp: (() => void) | null = null;
+
+/**
+ * Unmount the dialog's React root if one is mounted, then clear the handle.
+ * Guarded: an unmount failure must never block the surrounding DOM teardown.
+ * Removing the host DOM alone would leak the root (its effects keep running).
+ */
+function unmountDialogRoot(): void {
+  try {
+    unmountDialogApp?.();
+  } catch (err) {
+    console.error("[MooFamily] Dialog unmount failed:", err);
+  }
+  unmountDialogApp = null;
+}
+
+/**
+ * Full dialog teardown: unmount the React root FIRST (so effects/cleanups run
+ * while the DOM is still attached), dispose the dialog breakpoint watcher, then
+ * remove the host. Shared by the toggle-off and close (backdrop / mobile icon)
+ * paths so the three-step order lives in exactly one place. The floating button
+ * and its badge are untouched (separate light-DOM element).
+ */
+function disposeDialogShell(): void {
+  unmountDialogRoot();
+  disposeDialogWatcher?.();
+  disposeDialogWatcher = null;
+  document.getElementById(MOO_ELEMENT_IDS.host)?.remove();
+}
+
+/**
  * Remove all MooFamily UI and stop every breakpoint watcher. Use this instead
  * of `cleanupMooFamilyUI` from the content script so matchMedia listeners are
  * never left dangling after teardown.
  */
 function teardownMooFamilyUI(): void {
+  // Unmount the React root before cleanupMooFamilyUI rips its host out of the DOM.
+  unmountDialogRoot();
   disposeButtonWatcher = null;
   disposeDialogWatcher = null;
   stopAllMobileWatchers();
@@ -279,15 +319,16 @@ function toggleDialog(): void {
   // them directly.
   const existingHost = document.getElementById(MOO_ELEMENT_IDS.host);
   if (existingHost) {
-    // Toggle off: tear down the host (which removes the backdrop + dialog inside
-    // its shadow root) and ONLY the dialog's breakpoint watcher. The floating
-    // button's watcher must survive so the button keeps repositioning on later
-    // breakpoint changes.
-    disposeDialogWatcher?.();
-    disposeDialogWatcher = null;
-    existingHost.remove();
+    // Toggle off: unmount the React root + dispose ONLY the dialog's breakpoint
+    // watcher, then remove the host. The floating button's watcher must survive
+    // so the button keeps repositioning on later breakpoint changes.
+    disposeDialogShell();
     return;
   }
+
+  // Opening a fresh dialog: defensively clear any stale React root handle so we
+  // never orphan a root across open/close cycles (e.g. if a prior close raced).
+  unmountDialogRoot();
 
   const dialog = document.createElement("div");
   dialog.id = MOO_ELEMENT_IDS.dialog;
@@ -320,13 +361,11 @@ function toggleDialog(): void {
   injectShellStyles(shadowRoot);
 
   // Single close path reused by backdrop click and the mobile close icon.
-  // Tears down only the dialog's breakpoint watcher (module-level, so the
-  // toggle-off branch can dispose the same one); the button watcher is separate.
-  // Removing the host removes the backdrop + dialog inside its shadow tree.
+  // Unmounts the React root, disposes only the dialog's breakpoint watcher
+  // (module-level, so the toggle-off branch shares it; the button watcher is
+  // separate), then removes the host (backdrop + dialog live in its shadow tree).
   const closeDialog = (): void => {
-    disposeDialogWatcher?.();
-    disposeDialogWatcher = null;
-    host.remove();
+    disposeDialogShell();
   };
   backdrop.addEventListener("click", closeDialog);
 
@@ -373,7 +412,12 @@ function toggleDialog(): void {
   // chrome.runtime.getURL() which points to web-accessible extension resources.
   import(/* @vite-ignore */ browser.runtime.getURL("content-dialog.js"))
     .then((mod: DialogModule) => {
-      mod.mountDialog(mountPoint, {
+      // Race guard: the user may have closed the dialog before this dynamic
+      // import resolved. If the mount point is no longer in the DOM, mounting
+      // would leak a root nobody holds — so skip entirely.
+      if (!mountPoint.isConnected) return;
+      // Retain the unmount handle so the close/teardown paths can release the root.
+      unmountDialogApp = mod.mountDialog(mountPoint, {
         onViewChange: (view) => {
           currentIsMainView = view === "main";
           relayout();

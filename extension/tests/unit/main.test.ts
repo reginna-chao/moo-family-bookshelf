@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock react-dom/client before importing the module under test
 const mockRender = vi.fn();
-const mockCreateRoot = vi.fn().mockReturnValue({ render: mockRender });
+const mockUnmount = vi.fn();
+const mockCreateRoot = vi
+  .fn()
+  .mockReturnValue({ render: mockRender, unmount: mockUnmount });
 
 vi.mock("react-dom/client", () => ({
   createRoot: mockCreateRoot,
@@ -66,6 +69,35 @@ describe("mountDialog", () => {
     const renderArg = mockRender.mock.calls[0][0];
     const app = renderArg.props.children.props.children;
     expect(app.props.onViewChange).toBeUndefined();
+  });
+
+  it("returns an unmount handle (a function) so the caller can tear down the root", async () => {
+    const { mountDialog } = await import("@/dialog/main");
+    const container = document.createElement("div");
+
+    const unmount = mountDialog(container);
+
+    expect(typeof unmount).toBe("function");
+  });
+
+  it("does not unmount eagerly — the root stays mounted until the handle is invoked", async () => {
+    const { mountDialog } = await import("@/dialog/main");
+    const container = document.createElement("div");
+
+    mountDialog(container);
+
+    // Mounting alone must never call unmount; only the caller's teardown may.
+    expect(mockUnmount).not.toHaveBeenCalled();
+  });
+
+  it("tears down the React root when the returned handle is invoked", async () => {
+    const { mountDialog } = await import("@/dialog/main");
+    const container = document.createElement("div");
+
+    const unmount = mountDialog(container);
+    unmount();
+
+    expect(mockUnmount).toHaveBeenCalledTimes(1);
   });
 });
 
