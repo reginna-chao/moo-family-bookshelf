@@ -290,8 +290,10 @@ All development and design go through a **single skill entry: `/develop`**. It t
 ├── agents/         # role agents (invisible in the slash menu)
 │   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md
 │   └── references/designer/{pencil-mockup,logo,icon,banner}.md
+├── reports/        # retro reports — written by /develop's retro offer, consumed & cleared by /distill
 └── skills/         # slash-menu entries
-    ├── develop/        # SKILL.md (router) + references/{code-cycle,design}.md
+    ├── develop/        # SKILL.md (router) + references/{code-cycle,design,retro}.md
+    ├── distill/        # fold retro reports into durable rules, then clear them
     ├── bump-ver/
     └── project-init/
 ```
@@ -309,6 +311,15 @@ All development and design go through a **single skill entry: `/develop`**. It t
   Only adopt this for moo if FE/BE/PWA conventions later diverge enough that the shared rules stop fitting.
 - `.claude/rules/` is **not deprecated** and not a remote-magic feature — it is load-bearing because
   the agents explicitly read it. `.claude/settings.json` is gitignored (personal, per-developer).
+
+### Retro → Distill 自我改善迴圈
+
+- **Retro（產報告）**：每次 `/develop` run 收尾時**問一次**是否做 retrospective（使用者決定，
+  絕不自動跑）。同意後在主 session 依 `develop/references/retro.md` 產出
+  `.claude/reports/<MMDD_HHMM>.md` — 只寫結論（卡點、改進提案 L#/E#、KPI），**不套用任何提案**。
+- **Distill（蒸餾）**：報告累積數份後，由使用者定期呼叫 `/distill` — 彙整所有報告的提案、
+  跨報告重現的教訓優先、逐項由使用者決定採納與否，套用到 `.claude/rules/`、skills、agents、
+  `AGENTS.md` 等 git-tracked 目標，最後清除已消化的報告。報告是揮發性原料，規則檔才是持久產物。
 
 ## Local Agent Hooks (optional)
 

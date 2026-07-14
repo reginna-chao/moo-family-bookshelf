@@ -74,5 +74,6 @@ Parallelize across file-disjoint scopes (frontend + backend coders run concurren
 
 - `references/code-cycle.md` — the CODE lifecycle: branch preflight (fresh from origin/main) → requirements + risk analysis → API contract → coder → verify-before-test gate → tester → review → Fix Cycle (CRITICAL auto-fix / SUGGESTION decision with 🟢🟡🔴 TL 建議) → cross-scope validation → security scan → commit.
 - `references/design.md` — the DESIGN orchestration: triage (brand assets / add icon / style consultation) → brief → dispatch `designer` → Review & Deliver (integration snippets) → commit.
+- `references/retro.md` — the end-of-run retrospective, offered ONCE at the end of either route (user decides; never auto-run). Writes `.claude/reports/<MMDD_HHMM>.md` — conclusions only; proposals are applied later by `/distill`, never in-run. Load only when the user accepts the offer.
 
 Read the one the §0 fork selected. Do not preload both.

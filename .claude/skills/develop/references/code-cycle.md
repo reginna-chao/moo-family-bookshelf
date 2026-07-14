@@ -155,3 +155,7 @@ Run **once** after the whole feature is complete (all sub-tasks done), not per s
 4. **CRITICAL** → flag with remediation; recommend fixing before merge (user acknowledgement required). **WARNING** → report, non-blocking.
 
 This phase auto-starts (no confirmation to begin), but CRITICAL findings require user acknowledgement.
+
+## Phase 8: Retro Offer (end of run)
+
+After Phase 7's findings are presented, offer the run retrospective **ONCE** (user decides; never auto-run; declined → don't re-offer this run). On yes, read `references/retro.md` and follow it in **this session** (it needs the full conversation history — an isolated subagent cannot write it). The report lands in `.claude/reports/` — include it in the feature's commit, or a follow-up `chore(retro)` commit if the feature is already committed. The retro writes conclusions only; applying its proposals is `/distill`'s job (periodic, user-invoked), never done in-run.
