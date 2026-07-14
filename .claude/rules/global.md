@@ -3,7 +3,7 @@
 ### Language
 
 - Code identifiers, commit messages, branch names: English.
-- User-facing content (UI, docs, comments in docs): 繁體中文.
+- User-facing content (UI, docs, comments in docs, and ALL assistant/bot replies in chat / PR / issue comments): 繁體中文.
 - Code comments: English for technical, 繁體中文 acceptable for business logic explanations.
 
 ### Git Hygiene

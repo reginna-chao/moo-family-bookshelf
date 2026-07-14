@@ -73,5 +73,9 @@ jobs:
             Prefer a GitHub suggestion
             block (a fenced block whose info string is the single word suggestion) when
             the edit is a small contiguous change to an existing file, so the author can
-            commit it with one click."
+            commit it with one click.
+            Write ALL user-facing reply text in Traditional Chinese (繁體中文, 台灣用語)
+            — this applies to every GitHub comment you post, regardless of the language
+            of the comment that triggered you. Keep code identifiers, commands, file
+            paths, and code blocks in English."
 
