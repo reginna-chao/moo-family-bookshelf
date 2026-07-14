@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 - Repo: `moo-family-bookshelf`
-- Language: 繁體中文 for user-facing content (UI, docs, comments), English for code identifiers and commit messages.
+- Language: 繁體中文 for user-facing content (UI, docs, comments, and ALL assistant/bot replies — chat, PR, and issue comments), English for code identifiers and commit messages.
 - In chat replies, file references must be repo-root relative only (example: `extension/src/dialog/FamilyShelf.tsx:42`); never absolute paths.
 
 ## Project Overview
