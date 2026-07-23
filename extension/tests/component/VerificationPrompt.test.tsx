@@ -97,4 +97,22 @@ describe("VerificationPrompt", () => {
     renderPrompt({ method: "pin", submitting: true });
     expect(screen.getByText("返回")).toBeDisabled();
   });
+
+  it("renders the moo-onboarding-view wrapper (targeted by the modal zero-padding override)", () => {
+    // The reauth prompt lives inside `.moo-modal`; the `.moo-modal
+    // .moo-onboarding-view { padding: 0 }` override only applies if the prompt's
+    // root actually carries this wrapper class. Pin it so the selector keeps matching.
+    const { container } = render(
+      <VerificationPrompt
+        method="pin"
+        methodError={false}
+        error=""
+        locked={false}
+        submitting={false}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(container.firstElementChild).toHaveClass("moo-onboarding-view");
+  });
 });
