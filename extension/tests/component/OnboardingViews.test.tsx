@@ -417,3 +417,47 @@ describe("IdleView", () => {
     expect(input).toHaveAttribute("type", "text");
   });
 });
+
+describe("onboarding-view wrapper class", () => {
+  // The restored `.moo-onboarding-view { padding: 24px }` rule and the mobile
+  // centering media query both target the `moo-onboarding-view` wrapper. These
+  // assertions pin the class onto the rendered root so the CSS selectors keep
+  // matching real DOM (jsdom cannot verify the padding itself).
+  const idleProps = {
+    state: "idle" as string,
+    syncCodeInput: "",
+    isProcessing: false,
+    onSetSyncCodeInput: vi.fn(),
+    onCreate: vi.fn(),
+    onJoin: vi.fn(),
+  };
+
+  it("WelcomeView renders the moo-onboarding-view wrapper as its root", () => {
+    const { container } = render(<WelcomeView onStart={() => {}} />);
+    expect(container.firstElementChild).toHaveClass("moo-onboarding-view");
+  });
+
+  it("CreatedView renders the moo-onboarding-view wrapper as its root", () => {
+    const { container } = render(
+      <CreatedView
+        generatedSyncCode="moo-abc123"
+        copied={false}
+        onCopy={() => {}}
+        onContinue={() => {}}
+      />,
+    );
+    expect(container.firstElementChild).toHaveClass("moo-onboarding-view");
+  });
+
+  it("ErrorView renders the moo-onboarding-view wrapper as its root", () => {
+    const { container } = render(
+      <ErrorView errorMessage="錯誤" actions={[{ label: "重試", onClick: () => {} }]} />,
+    );
+    expect(container.firstElementChild).toHaveClass("moo-onboarding-view");
+  });
+
+  it("IdleView renders the moo-onboarding-view wrapper as its root", () => {
+    const { container } = render(<IdleView {...idleProps} />);
+    expect(container.firstElementChild).toHaveClass("moo-onboarding-view");
+  });
+});

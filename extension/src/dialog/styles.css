@@ -2969,11 +2969,39 @@
   min-height: 200px;
 }
 
+/* On phones the content script forces the dialog to 100vh for every view, so
+   short onboarding content would otherwise pack at the top and leave a large
+   void above the pinned footer. Let .moo-onboarding grow to fill the space
+   inside .moo-app__fill and vertically center its content. 767px mirrors
+   MOBILE_BREAKPOINT_PX in extension/src/hooks/breakpoints.ts. */
+@media screen and (max-width: 767px) {
+  .moo-onboarding {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    /* Allow tall states (error / idle create+join) to scroll instead of clip. */
+    overflow-y: auto;
+  }
+
+  /* auto margins center the content but collapse to 0 when it overflows, so
+     scrolling starts from the top with nothing clipped. The absolutely
+     positioned LoadingOverlay is out of flow, so this is ignored for it. */
+  .moo-onboarding > * {
+    margin-block: auto;
+  }
+}
+
 /* ── OnboardingViews (Welcome / Created / Error / Idle) ────────────────── */
 /* Shared 24px-padded panel wrapping every onboarding view. */
 
 .moo-onboarding-view {
   padding: 24px;
+}
+
+/* Inside a modal shell the modal's own 20px padding applies; zero the panel
+   padding so the reauth VerificationPrompt doesn't stack 20px + 24px. */
+.moo-modal .moo-onboarding-view {
+  padding: 0;
 }
 
 .moo-onboarding-view__heading {
