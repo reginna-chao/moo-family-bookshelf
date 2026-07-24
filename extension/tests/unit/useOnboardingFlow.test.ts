@@ -36,13 +36,16 @@ vi.mock("@/crypto/syncCode", () => ({
   encodeSyncCode: vi.fn(),
 }));
 
+import { waitFor } from "@testing-library/react";
 import { useOnboardingFlow } from "@/dialog/useOnboardingFlow";
 import { deriveUserId } from "@/crypto/hash";
+import { encodeSyncCode } from "@/crypto/syncCode";
 import {
   performJoin,
   performSoloRecovery,
   tryAutoRecovery,
 } from "@/dialog/onboardingFlow";
+import { USER_ID_KEY, FAMILY_ID_KEY, DEFAULT_API_ENDPOINT } from "@/constants";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
@@ -550,6 +553,134 @@ describe("useOnboardingFlow", () => {
 
       expect(result.current.state).toBe("verify-prompt");
       expect(result.current.verify.active).toBe(true);
+    });
+  });
+
+  /**
+   * On mount the hook pre-fills the sync-code input from a storage.sync REMNANT:
+   * when this device has onboarded (local userId) but lost its local familyId
+   * while sync still holds one, it offers the encoded sync code so the user can
+   * rejoin in one tap. It is PRE-FILL only — never auto-submits — and uses a
+   * functional state update so it can never clobber what the user is typing.
+   */
+  describe("sync-code pre-fill from storage.sync remnant", () => {
+    /** local = onboarded but no familyId; sync = holds the remnant familyId. */
+    function mockRemnantStorage(opts: {
+      localUserId?: string;
+      localFamilyId?: string;
+      syncFamilyId?: string;
+      syncGet?: () => Promise<Record<string, unknown>>;
+    }): void {
+      const local: Record<string, unknown> = {};
+      if (opts.localUserId) local[USER_ID_KEY] = opts.localUserId;
+      if (opts.localFamilyId) local[FAMILY_ID_KEY] = opts.localFamilyId;
+      vi.mocked(chrome.storage.local.get).mockResolvedValue(local as never);
+
+      const sync: Record<string, unknown> = {};
+      if (opts.syncFamilyId) sync[FAMILY_ID_KEY] = opts.syncFamilyId;
+      vi.mocked(chrome.storage.sync.get).mockImplementation(
+        (opts.syncGet ?? (() => Promise.resolve(sync))) as never,
+      );
+    }
+
+    afterEach(() => {
+      // Restore an EMPTY storage read so the file's other tests (which expect no
+      // pre-fill) are unaffected by these per-test overrides.
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
+      vi.mocked(chrome.storage.sync.get).mockResolvedValue({} as never);
+    });
+
+    it("pre-fills the input with the encoded sync code when a remnant exists", async () => {
+      mockRemnantStorage({ localUserId: "u1", syncFamilyId: "fam-remnant" });
+      vi.mocked(encodeSyncCode).mockReturnValue("moo-fam-remnant");
+      const apiClient = createMockApiClient({
+        getEndpoint: vi.fn().mockReturnValue(DEFAULT_API_ENDPOINT),
+      });
+
+      const { result } = renderFlow(apiClient);
+
+      await waitFor(() => {
+        expect(result.current.syncCodeInput).toBe("moo-fam-remnant");
+      });
+      // Default endpoint → encode WITHOUT an @host segment.
+      expect(encodeSyncCode).toHaveBeenCalledWith({
+        familyId: "fam-remnant",
+        apiHost: undefined,
+      });
+    });
+
+    it("encodes the @host segment when a custom endpoint is configured", async () => {
+      mockRemnantStorage({ localUserId: "u1", syncFamilyId: "fam-remnant" });
+      vi.mocked(encodeSyncCode).mockReturnValue("moo-fam-remnant@custom.example");
+      const apiClient = createMockApiClient({
+        getEndpoint: vi.fn().mockReturnValue("https://custom.example"),
+      });
+
+      const { result } = renderFlow(apiClient);
+
+      await waitFor(() => {
+        expect(result.current.syncCodeInput).toBe("moo-fam-remnant@custom.example");
+      });
+      expect(encodeSyncCode).toHaveBeenCalledWith({
+        familyId: "fam-remnant",
+        apiHost: "https://custom.example",
+      });
+    });
+
+    it("leaves the input empty when there is no remnant", async () => {
+      // Onboarded, but sync holds no familyId → nothing to pre-fill.
+      mockRemnantStorage({ localUserId: "u1" });
+
+      const { result } = renderFlow();
+
+      // Give the async effect a chance to run, then assert it stayed empty.
+      await waitFor(() => {
+        expect(chrome.storage.sync.get).toHaveBeenCalled();
+      });
+      expect(result.current.syncCodeInput).toBe("");
+      expect(encodeSyncCode).not.toHaveBeenCalled();
+    });
+
+    it("does not pre-fill when the device has never onboarded (no local userId)", async () => {
+      mockRemnantStorage({ syncFamilyId: "fam-remnant" }); // no local userId
+
+      const { result } = renderFlow();
+
+      await waitFor(() => {
+        expect(chrome.storage.local.get).toHaveBeenCalled();
+      });
+      expect(result.current.syncCodeInput).toBe("");
+      expect(encodeSyncCode).not.toHaveBeenCalled();
+    });
+
+    it("never clobbers a value the user is already typing", async () => {
+      // Hold the sync read pending so the user can type BEFORE the remnant
+      // resolves; the functional update must then keep the user's value.
+      let resolveSync!: (v: Record<string, unknown>) => void;
+      const pending = new Promise<Record<string, unknown>>((resolve) => {
+        resolveSync = resolve;
+      });
+      mockRemnantStorage({ localUserId: "u1", syncGet: () => pending });
+      vi.mocked(encodeSyncCode).mockReturnValue("moo-fam-remnant");
+
+      const { result } = renderFlow();
+
+      // User types while the remnant lookup is still in flight.
+      act(() => {
+        result.current.setSyncCodeInput("user-typed-code");
+      });
+
+      // Now the remnant resolves.
+      await act(async () => {
+        resolveSync({ [FAMILY_ID_KEY]: "fam-remnant" });
+        await pending;
+      });
+
+      await waitFor(() => {
+        expect(chrome.storage.sync.get).toHaveBeenCalled();
+      });
+      // The user's in-progress input survives — pre-fill did NOT overwrite it.
+      expect(result.current.syncCodeInput).toBe("user-typed-code");
     });
   });
 });

@@ -7,7 +7,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClient } from "../api/client";
 import { deriveUserId } from "../crypto/hash";
-import { SyncCodeError } from "../crypto/syncCode";
+import { SyncCodeError, encodeSyncCode } from "../crypto/syncCode";
+import { DEFAULT_API_ENDPOINT } from "../constants";
+import { readSyncFamilyIdRemnant } from "../storage/familyId";
 import { useAutoSetup } from "./useAutoSetup";
 import type { ErrorAction } from "./OnboardingViews";
 import {
@@ -126,6 +128,25 @@ export function useOnboardingFlow(
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // Pre-fill the sync-code input from a storage.sync remnant: when this device
+  // has onboarded (local userId) but lost its local familyId while sync still
+  // holds one, offer the encoded sync code so the user can rejoin in one tap.
+  // Pre-fill ONLY — never auto-submit; functional update avoids clobbering typing.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const remnant = await readSyncFamilyIdRemnant();
+      if (cancelled || !remnant) return;
+      const endpoint = apiClient.getEndpoint();
+      const apiHost = endpoint !== DEFAULT_API_ENDPOINT ? endpoint : undefined;
+      const code = encodeSyncCode({ familyId: remnant, apiHost });
+      setSyncCodeInput((current) => (current ? current : code));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient]);
 
   const handleRetry = useCallback(() => {
     autoSetup.reset();

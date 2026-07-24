@@ -44,7 +44,7 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
     if (count >= limit) {
       const retryAfter = Math.max(1, Math.ceil(((minuteBucket + 1) * BUCKET_MS - now) / 1000));
       return c.json(
-        { error: { code: "RATE_LIMITED", message: "Too many requests" } },
+        { error: { code: "RATE_LIMITED", message: "Too many requests", retryAfter } },
         429,
         {
           "Retry-After": String(retryAfter),
@@ -100,7 +100,7 @@ export async function enforcePerUserRateLimit(
   if (count >= opts.max) {
     const retryAfter = Math.max(1, Math.ceil(((bucket + 1) * windowMs - now) / 1000));
     return c.json(
-      { error: { code: "RATE_LIMITED", message: "Too many requests" } },
+      { error: { code: "RATE_LIMITED", message: "Too many requests", retryAfter } },
       429,
       { "Retry-After": String(retryAfter) },
     );

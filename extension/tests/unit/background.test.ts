@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import browser, { type Runtime } from "webextension-polyfill";
 import {
   FAMILY_ID_KEY,
+  USER_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
   API_ENDPOINT_KEY,
@@ -121,7 +122,10 @@ describe("background service worker", () => {
   });
 
   describe("GET_FAMILY_ID", () => {
-    it("returns familyId from sync storage when available", async () => {
+    it("bootstraps familyId from sync when the device has never onboarded (no local userId)", async () => {
+      // readFamilyId is now LOCAL-FIRST: sync is only a bootstrap hint consulted
+      // when local has no userId (never onboarded). Local is ALWAYS read first.
+      vi.mocked(browser.storage.local.get).mockResolvedValue({});
       vi.mocked(browser.storage.sync.get).mockResolvedValue({
         [FAMILY_ID_KEY]: "fam-from-sync",
       });
@@ -129,8 +133,24 @@ describe("background service worker", () => {
       const response = await sendMessage({ type: "GET_FAMILY_ID" });
 
       expect(response).toEqual({ familyId: "fam-from-sync" });
-      // Should NOT have queried local since sync had the value
-      expect(browser.storage.local.get).not.toHaveBeenCalled();
+      // Local is consulted first (local-first authority); only its ABSENCE of a
+      // userId lets the sync bootstrap run.
+      expect(browser.storage.local.get).toHaveBeenCalled();
+    });
+
+    it("returns null (never resurrects sync) when an onboarded device has userId but no local familyId", async () => {
+      // The zombie-familyId guard: onboarded (local userId) + no local familyId
+      // must NOT be resurrected from a stale sync remnant.
+      vi.mocked(browser.storage.local.get).mockResolvedValue({
+        [USER_ID_KEY]: "u1",
+      });
+      vi.mocked(browser.storage.sync.get).mockResolvedValue({
+        [FAMILY_ID_KEY]: "fam-zombie",
+      });
+
+      const response = await sendMessage({ type: "GET_FAMILY_ID" });
+
+      expect(response).toEqual({ familyId: null });
     });
 
     it("falls back to local storage when sync has no familyId", async () => {

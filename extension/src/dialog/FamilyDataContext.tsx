@@ -118,6 +118,12 @@ interface FamilyDataProviderProps {
   familyId: string;
   userId: string;
   apiClient: ApiClient;
+  /**
+   * Monotonic counter; each change re-runs the initial load (members →
+   * bookshelf → borrow) in place, preserving mounted component state. App bumps
+   * it after a successful re-verification so a stale 401 view reloads itself.
+   */
+  reloadSignal?: number;
   children: React.ReactNode;
 }
 
@@ -125,6 +131,7 @@ export function FamilyDataProvider({
   familyId,
   userId,
   apiClient,
+  reloadSignal,
   children,
 }: FamilyDataProviderProps) {
   // --- Members state ---
@@ -405,14 +412,17 @@ export function FamilyDataProvider({
     setFreshUpdateBookIds(new Set());
   }, [userId]);
 
-  // Fetch on mount: members first, then bookshelf + borrow requests
+  // Fetch on mount (and again whenever reloadSignal changes): members first,
+  // then bookshelf + borrow requests. refreshMembers/refreshBookshelf keep a
+  // "ready" state instead of flashing "loading", so an in-place reload after
+  // re-verification simply replaces the prior error/data.
   useEffect(() => {
     void (async () => {
       await refreshMembers();
       void refreshBookshelf();
       void refreshBorrowRequests();
     })();
-  }, [refreshMembers, refreshBookshelf, refreshBorrowRequests]);
+  }, [refreshMembers, refreshBookshelf, refreshBorrowRequests, reloadSignal]);
 
   // S4: single storage listener for cross-component sync
   useEffect(() => {

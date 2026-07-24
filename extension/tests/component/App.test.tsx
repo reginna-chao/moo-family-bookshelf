@@ -378,6 +378,77 @@ describe("App", () => {
     });
   });
 
+  // A dead token that can only be recovered by re-supplying the PWA-login
+  // verification secret must NOT drop the user to onboarding (Invariant 2).
+  // App mounts useReauth and renders VerificationPrompt in a modal OVERLAY on
+  // top of the still-mounted main view.
+  describe("re-verification overlay", () => {
+    async function renderWithCapturedClient() {
+      const instances: ApiClient[] = [];
+      const OrigConstructor = ApiClient;
+      const constructorSpy = vi.spyOn(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (await import("@/api/client")) as any,
+        "ApiClient",
+      ).mockImplementation((...args: unknown[]) => {
+        const instance = new OrigConstructor(...(args as [string?]));
+        instances.push(instance);
+        return instance;
+      });
+
+      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+      });
+      const apiClient = instances[0];
+      vi.spyOn(apiClient, "getVerifyMethod").mockResolvedValue({
+        data: { method: "pin", prompted: 0 },
+      } as never);
+      return { apiClient, constructorSpy };
+    }
+
+    it("shows the verification prompt over the still-mounted main view on the reauth signal", async () => {
+      const { apiClient, constructorSpy } = await renderWithCapturedClient();
+      expect(apiClient.onReauthRequired).not.toBeNull();
+
+      await act(async () => {
+        apiClient.onReauthRequired!();
+      });
+
+      // The prompt overlay appears...
+      await waitFor(() => {
+        expect(screen.getByText("需要驗證")).toBeInTheDocument();
+      });
+      // ...WITHOUT tearing down the main view (it renders underneath).
+      expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+      expect(screen.queryByTestId("onboarding")).not.toBeInTheDocument();
+
+      constructorSpy.mockRestore();
+    });
+
+    it("dismisses the overlay on cancel and leaves the main view intact", async () => {
+      const { apiClient, constructorSpy } = await renderWithCapturedClient();
+
+      await act(async () => {
+        apiClient.onReauthRequired!();
+      });
+      await waitFor(() => {
+        expect(screen.getByText("需要驗證")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("返回"));
+
+      await waitFor(() => {
+        expect(screen.queryByText("需要驗證")).not.toBeInTheDocument();
+      });
+      // Main view was never unmounted.
+      expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+
+      constructorSpy.mockRestore();
+    });
+  });
+
   // Firefox MV3 non-persistent background event page sleeps, so
   // browser.runtime.sendMessage round-trips fail — but browser.storage.* stays
   // reliable. The mount gate must resolve familyId/userId from DIRECT storage

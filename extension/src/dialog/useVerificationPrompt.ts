@@ -60,6 +60,10 @@ export function useVerificationPrompt(
   const [error, setError] = useState("");
   const [locked, setLocked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Mirrors `submitting` so submit() can reject a re-entrant call synchronously,
+  // before the first attempt's await resolves — the state value would be stale
+  // in the useCallback closure and let a second join fire.
+  const submittingRef = useRef(false);
   const ctxRef = useRef<VerificationContext | null>(null);
   // Mirrors `method` so applyCode can skip a redundant fetch without depending
   // on the (stale-in-closure) state value.
@@ -78,6 +82,11 @@ export function useVerificationPrompt(
   const updateMethod = useCallback((next: VerifyMethod | null) => {
     methodRef.current = next;
     setMethod(next);
+  }, []);
+
+  const updateSubmitting = useCallback((next: boolean) => {
+    submittingRef.current = next;
+    setSubmitting(next);
   }, []);
 
   // Loads the verification method for an active challenge. A REQUIRED/FAILED/
@@ -129,9 +138,9 @@ export function useVerificationPrompt(
     setMethodError(false);
     setError("");
     setLocked(false);
-    setSubmitting(false);
+    updateSubmitting(false);
     ctxRef.current = null;
-  }, [updateMethod]);
+  }, [updateMethod, updateSubmitting]);
 
   const begin = useCallback(
     async (errorCode: string | undefined, ctx: VerificationContext): Promise<boolean> => {
@@ -139,24 +148,28 @@ export function useVerificationPrompt(
       const generation = ++generationRef.current;
       ctxRef.current = ctx;
       setActive(true);
-      setSubmitting(false);
+      updateSubmitting(false);
       setMethodError(false);
       updateMethod(null);
       await applyCode(errorCode, ctx.userId, generation);
       return true;
     },
-    [applyCode, updateMethod],
+    [applyCode, updateMethod, updateSubmitting],
   );
 
   const submit = useCallback(
     async (secret: string): Promise<void> => {
       const ctx = ctxRef.current;
-      if (!ctx || locked) return;
+      // submittingRef guards re-entry: a fast second onComplete (pattern/PIN
+      // resubmitted while the first join is in flight) must not fire a second
+      // network join. The ref is set synchronously below, so the racing call
+      // sees it before the first attempt's await resolves.
+      if (!ctx || locked || submittingRef.current) return;
       const generation = generationRef.current;
-      setSubmitting(true);
+      updateSubmitting(true);
       const result = await ctx.retry(secret);
       if (!isMountedRef.current || generationRef.current !== generation) return;
-      setSubmitting(false);
+      updateSubmitting(false);
       if (result.ok) {
         // The retry closure owns the success side-effects (navigation, sync).
         reset();
@@ -166,9 +179,15 @@ export function useVerificationPrompt(
         await applyCode(result.errorCode, ctx.userId, generation);
         return;
       }
+      if (result.errorCode === "RATE_LIMITED") {
+        // Server join quota exhausted (429). Keep the prompt open so the user
+        // can retry once the window clears, with a specific message.
+        setError("嘗試次數過多，請稍後再試");
+        return;
+      }
       setError("發生錯誤，請稍後再試");
     },
-    [locked, applyCode, reset],
+    [locked, applyCode, reset, updateSubmitting],
   );
 
   const cancel = useCallback(() => {

@@ -4,6 +4,9 @@ export interface PatternLockProps {
   onComplete: (pattern: string) => void;
   mode: "setup" | "verify";
   error?: string;
+  /** When true, ignore all interaction and dim the widget (e.g. while a
+   *  verification attempt is in flight). Defaults to false. */
+  disabled?: boolean;
 }
 
 const GRID_SIZE = 3;
@@ -31,7 +34,7 @@ function getIndexFromPosition(x: number, y: number): number | null {
   return null;
 }
 
-export function PatternLock({ onComplete, mode, error }: PatternLockProps) {
+export function PatternLock({ onComplete, mode, error, disabled = false }: PatternLockProps) {
   const [selected, setSelected] = useState<number[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [setupStep, setSetupStep] = useState<SetupStep>("enter");
@@ -60,6 +63,7 @@ export function PatternLock({ onComplete, mode, error }: PatternLockProps) {
 
   const handleStart = useCallback(
     (e: React.MouseEvent | React.TouchEvent) => {
+      if (disabled) return;
       e.preventDefault();
       const pos = getEventPos(e);
       const idx = getIndexFromPosition(pos.x, pos.y);
@@ -69,7 +73,7 @@ export function PatternLock({ onComplete, mode, error }: PatternLockProps) {
       setMismatchError("");
       setMousePos(pos);
     },
-    [getEventPos],
+    [disabled, getEventPos],
   );
 
   const handleMove = useCallback(
@@ -143,7 +147,10 @@ export function PatternLock({ onComplete, mode, error }: PatternLockProps) {
         : "再次繪製圖形確認";
 
   return (
-    <div className="moo-secret-entry">
+    <div
+      className="moo-secret-entry"
+      style={disabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+    >
       <div className="moo-secret-entry__label">{label}</div>
       <svg
         ref={svgRef}

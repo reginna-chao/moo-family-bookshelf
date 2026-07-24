@@ -103,6 +103,33 @@ describe("PinInput", () => {
     });
   });
 
+  describe("disabled prop", () => {
+    it("marks the input and confirm button as disabled when disabled", () => {
+      render(<PinInput mode="verify" onComplete={vi.fn()} disabled />);
+      expect(getInput()).toBeDisabled();
+      expect(getSubmitButton()).toBeDisabled();
+    });
+
+    it("does not call onComplete on submit while disabled", () => {
+      const onComplete = vi.fn();
+      render(<PinInput mode="verify" onComplete={onComplete} disabled />);
+      // handleSubmit bails out early when disabled, so even a valid PIN is ignored.
+      fireEvent.click(getSubmitButton());
+      expect(onComplete).not.toHaveBeenCalled();
+    });
+
+    it("keeps the input and button interactive when disabled is omitted (default false)", () => {
+      const onComplete = vi.fn();
+      render(<PinInput mode="verify" onComplete={onComplete} />);
+      expect(getInput()).not.toBeDisabled();
+      expect(getSubmitButton()).not.toBeDisabled();
+
+      fireEvent.change(getInput(), { target: { value: "123456" } });
+      fireEvent.click(getSubmitButton());
+      expect(onComplete).toHaveBeenCalledWith("123456");
+    });
+  });
+
   describe("setup mode", () => {
     it("shows enter label first, then confirm label after submit", () => {
       render(<PinInput mode="setup" onComplete={vi.fn()} />);

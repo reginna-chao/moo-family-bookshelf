@@ -305,6 +305,15 @@ describe("Rate limit tiers", () => {
     expect(res.status).toBe(429);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("RATE_LIMITED");
+
+    // 429 body carries a sane retryAfter back-off hint (seconds) within the
+    // 60s bucket, consistent with the Retry-After header value.
+    const retryAfterHeader = res.headers.get("Retry-After");
+    expect(retryAfterHeader).toBeTruthy();
+    expect(typeof json.error.retryAfter).toBe("number");
+    expect(json.error.retryAfter).toBeGreaterThanOrEqual(1);
+    expect(json.error.retryAfter).toBeLessThanOrEqual(60);
+    expect(json.error.retryAfter).toBe(parseInt(retryAfterHeader!, 10));
   });
 
   it("should rate-limit sensitive route POST /api/family/:id/join after 3 requests", async () => {

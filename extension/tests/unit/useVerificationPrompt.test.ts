@@ -238,6 +238,45 @@ describe("useVerificationPrompt", () => {
     expect(result.current.locked).toBe(false);
   });
 
+  it("keeps the prompt open with a rate-limit message when retry returns RATE_LIMITED", async () => {
+    const api = createMockApiClient();
+    const retry = vi
+      .fn()
+      .mockResolvedValue({ ok: false, errorCode: "RATE_LIMITED" });
+    const { result } = renderHook(() => useVerificationPrompt(api));
+
+    await act(async () => {
+      await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+    });
+    await act(async () => {
+      await result.current.submit("123456");
+    });
+
+    // 429 join quota exhausted: the prompt stays open so the user can retry once
+    // the window clears, with a message distinct from the generic error.
+    expect(result.current.active).toBe(true);
+    expect(result.current.error).toContain("嘗試次數過多");
+    expect(result.current.locked).toBe(false);
+    expect(result.current.submitting).toBe(false);
+  });
+
+  it("shows the generic error message (not the rate-limit one) for an unknown non-verification code", async () => {
+    const api = createMockApiClient();
+    const retry = vi.fn().mockResolvedValue({ ok: false, errorCode: "UNKNOWN_THING" });
+    const { result } = renderHook(() => useVerificationPrompt(api));
+
+    await act(async () => {
+      await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+    });
+    await act(async () => {
+      await result.current.submit("123456");
+    });
+
+    expect(result.current.active).toBe(true);
+    expect(result.current.error).toContain("發生錯誤");
+    expect(result.current.error).not.toContain("嘗試次數過多");
+  });
+
   it("cancel() resets state and invokes the caller's onCancel", async () => {
     const api = createMockApiClient();
     const onCancel = vi.fn();
@@ -255,6 +294,70 @@ describe("useVerificationPrompt", () => {
     expect(result.current.active).toBe(false);
     expect(result.current.method).toBeNull();
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a re-entrant submit while the first retry is still pending (retry fires once)", async () => {
+    const api = createMockApiClient("pin");
+    let resolveRetry: (r: VerificationAttemptResult) => void = () => {};
+    const retry = vi.fn(
+      () =>
+        new Promise<VerificationAttemptResult>((res) => {
+          resolveRetry = res;
+        }),
+    );
+    const { result } = renderHook(() => useVerificationPrompt(api));
+
+    await act(async () => {
+      await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+    });
+
+    // First submit kicks off retry but the promise stays pending.
+    let firstSubmit: Promise<void> = Promise.resolve();
+    act(() => {
+      firstSubmit = result.current.submit("111111");
+    });
+    expect(result.current.submitting).toBe(true);
+
+    // A racing second onComplete (fast double-tap) must be dropped synchronously
+    // by the submittingRef guard — no second network join.
+    await act(async () => {
+      await result.current.submit("222222");
+    });
+    expect(retry).toHaveBeenCalledTimes(1);
+
+    // Settle the first attempt; still exactly one retry.
+    await act(async () => {
+      resolveRetry({ ok: false, errorCode: "VERIFICATION_FAILED" });
+      await firstSubmit;
+    });
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(result.current.submitting).toBe(false);
+  });
+
+  it("allows a fresh submit once the first attempt has settled (retry fires again)", async () => {
+    const api = createMockApiClient("pin");
+    const retry = vi
+      .fn()
+      .mockResolvedValue({ ok: false, errorCode: "VERIFICATION_FAILED" });
+    const { result } = renderHook(() => useVerificationPrompt(api));
+
+    await act(async () => {
+      await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+    });
+
+    await act(async () => {
+      await result.current.submit("111111");
+    });
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(result.current.submitting).toBe(false);
+
+    // The guard is released after the first attempt settles, so the user can
+    // correct a wrong secret and submit again.
+    await act(async () => {
+      await result.current.submit("222222");
+    });
+    expect(retry).toHaveBeenCalledTimes(2);
+    expect(retry).toHaveBeenLastCalledWith("222222");
   });
 
   it("ignores a submit whose retry resolves after cancel (S2: generation advanced)", async () => {
