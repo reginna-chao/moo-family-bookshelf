@@ -801,6 +801,10 @@
   min-width: 180px;
   max-height: 240px;
   overflow-y: auto;
+  /* Stop wheel scroll at the list edges from chaining to an ancestor: that
+     chained scroll's composedPath excludes this menu, so useDismissableMenu
+     would treat it as a background scroll and dismiss the menu. */
+  overscroll-behavior: contain;
   background: white;
   border: 1px solid var(--moo-border);
   border-radius: 8px;
@@ -896,6 +900,10 @@
   min-width: 180px;
   max-height: 240px;
   overflow-y: auto;
+  /* Stop wheel scroll at the list edges from chaining to an ancestor: that
+     chained scroll's composedPath excludes this menu, so useDismissableMenu
+     would treat it as a background scroll and dismiss the menu. */
+  overscroll-behavior: contain;
   background: white;
   border: 1px solid var(--moo-border);
   border-radius: 8px;

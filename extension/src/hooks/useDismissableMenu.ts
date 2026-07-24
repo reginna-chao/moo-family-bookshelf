@@ -8,14 +8,37 @@ export interface DismissableMenuOptions {
 }
 
 /**
+ * Returns true when the event's propagation path starts inside the trigger or
+ * the menu. Used to decide when NOT to dismiss (clicks/scrolls that belong to
+ * the menu itself). composedPath() pierces the shadow boundary — at the document
+ * level `e.target` is retargeted to the shadow host, so `menu.contains(e.target)`
+ * would report an inside interaction as "outside"; composedPath() returns the
+ * real inner nodes and works identically in light DOM (e.g. BookSortDropdown
+ * portaling to body).
+ */
+function eventStartedInMenu(
+  e: Event,
+  trigger: HTMLElement | null,
+  menu: HTMLElement | null,
+): boolean {
+  const path = e.composedPath();
+  return (!!trigger && path.includes(trigger)) || (!!menu && path.includes(menu));
+}
+
+/**
  * Encapsulates the dismissal side effects shared by portaled popup menus
  * (Extension): while open, closes the menu on outside click, Escape, scroll
  * (capture phase), or resize. Scroll is observed both at `window` (dev page /
  * light DOM and window-level scroll) and, when the trigger lives inside an open
  * shadow root, on that `ShadowRoot` in capture phase — `scroll` events are
  * `composed: false`, so a scroll inside the shadow tree never reaches `window`;
- * the shadow root is the top of the propagation path for those events. All
- * listeners are attached only while open and removed together on cleanup.
+ * the shadow root is the top of the propagation path for those events.
+ *
+ * Scroll-to-dismiss only closes the menu when the page/panels BEHIND it scroll:
+ * scrolls whose target is inside the menu (or the trigger) are ignored via
+ * composedPath(), so the menu's own `overflow-y: auto` list can be scrolled to
+ * reach lower options without dismissing. Resize still closes unconditionally.
+ * All listeners are attached only while open and removed together on cleanup.
  */
 export function useDismissableMenu({
   isOpen,
@@ -32,16 +55,8 @@ export function useDismissableMenu({
     if (!isOpen) return;
 
     function handlePointerDown(e: MouseEvent) {
-      // This listener lives on `document`, but the menu may be portaled into an
-      // open shadow root. At the document level `e.target` is retargeted to the
-      // shadow host, so `menu.contains(e.target)` would report a click inside the
-      // menu as "outside" and close it before onClick fires. composedPath()
-      // pierces the shadow boundary and returns the real inner nodes; it also
-      // works identically in light DOM (e.g. BookSortDropdown portaling to body).
-      const path = e.composedPath();
-      const trigger = triggerRef.current;
-      const menu = menuRef.current;
-      if ((trigger && path.includes(trigger)) || (menu && path.includes(menu))) return;
+      // Clicks inside the menu/trigger must not close it before onClick fires.
+      if (eventStartedInMenu(e, triggerRef.current, menuRef.current)) return;
       onCloseRef.current();
     }
     function handleKeyDown(e: KeyboardEvent) {
@@ -49,6 +64,12 @@ export function useDismissableMenu({
       onCloseRef.current();
     }
     function handleClose() {
+      onCloseRef.current();
+    }
+    function handleScroll(e: Event) {
+      // Ignore scrolls originating inside the menu's own scrollable list (or the
+      // trigger); only dismiss when the page/panels BEHIND the menu scroll.
+      if (eventStartedInMenu(e, triggerRef.current, menuRef.current)) return;
       onCloseRef.current();
     }
 
@@ -59,18 +80,18 @@ export function useDismissableMenu({
     const scrollRoot = triggerRef.current?.getRootNode();
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("scroll", handleClose, true);
+    window.addEventListener("scroll", handleScroll, true);
     window.addEventListener("resize", handleClose);
     if (scrollRoot instanceof ShadowRoot) {
-      scrollRoot.addEventListener("scroll", handleClose, true);
+      scrollRoot.addEventListener("scroll", handleScroll, true);
     }
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", handleClose, true);
+      window.removeEventListener("scroll", handleScroll, true);
       window.removeEventListener("resize", handleClose);
       if (scrollRoot instanceof ShadowRoot) {
-        scrollRoot.removeEventListener("scroll", handleClose, true);
+        scrollRoot.removeEventListener("scroll", handleScroll, true);
       }
     };
     // Refs are stable and onClose is read via onCloseRef; only isOpen should re-subscribe listeners.
