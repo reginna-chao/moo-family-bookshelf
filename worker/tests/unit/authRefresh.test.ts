@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
+import { TOKEN_TTL_SECONDS } from "../../src/kv/schema";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -98,6 +99,35 @@ describe("POST /api/auth/refresh", () => {
     // auth:{userId} should still point to old token
     const authRecord = await kv.get(`auth:${VALID_USER_ID}`, "json") as Json;
     expect(authRecord.token).toBe(oldToken);
+  });
+
+  it("should renew the 90d KV TTL on both auth entries when reusing an existing token", async () => {
+    const oldToken = "b".repeat(64);
+    await seedMember(VALID_USER_ID, VALID_FAMILY_ID, oldToken);
+    // Spy after seeding so only the refresh's re-puts are captured.
+    const putSpy = vi.spyOn(kv, "put");
+
+    const before = Date.now();
+    const res = await request("POST", "/api/auth/refresh", {
+      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      headers: { Authorization: `Bearer ${oldToken}` },
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+
+    // Same token reused (no churn), but expiresAt reflects a fresh 90d window.
+    expect(json.data.token).toBe(oldToken);
+    expect(json.data.expiresAt).toBeGreaterThanOrEqual(before + TOKEN_TTL_SECONDS * 1000);
+    expect(json.data.expiresAt).toBeLessThanOrEqual(Date.now() + TOKEN_TTL_SECONDS * 1000);
+
+    // Both KV directions were re-put carrying the shared 90d TTL.
+    const authPut = putSpy.mock.calls.find(([k]) => k === `auth:${VALID_USER_ID}`);
+    const tokenPut = putSpy.mock.calls.find(([k]) => k === `token:${oldToken}`);
+    expect(authPut?.[2]).toMatchObject({ expirationTtl: TOKEN_TTL_SECONDS });
+    expect(tokenPut?.[2]).toMatchObject({ expirationTtl: TOKEN_TTL_SECONDS });
+
+    putSpy.mockRestore();
   });
 
   it("should return 401 when token belongs to different user than body.userId", async () => {

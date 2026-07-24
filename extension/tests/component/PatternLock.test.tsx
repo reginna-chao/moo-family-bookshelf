@@ -94,4 +94,27 @@ describe("PatternLock", () => {
       expect(onComplete).toHaveBeenCalledWith("0,3,6,7");
     });
   });
+
+  describe("disabled prop", () => {
+    it("does not call onComplete when a pattern is drawn while disabled", () => {
+      const onComplete = vi.fn();
+      render(<PatternLock mode="verify" onComplete={onComplete} disabled />);
+      const svg = screen.getByRole("application");
+
+      // handleStart returns early when disabled, so no dot is ever selected.
+      simulatePattern(svg, [0, 3, 6, 7]);
+
+      expect(onComplete).not.toHaveBeenCalled();
+    });
+
+    it("still completes a pattern when disabled is omitted (default false)", () => {
+      const onComplete = vi.fn();
+      render(<PatternLock mode="verify" onComplete={onComplete} />);
+      const svg = screen.getByRole("application");
+
+      simulatePattern(svg, [0, 1, 4, 7]);
+
+      expect(onComplete).toHaveBeenCalledWith("0,1,4,7");
+    });
+  });
 });

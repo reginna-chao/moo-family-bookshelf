@@ -80,6 +80,13 @@ describe("enforcePerUserRateLimit", () => {
     const retryAfter = res.headers.get("Retry-After");
     expect(retryAfter).toBeTruthy();
     expect(parseInt(retryAfter!, 10)).toBeGreaterThanOrEqual(1);
+
+    // Body carries a sane retryAfter back-off hint (seconds) within the window,
+    // consistent with the Retry-After header value.
+    expect(typeof json.error.retryAfter).toBe("number");
+    expect(json.error.retryAfter).toBeGreaterThanOrEqual(1);
+    expect(json.error.retryAfter).toBeLessThanOrEqual(opts.windowSec);
+    expect(json.error.retryAfter).toBe(parseInt(retryAfter!, 10));
   });
 
   it("should use separate counters for different scopes", async () => {

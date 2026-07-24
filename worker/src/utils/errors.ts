@@ -3,7 +3,16 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 /** Canonical machine-readable API error envelope body. */
 export interface ErrorBody {
-  error: { code: string; message: string };
+  error: {
+    code: string;
+    message: string;
+    /**
+     * Optional back-off hint (seconds) for retryable errors such as 429
+     * RATE_LIMITED. Mirrors the `Retry-After` header so clients that only parse
+     * the JSON envelope can still schedule an auto-retry.
+     */
+    retryAfter?: number;
+  };
 }
 
 /**

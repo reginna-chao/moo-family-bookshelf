@@ -1,4 +1,5 @@
 import React from "react";
+import { Loader2 } from "lucide-react";
 import type { VerifyMethod } from "../api/types";
 import { PinInput } from "./PinInput";
 import { PatternLock } from "./PatternLock";
@@ -42,9 +43,6 @@ export function VerificationPrompt({
         為了保護你的書櫃資料，請完成登入驗證後再重新加入家庭。
       </p>
       {renderChallenge({ method, methodError, error, locked, submitting, onSubmit })}
-      {submitting && method !== "code" && method !== "none" && (
-        <div className="moo-verify__status moo-verify__status--saving">驗證中...</div>
-      )}
       <button
         type="button"
         onClick={onCancel}
@@ -84,10 +82,26 @@ function renderChallenge({
     return <div className="moo-verify__loading">載入中...</div>;
   }
   if (method === "pin") {
-    return <PinInput mode="verify" onComplete={onSubmit} error={error || undefined} />;
+    return renderWidgetChallenge(
+      <PinInput
+        mode="verify"
+        onComplete={onSubmit}
+        error={error || undefined}
+        disabled={submitting}
+      />,
+      submitting,
+    );
   }
   if (method === "pattern") {
-    return <PatternLock mode="verify" onComplete={onSubmit} error={error || undefined} />;
+    return renderWidgetChallenge(
+      <PatternLock
+        mode="verify"
+        onComplete={onSubmit}
+        error={error || undefined}
+        disabled={submitting}
+      />,
+      submitting,
+    );
   }
   if (method === "code") {
     return renderCodeGuidance(submitting);
@@ -95,6 +109,54 @@ function renderChallenge({
   // method === "none": inconsistent for an active challenge — treat as a load
   // error rather than showing OTP guidance.
   return <div className="moo-secret-entry__error">{METHOD_LOAD_ERROR}</div>;
+}
+
+/**
+ * Wraps a PIN/pattern widget in a relatively-positioned container so an
+ * in-progress overlay can be centered over the (dimmed, disabled) widget while
+ * a verification submit is in flight.
+ */
+function renderWidgetChallenge(
+  widget: React.JSX.Element,
+  submitting: boolean,
+): React.JSX.Element {
+  return (
+    <div style={{ position: "relative" }}>
+      {widget}
+      {submitting && <SubmittingOverlay />}
+    </div>
+  );
+}
+
+/** Centered spinner + "驗證中..." shown over the challenge widget during submit. */
+function SubmittingOverlay(): React.JSX.Element {
+  return (
+    <div
+      aria-live="polite"
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        // Subtle white backdrop keeps the text readable over the dimmed grid.
+        backgroundColor: "rgba(255, 255, 255, 0.6)",
+        borderRadius: 8,
+        // Widget is already disabled; never intercept pointer events.
+        pointerEvents: "none",
+      }}
+    >
+      <Loader2
+        aria-hidden="true"
+        size={28}
+        className="moo-spin"
+        style={{ color: "#64748b" }}
+      />
+      <span style={{ fontSize: 14, color: "#475569" }}>驗證中...</span>
+    </div>
+  );
 }
 
 function renderCodeGuidance(submitting: boolean): React.JSX.Element {

@@ -17,6 +17,8 @@ import { FamilySettings } from "./FamilySettings";
 import { BorrowTab } from "./BorrowTab";
 import { DialogFooter } from "./DialogFooter";
 import { useTokenRefresh } from "./useTokenRefresh";
+import { useReauth } from "./useReauth";
+import { VerificationPrompt } from "./VerificationPrompt";
 import { isExtensionContextValid } from "../utils/extensionContext";
 import { FamilyDataProvider, useFamilyData } from "./FamilyDataContext";
 import { VersionWarning } from "./VersionWarning";
@@ -47,10 +49,23 @@ export function App({ onViewChange, onPendingBorrowCountChange }: AppProps = {})
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [contextLost, setContextLost] = useState(false);
+  // Bumped after a successful re-verification so FamilyDataProvider re-runs its
+  // initial load (members → bookshelf → borrow) and the stale 401 view clears
+  // automatically, without a manual "重試" tap.
+  const [reloadSignal, setReloadSignal] = useState(0);
   const apiClientRef = useRef(new ApiClient());
 
   // Proactive token refresh — runs regardless of view state
   useTokenRefresh(apiClientRef.current);
+
+  const handleReauthSuccess = useCallback(() => {
+    setReloadSignal((n) => n + 1);
+  }, []);
+
+  // Re-verification prompt: shown when a dead token can only be recovered by
+  // re-supplying the user's PWA-login verification secret (Invariant 2). Wires
+  // apiClient.onReauthRequired; the overlay renders on top of the main view.
+  const reauth = useReauth(apiClientRef.current, { onSuccess: handleReauthSuccess });
 
   // Listen for FAMILY_REMOVED from ApiClient when token refresh fails
   // (e.g., KV data lost after wrangler dev restart, or user removed from family)
@@ -190,17 +205,44 @@ export function App({ onViewChange, onPendingBorrowCountChange }: AppProps = {})
   }
 
   return (
-    <FamilyDataProvider familyId={familyId} userId={userId} apiClient={apiClientRef.current}>
-      <MainContent
+    <>
+      <FamilyDataProvider
         familyId={familyId}
         userId={userId}
         apiClient={apiClientRef.current}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        onLeave={handleLeaveFamily}
-        onPendingBorrowCountChange={onPendingBorrowCountChange}
-      />
-    </FamilyDataProvider>
+        reloadSignal={reloadSignal}
+      >
+        <MainContent
+          familyId={familyId}
+          userId={userId}
+          apiClient={apiClientRef.current}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onLeave={handleLeaveFamily}
+          onPendingBorrowCountChange={onPendingBorrowCountChange}
+        />
+      </FamilyDataProvider>
+      {reauth.active && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="需要驗證"
+          className="moo-modal-overlay"
+        >
+          <div className="moo-modal">
+            <VerificationPrompt
+              method={reauth.method}
+              methodError={reauth.methodError}
+              error={reauth.error}
+              locked={reauth.locked}
+              submitting={reauth.submitting}
+              onSubmit={(secret) => void reauth.submit(secret)}
+              onCancel={reauth.cancel}
+            />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

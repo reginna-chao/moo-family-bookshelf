@@ -4,6 +4,9 @@ export interface PinInputProps {
   onComplete: (pin: string) => void;
   mode: "setup" | "verify";
   error?: string;
+  /** When true, ignore all interaction and dim the widget (e.g. while a
+   *  verification attempt is in flight). Defaults to false. */
+  disabled?: boolean;
 }
 
 type SetupStep = "enter" | "confirm";
@@ -18,7 +21,7 @@ function validatePin(pin: string): string | null {
   return null;
 }
 
-export function PinInput({ onComplete, mode, error }: PinInputProps) {
+export function PinInput({ onComplete, mode, error, disabled = false }: PinInputProps) {
   const [pin, setPin] = useState("");
   const [setupStep, setSetupStep] = useState<SetupStep>("enter");
   const [firstPin, setFirstPin] = useState("");
@@ -43,6 +46,7 @@ export function PinInput({ onComplete, mode, error }: PinInputProps) {
   );
 
   const handleSubmit = useCallback(() => {
+    if (disabled) return;
     const validationError = validatePin(pin);
     if (validationError) {
       setLocalError(validationError);
@@ -71,7 +75,7 @@ export function PinInput({ onComplete, mode, error }: PinInputProps) {
       setPin("");
       setTimeout(() => inputRef.current?.focus(), 0);
     }
-  }, [pin, mode, setupStep, firstPin, onComplete]);
+  }, [pin, mode, setupStep, firstPin, onComplete, disabled]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -95,7 +99,10 @@ export function PinInput({ onComplete, mode, error }: PinInputProps) {
   const fieldBorderColor = displayError ? "#ef4444" : pin ? "#2563eb" : "#cbd5e1";
 
   return (
-    <div className="moo-secret-entry">
+    <div
+      className="moo-secret-entry"
+      style={disabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+    >
       <div className="moo-secret-entry__label">{label}</div>
       <div className="moo-pin-input__hint">
         {PIN_MIN}-{PIN_MAX} 位數字
@@ -108,12 +115,13 @@ export function PinInput({ onComplete, mode, error }: PinInputProps) {
           value={pin}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
+          disabled={disabled}
           aria-label="PIN 碼輸入"
           placeholder={`輸入 ${PIN_MIN}-${PIN_MAX} 位數字`}
           className="moo-pin-input__field"
           style={{ border: `2px solid ${fieldBorderColor}` }}
         />
-        <button onClick={handleSubmit} className="moo-pin-input__submit">
+        <button onClick={handleSubmit} disabled={disabled} className="moo-pin-input__submit">
           確認
         </button>
       </div>

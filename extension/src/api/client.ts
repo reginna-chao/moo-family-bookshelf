@@ -40,7 +40,7 @@ import type {
   VersionInfo,
 } from "./types";
 import { BorrowStatus, type VerifyMethod, type BoolFlag } from "./types";
-import { doRefreshToken } from "./auth-refresh";
+import { doRefreshToken, type RefreshOutcome } from "./auth-refresh";
 
 // Re-export all types so existing imports from "./client" continue to work
 export { BoolFlag, BorrowStatus, PERSONAL_BOOKS_SCHEMA_VERSION } from "./types";
@@ -68,13 +68,39 @@ import { DEFAULT_PWA_URL } from "../constants";
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
+/**
+ * Build the user-facing message shown when auto-recovery was rate-limited.
+ * Appends an approximate wait (rounded up to whole minutes) when the cooldown
+ * deadline is known.
+ */
+function buildRateLimitMessage(cooldownUntil?: number): string {
+  const base = "嘗試次數過多，請稍後再重新開啟書櫃";
+  if (cooldownUntil === undefined) return base;
+  const remainingMs = cooldownUntil - Date.now();
+  if (remainingMs <= 0) return base;
+  const minutes = Math.ceil(remainingMs / (60 * 1000));
+  return `${base}（約 ${minutes} 分鐘後）`;
+}
+
 export class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
-  /** Guard: true while a token refresh is in flight */
-  private refreshInProgress: Promise<boolean> | null = null;
-  /** Callback invoked when token refresh fails with REFRESH_FAILED (family removed) */
+  /** Guard: holds the in-flight token refresh outcome while one is running */
+  private refreshInProgress: Promise<RefreshOutcome> | null = null;
+  /**
+   * Latch: set true once a re-verification prompt has been raised (see
+   * `doRefreshToken`). While latched, further 401 waves skip silent
+   * join-recovery so a single dialog open burns at most one join-quota unit and
+   * the in-progress verification prompt is never re-initialized. Cleared when a
+   * non-null token is set, or explicitly via `clearReauthPending`.
+   */
+  private reauthPending = false;
+  /** Callback invoked when token refresh fails because the family is genuinely
+   *  gone (deleted / user no longer a member) — the caller clears family data. */
   onFamilyRemoved: (() => void) | null = null;
+  /** Callback invoked when recovery needs a PWA-login verification secret, so
+   *  the caller can prompt re-verification instead of dropping the user's data. */
+  onReauthRequired: (() => void) | null = null;
   /** In-flight GET request deduplication map: URL -> Promise */
   private inflightGets = new Map<string, Promise<ApiResponse<unknown>>>();
 
@@ -92,6 +118,16 @@ export class ApiClient {
 
   setAuthToken(token: string | null): void {
     this.authToken = token;
+    // A fresh (non-null) token means auth succeeded — release the reauth latch.
+    // A null token (set mid-failure by doRefreshToken) must NOT clear it.
+    if (token !== null) {
+      this.reauthPending = false;
+    }
+  }
+
+  /** Release the reauth latch so the next authenticated action can re-challenge. */
+  clearReauthPending(): void {
+    this.reauthPending = false;
   }
 
   /** Check server API version. Returns null on network/parse errors. */
@@ -118,7 +154,8 @@ export class ApiClient {
       if (!tokenExpiresAt) return true; // No expiry info — assume valid
 
       if (Date.now() > (tokenExpiresAt as number) - REFRESH_BUFFER_MS) {
-        return this.refreshToken();
+        const outcome = await this.refreshToken();
+        return outcome.refreshed;
       }
       return true; // Token still valid
     } catch {
@@ -458,10 +495,20 @@ export class ApiClient {
       if (response.status === 401 && !skipRefresh) {
         // Clear stale dedup promises — token is about to change
         this.inflightGets.clear();
-        const refreshed = await this.refreshToken();
-        if (refreshed) {
+        const outcome = await this.refreshToken();
+        if (outcome.refreshed) {
           // Retry original request with the new token (skip refresh to avoid loop)
           return this.doRequest<T>(url, init, true);
+        }
+        // Rate-limited recovery (fresh 429 or active cooldown) — surface a
+        // friendly localized message instead of the raw English 401.
+        if (outcome.rateLimited) {
+          return {
+            error: {
+              code: "RATE_LIMITED",
+              message: buildRateLimitMessage(outcome.cooldownUntil),
+            },
+          };
         }
         // Refresh failed — return the original 401 error
         return {
@@ -496,7 +543,7 @@ export class ApiClient {
    * Attempt to refresh the auth token. Returns true on success.
    * Concurrent callers share a single in-flight refresh request.
    */
-  private async refreshToken(): Promise<boolean> {
+  private async refreshToken(): Promise<RefreshOutcome> {
     // Deduplicate: if a refresh is already in progress, wait for it
     if (this.refreshInProgress) {
       return this.refreshInProgress;
@@ -510,11 +557,19 @@ export class ApiClient {
     }
   }
 
-  private async doRefreshToken(): Promise<boolean> {
+  private async doRefreshToken(): Promise<RefreshOutcome> {
     return doRefreshToken({
       request: this.request.bind(this),
-      setAuthToken: (token) => { this.authToken = token; },
+      // Route through setAuthToken so a recovered token also clears the latch.
+      setAuthToken: (token) => { this.setAuthToken(token); },
       onFamilyRemoved: this.onFamilyRemoved,
+      // Wrap the caller's callback so raising the prompt also sets the latch;
+      // auth-refresh.ts stays latch-agnostic except for the isReauthPending skip.
+      onReauthRequired: () => {
+        this.reauthPending = true;
+        this.onReauthRequired?.();
+      },
+      isReauthPending: () => this.reauthPending,
     });
   }
 

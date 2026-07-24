@@ -23,6 +23,8 @@ export const PERSONAL_BOOKS_CACHE_KEY = "moo:personalBooksCache";
 export const USER_ID_KEY = "moo:userId";
 export const AUTH_TOKEN_KEY = "moo:authToken";
 export const TOKEN_EXPIRES_AT_KEY = "moo:tokenExpiresAt";
+// Epoch ms until which automatic recovery joins are suppressed after a 429.
+export const RECOVERY_COOLDOWN_UNTIL_KEY = "moo:recoveryCooldownUntil";
 
 // Family
 export const FAMILY_ID_KEY = "moo:familyId";

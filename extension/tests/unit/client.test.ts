@@ -865,8 +865,12 @@ describe("ApiClient", () => {
 
       // Only 2 fetch calls — no joinFamily attempt
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      // Should still call onFamilyRemoved since recovery was skipped
-      expect(onFamilyRemoved).toHaveBeenCalledOnce();
+      // Recovery was skipped with NO join error code (familyId missing), which
+      // is a transient/unknown outcome — NOT a genuine "family gone". Per the
+      // new contract (Invariant 2) family data must be left intact and
+      // onFamilyRemoved must NOT fire on this path.
+      expect(onFamilyRemoved).not.toHaveBeenCalled();
+      expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([FAMILY_ID_KEY]);
     });
 
     it("attempts joinFamily recovery on non-REFRESH_FAILED errors (e.g. rate limit)", async () => {
@@ -1012,6 +1016,247 @@ describe("ApiClient", () => {
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
         [FAMILY_ID_KEY],
       );
+    });
+
+    /**
+     * When staged recovery is throttled by the worker (429 RATE_LIMITED), the
+     * 401 path must NOT surface the raw English 401 — it returns a friendly,
+     * localized RATE_LIMITED envelope so the UI can tell the user to retry later
+     * (and must not prompt re-verification, which would fail anyway).
+     */
+    describe("rate-limited recovery", () => {
+      /** 401 → refresh fails → join recovery is 429 RATE_LIMITED. */
+      function mockRateLimitedRecovery(retryAfter?: number) {
+        return vi.fn()
+          // Original request → 401
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          })
+          // Refresh request → REFRESH_FAILED
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Token expired" } }),
+          })
+          // joinFamily recovery → 429 rate limited
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 429,
+            json: () => Promise.resolve({
+              error: {
+                code: "RATE_LIMITED",
+                message: "Too many requests",
+                ...(retryAfter !== undefined ? { retryAfter } : {}),
+              },
+            }),
+          });
+      }
+
+      function seedMembership() {
+        vi.mocked(chrome.storage.local.get).mockImplementation(
+          (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+            const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+            if (typeof callback === "function") callback(result);
+            return Promise.resolve(result) as unknown as void;
+          },
+        );
+      }
+
+      it("returns a localized RATE_LIMITED envelope instead of the raw 401", async () => {
+        globalThis.fetch = mockRateLimitedRecovery(120);
+        seedMembership();
+
+        const result = await client.getPersonalBooks("u1");
+
+        expect(result.error?.code).toBe("RATE_LIMITED");
+        // Localized (not the raw English 401 message) — contains Chinese and the
+        // stable "稍後" substring; an approximate wait is appended when known.
+        expect(result.error?.message).toMatch(/[一-鿿]/);
+        expect(result.error?.message).toContain("稍後");
+        expect(result.error?.message).toMatch(/分鐘後/);
+        // No retry of the original request — it was never re-issued with a token.
+        expect((globalThis.fetch as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(3);
+      });
+
+      it("still returns a localized RATE_LIMITED envelope when the 429 omits retryAfter", async () => {
+        globalThis.fetch = mockRateLimitedRecovery();
+        seedMembership();
+
+        const result = await client.getPersonalBooks("u1");
+
+        // A default cooldown is applied, so the envelope is still the localized
+        // RATE_LIMITED copy; assert only the stable base substring (don't pin the
+        // exact minute figure the fallback produces).
+        expect(result.error?.code).toBe("RATE_LIMITED");
+        expect(result.error?.message).toContain("稍後");
+      });
+
+      it("does not prompt re-verification (onReauthRequired) when rate-limited", async () => {
+        globalThis.fetch = mockRateLimitedRecovery(60);
+        seedMembership();
+
+        const onReauthRequired = vi.fn();
+        const onFamilyRemoved = vi.fn();
+        client.onReauthRequired = onReauthRequired;
+        client.onFamilyRemoved = onFamilyRemoved;
+
+        const result = await client.getPersonalBooks("u1");
+
+        expect(result.error?.code).toBe("RATE_LIMITED");
+        expect(onReauthRequired).not.toHaveBeenCalled();
+        expect(onFamilyRemoved).not.toHaveBeenCalled();
+        // Family data must survive a rate-limited recovery (Invariant 2).
+        expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([FAMILY_ID_KEY]);
+      });
+    });
+
+    /**
+     * Reauth-pending latch: once a verification prompt has been raised (recovery
+     * returned a VERIFICATION_* code), the client latches so a second 401 wave —
+     * e.g. the dialog's second concurrent data fetch — does NOT fire silent
+     * join-recovery again. This keeps a single dialog open to at most one
+     * join-quota unit and stops the in-progress verification prompt from being
+     * re-initialized (which would wipe the user's pattern/PIN input). The latch
+     * releases only on a fresh non-null token or an explicit clearReauthPending().
+     */
+    describe("reauth-pending latch", () => {
+      /** A 401 on the original protected request. */
+      function resp401() {
+        return {
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+        };
+      }
+      /** The refresh POST failing (dead token). */
+      function respRefreshFailed() {
+        return {
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Token expired" } }),
+        };
+      }
+      /** The recovery join demanding a PWA-login verification secret. */
+      function respJoinVerification() {
+        return {
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: { code: "VERIFICATION_REQUIRED", message: "verify" } }),
+        };
+      }
+
+      function seedMembership() {
+        vi.mocked(chrome.storage.local.get).mockImplementation(
+          (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+            const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+            if (typeof callback === "function") callback(result);
+            return Promise.resolve(result) as unknown as void;
+          },
+        );
+      }
+
+      /** Count how many issued fetches targeted the /join recovery endpoint. */
+      function joinRequestCount(fetchMock: ReturnType<typeof vi.fn>): number {
+        return fetchMock.mock.calls.filter((call) =>
+          String(call[0]).endsWith("/join"),
+        ).length;
+      }
+
+      it("fires the onReauthRequired user callback once and joins once across two 401 waves", async () => {
+        // Wave 1: 401 → refresh-fail → join(VERIFICATION_REQUIRED)  [latches]
+        // Wave 2: 401 → refresh-fail                                [join skipped]
+        const fetchMock = vi.fn()
+          .mockResolvedValueOnce(resp401())
+          .mockResolvedValueOnce(respRefreshFailed())
+          .mockResolvedValueOnce(respJoinVerification())
+          .mockResolvedValueOnce(resp401())
+          .mockResolvedValueOnce(respRefreshFailed());
+        globalThis.fetch = fetchMock;
+        seedMembership();
+
+        const onReauthRequired = vi.fn();
+        client.onReauthRequired = onReauthRequired;
+
+        await client.getPersonalBooks("u1");
+        await client.getFamilyMembers("fam-1");
+
+        // User callback fired exactly once despite two dead-token waves.
+        expect(onReauthRequired).toHaveBeenCalledTimes(1);
+        // Only one quota-sensitive join total (the second wave was suppressed).
+        expect(joinRequestCount(fetchMock)).toBe(1);
+        expect(fetchMock).toHaveBeenCalledTimes(5);
+      });
+
+      it("clears the latch on setAuthToken(<token>) so a later 401 wave joins again", async () => {
+        // Wave 1 latches; setAuthToken("x") releases; Wave 2 re-attempts join.
+        const fetchMock = vi.fn()
+          .mockResolvedValueOnce(resp401())
+          .mockResolvedValueOnce(respRefreshFailed())
+          .mockResolvedValueOnce(respJoinVerification())
+          .mockResolvedValueOnce(resp401())
+          .mockResolvedValueOnce(respRefreshFailed())
+          .mockResolvedValueOnce(respJoinVerification());
+        globalThis.fetch = fetchMock;
+        seedMembership();
+
+        const onReauthRequired = vi.fn();
+        client.onReauthRequired = onReauthRequired;
+
+        await client.getPersonalBooks("u1");
+        // A fresh token means auth succeeded elsewhere — release the latch.
+        client.setAuthToken("sometoken");
+        await client.getFamilyMembers("fam-1");
+
+        expect(onReauthRequired).toHaveBeenCalledTimes(2);
+        expect(joinRequestCount(fetchMock)).toBe(2);
+      });
+
+      it("does NOT clear the latch on setAuthToken(null) — join stays suppressed", async () => {
+        const fetchMock = vi.fn()
+          .mockResolvedValueOnce(resp401())
+          .mockResolvedValueOnce(respRefreshFailed())
+          .mockResolvedValueOnce(respJoinVerification())
+          .mockResolvedValueOnce(resp401())
+          .mockResolvedValueOnce(respRefreshFailed());
+        globalThis.fetch = fetchMock;
+        seedMembership();
+
+        const onReauthRequired = vi.fn();
+        client.onReauthRequired = onReauthRequired;
+
+        await client.getPersonalBooks("u1");
+        // A null token is set mid-failure by doRefreshToken; it must NOT release.
+        client.setAuthToken(null);
+        await client.getFamilyMembers("fam-1");
+
+        expect(onReauthRequired).toHaveBeenCalledTimes(1);
+        expect(joinRequestCount(fetchMock)).toBe(1);
+      });
+
+      it("clears the latch on clearReauthPending() so a later 401 wave joins again", async () => {
+        const fetchMock = vi.fn()
+          .mockResolvedValueOnce(resp401())
+          .mockResolvedValueOnce(respRefreshFailed())
+          .mockResolvedValueOnce(respJoinVerification())
+          .mockResolvedValueOnce(resp401())
+          .mockResolvedValueOnce(respRefreshFailed())
+          .mockResolvedValueOnce(respJoinVerification());
+        globalThis.fetch = fetchMock;
+        seedMembership();
+
+        const onReauthRequired = vi.fn();
+        client.onReauthRequired = onReauthRequired;
+
+        await client.getPersonalBooks("u1");
+        // Explicit release (e.g. the user cancelled the re-verification prompt).
+        client.clearReauthPending();
+        await client.getFamilyMembers("fam-1");
+
+        expect(onReauthRequired).toHaveBeenCalledTimes(2);
+        expect(joinRequestCount(fetchMock)).toBe(2);
+      });
     });
   });
 });

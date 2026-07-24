@@ -18,6 +18,26 @@ function renderPrompt(overrides: Partial<VerificationPromptProps> = {}) {
   return props;
 }
 
+/** Simulate a valid pattern draw on the PatternLock SVG (viewBox 200x200). */
+function drawPattern(svg: Element, dotIndices: number[]) {
+  const SPACING = 200 / 3;
+  const OFFSET = SPACING / 2;
+  const posOf = (index: number) => ({
+    clientX: (index % 3) * SPACING + OFFSET,
+    clientY: Math.floor(index / 3) * SPACING + OFFSET,
+  });
+  vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, right: 200, bottom: 200,
+    width: 200, height: 200, x: 0, y: 0,
+    toJSON: () => ({}),
+  });
+  fireEvent.mouseDown(svg, posOf(dotIndices[0]));
+  for (let i = 1; i < dotIndices.length; i++) {
+    fireEvent.mouseMove(svg, posOf(dotIndices[i]));
+  }
+  fireEvent.mouseUp(svg);
+}
+
 /** Distinguishing fragment of the OTP-guidance copy shown for a genuine "code". */
 const OTP_GUIDANCE_FRAGMENT = "此帳號使用一次性驗證碼";
 
@@ -96,6 +116,68 @@ describe("VerificationPrompt", () => {
   it("disables the 返回 button while submitting", () => {
     renderPrompt({ method: "pin", submitting: true });
     expect(screen.getByText("返回")).toBeDisabled();
+  });
+
+  it("disables the PIN input and 確認 button while submitting", () => {
+    renderPrompt({ method: "pin", submitting: true });
+    expect(screen.getByLabelText("PIN 碼輸入")).toBeDisabled();
+    expect(screen.getByText("確認")).toBeDisabled();
+  });
+
+  it("does not submit a PIN via the disabled 確認 button while submitting", () => {
+    const props = renderPrompt({ method: "pin", submitting: true });
+    fireEvent.change(screen.getByLabelText("PIN 碼輸入"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByText("確認"));
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("does not fire onSubmit from a pattern draw while submitting", () => {
+    const props = renderPrompt({ method: "pattern", submitting: true });
+    // A full 4-dot draw that would normally complete the pattern.
+    drawPattern(screen.getByRole("application"), [0, 3, 6, 7]);
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("fires onSubmit from a pattern draw when not submitting (guard is off by default)", () => {
+    const props = renderPrompt({ method: "pattern", submitting: false });
+    drawPattern(screen.getByRole("application"), [0, 3, 6, 7]);
+    expect(props.onSubmit).toHaveBeenCalledWith("0,3,6,7");
+  });
+
+  it("shows the '驗證中...' overlay inside an aria-live region while submitting a pattern", () => {
+    renderPrompt({ method: "pattern", submitting: true });
+    const status = screen.getByText("驗證中...");
+    // The submit feedback lives inside the polite live region (centered overlay).
+    const liveRegion = status.closest('[aria-live="polite"]');
+    expect(liveRegion).not.toBeNull();
+    expect(liveRegion).toContainElement(status);
+    // The old bottom status line must NOT be used for the pattern path anymore.
+    expect(document.querySelector(".moo-verify__status--saving")).toBeNull();
+  });
+
+  it("shows the '驗證中...' overlay inside an aria-live region while submitting a PIN", () => {
+    renderPrompt({ method: "pin", submitting: true });
+    const status = screen.getByText("驗證中...");
+    const liveRegion = status.closest('[aria-live="polite"]');
+    expect(liveRegion).not.toBeNull();
+    expect(liveRegion).toContainElement(status);
+    expect(document.querySelector(".moo-verify__status--saving")).toBeNull();
+  });
+
+  it("does not render the '驗證中...' overlay when not submitting", () => {
+    renderPrompt({ method: "pattern", submitting: false });
+    expect(screen.queryByText("驗證中...")).not.toBeInTheDocument();
+    expect(document.querySelector('[aria-live="polite"]')).toBeNull();
+  });
+
+  it("keeps the 'code' path on the bottom status line (not the aria-live overlay) while submitting", () => {
+    renderPrompt({ method: "code", submitting: true });
+    const status = screen.getByText("驗證中...");
+    // OTP guidance path is unchanged: still the bottom saving status, no overlay.
+    expect(status.closest(".moo-verify__status--saving")).not.toBeNull();
+    expect(status.closest('[aria-live="polite"]')).toBeNull();
   });
 
   it("renders the moo-onboarding-view wrapper (targeted by the modal zero-padding override)", () => {
