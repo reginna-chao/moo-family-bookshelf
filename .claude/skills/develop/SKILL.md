@@ -58,6 +58,8 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 [the ONE concrete action the user must take now, as explicit options]
 ```
 
+**Decision prompts use AskUserQuestion.** Whenever the stop is a *choice* (SUGGESTION 取捨、提交方式、方向/範圍選擇、retro 要不要做…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form stops (e.g. manual verification feedback) stay text-only.
+
 ## §3 Agent dispatch quick-reference
 
 | Agent | Use for | Key inputs |
@@ -68,12 +70,12 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 | `security-auditor` | post-feature security scan | `scope` (full/secrets/deps/code/extension/crypto/api/publish/invariants), `mode` (repo/changed + `base_ref`) — prefer `mode: changed` for a post-feature scan |
 | `designer` | UI mockup or brand/SVG asset | `request`, `context` |
 
-Parallelize across file-disjoint scopes (frontend + backend coders run concurrently); never let two concurrent agents own the same file. Re-review only the files changed by a fix, unless the user asks for a full re-review.
+Parallelize across file-disjoint scopes (frontend + backend coders run concurrently); never let two concurrent agents own the same file. Independent verification legs also run in parallel — e.g. reviewer dispatch + E2E typecheck, or (small diffs) focused re-review + security scan — issue them in the same message. Re-review only the files changed by a fix, unless the user asks for a full re-review.
 
 ## §4 References
 
-- `references/code-cycle.md` — the CODE lifecycle: branch preflight (fresh from origin/main) → requirements + risk analysis → API contract → coder → verify-before-test gate → tester → review → Fix Cycle (CRITICAL auto-fix / SUGGESTION decision with 🟢🟡🔴 TL 建議) → cross-scope validation → security scan → commit.
+- `references/code-cycle.md` — the CODE lifecycle: branch preflight (fresh from origin/main) → requirements + risk analysis → API contract → coder → verify-before-test gate → tester → review → Fix Cycle (CRITICAL auto-fix / SUGGESTION decision with 🟢🟡🔴 TL 建議) → cross-scope validation → security scan → retro offer → commit.
 - `references/design.md` — the DESIGN orchestration: triage (brand assets / add icon / style consultation) → brief → dispatch `designer` → Review & Deliver (integration snippets) → commit.
-- `references/retro.md` — the end-of-run retrospective, offered ONCE at the end of either route (user decides; never auto-run). Writes `.claude/reports/<MMDD_HHMM>.md` — conclusions only; proposals are applied later by `/distill`, never in-run. Load only when the user accepts the offer.
+- `references/retro.md` — the run retrospective, offered ONCE per run **before the commit gate** (code route: after the security scan; design route: at Deliver) so the report rides along in the feature's commit. User decides; never auto-run. Writes `.claude/reports/<MMDD_HHMM>.md` — conclusions only; proposals are applied later by `/distill`, never in-run. Load only when the user accepts the offer.
 
 Read the one the §0 fork selected. Do not preload both.

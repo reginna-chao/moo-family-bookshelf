@@ -75,8 +75,8 @@ After the `designer` agent(s) return:
 1. **Copy assets** to project (suggest paths, confirm with user): `cp {source} {destination}`.
 2. **Generate integration snippets** — only for approved assets:
    - Favicon + touch icon `<link>` tags; OG `<meta property="og:image" ...>` (1200×630); README banner `<p align="center"><img ...></p>`; PWA manifest `icons` array (192/512/maskable).
-3. **Ask the user about committing** the new assets. (Designs iterate — never commit without go-ahead.)
-4. **Retro offer** — offer the run retrospective ONCE (user decides; never auto-run; declined → don't re-offer). On yes, read `references/retro.md` and follow it in this session; proposals are applied later by `/distill`, never in-run.
+3. **Retro offer** — before the commit ask, offer the run retrospective ONCE (user decides; never auto-run; declined → don't re-offer). On yes, read `references/retro.md` and follow it in this session; the report rides along in the same commit. Proposals are applied later by `/distill`, never in-run.
+4. **Ask the user about committing** the new assets + retro report, if any. (Designs iterate — never commit without go-ahead.)
 
 ## Rules
 - **Never create assets directly** — always dispatch the `designer` agent.
