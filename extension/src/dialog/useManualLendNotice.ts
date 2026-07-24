@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import browser from "webextension-polyfill";
 import { MANUAL_LEND_NOTICE_DISMISSED_KEY } from "../constants";
+import { safeStorageGet } from "../storage/safeStorage";
 
 export interface UseManualLendNoticeReturn {
   isDismissed: boolean;
@@ -13,9 +14,7 @@ export function useManualLendNotice(): UseManualLendNoticeReturn {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const result = await browser.storage.local.get([
-        MANUAL_LEND_NOTICE_DISMISSED_KEY,
-      ]);
+      const result = await safeStorageGet([MANUAL_LEND_NOTICE_DISMISSED_KEY]);
       if (cancelled) return;
       if (result[MANUAL_LEND_NOTICE_DISMISSED_KEY] === true) {
         setIsDismissed(true);

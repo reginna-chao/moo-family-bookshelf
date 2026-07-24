@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import browser from "webextension-polyfill";
 import { ApiClient } from "../api/client";
 import { DISPLAY_NAME_KEY } from "../constants";
+import { safeStorageGet } from "../storage/safeStorage";
 
 type NameSaveState = "idle" | "saving" | "saved" | "error";
 
@@ -62,7 +63,7 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
     // can't setState on a dead component.
     let cancelled = false;
     void (async () => {
-      const result = await browser.storage.local.get([DISPLAY_NAME_KEY]);
+      const result = await safeStorageGet([DISPLAY_NAME_KEY]);
       if (cancelled) return;
       const cached = (result[DISPLAY_NAME_KEY] as string | undefined) ?? "";
       if (!cached) return;
