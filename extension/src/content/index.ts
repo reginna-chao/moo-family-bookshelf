@@ -11,7 +11,11 @@
 // reads DOM elements and returns data, with no shared mutable state.
 import browser from "webextension-polyfill";
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
-import { isExtensionContextValid, cleanupMooFamilyUI, MOO_ELEMENT_IDS } from "../utils/extensionContext";
+import {
+  isExtensionContextValid,
+  cleanupMooFamilyUI,
+  MOO_ELEMENT_IDS,
+} from "../utils/extensionContext";
 import { waitForPageReady } from "./pageReady";
 import { getAppEnv } from "../utils/appEnv";
 import {
@@ -100,7 +104,10 @@ function teardownMooFamilyUI(): void {
 
 type FloatingIconSize = "small" | "medium" | "large" | "icon";
 
-export function getButtonSizeStyles(size: FloatingIconSize): { padding: string; fontSize: string } {
+export function getButtonSizeStyles(size: FloatingIconSize): {
+  padding: string;
+  fontSize: string;
+} {
   if (size === "icon") return { padding: "10px", fontSize: "0px" };
   if (size === "small") return { padding: "6px 12px", fontSize: "12px" };
   if (size === "large") return { padding: "14px 24px", fontSize: "16px" };
@@ -108,7 +115,12 @@ export function getButtonSizeStyles(size: FloatingIconSize): { padding: string; 
 }
 
 export function isFloatingIconSize(value: unknown): value is FloatingIconSize {
-  return value === "small" || value === "medium" || value === "large" || value === "icon";
+  return (
+    value === "small" ||
+    value === "medium" ||
+    value === "large" ||
+    value === "icon"
+  );
 }
 
 const BOOK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path fill-rule="evenodd" d="M3 22L3 11A9 9 0 0 1 21 11L21 22ZM5 21L5 11.5A7 7 0 0 1 19 11.5L19 21Z"/><rect x="5" y="15" width="14" height="1.2" rx=".2"/><rect x="6.5" y="9.5" width="2" height="5.5" rx=".5"/><rect x="10" y="10.5" width="2" height="4.5" rx=".5"/><path d="M15 14.8L15.5 12.8H17.5L18 14.8Z"/><path d="M16.5 12.8Q14.5 11 14.5 9.5Q15.5 10 16.5 12.8Z"/><path d="M16.5 12.8Q18.5 11 18.5 9.5Q17.5 10 16.5 12.8Z"/><path d="M16.5 12.8Q16.5 10.5 16 8.5Q17 8.5 16.5 12.8Z"/><rect x="5" y="20.5" width="14" height="1.2" rx=".2"/><rect x="6.5" y="16.5" width="2" height="4" rx=".5"/><rect x="10" y="17" width="2" height="3.5" rx=".5"/><rect x="13.5" y="16.5" width="2" height="4" rx=".5"/><rect x="16.5" y="17" width="1.8" height="3.5" rx=".5" transform="rotate(-10 17.4 18.8)"/></svg>`;
@@ -154,6 +166,27 @@ function injectEnvStyle(): void {
   document.head.appendChild(style);
 }
 
+let baseButtonStyleInjected = false;
+// Injected in ALL environments (unlike injectEnvStyle, which is dev-only). The
+// `@media (hover: hover)` wrapper limits the hover effect to devices with a real
+// pointer, avoiding sticky-hover (the style getting stuck after a tap) on touch
+// devices. cleanupMooFamilyUI removes the button but not this <style>, so the
+// module-level guard flag prevents duplicate injection across re-injections.
+function injectBaseButtonStyle(): void {
+  if (baseButtonStyleInjected) return;
+  baseButtonStyleInjected = true;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    @media (hover: hover) {
+      #${MOO_ELEMENT_IDS.button}:hover {
+        opacity: 0.8;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 async function injectFamilyBookshelfButton(): Promise<void> {
   if (!isExtensionContextValid()) {
     teardownMooFamilyUI();
@@ -193,7 +226,10 @@ async function injectFamilyBookshelfButton(): Promise<void> {
     "cursor: pointer",
     "box-shadow: 0 2px 8px rgba(0,0,0,0.15)",
     "font-family: -apple-system, BlinkMacSystemFont, sans-serif",
+    "transition: opacity 0.2s ease-in",
   ].join(";");
+
+  injectBaseButtonStyle();
 
   if (APP_ENV !== "prod") {
     injectEnvStyle();
@@ -451,7 +487,10 @@ function tryScrapeAndCacheEmail(): void {
     if (!email) return;
 
     const displayName = scrapeDisplayName() ?? "";
-    void browser.storage.local.set({ [USER_EMAIL_KEY]: email, [DISPLAY_NAME_KEY]: displayName });
+    void browser.storage.local.set({
+      [USER_EMAIL_KEY]: email,
+      [DISPLAY_NAME_KEY]: displayName,
+    });
   }, 1000);
 }
 
@@ -491,7 +530,9 @@ function listenForIconSizeChanges(): void {
     if (areaName !== "local") return;
     if (!changes[FLOATING_ICON_SIZE_KEY]) return;
     const newValue = changes[FLOATING_ICON_SIZE_KEY].newValue;
-    const size: FloatingIconSize = isFloatingIconSize(newValue) ? newValue : "medium";
+    const size: FloatingIconSize = isFloatingIconSize(newValue)
+      ? newValue
+      : "medium";
     const button = document.getElementById(MOO_ELEMENT_IDS.button);
     if (!button) return;
     const { padding, fontSize } = getButtonSizeStyles(size);
