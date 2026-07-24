@@ -26,7 +26,9 @@ export function useManualLendNotice(): UseManualLendNoticeReturn {
   }, []);
 
   const dismiss = useCallback(() => {
-    void browser.storage.local.set({ [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true });
+    void browser.storage.local.set({
+      [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true,
+    });
     setIsDismissed(true);
   }, []);
 

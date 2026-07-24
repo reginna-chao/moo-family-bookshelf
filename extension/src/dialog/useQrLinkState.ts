@@ -59,7 +59,9 @@ export function useQrLinkState({
     };
   }, []);
 
-  const fetchAndActivate = useCallback(async (): Promise<{ url: string } | null> => {
+  const fetchAndActivate = useCallback(async (): Promise<{
+    url: string;
+  } | null> => {
     if (fetchInFlightRef.current) return null;
     fetchInFlightRef.current = true;
     const gen = generationRef.current;
@@ -75,17 +77,28 @@ export function useQrLinkState({
       const expiresIn = res.data?.expiresIn ?? DEFAULT_EXPIRES_IN_SECONDS;
       const url = buildPwaUrl(syncCode, userId, token);
       const QRCode = await import("qrcode");
-      const dataUrl = await QRCode.default.toDataURL(url, { width: QR_BOX_SIZE, margin: 2 });
+      const dataUrl = await QRCode.default.toDataURL(url, {
+        width: QR_BOX_SIZE,
+        margin: 2,
+      });
       if (!mountedRef.current || gen !== generationRef.current) return null;
       if (expireTimerRef.current !== null) clearTimeout(expireTimerRef.current);
       expireTimerRef.current = setTimeout(() => {
         if (mountedRef.current) setState({ kind: "expired" });
       }, expiresIn * 1000);
-      setState({ kind: "active", token, dataUrl, expiresAt: Date.now() + expiresIn * 1000 });
+      setState({
+        kind: "active",
+        token,
+        dataUrl,
+        expiresAt: Date.now() + expiresIn * 1000,
+      });
       return { url };
     } catch (err) {
       if (!mountedRef.current || gen !== generationRef.current) return null;
-      setState({ kind: "error", message: err instanceof Error ? err.message : "QR Code 產生失敗" });
+      setState({
+        kind: "error",
+        message: err instanceof Error ? err.message : "QR Code 產生失敗",
+      });
       return null;
     } finally {
       fetchInFlightRef.current = false;

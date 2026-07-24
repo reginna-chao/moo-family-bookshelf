@@ -127,7 +127,9 @@ describe("countFavorites", () => {
       makeMember("owner-1", ["same"]),
       makeMember("owner-2", ["same"]),
     ];
-    expect(countFavorites(sharedBookMembers, new Set(["owner-1:same"]))).toBe(1);
+    expect(countFavorites(sharedBookMembers, new Set(["owner-1:same"]))).toBe(
+      1,
+    );
   });
 
   it("returns 0 for empty members regardless of favorite refs", () => {

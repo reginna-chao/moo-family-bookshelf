@@ -18,17 +18,35 @@ export interface BorrowRequestCardProps {
 
 /** Per-status label + badge modifier class (colors live in styles.css). */
 const STATUS_META: Record<BorrowStatus, { label: string; modifier: string }> = {
-  [BorrowStatus.PENDING]: { label: "待處理", modifier: "moo-request-card__status--pending" },
-  [BorrowStatus.LENT]: { label: "出借中", modifier: "moo-request-card__status--lent" },
-  [BorrowStatus.RETURNED]: { label: "已歸還", modifier: "moo-request-card__status--returned" },
-  [BorrowStatus.REJECTED]: { label: "已拒絕", modifier: "moo-request-card__status--rejected" },
-  [BorrowStatus.CANCELLED]: { label: "已取消", modifier: "moo-request-card__status--cancelled" },
+  [BorrowStatus.PENDING]: {
+    label: "待處理",
+    modifier: "moo-request-card__status--pending",
+  },
+  [BorrowStatus.LENT]: {
+    label: "出借中",
+    modifier: "moo-request-card__status--lent",
+  },
+  [BorrowStatus.RETURNED]: {
+    label: "已歸還",
+    modifier: "moo-request-card__status--returned",
+  },
+  [BorrowStatus.REJECTED]: {
+    label: "已拒絕",
+    modifier: "moo-request-card__status--rejected",
+  },
+  [BorrowStatus.CANCELLED]: {
+    label: "已取消",
+    modifier: "moo-request-card__status--cancelled",
+  },
 };
 
 const ACTION_VARIANT_CLASS: Record<BorrowActionVariant, string> = {
-  primary: "moo-request-card__action moo-request-card__action--primary",
-  danger: "moo-request-card__action moo-request-card__action--danger",
-  secondary: "moo-request-card__action",
+  primary:
+    "moo-button moo-button--sm moo-request-card__action moo-request-card__action--primary",
+  danger:
+    "moo-button moo-button--outline-danger moo-button--sm moo-request-card__action moo-request-card__action--danger",
+  secondary:
+    "moo-button moo-button--ghost moo-button--sm moo-request-card__action",
 };
 
 /** Human-friendly relative time in 繁體中文 (falls back to ISO date on parse error). */
@@ -63,11 +81,16 @@ export function BorrowRequestCard({
           <div className="moo-request-card__author">{request.bookAuthor}</div>
         )}
         <div className="moo-request-card__party">
-          對象：<span className="moo-request-card__party-name">{otherPartyName}</span>
+          對象：
+          <span className="moo-request-card__party-name">{otherPartyName}</span>
         </div>
         <div className="moo-request-card__meta">
-          <span className={`moo-request-card__status ${status.modifier}`}>{status.label}</span>
-          <span className="moo-request-card__time">{formatRelativeTime(request.createdAt)}</span>
+          <span className={`moo-request-card__status ${status.modifier}`}>
+            {status.label}
+          </span>
+          <span className="moo-request-card__time">
+            {formatRelativeTime(request.createdAt)}
+          </span>
         </div>
         {actions.length > 0 && (
           <div className="moo-request-card__actions">

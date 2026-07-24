@@ -44,9 +44,9 @@ function geckoOf(result: ReturnType<typeof toFirefoxManifest>): GeckoShape {
   return bss.gecko as GeckoShape;
 }
 
-function geckoAndroidOf(
-  result: ReturnType<typeof toFirefoxManifest>,
-): { strict_min_version: string } {
+function geckoAndroidOf(result: ReturnType<typeof toFirefoxManifest>): {
+  strict_min_version: string;
+} {
   const bss = result.browser_specific_settings as Record<string, unknown>;
   return bss.gecko_android as { strict_min_version: string };
 }
@@ -82,7 +82,9 @@ describe("toFirefoxManifest", () => {
         DATA_COLLECTION_PERMISSIONS,
       );
 
-      expect(geckoAndroidOf(result).strict_min_version).toBe(STRICT_MIN_VERSION);
+      expect(geckoAndroidOf(result).strict_min_version).toBe(
+        STRICT_MIN_VERSION,
+      );
 
       // The data-consent declaration lives under gecko, not gecko_android.
       expect(geckoAndroidOf(result)).not.toHaveProperty(
@@ -106,7 +108,9 @@ describe("toFirefoxManifest", () => {
 
   it("omits gecko.update_url for the amo target", () => {
     const result = toFirefoxManifest(
-      makeChromeManifest() as unknown as Parameters<typeof toFirefoxManifest>[0],
+      makeChromeManifest() as unknown as Parameters<
+        typeof toFirefoxManifest
+      >[0],
       "1.5.0",
       "amo",
     );
@@ -115,7 +119,9 @@ describe("toFirefoxManifest", () => {
 
   it("embeds gecko.update_url for the direct target", () => {
     const result = toFirefoxManifest(
-      makeChromeManifest() as unknown as Parameters<typeof toFirefoxManifest>[0],
+      makeChromeManifest() as unknown as Parameters<
+        typeof toFirefoxManifest
+      >[0],
       "1.5.0",
       "direct",
     );
@@ -126,12 +132,16 @@ describe("toFirefoxManifest", () => {
     expect(GECKO_ID_AMO).not.toBe(GECKO_ID_DIRECT);
 
     const amo = toFirefoxManifest(
-      makeChromeManifest() as unknown as Parameters<typeof toFirefoxManifest>[0],
+      makeChromeManifest() as unknown as Parameters<
+        typeof toFirefoxManifest
+      >[0],
       "1.5.0",
       "amo",
     );
     const direct = toFirefoxManifest(
-      makeChromeManifest() as unknown as Parameters<typeof toFirefoxManifest>[0],
+      makeChromeManifest() as unknown as Parameters<
+        typeof toFirefoxManifest
+      >[0],
       "1.5.0",
       "direct",
     );

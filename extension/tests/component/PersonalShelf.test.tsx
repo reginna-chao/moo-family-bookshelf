@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PersonalShelf, PersonalShelfProps } from "@/dialog/PersonalShelf";
 import { BoolFlag, type ApiClient, type FamilyMember } from "@/api/client";
@@ -53,7 +59,9 @@ type TestBook = {
   isArchived: BoolFlag;
 };
 
-function makeBook(overrides: Partial<TestBook> & { bookId: string; title: string }): TestBook {
+function makeBook(
+  overrides: Partial<TestBook> & { bookId: string; title: string },
+): TestBook {
   return {
     author: "",
     coverUrl: "",
@@ -68,9 +76,24 @@ function makeBook(overrides: Partial<TestBook> & { bookId: string; title: string
 
 /** The default 3-book set every test starts from (supplied via the API record). */
 const DEFAULT_BOOKS: TestBook[] = [
-  makeBook({ bookId: "book-1", title: "測試書籍一", author: "作者A", coverUrl: "https://example.com/cover1.jpg" }),
-  makeBook({ bookId: "book-2", title: "測試書籍二", author: "作者B", coverUrl: "https://example.com/cover2.jpg" }),
-  makeBook({ bookId: "book-3", title: "測試書籍三", author: "作者C", coverUrl: "https://example.com/cover3.jpg" }),
+  makeBook({
+    bookId: "book-1",
+    title: "測試書籍一",
+    author: "作者A",
+    coverUrl: "https://example.com/cover1.jpg",
+  }),
+  makeBook({
+    bookId: "book-2",
+    title: "測試書籍二",
+    author: "作者B",
+    coverUrl: "https://example.com/cover2.jpg",
+  }),
+  makeBook({
+    bookId: "book-3",
+    title: "測試書籍三",
+    author: "作者C",
+    coverUrl: "https://example.com/cover3.jpg",
+  }),
 ];
 
 /** Build a getPersonalBooks mock that returns the given book set as the server record. */
@@ -96,7 +119,9 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     // save goes out as a full PUT (updatePersonalBooks) — see decideSaveStrategy.
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
-    patchPersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true, applied: 0 } }),
+    patchPersonalBooks: vi
+      .fn()
+      .mockResolvedValue({ data: { ok: true, applied: 0 } }),
     getFamilyMembers: vi.fn(),
     getFamilyBookshelf: vi.fn(),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
@@ -205,7 +230,9 @@ describe("PersonalShelf", () => {
     let resolveApi: (v: { data: null }) => void;
     const apiClient = createMockApiClient({
       getPersonalBooks: vi.fn().mockReturnValue(
-        new Promise((resolve) => { resolveApi = resolve; }),
+        new Promise((resolve) => {
+          resolveApi = resolve;
+        }),
       ),
     });
     seedCache(DEFAULT_BOOKS);
@@ -230,7 +257,9 @@ describe("PersonalShelf", () => {
       progressMessage: "正在讀取第 3 頁，已收集 600 本…",
     });
 
-    render(<PersonalShelf userId="user-abc123" apiClient={createMockApiClient()} />);
+    render(
+      <PersonalShelf userId="user-abc123" apiClient={createMockApiClient()} />,
+    );
 
     await waitFor(() => {
       expect(
@@ -317,7 +346,9 @@ describe("PersonalShelf", () => {
       await waitForBooksLoaded();
 
       fireEvent.click(screen.getByRole("button", { name: "全選" }));
-      expect(screen.getByRole("button", { name: "取消全選" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "取消全選" }),
+      ).toBeInTheDocument();
     });
 
     it("deselect all clears all selections", async () => {
@@ -376,8 +407,12 @@ describe("PersonalShelf", () => {
       fireEvent.click(checkboxes[1]);
 
       expect(screen.getByText("已選 2 本")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "設為開放" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "設為隱藏" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "設為開放" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "設為隱藏" }),
+      ).toBeInTheDocument();
     });
 
     it("shows save button when dirty but no selection", async () => {
@@ -391,7 +426,9 @@ describe("PersonalShelf", () => {
 
       // After batch action, selection is cleared but isDirty = true
       expect(screen.queryByText("已選")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "儲存變更" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "儲存變更" }),
+      ).toBeInTheDocument();
     });
 
     it("shows both batch buttons and save when selected and dirty", async () => {
@@ -408,9 +445,15 @@ describe("PersonalShelf", () => {
       fireEvent.click(updatedCheckboxes[1]);
 
       expect(screen.getByText("已選 1 本")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "設為開放" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "設為隱藏" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "儲存變更" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "設為開放" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "設為隱藏" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "儲存變更" }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -474,7 +517,9 @@ describe("PersonalShelf", () => {
       fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
 
       // Save button should appear (isDirty = true)
-      expect(screen.getByRole("button", { name: "儲存變更" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "儲存變更" }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -484,16 +529,22 @@ describe("PersonalShelf", () => {
       await waitForBooksLoaded();
 
       // Not dirty — cancel button should not exist
-      expect(screen.queryByRole("button", { name: "取消變更" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "取消變更" }),
+      ).not.toBeInTheDocument();
 
       // Select a book (no dirty yet)
       const checkboxes = screen.getAllByRole("checkbox");
       fireEvent.click(checkboxes[0]);
-      expect(screen.queryByRole("button", { name: "取消變更" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "取消變更" }),
+      ).not.toBeInTheDocument();
 
       // Make dirty via batch share
       fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
-      expect(screen.getByRole("button", { name: "取消變更" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "取消變更" }),
+      ).toBeInTheDocument();
     });
 
     it("cancel restores original book states and clears dirty and selection", async () => {
@@ -525,8 +576,12 @@ describe("PersonalShelf", () => {
       expect(restoredHiddenBadges.length).toBe(initialBadgeCount);
 
       // isDirty should be false — no save or cancel button
-      expect(screen.queryByRole("button", { name: "儲存變更" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "取消變更" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "儲存變更" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "取消變更" }),
+      ).not.toBeInTheDocument();
 
       // Selection should be cleared
       const finalCheckboxes = screen.getAllByRole("checkbox");
@@ -537,7 +592,9 @@ describe("PersonalShelf", () => {
   describe("save via floating bar", () => {
     it("save button in floating bar triggers save", async () => {
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
-      const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      const apiClient = createMockApiClient({
+        updatePersonalBooks: mockUpdate,
+      });
       seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
@@ -677,7 +734,9 @@ describe("PersonalShelf", () => {
   describe("save flow", () => {
     it("clears isDirty after successful save", async () => {
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
-      const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      const apiClient = createMockApiClient({
+        updatePersonalBooks: mockUpdate,
+      });
       seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
@@ -689,15 +748,21 @@ describe("PersonalShelf", () => {
       fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
 
       // Save button should be visible
-      expect(screen.getByRole("button", { name: "儲存變更" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "儲存變更" }),
+      ).toBeInTheDocument();
 
       // Click save
       fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
 
       // After successful save, isDirty should be false — floating bar disappears
       await waitFor(() => {
-        expect(screen.queryByRole("button", { name: "儲存變更" })).not.toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: "取消變更" })).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "儲存變更" }),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "取消變更" }),
+        ).not.toBeInTheDocument();
       });
     });
 
@@ -710,7 +775,9 @@ describe("PersonalShelf", () => {
       });
 
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
-      const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      const apiClient = createMockApiClient({
+        updatePersonalBooks: mockUpdate,
+      });
       seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
@@ -735,7 +802,9 @@ describe("PersonalShelf", () => {
       const mockUpdate = vi.fn().mockResolvedValue({
         error: { code: "SAVE_FAILED", message: "儲存失敗" },
       });
-      const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      const apiClient = createMockApiClient({
+        updatePersonalBooks: mockUpdate,
+      });
       seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
@@ -751,7 +820,6 @@ describe("PersonalShelf", () => {
         expect(screen.getByText("儲存失敗")).toBeInTheDocument();
       });
     });
-
   });
 
   describe("sync button", () => {
@@ -759,7 +827,9 @@ describe("PersonalShelf", () => {
       renderPersonalShelf();
       await waitForBooksLoaded();
 
-      expect(screen.getByRole("button", { name: "同步書櫃" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "同步書櫃" }),
+      ).toBeInTheDocument();
     });
 
     it("shows book count in header", async () => {
@@ -831,8 +901,19 @@ describe("PersonalShelf", () => {
     it("archive view tabs appear when syncArchived is enabled and there are archived books", async () => {
       // Synced books include an archived book.
       const books = [
-        makeBook({ bookId: "book-1", title: "測試書籍一", author: "作者A", coverUrl: "https://example.com/cover1.jpg" }),
-        makeBook({ bookId: "book-archived", title: "封存書籍一", author: "作者D", coverUrl: "https://example.com/cover-a.jpg", isArchived: BoolFlag.TRUE }),
+        makeBook({
+          bookId: "book-1",
+          title: "測試書籍一",
+          author: "作者A",
+          coverUrl: "https://example.com/cover1.jpg",
+        }),
+        makeBook({
+          bookId: "book-archived",
+          title: "封存書籍一",
+          author: "作者D",
+          coverUrl: "https://example.com/cover-a.jpg",
+          isArchived: BoolFlag.TRUE,
+        }),
       ];
 
       // Mock GET_SYNC_ARCHIVED to return 1
@@ -853,12 +934,18 @@ describe("PersonalShelf", () => {
       });
 
       // Archive tabs should be visible — use exact match with function
-      expect(screen.getByText((_content, el) =>
-        el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
-      )).toBeInTheDocument();
-      expect(screen.getByText((_content, el) =>
-        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
-      )).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          (_content, el) =>
+            el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          (_content, el) =>
+            el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+        ),
+      ).toBeInTheDocument();
     });
 
     it("archive view tabs do NOT appear when syncArchived is 0", async () => {
@@ -877,18 +964,29 @@ describe("PersonalShelf", () => {
       renderPersonalShelf();
       await waitForBooksLoaded();
 
-      expect(screen.queryByText((_content, el) =>
-        el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
-      )).not.toBeInTheDocument();
-      expect(screen.queryByText((_content, el) =>
-        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
-      )).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          (_content, el) =>
+            el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
+        ),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          (_content, el) =>
+            el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+        ),
+      ).not.toBeInTheDocument();
     });
 
     it("clicking '未封存' tab shows only active books", async () => {
       const books = [
         makeBook({ bookId: "book-1", title: "活躍書籍", author: "作者A" }),
-        makeBook({ bookId: "book-2", title: "已封存書", author: "作者B", isArchived: BoolFlag.TRUE }),
+        makeBook({
+          bookId: "book-2",
+          title: "已封存書",
+          author: "作者B",
+          isArchived: BoolFlag.TRUE,
+        }),
       ];
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -908,8 +1006,9 @@ describe("PersonalShelf", () => {
       });
 
       // Default view is "active" tab — click it to be explicit
-      const activeTab = screen.getByText((_content, el) =>
-        el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
+      const activeTab = screen.getByText(
+        (_content, el) =>
+          el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
       );
       fireEvent.click(activeTab);
 
@@ -920,7 +1019,12 @@ describe("PersonalShelf", () => {
     it("clicking '封存' tab shows only archived books", async () => {
       const books = [
         makeBook({ bookId: "book-1", title: "活躍書籍", author: "作者A" }),
-        makeBook({ bookId: "book-2", title: "已封存書", author: "作者B", isArchived: BoolFlag.TRUE }),
+        makeBook({
+          bookId: "book-2",
+          title: "已封存書",
+          author: "作者B",
+          isArchived: BoolFlag.TRUE,
+        }),
       ];
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -940,8 +1044,9 @@ describe("PersonalShelf", () => {
       });
 
       // Click the "封存" tab (starts with 封存, not 未封存)
-      const archivedTab = screen.getByText((_content, el) =>
-        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+      const archivedTab = screen.getByText(
+        (_content, el) =>
+          el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
       );
       fireEvent.click(archivedTab);
 
@@ -966,8 +1071,9 @@ describe("PersonalShelf", () => {
       await waitForBooksLoaded();
 
       // Click the "封存" tab — there are 0 archived books
-      const archivedTab = screen.getByText((_content, el) =>
-        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+      const archivedTab = screen.getByText(
+        (_content, el) =>
+          el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
       );
       fireEvent.click(archivedTab);
 
@@ -981,7 +1087,9 @@ describe("PersonalShelf", () => {
     // by handleSave — the latter is exercised below.
     it("updates cache after successful save", async () => {
       const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
-      const apiClient = createMockApiClient({ updatePersonalBooks: mockUpdate });
+      const apiClient = createMockApiClient({
+        updatePersonalBooks: mockUpdate,
+      });
       seedCache(DEFAULT_BOOKS);
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
@@ -1004,19 +1112,26 @@ describe("PersonalShelf", () => {
 
       // After save, cache should be updated
       await waitFor(() => {
-        expect(chrome.storage.local.set).toHaveBeenCalledWith(
-          { [PERSONAL_BOOKS_CACHE_KEY]: expect.any(String) },
-        );
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          [PERSONAL_BOOKS_CACHE_KEY]: expect.any(String),
+        });
       });
 
       // Verify the cached books include the toggled share status
       const setCalls = vi.mocked(chrome.storage.local.set).mock.calls;
       const cacheCall = setCalls.find(
-        (call) => call[0] && typeof call[0] === "object" && PERSONAL_BOOKS_CACHE_KEY in (call[0] as Record<string, unknown>),
+        (call) =>
+          call[0] &&
+          typeof call[0] === "object" &&
+          PERSONAL_BOOKS_CACHE_KEY in (call[0] as Record<string, unknown>),
       );
       expect(cacheCall).toBeDefined();
-      const cached = JSON.parse((cacheCall![0] as Record<string, string>)[PERSONAL_BOOKS_CACHE_KEY]);
-      const book1 = cached.find((b: { bookId: string }) => b.bookId === "book-1");
+      const cached = JSON.parse(
+        (cacheCall![0] as Record<string, string>)[PERSONAL_BOOKS_CACHE_KEY],
+      );
+      const book1 = cached.find(
+        (b: { bookId: string }) => b.bookId === "book-1",
+      );
       expect(book1).toBeDefined();
       expect(book1.isShared).toBe(BoolFlag.TRUE);
     });
@@ -1025,8 +1140,18 @@ describe("PersonalShelf", () => {
   describe("category filter reset", () => {
     it("resets category filter when status filter changes", async () => {
       const books = [
-        makeBook({ bookId: "book-1", title: "奇幻書籍", author: "作者A", category: "奇幻冒險" }),
-        makeBook({ bookId: "book-2", title: "韓國書籍", author: "作者B", category: "韓國耽美" }),
+        makeBook({
+          bookId: "book-1",
+          title: "奇幻書籍",
+          author: "作者A",
+          category: "奇幻冒險",
+        }),
+        makeBook({
+          bookId: "book-2",
+          title: "韓國書籍",
+          author: "作者B",
+          category: "韓國耽美",
+        }),
       ];
 
       renderPersonalShelf({}, books);
@@ -1197,7 +1322,10 @@ describe("PersonalShelf", () => {
   });
 
   describe("Load More (Wave G)", () => {
-    function makeManyBooks(count: number, isArchived = BoolFlag.FALSE): TestBook[] {
+    function makeManyBooks(
+      count: number,
+      isArchived = BoolFlag.FALSE,
+    ): TestBook[] {
       return Array.from({ length: count }, (_, i) =>
         makeBook({
           bookId: `book-${i + 1}`,
@@ -1233,7 +1361,9 @@ describe("PersonalShelf", () => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
       });
 
-      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /載入更多/ }),
+      ).not.toBeInTheDocument();
     });
 
     it("click Load More appends pageSize to visible count", async () => {
@@ -1243,7 +1373,9 @@ describe("PersonalShelf", () => {
         expect(screen.getByText("書籍 1")).toBeInTheDocument();
       });
 
-      const button = screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ });
+      const button = screen.getByRole("button", {
+        name: /載入更多.*已顯示 10.*共 25 本/,
+      });
       fireEvent.click(button);
 
       await waitFor(() => {
@@ -1263,7 +1395,9 @@ describe("PersonalShelf", () => {
       // Click "已開放" status filter — narrows view → narrowingActive=true → button hidden
       fireEvent.click(screen.getByRole("button", { name: "已開放" }));
 
-      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /載入更多/ }),
+      ).not.toBeInTheDocument();
     });
 
     it("resets visibleCount when switching archive tabs (Q-B 視角切換類)", async () => {
@@ -1293,7 +1427,9 @@ describe("PersonalShelf", () => {
       });
 
       // Click Load More — visible 10 → 20
-      fireEvent.click(screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }));
+      fireEvent.click(
+        screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }),
+      );
       await waitFor(() => {
         expect(
           screen.getByRole("button", { name: /載入更多.*已顯示 20.*共 25 本/ }),
@@ -1301,14 +1437,16 @@ describe("PersonalShelf", () => {
       });
 
       // Switch to archived tab
-      const archivedTab = screen.getByText((_content, el) =>
-        el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
+      const archivedTab = screen.getByText(
+        (_content, el) =>
+          el?.tagName === "BUTTON" && /^封存 \(/.test(el.textContent ?? ""),
       );
       fireEvent.click(archivedTab);
 
       // Switch back to active tab — visibleCount should reset to 10
-      const activeTab = screen.getByText((_content, el) =>
-        el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
+      const activeTab = screen.getByText(
+        (_content, el) =>
+          el?.tagName === "BUTTON" && /^未封存/.test(el.textContent ?? ""),
       );
       fireEvent.click(activeTab);
 

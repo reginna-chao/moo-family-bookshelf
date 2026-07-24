@@ -77,7 +77,9 @@ describe("MemberList", () => {
     fireEvent.click(screen.getByText("轉移管理權"));
 
     expect(
-      screen.getByText("確定要將管理權轉移給此成員？轉移後你將無法移除其他成員。"),
+      screen.getByText(
+        "確定要將管理權轉移給此成員？轉移後你將無法移除其他成員。",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -91,7 +93,8 @@ describe("MemberList", () => {
 
     await waitFor(() => {
       expect(apiClient.removeMember).toHaveBeenCalledWith(
-        "fam-123", "user-member456",
+        "fam-123",
+        "user-member456",
       );
       expect(onMembersChanged).toHaveBeenCalled();
     });
@@ -107,7 +110,10 @@ describe("MemberList", () => {
 
     await waitFor(() => {
       expect(apiClient.transferOwnership).toHaveBeenCalledWith(
-        "fam-123", "user-owner123", "user-member456", undefined,
+        "fam-123",
+        "user-owner123",
+        "user-member456",
+        undefined,
       );
       expect(onMembersChanged).toHaveBeenCalled();
     });

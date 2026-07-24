@@ -8,7 +8,12 @@ export type { AutoSyncInterval };
 const DEFAULT_AUTO_SYNC_INTERVAL: AutoSyncInterval = "daily";
 
 function isAutoSyncInterval(value: unknown): value is AutoSyncInterval {
-  return value === "daily" || value === "weekly" || value === "monthly" || value === "never";
+  return (
+    value === "daily" ||
+    value === "weekly" ||
+    value === "monthly" ||
+    value === "never"
+  );
 }
 
 export interface UseAutoSyncIntervalReturn {
@@ -17,7 +22,9 @@ export interface UseAutoSyncIntervalReturn {
 }
 
 export function useAutoSyncInterval(): UseAutoSyncIntervalReturn {
-  const [interval, setIntervalState] = useState<AutoSyncInterval>(DEFAULT_AUTO_SYNC_INTERVAL);
+  const [interval, setIntervalState] = useState<AutoSyncInterval>(
+    DEFAULT_AUTO_SYNC_INTERVAL,
+  );
   const intervalRef = useRef(interval);
 
   useEffect(() => {

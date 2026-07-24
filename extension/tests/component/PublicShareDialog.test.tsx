@@ -15,7 +15,10 @@ function makeApiClient() {
   } as unknown as ApiClient;
 }
 
-function renderDialog(apiClient: ApiClient) {
+function renderDialog(
+  apiClient: ApiClient,
+  options?: Parameters<typeof render>[1],
+) {
   return render(
     <PublicShareDialog
       userId="user-1"
@@ -23,6 +26,7 @@ function renderDialog(apiClient: ApiClient) {
       defaultDisplayName="小明"
       onClose={vi.fn()}
     />,
+    options,
   );
 }
 
@@ -82,6 +86,141 @@ describe("PublicShareDialog · ExpiresSelect class contract", () => {
       expect(input).not.toHaveClass("moo-public-share__select--mobile");
     },
   );
+
+  // The bespoke input chrome was folded into the shared `.moo-form-input`
+  // component class; the `--select` modifier only adjusts CSS variables.
+  it("opts the title input and the expires select into the shared .moo-form-input base", async () => {
+    renderDialog(makeApiClient());
+
+    const input = await screen.findByRole("textbox");
+    expect(input).toHaveClass("moo-form-input");
+    expect(input).not.toHaveClass("moo-form-input--select");
+
+    const select = screen.getByRole("combobox");
+    expect(select).toHaveClass("moo-form-input");
+    expect(select).toHaveClass("moo-form-input--select");
+  });
+
+  it("opts the close button into the shared ghost-icon button base", async () => {
+    const { container } = renderDialog(makeApiClient());
+
+    const closeBtn = container.querySelector(".moo-public-share__icon-btn");
+    expect(closeBtn).toHaveClass("moo-button");
+    expect(closeBtn).toHaveClass("moo-button--ghost-icon");
+
+    await screen.findByRole("combobox");
+  });
+
+  it("opts the create button into the shared small primary button base", async () => {
+    renderDialog(makeApiClient());
+
+    const createBtn = await screen.findByRole("button", {
+      name: "啟用公開書櫃",
+    });
+    expect(createBtn).toHaveClass("moo-button");
+    expect(createBtn).toHaveClass("moo-button--sm");
+    // The default (primary) variant carries no colour modifier.
+    expect(createBtn).not.toHaveClass("moo-button--ghost");
+    expect(createBtn).not.toHaveClass("moo-button--outline-danger");
+  });
+});
+
+/**
+ * The dialog is a modal: it renders after the trigger in DOM order, so without
+ * explicit focus management Tab would walk the shelf controls behind it. On mount
+ * it captures the opener from the (shadow-aware) root's `activeElement`, moves
+ * focus into its own container, and hands focus back to the opener on unmount.
+ */
+describe("PublicShareDialog · modal focus management", () => {
+  let opener: HTMLButtonElement;
+
+  beforeEach(() => {
+    vi.mocked(useIsMobile).mockReturnValue(false);
+    opener = document.createElement("button");
+    opener.textContent = "公開分享";
+    document.body.appendChild(opener);
+    opener.focus();
+  });
+
+  afterEach(() => {
+    opener.remove();
+  });
+
+  it("exposes modal semantics on the focusable dialog container", async () => {
+    renderDialog(makeApiClient());
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAttribute("aria-label", "公開書櫃分享");
+    expect(dialog).toHaveAttribute("tabindex", "-1");
+
+    // Settle the initial listPublicShelves promise before unmounting.
+    await screen.findByRole("combobox");
+  });
+
+  it("moves focus into the dialog container on open", async () => {
+    renderDialog(makeApiClient());
+
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+    expect(document.activeElement).not.toBe(opener);
+
+    await screen.findByRole("combobox");
+  });
+
+  it("restores focus to the opener when the dialog unmounts", async () => {
+    const { unmount } = renderDialog(makeApiClient());
+    await screen.findByRole("combobox");
+    expect(document.activeElement).not.toBe(opener);
+
+    unmount();
+
+    expect(document.activeElement).toBe(opener);
+  });
+
+  describe("mounted inside an open shadow root", () => {
+    let host: HTMLDivElement;
+    let shadowRoot: ShadowRoot;
+    let reactContainer: HTMLDivElement;
+    let shadowOpener: HTMLButtonElement;
+
+    beforeEach(() => {
+      host = document.createElement("div");
+      document.body.appendChild(host);
+      shadowRoot = host.attachShadow({ mode: "open" });
+      shadowOpener = document.createElement("button");
+      shadowOpener.textContent = "公開分享";
+      shadowRoot.appendChild(shadowOpener);
+      reactContainer = document.createElement("div");
+      shadowRoot.appendChild(reactContainer);
+      shadowOpener.focus();
+    });
+
+    afterEach(() => {
+      host.remove();
+    });
+
+    // `document.activeElement` is retargeted to the shadow host here, so reading
+    // it instead of `getRootNode().activeElement` would capture the host as the
+    // opener and focus would never return to the 公開分享 button.
+    it("captures the shadow-DOM opener and restores focus to it on unmount", async () => {
+      expect(shadowRoot.activeElement).toBe(shadowOpener);
+
+      const { unmount } = renderDialog(makeApiClient(), {
+        container: reactContainer,
+      });
+
+      const dialog = shadowRoot.querySelector('[role="dialog"]');
+      expect(dialog).not.toBeNull();
+      expect(shadowRoot.activeElement).toBe(dialog);
+
+      // Let the initial listPublicShelves promise resolve inside act().
+      await act(async () => {});
+
+      unmount();
+
+      expect(shadowRoot.activeElement).toBe(shadowOpener);
+    });
+  });
 });
 
 /**
@@ -175,7 +314,9 @@ describe("PublicShareDialog · debounce + copy-flag behavior (FE-5)", () => {
       fireEvent.click(copyBtn);
     });
 
-    expect(writeText).toHaveBeenCalledWith("https://pwa.example/public/tok-abc");
+    expect(writeText).toHaveBeenCalledWith(
+      "https://pwa.example/public/tok-abc",
+    );
     expect(screen.getByText("已複製")).toBeInTheDocument();
 
     // The flag auto-clears once its 2s window elapses.
@@ -184,4 +325,23 @@ describe("PublicShareDialog · debounce + copy-flag behavior (FE-5)", () => {
     });
     expect(screen.queryByText("已複製")).not.toBeInTheDocument();
   });
+
+  // Active-shelf actions are the only place in this dialog that uses the
+  // secondary/destructive button variants; pin their shared bases so the
+  // refactor cannot silently drop them.
+  it.each([
+    { name: "重設網址", modifier: "moo-button--ghost" },
+    { name: "關閉公開分享", modifier: "moo-button--outline-danger" },
+  ])(
+    "opts the $name action into the shared $modifier button base",
+    async ({ name, modifier }) => {
+      renderDialog(makeActiveApiClient());
+      await screen.findByLabelText("標題");
+
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveClass("moo-button");
+      expect(button).toHaveClass("moo-button--sm");
+      expect(button).toHaveClass(modifier);
+    },
+  );
 });

@@ -7,9 +7,5 @@
       "moo-family-bookshelf-shared/*": ["../shared/src/*"]
     }
   },
-  "include": [
-    "**/*.ts",
-    "../../src/**/*.ts",
-    "../../src/**/*.tsx"
-  ]
+  "include": ["**/*.ts", "../../src/**/*.ts", "../../src/**/*.tsx"]
 }

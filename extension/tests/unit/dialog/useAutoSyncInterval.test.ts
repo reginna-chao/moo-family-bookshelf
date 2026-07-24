@@ -13,18 +13,18 @@ function mockSendMessage(
   getResponse: Record<string, unknown>,
   setResponse: Record<string, unknown> = { ok: true },
 ) {
-  vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    ((message: unknown) => {
-      const msg = message as Record<string, unknown>;
-      if (msg.type === "GET_AUTO_SYNC_INTERVAL") {
-        return Promise.resolve(getResponse);
-      }
-      if (msg.type === "SET_AUTO_SYNC_INTERVAL") {
-        return Promise.resolve(setResponse);
-      }
-      return Promise.resolve(undefined);
-    }) as typeof chrome.runtime.sendMessage,
-  );
+  vi.mocked(chrome.runtime.sendMessage).mockImplementation(((
+    message: unknown,
+  ) => {
+    const msg = message as Record<string, unknown>;
+    if (msg.type === "GET_AUTO_SYNC_INTERVAL") {
+      return Promise.resolve(getResponse);
+    }
+    if (msg.type === "SET_AUTO_SYNC_INTERVAL") {
+      return Promise.resolve(setResponse);
+    }
+    return Promise.resolve(undefined);
+  }) as typeof chrome.runtime.sendMessage);
 }
 
 describe("useAutoSyncInterval", () => {
@@ -50,9 +50,10 @@ describe("useAutoSyncInterval", () => {
   );
 
   it("keeps 'daily' when the background message rejects", async () => {
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      (() => Promise.reject(new Error("background unavailable"))) as typeof chrome.runtime.sendMessage,
-    );
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation((() =>
+      Promise.reject(
+        new Error("background unavailable"),
+      )) as typeof chrome.runtime.sendMessage);
     const { result } = renderHook(() => useAutoSyncInterval());
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
@@ -109,10 +110,13 @@ describe("useAutoSyncInterval", () => {
       result.current.setInterval("daily");
     });
 
-    const setCalls = vi.mocked(chrome.runtime.sendMessage).mock.calls.filter(
-      (call) =>
-        (call[0] as unknown as Record<string, unknown>).type === "SET_AUTO_SYNC_INTERVAL",
-    );
+    const setCalls = vi
+      .mocked(chrome.runtime.sendMessage)
+      .mock.calls.filter(
+        (call) =>
+          (call[0] as unknown as Record<string, unknown>).type ===
+          "SET_AUTO_SYNC_INTERVAL",
+      );
     expect(setCalls).toHaveLength(0);
   });
 });

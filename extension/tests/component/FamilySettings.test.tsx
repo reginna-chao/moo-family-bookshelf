@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { FamilySettings, FamilySettingsProps } from "@/dialog/FamilySettings";
@@ -30,14 +36,22 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
         createdAt: "2026-01-01",
       },
     }),
-    getFamilyBookshelf: vi.fn().mockResolvedValue({ data: { familyId: "fam-123", members: [] } }),
+    getFamilyBookshelf: vi
+      .fn()
+      .mockResolvedValue({ data: { familyId: "fam-123", members: [] } }),
     deleteAccount: vi.fn().mockResolvedValue({ data: { ok: true } }),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
-    updateFamilyEndpoint: vi.fn().mockResolvedValue({ data: { familyId: "fam-123", apiEndpoint: null } }),
-    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none", prompted: 0 } }),
+    updateFamilyEndpoint: vi
+      .fn()
+      .mockResolvedValue({ data: { familyId: "fam-123", apiEndpoint: null } }),
+    getVerifyMethod: vi
+      .fn()
+      .mockResolvedValue({ data: { method: "none", prompted: 0 } }),
     setVerifyMethod: vi.fn().mockResolvedValue({ data: { ok: true } }),
-    generateOtp: vi.fn().mockResolvedValue({ data: { code: "123456", expiresAt: Date.now() + 300000 } }),
+    generateOtp: vi.fn().mockResolvedValue({
+      data: { code: "123456", expiresAt: Date.now() + 300000 },
+    }),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -51,7 +65,11 @@ function renderFamilySettings(props: Partial<FamilySettingsProps> = {}) {
   };
   const merged = { ...defaultProps, ...props };
   return render(
-    <FamilyDataProvider familyId={merged.familyId} userId={merged.userId} apiClient={merged.apiClient}>
+    <FamilyDataProvider
+      familyId={merged.familyId}
+      userId={merged.userId}
+      apiClient={merged.apiClient}
+    >
       <FamilySettings {...merged} />
     </FamilyDataProvider>,
   );
@@ -89,21 +107,29 @@ describe("FamilySettings", () => {
     renderFamilySettings();
 
     expect(screen.getByText("顯示名稱")).toBeInTheDocument();
-    expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
+    expect(
+      screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號"),
+    ).toBeInTheDocument();
 
     // New inline edit: display mode shows text, not input
     await waitFor(() => {
-      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
+      expect(
+        screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號"),
+      ).toBeInTheDocument();
     });
     // No input visible in display mode
-    expect(screen.queryByPlaceholderText("輸入顯示名稱")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("輸入顯示名稱"),
+    ).not.toBeInTheDocument();
   });
 
   it("enters edit mode when pencil icon is clicked", async () => {
     renderFamilySettings();
 
     await waitFor(() => {
-      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
+      expect(
+        screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號"),
+      ).toBeInTheDocument();
     });
 
     enterEditMode();
@@ -116,20 +142,28 @@ describe("FamilySettings", () => {
     renderFamilySettings();
 
     await waitFor(() => {
-      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
+      expect(
+        screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號"),
+      ).toBeInTheDocument();
     });
 
     enterEditMode();
 
-    fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), { target: { value: "大明" } });
+    fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), {
+      target: { value: "大明" },
+    });
 
     // Click cancel (X) button — second button in the edit row
-    const editButtons = screen.getByPlaceholderText("輸入顯示名稱").parentElement!.querySelectorAll("button");
+    const editButtons = screen
+      .getByPlaceholderText("輸入顯示名稱")
+      .parentElement!.querySelectorAll("button");
     fireEvent.click(editButtons[1]); // X button
 
     // Should be back in display mode
     await waitFor(() => {
-      expect(screen.queryByPlaceholderText("輸入顯示名稱")).not.toBeInTheDocument();
+      expect(
+        screen.queryByPlaceholderText("輸入顯示名稱"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -138,23 +172,35 @@ describe("FamilySettings", () => {
     renderFamilySettings({ apiClient });
 
     await waitFor(() => {
-      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
+      expect(
+        screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號"),
+      ).toBeInTheDocument();
     });
 
     enterEditMode();
 
-    fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), { target: { value: "大明" } });
+    fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), {
+      target: { value: "大明" },
+    });
 
     // Click check (confirm) button — first button in the edit row
-    const editButtons = screen.getByPlaceholderText("輸入顯示名稱").parentElement!.querySelectorAll("button");
+    const editButtons = screen
+      .getByPlaceholderText("輸入顯示名稱")
+      .parentElement!.querySelectorAll("button");
     fireEvent.click(editButtons[0]); // Check button
 
     await waitFor(() => {
       expect(apiClient.updateDisplayName).toHaveBeenCalledWith(
-        "fam-123", "user-abc12345", "大明",
+        "fam-123",
+        "user-abc12345",
+        "大明",
       );
-      expect(chrome.storage.local.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
-      expect(chrome.storage.sync.set).toHaveBeenCalledWith({ [DISPLAY_NAME_KEY]: "大明" });
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [DISPLAY_NAME_KEY]: "大明",
+      });
+      expect(chrome.storage.sync.set).toHaveBeenCalledWith({
+        [DISPLAY_NAME_KEY]: "大明",
+      });
     });
   });
 
@@ -357,13 +403,16 @@ describe("FamilySettings", () => {
 
     await waitFor(() => {
       expect(apiClient.removeMember).toHaveBeenCalledWith(
-        "fam-123", "user-def67890",
+        "fam-123",
+        "user-def67890",
       );
     });
 
     // fetchMembers should be called at least once more after the action
     await waitFor(() => {
-      expect(vi.mocked(apiClient.getFamilyMembers).mock.calls.length).toBeGreaterThan(callsBefore);
+      expect(
+        vi.mocked(apiClient.getFamilyMembers).mock.calls.length,
+      ).toBeGreaterThan(callsBefore);
     });
   });
 
@@ -377,7 +426,11 @@ describe("FamilySettings", () => {
     fireEvent.click(screen.getByText("轉移管理權"));
 
     await waitFor(() => {
-      expect(screen.getByText("確定要將管理權轉移給此成員？轉移後你將無法移除其他成員。")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "確定要將管理權轉移給此成員？轉移後你將無法移除其他成員。",
+        ),
+      ).toBeInTheDocument();
       expect(screen.getByText("確定")).toBeInTheDocument();
     });
   });
@@ -402,12 +455,17 @@ describe("FamilySettings", () => {
 
     await waitFor(() => {
       expect(apiClient.transferOwnership).toHaveBeenCalledWith(
-        "fam-123", "user-abc12345", "user-def67890", undefined,
+        "fam-123",
+        "user-abc12345",
+        "user-def67890",
+        undefined,
       );
     });
 
     await waitFor(() => {
-      expect(vi.mocked(apiClient.getFamilyMembers).mock.calls.length).toBeGreaterThan(callsBefore);
+      expect(
+        vi.mocked(apiClient.getFamilyMembers).mock.calls.length,
+      ).toBeGreaterThan(callsBefore);
     });
   });
 
@@ -428,7 +486,9 @@ describe("FamilySettings", () => {
     fireEvent.click(screen.getByText("確定離開"));
 
     await waitFor(() => {
-      expect(screen.getByText("管理者必須先轉移管理權才能離開家庭")).toBeInTheDocument();
+      expect(
+        screen.getByText("管理者必須先轉移管理權才能離開家庭"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -488,15 +548,21 @@ describe("FamilySettings", () => {
     renderFamilySettings({ apiClient });
 
     await waitFor(() => {
-      expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
+      expect(
+        screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號"),
+      ).toBeInTheDocument();
     });
 
     enterEditMode();
 
-    fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), { target: { value: "新名稱" } });
+    fireEvent.change(screen.getByPlaceholderText("輸入顯示名稱"), {
+      target: { value: "新名稱" },
+    });
 
     // Click check (confirm) button
-    const editButtons = screen.getByPlaceholderText("輸入顯示名稱").parentElement!.querySelectorAll("button");
+    const editButtons = screen
+      .getByPlaceholderText("輸入顯示名稱")
+      .parentElement!.querySelectorAll("button");
     fireEvent.click(editButtons[0]);
 
     await waitFor(() => {
@@ -511,7 +577,9 @@ describe("FamilySettings", () => {
       renderFamilySettings();
 
       await waitFor(() => {
-        expect(screen.getByRole("switch", { name: "同步封存書籍" })).toBeInTheDocument();
+        expect(
+          screen.getByRole("switch", { name: "同步封存書籍" }),
+        ).toBeInTheDocument();
       });
     });
 
@@ -519,7 +587,9 @@ describe("FamilySettings", () => {
       renderFamilySettings();
 
       await waitFor(() => {
-        expect(screen.getByText("啟用後，同步時會一併讀取已封存的書籍")).toBeInTheDocument();
+        expect(
+          screen.getByText("啟用後，同步時會一併讀取已封存的書籍"),
+        ).toBeInTheDocument();
       });
     });
 
@@ -571,7 +641,9 @@ describe("FamilySettings", () => {
       renderFamilySettings();
 
       await waitFor(() => {
-        expect(screen.getByRole("switch", { name: "同步封存書籍" })).toBeInTheDocument();
+        expect(
+          screen.getByRole("switch", { name: "同步封存書籍" }),
+        ).toBeInTheDocument();
       });
 
       fireEvent.click(screen.getByRole("switch", { name: "同步封存書籍" }));
@@ -657,7 +729,8 @@ describe("FamilySettings", () => {
       const errorResponse = {
         error: { code: "INTERNAL_ERROR", message: "載入失敗" },
       };
-      const getFamilyMembers = vi.fn()
+      const getFamilyMembers = vi
+        .fn()
         .mockResolvedValueOnce(errorResponse)
         .mockResolvedValue(successData);
 
@@ -691,7 +764,8 @@ describe("FamilySettings", () => {
     });
 
     // Get the listener registered on chrome.storage.onChanged
-    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener)
+      .mock.calls;
     const listener = addListenerCalls[addListenerCalls.length - 1][0];
 
     // Simulate storage change for displayName
@@ -716,7 +790,8 @@ describe("FamilySettings", () => {
       expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
     });
 
-    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener)
+      .mock.calls;
     const listener = addListenerCalls[addListenerCalls.length - 1][0];
 
     // Fire from "sync" area — should be ignored
@@ -795,7 +870,10 @@ describe("FamilySettings", () => {
       let resolveLeave: (value: unknown) => void;
       const apiClient = createMockApiClient({
         leaveFamily: vi.fn().mockImplementation(
-          () => new Promise((resolve) => { resolveLeave = resolve; }),
+          () =>
+            new Promise((resolve) => {
+              resolveLeave = resolve;
+            }),
         ),
       });
       renderFamilySettings({ apiClient });
@@ -859,7 +937,10 @@ describe("FamilySettings", () => {
     it("shows owner error when OWNER_CANNOT_DELETE", async () => {
       const apiClient = createMockApiClient({
         deleteAccount: vi.fn().mockResolvedValue({
-          error: { code: "OWNER_CANNOT_DELETE", message: "Owner cannot delete" },
+          error: {
+            code: "OWNER_CANNOT_DELETE",
+            message: "Owner cannot delete",
+          },
         }),
       });
       renderFamilySettings({ apiClient });
@@ -873,7 +954,9 @@ describe("FamilySettings", () => {
       fireEvent.click(screen.getByText("確定移除"));
 
       await waitFor(() => {
-        expect(screen.getByText("管理者必須先轉移管理權才能移除帳戶")).toBeInTheDocument();
+        expect(
+          screen.getByText("管理者必須先轉移管理權才能移除帳戶"),
+        ).toBeInTheDocument();
       });
     });
 
@@ -892,7 +975,9 @@ describe("FamilySettings", () => {
 
       await waitFor(() => {
         expect(screen.getByText("移除帳戶")).toBeInTheDocument();
-        expect(screen.queryByText("確定要移除帳戶嗎？")).not.toBeInTheDocument();
+        expect(
+          screen.queryByText("確定要移除帳戶嗎？"),
+        ).not.toBeInTheDocument();
       });
     });
   });

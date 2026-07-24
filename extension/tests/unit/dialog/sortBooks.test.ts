@@ -30,22 +30,26 @@ describe("sortBooks", () => {
     expect(books).toEqual(copy);
   });
 
-  it.each<BookSortMode>(["title-asc", "title-desc", "author-asc", "author-desc"])(
-    "returns empty array for empty input (%s)",
-    (mode) => {
-      expect(sortBooks([], mode)).toEqual([]);
-    },
-  );
+  it.each<BookSortMode>([
+    "title-asc",
+    "title-desc",
+    "author-asc",
+    "author-desc",
+  ])("returns empty array for empty input (%s)", (mode) => {
+    expect(sortBooks([], mode)).toEqual([]);
+  });
 
-  it.each<BookSortMode>(["title-asc", "title-desc", "author-asc", "author-desc"])(
-    "returns single-element array unchanged (%s)",
-    (mode) => {
-      const single = [{ title: "A", author: "B" }];
-      const result = sortBooks(single, mode);
-      expect(result).toHaveLength(1);
-      expect(result[0].title).toBe("A");
-    },
-  );
+  it.each<BookSortMode>([
+    "title-asc",
+    "title-desc",
+    "author-asc",
+    "author-desc",
+  ])("returns single-element array unchanged (%s)", (mode) => {
+    const single = [{ title: "A", author: "B" }];
+    const result = sortBooks(single, mode);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("A");
+  });
 
   describe("sort by title", () => {
     // zh-Hant collator: Chinese stroke order first, then Latin.
@@ -120,16 +124,22 @@ describe("normalizeSortMode", () => {
     { input: "title-desc", expected: "title-desc" },
     { input: "author-asc", expected: "author-asc" },
     { input: "author-desc", expected: "author-desc" },
-  ])("passes canonical value '$input' through unchanged", ({ input, expected }) => {
-    expect(normalizeSortMode(input)).toBe(expected);
-  });
+  ])(
+    "passes canonical value '$input' through unchanged",
+    ({ input, expected }) => {
+      expect(normalizeSortMode(input)).toBe(expected);
+    },
+  );
 
   it.each<{ input: string; expected: BookSortMode }>([
     { input: "title", expected: "title-asc" },
     { input: "author", expected: "author-asc" },
-  ])("maps legacy alias '$input' to its -asc canonical form", ({ input, expected }) => {
-    expect(normalizeSortMode(input)).toBe(expected);
-  });
+  ])(
+    "maps legacy alias '$input' to its -asc canonical form",
+    ({ input, expected }) => {
+      expect(normalizeSortMode(input)).toBe(expected);
+    },
+  );
 
   it.each<{ label: string; input: unknown }>([
     { label: "unknown string", input: "bogus" },

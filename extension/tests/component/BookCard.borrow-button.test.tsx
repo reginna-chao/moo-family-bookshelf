@@ -72,7 +72,9 @@ describe("BookCard borrow button", () => {
       />,
     );
 
-    const btn = screen.getByRole("button", { name: "申請中" }) as HTMLButtonElement;
+    const btn = screen.getByRole("button", {
+      name: "申請中",
+    }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     // Pending state adds the --pending modifier class (styles the disabled look).
     expect(btn).toHaveClass("moo-borrow-btn");
@@ -120,7 +122,9 @@ describe("BookCard borrow button", () => {
       />,
     );
 
-    const result = fireEvent.click(screen.getByRole("button", { name: "申請借閱" }));
+    const result = fireEvent.click(
+      screen.getByRole("button", { name: "申請借閱" }),
+    );
 
     // fireEvent.click returns false when defaultPrevented
     expect(result).toBe(false);

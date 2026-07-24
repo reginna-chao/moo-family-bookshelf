@@ -25,12 +25,19 @@ function setupPlugin(mode: string, outDir = "dist"): PluginHooks {
 
 function lastWrittenManifest(): Record<string, unknown> {
   const calls = vi.mocked(writeFileSync).mock.calls;
-  return JSON.parse(String(calls[calls.length - 1][1])) as Record<string, unknown>;
+  return JSON.parse(String(calls[calls.length - 1][1])) as Record<
+    string,
+    unknown
+  >;
 }
 
 const PROD_MANIFEST = JSON.stringify({
   name: "墨家書櫃 | MooFamily Bookshelf",
-  icons: { "16": "icons/icon-16.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  icons: {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png",
+  },
   action: {
     default_icon: {
       "16": "icons/icon-16.png",
@@ -66,14 +73,18 @@ describe("devManifest", () => {
     vi.mocked(readFileSync).mockReturnValue(PROD_MANIFEST as never);
     const hooks = setupPlugin("remote");
     hooks.closeBundle();
-    expect(lastWrittenManifest().name).toBe("墨家書櫃 | MooFamily Bookshelf (dev)");
+    expect(lastWrittenManifest().name).toBe(
+      "墨家書櫃 | MooFamily Bookshelf (dev)",
+    );
   });
 
   it("appends (local) suffix when mode is development", () => {
     vi.mocked(readFileSync).mockReturnValue(PROD_MANIFEST as never);
     const hooks = setupPlugin("development");
     hooks.closeBundle();
-    expect(lastWrittenManifest().name).toBe("墨家書櫃 | MooFamily Bookshelf (local)");
+    expect(lastWrittenManifest().name).toBe(
+      "墨家書櫃 | MooFamily Bookshelf (local)",
+    );
   });
 
   it("keeps a single (dev) suffix after consecutive closeBundle calls", () => {
@@ -98,7 +109,9 @@ describe("devManifest", () => {
     vi.mocked(readFileSync).mockReturnValue(localManifest as never);
     const hooks = setupPlugin("remote");
     hooks.closeBundle();
-    expect(lastWrittenManifest().name).toBe("墨家書櫃 | MooFamily Bookshelf (dev)");
+    expect(lastWrittenManifest().name).toBe(
+      "墨家書櫃 | MooFamily Bookshelf (dev)",
+    );
   });
 
   it("rewrites both manifest.icons and action.default_icon", () => {
@@ -142,7 +155,9 @@ describe("devManifest", () => {
     hooks.closeBundle();
 
     expect(warnSpy).toHaveBeenCalledOnce();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("custom/icon-16.png"));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("custom/icon-16.png"),
+    );
 
     const icons = lastWrittenManifest().icons as Record<string, string>;
     expect(icons["16"]).toBe("custom/icon-16.png");
@@ -162,7 +177,9 @@ describe("devManifest", () => {
 
     const manifest = lastWrittenManifest();
     expect(manifest.name).toBe("X (dev)");
-    expect((manifest.icons as Record<string, string>)["16"]).toBe("icons-dev/icon-16.png");
+    expect((manifest.icons as Record<string, string>)["16"]).toBe(
+      "icons-dev/icon-16.png",
+    );
   });
 
   it("returns early when manifest.json cannot be read", () => {

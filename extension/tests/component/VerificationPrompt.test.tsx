@@ -27,8 +27,14 @@ function drawPattern(svg: Element, dotIndices: number[]) {
     clientY: Math.floor(index / 3) * SPACING + OFFSET,
   });
   vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
-    left: 0, top: 0, right: 200, bottom: 200,
-    width: 200, height: 200, x: 0, y: 0,
+    left: 0,
+    top: 0,
+    right: 200,
+    bottom: 200,
+    width: 200,
+    height: 200,
+    x: 0,
+    y: 0,
     toJSON: () => ({}),
   });
   fireEvent.mouseDown(svg, posOf(dotIndices[0]));
@@ -59,7 +65,9 @@ describe("VerificationPrompt", () => {
 
   it("renders OTP guidance text and no secret input for a genuine 'code' method", () => {
     renderPrompt({ method: "code" });
-    expect(screen.getByText(new RegExp(OTP_GUIDANCE_FRAGMENT))).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(OTP_GUIDANCE_FRAGMENT)),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText("PIN 碼輸入")).not.toBeInTheDocument();
     expect(screen.queryByText("請繪製解鎖圖形")).not.toBeInTheDocument();
   });
@@ -67,7 +75,9 @@ describe("VerificationPrompt", () => {
   it("renders the load-error message (not OTP guidance) when method is 'none'", () => {
     renderPrompt({ method: "none" });
     expect(screen.getByText(METHOD_LOAD_ERROR)).toBeInTheDocument();
-    expect(screen.queryByText(new RegExp(OTP_GUIDANCE_FRAGMENT))).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(new RegExp(OTP_GUIDANCE_FRAGMENT)),
+    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("PIN 碼輸入")).not.toBeInTheDocument();
     expect(screen.queryByText("請繪製解鎖圖形")).not.toBeInTheDocument();
   });
@@ -76,7 +86,9 @@ describe("VerificationPrompt", () => {
     // methodError wins even if a stale method value is present.
     renderPrompt({ method: null, methodError: true });
     expect(screen.getByText(METHOD_LOAD_ERROR)).toBeInTheDocument();
-    expect(screen.queryByText(new RegExp(OTP_GUIDANCE_FRAGMENT))).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(new RegExp(OTP_GUIDANCE_FRAGMENT)),
+    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("PIN 碼輸入")).not.toBeInTheDocument();
     expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
   });
@@ -196,5 +208,20 @@ describe("VerificationPrompt", () => {
       />,
     );
     expect(container.firstElementChild).toHaveClass("moo-onboarding-view");
+  });
+
+  // The 返回 button was re-based on the shared `.moo-button` component class
+  // (full-width outline variant) instead of restating the button chrome in
+  // `.moo-onboarding-view__secondary`. jsdom does not apply the stylesheet, so
+  // the class list is the contract that keeps the shared base from being dropped.
+  it("opts the 返回 button into the shared full-width outline button base", () => {
+    renderPrompt({ method: "pin" });
+
+    const back = screen.getByText("返回");
+    expect(back).toHaveClass("moo-button");
+    expect(back).toHaveClass("moo-button--outline");
+    expect(back).toHaveClass("moo-button--block");
+    // The view-specific class is kept alongside the base (additive refactor).
+    expect(back).toHaveClass("moo-onboarding-view__secondary");
   });
 });

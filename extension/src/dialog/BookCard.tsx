@@ -34,16 +34,27 @@ interface BorrowControlProps {
 }
 
 /** Left-side borrow control in the action row. Renders nothing when not borrowable. */
-function BorrowControl({ showBorrowButton, borrowRequestPending, onBorrowClick }: BorrowControlProps) {
+function BorrowControl({
+  showBorrowButton,
+  borrowRequestPending,
+  onBorrowClick,
+}: BorrowControlProps) {
   if (!showBorrowButton) return null;
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (!borrowRequestPending && onBorrowClick) onBorrowClick();
   };
-  const className = borrowRequestPending ? "moo-borrow-btn moo-borrow-btn--pending" : "moo-borrow-btn";
+  const className = borrowRequestPending
+    ? "moo-button moo-borrow-btn moo-borrow-btn--pending"
+    : "moo-button moo-borrow-btn";
   return (
-    <button type="button" disabled={borrowRequestPending} onClick={handleClick} className={className}>
+    <button
+      type="button"
+      disabled={borrowRequestPending}
+      onClick={handleClick}
+      className={className}
+    >
       {borrowRequestPending ? "申請中" : "申請借閱"}
     </button>
   );
@@ -58,7 +69,9 @@ export function FilterButton({
   active: boolean;
   onClick: () => void;
 }) {
-  const className = active ? "moo-filter-btn moo-filter-btn--active" : "moo-filter-btn";
+  const className = active
+    ? "moo-button moo-button--ghost-icon moo-button--pill moo-filter-btn moo-filter-btn--active"
+    : "moo-button moo-button--ghost-icon moo-button--pill moo-filter-btn";
   return (
     <button onClick={onClick} className={className}>
       {label}
@@ -85,7 +98,12 @@ export function BookCard({
 
   return (
     <div className="moo-book-card">
-      <a href={book.readmooUrl} target="_blank" rel="noopener noreferrer" className="moo-book-card__link">
+      <a
+        href={book.readmooUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="moo-book-card__link"
+      >
         <div className="moo-book-card__cover-wrap">
           {/* width/height are only an intrinsic-ratio hint (CLS placeholder); actual
               responsive sizing lives in the .moo-book-card__cover class. */}
@@ -98,14 +116,19 @@ export function BookCard({
             fallback={<div className="moo-book-card__cover-fallback" />}
           />
           {book.isUpdated === BoolFlag.TRUE && (
-            <span aria-label="新分享書籍" className="moo-book-card__updated-badge">
+            <span
+              aria-label="新分享書籍"
+              className="moo-book-card__updated-badge"
+            >
               更新
             </span>
           )}
         </div>
         <div className="moo-book-card__info">
           <span className="moo-book-card__title">{book.title}</span>
-          {book.author && <span className="moo-book-card__author">{book.author}</span>}
+          {book.author && (
+            <span className="moo-book-card__author">{book.author}</span>
+          )}
           <span className="moo-book-card__member">{book.memberName}</span>
         </div>
       </a>
@@ -117,7 +140,10 @@ export function BookCard({
         />
         <div className="moo-book-card__actions-end">
           {showFavorite && onFavoriteToggle && (
-            <FavoriteButton isFavorite={isFavorite} onFavoriteToggle={onFavoriteToggle} />
+            <FavoriteButton
+              isFavorite={isFavorite}
+              onFavoriteToggle={onFavoriteToggle}
+            />
           )}
           {showMenu && <OverflowMenu items={menuItems} tone="plain" />}
         </div>

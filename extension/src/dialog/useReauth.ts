@@ -91,7 +91,8 @@ export function useReauth(
         ]);
         const userId = stored[USER_ID_KEY] as string | undefined;
         const familyId = stored[FAMILY_ID_KEY] as string | undefined;
-        const displayName = (stored[DISPLAY_NAME_KEY] as string | undefined) ?? "";
+        const displayName =
+          (stored[DISPLAY_NAME_KEY] as string | undefined) ?? "";
         if (!userId || !familyId) {
           // Storage lacks the identity needed to re-join, so no prompt can be
           // shown. Release the latch the client set before invoking us —

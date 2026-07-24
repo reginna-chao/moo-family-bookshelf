@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, renderHook } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  renderHook,
+} from "@testing-library/react";
 import { useRef, createRef, type RefObject } from "react";
 import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 
@@ -274,7 +280,9 @@ describe("useDismissableMenu", () => {
 
       // bubbles: false + composed: false mirrors a real element scroll; this
       // event never reaches window, so only the ShadowRoot listener can catch it.
-      innerScrollContainer.dispatchEvent(new Event("scroll", { bubbles: false }));
+      innerScrollContainer.dispatchEvent(
+        new Event("scroll", { bubbles: false }),
+      );
 
       expect(onClose).toHaveBeenCalledTimes(1);
     });
@@ -320,7 +328,9 @@ describe("useDismissableMenu", () => {
       view.unmount();
       onClose.mockClear();
 
-      innerScrollContainer.dispatchEvent(new Event("scroll", { bubbles: false }));
+      innerScrollContainer.dispatchEvent(
+        new Event("scroll", { bubbles: false }),
+      );
 
       expect(onClose).not.toHaveBeenCalled();
     });
@@ -332,7 +342,9 @@ describe("useDismissableMenu", () => {
       view.rerender({ isOpen: false });
       onClose.mockClear();
 
-      innerScrollContainer.dispatchEvent(new Event("scroll", { bubbles: false }));
+      innerScrollContainer.dispatchEvent(
+        new Event("scroll", { bubbles: false }),
+      );
 
       expect(onClose).not.toHaveBeenCalled();
     });

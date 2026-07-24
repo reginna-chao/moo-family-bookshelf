@@ -18,7 +18,9 @@ function createMockApiClient(): ApiClient {
   } as unknown as ApiClient;
 }
 
-function makeOptions(overrides: Partial<UseBookSyncOptions> = {}): UseBookSyncOptions {
+function makeOptions(
+  overrides: Partial<UseBookSyncOptions> = {},
+): UseBookSyncOptions {
   return {
     userId: "user-123",
     apiClient: createMockApiClient(),
@@ -127,7 +129,10 @@ describe("useBookSync", () => {
           isShared: BoolFlag.FALSE,
         },
       ];
-      vi.mocked(syncBooks).mockResolvedValue({ success: true, books: mockBooks });
+      vi.mocked(syncBooks).mockResolvedValue({
+        success: true,
+        books: mockBooks,
+      });
 
       const options = makeOptions();
       const { result } = renderHook(() => useBookSync(options));
@@ -145,7 +150,9 @@ describe("useBookSync", () => {
           apiClient: options.apiClient,
         }),
       );
-      expect(vi.mocked(syncBooks).mock.calls[0][0]).toHaveProperty("onProgress");
+      expect(vi.mocked(syncBooks).mock.calls[0][0]).toHaveProperty(
+        "onProgress",
+      );
       expect(result.current.lastSyncBooks).toEqual(mockBooks);
       expect(result.current.autoSyncDone).toBe(true);
     });
@@ -159,7 +166,10 @@ describe("useBookSync", () => {
 
       let resolveSync: (value: { success: boolean; books: never[] }) => void;
       vi.mocked(syncBooks).mockImplementation(
-        () => new Promise((resolve) => { resolveSync = resolve; }),
+        () =>
+          new Promise((resolve) => {
+            resolveSync = resolve;
+          }),
       );
 
       const { result } = renderHook(() => useBookSync(makeOptions()));
@@ -307,7 +317,9 @@ describe("useBookSync", () => {
           apiClient: options.apiClient,
         }),
       );
-      expect(vi.mocked(syncBooks).mock.calls[0][0]).toHaveProperty("onProgress");
+      expect(vi.mocked(syncBooks).mock.calls[0][0]).toHaveProperty(
+        "onProgress",
+      );
     });
 
     it("transitions syncing -> done -> idle on success", async () => {
@@ -323,7 +335,10 @@ describe("useBookSync", () => {
           isShared: BoolFlag.FALSE,
         },
       ];
-      vi.mocked(syncBooks).mockResolvedValue({ success: true, books: mockBooks });
+      vi.mocked(syncBooks).mockResolvedValue({
+        success: true,
+        books: mockBooks,
+      });
 
       const { result } = renderHook(() => useBookSync(makeOptions()));
 
@@ -376,7 +391,11 @@ describe("useBookSync", () => {
 
     it("clears previous error before starting manual sync", async () => {
       vi.mocked(syncBooks)
-        .mockResolvedValueOnce({ success: false, books: [], error: "First error" })
+        .mockResolvedValueOnce({
+          success: false,
+          books: [],
+          error: "First error",
+        })
         .mockResolvedValueOnce({ success: true, books: [] });
 
       const { result } = renderHook(() => useBookSync(makeOptions()));
@@ -413,7 +432,8 @@ describe("useBookSync", () => {
     });
 
     it("passes onProgress that updates progressMessage during sync", async () => {
-      let capturedOnProgress: ((page: number, count: number) => void) | undefined;
+      let capturedOnProgress:
+        ((page: number, count: number) => void) | undefined;
       vi.mocked(syncBooks).mockImplementation(async (opts) => {
         capturedOnProgress = opts.onProgress;
         return { success: true, books: [] };

@@ -43,7 +43,9 @@ function renderSearchUi(initialQuery = ""): {
   `;
   const modal = document.querySelector<HTMLElement>(".search-modal")!;
   const input = modal.querySelector<HTMLInputElement>("input.form-control")!;
-  const submit = modal.querySelector<HTMLButtonElement>("button[type='submit']")!;
+  const submit = modal.querySelector<HTMLButtonElement>(
+    "button[type='submit']",
+  )!;
   return { modal, input, submit };
 }
 
@@ -151,7 +153,9 @@ describe("readmoo-search", () => {
 
   describe("constants", () => {
     it("exposes positive default timeouts", () => {
-      expect(READMOO_SEARCH_DEFAULTS.searchModalOpenTimeoutMs).toBeGreaterThan(0);
+      expect(READMOO_SEARCH_DEFAULTS.searchModalOpenTimeoutMs).toBeGreaterThan(
+        0,
+      );
       expect(READMOO_SEARCH_DEFAULTS.bookCardPollTimeoutMs).toBeGreaterThan(0);
       expect(READMOO_SEARCH_DEFAULTS.bookCardPollIntervalMs).toBeGreaterThan(0);
     });

@@ -23,15 +23,27 @@ describe("ViewModeToggle", () => {
   it("marks grid button as pressed when mode is 'grid'", () => {
     render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
 
-    expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("marks row button as pressed when mode is 'row'", () => {
     render(<ViewModeToggle mode="row" onChange={vi.fn()} />);
 
-    expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("calls onChange('grid') when grid button is clicked", () => {
@@ -53,7 +65,9 @@ describe("ViewModeToggle", () => {
   it("has a group role with accessible label", () => {
     render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
 
-    expect(screen.getByRole("group", { name: "家庭書櫃顯示模式" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: "家庭書櫃顯示模式" }),
+    ).toBeInTheDocument();
   });
 
   describe("responsive sizing", () => {
@@ -76,5 +90,28 @@ describe("ViewModeToggle", () => {
       expect(grid).toHaveClass("moo-view-toggle__btn");
       expect(grid).toHaveClass("moo-view-toggle__btn--mobile");
     });
+  });
+
+  // Borders / hover fill / focus ring / head-tail radii were folded into the
+  // shared `.moo-segmented__item` component class; `.moo-view-toggle__btn` now
+  // only pins the 40×40 icon box. jsdom does not apply the stylesheet, so the
+  // class list is the contract that keeps the shared base from being dropped.
+  describe("shared .moo-segmented__item class contract", () => {
+    it.each([
+      { label: "切換為網格檢視", position: "first" },
+      { label: "切換為列表檢視", position: "last" },
+    ])(
+      "opts the '$label' button into the shared segmented-item base as --$position",
+      ({ label, position }) => {
+        render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
+
+        const button = screen.getByLabelText(label);
+        expect(button).toHaveClass("moo-segmented__item");
+        expect(button).toHaveClass(`moo-segmented__item--${position}`);
+        // The component-specific classes stay alongside (additive refactor).
+        expect(button).toHaveClass("moo-view-toggle__btn");
+        expect(button).toHaveClass(`moo-view-toggle__btn--${position}`);
+      },
+    );
   });
 });

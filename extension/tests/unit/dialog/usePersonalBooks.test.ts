@@ -18,13 +18,13 @@ import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { scrapeBooks } from "@/content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
 
-function createMockApiClient(
-  overrides: Partial<ApiClient> = {},
-): ApiClient {
+function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
-    patchPersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true, applied: 0 } }),
+    patchPersonalBooks: vi
+      .fn()
+      .mockResolvedValue({ data: { ok: true, applied: 0 } }),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -47,7 +47,9 @@ function setupStorage(data: Record<string, unknown> = {}) {
         callback(result);
         return undefined as unknown as Promise<Record<string, unknown>>;
       }
-      return Promise.resolve(result) as unknown as Promise<Record<string, unknown>>;
+      return Promise.resolve(result) as unknown as Promise<
+        Record<string, unknown>
+      >;
     },
   );
   vi.mocked(chrome.storage.local.set).mockImplementation(
@@ -91,9 +93,20 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
   });
 
   it("never calls scrapeBooks during load (display scrape removed)", async () => {
-    setupStorage(setCache([
-      { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-    ]));
+    setupStorage(
+      setCache([
+        {
+          bookId: "c1",
+          title: "快取書一",
+          author: "A",
+          isbn: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isShared: BoolFlag.FALSE,
+        },
+      ]),
+    );
 
     const { result } = renderUsePersonalBooks();
     await waitForReady(result);
@@ -102,9 +115,20 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
   });
 
   it("shows books from cache when cache is present", async () => {
-    setupStorage(setCache([
-      { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.TRUE },
-    ]));
+    setupStorage(
+      setCache([
+        {
+          bookId: "c1",
+          title: "快取書一",
+          author: "A",
+          isbn: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isShared: BoolFlag.TRUE,
+        },
+      ]),
+    );
 
     const { result } = renderUsePersonalBooks();
     await waitForReady(result);
@@ -117,12 +141,36 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
 
   it("reconciles cache share flags against the server (API wins for known books)", async () => {
     // Cache says c1 is NOT shared; server says it IS shared → API wins.
-    setupStorage(setCache([
-      { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-    ]));
+    setupStorage(
+      setCache([
+        {
+          bookId: "c1",
+          title: "快取書一",
+          author: "A",
+          isbn: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isShared: BoolFlag.FALSE,
+        },
+      ]),
+    );
     const client = createMockApiClient({
       getPersonalBooks: vi.fn().mockResolvedValue({
-        data: { books: [{ bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.TRUE }] },
+        data: {
+          books: [
+            {
+              bookId: "c1",
+              title: "快取書一",
+              author: "A",
+              isbn: "",
+              coverUrl: "",
+              readmooUrl: "",
+              category: "",
+              isShared: BoolFlag.TRUE,
+            },
+          ],
+        },
       }),
     });
 
@@ -137,7 +185,20 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
     setupStorage(); // no cache
     const client = createMockApiClient({
       getPersonalBooks: vi.fn().mockResolvedValue({
-        data: { books: [{ bookId: "api-1", title: "API 書", author: "B", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE }] },
+        data: {
+          books: [
+            {
+              bookId: "api-1",
+              title: "API 書",
+              author: "B",
+              isbn: "",
+              coverUrl: "",
+              readmooUrl: "",
+              category: "",
+              isShared: BoolFlag.FALSE,
+            },
+          ],
+        },
       }),
     });
 
@@ -173,7 +234,9 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
     let resolveApi: (v: { data: null }) => void;
     const client = createMockApiClient({
       getPersonalBooks: vi.fn().mockReturnValue(
-        new Promise((resolve) => { resolveApi = resolve; }),
+        new Promise((resolve) => {
+          resolveApi = resolve;
+        }),
       ),
     });
 
@@ -195,9 +258,20 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
   });
 
   it("merges newly synced books into the displayed list once ready", async () => {
-    setupStorage(setCache([
-      { bookId: "c1", title: "快取書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-    ]));
+    setupStorage(
+      setCache([
+        {
+          bookId: "c1",
+          title: "快取書一",
+          author: "A",
+          isbn: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isShared: BoolFlag.FALSE,
+        },
+      ]),
+    );
 
     const { result, rerender } = renderUsePersonalBooks();
     await waitForReady(result);
@@ -207,7 +281,16 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     act(() => {
       rerender({
         lastSyncBooks: [
-          { bookId: "new-1", title: "新書", author: "C", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+          {
+            bookId: "new-1",
+            title: "新書",
+            author: "C",
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: BoolFlag.FALSE,
+          },
         ],
       });
     });
@@ -224,7 +307,16 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     act(() => {
       rerender({
         lastSyncBooks: [
-          { bookId: "new-1", title: "新書", author: "C", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+          {
+            bookId: "new-1",
+            title: "新書",
+            author: "C",
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: BoolFlag.FALSE,
+          },
         ],
       });
     });
@@ -235,9 +327,20 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
 
   it("does NOT overwrite an unsaved (dirty) toggle when sync books arrive (save-before-sync, invariant 3)", async () => {
     // Baseline: server-known book b1, currently NOT shared.
-    setupStorage(setCache([
-      { bookId: "b1", title: "書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-    ]));
+    setupStorage(
+      setCache([
+        {
+          bookId: "b1",
+          title: "書一",
+          author: "A",
+          isbn: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isShared: BoolFlag.FALSE,
+        },
+      ]),
+    );
 
     const { result, rerender } = renderUsePersonalBooks();
     await waitForReady(result);
@@ -247,9 +350,9 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
       result.current.handleToggle("b1");
     });
     expect(result.current.dirtyBookIds.has("b1")).toBe(true);
-    expect(
-      result.current.books.find((b) => b.bookId === "b1")?.isShared,
-    ).toBe(BoolFlag.TRUE);
+    expect(result.current.books.find((b) => b.bookId === "b1")?.isShared).toBe(
+      BoolFlag.TRUE,
+    );
 
     // Auto-sync completes and streams b1 back. mergeBooks merges scraped books
     // INTO the current (prev) list, keeping prev's isShared for known books, so
@@ -257,29 +360,49 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     act(() => {
       rerender({
         lastSyncBooks: [
-          { bookId: "b1", title: "書一（同步版）", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+          {
+            bookId: "b1",
+            title: "書一（同步版）",
+            author: "A",
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: BoolFlag.FALSE,
+          },
         ],
       });
     });
 
     await waitFor(() =>
-      expect(
-        result.current.books.find((b) => b.bookId === "b1")?.title,
-      ).toBe("書一（同步版）"),
+      expect(result.current.books.find((b) => b.bookId === "b1")?.title).toBe(
+        "書一（同步版）",
+      ),
     );
 
     // Critical: the unsaved toggle is preserved (still TRUE), and b1 stays dirty.
-    expect(
-      result.current.books.find((b) => b.bookId === "b1")?.isShared,
-    ).toBe(BoolFlag.TRUE);
+    expect(result.current.books.find((b) => b.bookId === "b1")?.isShared).toBe(
+      BoolFlag.TRUE,
+    );
     expect(result.current.dirtyBookIds.has("b1")).toBe(true);
   });
 
   it("keeps synced-in new books after handleCancel, but reverts the unsaved toggle (S1 behaviour a)", async () => {
     // Baseline: server-known book b1, currently NOT shared.
-    setupStorage(setCache([
-      { bookId: "b1", title: "書一", author: "A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-    ]));
+    setupStorage(
+      setCache([
+        {
+          bookId: "b1",
+          title: "書一",
+          author: "A",
+          isbn: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isShared: BoolFlag.FALSE,
+        },
+      ]),
+    );
 
     const { result, rerender } = renderUsePersonalBooks();
     await waitForReady(result);
@@ -291,7 +414,16 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     act(() => {
       rerender({
         lastSyncBooks: [
-          { bookId: "b2", title: "新書", author: "C", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
+          {
+            bookId: "b2",
+            title: "新書",
+            author: "C",
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: BoolFlag.FALSE,
+          },
         ],
       });
     });
@@ -304,9 +436,9 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
       result.current.handleToggle("b1");
     });
     expect(result.current.dirtyBookIds.has("b1")).toBe(true);
-    expect(
-      result.current.books.find((b) => b.bookId === "b1")?.isShared,
-    ).toBe(BoolFlag.TRUE);
+    expect(result.current.books.find((b) => b.bookId === "b1")?.isShared).toBe(
+      BoolFlag.TRUE,
+    );
 
     // User presses "取消變更" → restores from the (merged) cancel baseline.
     act(() => {
@@ -316,9 +448,9 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     // b2 (synced-in new book) must SURVIVE the cancel — it lives in the baseline.
     expect(result.current.books.map((b) => b.bookId)).toContain("b2");
     // b1's unsaved toggle must be reverted to its clean baseline value (FALSE).
-    expect(
-      result.current.books.find((b) => b.bookId === "b1")?.isShared,
-    ).toBe(BoolFlag.FALSE);
+    expect(result.current.books.find((b) => b.bookId === "b1")?.isShared).toBe(
+      BoolFlag.FALSE,
+    );
     // Dirty state fully cleared.
     expect(result.current.isDirty).toBe(false);
     expect(result.current.dirtyBookIds.size).toBe(0);
@@ -330,11 +462,40 @@ describe("usePersonalBooks — dirty Set", () => {
     vi.clearAllMocks();
     // Seed the baseline from cache (the hook is now cache-first, no scrape).
     // Handler tests toggle book-1 / book-2 against this 3-book set.
-    setupStorage(setCache([
-      { bookId: "book-1", title: "書一", author: "作者A", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-      { bookId: "book-2", title: "書二", author: "作者B", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-      { bookId: "book-3", title: "書三", author: "作者C", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: BoolFlag.FALSE },
-    ]));
+    setupStorage(
+      setCache([
+        {
+          bookId: "book-1",
+          title: "書一",
+          author: "作者A",
+          isbn: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isShared: BoolFlag.FALSE,
+        },
+        {
+          bookId: "book-2",
+          title: "書二",
+          author: "作者B",
+          isbn: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isShared: BoolFlag.FALSE,
+        },
+        {
+          bookId: "book-3",
+          title: "書三",
+          author: "作者C",
+          isbn: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isShared: BoolFlag.FALSE,
+        },
+      ]),
+    );
   });
 
   it("starts with empty dirty set and isDirty=false", async () => {
@@ -533,7 +694,11 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
   });
 
   it("PATCHes only the dirty book when all dirty books are server-known", async () => {
-    const client = clientWithServerBooks([makeBook("b1"), makeBook("b2"), makeBook("b3")]);
+    const client = clientWithServerBooks([
+      makeBook("b1"),
+      makeBook("b2"),
+      makeBook("b3"),
+    ]);
     const { result } = renderUsePersonalBooks(client);
     await waitForReady(result);
 
@@ -552,7 +717,11 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
   });
 
   it("PATCH changes array contains only dirty books (not untouched ones)", async () => {
-    const client = clientWithServerBooks([makeBook("b1"), makeBook("b2"), makeBook("b3")]);
+    const client = clientWithServerBooks([
+      makeBook("b1"),
+      makeBook("b2"),
+      makeBook("b3"),
+    ]);
     const { result } = renderUsePersonalBooks(client);
     await waitForReady(result);
 
@@ -639,9 +808,9 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
 
   it("keeps dirty state and surfaces error when PATCH fails", async () => {
     const client = clientWithServerBooks([makeBook("b1")], {
-      patchPersonalBooks: vi
-        .fn()
-        .mockResolvedValue({ error: { code: "BOOM", message: "patch failed" } }),
+      patchPersonalBooks: vi.fn().mockResolvedValue({
+        error: { code: "BOOM", message: "patch failed" },
+      }),
     });
     const { result } = renderUsePersonalBooks(client);
     await waitForReady(result);

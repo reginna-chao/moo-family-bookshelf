@@ -38,7 +38,9 @@ describe("FavoriteButton (Extension)", () => {
 
   it("calls onFavoriteToggle when clicked", () => {
     const onFavoriteToggle = vi.fn();
-    render(<FavoriteButton isFavorite={false} onFavoriteToggle={onFavoriteToggle} />);
+    render(
+      <FavoriteButton isFavorite={false} onFavoriteToggle={onFavoriteToggle} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "加入最愛" }));
     expect(onFavoriteToggle).toHaveBeenCalledTimes(1);
@@ -50,11 +52,16 @@ describe("FavoriteButton (Extension)", () => {
     render(
       // eslint-disable-next-line jsx-a11y/anchor-is-valid
       <a href="https://readmoo.com/x" onClick={onLinkClick}>
-        <FavoriteButton isFavorite={false} onFavoriteToggle={onFavoriteToggle} />
+        <FavoriteButton
+          isFavorite={false}
+          onFavoriteToggle={onFavoriteToggle}
+        />
       </a>,
     );
 
-    const result = fireEvent.click(screen.getByRole("button", { name: "加入最愛" }));
+    const result = fireEvent.click(
+      screen.getByRole("button", { name: "加入最愛" }),
+    );
 
     // defaultPrevented → fireEvent.click returns false.
     expect(result).toBe(false);

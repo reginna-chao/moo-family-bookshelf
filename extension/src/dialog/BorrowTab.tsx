@@ -83,7 +83,10 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     useState<BorrowRequest | null>(null);
   const [dontRemind, setDontRemind] = useState(false);
 
-  const ownerNameLookup = useMemo(() => buildOwnerNameLookup(members), [members]);
+  const ownerNameLookup = useMemo(
+    () => buildOwnerNameLookup(members),
+    [members],
+  );
 
   const updateStatus = useCallback(
     async (requestId: string, status: BorrowStatus) => {
@@ -187,7 +190,10 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
             "讀墨借出對話框未關閉，請重新嘗試",
           );
         }
-        await apiClient.updateBorrowStatus(request.requestId, BorrowStatus.LENT);
+        await apiClient.updateBorrowStatus(
+          request.requestId,
+          BorrowStatus.LENT,
+        );
         // Optimistic local update instead of re-fetch (KV eventual consistency).
         applyBorrowStatus(request.requestId, BorrowStatus.LENT);
       } catch (err) {
@@ -260,7 +266,10 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     setManualLendRequest(null);
   }, [manualLendRequest, dontRemind, dismiss, updateStatus]);
 
-  const closeManualLendDialog = useCallback(() => setManualLendRequest(null), []);
+  const closeManualLendDialog = useCallback(
+    () => setManualLendRequest(null),
+    [],
+  );
 
   const confirmManualLend = useCallback(() => {
     void handleConfirmManualLend();
@@ -320,7 +329,8 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
             label: "拒絕",
             variant: "danger",
             disabled: isUpdating,
-            onClick: () => void updateStatus(request.requestId, BorrowStatus.REJECTED),
+            onClick: () =>
+              void updateStatus(request.requestId, BorrowStatus.REJECTED),
           },
         ];
       }
@@ -330,7 +340,8 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
             label: isUpdating ? "處理中..." : "標記已歸還",
             variant: "secondary",
             disabled: isUpdating,
-            onClick: () => void updateStatus(request.requestId, BorrowStatus.RETURNED),
+            onClick: () =>
+              void updateStatus(request.requestId, BorrowStatus.RETURNED),
           },
         ];
       }
@@ -348,7 +359,8 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
             label: isUpdating ? "處理中..." : "取消申請",
             variant: "secondary",
             disabled: isUpdating,
-            onClick: () => void updateStatus(request.requestId, BorrowStatus.CANCELLED),
+            onClick: () =>
+              void updateStatus(request.requestId, BorrowStatus.CANCELLED),
           },
         ];
       }
@@ -358,7 +370,8 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
             label: isUpdating ? "處理中..." : "標記已歸還",
             variant: "secondary",
             disabled: isUpdating,
-            onClick: () => void updateStatus(request.requestId, BorrowStatus.RETURNED),
+            onClick: () =>
+              void updateStatus(request.requestId, BorrowStatus.RETURNED),
           },
         ];
       }
@@ -369,12 +382,15 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
 
   const resolveIncomingOtherParty = useCallback(
     (req: BorrowRequest) =>
-      req.borrowerName || ownerNameLookup.get(req.borrowerId) || req.borrowerId.slice(0, 8),
+      req.borrowerName ||
+      ownerNameLookup.get(req.borrowerId) ||
+      req.borrowerId.slice(0, 8),
     [ownerNameLookup],
   );
 
   const resolveOutgoingOtherParty = useCallback(
-    (req: BorrowRequest) => ownerNameLookup.get(req.ownerId) ?? req.ownerId.slice(0, 8),
+    (req: BorrowRequest) =>
+      ownerNameLookup.get(req.ownerId) ?? req.ownerId.slice(0, 8),
     [ownerNameLookup],
   );
 
@@ -394,7 +410,7 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
         </p>
         <button
           onClick={() => void refreshBorrowRequests()}
-          className="moo-borrow-tab__state-retry"
+          className="moo-button moo-button--outline moo-borrow-tab__state-retry"
         >
           重試
         </button>
@@ -426,7 +442,9 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
       />
       {picker && (
         <ReadmooMemberPicker
-          borrowerName={picker.request.borrowerName || picker.request.borrowerId.slice(0, 8)}
+          borrowerName={
+            picker.request.borrowerName || picker.request.borrowerId.slice(0, 8)
+          }
           options={picker.options}
           saving={picker.saving}
           errorMessage={picker.errorMessage}

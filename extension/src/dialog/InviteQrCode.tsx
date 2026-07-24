@@ -20,7 +20,10 @@ export function InviteQrCode({ syncCode }: InviteQrCodeProps) {
       setError("");
       try {
         const QRCode = await import("qrcode");
-        const dataUrl = await QRCode.default.toDataURL(inviteUrl, { width: 200, margin: 2 });
+        const dataUrl = await QRCode.default.toDataURL(inviteUrl, {
+          width: 200,
+          margin: 2,
+        });
         if (!cancelled) {
           setQrDataUrl(dataUrl);
           setLoading(false);
@@ -44,7 +47,9 @@ export function InviteQrCode({ syncCode }: InviteQrCodeProps) {
     <div className="moo-invite-qr">
       <div className="moo-invite-qr__label">邀請 QR Code</div>
 
-      {loading && <div className="moo-invite-qr__loading">產生 QR Code 中...</div>}
+      {loading && (
+        <div className="moo-invite-qr__loading">產生 QR Code 中...</div>
+      )}
 
       {!loading && error && <div className="moo-invite-qr__error">{error}</div>}
 
@@ -59,7 +64,9 @@ export function InviteQrCode({ syncCode }: InviteQrCodeProps) {
         </div>
       )}
 
-      <div className="moo-invite-qr__hint">讓家人掃描此 QR Code 即可在手機上加入書櫃</div>
+      <div className="moo-invite-qr__hint">
+        讓家人掃描此 QR Code 即可在手機上加入書櫃
+      </div>
     </div>
   );
 }

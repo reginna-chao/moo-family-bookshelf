@@ -34,7 +34,13 @@ function buildCategories(books: { category: string }[]): CategoryOption[] {
     });
 }
 
-export function CategoryFilter({ books, value, onChange, open, onToggle }: CategoryFilterProps) {
+export function CategoryFilter({
+  books,
+  value,
+  onChange,
+  open,
+  onToggle,
+}: CategoryFilterProps) {
   const categories = React.useMemo(() => buildCategories(books), [books]);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -46,7 +52,7 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
 
   const isActive = value !== "";
   const triggerClass = [
-    "moo-category__trigger",
+    "moo-button moo-button--ghost-icon moo-button--icon moo-category__trigger",
     isMobile ? "moo-category__trigger--mobile" : "",
     isActive ? "moo-category__trigger--active" : "",
   ]
@@ -56,7 +62,9 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
     ? "moo-category__menu moo-category__menu--mobile"
     : "moo-category__menu";
   const optionClass = (selected: boolean) =>
-    selected ? "moo-category__option moo-category__option--selected" : "moo-category__option";
+    selected
+      ? "moo-category__option moo-category__option--selected"
+      : "moo-category__option";
 
   return (
     <div className="moo-category">
@@ -72,12 +80,20 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
         <SlidersHorizontal size={16} />
       </button>
       {open && (
-        <div ref={menuRef} className={menuClass} role="listbox" aria-label="分類選單">
+        <div
+          ref={menuRef}
+          className={menuClass}
+          role="listbox"
+          aria-label="分類選單"
+        >
           <button
             type="button"
             role="option"
             aria-selected={value === ""}
-            onClick={() => { onChange(""); onToggle(); }}
+            onClick={() => {
+              onChange("");
+              onToggle();
+            }}
             className={optionClass(value === "")}
           >
             <span>全部分類</span>
@@ -89,7 +105,10 @@ export function CategoryFilter({ books, value, onChange, open, onToggle }: Categ
               type="button"
               role="option"
               aria-selected={value === cat.value}
-              onClick={() => { onChange(cat.value); onToggle(); }}
+              onClick={() => {
+                onChange(cat.value);
+                onToggle();
+              }}
               className={optionClass(value === cat.value)}
             >
               <span>{cat.label}</span>

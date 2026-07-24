@@ -13,18 +13,18 @@ function mockSendMessage(
   getResponse: Record<string, unknown>,
   setResponse: Record<string, unknown> = { ok: true },
 ) {
-  vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    ((message: unknown) => {
-      const msg = message as Record<string, unknown>;
-      if (msg.type === "GET_FLOATING_ICON_SIZE") {
-        return Promise.resolve(getResponse);
-      }
-      if (msg.type === "SET_FLOATING_ICON_SIZE") {
-        return Promise.resolve(setResponse);
-      }
-      return Promise.resolve(undefined);
-    }) as typeof chrome.runtime.sendMessage,
-  );
+  vi.mocked(chrome.runtime.sendMessage).mockImplementation(((
+    message: unknown,
+  ) => {
+    const msg = message as Record<string, unknown>;
+    if (msg.type === "GET_FLOATING_ICON_SIZE") {
+      return Promise.resolve(getResponse);
+    }
+    if (msg.type === "SET_FLOATING_ICON_SIZE") {
+      return Promise.resolve(setResponse);
+    }
+    return Promise.resolve(undefined);
+  }) as typeof chrome.runtime.sendMessage);
 }
 
 describe("useFloatingIconSize", () => {
@@ -38,18 +38,22 @@ describe("useFloatingIconSize", () => {
     expect(result.current.size).toBe("medium");
   });
 
-  it.each(["small", "large"] as const)("reads '%s' from background on mount", async (size) => {
-    mockSendMessage({ size });
-    const { result } = renderHook(() => useFloatingIconSize());
-    await waitFor(() => {
-      expect(result.current.size).toBe(size);
-    });
-  });
+  it.each(["small", "large"] as const)(
+    "reads '%s' from background on mount",
+    async (size) => {
+      mockSendMessage({ size });
+      const { result } = renderHook(() => useFloatingIconSize());
+      await waitFor(() => {
+        expect(result.current.size).toBe(size);
+      });
+    },
+  );
 
   it("keeps 'medium' when the background message rejects", async () => {
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      (() => Promise.reject(new Error("background unavailable"))) as typeof chrome.runtime.sendMessage,
-    );
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation((() =>
+      Promise.reject(
+        new Error("background unavailable"),
+      )) as typeof chrome.runtime.sendMessage);
     const { result } = renderHook(() => useFloatingIconSize());
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
@@ -106,9 +110,13 @@ describe("useFloatingIconSize", () => {
       result.current.setSize("medium");
     });
 
-    const setCalls = vi.mocked(chrome.runtime.sendMessage).mock.calls.filter(
-      (call) => (call[0] as unknown as Record<string, unknown>).type === "SET_FLOATING_ICON_SIZE",
-    );
+    const setCalls = vi
+      .mocked(chrome.runtime.sendMessage)
+      .mock.calls.filter(
+        (call) =>
+          (call[0] as unknown as Record<string, unknown>).type ===
+          "SET_FLOATING_ICON_SIZE",
+      );
     expect(setCalls).toHaveLength(0);
   });
 });

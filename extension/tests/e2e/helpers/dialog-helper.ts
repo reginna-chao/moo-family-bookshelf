@@ -120,7 +120,9 @@ export async function waitForOnboarding(page: Page): Promise<void> {
     });
   } catch (e) {
     const html = await dialog.innerHTML().catch(() => "(unreadable)");
-    throw new Error(`waitForOnboarding failed. Dialog HTML:\n${html}\n\nOriginal: ${e}`);
+    throw new Error(
+      `waitForOnboarding failed. Dialog HTML:\n${html}\n\nOriginal: ${e}`,
+    );
   }
 }
 
@@ -158,10 +160,7 @@ export async function clickCreateFamily(page: Page): Promise<void> {
 /**
  * Enter a sync code and click "加入家庭公開書櫃".
  */
-export async function joinFamily(
-  page: Page,
-  syncCode: string,
-): Promise<void> {
+export async function joinFamily(page: Page, syncCode: string): Promise<void> {
   const dialog = page.locator(DIALOG_SELECTOR);
   await dialog.locator('input[placeholder="輸入家庭同步碼"]').fill(syncCode);
   await dialog.locator("button", { hasText: "加入家庭公開書櫃" }).click();
@@ -179,7 +178,9 @@ export async function getSyncCode(page: Page): Promise<string> {
     await codeEl.waitFor({ state: "visible", timeout: 15_000 });
   } catch (e) {
     const html = await dialog.innerHTML().catch(() => "(unreadable)");
-    throw new Error(`getSyncCode failed — sync code element not found.\nDialog HTML:\n${html}\n\nOriginal: ${e}`);
+    throw new Error(
+      `getSyncCode failed — sync code element not found.\nDialog HTML:\n${html}\n\nOriginal: ${e}`,
+    );
   }
   await revealSyncCode(dialog);
   return (await codeEl.textContent())?.trim() ?? "";
@@ -189,7 +190,9 @@ export async function getSyncCode(page: Page): Promise<string> {
  * Click the "顯示同步碼" eye button if present so the masked sync code becomes
  * readable. Safe to call even when the reveal button is absent.
  */
-async function revealSyncCode(dialog: ReturnType<Page["locator"]>): Promise<void> {
+async function revealSyncCode(
+  dialog: ReturnType<Page["locator"]>,
+): Promise<void> {
   const revealBtn = dialog.locator("button[aria-label='顯示同步碼']");
   if ((await revealBtn.count()) > 0) {
     await revealBtn.first().click();

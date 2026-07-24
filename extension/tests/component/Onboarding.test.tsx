@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Onboarding, OnboardingProps } from "@/dialog/Onboarding";
 import { BoolFlag, type ApiClient } from "@/api/client";
@@ -9,7 +15,10 @@ import { webcrypto } from "node:crypto";
 
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {
-    Object.defineProperty(globalThis, "crypto", { value: webcrypto, writable: true });
+    Object.defineProperty(globalThis, "crypto", {
+      value: webcrypto,
+      writable: true,
+    });
   }
 });
 
@@ -29,19 +38,31 @@ vi.mock("@/content/scraper", () => ({
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
-    lookupUser: vi.fn().mockResolvedValue({ data: { existingFamilyId: null, memberCount: 0 } }),
+    lookupUser: vi
+      .fn()
+      .mockResolvedValue({ data: { existingFamilyId: null, memberCount: 0 } }),
     createFamily: vi.fn().mockResolvedValue({
-      data: { familyId: "fam-123", members: ["user-1"], createdAt: "2026-01-01" },
+      data: {
+        familyId: "fam-123",
+        members: ["user-1"],
+        createdAt: "2026-01-01",
+      },
     }),
     joinFamily: vi.fn().mockResolvedValue({ data: { ok: true } }),
     leaveFamily: vi.fn(),
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
     getFamilyMembers: vi.fn().mockResolvedValue({
-      data: { familyId: "fam-123", members: ["user-1"], createdAt: "2026-01-01" },
+      data: {
+        familyId: "fam-123",
+        members: ["user-1"],
+        createdAt: "2026-01-01",
+      },
     }),
     getFamilyBookshelf: vi.fn(),
-    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
+    getVerifyMethod: vi
+      .fn()
+      .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
     setAuthToken: vi.fn(),
@@ -76,7 +97,10 @@ describe("Onboarding", () => {
 
     // Reset chrome.storage.local mock — handle both callback-based and promise-based calls
     vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+      (
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
         if (typeof callback === "function") {
           callback({});
         }
@@ -171,9 +195,7 @@ describe("Onboarding", () => {
 
     await waitFor(() => {
       expect(screen.getByText("發生錯誤")).toBeInTheDocument();
-      expect(
-        screen.getByText(/無法取得帳號信箱/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/無法取得帳號信箱/)).toBeInTheDocument();
     });
   });
 
@@ -403,7 +425,9 @@ describe("Onboarding", () => {
       await clickStartAndWait();
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
       });
 
       // Enter a valid sync code
@@ -435,7 +459,9 @@ describe("Onboarding", () => {
       await clickStartAndWait();
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
       });
 
       fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
@@ -464,7 +490,9 @@ describe("Onboarding", () => {
       await clickStartAndWait();
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
       });
 
       fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
@@ -529,7 +557,10 @@ describe("Onboarding", () => {
       });
 
       await waitFor(() => {
-        expect(onFamilyJoined).toHaveBeenCalledWith("fam-sync-fail", expect.any(String));
+        expect(onFamilyJoined).toHaveBeenCalledWith(
+          "fam-sync-fail",
+          expect.any(String),
+        );
       });
     });
   });
@@ -553,7 +584,9 @@ describe("Onboarding", () => {
       await clickStartAndWait();
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
       });
 
       // Enter a sync code with @host suffix
@@ -578,7 +611,9 @@ describe("Onboarding", () => {
           }),
         );
         // Also verify the API client endpoint was updated
-        expect(mockApi.setEndpoint).toHaveBeenCalledWith("https://custom.api.dev");
+        expect(mockApi.setEndpoint).toHaveBeenCalledWith(
+          "https://custom.api.dev",
+        );
       });
     });
   });
@@ -604,7 +639,9 @@ describe("Onboarding", () => {
       await clickStartAndWait();
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
       });
 
       fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
@@ -618,7 +655,10 @@ describe("Onboarding", () => {
 
       await waitFor(() => {
         // Despite sync failure, join succeeded so onFamilyJoined should be called
-        expect(onFamilyJoined).toHaveBeenCalledWith("abcd-efgh", expect.any(String));
+        expect(onFamilyJoined).toHaveBeenCalledWith(
+          "abcd-efgh",
+          expect.any(String),
+        );
       });
     });
   });
@@ -637,8 +677,15 @@ describe("Onboarding", () => {
 
     function setupCacheMock(cache: unknown[] | null) {
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const keyArr = Array.isArray(keys) ? keys : typeof keys === "string" ? [keys] : [];
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const keyArr = Array.isArray(keys)
+            ? keys
+            : typeof keys === "string"
+              ? [keys]
+              : [];
           const result: Record<string, unknown> = {};
           if (cache && keyArr.includes(PERSONAL_BOOKS_CACHE_KEY)) {
             result[PERSONAL_BOOKS_CACHE_KEY] = JSON.stringify(cache);
@@ -692,7 +739,9 @@ describe("Onboarding", () => {
       );
 
       // Cache should be removed after successful migration
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith([PERSONAL_BOOKS_CACHE_KEY]);
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+        PERSONAL_BOOKS_CACHE_KEY,
+      ]);
     });
 
     it("migrates cached books when joining a family", async () => {
@@ -714,7 +763,9 @@ describe("Onboarding", () => {
       await clickStartAndWait();
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
       });
 
       fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
@@ -743,7 +794,9 @@ describe("Onboarding", () => {
       );
 
       // Cache should be removed
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith([PERSONAL_BOOKS_CACHE_KEY]);
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+        PERSONAL_BOOKS_CACHE_KEY,
+      ]);
     });
 
     it("skips migration when no cache exists", async () => {
@@ -793,7 +846,9 @@ describe("Onboarding", () => {
           },
         }),
         // Make migration upload fail
-        updatePersonalBooks: vi.fn().mockRejectedValue(new Error("Upload failed")),
+        updatePersonalBooks: vi
+          .fn()
+          .mockRejectedValue(new Error("Upload failed")),
       });
 
       setupCacheMock(cachedBooks);
@@ -817,7 +872,9 @@ describe("Onboarding", () => {
       });
 
       // Cache should still be cleaned up even on failure
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith([PERSONAL_BOOKS_CACHE_KEY]);
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+        PERSONAL_BOOKS_CACHE_KEY,
+      ]);
     });
   });
 
@@ -844,7 +901,10 @@ describe("Onboarding", () => {
 
       // The early recovery in handleStart should fire and call onFamilyJoined
       await waitFor(() => {
-        expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", expect.any(String));
+        expect(onFamilyJoined).toHaveBeenCalledWith(
+          "fam-existing",
+          expect.any(String),
+        );
       });
 
       // Should have called joinFamily with the existing family (no verify secret opts)
@@ -924,9 +984,7 @@ describe("Onboarding", () => {
       await clickStartAndWait();
 
       await waitFor(() => {
-        expect(
-          screen.getByText("帳號：test@example.com"),
-        ).toBeInTheDocument();
+        expect(screen.getByText("帳號：test@example.com")).toBeInTheDocument();
       });
     });
 
@@ -973,7 +1031,6 @@ describe("Onboarding", () => {
         }),
       });
 
-
       renderOnboarding({ apiClient: mockApi });
 
       await clickStartAndWait();
@@ -996,9 +1053,7 @@ describe("Onboarding", () => {
       expect(
         screen.getByRole("button", { name: "確認重新同步" }),
       ).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: "返回" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
     });
 
     it("solo-recovery-confirm: '返回' goes back to recovery-choice", async () => {
@@ -1011,7 +1066,6 @@ describe("Onboarding", () => {
           error: { code: "FAIL", message: "recovery failed" },
         }),
       });
-
 
       renderOnboarding({ apiClient: mockApi });
 
@@ -1046,17 +1100,23 @@ describe("Onboarding", () => {
       // 1st call (tryAutoRecovery in handleStart) fails → recovery-choice
       // 2nd call (performSoloRecovery in handleRecoveryChoiceSkip) fails → solo-recovery-confirm
       // 3rd call (performSoloRecovery in handleSoloRecoveryConfirm) succeeds
-      const joinFamilyMock = vi.fn()
-        .mockResolvedValueOnce({ error: { code: "FAIL", message: "auto recovery failed" } })
-        .mockResolvedValueOnce({ error: { code: "FAIL", message: "solo recovery failed" } })
-        .mockResolvedValue({ data: { authToken: "tok-solo", expiresAt: 9999999999 } });
+      const joinFamilyMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          error: { code: "FAIL", message: "auto recovery failed" },
+        })
+        .mockResolvedValueOnce({
+          error: { code: "FAIL", message: "solo recovery failed" },
+        })
+        .mockResolvedValue({
+          data: { authToken: "tok-solo", expiresAt: 9999999999 },
+        });
       const mockApi = createMockApiClient({
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-confirm-solo", memberCount: 1 },
         }),
         joinFamily: joinFamilyMock,
       });
-
 
       renderOnboarding({ apiClient: mockApi, onFamilyJoined });
 
@@ -1130,7 +1190,9 @@ describe("Onboarding", () => {
       await clickStartAndWait();
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
       });
 
       fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {

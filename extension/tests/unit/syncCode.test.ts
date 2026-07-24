@@ -65,7 +65,9 @@ describe("decodeSyncCode", () => {
   });
 
   it("should accept old format with extra parts and @host", () => {
-    const result = decodeSyncCode("moo-abcd-1234-LONGKEY@my-worker.example.com");
+    const result = decodeSyncCode(
+      "moo-abcd-1234-LONGKEY@my-worker.example.com",
+    );
     expect(result).toEqual({
       familyId: "abcd-1234",
       apiHost: "my-worker.example.com",

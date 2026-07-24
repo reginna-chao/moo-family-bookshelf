@@ -21,13 +21,17 @@ describe("WelcomeView", () => {
     render(<WelcomeView onStart={() => {}} />);
 
     expect(screen.getByText("歡迎使用家庭書櫃")).toBeInTheDocument();
-    expect(screen.getByText("一鍵開始，自動同步你的讀墨帳號與書單。")).toBeInTheDocument();
+    expect(
+      screen.getByText("一鍵開始，自動同步你的讀墨帳號與書單。"),
+    ).toBeInTheDocument();
   });
 
   it("renders start button", () => {
     render(<WelcomeView onStart={() => {}} />);
 
-    expect(screen.getByRole("button", { name: "開始使用" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "開始使用" }),
+    ).toBeInTheDocument();
   });
 
   it("calls onStart when button is clicked", () => {
@@ -41,35 +45,53 @@ describe("WelcomeView", () => {
   it("renders privacy notice", () => {
     render(<WelcomeView onStart={() => {}} />);
 
-    expect(screen.getByText(/我們僅讀取你的帳號信箱用於生成匿名識別碼/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/我們僅讀取你的帳號信箱用於生成匿名識別碼/),
+    ).toBeInTheDocument();
   });
 
   it("renders '繼續使用' button when hasUsedBefore is true", () => {
     render(<WelcomeView onStart={() => {}} hasUsedBefore={true} />);
 
-    expect(screen.getByRole("button", { name: "繼續使用" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "開始使用" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "繼續使用" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "開始使用" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders recovery subtitle when hasUsedBefore is true", () => {
     render(<WelcomeView onStart={() => {}} hasUsedBefore={true} />);
 
-    expect(screen.getByText("偵測到你曾使用過家庭書櫃，請重新設定以繼續。")).toBeInTheDocument();
-    expect(screen.queryByText("一鍵開始，自動同步你的讀墨帳號與書單。")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("偵測到你曾使用過家庭書櫃，請重新設定以繼續。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("一鍵開始，自動同步你的讀墨帳號與書單。"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders default text when hasUsedBefore is false", () => {
     render(<WelcomeView onStart={() => {}} hasUsedBefore={false} />);
 
-    expect(screen.getByRole("button", { name: "開始使用" })).toBeInTheDocument();
-    expect(screen.getByText("一鍵開始，自動同步你的讀墨帳號與書單。")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "開始使用" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("一鍵開始，自動同步你的讀墨帳號與書單。"),
+    ).toBeInTheDocument();
   });
 
   it("renders default text when hasUsedBefore is undefined", () => {
     render(<WelcomeView onStart={() => {}} />);
 
-    expect(screen.getByRole("button", { name: "開始使用" })).toBeInTheDocument();
-    expect(screen.getByText("一鍵開始，自動同步你的讀墨帳號與書單。")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "開始使用" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("一鍵開始，自動同步你的讀墨帳號與書單。"),
+    ).toBeInTheDocument();
   });
 
   it("calls onStart when '繼續使用' button is clicked", () => {
@@ -110,7 +132,9 @@ describe("CreatedView", () => {
   it("shows copy button with default text", () => {
     render(<CreatedView {...defaultProps} copied={false} />);
 
-    expect(screen.getByRole("button", { name: "複製同步碼" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "複製同步碼" }),
+    ).toBeInTheDocument();
   });
 
   it("shows '已複製' when copied is true", () => {
@@ -195,7 +219,12 @@ describe("ErrorView", () => {
     // The red color moved from an inline style to the `--error` heading modifier
     // in styles.css. jsdom does not apply stylesheet rules, so assert the base
     // heading class plus the error modifier that carries the danger color.
-    render(<ErrorView errorMessage="測試錯誤" actions={[{ label: "重試", onClick: () => {} }]} />);
+    render(
+      <ErrorView
+        errorMessage="測試錯誤"
+        actions={[{ label: "重試", onClick: () => {} }]}
+      />,
+    );
 
     const heading = screen.getByText("發生錯誤");
     expect(heading).toBeInTheDocument();
@@ -204,13 +233,23 @@ describe("ErrorView", () => {
   });
 
   it("renders error message text", () => {
-    render(<ErrorView errorMessage="伺服器無回應" actions={[{ label: "重試", onClick: () => {} }]} />);
+    render(
+      <ErrorView
+        errorMessage="伺服器無回應"
+        actions={[{ label: "重試", onClick: () => {} }]}
+      />,
+    );
 
     expect(screen.getByText("伺服器無回應")).toBeInTheDocument();
   });
 
   it("renders single action button", () => {
-    render(<ErrorView errorMessage="錯誤" actions={[{ label: "重試", onClick: () => {} }]} />);
+    render(
+      <ErrorView
+        errorMessage="錯誤"
+        actions={[{ label: "重試", onClick: () => {} }]}
+      />,
+    );
 
     expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
     expect(screen.getAllByRole("button")).toHaveLength(1);
@@ -218,7 +257,9 @@ describe("ErrorView", () => {
 
   it("calls onClick when action button is clicked", () => {
     const onClick = vi.fn();
-    render(<ErrorView errorMessage="錯誤" actions={[{ label: "重試", onClick }]} />);
+    render(
+      <ErrorView errorMessage="錯誤" actions={[{ label: "重試", onClick }]} />,
+    );
 
     fireEvent.click(screen.getByText("重試"));
     expect(onClick).toHaveBeenCalledOnce();
@@ -237,7 +278,9 @@ describe("ErrorView", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "改用同步碼" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "改用同步碼" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
     expect(screen.getAllByRole("button")).toHaveLength(2);
   });
@@ -313,7 +356,9 @@ describe("IdleView", () => {
   it("renders create button", () => {
     render(<IdleView {...defaultProps} />);
 
-    expect(screen.getByRole("button", { name: "建立家庭公開書櫃" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "建立家庭公開書櫃" }),
+    ).toBeInTheDocument();
   });
 
   it("calls onCreate when create button clicked", () => {
@@ -328,25 +373,35 @@ describe("IdleView", () => {
     render(<IdleView {...defaultProps} />);
 
     expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "加入家庭公開書櫃" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "加入家庭公開書櫃" }),
+    ).toBeInTheDocument();
   });
 
   it("join button is disabled when sync code input is empty", () => {
     render(<IdleView {...defaultProps} syncCodeInput="" />);
 
-    expect(screen.getByRole("button", { name: "加入家庭公開書櫃" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "加入家庭公開書櫃" }),
+    ).toBeDisabled();
   });
 
   it("join button is enabled when sync code input has text", () => {
     render(<IdleView {...defaultProps} syncCodeInput="moo-test-code" />);
 
-    expect(screen.getByRole("button", { name: "加入家庭公開書櫃" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "加入家庭公開書櫃" }),
+    ).toBeEnabled();
   });
 
   it("calls onJoin when join button clicked", () => {
     const onJoin = vi.fn();
     render(
-      <IdleView {...defaultProps} syncCodeInput="moo-test-code" onJoin={onJoin} />,
+      <IdleView
+        {...defaultProps}
+        syncCodeInput="moo-test-code"
+        onJoin={onJoin}
+      />,
     );
 
     fireEvent.click(screen.getByText("加入家庭公開書櫃"));
@@ -368,15 +423,23 @@ describe("IdleView", () => {
   it("disables create button when isProcessing is true", () => {
     render(<IdleView {...defaultProps} isProcessing={true} />);
 
-    expect(screen.getByRole("button", { name: "建立家庭公開書櫃" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "建立家庭公開書櫃" }),
+    ).toBeDisabled();
   });
 
   it("disables join button when isProcessing is true", () => {
     render(
-      <IdleView {...defaultProps} syncCodeInput="moo-test" isProcessing={true} />,
+      <IdleView
+        {...defaultProps}
+        syncCodeInput="moo-test"
+        isProcessing={true}
+      />,
     );
 
-    expect(screen.getByRole("button", { name: "加入家庭公開書櫃" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "加入家庭公開書櫃" }),
+    ).toBeDisabled();
   });
 
   it("disables input when isProcessing is true", () => {
@@ -451,7 +514,10 @@ describe("onboarding-view wrapper class", () => {
 
   it("ErrorView renders the moo-onboarding-view wrapper as its root", () => {
     const { container } = render(
-      <ErrorView errorMessage="錯誤" actions={[{ label: "重試", onClick: () => {} }]} />,
+      <ErrorView
+        errorMessage="錯誤"
+        actions={[{ label: "重試", onClick: () => {} }]}
+      />,
     );
     expect(container.firstElementChild).toHaveClass("moo-onboarding-view");
   });

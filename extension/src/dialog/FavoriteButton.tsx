@@ -17,7 +17,10 @@ export interface FavoriteButtonProps {
  * Hover behaviour is CSS-driven (.moo-favorite-btn:hover): not-favorited shifts
  * grey → red-400 on hover, favorited stays solid red.
  */
-export function FavoriteButton({ isFavorite, onFavoriteToggle }: FavoriteButtonProps) {
+export function FavoriteButton({
+  isFavorite,
+  onFavoriteToggle,
+}: FavoriteButtonProps) {
   const label = isFavorite ? "取消最愛" : "加入最愛";
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -26,8 +29,8 @@ export function FavoriteButton({ isFavorite, onFavoriteToggle }: FavoriteButtonP
   };
 
   const className = isFavorite
-    ? "moo-favorite-btn moo-favorite-btn--active"
-    : "moo-favorite-btn";
+    ? "moo-button moo-button--ghost-icon moo-favorite-btn moo-favorite-btn--active"
+    : "moo-button moo-button--ghost-icon moo-favorite-btn";
 
   return (
     <button

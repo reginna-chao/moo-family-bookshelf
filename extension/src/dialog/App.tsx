@@ -44,7 +44,10 @@ interface AppProps {
   onPendingBorrowCountChange?: (count: number) => void;
 }
 
-export function App({ onViewChange, onPendingBorrowCountChange }: AppProps = {}) {
+export function App({
+  onViewChange,
+  onPendingBorrowCountChange,
+}: AppProps = {}) {
   const [view, setView] = useState<View>("loading");
   const [activeTab, setActiveTab] = useState<Tab>("family-shelf");
   const [familyId, setFamilyId] = useState<string | null>(null);
@@ -66,7 +69,9 @@ export function App({ onViewChange, onPendingBorrowCountChange }: AppProps = {})
   // Re-verification prompt: shown when a dead token can only be recovered by
   // re-supplying the user's PWA-login verification secret (Invariant 2). Wires
   // apiClient.onReauthRequired; the overlay renders on top of the main view.
-  const reauth = useReauth(apiClientRef.current, { onSuccess: handleReauthSuccess });
+  const reauth = useReauth(apiClientRef.current, {
+    onSuccess: handleReauthSuccess,
+  });
 
   // Listen for FAMILY_REMOVED from ApiClient when token refresh fails
   // (e.g., KV data lost after wrangler dev restart, or user removed from family)
@@ -105,9 +110,9 @@ export function App({ onViewChange, onPendingBorrowCountChange }: AppProps = {})
           readFamilyId(),
           browser.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY]),
           Promise.resolve(
-            browser.runtime.sendMessage({ type: "GET_API_ENDPOINT" }) as Promise<
-              { apiEndpoint?: string } | undefined
-            >,
+            browser.runtime.sendMessage({
+              type: "GET_API_ENDPOINT",
+            }) as Promise<{ apiEndpoint?: string } | undefined>,
           ).catch(() => undefined),
         ]);
         if (cancelled) return;
@@ -116,7 +121,9 @@ export function App({ onViewChange, onPendingBorrowCountChange }: AppProps = {})
           apiClientRef.current.setEndpoint(apiResult.apiEndpoint);
         }
         if (storageResult[AUTH_TOKEN_KEY]) {
-          apiClientRef.current.setAuthToken(storageResult[AUTH_TOKEN_KEY] as string);
+          apiClientRef.current.setAuthToken(
+            storageResult[AUTH_TOKEN_KEY] as string,
+          );
         }
         if (familyId && storageResult[USER_ID_KEY]) {
           setFamilyId(familyId);
@@ -268,15 +275,23 @@ function MainContent({
   onLeave,
   onPendingBorrowCountChange,
 }: MainContentProps) {
-  const { hasBookshelfUpdates, markBookshelfSeen, borrowRequests, borrowRequestsState } =
-    useFamilyData();
+  const {
+    hasBookshelfUpdates,
+    markBookshelfSeen,
+    borrowRequests,
+    borrowRequestsState,
+  } = useFamilyData();
   const isMobile = useIsMobile();
 
   // Lazy-mount tab panels: mount a heavy child on its first visit, keep it mounted after.
-  const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set<Tab>([activeTab]));
+  const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(
+    () => new Set<Tab>([activeTab]),
+  );
 
   useEffect(() => {
-    setMountedTabs((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+    setMountedTabs((prev) =>
+      prev.has(activeTab) ? prev : new Set(prev).add(activeTab),
+    );
   }, [activeTab]);
 
   const handleTabChange = useCallback(
@@ -306,10 +321,26 @@ function MainContent({
   }, [borrowRequestsState, incomingPendingCount, onPendingBorrowCountChange]);
 
   const tabs: Array<{ key: Tab; label: string; icon: React.ReactNode }> = [
-    { key: "family-shelf", label: "家庭書櫃", icon: <Library size={14} aria-hidden="true" /> },
-    { key: "personal-shelf", label: "個人書櫃", icon: <BookOpen size={14} aria-hidden="true" /> },
-    { key: "borrow", label: "借閱", icon: <Inbox size={14} aria-hidden="true" /> },
-    { key: "settings", label: "設定", icon: <Settings size={14} aria-hidden="true" /> },
+    {
+      key: "family-shelf",
+      label: "家庭書櫃",
+      icon: <Library size={14} aria-hidden="true" />,
+    },
+    {
+      key: "personal-shelf",
+      label: "個人書櫃",
+      icon: <BookOpen size={14} aria-hidden="true" />,
+    },
+    {
+      key: "borrow",
+      label: "借閱",
+      icon: <Inbox size={14} aria-hidden="true" />,
+    },
+    {
+      key: "settings",
+      label: "設定",
+      icon: <Settings size={14} aria-hidden="true" />,
+    },
   ];
 
   const tabsClass = isMobile ? "moo-tabs moo-tabs--mobile" : "moo-tabs";
@@ -359,16 +390,40 @@ function MainContent({
         })}
       </nav>
       <div className="moo-tab-panels">
-        <div id="panel-family-shelf" role="tabpanel" aria-labelledby="tab-family-shelf" className={panelClass(activeTab === "family-shelf")}>
+        <div
+          id="panel-family-shelf"
+          role="tabpanel"
+          aria-labelledby="tab-family-shelf"
+          className={panelClass(activeTab === "family-shelf")}
+        >
           {mountedTabs.has("family-shelf") && <FamilyShelf userId={userId} />}
         </div>
-        <div id="panel-personal-shelf" role="tabpanel" aria-labelledby="tab-personal-shelf" className={panelClass(activeTab === "personal-shelf")}>
-          {mountedTabs.has("personal-shelf") && <PersonalShelf userId={userId} apiClient={apiClient} />}
+        <div
+          id="panel-personal-shelf"
+          role="tabpanel"
+          aria-labelledby="tab-personal-shelf"
+          className={panelClass(activeTab === "personal-shelf")}
+        >
+          {mountedTabs.has("personal-shelf") && (
+            <PersonalShelf userId={userId} apiClient={apiClient} />
+          )}
         </div>
-        <div id="panel-borrow" role="tabpanel" aria-labelledby="tab-borrow" className={panelClass(activeTab === "borrow")}>
-          {mountedTabs.has("borrow") && <BorrowTab userId={userId} apiClient={apiClient} />}
+        <div
+          id="panel-borrow"
+          role="tabpanel"
+          aria-labelledby="tab-borrow"
+          className={panelClass(activeTab === "borrow")}
+        >
+          {mountedTabs.has("borrow") && (
+            <BorrowTab userId={userId} apiClient={apiClient} />
+          )}
         </div>
-        <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" className={panelClass(activeTab === "settings")}>
+        <div
+          id="panel-settings"
+          role="tabpanel"
+          aria-labelledby="tab-settings"
+          className={panelClass(activeTab === "settings")}
+        >
           {mountedTabs.has("settings") && (
             <FamilySettings
               familyId={familyId}
@@ -388,4 +443,3 @@ function MainContent({
 function panelClass(active: boolean): string {
   return active ? "moo-tab-panel moo-tab-panel--active" : "moo-tab-panel";
 }
-

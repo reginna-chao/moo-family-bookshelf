@@ -134,7 +134,9 @@ async function ensureButtonInjected(): Promise<void> {
   );
 }
 
-const getURLMock = browser.runtime.getURL as unknown as ReturnType<typeof vi.fn>;
+const getURLMock = browser.runtime.getURL as unknown as ReturnType<
+  typeof vi.fn
+>;
 
 /** Restores a per-test `browser.runtime.id` getter spy; null when none active. */
 let restoreContextValidity: (() => void) | null = null;

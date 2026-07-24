@@ -45,7 +45,11 @@ describe("ApiClient verification methods", () => {
       expect(result.data).toEqual({ method: "pin", prompted: 0 });
       expect(globalThis.fetch).toHaveBeenCalledWith(
         `${MOCK_ENDPOINT}/api/user/user-123/verify`,
-        expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer test-token" }) }),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: "Bearer test-token",
+          }),
+        }),
       );
     });
 
@@ -53,7 +57,10 @@ describe("ApiClient verification methods", () => {
       globalThis.fetch = mockFetchError("NOT_FOUND", "User not found", 404);
       const result = await client.getVerifyMethod("user-123");
 
-      expect(result.error).toEqual({ code: "NOT_FOUND", message: "User not found" });
+      expect(result.error).toEqual({
+        code: "NOT_FOUND",
+        message: "User not found",
+      });
     });
   });
 
@@ -69,7 +76,10 @@ describe("ApiClient verification methods", () => {
       const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(call[0]).toBe(`${MOCK_ENDPOINT}/api/user/user-123/verify`);
       expect(call[1].method).toBe("PUT");
-      expect(JSON.parse(call[1].body as string)).toEqual({ method: "pin", secret: "1234" });
+      expect(JSON.parse(call[1].body as string)).toEqual({
+        method: "pin",
+        secret: "1234",
+      });
     });
 
     it("calls PUT without secret for code method", async () => {
@@ -82,7 +92,10 @@ describe("ApiClient verification methods", () => {
 
     it("returns error on failure", async () => {
       globalThis.fetch = mockFetchError("INVALID_METHOD", "Invalid method");
-      const result = await client.setVerifyMethod("user-123", { method: "pin", secret: "12" });
+      const result = await client.setVerifyMethod("user-123", {
+        method: "pin",
+        secret: "12",
+      });
 
       expect(result.error?.code).toBe("INVALID_METHOD");
     });
@@ -101,7 +114,11 @@ describe("ApiClient verification methods", () => {
     });
 
     it("returns error on failure", async () => {
-      globalThis.fetch = mockFetchError("METHOD_NOT_SET", "Set verify method first", 400);
+      globalThis.fetch = mockFetchError(
+        "METHOD_NOT_SET",
+        "Set verify method first",
+        400,
+      );
       const result = await client.generateOtp("user-123");
 
       expect(result.error?.code).toBe("METHOD_NOT_SET");

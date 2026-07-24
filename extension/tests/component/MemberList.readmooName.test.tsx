@@ -7,9 +7,7 @@ const OWNER_ID = "user-owner123";
 const MEMBER_A = "user-membA456";
 const MEMBER_B = "user-membB789";
 
-function createMockApiClient(
-  overrides: Partial<ApiClient> = {},
-): ApiClient {
+function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     removeMember: vi.fn().mockResolvedValue({ data: { ok: true } }),
     transferOwnership: vi.fn().mockResolvedValue({ data: { ok: true } }),
@@ -55,7 +53,9 @@ describe("MemberList readmooName section (extension)", () => {
         },
       ],
     });
-    expect(screen.queryByText(/讀墨名稱：alice@readmoo/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/讀墨名稱：alice@readmoo/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/尚未記錄/)).not.toBeInTheDocument();
   });
 
@@ -81,7 +81,9 @@ describe("MemberList readmooName section (extension)", () => {
   it("shows '尚未記錄' hint when family has >=3 members and readmooName is unset", () => {
     renderMemberList();
     // Both Alice and Bob have canLend=TRUE and no readmooName → 2 hints
-    expect(screen.getAllByText(/尚未記錄（首次借出時自動建立）/)).toHaveLength(2);
+    expect(screen.getAllByText(/尚未記錄（首次借出時自動建立）/)).toHaveLength(
+      2,
+    );
   });
 
   it("does not show the readmooName section for a member whose canLend is FALSE", () => {
@@ -98,7 +100,9 @@ describe("MemberList readmooName section (extension)", () => {
       ],
     });
     // Alice has canLend FALSE → no readmoo row
-    expect(screen.queryByText(/讀墨名稱：alice@readmoo/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/讀墨名稱：alice@readmoo/),
+    ).not.toBeInTheDocument();
     // Bob still shows the unset hint
     expect(screen.getByText(/尚未記錄/)).toBeInTheDocument();
   });
@@ -116,7 +120,9 @@ describe("MemberList readmooName section (extension)", () => {
         { userId: MEMBER_B, displayName: "Bob", canLend: BoolFlag.TRUE },
       ],
     });
-    expect(screen.queryByText(/讀墨名稱：owner@readmoo/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/讀墨名稱：owner@readmoo/),
+    ).not.toBeInTheDocument();
   });
 
   it("does not render an <input> for editing readmooName (Wave J removes manual edit)", () => {
@@ -168,11 +174,9 @@ describe("MemberList readmooName section (extension)", () => {
     );
 
     await waitFor(() => {
-      expect(updateMemberSettings).toHaveBeenCalledWith(
-        "fam-123",
-        MEMBER_A,
-        { readmooName: null },
-      );
+      expect(updateMemberSettings).toHaveBeenCalledWith("fam-123", MEMBER_A, {
+        readmooName: null,
+      });
       expect(onMembersChanged).toHaveBeenCalled();
     });
   });
@@ -219,7 +223,9 @@ describe("MemberList readmooName section (extension)", () => {
       ],
     });
     // Section is gated on the canLend toggle, which only the owner sees
-    expect(screen.queryByText(/讀墨名稱：alice@readmoo/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/讀墨名稱：alice@readmoo/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/尚未記錄/)).not.toBeInTheDocument();
   });
 });

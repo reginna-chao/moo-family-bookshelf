@@ -4,7 +4,10 @@ import { webcrypto } from "node:crypto";
 
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {
-    Object.defineProperty(globalThis, "crypto", { value: webcrypto, writable: true });
+    Object.defineProperty(globalThis, "crypto", {
+      value: webcrypto,
+      writable: true,
+    });
   }
 });
 
@@ -157,12 +160,19 @@ describe("useOnboardingFlow", () => {
         return { recovered: true };
       });
 
-      const { result } = renderFlow(apiClient, createMockAutoSetup(), onFamilyJoined);
+      const { result } = renderFlow(
+        apiClient,
+        createMockAutoSetup(),
+        onFamilyJoined,
+      );
       await act(async () => {
         await result.current.handleStart();
       });
 
-      expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", expect.any(String));
+      expect(onFamilyJoined).toHaveBeenCalledWith(
+        "fam-existing",
+        expect.any(String),
+      );
     });
 
     it("falls back to 'recovery-choice' when auto-recovery fails", async () => {
@@ -201,7 +211,9 @@ describe("useOnboardingFlow", () => {
     });
 
     it("handleRecoveryChoiceSkip → tries solo recovery, then state 'solo-recovery-confirm' on failure", async () => {
-      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+        recovered: false,
+      });
       const { result } = await driveToRecoveryChoice();
 
       await act(async () => {
@@ -228,7 +240,9 @@ describe("useOnboardingFlow", () => {
     });
 
     it("handleSoloRecoveryBack → state 'recovery-choice'", async () => {
-      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+        recovered: false,
+      });
       const { result } = await driveToRecoveryChoice();
 
       await act(async () => {
@@ -248,7 +262,9 @@ describe("useOnboardingFlow", () => {
     /** Drive to solo-recovery-confirm by making handleRecoveryChoiceSkip's attempt fail */
     async function driveToSoloRecoveryConfirm() {
       // Make the first performSoloRecovery call (from handleRecoveryChoiceSkip) fail
-      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+        recovered: false,
+      });
       const driven = await driveToRecoveryChoice();
 
       await act(async () => {
@@ -278,7 +294,9 @@ describe("useOnboardingFlow", () => {
 
     it("sets state to 'error' when performSoloRecovery returns { recovered: false }", async () => {
       const { result } = await driveToSoloRecoveryConfirm();
-      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+        recovered: false,
+      });
 
       await act(async () => {
         await result.current.handleSoloRecoveryConfirm();
@@ -343,7 +361,9 @@ describe("useOnboardingFlow", () => {
     });
 
     it("returns to 'welcome' when called from 'solo-recovery-confirm'", async () => {
-      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+        recovered: false,
+      });
       const { result } = await driveToRecoveryChoice();
       await act(async () => {
         await result.current.handleRecoveryChoiceSkip();
@@ -398,7 +418,9 @@ describe("useOnboardingFlow", () => {
         lookupUser: vi.fn().mockResolvedValue({
           data: { existingFamilyId: "fam-existing", memberCount: 2 },
         }),
-        getVerifyMethod: vi.fn().mockResolvedValue({ data: { method, prompted: 0 } }),
+        getVerifyMethod: vi
+          .fn()
+          .mockResolvedValue({ data: { method, prompted: 0 } }),
       });
     }
 
@@ -443,7 +465,10 @@ describe("useOnboardingFlow", () => {
         await result.current.verify.submit("123456");
       });
 
-      expect(onFamilyJoined).toHaveBeenCalledWith("fam-existing", expect.any(String));
+      expect(onFamilyJoined).toHaveBeenCalledWith(
+        "fam-existing",
+        expect.any(String),
+      );
       const lastCall = vi.mocked(tryAutoRecovery).mock.calls.at(-1);
       expect(lastCall?.[0].verifySecret).toBe("123456");
     });
@@ -481,7 +506,9 @@ describe("useOnboardingFlow", () => {
         };
       });
       const api = createMockApiClient({
-        getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
+        getVerifyMethod: vi
+          .fn()
+          .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
       });
       const { result } = renderFlow(api, createMockAutoSetup(), onFamilyJoined);
 
@@ -502,7 +529,10 @@ describe("useOnboardingFlow", () => {
         await result.current.verify.submit("654321");
       });
 
-      expect(onFamilyJoined).toHaveBeenCalledWith("fam-joined", expect.any(String));
+      expect(onFamilyJoined).toHaveBeenCalledWith(
+        "fam-joined",
+        expect.any(String),
+      );
     });
 
     it("manual join: cancel returns to the idle screen", async () => {
@@ -512,7 +542,9 @@ describe("useOnboardingFlow", () => {
         errorMessage: "需要驗證",
       });
       const api = createMockApiClient({
-        getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
+        getVerifyMethod: vi
+          .fn()
+          .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
       });
       const { result } = renderFlow(api);
 
@@ -536,7 +568,9 @@ describe("useOnboardingFlow", () => {
 
     it("solo recovery: VERIFICATION_REQUIRED routes to verify-prompt", async () => {
       // Reach solo-recovery-confirm, then confirm with a verification failure.
-      vi.mocked(performSoloRecovery).mockResolvedValueOnce({ recovered: false });
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+        recovered: false,
+      });
       const { result } = await driveToRecoveryChoice(apiClientWithFamily());
       await act(async () => {
         await result.current.handleRecoveryChoiceSkip();
@@ -611,7 +645,9 @@ describe("useOnboardingFlow", () => {
 
     it("encodes the @host segment when a custom endpoint is configured", async () => {
       mockRemnantStorage({ localUserId: "u1", syncFamilyId: "fam-remnant" });
-      vi.mocked(encodeSyncCode).mockReturnValue("moo-fam-remnant@custom.example");
+      vi.mocked(encodeSyncCode).mockReturnValue(
+        "moo-fam-remnant@custom.example",
+      );
       const apiClient = createMockApiClient({
         getEndpoint: vi.fn().mockReturnValue("https://custom.example"),
       });
@@ -619,7 +655,9 @@ describe("useOnboardingFlow", () => {
       const { result } = renderFlow(apiClient);
 
       await waitFor(() => {
-        expect(result.current.syncCodeInput).toBe("moo-fam-remnant@custom.example");
+        expect(result.current.syncCodeInput).toBe(
+          "moo-fam-remnant@custom.example",
+        );
       });
       expect(encodeSyncCode).toHaveBeenCalledWith({
         familyId: "fam-remnant",

@@ -26,15 +26,23 @@ export interface PersonalShelfProps {
 }
 
 function toolButtonClass(isMobile: boolean, extra = ""): string {
-  const base = isMobile ? "moo-shelf__tool-btn moo-shelf__tool-btn--icon" : "moo-shelf__tool-btn";
+  const base = isMobile
+    ? "moo-button moo-button--outline moo-shelf__tool-btn moo-shelf__tool-btn--icon"
+    : "moo-button moo-button--outline moo-shelf__tool-btn";
   return extra ? `${base} ${extra}` : base;
 }
 
 function archiveTabClass(active: boolean): string {
-  return active ? "moo-shelf__archive-tab moo-shelf__archive-tab--active" : "moo-shelf__archive-tab";
+  return active
+    ? "moo-shelf__archive-tab moo-shelf__archive-tab--active"
+    : "moo-shelf__archive-tab";
 }
 
-export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProps) {
+export function PersonalShelf({
+  userId,
+  apiClient,
+  pageSize,
+}: PersonalShelfProps) {
   const isMobile = useIsMobile();
   const { members, familyId, applyBorrowStatus } = useFamilyData();
   const selfMember = members.find((m) => m.userId === userId);
@@ -44,7 +52,9 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [categoryOpen, setCategoryOpen] = useState(false);
-  const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
+  const [archiveView, setArchiveView] = useState<"active" | "archived">(
+    "active",
+  );
   const [syncArchived, setSyncArchived] = useState<number>(0);
   const [showPublicShare, setShowPublicShare] = useState(false);
   const { sort, setSort } = useBookSort("personal");
@@ -60,7 +70,13 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
     [applyBorrowStatus],
   );
 
-  const { syncStatus, syncError, triggerManualSync, lastSyncBooks, progressMessage } = useBookSync({
+  const {
+    syncStatus,
+    syncError,
+    triggerManualSync,
+    lastSyncBooks,
+    progressMessage,
+  } = useBookSync({
     userId,
     apiClient,
     familyId,
@@ -68,9 +84,17 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
   });
 
   const {
-    books, setBooks, status, setStatus, errorMessage,
-    isDirty, dirtyBookIds, markManyDirty,
-    handleToggle, handleSave, handleCancel: handleCancelBooks,
+    books,
+    setBooks,
+    status,
+    setStatus,
+    errorMessage,
+    isDirty,
+    dirtyBookIds,
+    markManyDirty,
+    handleToggle,
+    handleSave,
+    handleCancel: handleCancelBooks,
   } = usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName });
 
   useEffect(() => {
@@ -101,26 +125,40 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
 
   const resetSearchRef = useRef<() => void>(() => {});
 
-  const activeBooks = books.filter(b => b.isArchived !== BoolFlag.TRUE);
-  const archivedBooks = books.filter(b => b.isArchived === BoolFlag.TRUE);
-  const currentViewBooks = archiveView === "active" ? activeBooks : archivedBooks;
+  const activeBooks = books.filter((b) => b.isArchived !== BoolFlag.TRUE);
+  const archivedBooks = books.filter((b) => b.isArchived === BoolFlag.TRUE);
+  const currentViewBooks =
+    archiveView === "active" ? activeBooks : archivedBooks;
 
-  const statusFilteredBooks = statusFilter === "shared"
-    ? currentViewBooks.filter((b) => b.isShared === BoolFlag.TRUE)
-    : statusFilter === "not-shared"
-      ? currentViewBooks.filter((b) => b.isShared === BoolFlag.FALSE)
-      : currentViewBooks;
+  const statusFilteredBooks =
+    statusFilter === "shared"
+      ? currentViewBooks.filter((b) => b.isShared === BoolFlag.TRUE)
+      : statusFilter === "not-shared"
+        ? currentViewBooks.filter((b) => b.isShared === BoolFlag.FALSE)
+        : currentViewBooks;
 
-  const categoryFilteredBooks = filterByCategory(statusFilteredBooks, categoryFilter);
+  const categoryFilteredBooks = filterByCategory(
+    statusFilteredBooks,
+    categoryFilter,
+  );
 
   const { searchTerm, setSearchTerm, resetSearch, filteredItems, isFiltering } =
     useSearch(categoryFilteredBooks);
   resetSearchRef.current = resetSearch;
 
-  const sortedBooks = useMemo(() => sortBooks(filteredItems, sort), [filteredItems, sort]);
+  const sortedBooks = useMemo(
+    () => sortBooks(filteredItems, sort),
+    [filteredItems, sort],
+  );
 
-  const narrowingActive = searchTerm !== "" || statusFilter !== "all" || categoryFilter !== "";
-  const { visibleItems: displayedBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
+  const narrowingActive =
+    searchTerm !== "" || statusFilter !== "all" || categoryFilter !== "";
+  const {
+    visibleItems: displayedBooks,
+    hasMore,
+    loadMore,
+    reset: resetLoadMore,
+  } = useLoadMore({
     items: sortedBooks,
     narrowingActive,
     pageSize,
@@ -133,13 +171,16 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
     resetSearchRef.current();
   }, []);
 
-  const handleArchiveViewChange = useCallback((view: "active" | "archived") => {
-    setArchiveView(view);
-    setCategoryFilter("");
-    setCategoryOpen(false);
-    resetSearchRef.current();
-    resetLoadMore();
-  }, [resetLoadMore]);
+  const handleArchiveViewChange = useCallback(
+    (view: "active" | "archived") => {
+      setArchiveView(view);
+      setCategoryFilter("");
+      setCategoryOpen(false);
+      resetSearchRef.current();
+      resetLoadMore();
+    },
+    [resetLoadMore],
+  );
 
   const handleSelect = useCallback((bookId: string) => {
     setSelectedIds((prev) => {
@@ -150,13 +191,26 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
     });
   }, []);
 
-  const batchSetShared = useCallback((flag: BoolFlag) => {
-    setBooks((prev) => prev.map((b) => (selectedIds.has(b.bookId) ? { ...b, isShared: flag } : b)));
-    markManyDirty(selectedIds);
-    setSelectedIds(new Set());
-  }, [selectedIds, setBooks, markManyDirty]);
-  const handleBatchShare = useCallback(() => batchSetShared(BoolFlag.TRUE), [batchSetShared]);
-  const handleBatchHide = useCallback(() => batchSetShared(BoolFlag.FALSE), [batchSetShared]);
+  const batchSetShared = useCallback(
+    (flag: BoolFlag) => {
+      setBooks((prev) =>
+        prev.map((b) =>
+          selectedIds.has(b.bookId) ? { ...b, isShared: flag } : b,
+        ),
+      );
+      markManyDirty(selectedIds);
+      setSelectedIds(new Set());
+    },
+    [selectedIds, setBooks, markManyDirty],
+  );
+  const handleBatchShare = useCallback(
+    () => batchSetShared(BoolFlag.TRUE),
+    [batchSetShared],
+  );
+  const handleBatchHide = useCallback(
+    () => batchSetShared(BoolFlag.FALSE),
+    [batchSetShared],
+  );
 
   const handleCancel = useCallback(() => {
     handleCancelBooks();
@@ -174,7 +228,10 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
     return (
       <div className="moo-shelf__state">
         <p className="moo-shelf__state-error">{errorMessage}</p>
-        <button onClick={() => setStatus("ready")} className="moo-shelf__state-retry">
+        <button
+          onClick={() => setStatus("ready")}
+          className="moo-button moo-button--outline moo-shelf__state-retry"
+        >
           返回
         </button>
       </div>
@@ -182,18 +239,31 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
   }
 
   const isSyncing = syncStatus === "syncing";
-  const syncLabel = isSyncing ? "同步中..." : syncStatus === "done" ? "同步完成" : "同步書櫃";
-  const allVisibleSelected = displayedBooks.length > 0 && displayedBooks.every((b) => selectedIds.has(b.bookId));
+  const syncLabel = isSyncing
+    ? "同步中..."
+    : syncStatus === "done"
+      ? "同步完成"
+      : "同步書櫃";
+  const allVisibleSelected =
+    displayedBooks.length > 0 &&
+    displayedBooks.every((b) => selectedIds.has(b.bookId));
 
   const handleSelectAll = () => {
-    setSelectedIds(allVisibleSelected ? new Set() : new Set(displayedBooks.map((b) => b.bookId)));
+    setSelectedIds(
+      allVisibleSelected
+        ? new Set()
+        : new Set(displayedBooks.map((b) => b.bookId)),
+    );
   };
 
   return (
     <div className="moo-shelf">
       <div className="moo-shelf__header">
-        <h3 className="moo-shelf__heading">個人書櫃管理
-          <span className="moo-shelf__heading-count">({currentViewBooks.length} 本)</span>
+        <h3 className="moo-shelf__heading">
+          個人書櫃管理
+          <span className="moo-shelf__heading-count">
+            ({currentViewBooks.length} 本)
+          </span>
         </h3>
         <div className="moo-shelf__header-actions">
           <button
@@ -210,9 +280,15 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
             disabled={isSyncing}
             aria-label={syncLabel}
             title={syncLabel}
-            className={toolButtonClass(isMobile, isSyncing ? "moo-shelf__tool-btn--syncing" : "")}
+            className={toolButtonClass(
+              isMobile,
+              isSyncing ? "moo-shelf__tool-btn--syncing" : "",
+            )}
           >
-            <RefreshCw size={13} className={isSyncing ? "moo-spin" : undefined} />
+            <RefreshCw
+              size={13}
+              className={isSyncing ? "moo-spin" : undefined}
+            />
             {!isMobile && syncLabel}
           </button>
         </div>
@@ -228,12 +304,20 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
 
       {syncArchived === BoolFlag.TRUE && (
         <div role="tablist" className="moo-shelf__archive-tabs">
-          <button role="tab" aria-selected={archiveView === "active"}
-            onClick={() => handleArchiveViewChange("active")} className={archiveTabClass(archiveView === "active")}>
+          <button
+            role="tab"
+            aria-selected={archiveView === "active"}
+            onClick={() => handleArchiveViewChange("active")}
+            className={archiveTabClass(archiveView === "active")}
+          >
             未封存 ({activeBooks.length})
           </button>
-          <button role="tab" aria-selected={archiveView === "archived"}
-            onClick={() => handleArchiveViewChange("archived")} className={archiveTabClass(archiveView === "archived")}>
+          <button
+            role="tab"
+            aria-selected={archiveView === "archived"}
+            onClick={() => handleArchiveViewChange("archived")}
+            className={archiveTabClass(archiveView === "archived")}
+          >
             封存 ({archivedBooks.length})
           </button>
         </div>
@@ -243,20 +327,29 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
         <>
           <div className="moo-shelf__filter-row">
             <div className="moo-shelf__grow">
-              <StatusFilterBar value={statusFilter} onChange={handleStatusFilterChange} />
+              <StatusFilterBar
+                value={statusFilter}
+                onChange={handleStatusFilterChange}
+              />
             </div>
             <BookSortDropdown value={sort} onChange={setSort} />
           </div>
           <div className="moo-shelf__search-row">
             <div className="moo-shelf__grow">
               <SearchBar
-                value={searchTerm} onChange={setSearchTerm}
-                totalCount={categoryFilteredBooks.length} filteredCount={displayedBooks.length} isFiltering={isFiltering}
+                value={searchTerm}
+                onChange={setSearchTerm}
+                totalCount={categoryFilteredBooks.length}
+                filteredCount={displayedBooks.length}
+                isFiltering={isFiltering}
               />
             </div>
             <CategoryFilter
-              books={statusFilteredBooks} value={categoryFilter} onChange={setCategoryFilter}
-              open={categoryOpen} onToggle={() => setCategoryOpen(prev => !prev)}
+              books={statusFilteredBooks}
+              value={categoryFilter}
+              onChange={setCategoryFilter}
+              open={categoryOpen}
+              onToggle={() => setCategoryOpen((prev) => !prev)}
             />
           </div>
           <div className="moo-shelf__select-all-row">
@@ -288,14 +381,24 @@ export function PersonalShelf({ userId, apiClient, pageSize }: PersonalShelfProp
       </div>
 
       {hasMore && (
-        <button onClick={loadMore} className="moo-shelf__load-more">
-          載入更多（已顯示 {displayedBooks.length} / 共 {filteredItems.length} 本）
+        <button
+          onClick={loadMore}
+          className="moo-button moo-button--outline moo-button--block moo-shelf__load-more"
+        >
+          載入更多（已顯示 {displayedBooks.length} / 共 {filteredItems.length}{" "}
+          本）
         </button>
       )}
 
       <FloatingActionBar
-        selectedCount={selectedIds.size} isDirty={isDirty} isSaving={status === "saving"} isSaved={status === "saved"}
-        onBatchShare={handleBatchShare} onBatchHide={handleBatchHide} onCancel={handleCancel} onSave={handleSave}
+        selectedCount={selectedIds.size}
+        isDirty={isDirty}
+        isSaving={status === "saving"}
+        isSaved={status === "saved"}
+        onBatchShare={handleBatchShare}
+        onBatchHide={handleBatchHide}
+        onCancel={handleCancel}
+        onSave={handleSave}
       />
 
       {showPublicShare && (

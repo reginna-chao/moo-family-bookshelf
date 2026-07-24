@@ -25,7 +25,10 @@ describe("CategoryFilter", () => {
 
   it("renders nothing when all books share one category", () => {
     const { container } = render(
-      <CategoryFilter {...defaultProps} books={makeBooks(["奇幻冒險", "奇幻冒險"])} />,
+      <CategoryFilter
+        {...defaultProps}
+        books={makeBooks(["奇幻冒險", "奇幻冒險"])}
+      />,
     );
     expect(container.innerHTML).toBe("");
   });

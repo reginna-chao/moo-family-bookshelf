@@ -22,7 +22,10 @@ type SetupStep = "enter" | "confirm";
 function getDotCenter(index: number): { x: number; y: number } {
   const col = index % GRID_SIZE;
   const row = Math.floor(index / GRID_SIZE);
-  return { x: col * DOT_SPACING + DOT_OFFSET, y: row * DOT_SPACING + DOT_OFFSET };
+  return {
+    x: col * DOT_SPACING + DOT_OFFSET,
+    y: row * DOT_SPACING + DOT_OFFSET,
+  };
 }
 
 function getIndexFromPosition(x: number, y: number): number | null {
@@ -34,13 +37,20 @@ function getIndexFromPosition(x: number, y: number): number | null {
   return null;
 }
 
-export function PatternLock({ onComplete, mode, error, disabled = false }: PatternLockProps) {
+export function PatternLock({
+  onComplete,
+  mode,
+  error,
+  disabled = false,
+}: PatternLockProps) {
   const [selected, setSelected] = useState<number[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [setupStep, setSetupStep] = useState<SetupStep>("enter");
   const [firstPattern, setFirstPattern] = useState("");
   const [mismatchError, setMismatchError] = useState("");
-  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const svgRef = useRef<SVGSVGElement>(null);
 
   const reset = useCallback(() => {
@@ -133,7 +143,9 @@ export function PatternLock({ onComplete, mode, error, disabled = false }: Patte
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
-    const prevent = (e: TouchEvent) => { if (drawing) e.preventDefault(); };
+    const prevent = (e: TouchEvent) => {
+      if (drawing) e.preventDefault();
+    };
     svg.addEventListener("touchmove", prevent, { passive: false });
     return () => svg.removeEventListener("touchmove", prevent);
   }, [drawing]);
@@ -176,8 +188,13 @@ export function PatternLock({ onComplete, mode, error, disabled = false }: Patte
           return (
             <line
               key={`line-${i}`}
-              x1={prev.x} y1={prev.y} x2={curr.x} y2={curr.y}
-              stroke="#2563eb" strokeWidth={3} strokeLinecap="round"
+              x1={prev.x}
+              y1={prev.y}
+              x2={curr.x}
+              y2={curr.y}
+              stroke="#2563eb"
+              strokeWidth={3}
+              strokeLinecap="round"
             />
           );
         })}
@@ -186,8 +203,11 @@ export function PatternLock({ onComplete, mode, error, disabled = false }: Patte
           <line
             x1={getDotCenter(selected[selected.length - 1]).x}
             y1={getDotCenter(selected[selected.length - 1]).y}
-            x2={mousePos.x} y2={mousePos.y}
-            stroke="#93c5fd" strokeWidth={2} strokeLinecap="round"
+            x2={mousePos.x}
+            y2={mousePos.y}
+            stroke="#93c5fd"
+            strokeWidth={2}
+            strokeLinecap="round"
           />
         )}
         {/* Dots */}
@@ -197,7 +217,8 @@ export function PatternLock({ onComplete, mode, error, disabled = false }: Patte
           return (
             <circle
               key={`dot-${i}`}
-              cx={x} cy={y}
+              cx={x}
+              cy={y}
               r={isActive ? DOT_RADIUS : DOT_RADIUS * 0.6}
               fill={isActive ? "#2563eb" : "#cbd5e1"}
               stroke={isActive ? "#1d4ed8" : "none"}
@@ -207,7 +228,9 @@ export function PatternLock({ onComplete, mode, error, disabled = false }: Patte
           );
         })}
       </svg>
-      {displayError && <div className="moo-secret-entry__error">{displayError}</div>}
+      {displayError && (
+        <div className="moo-secret-entry__error">{displayError}</div>
+      )}
       {mode === "setup" && setupStep === "confirm" && (
         <button
           onClick={() => {
@@ -216,7 +239,7 @@ export function PatternLock({ onComplete, mode, error, disabled = false }: Patte
             reset();
             setMismatchError("");
           }}
-          className="moo-secret-entry__reset"
+          className="moo-button moo-button--link moo-secret-entry__reset"
         >
           重新設定
         </button>

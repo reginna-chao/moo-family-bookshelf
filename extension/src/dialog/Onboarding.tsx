@@ -4,7 +4,12 @@ import { DISPLAY_NAME_KEY } from "../constants";
 import { safeStorageGet } from "../storage/safeStorage";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { useAutoSetup } from "./useAutoSetup";
-import { WelcomeView, CreatedView, ErrorView, IdleView } from "./OnboardingViews";
+import {
+  WelcomeView,
+  CreatedView,
+  ErrorView,
+  IdleView,
+} from "./OnboardingViews";
 import type { ErrorAction } from "./OnboardingViews";
 import {
   RecoveryChoiceView,
@@ -47,7 +52,8 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isAutoSetupActive = autoSetup.phase !== "idle" && autoSetup.phase !== "error";
+  const isAutoSetupActive =
+    autoSetup.phase !== "idle" && autoSetup.phase !== "error";
 
   const overlayMessage =
     autoSetup.phase !== "idle" && autoSetup.phase !== "error"
@@ -61,7 +67,8 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
             : "";
 
   const effectiveState = autoSetup.phase === "error" ? "error" : flow.state;
-  const effectiveError = autoSetup.phase === "error" ? autoSetup.errorMessage : flow.errorMessage;
+  const effectiveError =
+    autoSetup.phase === "error" ? autoSetup.errorMessage : flow.errorMessage;
   const isProcessing =
     effectiveState === "creating" ||
     effectiveState === "joining" ||
@@ -77,13 +84,21 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
 
   const renderContent = () => {
     if (effectiveState === "welcome") {
-      return <WelcomeView onStart={flow.handleStart} hasUsedBefore={hasUsedBefore} />;
+      return (
+        <WelcomeView onStart={flow.handleStart} hasUsedBefore={hasUsedBefore} />
+      );
     }
     if (effectiveState === "error") {
       const actions =
         effectiveErrorActions.length > 0
           ? effectiveErrorActions
-          : [{ label: "重試", variant: "primary" as const, onClick: flow.handleRetry }];
+          : [
+              {
+                label: "重試",
+                variant: "primary" as const,
+                onClick: flow.handleRetry,
+              },
+            ];
       return <ErrorView errorMessage={effectiveError} actions={actions} />;
     }
     if (effectiveState === "created") {

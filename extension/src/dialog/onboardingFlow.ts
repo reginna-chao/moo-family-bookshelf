@@ -8,7 +8,13 @@
  */
 
 import browser from "webextension-polyfill";
-import { ApiClient, FamilyGroup, BookEntry, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import {
+  ApiClient,
+  FamilyGroup,
+  BookEntry,
+  PersonalBooks,
+  PERSONAL_BOOKS_SCHEMA_VERSION,
+} from "../api/client";
 import { decodeSyncCode, encodeSyncCode } from "../crypto/syncCode";
 import {
   DEFAULT_API_ENDPOINT,
@@ -30,11 +36,15 @@ export async function migratePersonalBooksCache(
   apiClient: ApiClient,
 ): Promise<void> {
   try {
-    const result = await browser.storage.local.get([PERSONAL_BOOKS_CACHE_KEY, DISPLAY_NAME_KEY]);
+    const result = await browser.storage.local.get([
+      PERSONAL_BOOKS_CACHE_KEY,
+      DISPLAY_NAME_KEY,
+    ]);
     const raw = result[PERSONAL_BOOKS_CACHE_KEY] as string | undefined;
     if (!raw) return;
 
-    const storedDisplayName = (result[DISPLAY_NAME_KEY] as string | undefined) ?? "";
+    const storedDisplayName =
+      (result[DISPLAY_NAME_KEY] as string | undefined) ?? "";
     const books = JSON.parse(raw) as BookEntry[];
     const personalBooks: PersonalBooks = {
       schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
@@ -106,14 +116,19 @@ export async function tryAutoRecovery(opts: {
     opts.familyId,
     opts.userId,
     opts.displayName,
-    opts.verifySecret !== undefined ? { verifySecret: opts.verifySecret } : undefined,
+    opts.verifySecret !== undefined
+      ? { verifySecret: opts.verifySecret }
+      : undefined,
   );
   if (joinRes.error) return { recovered: false, errorCode: joinRes.error.code };
 
   const joinData = joinRes.data;
 
   void Promise.resolve(
-    browser.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: opts.familyId }),
+    browser.runtime.sendMessage({
+      type: "SET_FAMILY_ID",
+      familyId: opts.familyId,
+    }),
   ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
@@ -133,7 +148,10 @@ export async function tryAutoRecovery(opts: {
     opts.apiClient.setAuthToken(joinData.authToken);
   }
 
-  await opts.autoSetup.syncBooks({ userId: opts.userId, apiClient: opts.apiClient });
+  await opts.autoSetup.syncBooks({
+    userId: opts.userId,
+    apiClient: opts.apiClient,
+  });
   opts.onFamilyJoined(opts.familyId, opts.userId);
   return { recovered: true };
 }
@@ -161,14 +179,19 @@ export async function performSoloRecovery(opts: {
     opts.familyId,
     opts.userId,
     opts.displayName,
-    opts.verifySecret !== undefined ? { verifySecret: opts.verifySecret } : undefined,
+    opts.verifySecret !== undefined
+      ? { verifySecret: opts.verifySecret }
+      : undefined,
   );
   if (joinRes.error) return { recovered: false, errorCode: joinRes.error.code };
 
   const joinData = joinRes.data;
 
   void Promise.resolve(
-    browser.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: opts.familyId }),
+    browser.runtime.sendMessage({
+      type: "SET_FAMILY_ID",
+      familyId: opts.familyId,
+    }),
   ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,
@@ -187,7 +210,10 @@ export async function performSoloRecovery(opts: {
     opts.apiClient.setAuthToken(joinData.authToken);
   }
 
-  await opts.autoSetup.syncBooks({ userId: opts.userId, apiClient: opts.apiClient });
+  await opts.autoSetup.syncBooks({
+    userId: opts.userId,
+    apiClient: opts.apiClient,
+  });
   opts.onFamilyJoined(opts.familyId, opts.userId);
   return { recovered: true };
 }
@@ -208,14 +234,18 @@ export async function createNewFamily(opts: {
   displayName: string;
   apiClient: ApiClient;
 }): Promise<CreateFamilyResult> {
-  const response = await opts.apiClient.createFamily(opts.userId, opts.displayName);
+  const response = await opts.apiClient.createFamily(
+    opts.userId,
+    opts.displayName,
+  );
   if (response.error) throw new Error(response.error.message);
   if (!response.data) throw new Error("伺服器未回傳資料");
 
   const data: FamilyGroup = response.data;
   const familyId = data.familyId;
 
-  const isCustomEndpoint = opts.apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
+  const isCustomEndpoint =
+    opts.apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
   const syncCode = encodeSyncCode({
     familyId,
     apiHost: isCustomEndpoint ? opts.apiClient.getEndpoint() : undefined,
@@ -242,7 +272,9 @@ export async function createNewFamily(opts: {
   }
 
   if (isCustomEndpoint) {
-    opts.apiClient.updateFamilyEndpoint(familyId, opts.apiClient.getEndpoint()).catch(() => {});
+    opts.apiClient
+      .updateFamilyEndpoint(familyId, opts.apiClient.getEndpoint())
+      .catch(() => {});
   }
 
   return { familyId, userId: opts.userId, syncCode, authToken: data.authToken };
@@ -291,7 +323,9 @@ export async function performJoin(opts: {
     decoded.familyId,
     opts.userId,
     opts.displayName,
-    opts.verifySecret !== undefined ? { verifySecret: opts.verifySecret } : undefined,
+    opts.verifySecret !== undefined
+      ? { verifySecret: opts.verifySecret }
+      : undefined,
   );
   if (response.error) {
     return {
@@ -304,7 +338,10 @@ export async function performJoin(opts: {
   const joinData = response.data;
 
   void Promise.resolve(
-    browser.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId: decoded.familyId }),
+    browser.runtime.sendMessage({
+      type: "SET_FAMILY_ID",
+      familyId: decoded.familyId,
+    }),
   ).catch(() => {});
   await persistJoinCredentials({
     userId: opts.userId,

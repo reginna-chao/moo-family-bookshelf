@@ -33,8 +33,9 @@ describe("buildUpdatesManifest", () => {
 
   it("builds the exact direct-install update_link for v1.5.0", () => {
     const version = "1.5.0";
-    const link = buildUpdatesManifest(version).addons[GECKO_ID_DIRECT].updates[0]
-      .update_link;
+    const link =
+      buildUpdatesManifest(version).addons[GECKO_ID_DIRECT].updates[0]
+        .update_link;
     expect(link).toBe(expectedUpdateLink(version));
     expect(link.endsWith("-direct-install.xpi")).toBe(true);
     // version is interpolated twice: in the release tag and the asset name.
@@ -44,8 +45,8 @@ describe("buildUpdatesManifest", () => {
   it.each(["1.5.0", "2.0.1"])(
     "interpolates version %s into both version field and update_link",
     (version) => {
-      const entry = buildUpdatesManifest(version).addons[GECKO_ID_DIRECT]
-        .updates[0];
+      const entry =
+        buildUpdatesManifest(version).addons[GECKO_ID_DIRECT].updates[0];
       expect(entry.version).toBe(version);
       expect(entry.update_link).toBe(expectedUpdateLink(version));
     },

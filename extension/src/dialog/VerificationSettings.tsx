@@ -18,9 +18,14 @@ const METHOD_LABELS: Record<VerifyMethod, string> = {
   none: "不設定驗證",
 };
 
-export function VerificationSettings({ userId, apiClient }: VerificationSettingsProps) {
+export function VerificationSettings({
+  userId,
+  apiClient,
+}: VerificationSettingsProps) {
   const [currentMethod, setCurrentMethod] = useState<VerifyMethod | null>(null);
-  const [selectedMethod, setSelectedMethod] = useState<VerifyMethod | null>(null);
+  const [selectedMethod, setSelectedMethod] = useState<VerifyMethod | null>(
+    null,
+  );
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
   const [showSetup, setShowSetup] = useState(false);
@@ -46,14 +51,19 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
       setLoading(false);
     }
     void load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [userId, apiClient]);
 
   // OTP countdown timer
   useEffect(() => {
     if (!otpExpiresAt) return;
     function tick() {
-      const remaining = Math.max(0, Math.floor(((otpExpiresAt ?? 0) - Date.now()) / 1000));
+      const remaining = Math.max(
+        0,
+        Math.floor(((otpExpiresAt ?? 0) - Date.now()) / 1000),
+      );
       setOtpCountdown(remaining);
       if (remaining <= 0) {
         setOtpCode(null);
@@ -63,7 +73,9 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
     }
     tick();
     timerRef.current = setInterval(tick, 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, [otpExpiresAt]);
 
   const handleSave = useCallback(
@@ -185,7 +197,7 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
           <button
             onClick={() => void handleSave("none")}
             disabled={saveState === "saving"}
-            className="moo-verify__none-confirm"
+            className="moo-button moo-button--warn moo-button--sm moo-verify__none-confirm"
           >
             {saveState === "saving" ? "儲存中..." : "確定不設定驗證"}
           </button>
@@ -203,7 +215,10 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
               </div>
             </div>
           ) : (
-            <button onClick={() => void handleGenerateOtp()} className="moo-verify__otp-generate">
+            <button
+              onClick={() => void handleGenerateOtp()}
+              className="moo-button moo-button--outline moo-button--sm moo-verify__otp-generate"
+            >
               產生驗證碼
             </button>
           )}
@@ -212,13 +227,19 @@ export function VerificationSettings({ userId, apiClient }: VerificationSettings
 
       {/* Save status */}
       {saveState === "saving" && !showNoneWarning && (
-        <div className="moo-verify__status moo-verify__status--saving">儲存中...</div>
+        <div className="moo-verify__status moo-verify__status--saving">
+          儲存中...
+        </div>
       )}
       {saveState === "saved" && (
-        <div className="moo-verify__status moo-verify__status--saved">已儲存</div>
+        <div className="moo-verify__status moo-verify__status--saved">
+          已儲存
+        </div>
       )}
       {saveState === "error" && !showSetup && (
-        <div className="moo-verify__status moo-verify__status--error">{saveError}</div>
+        <div className="moo-verify__status moo-verify__status--error">
+          {saveError}
+        </div>
       )}
     </div>
   );

@@ -271,13 +271,16 @@ describe("background service worker", () => {
       expect(response).toEqual({ size: "medium" });
     });
 
-    it.each(["small", "medium", "large", "icon"] as const)("returns '%s' when storage has '%s'", async (size) => {
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [FLOATING_ICON_SIZE_KEY]: size,
-      });
-      const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
-      expect(response).toEqual({ size });
-    });
+    it.each(["small", "medium", "large", "icon"] as const)(
+      "returns '%s' when storage has '%s'",
+      async (size) => {
+        vi.mocked(browser.storage.local.get).mockResolvedValue({
+          [FLOATING_ICON_SIZE_KEY]: size,
+        });
+        const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
+        expect(response).toEqual({ size });
+      },
+    );
 
     it("returns 'medium' when storage has invalid value", async () => {
       vi.mocked(browser.storage.local.get).mockResolvedValue({
@@ -289,16 +292,19 @@ describe("background service worker", () => {
   });
 
   describe("SET_FLOATING_ICON_SIZE", () => {
-    it.each(["small", "medium", "large", "icon"] as const)("writes '%s' to local storage and responds ok", async (size) => {
-      const response = await sendMessage({
-        type: "SET_FLOATING_ICON_SIZE",
-        size,
-      });
-      expect(response).toEqual({ ok: true });
-      expect(browser.storage.local.set).toHaveBeenCalledWith({
-        [FLOATING_ICON_SIZE_KEY]: size,
-      });
-    });
+    it.each(["small", "medium", "large", "icon"] as const)(
+      "writes '%s' to local storage and responds ok",
+      async (size) => {
+        const response = await sendMessage({
+          type: "SET_FLOATING_ICON_SIZE",
+          size,
+        });
+        expect(response).toEqual({ ok: true });
+        expect(browser.storage.local.set).toHaveBeenCalledWith({
+          [FLOATING_ICON_SIZE_KEY]: size,
+        });
+      },
+    );
 
     it.each(["huge", undefined, 42, ""])(
       "rejects invalid value '%s' without writing",
@@ -369,7 +375,10 @@ describe("background service worker", () => {
 
   describe("GET_BOOK_SORT", () => {
     it("returns 'default' when storage has no value for family", async () => {
-      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
+      const response = await sendMessage({
+        type: "GET_BOOK_SORT",
+        shelf: "family",
+      });
       expect(response).toEqual({ sort: "default" });
     });
 
@@ -377,7 +386,10 @@ describe("background service worker", () => {
       vi.mocked(browser.storage.local.get).mockResolvedValue({
         [FAMILY_SHELF_SORT_KEY]: "title-desc",
       });
-      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
+      const response = await sendMessage({
+        type: "GET_BOOK_SORT",
+        shelf: "family",
+      });
       expect(response).toEqual({ sort: "title-desc" });
     });
 
@@ -385,7 +397,10 @@ describe("background service worker", () => {
       vi.mocked(browser.storage.local.get).mockResolvedValue({
         [PERSONAL_SHELF_SORT_KEY]: "author-desc",
       });
-      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "personal" });
+      const response = await sendMessage({
+        type: "GET_BOOK_SORT",
+        shelf: "personal",
+      });
       expect(response).toEqual({ sort: "author-desc" });
     });
 
@@ -398,13 +413,19 @@ describe("background service worker", () => {
         vi.mocked(browser.storage.local.get).mockResolvedValue({
           [FAMILY_SHELF_SORT_KEY]: stored,
         });
-        const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
+        const response = await sendMessage({
+          type: "GET_BOOK_SORT",
+          shelf: "family",
+        });
         expect(response).toEqual({ sort: expected });
       },
     );
 
     it("returns 'default' for invalid shelf", async () => {
-      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "invalid" });
+      const response = await sendMessage({
+        type: "GET_BOOK_SORT",
+        shelf: "invalid",
+      });
       expect(response).toEqual({ sort: "default" });
     });
 
@@ -412,24 +433,43 @@ describe("background service worker", () => {
       vi.mocked(browser.storage.local.get).mockResolvedValue({
         [FAMILY_SHELF_SORT_KEY]: "bogus",
       });
-      const response = await sendMessage({ type: "GET_BOOK_SORT", shelf: "family" });
+      const response = await sendMessage({
+        type: "GET_BOOK_SORT",
+        shelf: "family",
+      });
       expect(response).toEqual({ sort: "default" });
     });
   });
 
   describe("SET_BOOK_SORT", () => {
     it.each(
-      (["default", "title-asc", "title-desc", "author-asc", "author-desc"] as const).flatMap(
-        (sort) => (["family", "personal"] as const).map((shelf) => ({ sort, shelf })),
+      (
+        [
+          "default",
+          "title-asc",
+          "title-desc",
+          "author-asc",
+          "author-desc",
+        ] as const
+      ).flatMap((sort) =>
+        (["family", "personal"] as const).map((shelf) => ({ sort, shelf })),
       ),
-    )("writes canonical '$sort' for '$shelf' to correct storage key", async ({ sort, shelf }) => {
-      const response = await sendMessage({ type: "SET_BOOK_SORT", shelf, sort });
-      expect(response).toEqual({ ok: true });
-      const expectedKey = shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
-      expect(browser.storage.local.set).toHaveBeenCalledWith({
-        [expectedKey]: sort,
-      });
-    });
+    )(
+      "writes canonical '$sort' for '$shelf' to correct storage key",
+      async ({ sort, shelf }) => {
+        const response = await sendMessage({
+          type: "SET_BOOK_SORT",
+          shelf,
+          sort,
+        });
+        expect(response).toEqual({ ok: true });
+        const expectedKey =
+          shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
+        expect(browser.storage.local.set).toHaveBeenCalledWith({
+          [expectedKey]: sort,
+        });
+      },
+    );
 
     it.each([
       { legacy: "title", stored: "title-asc" },
@@ -437,7 +477,11 @@ describe("background service worker", () => {
     ])(
       "accepts legacy value '$legacy' and writes normalized '$stored'",
       async ({ legacy, stored }) => {
-        const response = await sendMessage({ type: "SET_BOOK_SORT", shelf: "family", sort: legacy });
+        const response = await sendMessage({
+          type: "SET_BOOK_SORT",
+          shelf: "family",
+          sort: legacy,
+        });
         expect(response).toEqual({ ok: true });
         expect(browser.storage.local.set).toHaveBeenCalledWith({
           [FAMILY_SHELF_SORT_KEY]: stored,

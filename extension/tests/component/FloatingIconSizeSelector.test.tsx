@@ -14,17 +14,41 @@ describe("FloatingIconSizeSelector", () => {
     expect(screen.getByLabelText("大尺寸")).toBeInTheDocument();
   });
 
-  it.each<{ current: FloatingIconSize; pressed: string; notPressed: string[] }>([
-    { current: "icon", pressed: "僅圖示", notPressed: ["小尺寸", "中尺寸", "大尺寸"] },
-    { current: "small", pressed: "小尺寸", notPressed: ["僅圖示", "中尺寸", "大尺寸"] },
-    { current: "medium", pressed: "中尺寸", notPressed: ["僅圖示", "小尺寸", "大尺寸"] },
-    { current: "large", pressed: "大尺寸", notPressed: ["僅圖示", "小尺寸", "中尺寸"] },
-  ])("marks $current button as pressed", ({ current, pressed, notPressed }) => {
+  it.each<{ current: FloatingIconSize; pressed: string; notPressed: string[] }>(
+    [
+      {
+        current: "icon",
+        pressed: "僅圖示",
+        notPressed: ["小尺寸", "中尺寸", "大尺寸"],
+      },
+      {
+        current: "small",
+        pressed: "小尺寸",
+        notPressed: ["僅圖示", "中尺寸", "大尺寸"],
+      },
+      {
+        current: "medium",
+        pressed: "中尺寸",
+        notPressed: ["僅圖示", "小尺寸", "大尺寸"],
+      },
+      {
+        current: "large",
+        pressed: "大尺寸",
+        notPressed: ["僅圖示", "小尺寸", "中尺寸"],
+      },
+    ],
+  )("marks $current button as pressed", ({ current, pressed, notPressed }) => {
     render(<FloatingIconSizeSelector size={current} onChange={vi.fn()} />);
 
-    expect(screen.getByLabelText(pressed)).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText(pressed)).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     for (const label of notPressed) {
-      expect(screen.getByLabelText(label)).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByLabelText(label)).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
     }
   });
 
@@ -33,18 +57,23 @@ describe("FloatingIconSizeSelector", () => {
     { label: "小尺寸", expected: "small" },
     { label: "中尺寸", expected: "medium" },
     { label: "大尺寸", expected: "large" },
-  ])("calls onChange('$expected') when '$label' is clicked", ({ label, expected }) => {
-    const onChange = vi.fn();
-    render(<FloatingIconSizeSelector size="medium" onChange={onChange} />);
+  ])(
+    "calls onChange('$expected') when '$label' is clicked",
+    ({ label, expected }) => {
+      const onChange = vi.fn();
+      render(<FloatingIconSizeSelector size="medium" onChange={onChange} />);
 
-    fireEvent.click(screen.getByLabelText(label));
-    expect(onChange).toHaveBeenCalledWith(expected);
-  });
+      fireEvent.click(screen.getByLabelText(label));
+      expect(onChange).toHaveBeenCalledWith(expected);
+    },
+  );
 
   it("has a group role with accessible label", () => {
     render(<FloatingIconSizeSelector size="medium" onChange={vi.fn()} />);
 
-    expect(screen.getByRole("group", { name: "家庭書櫃按鈕大小" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: "家庭書櫃按鈕大小" }),
+    ).toBeInTheDocument();
   });
 
   // The segmented-control container clip (overflow: hidden) and per-segment
@@ -76,19 +105,59 @@ describe("FloatingIconSizeSelector", () => {
   );
 
   it.each<{ current: FloatingIconSize; active: string; inactive: string[] }>([
-    { current: "icon", active: "僅圖示", inactive: ["小尺寸", "中尺寸", "大尺寸"] },
-    { current: "small", active: "小尺寸", inactive: ["僅圖示", "中尺寸", "大尺寸"] },
-    { current: "medium", active: "中尺寸", inactive: ["僅圖示", "小尺寸", "大尺寸"] },
-    { current: "large", active: "大尺寸", inactive: ["僅圖示", "小尺寸", "中尺寸"] },
+    {
+      current: "icon",
+      active: "僅圖示",
+      inactive: ["小尺寸", "中尺寸", "大尺寸"],
+    },
+    {
+      current: "small",
+      active: "小尺寸",
+      inactive: ["僅圖示", "中尺寸", "大尺寸"],
+    },
+    {
+      current: "medium",
+      active: "中尺寸",
+      inactive: ["僅圖示", "小尺寸", "大尺寸"],
+    },
+    {
+      current: "large",
+      active: "大尺寸",
+      inactive: ["僅圖示", "小尺寸", "中尺寸"],
+    },
   ])(
     "highlights only the selected '$current' segment with the --active modifier",
     ({ current, active, inactive }) => {
       render(<FloatingIconSizeSelector size={current} onChange={vi.fn()} />);
 
-      expect(screen.getByLabelText(active)).toHaveClass("moo-icon-size__segment--active");
+      expect(screen.getByLabelText(active)).toHaveClass(
+        "moo-icon-size__segment--active",
+      );
       for (const label of inactive) {
-        expect(screen.getByLabelText(label)).not.toHaveClass("moo-icon-size__segment--active");
+        expect(screen.getByLabelText(label)).not.toHaveClass(
+          "moo-icon-size__segment--active",
+        );
       }
+    },
+  );
+
+  // The borders / hover fill / focus ring / corner radii were folded into the
+  // shared `.moo-segmented__item` component class; `.moo-icon-size__segment`
+  // now only adds `flex: 1`. jsdom does not apply the stylesheet, so the class
+  // list is the contract that keeps the shared base from being dropped.
+  it.each<{ label: string; position: string }>([
+    { label: "僅圖示", position: "first" },
+    { label: "小尺寸", position: "middle" },
+    { label: "中尺寸", position: "middle" },
+    { label: "大尺寸", position: "last" },
+  ])(
+    "opts the '$label' segment into the shared segmented-item base",
+    ({ label, position }) => {
+      render(<FloatingIconSizeSelector size="medium" onChange={vi.fn()} />);
+
+      const segment = screen.getByLabelText(label);
+      expect(segment).toHaveClass("moo-segmented__item");
+      expect(segment).toHaveClass(`moo-segmented__item--${position}`);
     },
   );
 });

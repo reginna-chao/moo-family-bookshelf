@@ -14,23 +14,37 @@ describe("getReportLinks", () => {
   });
 
   it("GoogleForm entry points to feedback redirect with platform and version query", () => {
-    const link = getReportLinks({ appVersion: TEST_VERSION }).find((l) => l.name === "GoogleForm");
+    const link = getReportLinks({ appVersion: TEST_VERSION }).find(
+      (l) => l.name === "GoogleForm",
+    );
     expect(link).toBeDefined();
-    expect(link!.url.startsWith("https://reginna-chao.github.io/moo-family-bookshelf/feedback.html?")).toBe(true);
+    expect(
+      link!.url.startsWith(
+        "https://reginna-chao.github.io/moo-family-bookshelf/feedback.html?",
+      ),
+    ).toBe(true);
     expect(link!.url).toContain("platform=googleform");
     expect(link!.url).toContain("v=1.2.3");
   });
 
   it("GitHub entry is a direct link to the repository", () => {
-    const link = getReportLinks({ appVersion: TEST_VERSION }).find((l) => l.name === "GitHub");
+    const link = getReportLinks({ appVersion: TEST_VERSION }).find(
+      (l) => l.name === "GitHub",
+    );
     expect(link).toBeDefined();
-    expect(link!.url).toBe("https://github.com/reginna-chao/moo-family-bookshelf");
+    expect(link!.url).toBe(
+      "https://github.com/reginna-chao/moo-family-bookshelf",
+    );
   });
 
   it("Plurk entry points to the feedback redirect page", () => {
-    const link = getReportLinks({ appVersion: TEST_VERSION }).find((l) => l.name === "Plurk");
+    const link = getReportLinks({ appVersion: TEST_VERSION }).find(
+      (l) => l.name === "Plurk",
+    );
     expect(link).toBeDefined();
-    expect(link!.url).toBe("https://reginna-chao.github.io/moo-family-bookshelf/feedback.html?platform=plurk");
+    expect(link!.url).toBe(
+      "https://reginna-chao.github.io/moo-family-bookshelf/feedback.html?platform=plurk",
+    );
   });
 
   it("every entry has a non-empty svgPath", () => {

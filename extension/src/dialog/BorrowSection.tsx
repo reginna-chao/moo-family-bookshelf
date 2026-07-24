@@ -32,7 +32,9 @@ export function BorrowSection({
     <section className="moo-borrow-section">
       <h4 className="moo-borrow-section__title">
         {title}
-        <span className="moo-borrow-section__title-count">({active.length})</span>
+        <span className="moo-borrow-section__title-count">
+          ({active.length})
+        </span>
       </h4>
       <div className="moo-borrow-section__list">
         {active.map((req) => (
@@ -49,9 +51,11 @@ export function BorrowSection({
           <button
             type="button"
             onClick={() => setShowArchived((v) => !v)}
-            className="moo-borrow-section__toggle"
+            className="moo-button moo-button--link moo-borrow-section__toggle"
           >
-            {showArchived ? "隱藏歷史紀錄" : `顯示歷史紀錄 (${archived.length})`}
+            {showArchived
+              ? "隱藏歷史紀錄"
+              : `顯示歷史紀錄 (${archived.length})`}
           </button>
           {showArchived && (
             <div className="moo-borrow-section__archived-list">

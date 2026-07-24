@@ -76,7 +76,11 @@ describe("MemberList canLend toggle", () => {
     renderMemberList({
       members: [
         { userId: "user-owner123", displayName: "Owner" },
-        { userId: "user-member456", displayName: "Bob", canLend: BoolFlag.TRUE },
+        {
+          userId: "user-member456",
+          displayName: "Bob",
+          canLend: BoolFlag.TRUE,
+        },
       ],
     });
 
@@ -88,7 +92,11 @@ describe("MemberList canLend toggle", () => {
     renderMemberList({
       members: [
         { userId: "user-owner123", displayName: "Owner" },
-        { userId: "user-member456", displayName: "Bob", canLend: BoolFlag.FALSE },
+        {
+          userId: "user-member456",
+          displayName: "Bob",
+          canLend: BoolFlag.FALSE,
+        },
       ],
     });
 
@@ -104,7 +112,11 @@ describe("MemberList canLend toggle", () => {
       onMembersChanged,
       members: [
         { userId: "user-owner123", displayName: "Owner" },
-        { userId: "user-member456", displayName: "Bob", canLend: BoolFlag.TRUE },
+        {
+          userId: "user-member456",
+          displayName: "Bob",
+          canLend: BoolFlag.TRUE,
+        },
       ],
     });
 
@@ -132,7 +144,11 @@ describe("MemberList canLend toggle", () => {
       apiClient,
       members: [
         { userId: "user-owner123", displayName: "Owner" },
-        { userId: "user-member456", displayName: "Bob", canLend: BoolFlag.FALSE },
+        {
+          userId: "user-member456",
+          displayName: "Bob",
+          canLend: BoolFlag.FALSE,
+        },
       ],
     });
 
@@ -163,7 +179,11 @@ describe("MemberList canLend toggle", () => {
       apiClient,
       members: [
         { userId: "user-owner123", displayName: "Owner" },
-        { userId: "user-member456", displayName: "Bob", canLend: BoolFlag.TRUE },
+        {
+          userId: "user-member456",
+          displayName: "Bob",
+          canLend: BoolFlag.TRUE,
+        },
       ],
     });
 

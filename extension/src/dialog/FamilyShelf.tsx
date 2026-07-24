@@ -9,7 +9,10 @@ import { LoadingState } from "./LoadingState";
 import { useFamilyShelfViewMode } from "./useFamilyShelfViewMode";
 import { useBookSort } from "./useBookSort";
 import { sortBooks } from "./sortBooks";
-import { useFamilyShelfBooks, type FamilyShelfBook } from "./useFamilyShelfBooks";
+import {
+  useFamilyShelfBooks,
+  type FamilyShelfBook,
+} from "./useFamilyShelfBooks";
 import { FamilyShelfBookList } from "./FamilyShelfBookList";
 import { FamilyShelfError, FamilyShelfEmpty } from "./FamilyShelfStatus";
 import { FamilyShelfToolbar } from "./FamilyShelfToolbar";
@@ -47,44 +50,64 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
     toggleFavorite,
     prefsSyncFailed,
   } = useFamilyData();
-  const [filterMember, setFilterMember] = useState<MemberFilterValue>("all-except-self");
+  const [filterMember, setFilterMember] =
+    useState<MemberFilterValue>("all-except-self");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [categoryOpen, setCategoryOpen] = useState(false);
   const { viewMode, setViewMode } = useFamilyShelfViewMode();
   const { sort, setSort } = useBookSort("family");
 
-  const { memberFilteredBooks, totalBooks, headingCount, favoriteCount, hiddenCount } =
-    useFamilyShelfBooks({
-      members,
-      filterMember,
-      userId,
-      updatedBookIds,
-      hiddenRefs,
-      isHidden,
-      favoriteRefs,
-      isFavorite,
-    });
+  const {
+    memberFilteredBooks,
+    totalBooks,
+    headingCount,
+    favoriteCount,
+    hiddenCount,
+  } = useFamilyShelfBooks({
+    members,
+    filterMember,
+    userId,
+    updatedBookIds,
+    hiddenRefs,
+    isHidden,
+    favoriteRefs,
+    isFavorite,
+  });
 
-  const categoryFilteredBooks = filterByCategory(memberFilteredBooks, categoryFilter);
+  const categoryFilteredBooks = filterByCategory(
+    memberFilteredBooks,
+    categoryFilter,
+  );
 
   const { searchTerm, setSearchTerm, resetSearch, filteredItems, isFiltering } =
     useSearch(categoryFilteredBooks);
 
-  const sortedBooks = useMemo(() => sortBooks(filteredItems, sort), [filteredItems, sort]);
+  const sortedBooks = useMemo(
+    () => sortBooks(filteredItems, sort),
+    [filteredItems, sort],
+  );
 
   const narrowingActive = searchTerm !== "" || categoryFilter !== "";
-  const { visibleItems: visibleBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
+  const {
+    visibleItems: visibleBooks,
+    hasMore,
+    loadMore,
+    reset: resetLoadMore,
+  } = useLoadMore({
     items: sortedBooks,
     narrowingActive,
   });
 
-  const handleMemberFilterChange = useCallback((value: MemberFilterValue) => {
-    setFilterMember(value);
-    setCategoryFilter("");
-    setCategoryOpen(false);
-    resetSearch();
-    resetLoadMore();
-  }, [resetSearch, resetLoadMore]);
+  const handleMemberFilterChange = useCallback(
+    (value: MemberFilterValue) => {
+      setFilterMember(value);
+      setCategoryFilter("");
+      setCategoryOpen(false);
+      resetSearch();
+      resetLoadMore();
+    },
+    [resetSearch, resetLoadMore],
+  );
 
   const memberCanLendMap = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -185,8 +208,12 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
       />
 
       {hasMore && (
-        <button onClick={loadMore} className="moo-load-more">
-          載入更多（已顯示 {visibleBooks.length} / 共 {filteredItems.length} 本）
+        <button
+          onClick={loadMore}
+          className="moo-button moo-button--outline moo-load-more"
+        >
+          載入更多（已顯示 {visibleBooks.length} / 共 {filteredItems.length}{" "}
+          本）
         </button>
       )}
     </div>

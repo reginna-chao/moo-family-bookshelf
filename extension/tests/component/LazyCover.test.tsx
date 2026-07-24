@@ -17,7 +17,13 @@ describe("LazyCover", () => {
   describe("empty src", () => {
     it("renders fallback directly when src is empty string", () => {
       render(
-        <LazyCover src="" alt="book" width={40} height={60} fallback={fallbackDiv()} />,
+        <LazyCover
+          src=""
+          alt="book"
+          width={40}
+          height={60}
+          fallback={fallbackDiv()}
+        />,
       );
 
       expect(screen.getByTestId("fallback")).toBeInTheDocument();
@@ -26,7 +32,13 @@ describe("LazyCover", () => {
 
     it("does not show spinner when src is empty", () => {
       const { container } = render(
-        <LazyCover src="" alt="book" width={40} height={60} fallback={fallbackDiv()} />,
+        <LazyCover
+          src=""
+          alt="book"
+          width={40}
+          height={60}
+          fallback={fallbackDiv()}
+        />,
       );
 
       // Empty src renders only the fallback — no wrapper, so no spinner element.
@@ -106,7 +118,9 @@ describe("LazyCover", () => {
 
       fireEvent.load(screen.getByRole("img"));
 
-      expect(screen.getByRole("img")).toHaveClass("moo-lazy-cover__img--loaded");
+      expect(screen.getByRole("img")).toHaveClass(
+        "moo-lazy-cover__img--loaded",
+      );
       expect(spinnerIn(container)).toBeNull();
       expect(screen.queryByTestId("fallback")).not.toBeInTheDocument();
     });
@@ -163,13 +177,13 @@ describe("LazyCover", () => {
 
       // Neither document.head nor the component subtree carries an inline
       // @keyframes block — the animation is defined once in styles.css.
-      const headStyles = Array.from(document.head.querySelectorAll("style")).filter(
-        (el) => el.textContent?.includes(SPIN_KEYFRAME),
-      );
+      const headStyles = Array.from(
+        document.head.querySelectorAll("style"),
+      ).filter((el) => el.textContent?.includes(SPIN_KEYFRAME));
       expect(headStyles).toHaveLength(0);
-      const subtreeStyles = Array.from(container.querySelectorAll("style")).filter(
-        (el) => el.textContent?.includes(SPIN_KEYFRAME),
-      );
+      const subtreeStyles = Array.from(
+        container.querySelectorAll("style"),
+      ).filter((el) => el.textContent?.includes(SPIN_KEYFRAME));
       expect(subtreeStyles).toHaveLength(0);
     });
 

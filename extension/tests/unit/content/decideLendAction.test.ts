@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  decideLendAction,
-  type ReadmooMember,
-} from "@/content/readmoo-lend";
+import { decideLendAction, type ReadmooMember } from "@/content/readmoo-lend";
 
 const alice: ReadmooMember = { name: "Alice", avatar: "alice.png" };
 const bob: ReadmooMember = { name: "Bob", avatar: "bob.png" };

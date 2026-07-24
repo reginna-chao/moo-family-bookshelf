@@ -14,18 +14,18 @@ function mockSendMessage(
   getResponse: Record<string, unknown>,
   setResponse: Record<string, unknown> = { ok: true },
 ) {
-  vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-    ((message: unknown) => {
-      const msg = message as Record<string, unknown>;
-      if (msg.type === "GET_BOOK_SORT") {
-        return Promise.resolve(getResponse);
-      }
-      if (msg.type === "SET_BOOK_SORT") {
-        return Promise.resolve(setResponse);
-      }
-      return Promise.resolve(undefined);
-    }) as typeof chrome.runtime.sendMessage,
-  );
+  vi.mocked(chrome.runtime.sendMessage).mockImplementation(((
+    message: unknown,
+  ) => {
+    const msg = message as Record<string, unknown>;
+    if (msg.type === "GET_BOOK_SORT") {
+      return Promise.resolve(getResponse);
+    }
+    if (msg.type === "SET_BOOK_SORT") {
+      return Promise.resolve(setResponse);
+    }
+    return Promise.resolve(undefined);
+  }) as typeof chrome.runtime.sendMessage);
 }
 
 describe("useBookSort", () => {
@@ -83,9 +83,10 @@ describe("useBookSort", () => {
   });
 
   it("keeps 'default' when the background message rejects", async () => {
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      (() => Promise.reject(new Error("background unavailable"))) as typeof chrome.runtime.sendMessage,
-    );
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation((() =>
+      Promise.reject(
+        new Error("background unavailable"),
+      )) as typeof chrome.runtime.sendMessage);
     const { result } = renderHook(() => useBookSort("family"));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
@@ -143,9 +144,13 @@ describe("useBookSort", () => {
       result.current.setSort("default");
     });
 
-    const setCalls = vi.mocked(chrome.runtime.sendMessage).mock.calls.filter(
-      (call) => (call[0] as unknown as Record<string, unknown>).type === "SET_BOOK_SORT",
-    );
+    const setCalls = vi
+      .mocked(chrome.runtime.sendMessage)
+      .mock.calls.filter(
+        (call) =>
+          (call[0] as unknown as Record<string, unknown>).type ===
+          "SET_BOOK_SORT",
+      );
     expect(setCalls).toHaveLength(0);
   });
 });

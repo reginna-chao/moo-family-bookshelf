@@ -15,7 +15,8 @@ export interface UseFamilyShelfViewModeReturn {
 }
 
 export function useFamilyShelfViewMode(): UseFamilyShelfViewModeReturn {
-  const [viewMode, setViewModeState] = useState<FamilyShelfViewMode>(DEFAULT_VIEW_MODE);
+  const [viewMode, setViewModeState] =
+    useState<FamilyShelfViewMode>(DEFAULT_VIEW_MODE);
 
   useEffect(() => {
     let cancelled = false;

@@ -33,22 +33,27 @@ const syncStorageMock: Record<string, unknown> = {};
 
 function createStorageAreaMock(store: Record<string, unknown>) {
   return {
-    get: vi.fn((keys: string | string[] | null | undefined, callback?: (result: Record<string, unknown>) => void) => {
-      let result: Record<string, unknown> = {};
-      if (keys === null || keys === undefined) {
-        // Match the real API: get(null) / get() returns the entire store.
-        result = { ...store };
-      } else {
-        const keyList = Array.isArray(keys) ? keys : [keys];
-        for (const key of keyList) {
-          if (key in store) result[key] = store[key];
+    get: vi.fn(
+      (
+        keys: string | string[] | null | undefined,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
+        let result: Record<string, unknown> = {};
+        if (keys === null || keys === undefined) {
+          // Match the real API: get(null) / get() returns the entire store.
+          result = { ...store };
+        } else {
+          const keyList = Array.isArray(keys) ? keys : [keys];
+          for (const key of keyList) {
+            if (key in store) result[key] = store[key];
+          }
         }
-      }
-      if (typeof callback === "function") {
-        callback(result);
-      }
-      return Promise.resolve(result);
-    }),
+        if (typeof callback === "function") {
+          callback(result);
+        }
+        return Promise.resolve(result);
+      },
+    ),
     set: vi.fn((items: Record<string, unknown>, callback?: () => void) => {
       Object.assign(store, items);
       callback?.();
@@ -76,7 +81,9 @@ function createStorageAreaMock(store: Record<string, unknown>) {
 const extensionApiMock = {
   runtime: {
     id: "mock-extension-id",
-    getURL: vi.fn((path: string) => `chrome-extension://mock-extension-id/${path}`),
+    getURL: vi.fn(
+      (path: string) => `chrome-extension://mock-extension-id/${path}`,
+    ),
     sendMessage: vi.fn(),
     onMessage: {
       addListener: vi.fn(),

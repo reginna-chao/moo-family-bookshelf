@@ -29,7 +29,12 @@ export function ManualLendDialog({
   }, [onCancel, confirming]);
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="手動借出提醒" className="moo-modal-overlay">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="手動借出提醒"
+      className="moo-modal-overlay"
+    >
       <div className="moo-modal">
         <div className="moo-modal__header">
           <h3 className="moo-modal__title">手動借出提醒</h3>
@@ -38,7 +43,7 @@ export function ManualLendDialog({
             aria-label="關閉"
             onClick={onCancel}
             disabled={confirming}
-            className="moo-modal__close"
+            className="moo-button moo-button--ghost-icon moo-modal__close"
           >
             <X size={16} />
           </button>
@@ -66,7 +71,7 @@ export function ManualLendDialog({
             type="button"
             onClick={onCancel}
             disabled={confirming}
-            className="moo-modal__cancel"
+            className="moo-button moo-button--ghost moo-button--sm moo-modal__cancel"
           >
             取消
           </button>
@@ -74,7 +79,7 @@ export function ManualLendDialog({
             type="button"
             onClick={onConfirm}
             disabled={confirming}
-            className="moo-manual-lend__confirm"
+            className="moo-button moo-button--sm moo-manual-lend__confirm"
           >
             {confirming ? "處理中..." : "確認借出"}
           </button>

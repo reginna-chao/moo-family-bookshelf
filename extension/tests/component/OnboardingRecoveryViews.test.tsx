@@ -34,9 +34,7 @@ describe("RecoveryChoiceView", () => {
   it("renders explanation about recovery options", () => {
     render(<RecoveryChoiceView {...defaultProps} />);
 
-    expect(
-      screen.getByText(/自動恢復未成功/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/自動恢復未成功/)).toBeInTheDocument();
   });
 
   it("renders both primary and secondary action buttons", () => {
@@ -200,9 +198,7 @@ describe("RecoveryJoinView", () => {
     );
 
     expect(screen.getByText("加入中...")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "加入中..." }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "加入中..." })).toBeDisabled();
   });
 
   it("disables input and back button when isProcessing is true", () => {
@@ -243,9 +239,7 @@ describe("SoloRecoveryConfirmView", () => {
   it("renders note about sync completion", () => {
     render(<SoloRecoveryConfirmView {...defaultProps} />);
 
-    expect(
-      screen.getByText(/同步完成後即可查看家庭書架/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/同步完成後即可查看家庭書架/)).toBeInTheDocument();
   });
 
   it("renders confirm and back buttons", () => {
@@ -254,9 +248,7 @@ describe("SoloRecoveryConfirmView", () => {
     expect(
       screen.getByRole("button", { name: "確認重新同步" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "返回" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
   });
 
   it("calls onConfirm when confirm button is clicked", () => {

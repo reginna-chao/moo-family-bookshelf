@@ -18,7 +18,10 @@ export function WelcomeView({ onStart, hasUsedBefore }: WelcomeViewProps) {
           ? "偵測到你曾使用過家庭書櫃，請重新設定以繼續。"
           : "一鍵開始，自動同步你的讀墨帳號與書單。"}
       </p>
-      <button onClick={onStart} className="moo-onboarding-view__primary moo-onboarding-view__primary--welcome">
+      <button
+        onClick={onStart}
+        className="moo-button moo-button--block moo-button--lg moo-onboarding-view__primary moo-onboarding-view__primary--welcome"
+      >
         {hasUsedBefore ? "繼續使用" : "開始使用"}
       </button>
       <p className="moo-onboarding-view__note">
@@ -37,10 +40,15 @@ export interface CreatedViewProps {
   onContinue: () => void;
 }
 
-export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: CreatedViewProps) {
+export function CreatedView({
+  generatedSyncCode,
+  copied,
+  onCopy,
+  onContinue,
+}: CreatedViewProps) {
   const copyClass = copied
-    ? "moo-onboarding-view__copy moo-onboarding-view__copy--copied"
-    : "moo-onboarding-view__copy";
+    ? "moo-button moo-button--outline moo-onboarding-view__copy moo-onboarding-view__copy--copied"
+    : "moo-button moo-button--outline moo-onboarding-view__copy";
   return (
     <div className="moo-onboarding-view">
       <h2 className="moo-onboarding-view__heading">家庭公開書櫃已建立</h2>
@@ -48,14 +56,20 @@ export function CreatedView({ generatedSyncCode, copied, onCopy, onContinue }: C
         將以下同步碼分享給家人，他們可以用此代碼加入你的公開書櫃。
       </p>
       <div className="moo-onboarding-view__code-box">
-        <span data-testid="sync-code" className="moo-onboarding-view__code-text">
+        <span
+          data-testid="sync-code"
+          className="moo-onboarding-view__code-text"
+        >
           {generatedSyncCode}
         </span>
       </div>
       <button onClick={onCopy} className={copyClass}>
         {copied ? "已複製" : "複製同步碼"}
       </button>
-      <button onClick={onContinue} className="moo-onboarding-view__primary">
+      <button
+        onClick={onContinue}
+        className="moo-button moo-button--block moo-onboarding-view__primary"
+      >
         繼續
       </button>
     </div>
@@ -88,10 +102,14 @@ export function ErrorView({ errorMessage, actions }: ErrorViewProps) {
         {actions.map((action) => {
           const isSecondary = action.variant === "secondary";
           const className = isSecondary
-            ? "moo-onboarding-view__secondary"
-            : "moo-onboarding-view__primary moo-onboarding-view__primary--gap8";
+            ? "moo-button moo-button--outline moo-button--block moo-onboarding-view__secondary"
+            : "moo-button moo-button--block moo-onboarding-view__primary moo-onboarding-view__primary--gap8";
           return (
-            <button key={action.label} onClick={action.onClick} className={className}>
+            <button
+              key={action.label}
+              onClick={action.onClick}
+              className={className}
+            >
               {action.label}
             </button>
           );
@@ -123,19 +141,23 @@ export function IdleView({
   onJoin,
 }: IdleViewProps) {
   const createClass = isProcessing
-    ? "moo-onboarding-view__create moo-onboarding-view__create--busy"
-    : "moo-onboarding-view__create";
+    ? "moo-button moo-button--block moo-onboarding-view__create moo-onboarding-view__create--busy"
+    : "moo-button moo-button--block moo-onboarding-view__create";
   const joinDisabled = !syncCodeInput.trim() || isProcessing;
   const joinClass = joinDisabled
-    ? "moo-onboarding-view__join moo-onboarding-view__join--disabled"
-    : "moo-onboarding-view__join";
+    ? "moo-button moo-button--outline moo-button--block moo-onboarding-view__join moo-onboarding-view__join--disabled"
+    : "moo-button moo-button--outline moo-button--block moo-onboarding-view__join";
   return (
     <div className="moo-onboarding-view">
       <h2 className="moo-onboarding-view__heading">歡迎使用家庭書櫃</h2>
       <p className="moo-onboarding-view__body">
         建立或加入家庭公開書櫃，與家人分享你的藏書。
       </p>
-      <button onClick={onCreate} disabled={isProcessing} className={createClass}>
+      <button
+        onClick={onCreate}
+        disabled={isProcessing}
+        className={createClass}
+      >
         {state === "creating" ? "建立中..." : "建立家庭公開書櫃"}
       </button>
       <div className="moo-onboarding-view__divider">或</div>
@@ -147,7 +169,7 @@ export function IdleView({
           value={syncCodeInput}
           onChange={(e) => onSetSyncCodeInput(e.target.value)}
           disabled={isProcessing}
-          className="moo-onboarding-view__input"
+          className="moo-form-input moo-form-input--block moo-onboarding-view__input"
         />
       </div>
       <button onClick={onJoin} disabled={joinDisabled} className={joinClass}>

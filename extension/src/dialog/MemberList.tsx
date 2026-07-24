@@ -24,8 +24,7 @@ function canLendValue(member: FamilyMember): boolean {
 }
 
 type ConfirmAction =
-  | { type: "remove"; targetId: string }
-  | { type: "transfer"; targetId: string };
+  { type: "remove"; targetId: string } | { type: "transfer"; targetId: string };
 
 function getMemberLabel(member: FamilyMember): string {
   return member.displayName || member.userId.slice(0, 8);
@@ -45,12 +44,18 @@ export function MemberList({
   onMembersChanged,
   familyEndpoint,
 }: MemberListProps) {
-  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(
+    null,
+  );
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [activeTransferAction, setActiveTransferAction] = useState<"keep" | "clear" | null>(null);
+  const [activeTransferAction, setActiveTransferAction] = useState<
+    "keep" | "clear" | null
+  >(null);
   const [canLendUpdating, setCanLendUpdating] = useState<string | null>(null);
-  const [readmooNameDeleting, setReadmooNameDeleting] = useState<string | null>(null);
+  const [readmooNameDeleting, setReadmooNameDeleting] = useState<string | null>(
+    null,
+  );
 
   const isOwner = userId === ownerId;
   const showReadmooNameSection = members.length >= MIN_MEMBERS_FOR_READMOO_NAME;
@@ -60,7 +65,9 @@ export function MemberList({
     setActionError("");
     const next = canLendValue(target) ? BoolFlag.FALSE : BoolFlag.TRUE;
     try {
-      await apiClient.updateMemberSettings(familyId, target.userId, { canLend: next });
+      await apiClient.updateMemberSettings(familyId, target.userId, {
+        canLend: next,
+      });
       onMembersChanged();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "更新失敗");
@@ -73,7 +80,9 @@ export function MemberList({
     setReadmooNameDeleting(target.userId);
     setActionError("");
     try {
-      await apiClient.updateMemberSettings(familyId, target.userId, { readmooName: null });
+      await apiClient.updateMemberSettings(familyId, target.userId, {
+        readmooName: null,
+      });
       onMembersChanged();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "刪除失敗");
@@ -103,7 +112,12 @@ export function MemberList({
     setActionLoading(true);
     setActionError("");
     try {
-      const response = await apiClient.transferOwnership(familyId, userId, targetId, clearEndpoint);
+      const response = await apiClient.transferOwnership(
+        familyId,
+        userId,
+        targetId,
+        clearEndpoint,
+      );
       if (response.error) {
         setActionError(response.error.message);
       } else {
@@ -125,19 +139,24 @@ export function MemberList({
     if (confirmAction.type === "remove") {
       return (
         <div className="moo-member-list__confirm">
-          <div className="moo-member-list__confirm-text">確定要移除此成員？</div>
+          <div className="moo-member-list__confirm-text">
+            確定要移除此成員？
+          </div>
           <div className="moo-member-list__confirm-row">
             <button
               disabled={actionLoading}
               onClick={() => void handleRemove(confirmAction.targetId)}
-              className="moo-member-list__confirm-yes"
+              className="moo-button moo-button--danger moo-button--xs moo-member-list__confirm-yes"
             >
               {actionLoading ? "處理中..." : "確定"}
             </button>
             <button
               disabled={actionLoading}
-              onClick={() => { setActionError(""); setConfirmAction(null); }}
-              className="moo-member-list__confirm-no"
+              onClick={() => {
+                setActionError("");
+                setConfirmAction(null);
+              }}
+              className="moo-button moo-button--ghost moo-button--xs moo-member-list__confirm-no"
             >
               取消
             </button>
@@ -156,14 +175,17 @@ export function MemberList({
             <button
               disabled={actionLoading}
               onClick={() => void handleTransfer(confirmAction.targetId)}
-              className="moo-member-list__confirm-yes"
+              className="moo-button moo-button--danger moo-button--xs moo-member-list__confirm-yes"
             >
               {actionLoading ? "處理中..." : "確定"}
             </button>
             <button
               disabled={actionLoading}
-              onClick={() => { setActionError(""); setConfirmAction(null); }}
-              className="moo-member-list__confirm-no"
+              onClick={() => {
+                setActionError("");
+                setConfirmAction(null);
+              }}
+              className="moo-button moo-button--ghost moo-button--xs moo-member-list__confirm-no"
             >
               取消
             </button>
@@ -189,24 +211,37 @@ export function MemberList({
           <div className="moo-member-list__confirm-row moo-member-list__confirm-row--end">
             <button
               disabled={actionLoading}
-              onClick={() => { setActionError(""); setConfirmAction(null); }}
-              className="moo-member-list__endpoint-cancel"
+              onClick={() => {
+                setActionError("");
+                setConfirmAction(null);
+              }}
+              className="moo-button moo-button--ghost moo-member-list__endpoint-cancel"
             >
               取消
             </button>
             <button
               disabled={actionLoading}
-              onClick={() => { setActiveTransferAction("keep"); void handleTransfer(confirmAction.targetId); }}
-              className="moo-member-list__endpoint-keep"
+              onClick={() => {
+                setActiveTransferAction("keep");
+                void handleTransfer(confirmAction.targetId);
+              }}
+              className="moo-button moo-button--outline moo-button--sm moo-member-list__endpoint-keep"
             >
-              {actionLoading && activeTransferAction === "keep" ? "處理中..." : "不清除，直接轉移"}
+              {actionLoading && activeTransferAction === "keep"
+                ? "處理中..."
+                : "不清除，直接轉移"}
             </button>
             <button
               disabled={actionLoading}
-              onClick={() => { setActiveTransferAction("clear"); void handleTransfer(confirmAction.targetId, 1); }}
-              className="moo-member-list__endpoint-clear"
+              onClick={() => {
+                setActiveTransferAction("clear");
+                void handleTransfer(confirmAction.targetId, 1);
+              }}
+              className="moo-button moo-button--sm moo-member-list__endpoint-clear"
             >
-              {actionLoading && activeTransferAction === "clear" ? "處理中..." : "清除並轉移"}
+              {actionLoading && activeTransferAction === "clear"
+                ? "處理中..."
+                : "清除並轉移"}
             </button>
           </div>
         </div>
@@ -218,7 +253,9 @@ export function MemberList({
 
   return (
     <div>
-      {actionError && <div className="moo-member-list__error">{actionError}</div>}
+      {actionError && (
+        <div className="moo-member-list__error">{actionError}</div>
+      )}
       {renderConfirmDialog()}
       <div className="moo-member-list__table">
         {members.map((member) => {
@@ -245,14 +282,24 @@ export function MemberList({
                 {isOwner && member.userId !== userId && !confirmAction && (
                   <span>
                     <button
-                      onClick={() => setConfirmAction({ type: "transfer", targetId: member.userId })}
-                      className="moo-member-list__small-btn moo-member-list__small-btn--primary"
+                      onClick={() =>
+                        setConfirmAction({
+                          type: "transfer",
+                          targetId: member.userId,
+                        })
+                      }
+                      className="moo-button moo-button--outline moo-button--xs moo-member-list__small-btn moo-member-list__small-btn--primary"
                     >
                       轉移管理權
                     </button>
                     <button
-                      onClick={() => setConfirmAction({ type: "remove", targetId: member.userId })}
-                      className="moo-member-list__small-btn moo-member-list__small-btn--danger"
+                      onClick={() =>
+                        setConfirmAction({
+                          type: "remove",
+                          targetId: member.userId,
+                        })
+                      }
+                      className="moo-button moo-button--outline-danger moo-button--xs moo-member-list__small-btn moo-member-list__small-btn--danger"
                     >
                       移除
                     </button>
@@ -290,7 +337,7 @@ export function MemberList({
                         disabled={isDeletingReadmooName}
                         onClick={() => void handleDeleteReadmooName(member)}
                         aria-label={`刪除 ${getMemberLabel(member)} 的讀墨名稱`}
-                        className="moo-member-list__small-btn moo-member-list__small-btn--danger moo-member-list__small-btn--flush"
+                        className="moo-button moo-button--outline-danger moo-button--xs moo-member-list__small-btn moo-member-list__small-btn--danger moo-member-list__small-btn--flush"
                       >
                         {isDeletingReadmooName ? "刪除中..." : "刪除"}
                       </button>

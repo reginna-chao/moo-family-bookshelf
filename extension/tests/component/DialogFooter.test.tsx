@@ -100,14 +100,18 @@ describe("DialogFooter", () => {
     it("applies the version class (marginTop) in narrow mode", () => {
       vi.mocked(useMediaQuery).mockReturnValue(false);
       render(<DialogFooter />);
-      const versionDiv = screen.getByText(/墨家書櫃 v\d+\.\d+\.\d+/).closest("div")!;
+      const versionDiv = screen
+        .getByText(/墨家書櫃 v\d+\.\d+\.\d+/)
+        .closest("div")!;
       expect(versionDiv).toHaveClass("moo-footer__version");
     });
 
     it("does not apply the version class (marginTop) in wide mode", () => {
       vi.mocked(useMediaQuery).mockReturnValue(true);
       render(<DialogFooter />);
-      const versionDiv = screen.getByText(/墨家書櫃 v\d+\.\d+\.\d+/).closest("div")!;
+      const versionDiv = screen
+        .getByText(/墨家書櫃 v\d+\.\d+\.\d+/)
+        .closest("div")!;
       expect(versionDiv).not.toHaveClass("moo-footer__version");
     });
   });

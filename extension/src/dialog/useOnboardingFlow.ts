@@ -176,7 +176,9 @@ export function useOnboardingFlow(
     async (params: {
       errorCode: string | undefined;
       userId: string;
-      run: (verifySecret: string) => Promise<{ recovered: boolean; errorCode?: string }>;
+      run: (
+        verifySecret: string,
+      ) => Promise<{ recovered: boolean; errorCode?: string }>;
       onCancel: () => void;
     }): Promise<boolean> => {
       if (!isVerificationError(params.errorCode)) return false;
@@ -268,7 +270,9 @@ export function useOnboardingFlow(
       const lookupRes = await apiClient.lookupUser(userId);
       if (lookupRes.error) {
         setErrorMessage("無法驗證帳號，請重試。");
-        setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+        setErrorActions([
+          { label: "重試", variant: "primary", onClick: handleRetry },
+        ]);
         setState("error");
         return;
       }
@@ -326,10 +330,18 @@ export function useOnboardingFlow(
       setState("created");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
-      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setErrorActions([
+        { label: "重試", variant: "primary", onClick: handleRetry },
+      ]);
       setState("error");
     }
-  }, [apiClient, autoSetup, handleRetry, onFamilyJoined, promptRecoveryVerification]);
+  }, [
+    apiClient,
+    autoSetup,
+    handleRetry,
+    onFamilyJoined,
+    promptRecoveryVerification,
+  ]);
 
   const finishJoin = useCallback(
     async (familyId: string, userId: string) => {
@@ -390,7 +402,9 @@ export function useOnboardingFlow(
       }
 
       setErrorMessage(result.errorMessage);
-      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setErrorActions([
+        { label: "重試", variant: "primary", onClick: handleRetry },
+      ]);
       setState("error");
     } catch (err) {
       if (err instanceof SyncCodeError) {
@@ -398,7 +412,9 @@ export function useOnboardingFlow(
       } else {
         setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
       }
-      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setErrorActions([
+        { label: "重試", variant: "primary", onClick: handleRetry },
+      ]);
       setState("error");
     }
   }, [apiClient, handleRetry, finishJoin, verifyBegin]);
@@ -476,7 +492,9 @@ export function useOnboardingFlow(
     const familyId = recoveryFamilyIdRef.current;
     if (!email || !familyId) {
       setErrorMessage("恢復資料遺失，請重新開始。");
-      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setErrorActions([
+        { label: "重試", variant: "primary", onClick: handleRetry },
+      ]);
       setState("error");
       return;
     }
@@ -511,14 +529,24 @@ export function useOnboardingFlow(
       });
       if (handled) return;
       setErrorMessage("恢復失敗，請重試。");
-      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setErrorActions([
+        { label: "重試", variant: "primary", onClick: handleRetry },
+      ]);
       setState("error");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
-      setErrorActions([{ label: "重試", variant: "primary", onClick: handleRetry }]);
+      setErrorActions([
+        { label: "重試", variant: "primary", onClick: handleRetry },
+      ]);
       setState("error");
     }
-  }, [apiClient, autoSetup, handleRetry, onFamilyJoined, promptRecoveryVerification]);
+  }, [
+    apiClient,
+    autoSetup,
+    handleRetry,
+    onFamilyJoined,
+    promptRecoveryVerification,
+  ]);
 
   return {
     state,

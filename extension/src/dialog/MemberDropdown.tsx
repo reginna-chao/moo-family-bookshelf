@@ -1,5 +1,12 @@
 import React, { useState, useRef, useMemo } from "react";
-import { Users, UsersRound, User, Heart, EyeOff, ChevronDown } from "lucide-react";
+import {
+  Users,
+  UsersRound,
+  User,
+  Heart,
+  EyeOff,
+  ChevronDown,
+} from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDismissableMenu } from "../hooks/useDismissableMenu";
 
@@ -53,10 +60,18 @@ function buildOptions(
     .filter((m) => m.userId !== userId)
     .reduce((sum, m) => sum + m.books.length, 0);
   const self = members.find((m) => m.userId === userId);
-  const othersWithBooks = members.filter((m) => m.userId !== userId && m.books.length > 0);
+  const othersWithBooks = members.filter(
+    (m) => m.userId !== userId && m.books.length > 0,
+  );
 
   return [
-    { key: "all", value: "all", label: "所有人的書", icon: <Users size={16} aria-hidden="true" />, count: allCount },
+    {
+      key: "all",
+      value: "all",
+      label: "所有人的書",
+      icon: <Users size={16} aria-hidden="true" />,
+      count: allCount,
+    },
     {
       key: "all-except-self",
       value: "all-except-self",
@@ -64,7 +79,13 @@ function buildOptions(
       icon: <UsersRound size={16} aria-hidden="true" />,
       count: othersCount,
     },
-    { key: "self", value: userId, label: "自己的書", icon: <User size={16} aria-hidden="true" />, count: self ? self.books.length : 0 },
+    {
+      key: "self",
+      value: userId,
+      label: "自己的書",
+      icon: <User size={16} aria-hidden="true" />,
+      count: self ? self.books.length : 0,
+    },
     ...othersWithBooks.map((m) => ({
       key: m.userId,
       value: m.userId,
@@ -72,8 +93,20 @@ function buildOptions(
       icon: <User size={16} aria-hidden="true" />,
       count: m.books.length,
     })),
-    { key: FAVORITE_FILTER_VALUE, value: FAVORITE_FILTER_VALUE, label: "我的最愛", icon: <Heart size={16} aria-hidden="true" />, count: favoriteCount },
-    { key: HIDDEN_FILTER_VALUE, value: HIDDEN_FILTER_VALUE, label: "隱藏的書", icon: <EyeOff size={16} aria-hidden="true" />, count: hiddenCount },
+    {
+      key: FAVORITE_FILTER_VALUE,
+      value: FAVORITE_FILTER_VALUE,
+      label: "我的最愛",
+      icon: <Heart size={16} aria-hidden="true" />,
+      count: favoriteCount,
+    },
+    {
+      key: HIDDEN_FILTER_VALUE,
+      value: HIDDEN_FILTER_VALUE,
+      label: "隱藏的書",
+      icon: <EyeOff size={16} aria-hidden="true" />,
+      count: hiddenCount,
+    },
   ];
 }
 
@@ -96,7 +129,12 @@ export function MemberDropdown({
   );
   const current = options.find((o) => o.value === value) ?? options[0];
 
-  useDismissableMenu({ isOpen: open, onClose: () => setOpen(false), triggerRef, menuRef });
+  useDismissableMenu({
+    isOpen: open,
+    onClose: () => setOpen(false),
+    triggerRef,
+    menuRef,
+  });
 
   function handleSelect(next: MemberFilterValue) {
     onChange(next);
@@ -104,13 +142,15 @@ export function MemberDropdown({
   }
 
   const triggerClass = isMobile
-    ? "moo-member-filter__trigger moo-member-filter__trigger--mobile"
-    : "moo-member-filter__trigger";
+    ? "moo-form-input moo-member-filter__trigger moo-member-filter__trigger--mobile"
+    : "moo-form-input moo-member-filter__trigger";
   const menuClass = isMobile
     ? "moo-member-filter__menu moo-member-filter__menu--mobile"
     : "moo-member-filter__menu";
   const optionClass = (selected: boolean) =>
-    selected ? "moo-category__option moo-category__option--selected" : "moo-category__option";
+    selected
+      ? "moo-category__option moo-category__option--selected"
+      : "moo-category__option";
 
   return (
     <div className="moo-member-filter">
@@ -125,12 +165,23 @@ export function MemberDropdown({
       >
         <span className="moo-member-filter__current">
           {current.icon}
-          <span className="moo-member-filter__current-label">{current.label}</span>
+          <span className="moo-member-filter__current-label">
+            {current.label}
+          </span>
         </span>
-        <ChevronDown size={16} aria-hidden="true" className="moo-member-filter__chevron" />
+        <ChevronDown
+          size={16}
+          aria-hidden="true"
+          className="moo-member-filter__chevron"
+        />
       </button>
       {open && (
-        <div ref={menuRef} className={menuClass} role="listbox" aria-label="成員選單">
+        <div
+          ref={menuRef}
+          className={menuClass}
+          role="listbox"
+          aria-label="成員選單"
+        >
           {options.map((opt) => (
             <button
               key={opt.key}

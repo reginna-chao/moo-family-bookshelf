@@ -14,7 +14,9 @@ function BlurQrPlaceholder({ variant }: { variant?: "default" | "error" }) {
   const fillColor = variant === "error" ? "#fca5a5" : "#1e293b";
   const cells = Array.from({ length: PATTERN_SIZE * PATTERN_SIZE }, (_, i) => {
     const filled = ((i * 17 + (i >> 2) * 13) & 3) < 2;
-    return <div key={i} style={{ background: filled ? fillColor : "#f1f5f9" }} />;
+    return (
+      <div key={i} style={{ background: filled ? fillColor : "#f1f5f9" }} />
+    );
   });
   return (
     <div
@@ -32,7 +34,11 @@ function BlurQrPlaceholder({ variant }: { variant?: "default" | "error" }) {
   );
 }
 
-function QrBoxOverlay({ state }: { state: Exclude<QrState, { kind: "active" }> }) {
+function QrBoxOverlay({
+  state,
+}: {
+  state: Exclude<QrState, { kind: "active" }>;
+}) {
   if (state.kind === "idle") {
     return (
       <>
@@ -44,7 +50,13 @@ function QrBoxOverlay({ state }: { state: Exclude<QrState, { kind: "active" }> }
   if (state.kind === "loading") {
     return (
       <>
-        <Loader2 size={28} style={{ color: "#64748b", animation: "qrLinkSpin 1s linear infinite" }} />
+        <Loader2
+          size={28}
+          style={{
+            color: "#64748b",
+            animation: "qrLinkSpin 1s linear infinite",
+          }}
+        />
         <div className="moo-qr-link__cta">產生中…</div>
       </>
     );
@@ -52,15 +64,25 @@ function QrBoxOverlay({ state }: { state: Exclude<QrState, { kind: "active" }> }
   if (state.kind === "expired") {
     return (
       <>
-        <div className="moo-qr-link__cta moo-qr-link__cta--spaced">QR Code 已過期</div>
-        <div className="moo-qr-link__regen"><RefreshCw size={14} />重新產生</div>
+        <div className="moo-qr-link__cta moo-qr-link__cta--spaced">
+          QR Code 已過期
+        </div>
+        <div className="moo-button moo-button--outline moo-button--sm moo-qr-link__regen">
+          <RefreshCw size={14} />
+          重新產生
+        </div>
       </>
     );
   }
   return (
     <>
-      <div className="moo-qr-link__cta moo-qr-link__cta--error">{state.message}</div>
-      <div className="moo-qr-link__regen"><RefreshCw size={14} />重試</div>
+      <div className="moo-qr-link__cta moo-qr-link__cta--error">
+        {state.message}
+      </div>
+      <div className="moo-button moo-button--outline moo-button--sm moo-qr-link__regen">
+        <RefreshCw size={14} />
+        重試
+      </div>
     </>
   );
 }
@@ -92,7 +114,9 @@ function QrBoxButton({ state, onClick }: QrBoxButtonProps) {
       className={className}
       style={{ width: QR_BOX_SIZE, height: QR_BOX_SIZE }}
     >
-      <BlurQrPlaceholder variant={state.kind === "error" ? "error" : "default"} />
+      <BlurQrPlaceholder
+        variant={state.kind === "error" ? "error" : "default"}
+      />
       <div className="moo-qr-link__overlay">
         <QrBoxOverlay state={state} />
       </div>
@@ -102,13 +126,15 @@ function QrBoxButton({ state, onClick }: QrBoxButtonProps) {
 
 export function QrCodeLink({ syncCode, userId, apiClient }: QrCodeLinkProps) {
   const { state, copied, onRevealClick, onCopyClick } = useQrLinkState({
-    syncCode, userId, apiClient,
+    syncCode,
+    userId,
+    apiClient,
   });
   const isLoading = state.kind === "loading";
 
   const copyClassName = copied
-    ? "moo-qr-link__copy-btn moo-qr-link__copy-btn--copied"
-    : "moo-qr-link__copy-btn";
+    ? "moo-button moo-button--outline moo-qr-link__copy-btn moo-qr-link__copy-btn--copied"
+    : "moo-button moo-button--outline moo-qr-link__copy-btn";
 
   return (
     <div className="moo-qr-link">

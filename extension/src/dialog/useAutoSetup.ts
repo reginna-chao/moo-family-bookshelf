@@ -7,15 +7,20 @@ import {
   formatScrapeProgress,
 } from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
-import { ApiClient, BookEntry, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
-import { USER_EMAIL_KEY, DISPLAY_NAME_KEY, LAST_SYNC_AT_KEY } from "../constants";
+import {
+  ApiClient,
+  BookEntry,
+  PersonalBooks,
+  PERSONAL_BOOKS_SCHEMA_VERSION,
+} from "../api/client";
+import {
+  USER_EMAIL_KEY,
+  DISPLAY_NAME_KEY,
+  LAST_SYNC_AT_KEY,
+} from "../constants";
 
 export type AutoSetupPhase =
-  | "idle"
-  | "scraping-profile"
-  | "scraping-books"
-  | "done"
-  | "error";
+  "idle" | "scraping-profile" | "scraping-books" | "done" | "error";
 
 const STATIC_PHASE_MESSAGES: Record<AutoSetupPhase, string> = {
   idle: "",
@@ -36,9 +41,7 @@ function wait(ms: number): Promise<void> {
  * Extract saved books from the personal books API response.
  * Parses the API response as plain JSON — returns BookEntry[] directly.
  */
-function extractSavedBooks(
-  data: unknown,
-): BookEntry[] {
+function extractSavedBooks(data: unknown): BookEntry[] {
   if (!data || typeof data !== "object") return [];
   const record = data as Record<string, unknown>;
   if (Array.isArray(record.books)) return record.books as BookEntry[];
@@ -49,7 +52,10 @@ function extractSavedBooks(
  * Navigate the host SPA to a hash route, wait for render, then run a task.
  * Returns the result of the task function.
  */
-async function navigateAndRun<T>(hash: string, task: () => T | Promise<T>): Promise<T> {
+async function navigateAndRun<T>(
+  hash: string,
+  task: () => T | Promise<T>,
+): Promise<T> {
   window.location.hash = hash;
   await wait(NAV_SETTLE_MS);
   return task();
@@ -93,40 +99,43 @@ export function useAutoSetup(): UseAutoSetupReturn {
     setProgressMessage("");
   }, []);
 
-  const scrapeProfile = useCallback(async (): Promise<AutoSetupResult | null> => {
-    originalHashRef.current = window.location.hash;
-    setPhase("scraping-profile");
-    setErrorMessage("");
+  const scrapeProfile =
+    useCallback(async (): Promise<AutoSetupResult | null> => {
+      originalHashRef.current = window.location.hash;
+      setPhase("scraping-profile");
+      setErrorMessage("");
 
-    try {
-      const result = await navigateAndRun("#/me", () => {
-        const email = scrapeUserEmail();
-        const displayName = scrapeDisplayName() ?? "";
-        return { email, displayName };
-      });
+      try {
+        const result = await navigateAndRun("#/me", () => {
+          const email = scrapeUserEmail();
+          const displayName = scrapeDisplayName() ?? "";
+          return { email, displayName };
+        });
 
-      if (!result.email) {
-        setErrorMessage("無法取得帳號信箱，請確認已登入讀墨帳號。");
+        if (!result.email) {
+          setErrorMessage("無法取得帳號信箱，請確認已登入讀墨帳號。");
+          setPhase("error");
+          restoreHash();
+          return null;
+        }
+
+        await browser.storage.local.set({
+          [USER_EMAIL_KEY]: result.email,
+          [DISPLAY_NAME_KEY]: result.displayName,
+        });
+
+        restoreHash();
+        setPhase("idle");
+        return { email: result.email, displayName: result.displayName };
+      } catch (err) {
+        setErrorMessage(
+          err instanceof Error ? err.message : "取得帳號資訊失敗",
+        );
         setPhase("error");
         restoreHash();
         return null;
       }
-
-      await browser.storage.local.set({
-        [USER_EMAIL_KEY]: result.email,
-        [DISPLAY_NAME_KEY]: result.displayName,
-      });
-
-      restoreHash();
-      setPhase("idle");
-      return { email: result.email, displayName: result.displayName };
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "取得帳號資訊失敗");
-      setPhase("error");
-      restoreHash();
-      return null;
-    }
-  }, [restoreHash]);
+    }, [restoreHash]);
 
   const syncBooks = useCallback(
     async ({ userId, apiClient }: AutoBookSyncParams): Promise<boolean> => {
@@ -156,7 +165,10 @@ export function useAutoSetup(): UseAutoSetupReturn {
           books: merged,
           lastUpdated: new Date().toISOString(),
         };
-        const uploadResponse = await apiClient.updatePersonalBooks(userId, personalBooks);
+        const uploadResponse = await apiClient.updatePersonalBooks(
+          userId,
+          personalBooks,
+        );
 
         if (uploadResponse.error) {
           setErrorMessage(uploadResponse.error.message);

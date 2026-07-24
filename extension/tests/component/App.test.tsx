@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { App } from "@/dialog/App";
 import { ApiClient } from "@/api/client";
@@ -12,7 +18,11 @@ import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
 
 // Mock all child components
 vi.mock("@/dialog/Onboarding", () => ({
-  Onboarding: ({ onFamilyJoined }: { onFamilyJoined: (id: string, userId: string) => void }) => (
+  Onboarding: ({
+    onFamilyJoined,
+  }: {
+    onFamilyJoined: (id: string, userId: string) => void;
+  }) => (
     <div data-testid="onboarding">
       <button onClick={() => onFamilyJoined("fam-123", "user-456")}>
         Mock Join
@@ -38,9 +48,7 @@ vi.mock("@/dialog/FamilySettings", () => ({
 }));
 
 vi.mock("@/dialog/DialogFooter", () => ({
-  DialogFooter: () => (
-    <div data-testid="dialog-footer">footer</div>
-  ),
+  DialogFooter: () => <div data-testid="dialog-footer">footer</div>,
 }));
 
 vi.mock("@/constants", async (importOriginal) => {
@@ -106,9 +114,13 @@ function setupChromeMessages(options: {
   if (options.familyId) syncStore[FAMILY_ID_KEY] = options.familyId;
 
   vi.mocked(chrome.storage.local.get).mockImplementation(((keys: unknown) =>
-    Promise.resolve(pickKeys(localStore, keys))) as typeof chrome.storage.local.get);
+    Promise.resolve(
+      pickKeys(localStore, keys),
+    )) as typeof chrome.storage.local.get);
   vi.mocked(chrome.storage.sync.get).mockImplementation(((keys: unknown) =>
-    Promise.resolve(pickKeys(syncStore, keys))) as typeof chrome.storage.sync.get);
+    Promise.resolve(
+      pickKeys(syncStore, keys),
+    )) as typeof chrome.storage.sync.get);
 }
 
 describe("App", () => {
@@ -156,7 +168,11 @@ describe("App", () => {
   });
 
   it("shows main view with tabs when familyId and userId exist", async () => {
-    setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+    setupChromeMessages({
+      familyId: "fam-1",
+      userId: "user-1",
+      authToken: "tok",
+    });
 
     render(<App />);
     await waitFor(() => {
@@ -167,7 +183,11 @@ describe("App", () => {
   });
 
   it("renders a lucide icon inside each tab alongside its label", async () => {
-    setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+    setupChromeMessages({
+      familyId: "fam-1",
+      userId: "user-1",
+      authToken: "tok",
+    });
 
     render(<App />);
     await waitFor(() => {
@@ -262,9 +282,9 @@ describe("App", () => {
     });
 
     // CLEAR_FAMILY_ID should have been sent
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      { type: "CLEAR_FAMILY_ID" },
-    );
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "CLEAR_FAMILY_ID",
+    });
   });
 
   it("handleLeaveFamily resets active tab to family-shelf", async () => {
@@ -279,7 +299,11 @@ describe("App", () => {
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
         const result: Record<string, unknown> = {};
-        const keyList = Array.isArray(keys) ? keys : (typeof keys === "string" ? [keys] : Object.keys(keys as Record<string, unknown>));
+        const keyList = Array.isArray(keys)
+          ? keys
+          : typeof keys === "string"
+            ? [keys]
+            : Object.keys(keys as Record<string, unknown>);
         for (const k of keyList) {
           if (k in storageState) result[k] = storageState[k];
         }
@@ -326,17 +350,23 @@ describe("App", () => {
     // Capture the ApiClient instance created by App's useRef
     const instances: ApiClient[] = [];
     const OrigConstructor = ApiClient;
-    const constructorSpy = vi.spyOn(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (await import("@/api/client")) as any,
-      "ApiClient",
-    ).mockImplementation((...args: unknown[]) => {
-      const instance = new OrigConstructor(...(args as [string?]));
-      instances.push(instance);
-      return instance;
-    });
+    const constructorSpy = vi
+      .spyOn(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (await import("@/api/client")) as any,
+        "ApiClient",
+      )
+      .mockImplementation((...args: unknown[]) => {
+        const instance = new OrigConstructor(...(args as [string?]));
+        instances.push(instance);
+        return instance;
+      });
 
-    setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+    setupChromeMessages({
+      familyId: "fam-1",
+      userId: "user-1",
+      authToken: "tok",
+    });
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
@@ -386,17 +416,23 @@ describe("App", () => {
     async function renderWithCapturedClient() {
       const instances: ApiClient[] = [];
       const OrigConstructor = ApiClient;
-      const constructorSpy = vi.spyOn(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (await import("@/api/client")) as any,
-        "ApiClient",
-      ).mockImplementation((...args: unknown[]) => {
-        const instance = new OrigConstructor(...(args as [string?]));
-        instances.push(instance);
-        return instance;
-      });
+      const constructorSpy = vi
+        .spyOn(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (await import("@/api/client")) as any,
+          "ApiClient",
+        )
+        .mockImplementation((...args: unknown[]) => {
+          const instance = new OrigConstructor(...(args as [string?]));
+          instances.push(instance);
+          return instance;
+        });
 
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
       render(<App />);
       await waitFor(() => {
         expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
@@ -469,15 +505,21 @@ describe("App", () => {
       if (opts.familyId) syncStore[FAMILY_ID_KEY] = opts.familyId;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(((keys: unknown) =>
-        Promise.resolve(pickKeys(localStore, keys))) as typeof chrome.storage.local.get);
+        Promise.resolve(
+          pickKeys(localStore, keys),
+        )) as typeof chrome.storage.local.get);
       vi.mocked(chrome.storage.sync.get).mockImplementation(((keys: unknown) =>
-        Promise.resolve(pickKeys(syncStore, keys))) as typeof chrome.storage.sync.get);
+        Promise.resolve(
+          pickKeys(syncStore, keys),
+        )) as typeof chrome.storage.sync.get);
     }
 
     it("resolves to MAIN view when sendMessage REJECTS but storage has familyId+userId", async () => {
       // Every background message rejects (sleeping Firefox background).
       vi.mocked(chrome.runtime.sendMessage).mockRejectedValue(
-        new Error("Could not establish connection. Receiving end does not exist."),
+        new Error(
+          "Could not establish connection. Receiving end does not exist.",
+        ),
       );
       seedStorage({ familyId: "fam-ff", userId: "user-ff", authToken: "tok" });
 
@@ -493,7 +535,9 @@ describe("App", () => {
 
     it("resolves to onboarding when sendMessage rejects and storage has no familyId", async () => {
       vi.mocked(chrome.runtime.sendMessage).mockRejectedValue(
-        new Error("Could not establish connection. Receiving end does not exist."),
+        new Error(
+          "Could not establish connection. Receiving end does not exist.",
+        ),
       );
       seedStorage({ familyId: null, userId: null, authToken: null });
 
@@ -529,19 +573,25 @@ describe("App", () => {
   // Firefox: CLEAR_FAMILY_ID message can fail (sleeping background), so leave
   // must also clear familyId + auth credentials DIRECTLY from storage.local.
   it("handleLeaveFamily removes credentials from storage.local even when CLEAR_FAMILY_ID message rejects", async () => {
-    setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+    setupChromeMessages({
+      familyId: "fam-1",
+      userId: "user-1",
+      authToken: "tok",
+    });
     // The CLEAR_FAMILY_ID message rejects (Firefox sleeping background). The
     // GET_* messages used at mount must still resolve so the main view renders.
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation((message: unknown) => {
-      const msg = message as { type: string };
-      if (msg.type === "CLEAR_FAMILY_ID") {
-        return Promise.reject(new Error("background asleep"));
-      }
-      if (msg.type === "GET_API_ENDPOINT") {
-        return Promise.resolve({ apiEndpoint: null });
-      }
-      return Promise.resolve(undefined);
-    });
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      (message: unknown) => {
+        const msg = message as { type: string };
+        if (msg.type === "CLEAR_FAMILY_ID") {
+          return Promise.reject(new Error("background asleep"));
+        }
+        if (msg.type === "GET_API_ENDPOINT") {
+          return Promise.resolve({ apiEndpoint: null });
+        }
+        return Promise.resolve(undefined);
+      },
+    );
 
     render(<App />);
     await waitFor(() => {
@@ -557,13 +607,21 @@ describe("App", () => {
 
     // Direct storage cleanup guarantees Unbind Isolation even with no background.
     expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-      expect.arrayContaining([FAMILY_ID_KEY, AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]),
+      expect.arrayContaining([
+        FAMILY_ID_KEY,
+        AUTH_TOKEN_KEY,
+        TOKEN_EXPIRES_AT_KEY,
+      ]),
     );
   });
 
   describe("lazy-mount tab panels", () => {
     it("mounts only FamilyShelf on initial render (default family-shelf tab)", async () => {
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
 
       render(<App />);
       await waitFor(() => {
@@ -576,7 +634,11 @@ describe("App", () => {
     });
 
     it("mounts PersonalShelf only after its tab is first clicked", async () => {
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
 
       render(<App />);
       await waitFor(() => {
@@ -591,7 +653,11 @@ describe("App", () => {
     });
 
     it("mounts FamilySettings only after its tab is first clicked", async () => {
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
 
       render(<App />);
       await waitFor(() => {
@@ -606,7 +672,11 @@ describe("App", () => {
     });
 
     it("keeps a visited panel mounted after switching away and back", async () => {
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
 
       render(<App />);
       await waitFor(() => {
@@ -628,7 +698,11 @@ describe("App", () => {
     });
 
     it("a visited panel stays in the DOM but is hidden when inactive", async () => {
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
 
       render(<App />);
       await waitFor(() => {
@@ -666,7 +740,11 @@ describe("App", () => {
 
     it("uses desktop tab-row sizing when viewport is not mobile", async () => {
       // tests/setup.ts default stub reports matches:false for every query.
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
 
       render(<App />);
       await waitFor(() => {
@@ -702,9 +780,14 @@ describe("App", () => {
         removeListener: vi.fn(),
         dispatchEvent: vi.fn(),
       }));
-      window.matchMedia = mobileMatchMedia as unknown as typeof window.matchMedia;
+      window.matchMedia =
+        mobileMatchMedia as unknown as typeof window.matchMedia;
 
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
 
       const { App: FreshApp } = await import("@/dialog/App");
       render(<FreshApp />);
@@ -743,7 +826,11 @@ describe("App", () => {
     });
 
     it("main view wrapper carries the flex-fill layout class", async () => {
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
       render(<App />);
       await waitFor(() => {
         expect(screen.getByRole("tablist")).toBeInTheDocument();
@@ -754,7 +841,11 @@ describe("App", () => {
     });
 
     it("content area uses the flex-growth tab-panels class (no fixed max-height)", async () => {
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
       render(<App />);
       await waitFor(() => {
         expect(screen.getByTestId("family-shelf")).toBeInTheDocument();
@@ -789,7 +880,11 @@ describe("App", () => {
     });
 
     it("reports the main view when familyId and userId exist", async () => {
-      setupChromeMessages({ familyId: "fam-1", userId: "user-1", authToken: "tok" });
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
       const onViewChange = vi.fn();
 
       render(<App onViewChange={onViewChange} />);

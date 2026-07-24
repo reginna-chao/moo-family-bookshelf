@@ -1,11 +1,16 @@
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { BoolFlag, type ApiClient } from "@/api/client";
 import { DISPLAY_NAME_KEY } from "@/constants";
-
 
 // Mock useSearch to avoid debounce complexity in tests
 vi.mock("@/dialog/useSearch", () => ({
@@ -30,8 +35,12 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     leaveFamily: vi.fn(),
     getPersonalBooks: vi.fn(),
     updatePersonalBooks: vi.fn(),
-    getFamilyMembers: vi.fn().mockResolvedValue({ data: { familyId: "fam-1", ownerId: "user-1", members: [] } }),
-    getFamilyBookshelf: vi.fn().mockResolvedValue({ data: { familyId: "fam-1", members: [] } }),
+    getFamilyMembers: vi.fn().mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-1", members: [] },
+    }),
+    getFamilyBookshelf: vi
+      .fn()
+      .mockResolvedValue({ data: { familyId: "fam-1", members: [] } }),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
     setAuthToken: vi.fn(),
@@ -49,13 +58,24 @@ function renderWithProvider(
   { familyId = "fam-1", userId = "user-1" } = {},
 ) {
   return render(
-    <FamilyDataProvider familyId={familyId} userId={userId} apiClient={apiClient}>
+    <FamilyDataProvider
+      familyId={familyId}
+      userId={userId}
+      apiClient={apiClient}
+    >
       {ui}
     </FamilyDataProvider>,
   );
 }
 
-function makeMemberBooks(books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>) {
+function makeMemberBooks(
+  books: Array<{
+    bookId: string;
+    title: string;
+    author: string;
+    isShared: BoolFlag;
+  }>,
+) {
   return books;
 }
 
@@ -115,7 +135,11 @@ describe("FamilyShelf", () => {
   it("shows empty state when members have no shared books", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [{ userId: "user-2", displayName: "Alice" }],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -125,7 +149,12 @@ describe("FamilyShelf", () => {
               userId: "user-2",
               displayName: "Alice",
               books: makeMemberBooks([
-                { bookId: "b1", title: "Book 1", author: "Author", isShared: BoolFlag.FALSE },
+                {
+                  bookId: "b1",
+                  title: "Book 1",
+                  author: "Author",
+                  isShared: BoolFlag.FALSE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -144,7 +173,11 @@ describe("FamilyShelf", () => {
   it("renders books when members have shared books", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [{ userId: "user-2", displayName: "Alice" }],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -154,8 +187,18 @@ describe("FamilyShelf", () => {
               userId: "user-2",
               displayName: "Alice",
               books: makeMemberBooks([
-                { bookId: "b1", title: "共享書籍一", author: "作者A", isShared: BoolFlag.TRUE },
-                { bookId: "b2", title: "私密書籍", author: "作者B", isShared: BoolFlag.FALSE },
+                {
+                  bookId: "b1",
+                  title: "共享書籍一",
+                  author: "作者A",
+                  isShared: BoolFlag.TRUE,
+                },
+                {
+                  bookId: "b2",
+                  title: "私密書籍",
+                  author: "作者B",
+                  isShared: BoolFlag.FALSE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -192,7 +235,8 @@ describe("FamilyShelf", () => {
   });
 
   it("retry button reloads bookshelf", async () => {
-    const getFamilyBookshelf = vi.fn()
+    const getFamilyBookshelf = vi
+      .fn()
       .mockResolvedValueOnce({
         error: { code: "SERVER_ERROR", message: "伺服器錯誤" },
       })
@@ -204,7 +248,12 @@ describe("FamilyShelf", () => {
               userId: "user-2",
               displayName: "Alice",
               books: makeMemberBooks([
-                { bookId: "b1", title: "重試成功書", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b1",
+                  title: "重試成功書",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -214,7 +263,11 @@ describe("FamilyShelf", () => {
 
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [{ userId: "user-2", displayName: "Alice" }],
+        },
       }),
       getFamilyBookshelf,
     });
@@ -236,7 +289,9 @@ describe("FamilyShelf", () => {
 
   it("shows error state on network exception", async () => {
     const apiClient = createMockApiClient({
-      getFamilyBookshelf: vi.fn().mockRejectedValue(new Error("Network failure")),
+      getFamilyBookshelf: vi
+        .fn()
+        .mockRejectedValue(new Error("Network failure")),
     });
 
     renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
@@ -250,21 +305,35 @@ describe("FamilyShelf", () => {
   it("handles member with null books gracefully", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [
-          { userId: "user-2", displayName: "" },
-          { userId: "user-3", displayName: "Bob" },
-        ] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [
+            { userId: "user-2", displayName: "" },
+            { userId: "user-3", displayName: "Bob" },
+          ],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
           familyId: "fam-1",
           members: [
-            { userId: "user-2", displayName: "", books: null, lastUpdated: null },
+            {
+              userId: "user-2",
+              displayName: "",
+              books: null,
+              lastUpdated: null,
+            },
             {
               userId: "user-3",
               displayName: "Bob",
               books: makeMemberBooks([
-                { bookId: "b1", title: "Bob的書", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b1",
+                  title: "Bob的書",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -283,10 +352,14 @@ describe("FamilyShelf", () => {
   it("handles member with empty books gracefully — shows other member's books", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [
-          { userId: "user-2", displayName: "" },
-          { userId: "user-3", displayName: "Carol" },
-        ] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [
+            { userId: "user-2", displayName: "" },
+            { userId: "user-3", displayName: "Carol" },
+          ],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -302,7 +375,12 @@ describe("FamilyShelf", () => {
               userId: "user-3",
               displayName: "Carol",
               books: makeMemberBooks([
-                { bookId: "b2", title: "Carol的書", author: "C", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b2",
+                  title: "Carol的書",
+                  author: "C",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -321,7 +399,11 @@ describe("FamilyShelf", () => {
   it("uses userId prefix as display name when displayName is empty", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "abcdefghijklmnop", displayName: "" }] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [{ userId: "abcdefghijklmnop", displayName: "" }],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -331,7 +413,12 @@ describe("FamilyShelf", () => {
               userId: "abcdefghijklmnop",
               displayName: "",
               books: makeMemberBooks([
-                { bookId: "b1", title: "匿名的書", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b1",
+                  title: "匿名的書",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -352,7 +439,11 @@ describe("FamilyShelf", () => {
   it("renders member dropdown for filtering", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [{ userId: "user-2", displayName: "Alice" }],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -362,7 +453,12 @@ describe("FamilyShelf", () => {
               userId: "user-2",
               displayName: "Alice",
               books: makeMemberBooks([
-                { bookId: "b1", title: "Alice的書", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b1",
+                  title: "Alice的書",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -381,10 +477,14 @@ describe("FamilyShelf", () => {
   it("filters books by selected member", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [
-          { userId: "user-1", displayName: "Me" },
-          { userId: "user-2", displayName: "Alice" },
-        ] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [
+            { userId: "user-1", displayName: "Me" },
+            { userId: "user-2", displayName: "Alice" },
+          ],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -394,7 +494,12 @@ describe("FamilyShelf", () => {
               userId: "user-1",
               displayName: "Me",
               books: makeMemberBooks([
-                { bookId: "b1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b1",
+                  title: "我的書",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -402,7 +507,12 @@ describe("FamilyShelf", () => {
               userId: "user-2",
               displayName: "Alice",
               books: makeMemberBooks([
-                { bookId: "b2", title: "Alice的書", author: "B", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b2",
+                  title: "Alice的書",
+                  author: "B",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -431,7 +541,11 @@ describe("FamilyShelf", () => {
   it("shows total book count in header", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [{ userId: "user-2", displayName: "Alice" }],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -441,8 +555,18 @@ describe("FamilyShelf", () => {
               userId: "user-2",
               displayName: "Alice",
               books: makeMemberBooks([
-                { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
-                { bookId: "b2", title: "書二", author: "B", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b1",
+                  title: "書一",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
+                {
+                  bookId: "b2",
+                  title: "書二",
+                  author: "B",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -461,7 +585,11 @@ describe("FamilyShelf", () => {
   it("shows search bar when books exist", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [{ userId: "user-2", displayName: "Alice" }],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -471,7 +599,12 @@ describe("FamilyShelf", () => {
               userId: "user-2",
               displayName: "Alice",
               books: makeMemberBooks([
-                { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b1",
+                  title: "書一",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -493,7 +626,12 @@ describe("FamilyShelf", () => {
         data: {
           familyId: "fam-1",
           members: [
-            { userId: "user-2", displayName: "User2", books: [], lastUpdated: "2024-01-01" },
+            {
+              userId: "user-2",
+              displayName: "User2",
+              books: [],
+              lastUpdated: "2024-01-01",
+            },
           ],
         },
       }),
@@ -524,10 +662,14 @@ describe("FamilyShelf", () => {
   it("updates member display name on chrome.storage.onChanged", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [
-          { userId: "user-1", displayName: "小明" },
-          { userId: "user-2", displayName: "Alice" },
-        ] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [
+            { userId: "user-1", displayName: "小明" },
+            { userId: "user-2", displayName: "Alice" },
+          ],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -537,7 +679,12 @@ describe("FamilyShelf", () => {
               userId: "user-1",
               displayName: "小明",
               books: makeMemberBooks([
-                { bookId: "b1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b1",
+                  title: "我的書",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -545,7 +692,12 @@ describe("FamilyShelf", () => {
               userId: "user-2",
               displayName: "Alice",
               books: makeMemberBooks([
-                { bookId: "b2", title: "Alice的書", author: "B", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b2",
+                  title: "Alice的書",
+                  author: "B",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -567,7 +719,8 @@ describe("FamilyShelf", () => {
     });
 
     // Get the listener registered on chrome.storage.onChanged
-    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener)
+      .mock.calls;
     const listener = addListenerCalls[addListenerCalls.length - 1][0];
 
     // Simulate storage change
@@ -587,7 +740,11 @@ describe("FamilyShelf", () => {
   it("ignores chrome.storage.onChanged from non-local area", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
-        data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-1", displayName: "小明" }] },
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [{ userId: "user-1", displayName: "小明" }],
+        },
       }),
       getFamilyBookshelf: vi.fn().mockResolvedValue({
         data: {
@@ -597,7 +754,12 @@ describe("FamilyShelf", () => {
               userId: "user-1",
               displayName: "小明",
               books: makeMemberBooks([
-                { bookId: "b1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b1",
+                  title: "我的書",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -617,7 +779,8 @@ describe("FamilyShelf", () => {
       expect(screen.getByText("我的書")).toBeInTheDocument();
     });
 
-    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const addListenerCalls = vi.mocked(chrome.storage.onChanged.addListener)
+      .mock.calls;
     const listener = addListenerCalls[addListenerCalls.length - 1][0];
 
     // Fire from "sync" area — should be ignored
@@ -636,7 +799,11 @@ describe("FamilyShelf", () => {
     function setupWithBooks() {
       return createMockApiClient({
         getFamilyMembers: vi.fn().mockResolvedValue({
-          data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+          data: {
+            familyId: "fam-1",
+            ownerId: "user-1",
+            members: [{ userId: "user-2", displayName: "Alice" }],
+          },
         }),
         getFamilyBookshelf: vi.fn().mockResolvedValue({
           data: {
@@ -646,7 +813,12 @@ describe("FamilyShelf", () => {
                 userId: "user-2",
                 displayName: "Alice",
                 books: makeMemberBooks([
-                  { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
+                  {
+                    bookId: "b1",
+                    title: "書一",
+                    author: "A",
+                    isShared: BoolFlag.TRUE,
+                  },
                 ]),
                 lastUpdated: "2024-01-01",
               },
@@ -659,14 +831,19 @@ describe("FamilyShelf", () => {
     it("renders ViewModeToggle in toolbar", async () => {
       renderWithProvider(<FamilyShelf userId="user-1" />, setupWithBooks());
       await waitFor(() => {
-        expect(screen.getByRole("group", { name: "家庭書櫃顯示模式" })).toBeInTheDocument();
+        expect(
+          screen.getByRole("group", { name: "家庭書櫃顯示模式" }),
+        ).toBeInTheDocument();
       });
     });
 
     it("defaults to grid mode", async () => {
       renderWithProvider(<FamilyShelf userId="user-1" />, setupWithBooks());
       await waitFor(() => {
-        expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute("aria-pressed", "true");
+        expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
       });
     });
 
@@ -679,7 +856,10 @@ describe("FamilyShelf", () => {
       fireEvent.click(screen.getByLabelText("切換為列表檢視"));
 
       await waitFor(() => {
-        expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute("aria-pressed", "true");
+        expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
       });
     });
   });
@@ -702,7 +882,11 @@ describe("FamilyShelf", () => {
     function setupShelfWithBooks(count: number) {
       return createMockApiClient({
         getFamilyMembers: vi.fn().mockResolvedValue({
-          data: { familyId: "fam-1", ownerId: "user-1", members: [{ userId: "user-2", displayName: "Alice" }] },
+          data: {
+            familyId: "fam-1",
+            ownerId: "user-1",
+            members: [{ userId: "user-2", displayName: "Alice" }],
+          },
         }),
         getFamilyBookshelf: vi.fn().mockResolvedValue({
           data: {
@@ -721,7 +905,10 @@ describe("FamilyShelf", () => {
     }
 
     it("shows Load More button when shared books exceed pageSize", async () => {
-      renderWithProvider(<FamilyShelf userId="user-1" />, setupShelfWithBooks(250));
+      renderWithProvider(
+        <FamilyShelf userId="user-1" />,
+        setupShelfWithBooks(250),
+      );
 
       await waitFor(() => {
         expect(screen.getByText("共享書 1")).toBeInTheDocument();
@@ -733,17 +920,25 @@ describe("FamilyShelf", () => {
     });
 
     it("does not show Load More button when books fit in pageSize", async () => {
-      renderWithProvider(<FamilyShelf userId="user-1" />, setupShelfWithBooks(80));
+      renderWithProvider(
+        <FamilyShelf userId="user-1" />,
+        setupShelfWithBooks(80),
+      );
 
       await waitFor(() => {
         expect(screen.getByText("共享書 1")).toBeInTheDocument();
       });
 
-      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /載入更多/ }),
+      ).not.toBeInTheDocument();
     });
 
     it("click Load More appends pageSize to visible count", async () => {
-      renderWithProvider(<FamilyShelf userId="user-1" />, setupShelfWithBooks(250));
+      renderWithProvider(
+        <FamilyShelf userId="user-1" />,
+        setupShelfWithBooks(250),
+      );
 
       await waitFor(() => {
         expect(screen.getByText("共享書 1")).toBeInTheDocument();
@@ -755,7 +950,9 @@ describe("FamilyShelf", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 250 本/ }),
+          screen.getByRole("button", {
+            name: /載入更多.*已顯示 200.*共 250 本/,
+          }),
         ).toBeInTheDocument();
       });
     });
@@ -763,22 +960,30 @@ describe("FamilyShelf", () => {
     it("hides Load More button when search narrows the view (narrowingActive)", async () => {
       const { useSearch } = await import("@/dialog/useSearch");
       const defaultImpl = vi.mocked(useSearch).getMockImplementation();
-      vi.mocked(useSearch).mockImplementation((items: unknown[]) => ({
-        searchTerm: "共享",
-        setSearchTerm: vi.fn(),
-        resetSearch: vi.fn(),
-        filteredItems: items,
-        isFiltering: true,
-      }) as ReturnType<typeof useSearch>);
+      vi.mocked(useSearch).mockImplementation(
+        (items: unknown[]) =>
+          ({
+            searchTerm: "共享",
+            setSearchTerm: vi.fn(),
+            resetSearch: vi.fn(),
+            filteredItems: items,
+            isFiltering: true,
+          }) as ReturnType<typeof useSearch>,
+      );
 
       try {
-        renderWithProvider(<FamilyShelf userId="user-1" />, setupShelfWithBooks(250));
+        renderWithProvider(
+          <FamilyShelf userId="user-1" />,
+          setupShelfWithBooks(250),
+        );
 
         await waitFor(() => {
           expect(screen.getByText("共享書 1")).toBeInTheDocument();
         });
 
-        expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: /載入更多/ }),
+        ).not.toBeInTheDocument();
       } finally {
         if (defaultImpl) vi.mocked(useSearch).mockImplementation(defaultImpl);
       }
@@ -809,7 +1014,10 @@ describe("FamilyShelf", () => {
               {
                 userId: "user-3",
                 displayName: "Bob",
-                books: makeManyBooks(80).map((b, i) => ({ ...b, bookId: `bob-${i}` })),
+                books: makeManyBooks(80).map((b, i) => ({
+                  ...b,
+                  bookId: `bob-${i}`,
+                })),
                 lastUpdated: "2024-01-01",
               },
             ],
@@ -829,7 +1037,9 @@ describe("FamilyShelf", () => {
       );
       await waitFor(() => {
         expect(
-          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 330 本/ }),
+          screen.getByRole("button", {
+            name: /載入更多.*已顯示 200.*共 330 本/,
+          }),
         ).toBeInTheDocument();
       });
 
@@ -839,7 +1049,9 @@ describe("FamilyShelf", () => {
       // Alice has 250 books → after reset, visible = 100
       await waitFor(() => {
         expect(
-          screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+          screen.getByRole("button", {
+            name: /載入更多.*已顯示 100.*共 250 本/,
+          }),
         ).toBeInTheDocument();
       });
     });

@@ -31,11 +31,16 @@ async function createFamilyAndGetSyncCode(
   extensionId: string,
 ): Promise<string> {
   await page.goto(`chrome-extension://${extensionId}/background.js`);
-  await page.evaluate(({ apiUrl, key }) => {
-    chrome.storage.local.clear();
-    try { chrome.storage.sync.clear(); } catch {}
-    chrome.storage.local.set({ [key]: apiUrl });
-  }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
+  await page.evaluate(
+    ({ apiUrl, key }) => {
+      chrome.storage.local.clear();
+      try {
+        chrome.storage.sync.clear();
+      } catch {}
+      chrome.storage.local.set({ [key]: apiUrl });
+    },
+    { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+  );
 
   await page.goto(MOCK_READMOO_URL);
   await waitForPageReady(page);
@@ -63,7 +68,9 @@ async function createFamilyAndGetSyncCode(
 
   // Wait for sync code to appear (or dump dialog HTML on failure)
   try {
-    await dialog.locator("[data-testid='sync-code']").waitFor({ state: "visible", timeout: 30_000 });
+    await dialog
+      .locator("[data-testid='sync-code']")
+      .waitFor({ state: "visible", timeout: 30_000 });
   } catch (e) {
     const html = await dialog.innerHTML().catch(() => "(unreadable)");
     throw new Error(
@@ -102,7 +109,10 @@ test.describe("Custom API Endpoint", () => {
     const page = await context.newPage();
 
     // Create family and get sync code during creation
-    const syncCodeOnCreate = await createFamilyAndGetSyncCode(page, extensionId);
+    const syncCodeOnCreate = await createFamilyAndGetSyncCode(
+      page,
+      extensionId,
+    );
     expect(syncCodeOnCreate).toBeTruthy();
 
     // Continue to main view
