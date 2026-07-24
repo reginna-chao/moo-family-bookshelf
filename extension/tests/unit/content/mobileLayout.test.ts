@@ -17,8 +17,14 @@ interface MockMql {
   media: string;
   _listeners: Set<ChangeListener>;
   _setMatches: (v: boolean) => void;
-  addEventListener: (type: string, cb: EventListenerOrEventListenerObject | null) => void;
-  removeEventListener: (type: string, cb: EventListenerOrEventListenerObject | null) => void;
+  addEventListener: (
+    type: string,
+    cb: EventListenerOrEventListenerObject | null,
+  ) => void;
+  removeEventListener: (
+    type: string,
+    cb: EventListenerOrEventListenerObject | null,
+  ) => void;
   addListener: ReturnType<typeof vi.fn>;
   removeListener: ReturnType<typeof vi.fn>;
   dispatchEvent: ReturnType<typeof vi.fn>;
@@ -34,11 +40,19 @@ function createMockMql(query: string, matches: boolean): MockMql {
       mql.matches = v;
       listeners.forEach((cb) => cb());
     },
-    addEventListener(type: string, cb: EventListenerOrEventListenerObject | null) {
-      if (type === "change" && typeof cb === "function") listeners.add(cb as ChangeListener);
+    addEventListener(
+      type: string,
+      cb: EventListenerOrEventListenerObject | null,
+    ) {
+      if (type === "change" && typeof cb === "function")
+        listeners.add(cb as ChangeListener);
     },
-    removeEventListener(type: string, cb: EventListenerOrEventListenerObject | null) {
-      if (type === "change" && typeof cb === "function") listeners.delete(cb as ChangeListener);
+    removeEventListener(
+      type: string,
+      cb: EventListenerOrEventListenerObject | null,
+    ) {
+      if (type === "change" && typeof cb === "function")
+        listeners.delete(cb as ChangeListener);
     },
     addListener: vi.fn(),
     removeListener: vi.fn(),
@@ -142,7 +156,7 @@ describe("mobileLayout", () => {
       const dialog = document.createElement("div");
       applyDialogLayout(dialog, false);
       expect(dialog.style.width).toBe("90vw");
-      expect(dialog.style.maxWidth).toBe("640px");
+      expect(dialog.style.maxWidth).toBe("650px");
       expect(dialog.style.maxHeight).toBe("80vh");
       expect(dialog.style.borderRadius).toBe("12px");
       expect(dialog.style.transform).toBe("translate(-50%, -50%)");
@@ -162,7 +176,7 @@ describe("mobileLayout", () => {
       applyDialogLayout(dialog, false, true);
       expect(dialog.style.height).toBe("80vh");
       expect(dialog.style.maxHeight).toBe("80vh");
-      expect(dialog.style.maxWidth).toBe("640px");
+      expect(dialog.style.maxWidth).toBe("650px");
       expect(dialog.style.borderRadius).toBe("12px");
     });
 
@@ -172,7 +186,7 @@ describe("mobileLayout", () => {
       expect(dialog.style.height).toBe("");
       // Remaining desktop card styles keep it centred and height-capped.
       expect(dialog.style.maxHeight).toBe("80vh");
-      expect(dialog.style.maxWidth).toBe("640px");
+      expect(dialog.style.maxWidth).toBe("650px");
       expect(dialog.style.borderRadius).toBe("12px");
     });
 
@@ -224,8 +238,12 @@ describe("mobileLayout", () => {
       // observable contract for the size — assert the class here and pin the
       // actual px value against the source stylesheet below.
       expect(btn.classList.contains("moo-shell-close")).toBe(true);
-      expect(SHELL_BOOTSTRAP_CSS).toMatch(/\.moo-shell-close\s*\{[^}]*width:\s*35px/);
-      expect(SHELL_BOOTSTRAP_CSS).toMatch(/\.moo-shell-close\s*\{[^}]*height:\s*35px/);
+      expect(SHELL_BOOTSTRAP_CSS).toMatch(
+        /\.moo-shell-close\s*\{[^}]*width:\s*35px/,
+      );
+      expect(SHELL_BOOTSTRAP_CSS).toMatch(
+        /\.moo-shell-close\s*\{[^}]*height:\s*35px/,
+      );
       expect(btn.getAttribute("aria-label")).toBe("關閉");
     });
 

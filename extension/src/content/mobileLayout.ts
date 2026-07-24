@@ -85,7 +85,7 @@ const DESKTOP_DIALOG_BASE_STYLE: Record<string, string> = {
   left: "50%",
   transform: "translate(-50%, -50%)",
   width: "90vw",
-  maxWidth: "640px",
+  maxWidth: "650px",
   maxHeight: DESKTOP_MAX_HEIGHT,
   borderRadius: "12px",
 };
