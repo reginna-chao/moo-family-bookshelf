@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import browser from "webextension-polyfill";
 import { ApiClient } from "../api/client";
 import { DISPLAY_NAME_KEY } from "../constants";
+import { safeStorageGet } from "../storage/safeStorage";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { useAutoSetup } from "./useAutoSetup";
 import { WelcomeView, CreatedView, ErrorView, IdleView } from "./OnboardingViews";
@@ -30,7 +30,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const result = await browser.storage.local.get([DISPLAY_NAME_KEY]);
+      const result = await safeStorageGet([DISPLAY_NAME_KEY]);
       if (cancelled) return;
       if (result[DISPLAY_NAME_KEY]) {
         setHasUsedBefore(true);

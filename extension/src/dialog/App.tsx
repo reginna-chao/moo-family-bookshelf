@@ -10,6 +10,7 @@ import {
   HAS_COMPLETED_INITIAL_SETUP_KEY,
 } from "../constants";
 import { readFamilyId } from "../storage/familyId";
+import { safeStorageGet } from "../storage/safeStorage";
 import { Onboarding } from "./Onboarding";
 import { PersonalShelf } from "./PersonalShelf";
 import { FamilyShelf } from "./FamilyShelf";
@@ -148,10 +149,12 @@ export function App({ onViewChange, onPendingBorrowCountChange }: AppProps = {})
     setUserId(newUserId);
     // First-time onboarding: default to personal-shelf tab
     void (async () => {
-      const result = await browser.storage.local.get([HAS_COMPLETED_INITIAL_SETUP_KEY]);
+      const result = await safeStorageGet([HAS_COMPLETED_INITIAL_SETUP_KEY]);
       if (!result[HAS_COMPLETED_INITIAL_SETUP_KEY]) {
         setActiveTab("personal-shelf");
-        void browser.storage.local.set({ [HAS_COMPLETED_INITIAL_SETUP_KEY]: true });
+        void browser.storage.local
+          .set({ [HAS_COMPLETED_INITIAL_SETUP_KEY]: true })
+          .catch(() => {});
       }
     })();
     setView("main");

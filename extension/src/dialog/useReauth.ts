@@ -21,6 +21,7 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
 } from "../constants";
+import { safeStorageGet } from "../storage/safeStorage";
 import {
   useVerificationPrompt,
   type UseVerificationPromptResult,
@@ -83,7 +84,7 @@ export function useReauth(
   useEffect(() => {
     apiClient.onReauthRequired = () => {
       void (async () => {
-        const stored = await browser.storage.local.get([
+        const stored = await safeStorageGet([
           USER_ID_KEY,
           FAMILY_ID_KEY,
           DISPLAY_NAME_KEY,
