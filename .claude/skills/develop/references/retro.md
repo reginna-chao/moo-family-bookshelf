@@ -1,7 +1,7 @@
 # Run retrospective (reference)
 
-Lazy-loaded by `/develop` at the end-of-run retro offer (code-cycle Phase 8 / design
-Deliver). Runs in the **main session** — it needs the full conversation history
+Lazy-loaded by `/develop` at the retro offer, before the commit gate (code-cycle
+Phase 7 / design Deliver). Runs in the **main session** — it needs the full conversation history
 (dispatches, gates, Fix Cycle rounds, user corrections) that an isolated subagent cannot
 see. Read this only when the user accepts the retro offer; never load it preemptively,
 never auto-run.

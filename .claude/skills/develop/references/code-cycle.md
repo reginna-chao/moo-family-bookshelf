@@ -11,21 +11,27 @@ Guarantee the change lands on its own clean branch off `origin/main`, so another
 3. **Isolation check:** run `git log --oneline origin/main..HEAD`. If it is non-empty — the current worktree/branch already carries unrelated commits — do NOT commit on top. Cut a fresh branch from `origin/main`: `git checkout -b <type>/<slug> origin/main` (or create a new worktree from `origin/main`).
 4. **Name it meaningfully:** `<type>/<short-kebab-slug>` — conventional type (`feat`/`fix`/`refactor`/`docs`/`test`/`chore`) + a concise English task slug (e.g. `fix/save-before-sync`). Never keep an opaque auto-generated worktree name (`claude/angry-moore-3651ca`) as the PR branch — rename first.
 5. Re-confirm `git log --oneline origin/main..HEAD` is empty before starting Phase 1. See `.claude/rules/global.md` → "Branch & Worktree Hygiene".
+6. **Worktree tasks:** when the task runs in a dedicated worktree, start EVERY agent prompt by restating the worktree's absolute path and forbidding any write to the main checkout.
 
 ## Phase 1: Requirements Analysis (collaborative — iterate until confirmed)
 
 1. Read the requirement carefully.
-2. Read `docs/project-plan.md` and `docs/architecture.md` for context (skip if absent).
-3. Break the requirement into work-items, each tagged **frontend** (Extension UI, Content Script, crypto, PWA) or **backend** (Worker API, KV schema, middleware), plus **shared concerns** (sync code format, API contract).
-4. **Proactively identify gaps and risks** — present these to the user:
+2. **Bug / incident intake** (bug-type requests only — skip for features):
+   - **Surface matrix first.** Before reading any code, establish WHICH surface is broken: Extension-Chrome / Extension-Firefox / PWA × device × symptom. Investigate only the broken surface — don't burn context reading an unaffected one.
+   - **Delegate broad scans.** Multi-file investigation sweeps go to an `Explore` agent that returns conclusions; you self-read only the 3–5 key files that anchor the diagnosis.
+   - **Masked fields are unknowns.** If you asked the user to redact a sensitive field (token, id), record it as "existence unknown" — never treat its absence from pasted output as evidence.
+   - **Fast-path** (single scope + root cause already pinned with `file:line` evidence + no API/schema change): you MAY fold the requirements analysis into the Phase 3 verify-before-test gate presentation instead of a separate confirmation stop, and write the pinned root cause into the coder prompt.
+3. Read `docs/project-plan.md` and `docs/architecture.md` for context (skip if absent).
+4. Break the requirement into work-items, each tagged **frontend** (Extension UI, Content Script, crypto, PWA) or **backend** (Worker API, KV schema, middleware), plus **shared concerns** (sync code format, API contract).
+5. **Proactively identify gaps and risks** — present these to the user:
    - **Assumptions** you are making.
    - **Missing / ambiguous** aspects: edge cases, error/empty/loading states, UX flows, concurrency, data migration, KV key collisions, TTL strategy.
    - **Security concerns** (frontend: XSS, `dangerouslySetInnerHTML`, secrets in client, `chrome.storage` exposure; backend: auth bypass, plaintext exposure, KV key injection, rate-limit evasion).
    - **Performance concerns** (frontend: needless re-renders, bundle size; backend: N+1 KV reads, payload size, cold start).
    - **Lifecycle & resource cost** — for ANY feature with FE polling/auto-refresh, BE scheduled jobs, or background sync: back-of-envelope cost (1 user × 24h × N devices) vs Cloudflare Workers' ~100k req/day free tier. **If realistic worst case > 1,000 req/user/day or polling is unbounded → mandate on-demand or visibility-gated design and flag it now, not at review.** See `.claude/rules/global.md` → "Lifecycle & Resource Cost".
    - **Open questions** needing the user's decision.
-5. **Mockup gate (optional).** If the feature introduces a new screen / dialog / overlay or significantly reshapes one, offer to dispatch the `designer` agent for a Pencil mockup before coding (user decides; skip for string/styling/internal changes). On yes, dispatch `designer` with `request` + `context`, relay its screenshot + annotations, iterate to approval, then continue.
-6. Present the full analysis. **Wait for user confirmation before proceeding.**
+6. **Mockup gate (optional).** If the feature introduces a new screen / dialog / overlay or significantly reshapes one, offer to dispatch the `designer` agent for a Pencil mockup before coding (user decides; skip for string/styling/internal changes). On yes, dispatch `designer` with `request` + `context`, relay its screenshot + annotations, iterate to approval, then continue.
+7. Present the full analysis. **Wait for user confirmation before proceeding.** (Bug fast-path per step 2 may defer this to the verify-before-test gate.)
 
 ## Phase 2: API Contract (full-stack features only)
 
@@ -42,9 +48,10 @@ For each scope in play (frontend, backend — parallelize when file-disjoint):
 3. **Verify-before-test gate [STOP — manual verification].** Before any test is written, present:
    - a concise summary of what the coder changed (files + behavior + affected states),
    - how the user can verify it (frontend: what to click/observe; backend: a curl example or KV state to inspect),
+   - **any rate limit / quota the tested flow touches** (limit, window, retry interval) — so throttling (e.g. a 429) isn't misread as a functional defect and repeated manual retries don't burn the quota,
 
    then ask the user to confirm it's correct OR point out fixes. **Rationale:** writing tests against unconfirmed behavior forces repeated rewrites. End with the Stop Block.
-   - Fixes needed → dispatch `coder` to fix, re-run typecheck/lint, re-present this gate.
+   - Fixes needed → dispatch `coder` to fix, re-run typecheck/lint, re-present this gate. **Batch feedback:** when one gate round returns several small UI remarks, fold them into ONE coder dispatch (file-disjoint) and one tester pass afterward — never one full round-trip per remark.
    - Confirmed correct → proceed to step 4.
 4. Dispatch **`tester`** with `scope`, `target`, `change_summary` (+ the actual diff).
 5. Run full verify: frontend `pnpm typecheck && pnpm lint && pnpm test`; backend `cd worker && pnpm typecheck && pnpm lint && pnpm test`.
@@ -136,26 +143,26 @@ Only when both frontend and backend changed:
 4. E2E typecheck on affected packages → clean.
 5. Any cross-scope issue → classify like 4.1: CRITICAL → fix via the owning scope's `coder`/`tester` (re-enter Fix Cycle); SUGGESTION → TL 建議 + Decision Prompt, wait for user. If none, skip.
 
-## Phase 6: Complete
+## Phase 6: Security Scan
 
-1. Re-present the Fix Cycle 總結 (+ any cross-scope additions).
-2. List changed files (all scopes) + final verification status.
-3. End with a single **prose headline paragraph** consolidating the outcome.
-4. `git add` changed files.
-5. Ask the user about committing. (Commit is ALWAYS an explicit user question — never auto-run.)
-
-## Phase 7: Security Scan
-
-Run **once** after the whole feature is complete (all sub-tasks done), not per sub-task.
+Run **once** after the whole feature is complete (all sub-tasks done, cross-scope validation passed) and **before the commit gate**, not per sub-task.
 1. Pick scope(s) from all changed files since the feature began:
    - `extension/src/crypto/` → `crypto`; `worker/src/` → `api`; `extension/src/` → `code` + `extension`; `pwa/src/` → `code`; `.env*`/`wrangler.toml`/CI/CD → `secrets`; deps changed → `deps`; multiple areas → `full`.
    - **Business-logic / invariant surfaces → also add `invariants`** (Dimension 8): any change under `worker/src/routes/` (family / bookshelf / member / user / auth) or `worker/src/middleware/auth`, or any FE change to the sharing / save-before-sync flow (`PersonalShelf`, `api/client` sharing calls). These carry the security-UX invariants (Inv-1..5), which the plain `api` / `code` scopes do **not** cover.
 2. Dispatch **`security-auditor`** with that scope (set) plus `mode: changed` and `base_ref: origin/main`, so the scan focuses on the feature's diff + its blast radius instead of re-scanning the whole repo. (Use `mode: repo` only for a deliberate periodic full audit, never for a routine post-feature scan.)
-3. Present findings alongside the final summary.
+3. Present findings.
 4. **CRITICAL** → flag with remediation; recommend fixing before merge (user acknowledgement required). **WARNING** → report, non-blocking.
 
 This phase auto-starts (no confirmation to begin), but CRITICAL findings require user acknowledgement.
 
-## Phase 8: Retro Offer (end of run)
+## Phase 7: Retro Offer (before the commit gate)
 
-After Phase 7's findings are presented, offer the run retrospective **ONCE** (user decides; never auto-run; declined → don't re-offer this run). On yes, read `references/retro.md` and follow it in **this session** (it needs the full conversation history — an isolated subagent cannot write it). The report lands in `.claude/reports/` — include it in the feature's commit, or a follow-up `chore(retro)` commit if the feature is already committed. The retro writes conclusions only; applying its proposals is `/distill`'s job (periodic, user-invoked), never done in-run.
+After Phase 6's findings are presented, offer the run retrospective **ONCE** (user decides; never auto-run; declined → don't re-offer this run). On yes, read `references/retro.md` and follow it in **this session** (it needs the full conversation history — an isolated subagent cannot write it). The report lands in `.claude/reports/` **before Phase 8's commit gate**, so it rides along in the feature's commit — no follow-up `chore(retro)` commit needed. The retro writes conclusions only; applying its proposals is `/distill`'s job (periodic, user-invoked), never done in-run.
+
+## Phase 8: Complete
+
+1. Re-present the Fix Cycle 總結 (+ any cross-scope additions + the security-scan verdict).
+2. List changed files (all scopes) + final verification status.
+3. End with a single **prose headline paragraph** consolidating the outcome.
+4. `git add` changed files (including the retro report, if one was written).
+5. Ask the user about committing. (Commit is ALWAYS an explicit user question — never auto-run.)
