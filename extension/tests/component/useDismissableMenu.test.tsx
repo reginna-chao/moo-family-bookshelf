@@ -19,9 +19,12 @@ function Harness({ isOpen, onClose }: HarnessProps) {
       </button>
       {isOpen && (
         <div ref={menuRef} data-testid="menu">
-          menu
+          {/* Mirrors the menu's own scrollable option list; a wheel/scroll here
+              must NOT dismiss the menu. */}
+          <button data-testid="menu-item">option</button>
         </div>
       )}
+      {/* A sibling scroll container that lives OUTSIDE the menu subtree. */}
       <div data-testid="outside">outside</div>
     </>
   );
@@ -90,6 +93,64 @@ describe("useDismissableMenu", () => {
       render(<Harness isOpen onClose={onClose} />);
 
       window.dispatchEvent(new Event("resize"));
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // The scroll-to-dismiss handler is origin-aware: a scroll whose composedPath
+  // includes the menu (its own overflow-y:auto list) or the trigger must NOT
+  // close the menu, so lower options stay reachable by wheel. Only scrolls of
+  // the page/panels BEHIND the menu dismiss it. Escape/outside-click/resize are
+  // unaffected.
+  describe("scroll-to-dismiss (origin-aware)", () => {
+    it("keeps the menu open on a scroll originating inside the menu's list", () => {
+      const onClose = vi.fn();
+      render(<Harness isOpen onClose={onClose} />);
+
+      // bubbles:true so the capture-phase window listener sees it and the
+      // composedPath climbs through the menu (matching a real wheel-scroll on
+      // an option row inside the scrollable list).
+      fireEvent(
+        screen.getByTestId("menu-item"),
+        new Event("scroll", { bubbles: true }),
+      );
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("keeps the menu open on a scroll dispatched on the menu element itself", () => {
+      const onClose = vi.fn();
+      render(<Harness isOpen onClose={onClose} />);
+
+      fireEvent(
+        screen.getByTestId("menu"),
+        new Event("scroll", { bubbles: true }),
+      );
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("keeps the menu open on a scroll originating on the trigger", () => {
+      const onClose = vi.fn();
+      render(<Harness isOpen onClose={onClose} />);
+
+      fireEvent(
+        screen.getByTestId("trigger"),
+        new Event("scroll", { bubbles: true }),
+      );
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("closes the menu on a scroll originating from a sibling container outside the menu", () => {
+      const onClose = vi.fn();
+      render(<Harness isOpen onClose={onClose} />);
+
+      fireEvent(
+        screen.getByTestId("outside"),
+        new Event("scroll", { bubbles: true }),
+      );
 
       expect(onClose).toHaveBeenCalledTimes(1);
     });
@@ -183,6 +244,10 @@ describe("useDismissableMenu", () => {
       shadowRoot.appendChild(innerScrollContainer);
       const menu = document.createElement("div");
       shadowRoot.appendChild(menu);
+      // An option row inside the menu's own scrollable list; scrolling here must
+      // NOT dismiss the menu even though the event also stays inside the shadow.
+      const innerMenuItem = document.createElement("button");
+      menu.appendChild(innerMenuItem);
 
       const triggerRef = createRef<HTMLElement>() as RefObject<HTMLElement>;
       const menuRef = createRef<HTMLElement>() as RefObject<HTMLElement>;
@@ -195,7 +260,7 @@ describe("useDismissableMenu", () => {
         { initialProps: { isOpen: true } },
       );
 
-      return { view, shadowRoot, innerScrollContainer };
+      return { view, shadowRoot, innerScrollContainer, innerMenuItem };
     }
 
     afterEach(() => {
@@ -212,6 +277,17 @@ describe("useDismissableMenu", () => {
       innerScrollContainer.dispatchEvent(new Event("scroll", { bubbles: false }));
 
       expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the menu open on a scroll originating inside the menu within the shadow tree", () => {
+      const onClose = vi.fn();
+      const { innerMenuItem } = mountInShadowRoot(onClose);
+
+      // Same shadow-root listener catches it, but composedPath climbs through the
+      // menu, so the origin-aware handler must ignore it.
+      innerMenuItem.dispatchEvent(new Event("scroll", { bubbles: true }));
+
+      expect(onClose).not.toHaveBeenCalled();
     });
 
     it("still calls onClose on a window scroll when the trigger is in light DOM", () => {
