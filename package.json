@@ -34,6 +34,8 @@
     "e2e:verify:selectors:update": "pnpm --filter moo-family-bookshelf-extension e2e:verify:selectors:update",
     "clean:kv": "rimraf worker/.wrangler/state",
     "clean:kv:dev": "node scripts/clean-kv.mjs dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -45,12 +47,16 @@
     ],
     "pwa/src/**/*.{ts,tsx}": [
       "pnpm --filter moo-family-bookshelf-pwa exec eslint --fix"
+    ],
+    "*.{ts,tsx,js,jsx,mjs,cjs,css,html,json,md,yml,yaml}": [
+      "prettier --write"
     ]
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
+    "prettier": "^3.9.6",
     "rimraf": "^6.1.3"
   }
 }

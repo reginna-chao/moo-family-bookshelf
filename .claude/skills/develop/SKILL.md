@@ -26,11 +26,11 @@ All skill-internal reasoning is yours; everything shown to the user is **繁體�
 
 Before anything else, classify the request. A misrouted design request must NEVER fall into the code Fix Cycle, and vice versa.
 
-| Intent | Signals | Route |
-| --- | --- | --- |
-| **CODE** | implement / add / fix / refactor / build / test / review a feature; anything touching `extension/` `pwa/` `worker/` source | → load `references/code-cycle.md`, run that lifecycle |
-| **DESIGN** | "make a favicon / logo / app icon / OG image / banner"; "design a brand"; "I don't like the colors / want to explore visual direction" | → load `references/design.md`, run that orchestration |
-| **MIXED** | a code feature that also needs a new screen's visual mockup | → run the CODE lifecycle; it dispatches the `designer` agent inline at the Phase-1 mockup gate |
+| Intent     | Signals                                                                                                                                | Route                                                                                          |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **CODE**   | implement / add / fix / refactor / build / test / review a feature; anything touching `extension/` `pwa/` `worker/` source             | → load `references/code-cycle.md`, run that lifecycle                                          |
+| **DESIGN** | "make a favicon / logo / app icon / OG image / banner"; "design a brand"; "I don't like the colors / want to explore visual direction" | → load `references/design.md`, run that orchestration                                          |
+| **MIXED**  | a code feature that also needs a new screen's visual mockup                                                                            | → run the CODE lifecycle; it dispatches the `designer` agent inline at the Phase-1 mockup gate |
 
 If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loading a reference. When the route is clear, **`Read` the matching reference file and follow it** — it carries the full phase-by-phase workflow.
 
@@ -58,17 +58,17 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 [the ONE concrete action the user must take now, as explicit options]
 ```
 
-**Decision prompts use AskUserQuestion.** Whenever the stop is a *choice* (SUGGESTION 取捨、提交方式、方向/範圍選擇、retro 要不要做…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form stops (e.g. manual verification feedback) stay text-only.
+**Decision prompts use AskUserQuestion.** Whenever the stop is a _choice_ (SUGGESTION 取捨、提交方式、方向/範圍選擇、retro 要不要做…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form stops (e.g. manual verification feedback) stay text-only.
 
 ## §3 Agent dispatch quick-reference
 
-| Agent | Use for | Key inputs |
-| --- | --- | --- |
-| `coder` | production code | `scope`, `requirements`, `files`, `mode` (production/research-only) |
-| `tester` | tests | `scope`, `target`, `scope_intent`, `change_summary` (+ actual diff) |
-| `reviewer` | code review | `scope`, `target`, `business_logic` |
-| `security-auditor` | post-feature security scan | `scope` (full/secrets/deps/code/extension/crypto/api/publish/invariants), `mode` (repo/changed + `base_ref`) — prefer `mode: changed` for a post-feature scan |
-| `designer` | UI mockup or brand/SVG asset | `request`, `context` |
+| Agent              | Use for                      | Key inputs                                                                                                                                                    |
+| ------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `coder`            | production code              | `scope`, `requirements`, `files`, `mode` (production/research-only)                                                                                           |
+| `tester`           | tests                        | `scope`, `target`, `scope_intent`, `change_summary` (+ actual diff)                                                                                           |
+| `reviewer`         | code review                  | `scope`, `target`, `business_logic`                                                                                                                           |
+| `security-auditor` | post-feature security scan   | `scope` (full/secrets/deps/code/extension/crypto/api/publish/invariants), `mode` (repo/changed + `base_ref`) — prefer `mode: changed` for a post-feature scan |
+| `designer`         | UI mockup or brand/SVG asset | `request`, `context`                                                                                                                                          |
 
 Parallelize across file-disjoint scopes (frontend + backend coders run concurrently); never let two concurrent agents own the same file. Independent verification legs also run in parallel — e.g. reviewer dispatch + E2E typecheck, or (small diffs) focused re-review + security scan — issue them in the same message. Re-review only the files changed by a fix, unless the user asks for a full re-review.
 

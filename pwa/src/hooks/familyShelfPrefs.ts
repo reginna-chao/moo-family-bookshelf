@@ -11,10 +11,7 @@ export function familyPrefRef(ownerId: string, bookId: string): string {
  * Membership is checked against current cards only, so orphan refs (pointing
  * to a no-longer-existing owner/book) are naturally excluded from the count.
  */
-export function countRefs(
-  members: MemberBooks[],
-  refs: Set<string>,
-): number {
+export function countRefs(members: MemberBooks[], refs: Set<string>): number {
   let count = 0;
   for (const member of members) {
     for (const book of member.books) {

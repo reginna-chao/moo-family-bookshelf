@@ -5,7 +5,10 @@ import type { ApiClient, BookEntry } from "@/api/client";
 import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { useSearch } from "@/hooks/useSearch";
 import { useLoadMore } from "@/hooks/useLoadMore";
-import { FloatingActionBar, shouldShowFloatingBar } from "@/components/FloatingActionBar";
+import {
+  FloatingActionBar,
+  shouldShowFloatingBar,
+} from "@/components/FloatingActionBar";
 import { CategoryFilter, filterByCategory } from "@/components/CategoryFilter";
 import { BookRow } from "@/components/BookRow";
 import { PublicShareDialog } from "@/components/PublicShareDialog";
@@ -39,7 +42,9 @@ export function PersonalShelfPage({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [archiveView, setArchiveView] = useState<"active" | "archived">("active");
+  const [archiveView, setArchiveView] = useState<"active" | "archived">(
+    "active",
+  );
   const [showPublicShare, setShowPublicShare] = useState(false);
   const { refreshBookshelf } = useFamilyData();
   const { sort, setSort } = useBookSort(userId, "personal");
@@ -172,7 +177,15 @@ export function PersonalShelfPage({
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setState("error");
     }
-  }, [userId, displayName, books, apiClient, clearDirty, dirtyBookIds, refreshBookshelf]);
+  }, [
+    userId,
+    displayName,
+    books,
+    apiClient,
+    clearDirty,
+    dirtyBookIds,
+    refreshBookshelf,
+  ]);
 
   const handleCancelChanges = useCallback(() => {
     setBooks(originalBooksRef.current);
@@ -182,28 +195,45 @@ export function PersonalShelfPage({
   }, [clearDirty]);
 
   const handleBatchShare = useCallback(() => {
-    setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.TRUE } : b));
+    setBooks((prev) =>
+      prev.map((b) =>
+        selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.TRUE } : b,
+      ),
+    );
     markManyDirty(selectedIds);
     setSelectedIds(new Set());
   }, [selectedIds, markManyDirty]);
 
   const handleBatchHide = useCallback(() => {
-    setBooks(prev => prev.map(b => selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.FALSE } : b));
+    setBooks((prev) =>
+      prev.map((b) =>
+        selectedIds.has(b.bookId) ? { ...b, isShared: BoolFlag.FALSE } : b,
+      ),
+    );
     markManyDirty(selectedIds);
     setSelectedIds(new Set());
   }, [selectedIds, markManyDirty]);
 
-  const handleToggle = useCallback((bookId: string) => {
-    setBooks((prev) =>
-      prev.map((b) =>
-        b.bookId === bookId ? { ...b, isShared: b.isShared === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE } : b,
-      ),
-    );
-    markDirty(bookId);
-  }, [markDirty]);
+  const handleToggle = useCallback(
+    (bookId: string) => {
+      setBooks((prev) =>
+        prev.map((b) =>
+          b.bookId === bookId
+            ? {
+                ...b,
+                isShared:
+                  b.isShared === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE,
+              }
+            : b,
+        ),
+      );
+      markDirty(bookId);
+    },
+    [markDirty],
+  );
 
   const toggleSelect = useCallback((bookId: string) => {
-    setSelectedIds(prev => {
+    setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(bookId)) next.delete(bookId);
       else next.add(bookId);
@@ -211,11 +241,19 @@ export function PersonalShelfPage({
     });
   }, []);
 
-  const syncArchived = localStorage.getItem(namespacedKey(userId, "syncArchived")) === "1";
-  const activeBooks = useMemo(() => books.filter(b => b.isArchived !== BoolFlag.TRUE), [books]);
-  const archivedBooks = useMemo(() => books.filter(b => b.isArchived === BoolFlag.TRUE), [books]);
+  const syncArchived =
+    localStorage.getItem(namespacedKey(userId, "syncArchived")) === "1";
+  const activeBooks = useMemo(
+    () => books.filter((b) => b.isArchived !== BoolFlag.TRUE),
+    [books],
+  );
+  const archivedBooks = useMemo(
+    () => books.filter((b) => b.isArchived === BoolFlag.TRUE),
+    [books],
+  );
   const showArchiveTabs = syncArchived && archivedBooks.length > 0;
-  const currentViewBooks = showArchiveTabs && archiveView === "archived" ? archivedBooks : activeBooks;
+  const currentViewBooks =
+    showArchiveTabs && archiveView === "archived" ? archivedBooks : activeBooks;
   const showFloatingBar = shouldShowFloatingBar({
     selectedCount: selectedIds.size,
     isDirty,
@@ -224,8 +262,10 @@ export function PersonalShelfPage({
   });
 
   const statusFilteredBooks = useMemo(() => {
-    if (statusFilter === "shared") return currentViewBooks.filter((b) => b.isShared === BoolFlag.TRUE);
-    if (statusFilter === "not-shared") return currentViewBooks.filter((b) => b.isShared === BoolFlag.FALSE);
+    if (statusFilter === "shared")
+      return currentViewBooks.filter((b) => b.isShared === BoolFlag.TRUE);
+    if (statusFilter === "not-shared")
+      return currentViewBooks.filter((b) => b.isShared === BoolFlag.FALSE);
     return currentViewBooks;
   }, [currentViewBooks, statusFilter]);
 
@@ -234,31 +274,39 @@ export function PersonalShelfPage({
     [statusFilteredBooks, categoryFilter],
   );
 
+  const { searchTerm, setSearchTerm, filteredItems, isFiltering } = useSearch(
+    categoryFilteredBooks,
+  );
+
+  const sortedBooks = useMemo(
+    () => sortBooks(filteredItems, sort),
+    [filteredItems, sort],
+  );
+
+  const narrowingActive =
+    searchTerm !== "" || statusFilter !== "all" || categoryFilter !== "";
   const {
-    searchTerm,
-    setSearchTerm,
-    filteredItems,
-    isFiltering,
-  } = useSearch(categoryFilteredBooks);
-
-  const sortedBooks = useMemo(() => sortBooks(filteredItems, sort), [filteredItems, sort]);
-
-  const narrowingActive = searchTerm !== "" || statusFilter !== "all" || categoryFilter !== "";
-  const { visibleItems: visibleBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
+    visibleItems: visibleBooks,
+    hasMore,
+    loadMore,
+    reset: resetLoadMore,
+  } = useLoadMore({
     items: sortedBooks,
     narrowingActive,
   });
 
   const handleSelectAll = useCallback(() => {
-    const allVisible = visibleBooks.every(b => selectedIds.has(b.bookId));
+    const allVisible = visibleBooks.every((b) => selectedIds.has(b.bookId));
     if (allVisible && visibleBooks.length > 0) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(visibleBooks.map(b => b.bookId)));
+      setSelectedIds(new Set(visibleBooks.map((b) => b.bookId)));
     }
   }, [visibleBooks, selectedIds]);
 
-  const allVisibleSelected = visibleBooks.length > 0 && visibleBooks.every(b => selectedIds.has(b.bookId));
+  const allVisibleSelected =
+    visibleBooks.length > 0 &&
+    visibleBooks.every((b) => selectedIds.has(b.bookId));
 
   if (state === "loading") {
     return (
@@ -287,7 +335,9 @@ export function PersonalShelfPage({
     return (
       <div className="p-4 text-center">
         <p className="text-gray-400 mt-4">尚無已同步的書籍</p>
-        <p className="text-gray-300 text-sm mt-2">請先在桌面版 Chrome 擴充功能中同步書單</p>
+        <p className="text-gray-300 text-sm mt-2">
+          請先在桌面版 Chrome 擴充功能中同步書單
+        </p>
       </div>
     );
   }
@@ -301,7 +351,9 @@ export function PersonalShelfPage({
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xl font-bold text-gray-900">
             個人書櫃
-            <span className="text-gray-400 text-sm font-normal ml-2">({currentViewBooks.length} 本)</span>
+            <span className="text-gray-400 text-sm font-normal ml-2">
+              ({currentViewBooks.length} 本)
+            </span>
           </h2>
           <button
             onClick={() => setShowPublicShare(true)}
@@ -316,7 +368,11 @@ export function PersonalShelfPage({
             <button
               role="tab"
               aria-selected={archiveView === "active"}
-              onClick={() => { setArchiveView("active"); setCategoryFilter(""); resetLoadMore(); }}
+              onClick={() => {
+                setArchiveView("active");
+                setCategoryFilter("");
+                resetLoadMore();
+              }}
               className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
                 archiveView === "active"
                   ? "border-blue-600 text-blue-600"
@@ -328,7 +384,11 @@ export function PersonalShelfPage({
             <button
               role="tab"
               aria-selected={archiveView === "archived"}
-              onClick={() => { setArchiveView("archived"); setCategoryFilter(""); resetLoadMore(); }}
+              onClick={() => {
+                setArchiveView("archived");
+                setCategoryFilter("");
+                resetLoadMore();
+              }}
               className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
                 archiveView === "archived"
                   ? "border-blue-600 text-blue-600"
@@ -345,10 +405,15 @@ export function PersonalShelfPage({
             {(["all", "shared", "not-shared"] as const).map((f) => (
               <button
                 key={f}
-                onClick={() => { setStatusFilter(f); setCategoryFilter(""); }}
+                onClick={() => {
+                  setStatusFilter(f);
+                  setCategoryFilter("");
+                }}
                 aria-pressed={statusFilter === f}
                 className={`px-3 py-1.5 text-xs rounded-full ${
-                  statusFilter === f ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"
+                  statusFilter === f
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-600"
                 }`}
               >
                 {f === "all" ? "全部" : f === "shared" ? "已開放" : "未開放"}
@@ -377,7 +442,9 @@ export function PersonalShelfPage({
         {visibleBooks.length > 0 && (
           <div className="flex items-center justify-between mb-2">
             {isFiltering && (
-              <p className="text-gray-400 text-xs">找到 {visibleBooks.length} 本</p>
+              <p className="text-gray-400 text-xs">
+                找到 {visibleBooks.length} 本
+              </p>
             )}
             <button
               onClick={handleSelectAll}
@@ -389,7 +456,9 @@ export function PersonalShelfPage({
         )}
 
         {isFiltering && visibleBooks.length === 0 && (
-          <p className="text-gray-400 text-xs mb-2">找到 {visibleBooks.length} 本</p>
+          <p className="text-gray-400 text-xs mb-2">
+            找到 {visibleBooks.length} 本
+          </p>
         )}
 
         {visibleBooks.length === 0 ? (
@@ -398,27 +467,28 @@ export function PersonalShelfPage({
           </p>
         ) : (
           <>
-          <div>
-            {visibleBooks.map((book) => (
-              <BookRow
-                key={book.bookId}
-                book={book}
-                selected={selectedIds.has(book.bookId)}
-                isDirty={dirtyBookIds.has(book.bookId)}
-                onSelect={toggleSelect}
-                onToggle={handleToggle}
-              />
-            ))}
-          </div>
+            <div>
+              {visibleBooks.map((book) => (
+                <BookRow
+                  key={book.bookId}
+                  book={book}
+                  selected={selectedIds.has(book.bookId)}
+                  isDirty={dirtyBookIds.has(book.bookId)}
+                  onSelect={toggleSelect}
+                  onToggle={handleToggle}
+                />
+              ))}
+            </div>
 
-          {hasMore && (
-            <button
-              onClick={loadMore}
-              className="w-full py-2.5 mt-3 text-sm font-medium text-blue-600 border border-blue-600 rounded-lg"
-            >
-              載入更多（已顯示 {visibleBooks.length} / 共 {filteredItems.length} 本）
-            </button>
-          )}
+            {hasMore && (
+              <button
+                onClick={loadMore}
+                className="w-full py-2.5 mt-3 text-sm font-medium text-blue-600 border border-blue-600 rounded-lg"
+              >
+                載入更多（已顯示 {visibleBooks.length} / 共{" "}
+                {filteredItems.length} 本）
+              </button>
+            )}
           </>
         )}
       </div>

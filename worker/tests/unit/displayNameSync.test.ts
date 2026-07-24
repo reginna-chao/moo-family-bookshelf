@@ -18,17 +18,29 @@ interface ResponseData {
 /** Read a successful response body. Throws if `data` is missing — every test
  *  here exercises the success path, so this avoids optional-chaining noise. */
 async function readJson(res: Response): Promise<ResponseData> {
-  const body = (await res.json()) as { data?: ResponseData; error?: { code: string; message: string } };
+  const body = (await res.json()) as {
+    data?: ResponseData;
+    error?: { code: string; message: string };
+  };
   if (!body.data) {
-    throw new Error(`Expected data in response, got error: ${JSON.stringify(body.error)}`);
+    throw new Error(
+      `Expected data in response, got error: ${JSON.stringify(body.error)}`,
+    );
   }
   return body.data;
 }
 
 let kv: KVNamespace;
 
-function request(method: string, path: string, body?: unknown, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
@@ -48,8 +60,14 @@ async function createFamily(userId = USER1, displayName?: string) {
   };
 }
 
-async function createFamilyWithTwoMembers(displayName1?: string, displayName2?: string) {
-  const { familyId, authToken: token1 } = await createFamily(USER1, displayName1);
+async function createFamilyWithTwoMembers(
+  displayName1?: string,
+  displayName2?: string,
+) {
+  const { familyId, authToken: token1 } = await createFamily(
+    USER1,
+    displayName1,
+  );
   const joinRes = await request("POST", `/api/family/${familyId}/join`, {
     userId: USER2,
     displayName: displayName2,
@@ -68,16 +86,37 @@ beforeEach(() => {
 
 describe("PUT displayName syncs user record", () => {
   it("should update user record displayName when user record exists", async () => {
-    const { familyId, token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
+    const { familyId, token1 } = await createFamilyWithTwoMembers(
+      "Alice",
+      "Bob",
+    );
 
-    await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1,
-      userId: USER1,
-      displayName: "Alice",
-      books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
-    }, token1);
+    await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Alice",
+        books: [
+          {
+            bookId: "b1",
+            title: "Book 1",
+            author: "",
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: 1,
+          },
+        ],
+      },
+      token1,
+    );
 
-    const before = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const before = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(before.displayName).toBe("Alice");
 
     const updateRes = await request(
@@ -88,18 +127,33 @@ describe("PUT displayName syncs user record", () => {
     );
     expect(updateRes.status).toBe(200);
 
-    const after = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const after = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(after.displayName).toBe("AliceNew");
   });
 
   it("should update user record lastUpdated when displayName changes", async () => {
-    const { familyId, token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
+    const { familyId, token1 } = await createFamilyWithTwoMembers(
+      "Alice",
+      "Bob",
+    );
 
-    await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "Alice", books: [],
-    }, token1);
+    await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Alice",
+        books: [],
+      },
+      token1,
+    );
 
-    const before = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const before = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     const oldLastUpdated = before.lastUpdated;
 
     await new Promise((r) => setTimeout(r, 10));
@@ -111,7 +165,9 @@ describe("PUT displayName syncs user record", () => {
       token1,
     );
 
-    const after = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const after = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(after.lastUpdated).not.toBe(oldLastUpdated);
   });
 
@@ -131,17 +187,43 @@ describe("PUT displayName syncs user record", () => {
   });
 
   it("should preserve other user record fields when syncing displayName", async () => {
-    const { familyId, token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
+    const { familyId, token1 } = await createFamilyWithTwoMembers(
+      "Alice",
+      "Bob",
+    );
 
-    await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1,
-      userId: USER1,
-      displayName: "Alice",
-      books: [
-        { bookId: "b1", title: "Book 1", author: "Author1", isbn: "123", coverUrl: "", readmooUrl: "", category: "fiction", isShared: 1 },
-        { bookId: "b2", title: "Book 2", author: "Author2", isbn: "456", coverUrl: "", readmooUrl: "", category: "non-fiction", isShared: 0 },
-      ],
-    }, token1);
+    await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Alice",
+        books: [
+          {
+            bookId: "b1",
+            title: "Book 1",
+            author: "Author1",
+            isbn: "123",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "fiction",
+            isShared: 1,
+          },
+          {
+            bookId: "b2",
+            title: "Book 2",
+            author: "Author2",
+            isbn: "456",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "non-fiction",
+            isShared: 0,
+          },
+        ],
+      },
+      token1,
+    );
 
     await request(
       "PUT",
@@ -150,7 +232,9 @@ describe("PUT displayName syncs user record", () => {
       token1,
     );
 
-    const data = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const data = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(data.displayName).toBe("AliceRenamed");
     expect(data.books).toHaveLength(2);
     expect(data.books?.[0].bookId).toBe("b1");
@@ -166,7 +250,10 @@ describe("PUT displayName syncs user record", () => {
 
 describe("PUT books uses family displayName over client displayName", () => {
   it("should use family record displayName instead of client-supplied stale name", async () => {
-    const { familyId, token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
+    const { familyId, token1 } = await createFamilyWithTwoMembers(
+      "Alice",
+      "Bob",
+    );
 
     await request(
       "PUT",
@@ -175,36 +262,77 @@ describe("PUT books uses family displayName over client displayName", () => {
       token1,
     );
 
-    const putRes = await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1,
-      userId: USER1,
-      displayName: "Alice", // stale!
-      books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
-    }, token1);
+    const putRes = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Alice", // stale!
+        books: [
+          {
+            bookId: "b1",
+            title: "Book 1",
+            author: "",
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: 1,
+          },
+        ],
+      },
+      token1,
+    );
     expect(putRes.status).toBe(200);
 
-    const data = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const data = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(data.displayName).toBe("AliceNew");
   });
 
   it("should fall back to client displayName when user is not in a family", async () => {
     const { familyId, authToken: token1 } = await createFamily(USER1, "Alice");
 
-    await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "Alice", books: [],
-    }, token1);
+    await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Alice",
+        books: [],
+      },
+      token1,
+    );
 
-    await request("DELETE", `/api/family/${familyId}/member/${USER1}`, undefined, token1);
+    await request(
+      "DELETE",
+      `/api/family/${familyId}/member/${USER1}`,
+      undefined,
+      token1,
+    );
 
     const { generateAuthToken } = await import("../../src/middleware/auth");
     const newToken = await generateAuthToken(kv, USER1);
 
-    const putRes = await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "AliceNoFamily", books: [],
-    }, newToken);
+    const putRes = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "AliceNoFamily",
+        books: [],
+      },
+      newToken,
+    );
     expect(putRes.status).toBe(200);
 
-    const data = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, newToken));
+    const data = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, newToken),
+    );
     expect(data.displayName).toBe("AliceNoFamily");
   });
 
@@ -213,12 +341,22 @@ describe("PUT books uses family displayName over client displayName", () => {
 
     await kv.delete(kvKeys.family(familyId));
 
-    const putRes = await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "AliceFallback", books: [],
-    }, token1);
+    const putRes = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "AliceFallback",
+        books: [],
+      },
+      token1,
+    );
     expect(putRes.status).toBe(200);
 
-    const data = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const data = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(data.displayName).toBe("AliceFallback");
   });
 
@@ -227,12 +365,22 @@ describe("PUT books uses family displayName over client displayName", () => {
     const { authToken: token1 } = await createFamily(USER1);
 
     // Even though client sends "ClientName", family record's "" wins
-    const putRes = await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "ClientName", books: [],
-    }, token1);
+    const putRes = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "ClientName",
+        books: [],
+      },
+      token1,
+    );
     expect(putRes.status).toBe(200);
 
-    const data = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const data = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(data.displayName).toBe("");
   });
 
@@ -243,12 +391,22 @@ describe("PUT books uses family displayName over client displayName", () => {
     await kv.delete(kvKeys.member(USER1));
 
     // Zero-width space embedded in "Alice​" should be stripped by sanitizer
-    const putRes = await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "Alice​", books: [],
-    }, token1);
+    const putRes = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Alice​",
+        books: [],
+      },
+      token1,
+    );
     expect(putRes.status).toBe(200);
 
-    const data = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const data = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(data.displayName).toBe("Alice");
   });
 
@@ -258,38 +416,97 @@ describe("PUT books uses family displayName over client displayName", () => {
     await kv.delete(kvKeys.member(USER1));
 
     // 21 chars, exceeds DISPLAY_NAME_MAX_LENGTH (20). sanitizer returns null → "".
-    const putRes = await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "A".repeat(21), books: [],
-    }, token1);
+    const putRes = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "A".repeat(21),
+        books: [],
+      },
+      token1,
+    );
     expect(putRes.status).toBe(200);
 
-    const data = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const data = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(data.displayName).toBe("");
   });
 
   it("should use family displayName even when client sends empty string", async () => {
     const { token1 } = await createFamilyWithTwoMembers("Alice", "Bob");
 
-    const putRes = await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "", books: [],
-    }, token1);
+    const putRes = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "",
+        books: [],
+      },
+      token1,
+    );
     expect(putRes.status).toBe(200);
 
-    const data = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const data = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(data.displayName).toBe("Alice");
   });
 
   it("should handle both fixes together: rename then sync books", async () => {
-    const { familyId, token1, token2 } = await createFamilyWithTwoMembers("Alice", "Bob");
+    const { familyId, token1, token2 } = await createFamilyWithTwoMembers(
+      "Alice",
+      "Bob",
+    );
 
-    await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "Alice",
-      books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
-    }, token1);
-    await request("PUT", `/api/user/${USER2}/books`, {
-      schemaVersion: 1, userId: USER2, displayName: "Bob",
-      books: [{ bookId: "b2", title: "Book 2", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
-    }, token2);
+    await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Alice",
+        books: [
+          {
+            bookId: "b1",
+            title: "Book 1",
+            author: "",
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: 1,
+          },
+        ],
+      },
+      token1,
+    );
+    await request(
+      "PUT",
+      `/api/user/${USER2}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER2,
+        displayName: "Bob",
+        books: [
+          {
+            bookId: "b2",
+            title: "Book 2",
+            author: "",
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: 1,
+          },
+        ],
+      },
+      token2,
+    );
 
     await request(
       "PUT",
@@ -299,21 +516,50 @@ describe("PUT books uses family displayName over client displayName", () => {
     );
 
     // Fix A: user record already reflects "AliceNew"
-    const user = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const user = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(user.displayName).toBe("AliceNew");
 
     // Extension syncs books with stale "Alice"
-    await request("PUT", `/api/user/${USER1}/books`, {
-      schemaVersion: 1, userId: USER1, displayName: "Alice",
-      books: [{ bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 1 }],
-    }, token1);
+    await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Alice",
+        books: [
+          {
+            bookId: "b1",
+            title: "Book 1",
+            author: "",
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: 1,
+          },
+        ],
+      },
+      token1,
+    );
 
     // Fix B: server overrides with "AliceNew" from family record
-    const afterSync = await readJson(await request("GET", `/api/user/${USER1}/books`, undefined, token1));
+    const afterSync = await readJson(
+      await request("GET", `/api/user/${USER1}/books`, undefined, token1),
+    );
     expect(afterSync.displayName).toBe("AliceNew");
 
     // Family bookshelf reflects "AliceNew" too
-    const bookshelf = await readJson(await request("GET", `/api/family/${familyId}/bookshelf`, undefined, token1));
+    const bookshelf = await readJson(
+      await request(
+        "GET",
+        `/api/family/${familyId}/bookshelf`,
+        undefined,
+        token1,
+      ),
+    );
     const user1Member = bookshelf.members?.find((m) => m.userId === USER1);
     expect(user1Member?.displayName).toBe("AliceNew");
   });

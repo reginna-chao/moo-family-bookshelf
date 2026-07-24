@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import React from "react";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { FamilyDataProvider, useFamilyData } from "@/hooks/useFamilyData";
@@ -31,9 +37,7 @@ const mockApiClient = {
   leaveFamily: mockLeaveFamily,
   updateDisplayName: mockUpdateDisplayName,
   deleteAccount: mockDeleteAccount,
-  getEndpoint: vi
-    .fn()
-    .mockReturnValue(DEFAULT_API_ENDPOINT),
+  getEndpoint: vi.fn().mockReturnValue(DEFAULT_API_ENDPOINT),
 } as unknown as ApiClient;
 
 const defaultProps = {
@@ -475,17 +479,23 @@ describe("SettingsPage", () => {
     renderWithProvider();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "編輯顯示名稱" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "編輯顯示名稱" }),
+      ).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
     // Input should be visible
-    expect(screen.getByRole("textbox", { name: "顯示名稱" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "顯示名稱" }),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "取消修改名稱" }));
 
     // Should return to display mode — input gone
-    expect(screen.queryByRole("textbox", { name: "顯示名稱" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", { name: "顯示名稱" }),
+    ).not.toBeInTheDocument();
   });
 
   // --- Sync archived toggle ---
@@ -502,11 +512,15 @@ describe("SettingsPage", () => {
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(localStorage.getItem(`moo:${defaultProps.userId}:syncArchived`)).toBe("1");
+    expect(
+      localStorage.getItem(`moo:${defaultProps.userId}:syncArchived`),
+    ).toBe("1");
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(localStorage.getItem(`moo:${defaultProps.userId}:syncArchived`)).toBe("0");
+    expect(
+      localStorage.getItem(`moo:${defaultProps.userId}:syncArchived`),
+    ).toBe("0");
   });
 
   // --- Version & disclaimer ---
@@ -519,7 +533,9 @@ describe("SettingsPage", () => {
     });
 
     expect(screen.getByText(/墨家書櫃 v/)).toBeInTheDocument();
-    expect(screen.getByText("本程式為第三方開發，非 Readmoo 讀墨官方提供。")).toBeInTheDocument();
+    expect(
+      screen.getByText("本程式為第三方開發，非 Readmoo 讀墨官方提供。"),
+    ).toBeInTheDocument();
   });
 
   // --- Leave family cancel ---
@@ -532,15 +548,21 @@ describe("SettingsPage", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
-    expect(screen.getByRole("button", { name: "確定離開" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "確定離開" }),
+    ).toBeInTheDocument();
 
     // Click cancel in the leave section
     const cancelButtons = screen.getAllByRole("button", { name: "取消" });
     // Leave cancel is the first 取消 button
     fireEvent.click(cancelButtons[0]);
 
-    expect(screen.getByRole("button", { name: "離開家庭" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "確定離開" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "離開家庭" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "確定離開" }),
+    ).not.toBeInTheDocument();
   });
 
   // --- Leave family generic error ---
@@ -570,7 +592,9 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    expect(screen.getByText("moo-fam1-key1@custom.api.com")).toBeInTheDocument();
+    expect(
+      screen.getByText("moo-fam1-key1@custom.api.com"),
+    ).toBeInTheDocument();
 
     // Restore default mock
     mockEncodeSyncCode.mockReturnValue("moo-fam1-key1");

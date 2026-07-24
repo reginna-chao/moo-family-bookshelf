@@ -31,14 +31,17 @@ export const CHARLIE = hexId("e");
 export const DAVE = hexId("f");
 
 /** Extra distinct ids for tests that need many members / outsiders. */
-export const OUTSIDER = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-export const STRANGER = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+export const OUTSIDER =
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+export const STRANGER =
+  "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
 /**
  * A syntactically-valid-but-arbitrary id, useful where a test needs "some other
  * user that does not exist" without caring about identity.
  */
-export const NOBODY = "9999999999999999999999999999999999999999999999999999999999999999";
+export const NOBODY =
+  "9999999999999999999999999999999999999999999999999999999999999999";
 
 /** Build N distinct valid 64-hex ids (e.g. for rate-limit fan-out loops). */
 export function makeUserId(index: number): string {

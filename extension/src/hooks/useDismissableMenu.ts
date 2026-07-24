@@ -22,7 +22,9 @@ function eventStartedInMenu(
   menu: HTMLElement | null,
 ): boolean {
   const path = e.composedPath();
-  return (!!trigger && path.includes(trigger)) || (!!menu && path.includes(menu));
+  return (
+    (!!trigger && path.includes(trigger)) || (!!menu && path.includes(menu))
+  );
 }
 
 /**

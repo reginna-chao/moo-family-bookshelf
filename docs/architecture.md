@@ -144,14 +144,14 @@
 
 採「可定址」設計，從 day-1 即以 `:shelfId` 路由，未來擴充至多組無需更動 API 形狀。
 
-| Method   | Path                                              | 說明                                  | 權限       |
-| -------- | ------------------------------------------------- | ------------------------------------- | ---------- |
-| `GET`    | `/api/user/:id/public-shelf`                      | 列出所有公開書櫃（v1.2.0 最多 1 組）  | 本人       |
-| `POST`   | `/api/user/:id/public-shelf`                      | 建立新公開書櫃（達上限回 409）        | 本人       |
-| `PUT`    | `/api/user/:id/public-shelf/:shelfId`             | 更新公開書櫃設定（標題、過期）        | 本人       |
-| `POST`   | `/api/user/:id/public-shelf/:shelfId/reset-token` | 重設 shareToken（shelfId 不變）       | 本人       |
-| `DELETE` | `/api/user/:id/public-shelf/:shelfId`             | 關閉指定公開書櫃                      | 本人       |
-| `GET`    | `/api/public/:shareToken`                         | 查詢公開書櫃（明文）                  | 無（公開） |
+| Method   | Path                                              | 說明                                 | 權限       |
+| -------- | ------------------------------------------------- | ------------------------------------ | ---------- |
+| `GET`    | `/api/user/:id/public-shelf`                      | 列出所有公開書櫃（v1.2.0 最多 1 組） | 本人       |
+| `POST`   | `/api/user/:id/public-shelf`                      | 建立新公開書櫃（達上限回 409）       | 本人       |
+| `PUT`    | `/api/user/:id/public-shelf/:shelfId`             | 更新公開書櫃設定（標題、過期）       | 本人       |
+| `POST`   | `/api/user/:id/public-shelf/:shelfId/reset-token` | 重設 shareToken（shelfId 不變）      | 本人       |
+| `DELETE` | `/api/user/:id/public-shelf/:shelfId`             | 關閉指定公開書櫃                     | 本人       |
+| `GET`    | `/api/public/:shareToken`                         | 查詢公開書櫃（明文）                 | 無（公開） |
 
 #### 個人開放設定 API
 
@@ -181,14 +181,14 @@
 - **職責**：儲存資料（明文 JSON）
 - **Key 設計**：
 
-| Key Pattern            | Value                                                      | 說明                       |
-| ---------------------- | ---------------------------------------------------------- | -------------------------- |
-| `user:{user_id}`       | 個人書單 + 開放設定（JSON）                                | 歸屬個人，不隨家庭變動     |
-| `family:{family_id}`   | `{ owner_id, members[], max_members, created_at }`         | 記錄家庭組成 + 管理者      |
-| `member:{user_id}`     | 所屬 family_id                                             | 反向查詢用                 |
+| Key Pattern            | Value                                                       | 說明                       |
+| ---------------------- | ----------------------------------------------------------- | -------------------------- |
+| `user:{user_id}`       | 個人書單 + 開放設定（JSON）                                 | 歸屬個人，不隨家庭變動     |
+| `family:{family_id}`   | `{ owner_id, members[], max_members, created_at }`          | 記錄家庭組成 + 管理者      |
+| `member:{user_id}`     | 所屬 family_id                                              | 反向查詢用                 |
 | `public:{share_token}` | `{ userId, shelfId, title, books[], createdAt, expiresAt }` | 公開書櫃明文快照（v1.2.0） |
-| `verify:{user_id}`     | `{ method, hash, salt, prompted, failCount, lockedUntil }` | PWA 登入驗證設定           |
-| `otp:{user_id}`        | `{ code, createdAt }`                                      | 一次性驗證碼（TTL 5 分鐘） |
+| `verify:{user_id}`     | `{ method, hash, salt, prompted, failCount, lockedUntil }`  | PWA 登入驗證設定           |
+| `otp:{user_id}`        | `{ code, createdAt }`                                       | 一次性驗證碼（TTL 5 分鐘） |
 
 - **TTL**：個人開放設定不設過期（持久化）；家庭群組可設定過期時間；公開書櫃依使用者設定（7/30/60/90 天或永久）
 - **家庭人數上限**：`max_members` 預設為 2（配合讀墨官方限制）
@@ -638,13 +638,13 @@ export const reportLinks = [
 interface UserBooksRecord {
   // ... 既有欄位
   publicSharing?: {
-    shelves: PublicShelf[];   // v1.2.0 強制 length <= 1
+    shelves: PublicShelf[]; // v1.2.0 強制 length <= 1
   };
 }
 
 interface PublicShelf {
-  shelfId: string;            // 內部識別（UUID），重設網址後仍維持
-  shareToken: string;         // 對外網址 token（可重設）
+  shelfId: string; // 內部識別（UUID），重設網址後仍維持
+  shareToken: string; // 對外網址 token（可重設）
   title: string;
   expiresDays: number | null; // null = 永久
   createdAt: number;
@@ -658,7 +658,7 @@ interface PublicShelfSnapshot {
   userId: string;
   shelfId: string;
   title: string;
-  books: BookEntry[];          // is_shared=true 的書籍快照
+  books: BookEntry[]; // is_shared=true 的書籍快照
   createdAt: number;
   expiresAt: number | null;
 }
@@ -680,12 +680,12 @@ interface PublicShelfSnapshot {
 
 ### 擴充路徑（v1.3+）
 
-| 擴充項目         | 變更                                                          |
-| ---------------- | ------------------------------------------------------------- |
-| 多組公開書櫃     | worker 常數 `MAX_PUBLIC_SHELVES` 由 1 提升至 3；UI 增加 list view |
-| 自選書籍模式     | 啟用 `selectionMode: "explicit"` + `bookIds[]`                 |
-| 既有資料相容性   | 既有單組記錄無需遷移（已是 array 結構）                        |
-| API 路由形狀     | 無需變更（已採 `:shelfId` 定址）                               |
+| 擴充項目       | 變更                                                              |
+| -------------- | ----------------------------------------------------------------- |
+| 多組公開書櫃   | worker 常數 `MAX_PUBLIC_SHELVES` 由 1 提升至 3；UI 增加 list view |
+| 自選書籍模式   | 啟用 `selectionMode: "explicit"` + `bookIds[]`                    |
+| 既有資料相容性 | 既有單組記錄無需遷移（已是 array 結構）                           |
+| API 路由形狀   | 無需變更（已採 `:shelfId` 定址）                                  |
 
 ---
 

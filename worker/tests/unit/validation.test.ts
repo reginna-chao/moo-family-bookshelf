@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeDisplayName, validateDisplayName } from "../../src/utils/validation";
+import {
+  sanitizeDisplayName,
+  validateDisplayName,
+} from "../../src/utils/validation";
 
 describe("sanitizeDisplayName", () => {
   it("returns empty string for undefined/null", () => {

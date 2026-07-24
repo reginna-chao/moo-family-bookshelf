@@ -11,9 +11,7 @@ export interface Env {
  * Self-hosters: if you deploy under a custom Worker name and want the same
  * protection, add your production Worker name to this list.
  */
-const PRODUCTION_WORKER_NAMES = [
-  "moo-family-bookshelf",
-];
+const PRODUCTION_WORKER_NAMES = ["moo-family-bookshelf"];
 
 /**
  * Runtime guard: returns true only if DEV_MODE is set AND the Worker

@@ -1,6 +1,16 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { Library, BookOpen, Inbox, Settings, type LucideIcon } from "lucide-react";
-import { useAuth, REMEMBER_SYNC_CODE_KEY, REMEMBERED_LOGOUT_KEY } from "./hooks/useAuth";
+import {
+  Library,
+  BookOpen,
+  Inbox,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  useAuth,
+  REMEMBER_SYNC_CODE_KEY,
+  REMEMBERED_LOGOUT_KEY,
+} from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
@@ -28,8 +38,8 @@ const HASH_TO_PAGE: Record<string, Page> = {
 const PAGE_TO_HASH: Record<Page, string> = {
   "family-shelf": "#family-shelf",
   "personal-shelf": "#personal-shelf",
-  "borrow": "#borrow",
-  "settings": "#settings",
+  borrow: "#borrow",
+  settings: "#settings",
 };
 
 /** Read page from hash, but only if it's a simple page hash (not auth params). */
@@ -65,8 +75,19 @@ export default function App() {
 }
 
 function AuthenticatedApp() {
-  const { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId, qrToken } = useAuth();
-  const [currentPage, setCurrentPage] = useState<Page>(() => pageFromHash() ?? "family-shelf");
+  const {
+    auth,
+    isLoading,
+    login,
+    logout,
+    forceLogout,
+    initialSyncCode,
+    qrUserId,
+    qrToken,
+  } = useAuth();
+  const [currentPage, setCurrentPage] = useState<Page>(
+    () => pageFromHash() ?? "family-shelf",
+  );
   const [familyFullError, setFamilyFullError] = useState("");
   const [verifySetupDone, setVerifySetupDone] = useState(false);
 
@@ -112,11 +133,18 @@ function AuthenticatedApp() {
     if (current.authToken) {
       tempClient.setAuthToken(current.authToken);
     }
-    const res = await tempClient.joinFamily(current.familyId, current.userId, {});
+    const res = await tempClient.joinFamily(
+      current.familyId,
+      current.userId,
+      {},
+    );
     if (res.error) {
       if (res.error.code === "FAMILY_FULL") {
         setFamilyFullError("家庭成員已達上限（每個家庭最多 2 位成員）");
-      } else if (res.error.code === "VERIFICATION_REQUIRED" && current.familyId) {
+      } else if (
+        res.error.code === "VERIFICATION_REQUIRED" &&
+        current.familyId
+      ) {
         // Preserve sync code so LandingPage can pre-fill and show verification UI.
         // Respect the user's "remember sync code" preference.
         if (localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0") {
@@ -126,7 +154,9 @@ function AuthenticatedApp() {
               apiHost: current.apiHost,
             });
             localStorage.setItem(REMEMBERED_LOGOUT_KEY, code);
-          } catch { /* best-effort */ }
+          } catch {
+            /* best-effort */
+          }
         }
       }
       logout();
@@ -158,7 +188,6 @@ function AuthenticatedApp() {
 
     void acquireNewToken().finally(() => setAcquiringToken(false));
   }, [auth, acquireNewToken]);
-
 
   if (isLoading || acquiringToken) {
     return (
@@ -296,7 +325,10 @@ function MainContent({
                 <span className="relative">
                   <item.icon size={20} aria-hidden="true" className="mb-0.5" />
                   {item.page === "family-shelf" && showRedDot && (
-                    <span aria-hidden="true" className="absolute -top-0.5 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+                    <span
+                      aria-hidden="true"
+                      className="absolute -top-0.5 -right-1 w-2 h-2 bg-red-500 rounded-full"
+                    />
                   )}
                   {item.page === "borrow" && showBorrowBadge && (
                     <span

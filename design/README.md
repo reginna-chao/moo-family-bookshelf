@@ -6,12 +6,12 @@ Designs are produced by the `designer` agent (`.claude/agents/designer.md`, Penc
 
 ## Folder layout
 
-| Folder | Surface |
-|--------|---------|
+| Folder       | Surface                                                                   |
+| ------------ | ------------------------------------------------------------------------- |
 | `extension/` | Chrome Extension Dialog (overlay on Readmoo pages) and Extension Settings |
-| `pwa/` | PWA mobile viewer |
-| `site/` | GitHub Pages landing page (`site/index.html`) |
-| `flows/` | Cross-surface user journeys (e.g. Extension → PWA invite flow) |
+| `pwa/`       | PWA mobile viewer                                                         |
+| `site/`      | GitHub Pages landing page (`site/index.html`)                             |
+| `flows/`     | Cross-surface user journeys (e.g. Extension → PWA invite flow)            |
 
 Inside each surface, group designs by feature in kebab-case folders (e.g. `extension/borrow-flow/borrow-request.pen`).
 

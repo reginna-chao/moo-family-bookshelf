@@ -1,6 +1,13 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import type { ReactNode } from "react";
-import { Users, UsersRound, User, Heart, EyeOff, ChevronDown } from "lucide-react";
+import {
+  Users,
+  UsersRound,
+  User,
+  Heart,
+  EyeOff,
+  ChevronDown,
+} from "lucide-react";
 import {
   FAVORITE_FILTER_VALUE,
   HIDDEN_FILTER_VALUE,
@@ -118,7 +125,10 @@ export function MemberDropdown({
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
       // PWA is not in a Shadow DOM, so e.target is not retargeted — contains() is correct here (unlike the Extension dialog, which needs composedPath()).
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     }
@@ -143,7 +153,11 @@ export function MemberDropdown({
           {current.icon}
           <span className="truncate">{current.label}</span>
         </span>
-        <ChevronDown size={16} aria-hidden="true" className="text-gray-400 flex-shrink-0" />
+        <ChevronDown
+          size={16}
+          aria-hidden="true"
+          className="text-gray-400 flex-shrink-0"
+        />
       </button>
       {open && (
         <div
@@ -168,7 +182,9 @@ export function MemberDropdown({
                   {opt.icon}
                   <span className="truncate">{opt.label}</span>
                 </span>
-                <span className="text-gray-400 text-xs flex-shrink-0">{opt.count}</span>
+                <span className="text-gray-400 text-xs flex-shrink-0">
+                  {opt.count}
+                </span>
               </button>
             );
           })}

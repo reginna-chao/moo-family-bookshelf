@@ -9,8 +9,15 @@ type Json = any;
 
 let kv: KVNamespace;
 
-function request(method: string, path: string, body?: unknown, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
@@ -40,7 +47,12 @@ describe("GET /api/family/:id/bookshelf validation", () => {
   it("should return 400 INVALID_FAMILY_ID for malformed family ID", async () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("GET", "/api/family/INVALID/bookshelf", undefined, authToken);
+    const res = await request(
+      "GET",
+      "/api/family/INVALID/bookshelf",
+      undefined,
+      authToken,
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_FAMILY_ID");
@@ -57,7 +69,12 @@ describe("GET /api/family/:id/bookshelf validation", () => {
     // Delete the family record from KV but keep the member mapping
     await kv.delete(kvKeys.family(familyId));
 
-    const res = await request("GET", `/api/family/${familyId}/bookshelf`, undefined, authToken);
+    const res = await request(
+      "GET",
+      `/api/family/${familyId}/bookshelf`,
+      undefined,
+      authToken,
+    );
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("FAMILY_NOT_FOUND");
@@ -66,7 +83,12 @@ describe("GET /api/family/:id/bookshelf validation", () => {
   it("should return members with empty books array when no books saved", async () => {
     const { familyId, authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("GET", `/api/family/${familyId}/bookshelf`, undefined, authToken);
+    const res = await request(
+      "GET",
+      `/api/family/${familyId}/bookshelf`,
+      undefined,
+      authToken,
+    );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.members[0].books).toEqual([]);

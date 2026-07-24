@@ -24,6 +24,10 @@ export function createMockKV(): KVNamespace {
       const keys = [...store.keys()].map((name) => ({ name }));
       return { keys, list_complete: true, cacheStatus: null };
     },
-    getWithMetadata: async () => ({ value: null, metadata: null, cacheStatus: null }),
+    getWithMetadata: async () => ({
+      value: null,
+      metadata: null,
+      cacheStatus: null,
+    }),
   } as unknown as KVNamespace;
 }

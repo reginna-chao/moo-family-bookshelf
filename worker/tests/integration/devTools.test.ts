@@ -21,7 +21,11 @@ function prodEnv(overrides: Record<string, unknown> = {}) {
 
 describe("GET /api/_openapi.json", () => {
   it("returns OpenAPI 3.1 spec in dev mode (local wrangler dev)", async () => {
-    const res = await app.request("/api/_openapi.json", { method: "GET" }, devEnv());
+    const res = await app.request(
+      "/api/_openapi.json",
+      { method: "GET" },
+      devEnv(),
+    );
     expect(res.status).toBe(200);
 
     const json = (await res.json()) as Json;
@@ -32,14 +36,22 @@ describe("GET /api/_openapi.json", () => {
   });
 
   it("includes known route paths in the spec", async () => {
-    const res = await app.request("/api/_openapi.json", { method: "GET" }, devEnv());
+    const res = await app.request(
+      "/api/_openapi.json",
+      { method: "GET" },
+      devEnv(),
+    );
     const json = (await res.json()) as Json;
     const paths = Object.keys(json.paths ?? {});
     expect(paths.length).toBeGreaterThan(0);
   });
 
   it("returns 404 when DEV_MODE is not set (production)", async () => {
-    const res = await app.request("/api/_openapi.json", { method: "GET" }, prodEnv());
+    const res = await app.request(
+      "/api/_openapi.json",
+      { method: "GET" },
+      prodEnv(),
+    );
     expect(res.status).toBe(404);
 
     const json = (await res.json()) as Json;

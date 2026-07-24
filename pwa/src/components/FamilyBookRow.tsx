@@ -62,7 +62,11 @@ export function FamilyBookRow({
           className="w-10 h-[54px] rounded object-cover"
           fallback={
             <div className="w-10 h-[54px] rounded bg-gray-100 flex items-center justify-center">
-              <BookOpen size={18} className="text-gray-300" aria-hidden="true" />
+              <BookOpen
+                size={18}
+                className="text-gray-300"
+                aria-hidden="true"
+              />
             </div>
           }
         />
@@ -76,7 +80,9 @@ export function FamilyBookRow({
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-[13px] md:text-sm font-medium text-gray-900 truncate">{book.title}</p>
+        <p className="text-[13px] md:text-sm font-medium text-gray-900 truncate">
+          {book.title}
+        </p>
         <p className="text-xs text-gray-500 truncate">{book.author}</p>
       </div>
       <span className="text-xs text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap">
@@ -98,7 +104,10 @@ export function FamilyBookRow({
       )}
       {onFavoriteToggle && (
         <span className="flex-shrink-0 inline-flex">
-          <FavoriteButton isFavorite={isFavorite} onFavoriteToggle={onFavoriteToggle} />
+          <FavoriteButton
+            isFavorite={isFavorite}
+            onFavoriteToggle={onFavoriteToggle}
+          />
         </span>
       )}
       {menuItems.length > 0 && (

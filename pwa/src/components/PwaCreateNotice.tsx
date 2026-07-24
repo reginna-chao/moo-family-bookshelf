@@ -32,7 +32,9 @@ export function PwaCreateNotice({ userId, onDismiss }: PwaCreateNoticeProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl mx-6 max-w-sm w-full p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-3">歡迎使用墨家書櫃</h2>
+        <h2 className="text-lg font-bold text-gray-900 mb-3">
+          歡迎使用墨家書櫃
+        </h2>
         <p className="text-sm text-gray-600 leading-relaxed mb-6">
           掃描書籍需要使用讀墨的網頁版搭配瀏覽器擴充功能，手機版僅供瀏覽家庭書櫃。
         </p>

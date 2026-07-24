@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { kvKeys, BorrowStatus, BoolFlag, type BorrowRequest, type FamilyRecord } from "../../src/kv/schema";
+import {
+  kvKeys,
+  BorrowStatus,
+  BoolFlag,
+  type BorrowRequest,
+  type FamilyRecord,
+} from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
 import { NOBODY, USER1, USER2, USER3 } from "../helpers/ids";
 
@@ -10,8 +16,15 @@ type Json = any;
 
 let kv: KVNamespace;
 
-function request(method: string, path: string, body?: unknown, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
@@ -21,7 +34,10 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
 }
 
 async function createFamilyAndGetToken(userId = USER1) {
-  const res = await request("POST", "/api/family", { userId, displayName: "User1" });
+  const res = await request("POST", "/api/family", {
+    userId,
+    displayName: "User1",
+  });
   const json = (await res.json()) as Json;
   return {
     familyId: json.data.familyId as string,
@@ -29,7 +45,11 @@ async function createFamilyAndGetToken(userId = USER1) {
   };
 }
 
-async function joinFamilyAndGetToken(familyId: string, userId: string, displayName = "") {
+async function joinFamilyAndGetToken(
+  familyId: string,
+  userId: string,
+  displayName = "",
+) {
   const res = await request("POST", `/api/family/${familyId}/join`, {
     userId,
     displayName,
@@ -42,7 +62,11 @@ async function joinFamilyAndGetToken(familyId: string, userId: string, displayNa
 
 async function createFamilyWithTwoMembers() {
   const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1);
-  const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "User2");
+  const { authToken: token2 } = await joinFamilyAndGetToken(
+    familyId,
+    USER2,
+    "User2",
+  );
   return { familyId, token1, token2 };
 }
 
@@ -74,7 +98,12 @@ describe("POST /api/family/:id/borrow", () => {
       ownerId: USER1,
     };
 
-    const res = await request("POST", `/api/family/${familyId}/borrow`, body, token2);
+    const res = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      body,
+      token2,
+    );
     expect(res.status).toBe(201);
 
     const json = (await res.json()) as Json;
@@ -96,7 +125,11 @@ describe("POST /api/family/:id/borrow", () => {
   it("should return 401 if not authenticated", async () => {
     const { familyId } = await createFamilyWithTwoMembers();
 
-    const res = await request("POST", `/api/family/${familyId}/borrow`, validBorrowBody);
+    const res = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      validBorrowBody,
+    );
     expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("UNAUTHORIZED");
@@ -295,11 +328,21 @@ describe("POST /api/family/:id/borrow", () => {
     const body = { ...validBorrowBody, ownerId: USER1 };
 
     // First request should succeed
-    const res1 = await request("POST", `/api/family/${familyId}/borrow`, body, token2);
+    const res1 = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      body,
+      token2,
+    );
     expect(res1.status).toBe(201);
 
     // Second identical request should fail
-    const res2 = await request("POST", `/api/family/${familyId}/borrow`, body, token2);
+    const res2 = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      body,
+      token2,
+    );
     expect(res2.status).toBe(400);
     const json = (await res2.json()) as Json;
     expect(json.error.code).toBe("DUPLICATE_REQUEST");
@@ -311,10 +354,20 @@ describe("POST /api/family/:id/borrow", () => {
     const body1 = { ...validBorrowBody, ownerId: USER1, bookId: "book-1" };
     const body2 = { ...validBorrowBody, ownerId: USER1, bookId: "book-2" };
 
-    const res1 = await request("POST", `/api/family/${familyId}/borrow`, body1, token2);
+    const res1 = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      body1,
+      token2,
+    );
     expect(res1.status).toBe(201);
 
-    const res2 = await request("POST", `/api/family/${familyId}/borrow`, body2, token2);
+    const res2 = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      body2,
+      token2,
+    );
     expect(res2.status).toBe(201);
   });
 
@@ -322,20 +375,31 @@ describe("POST /api/family/:id/borrow", () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
     const body = { ...validBorrowBody, ownerId: USER1 };
-    const res = await request("POST", `/api/family/${familyId}/borrow`, body, token2);
+    const res = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      body,
+      token2,
+    );
     expect(res.status).toBe(201);
 
     const json = (await res.json()) as Json;
     const requestId = json.data.requestId;
 
     // Verify KV storage
-    const stored = await kv.get(kvKeys.borrow(requestId), "json") as BorrowRequest;
+    const stored = (await kv.get(
+      kvKeys.borrow(requestId),
+      "json",
+    )) as BorrowRequest;
     expect(stored).not.toBeNull();
     expect(stored.requestId).toBe(requestId);
     expect(stored.status).toBe(BorrowStatus.PENDING);
 
     // Verify index
-    const index = await kv.get(kvKeys.borrowsByFamily(familyId), "json") as string[];
+    const index = (await kv.get(
+      kvKeys.borrowsByFamily(familyId),
+      "json",
+    )) as string[];
     expect(index).toContain(requestId);
   });
 
@@ -348,7 +412,7 @@ describe("POST /api/family/:id/borrow", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token2}`,
+          Authorization: `Bearer ${token2}`,
         },
         body: "{invalid json}",
       },
@@ -394,7 +458,12 @@ describe("GET /api/family/:id/borrow", () => {
       token2,
     );
 
-    const res = await request("GET", `/api/family/${familyId}/borrow`, undefined, token1);
+    const res = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token1,
+    );
     expect(res.status).toBe(200);
 
     const json = (await res.json()) as Json;
@@ -406,7 +475,12 @@ describe("GET /api/family/:id/borrow", () => {
   it("should return empty array when no requests exist", async () => {
     const { familyId, token1 } = await createFamilyWithTwoMembers();
 
-    const res = await request("GET", `/api/family/${familyId}/borrow`, undefined, token1);
+    const res = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token1,
+    );
     expect(res.status).toBe(200);
 
     const json = (await res.json()) as Json;
@@ -428,7 +502,12 @@ describe("GET /api/family/:id/borrow", () => {
     // user3 is not in the family
     const { authToken: token3 } = await createFamilyAndGetToken(USER3);
 
-    const res = await request("GET", `/api/family/${familyId}/borrow`, undefined, token3);
+    const res = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token3,
+    );
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("NOT_FAMILY_MEMBER");
@@ -437,7 +516,12 @@ describe("GET /api/family/:id/borrow", () => {
   it("should return 404 if family not found", async () => {
     const { token1 } = await createFamilyWithTwoMembers();
 
-    const res = await request("GET", "/api/family/zzzz-zzzz/borrow", undefined, token1);
+    const res = await request(
+      "GET",
+      "/api/family/zzzz-zzzz/borrow",
+      undefined,
+      token1,
+    );
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("FAMILY_NOT_FOUND");
@@ -446,7 +530,12 @@ describe("GET /api/family/:id/borrow", () => {
   it("should return 400 for invalid family ID format", async () => {
     const { token1 } = await createFamilyWithTwoMembers();
 
-    const res = await request("GET", "/api/family/INVALID/borrow", undefined, token1);
+    const res = await request(
+      "GET",
+      "/api/family/INVALID/borrow",
+      undefined,
+      token1,
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_FAMILY_ID");
@@ -791,23 +880,16 @@ describe("PATCH /api/borrow/:requestId", () => {
     const { familyId, token1, token2 } = await createFamilyWithTwoMembers();
     const requestId = await createPendingBorrowRequest(familyId, token2);
 
-    const res = await request(
-      "PATCH",
-      `/api/borrow/${requestId}`,
-      {},
-      token1,
-    );
+    const res = await request("PATCH", `/api/borrow/${requestId}`, {}, token1);
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("MISSING_FIELDS");
   });
 
   it("should return 401 if not authenticated", async () => {
-    const res = await request(
-      "PATCH",
-      "/api/borrow/some-request-id",
-      { status: BorrowStatus.LENT },
-    );
+    const res = await request("PATCH", "/api/borrow/some-request-id", {
+      status: BorrowStatus.LENT,
+    });
     expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("UNAUTHORIZED");
@@ -823,7 +905,7 @@ describe("PATCH /api/borrow/:requestId", () => {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token1}`,
+          Authorization: `Bearer ${token1}`,
         },
         body: "{invalid json}",
       },
@@ -843,7 +925,10 @@ describe("PATCH /api/borrow/:requestId", () => {
       token1,
     );
 
-    const stored = await kv.get(kvKeys.borrow(requestId), "json") as BorrowRequest;
+    const stored = (await kv.get(
+      kvKeys.borrow(requestId),
+      "json",
+    )) as BorrowRequest;
     expect(stored.status).toBe(BorrowStatus.LENT);
   });
 

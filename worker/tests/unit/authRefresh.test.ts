@@ -29,11 +29,7 @@ function request(
 }
 
 /** Seed KV with a member mapping and optionally an old auth record. */
-async function seedMember(
-  userId: string,
-  familyId: string,
-  oldToken?: string,
-) {
+async function seedMember(userId: string, familyId: string, oldToken?: string) {
   await kv.put(`member:${userId}`, familyId);
   if (oldToken) {
     await kv.put(`token:${oldToken}`, userId);
@@ -53,7 +49,10 @@ describe("POST /api/auth/refresh", () => {
     await seedMember(VALID_USER_ID, VALID_FAMILY_ID);
 
     const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        familyId: VALID_FAMILY_ID,
+      }),
     });
 
     expect(res.status).toBe(401);
@@ -66,7 +65,10 @@ describe("POST /api/auth/refresh", () => {
     await seedMember(VALID_USER_ID, VALID_FAMILY_ID, oldToken);
 
     const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        familyId: VALID_FAMILY_ID,
+      }),
       headers: { Authorization: `Bearer ${oldToken}` },
     });
 
@@ -82,7 +84,10 @@ describe("POST /api/auth/refresh", () => {
     await seedMember(VALID_USER_ID, VALID_FAMILY_ID, oldToken);
 
     const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        familyId: VALID_FAMILY_ID,
+      }),
       headers: { Authorization: `Bearer ${oldToken}` },
     });
 
@@ -97,7 +102,7 @@ describe("POST /api/auth/refresh", () => {
     expect(tokenLookup).toBe(VALID_USER_ID);
 
     // auth:{userId} should still point to old token
-    const authRecord = await kv.get(`auth:${VALID_USER_ID}`, "json") as Json;
+    const authRecord = (await kv.get(`auth:${VALID_USER_ID}`, "json")) as Json;
     expect(authRecord.token).toBe(oldToken);
   });
 
@@ -109,7 +114,10 @@ describe("POST /api/auth/refresh", () => {
 
     const before = Date.now();
     const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        familyId: VALID_FAMILY_ID,
+      }),
       headers: { Authorization: `Bearer ${oldToken}` },
     });
 
@@ -118,11 +126,17 @@ describe("POST /api/auth/refresh", () => {
 
     // Same token reused (no churn), but expiresAt reflects a fresh 90d window.
     expect(json.data.token).toBe(oldToken);
-    expect(json.data.expiresAt).toBeGreaterThanOrEqual(before + TOKEN_TTL_SECONDS * 1000);
-    expect(json.data.expiresAt).toBeLessThanOrEqual(Date.now() + TOKEN_TTL_SECONDS * 1000);
+    expect(json.data.expiresAt).toBeGreaterThanOrEqual(
+      before + TOKEN_TTL_SECONDS * 1000,
+    );
+    expect(json.data.expiresAt).toBeLessThanOrEqual(
+      Date.now() + TOKEN_TTL_SECONDS * 1000,
+    );
 
     // Both KV directions were re-put carrying the shared 90d TTL.
-    const authPut = putSpy.mock.calls.find(([k]) => k === `auth:${VALID_USER_ID}`);
+    const authPut = putSpy.mock.calls.find(
+      ([k]) => k === `auth:${VALID_USER_ID}`,
+    );
     const tokenPut = putSpy.mock.calls.find(([k]) => k === `token:${oldToken}`);
     expect(authPut?.[2]).toMatchObject({ expirationTtl: TOKEN_TTL_SECONDS });
     expect(tokenPut?.[2]).toMatchObject({ expirationTtl: TOKEN_TTL_SECONDS });
@@ -137,7 +151,10 @@ describe("POST /api/auth/refresh", () => {
     await seedMember(otherUserId, VALID_FAMILY_ID, token);
 
     const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        familyId: VALID_FAMILY_ID,
+      }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -165,7 +182,10 @@ describe("POST /api/auth/refresh", () => {
     await kv.put(`token:${token}`, VALID_USER_ID);
 
     const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: "A".repeat(64), familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: "A".repeat(64),
+        familyId: VALID_FAMILY_ID,
+      }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -191,7 +211,10 @@ describe("POST /api/auth/refresh", () => {
   it("should succeed without familyId (v1.2.0: familyId is optional)", async () => {
     const token = "e".repeat(64);
     await kv.put(`token:${token}`, VALID_USER_ID);
-    await kv.put(`auth:${VALID_USER_ID}`, JSON.stringify({ token, createdAt: "2026-01-01T00:00:00Z" }));
+    await kv.put(
+      `auth:${VALID_USER_ID}`,
+      JSON.stringify({ token, createdAt: "2026-01-01T00:00:00Z" }),
+    );
 
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID }),
@@ -236,7 +259,10 @@ describe("POST /api/auth/refresh", () => {
     await seedMember(VALID_USER_ID, "wxyz-9876", token);
 
     const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        familyId: VALID_FAMILY_ID,
+      }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -249,11 +275,17 @@ describe("POST /api/auth/refresh", () => {
     const token = "f".repeat(64);
     // Seed member with token but create a second user with only member mapping
     await kv.put(`token:${token}`, VALID_USER_ID);
-    await kv.put(`auth:${VALID_USER_ID}`, JSON.stringify({ token, createdAt: "2026-01-01T00:00:00Z" }));
+    await kv.put(
+      `auth:${VALID_USER_ID}`,
+      JSON.stringify({ token, createdAt: "2026-01-01T00:00:00Z" }),
+    );
     await kv.put(`member:${VALID_USER_ID}`, VALID_FAMILY_ID);
 
     const res = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        familyId: VALID_FAMILY_ID,
+      }),
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -268,14 +300,20 @@ describe("POST /api/auth/refresh", () => {
     await seedMember(VALID_USER_ID, VALID_FAMILY_ID, token);
 
     const res1 = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        familyId: VALID_FAMILY_ID,
+      }),
       headers: { Authorization: `Bearer ${token}` },
     });
     const json1 = (await res1.json()) as Json;
 
     // Use the returned token for the second request
     const res2 = await request("POST", "/api/auth/refresh", {
-      body: JSON.stringify({ userId: VALID_USER_ID, familyId: VALID_FAMILY_ID }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        familyId: VALID_FAMILY_ID,
+      }),
       headers: { Authorization: `Bearer ${json1.data.token}` },
     });
     const json2 = (await res2.json()) as Json;

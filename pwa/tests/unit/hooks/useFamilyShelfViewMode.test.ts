@@ -22,7 +22,10 @@ describe("useFamilyShelfViewMode", () => {
   });
 
   it("defaults to 'grid' for invalid localStorage value", () => {
-    localStorage.setItem(namespacedKey(USER_ID, "familyShelfViewMode"), "invalid");
+    localStorage.setItem(
+      namespacedKey(USER_ID, "familyShelfViewMode"),
+      "invalid",
+    );
     const { result } = renderHook(() => useFamilyShelfViewMode(USER_ID));
     expect(result.current.viewMode).toBe("grid");
   });
@@ -35,7 +38,9 @@ describe("useFamilyShelfViewMode", () => {
     });
 
     expect(result.current.viewMode).toBe("row");
-    expect(localStorage.getItem(namespacedKey(USER_ID, "familyShelfViewMode"))).toBe("row");
+    expect(
+      localStorage.getItem(namespacedKey(USER_ID, "familyShelfViewMode")),
+    ).toBe("row");
   });
 
   it("uses correct namespaced key (moo:{userId}:familyShelfViewMode)", () => {
@@ -52,7 +57,10 @@ describe("useFamilyShelfViewMode", () => {
   it("re-reads preference when userId changes", () => {
     const otherUserId = "other-user-456";
     localStorage.setItem(namespacedKey(USER_ID, "familyShelfViewMode"), "row");
-    localStorage.setItem(namespacedKey(otherUserId, "familyShelfViewMode"), "grid");
+    localStorage.setItem(
+      namespacedKey(otherUserId, "familyShelfViewMode"),
+      "grid",
+    );
 
     const { result, rerender } = renderHook(
       ({ userId }) => useFamilyShelfViewMode(userId),

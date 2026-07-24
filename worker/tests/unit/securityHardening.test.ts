@@ -176,8 +176,12 @@ describe("isPublicRoute", () => {
   });
 
   it("should NOT match POST /api/user/:id/verify/prompted (now protected)", () => {
-    expect(isPublicRoute("POST", "/api/user/abc123/verify/prompted")).toBe(false);
-    expect(isPublicRoute("POST", "/api/user/abc123/verify/prompted/")).toBe(false);
+    expect(isPublicRoute("POST", "/api/user/abc123/verify/prompted")).toBe(
+      false,
+    );
+    expect(isPublicRoute("POST", "/api/user/abc123/verify/prompted/")).toBe(
+      false,
+    );
   });
 
   it("should NOT match PUT /api/user/:id/verify (protected)", () => {
@@ -190,7 +194,9 @@ describe("isPublicRoute", () => {
 
   it("should not match other methods or paths", () => {
     expect(isPublicRoute("GET", "/api/family")).toBe(false);
-    expect(isPublicRoute("DELETE", "/api/family/abcd-1234/member/user1")).toBe(false);
+    expect(isPublicRoute("DELETE", "/api/family/abcd-1234/member/user1")).toBe(
+      false,
+    );
     expect(isPublicRoute("GET", "/api/family/abcd-1234/members")).toBe(false);
     expect(isPublicRoute("PUT", "/api/user/test/books")).toBe(false);
   });
@@ -203,12 +209,16 @@ describe("isSensitivePublicRoute", () => {
   });
 
   it("should match POST /api/family/:id/join", () => {
-    expect(isSensitivePublicRoute("POST", "/api/family/abcd-1234/join")).toBe(true);
+    expect(isSensitivePublicRoute("POST", "/api/family/abcd-1234/join")).toBe(
+      true,
+    );
   });
 
   it("should NOT match other public routes", () => {
     expect(isSensitivePublicRoute("POST", "/api/auth/lookup")).toBe(false);
-    expect(isSensitivePublicRoute("GET", "/api/user/abc123/verify")).toBe(false);
+    expect(isSensitivePublicRoute("GET", "/api/user/abc123/verify")).toBe(
+      false,
+    );
   });
 
   it("should NOT match standard routes", () => {
@@ -473,8 +483,8 @@ describe("OPTIONS preflight short-circuit", () => {
     // Fire a GET first to create a known rate limit counter
     await request("GET", "/api/user/test/books");
     const keysBefore = await kv.list();
-    const rateLimitBefore = keysBefore.keys.filter(
-      (k: { name: string }) => k.name.startsWith("ratelimit"),
+    const rateLimitBefore = keysBefore.keys.filter((k: { name: string }) =>
+      k.name.startsWith("ratelimit"),
     );
     const countsBefore = new Map<string, string | null>();
     for (const k of rateLimitBefore) {
@@ -486,8 +496,8 @@ describe("OPTIONS preflight short-circuit", () => {
 
     // Snapshot after — must be identical
     const keysAfter = await kv.list();
-    const rateLimitAfter = keysAfter.keys.filter(
-      (k: { name: string }) => k.name.startsWith("ratelimit"),
+    const rateLimitAfter = keysAfter.keys.filter((k: { name: string }) =>
+      k.name.startsWith("ratelimit"),
     );
     expect(rateLimitAfter.length).toBe(rateLimitBefore.length);
     for (const k of rateLimitAfter) {

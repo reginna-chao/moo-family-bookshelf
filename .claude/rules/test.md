@@ -2,12 +2,12 @@
 
 ### Framework & Tools
 
-| Tool | Scope | Purpose |
-|------|-------|---------|
-| Vitest | Extension + Worker | Unit & integration tests |
-| React Testing Library | Extension | Component tests |
-| Playwright | Extension | E2E tests with loaded Extension |
-| Miniflare | Worker | Local KV simulation |
+| Tool                  | Scope              | Purpose                         |
+| --------------------- | ------------------ | ------------------------------- |
+| Vitest                | Extension + Worker | Unit & integration tests        |
+| React Testing Library | Extension          | Component tests                 |
+| Playwright            | Extension          | E2E tests with loaded Extension |
+| Miniflare             | Worker             | Local KV simulation             |
 
 ### Test Locations
 
@@ -24,12 +24,12 @@
 
 ### Coverage Targets
 
-| Scope | Target |
-|-------|--------|
-| `extension/src/api/` | >= 80% |
+| Scope                   | Target |
+| ----------------------- | ------ |
+| `extension/src/api/`    | >= 80% |
 | `extension/src/dialog/` | >= 70% |
-| `worker/src/` | >= 80% |
-| Overall | >= 70% |
+| `worker/src/`           | >= 80% |
+| Overall                 | >= 70% |
 
 ### Naming
 

@@ -31,7 +31,10 @@ describe("normalizeFamilyRecord", () => {
     // Legacy format: members could be string[] instead of FamilyMember[]
     const legacy = {
       familyId: "abcd-1234",
-      members: ["alice"] as unknown as { userId: string; displayName: string }[],
+      members: ["alice"] as unknown as {
+        userId: string;
+        displayName: string;
+      }[],
       createdAt: "2025-01-01T00:00:00.000Z",
     };
     const result = normalizeFamilyRecord(legacy);

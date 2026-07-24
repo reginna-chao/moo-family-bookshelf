@@ -5,8 +5,12 @@ export interface FloatingBarVisibilityState {
   isSaved: boolean;
 }
 
-export function shouldShowFloatingBar(state: FloatingBarVisibilityState): boolean {
-  return state.selectedCount > 0 || state.isDirty || state.isSaving || state.isSaved;
+export function shouldShowFloatingBar(
+  state: FloatingBarVisibilityState,
+): boolean {
+  return (
+    state.selectedCount > 0 || state.isDirty || state.isSaving || state.isSaved
+  );
 }
 
 interface FloatingActionBarProps {
@@ -31,7 +35,12 @@ export function FloatingActionBar({
   onSave,
 }: FloatingActionBarProps) {
   const showSaveSection = isDirty || isSaving || isSaved;
-  const visible = shouldShowFloatingBar({ selectedCount, isDirty, isSaving, isSaved });
+  const visible = shouldShowFloatingBar({
+    selectedCount,
+    isDirty,
+    isSaving,
+    isSaved,
+  });
   if (!visible) return null;
 
   return (

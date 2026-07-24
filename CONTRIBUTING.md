@@ -32,23 +32,23 @@ cp .env.example .env
 
 ## Project Structure
 
-| Directory | Description |
-|-----------|-------------|
-| `extension/` | Chrome Extension (React + TypeScript + Vite) |
-| `pwa/` | PWA mobile viewer (React + Vite) |
-| `worker/` | Cloudflare Workers backend (Hono + KV) |
-| `site/` | GitHub Pages landing page |
-| `docs/` | Project documentation (plan, architecture, privacy) |
-| `assets/brand/` | Brand assets (logo, favicon, OG image) |
+| Directory       | Description                                         |
+| --------------- | --------------------------------------------------- |
+| `extension/`    | Chrome Extension (React + TypeScript + Vite)        |
+| `pwa/`          | PWA mobile viewer (React + Vite)                    |
+| `worker/`       | Cloudflare Workers backend (Hono + KV)              |
+| `site/`         | GitHub Pages landing page                           |
+| `docs/`         | Project documentation (plan, architecture, privacy) |
+| `assets/brand/` | Brand assets (logo, favicon, OG image)              |
 
 ### Tech Stack
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| Frontend | React + TypeScript + Vite | Chrome Extension, Dialog injected via Content Script |
-| Mobile | PWA | Shares the same Workers API; cannot scrape Readmoo |
-| Backend | Cloudflare Workers | Serverless; free tier sufficient; self-hostable |
-| Storage | Cloudflare KV | `user:{id}` for personal settings, `family:{id}` for groups |
+| Layer    | Technology                | Notes                                                       |
+| -------- | ------------------------- | ----------------------------------------------------------- |
+| Frontend | React + TypeScript + Vite | Chrome Extension, Dialog injected via Content Script        |
+| Mobile   | PWA                       | Shares the same Workers API; cannot scrape Readmoo          |
+| Backend  | Cloudflare Workers        | Serverless; free tier sufficient; self-hostable             |
+| Storage  | Cloudflare KV             | `user:{id}` for personal settings, `family:{id}` for groups |
 
 ## Development Commands
 
@@ -93,18 +93,18 @@ pnpm test
 
 From the project root:
 
-| Script | Worker | KV | Use case |
-|--------|--------|-----|----------|
-| `pnpm dev` | `localhost:8787` | Local Miniflare | Daily development |
-| `pnpm dev:remote` | `localhost:8787` | Remote dev KV | Test with real KV |
-| `pnpm deploy:prod` | Cloudflare | Prod KV | Deploy production |
+| Script             | Worker           | KV              | Use case          |
+| ------------------ | ---------------- | --------------- | ----------------- |
+| `pnpm dev`         | `localhost:8787` | Local Miniflare | Daily development |
+| `pnpm dev:remote`  | `localhost:8787` | Remote dev KV   | Test with real KV |
+| `pnpm deploy:prod` | Cloudflare       | Prod KV         | Deploy production |
 
 Utility scripts:
 
-| Script | Description |
-|--------|-------------|
-| `pnpm clean:kv` | Clear local Miniflare KV data |
-| `pnpm clean:kv:dev` | Clear remote dev KV data |
+| Script              | Description                   |
+| ------------------- | ----------------------------- |
+| `pnpm clean:kv`     | Clear local Miniflare KV data |
+| `pnpm clean:kv:dev` | Clear remote dev KV data      |
 
 ## E2E Testing
 
@@ -122,12 +122,12 @@ cd extension && npx playwright install chromium
 
 ### Test Scenarios
 
-| Spec file | Coverage |
-|-----------|----------|
-| `family-lifecycle.spec.ts` | Create family → sync code → second user joins → verify members |
-| `book-sharing.spec.ts` | Books default to not-shared → toggle → save → visible in family shelf |
+| Spec file                      | Coverage                                                               |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| `family-lifecycle.spec.ts`     | Create family → sync code → second user joins → verify members         |
+| `book-sharing.spec.ts`         | Books default to not-shared → toggle → save → visible in family shelf  |
 | `dialog-state-machine.spec.ts` | No family → onboarding → create → main view → close/reopen persistence |
-| `custom-endpoint.spec.ts` | Custom API endpoint → sync code with `@host` → format validation |
+| `custom-endpoint.spec.ts`      | Custom API endpoint → sync code with `@host` → format validation       |
 
 ### Selector Verification
 
@@ -150,13 +150,13 @@ The first run opens Chromium and requires manual Readmoo login. Login state is p
 
 ### Coverage Targets
 
-| Scope | Target |
-|-------|--------|
-| `extension/src/crypto/` | ≥ 90% |
-| `extension/src/api/` | ≥ 80% |
-| `extension/src/dialog/` | ≥ 70% |
-| `worker/src/` | ≥ 80% |
-| Overall | ≥ 70% |
+| Scope                   | Target |
+| ----------------------- | ------ |
+| `extension/src/crypto/` | ≥ 90%  |
+| `extension/src/api/`    | ≥ 80%  |
+| `extension/src/dialog/` | ≥ 70%  |
+| `worker/src/`           | ≥ 80%  |
+| Overall                 | ≥ 70%  |
 
 Run full coverage report:
 
@@ -182,13 +182,13 @@ CHANGELOG and version bump happen later, at release time, in one step.
 
 All five version files are kept in sync to the same number:
 
-| File |
-|------|
-| `extension/package.json` |
-| `pwa/package.json` |
-| `worker/package.json` |
+| File                             |
+| -------------------------------- |
+| `extension/package.json`         |
+| `pwa/package.json`               |
+| `worker/package.json`            |
 | `extension/public/manifest.json` |
-| `package.json` (root) |
+| `package.json` (root)            |
 
 ### Releasing a New Version
 

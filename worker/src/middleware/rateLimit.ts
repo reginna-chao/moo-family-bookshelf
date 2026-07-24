@@ -31,8 +31,16 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
     const minuteBucket = Math.floor(now / BUCKET_MS);
     const isSensitive = isSensitivePublicRoute(c.req.method, c.req.path);
     const isPublic = isPublicRoute(c.req.method, c.req.path);
-    const prefix = isSensitive ? "ratelimit:sens" : isPublic ? "ratelimit:pub" : "ratelimit";
-    const limit = isSensitive ? RATE_LIMIT_SENSITIVE : isPublic ? RATE_LIMIT_PUBLIC : RATE_LIMIT_STANDARD;
+    const prefix = isSensitive
+      ? "ratelimit:sens"
+      : isPublic
+        ? "ratelimit:pub"
+        : "ratelimit";
+    const limit = isSensitive
+      ? RATE_LIMIT_SENSITIVE
+      : isPublic
+        ? RATE_LIMIT_PUBLIC
+        : RATE_LIMIT_STANDARD;
     const key = `${prefix}:${ip}:${minuteBucket}`;
 
     // Known limitation: KV get-then-put is not atomic. Concurrent requests may
@@ -42,9 +50,18 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
     const count = current ? parseInt(current, 10) : 0;
 
     if (count >= limit) {
-      const retryAfter = Math.max(1, Math.ceil(((minuteBucket + 1) * BUCKET_MS - now) / 1000));
+      const retryAfter = Math.max(
+        1,
+        Math.ceil(((minuteBucket + 1) * BUCKET_MS - now) / 1000),
+      );
       return c.json(
-        { error: { code: "RATE_LIMITED", message: "Too many requests", retryAfter } },
+        {
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many requests",
+            retryAfter,
+          },
+        },
         429,
         {
           "Retry-After": String(retryAfter),
@@ -98,9 +115,18 @@ export async function enforcePerUserRateLimit(
   const count = current ? parseInt(current, 10) : 0;
 
   if (count >= opts.max) {
-    const retryAfter = Math.max(1, Math.ceil(((bucket + 1) * windowMs - now) / 1000));
+    const retryAfter = Math.max(
+      1,
+      Math.ceil(((bucket + 1) * windowMs - now) / 1000),
+    );
     return c.json(
-      { error: { code: "RATE_LIMITED", message: "Too many requests", retryAfter } },
+      {
+        error: {
+          code: "RATE_LIMITED",
+          message: "Too many requests",
+          retryAfter,
+        },
+      },
       429,
       { "Retry-After": String(retryAfter) },
     );

@@ -8,7 +8,9 @@ function readEnvValue(envPath, key) {
   try {
     const content = readFileSync(resolve(root, envPath), "utf-8");
     const match = content.match(new RegExp(`^${key}=(.*)$`, "m"));
-    return match ? match[1].trim() || "(empty — will use fallback URL)" : "(not set)";
+    return match
+      ? match[1].trim() || "(empty — will use fallback URL)"
+      : "(not set)";
   } catch {
     return "(file not found)";
   }

@@ -61,7 +61,12 @@ vi.mock("@/api/client", async (importOriginal) => {
 import { BoolFlag, type ApiClient } from "@/api/client";
 
 function makeBooks(
-  books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>,
+  books: Array<{
+    bookId: string;
+    title: string;
+    author: string;
+    isShared: BoolFlag;
+  }>,
 ) {
   return books.map((b) => ({
     bookId: b.bookId,
@@ -95,15 +100,19 @@ function createApiClient(opts: MockOpts = {}) {
     }),
     updateFamilyPrefs:
       opts.updateFamilyPrefs ??
-      vi.fn().mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } }),
+      vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } }),
     getFamilyMembers: vi.fn().mockResolvedValue(
       opts.members ?? {
         data: { familyId: "fam-1", ownerId: "user-self", members: [] },
       },
     ),
-    getFamilyBookshelf: vi.fn().mockResolvedValue(
-      opts.bookshelf ?? { data: { familyId: "fam-1", members: [] } },
-    ),
+    getFamilyBookshelf: vi
+      .fn()
+      .mockResolvedValue(
+        opts.bookshelf ?? { data: { familyId: "fam-1", members: [] } },
+      ),
     listBorrowRequests: vi.fn().mockResolvedValue([]),
     createBorrowRequest: vi.fn(),
   } as unknown as ApiClient;
@@ -135,8 +144,18 @@ function aliceTwoBooks() {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
-              { bookId: "b2", title: "書二", author: "B", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "書一",
+                author: "A",
+                isShared: BoolFlag.TRUE,
+              },
+              {
+                bookId: "b2",
+                title: "書二",
+                author: "B",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -217,7 +236,10 @@ describe("FamilyShelfPage — hide feature", () => {
     const updateFamilyPrefs = vi
       .fn()
       .mockResolvedValue({ data: { ok: true, hidden: [] } });
-    const apiClient = createApiClient({ ...aliceTwoBooks(), updateFamilyPrefs });
+    const apiClient = createApiClient({
+      ...aliceTwoBooks(),
+      updateFamilyPrefs,
+    });
     renderPage(apiClient);
 
     await waitFor(() => {
@@ -273,7 +295,12 @@ describe("FamilyShelfPage — hide feature", () => {
               userId: "user-self",
               displayName: "Me",
               books: makeBooks([
-                { bookId: "self-1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "self-1",
+                  title: "我的書",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2026-01-01",
             },
@@ -281,7 +308,12 @@ describe("FamilyShelfPage — hide feature", () => {
               userId: "user-alice",
               displayName: "Alice",
               books: makeBooks([
-                { bookId: "b2", title: "Alice的書", author: "B", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b2",
+                  title: "Alice的書",
+                  author: "B",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2026-01-01",
             },

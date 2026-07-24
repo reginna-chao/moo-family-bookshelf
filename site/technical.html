@@ -1,478 +1,643 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-Hant">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>開發者與技術說明 — 墨家書櫃 MooFamily Bookshelf</title>
-  <meta name="description" content="墨家書櫃的技術架構、資料模型、自建後端（BYO Backend）與開發者資源。">
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <style>
-    :root {
-      --color-primary: #2563eb;
-      --color-primary-dark: #1d4ed8;
-      --color-bg: #ffffff;
-      --color-bg-alt: #f8fafc;
-      --color-text: #1e293b;
-      --color-text-secondary: #64748b;
-      --color-border: #e2e8f0;
-      --color-accent: #f59e0b;
-      --max-width: 860px;
-      --radius: 8px;
-    }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>開發者與技術說明 — 墨家書櫃 MooFamily Bookshelf</title>
+    <meta
+      name="description"
+      content="墨家書櫃的技術架構、資料模型、自建後端（BYO Backend）與開發者資源。"
+    />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <style>
+      :root {
+        --color-primary: #2563eb;
+        --color-primary-dark: #1d4ed8;
+        --color-bg: #ffffff;
+        --color-bg-alt: #f8fafc;
+        --color-text: #1e293b;
+        --color-text-secondary: #64748b;
+        --color-border: #e2e8f0;
+        --color-accent: #f59e0b;
+        --max-width: 860px;
+        --radius: 8px;
+      }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
-      color: var(--color-text);
-      background: var(--color-bg);
-      line-height: 1.7;
-      -webkit-font-smoothing: antialiased;
-    }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC",
+          sans-serif;
+        color: var(--color-text);
+        background: var(--color-bg);
+        line-height: 1.7;
+        -webkit-font-smoothing: antialiased;
+      }
 
-    a { color: var(--color-primary); }
+      a {
+        color: var(--color-primary);
+      }
 
-    /* Top nav */
-    .topnav {
-      max-width: var(--max-width);
-      margin: 0 auto;
-      padding: 20px 24px 0;
-      font-size: 0.9rem;
-    }
+      /* Top nav */
+      .topnav {
+        max-width: var(--max-width);
+        margin: 0 auto;
+        padding: 20px 24px 0;
+        font-size: 0.9rem;
+      }
 
-    .topnav a {
-      color: var(--color-text-secondary);
-      text-decoration: none;
-    }
+      .topnav a {
+        color: var(--color-text-secondary);
+        text-decoration: none;
+      }
 
-    .topnav a:hover { color: var(--color-primary); }
+      .topnav a:hover {
+        color: var(--color-primary);
+      }
 
-    /* Header */
-    .header {
-      text-align: center;
-      padding: 60px 24px 40px;
-      border-bottom: 1px solid var(--color-border);
-    }
+      /* Header */
+      .header {
+        text-align: center;
+        padding: 60px 24px 40px;
+        border-bottom: 1px solid var(--color-border);
+      }
 
-    .header h1 {
-      font-size: 2rem;
-      font-weight: 700;
-      margin-bottom: 10px;
-      letter-spacing: -0.02em;
-    }
+      .header h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 10px;
+        letter-spacing: -0.02em;
+      }
 
-    .header .tagline {
-      font-size: 1.05rem;
-      color: var(--color-text-secondary);
-      max-width: 560px;
-      margin: 0 auto;
-    }
+      .header .tagline {
+        font-size: 1.05rem;
+        color: var(--color-text-secondary);
+        max-width: 560px;
+        margin: 0 auto;
+      }
 
-    /* Main */
-    .content {
-      max-width: var(--max-width);
-      margin: 0 auto;
-      padding: 0 24px;
-    }
+      /* Main */
+      .content {
+        max-width: var(--max-width);
+        margin: 0 auto;
+        padding: 0 24px;
+      }
 
-    section {
-      padding: 48px 0;
-      border-bottom: 1px solid var(--color-border);
-    }
+      section {
+        padding: 48px 0;
+        border-bottom: 1px solid var(--color-border);
+      }
 
-    section:last-of-type { border-bottom: none; }
+      section:last-of-type {
+        border-bottom: none;
+      }
 
-    section h2 {
-      font-size: 1.45rem;
-      font-weight: 700;
-      margin-bottom: 16px;
-      letter-spacing: -0.01em;
-    }
+      section h2 {
+        font-size: 1.45rem;
+        font-weight: 700;
+        margin-bottom: 16px;
+        letter-spacing: -0.01em;
+      }
 
-    section h3 {
-      font-size: 1.05rem;
-      font-weight: 600;
-      margin-top: 24px;
-      margin-bottom: 8px;
-    }
+      section h3 {
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin-top: 24px;
+        margin-bottom: 8px;
+      }
 
-    section p {
-      margin-bottom: 14px;
-      color: var(--color-text);
-    }
+      section p {
+        margin-bottom: 14px;
+        color: var(--color-text);
+      }
 
-    section ul, section ol {
-      margin: 12px 0 16px 20px;
-      color: var(--color-text);
-    }
+      section ul,
+      section ol {
+        margin: 12px 0 16px 20px;
+        color: var(--color-text);
+      }
 
-    section li { margin-bottom: 6px; }
+      section li {
+        margin-bottom: 6px;
+      }
 
-    /* Table */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 16px 0;
-      font-size: 0.9rem;
-    }
+      /* Table */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 16px 0;
+        font-size: 0.9rem;
+      }
 
-    th, td {
-      padding: 12px 16px;
-      text-align: left;
-      border-bottom: 1px solid var(--color-border);
-      vertical-align: top;
-    }
+      th,
+      td {
+        padding: 12px 16px;
+        text-align: left;
+        border-bottom: 1px solid var(--color-border);
+        vertical-align: top;
+      }
 
-    th {
-      font-weight: 600;
-      background: var(--color-bg-alt);
-    }
+      th {
+        font-weight: 600;
+        background: var(--color-bg-alt);
+      }
 
-    /* Code */
-    code {
-      font-family: "SF Mono", "Fira Code", monospace;
-      font-size: 0.88em;
-      background: var(--color-bg-alt);
-      border: 1px solid var(--color-border);
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
+      /* Code */
+      code {
+        font-family: "SF Mono", "Fira Code", monospace;
+        font-size: 0.88em;
+        background: var(--color-bg-alt);
+        border: 1px solid var(--color-border);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
 
-    pre {
-      background: #1e293b;
-      color: #e2e8f0;
-      padding: 18px 20px;
-      border-radius: var(--radius);
-      overflow-x: auto;
-      margin: 14px 0;
-      font-size: 0.85rem;
-      line-height: 1.6;
-    }
+      pre {
+        background: #1e293b;
+        color: #e2e8f0;
+        padding: 18px 20px;
+        border-radius: var(--radius);
+        overflow-x: auto;
+        margin: 14px 0;
+        font-size: 0.85rem;
+        line-height: 1.6;
+      }
 
-    pre code {
-      background: none;
-      border: none;
-      padding: 0;
-      color: inherit;
-    }
+      pre code {
+        background: none;
+        border: none;
+        padding: 0;
+        color: inherit;
+      }
 
-    /* Steps */
-    .steps {
-      counter-reset: step;
-      list-style: none;
-      margin: 16px 0;
-    }
+      /* Steps */
+      .steps {
+        counter-reset: step;
+        list-style: none;
+        margin: 16px 0;
+      }
 
-    .steps > li {
-      counter-increment: step;
-      padding: 14px 0 14px 40px;
-      position: relative;
-      border-bottom: 1px solid var(--color-border);
-    }
+      .steps > li {
+        counter-increment: step;
+        padding: 14px 0 14px 40px;
+        position: relative;
+        border-bottom: 1px solid var(--color-border);
+      }
 
-    .steps > li:last-child { border-bottom: none; }
+      .steps > li:last-child {
+        border-bottom: none;
+      }
 
-    .steps > li::before {
-      content: counter(step);
-      position: absolute;
-      left: 0;
-      top: 14px;
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
-      background: var(--color-bg-alt);
-      border: 1px solid var(--color-border);
-      font-size: 0.82rem;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--color-text-secondary);
-    }
+      .steps > li::before {
+        content: counter(step);
+        position: absolute;
+        left: 0;
+        top: 14px;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--color-bg-alt);
+        border: 1px solid var(--color-border);
+        font-size: 0.82rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--color-text-secondary);
+      }
 
-    /* Callout */
-    .callout {
-      padding: 14px 18px;
-      border-radius: var(--radius);
-      border-left: 4px solid var(--color-primary);
-      background: #eff6ff;
-      margin: 18px 0;
-      font-size: 0.92rem;
-    }
+      /* Callout */
+      .callout {
+        padding: 14px 18px;
+        border-radius: var(--radius);
+        border-left: 4px solid var(--color-primary);
+        background: #eff6ff;
+        margin: 18px 0;
+        font-size: 0.92rem;
+      }
 
-    .callout.warning {
-      border-left-color: var(--color-accent);
-      background: #fffbeb;
-    }
+      .callout.warning {
+        border-left-color: var(--color-accent);
+        background: #fffbeb;
+      }
 
-    /* Footer */
-    .footer {
-      text-align: center;
-      padding: 40px 24px;
-      color: var(--color-text-secondary);
-      font-size: 0.85rem;
-      border-top: 1px solid var(--color-border);
-    }
+      /* Footer */
+      .footer {
+        text-align: center;
+        padding: 40px 24px;
+        color: var(--color-text-secondary);
+        font-size: 0.85rem;
+        border-top: 1px solid var(--color-border);
+      }
 
-    .footer a { color: var(--color-primary); text-decoration: none; }
-    .footer a:hover { text-decoration: underline; }
-    .footer p + p { margin-top: 6px; }
+      .footer a {
+        color: var(--color-primary);
+        text-decoration: none;
+      }
+      .footer a:hover {
+        text-decoration: underline;
+      }
+      .footer p + p {
+        margin-top: 6px;
+      }
 
-    @media (max-width: 640px) {
-      .header { padding: 44px 20px 32px; }
-      .header h1 { font-size: 1.55rem; }
-      section { padding: 36px 0; }
-      table { font-size: 0.85rem; }
-      th, td { padding: 10px 12px; }
-    }
-  </style>
-</head>
-<body>
+      @media (max-width: 650px) {
+        .header {
+          padding: 44px 20px 32px;
+        }
+        .header h1 {
+          font-size: 1.55rem;
+        }
+        section {
+          padding: 36px 0;
+        }
+        table {
+          font-size: 0.85rem;
+        }
+        th,
+        td {
+          padding: 10px 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="topnav">
+      <a href="index.html">← 回首頁</a>
+    </nav>
 
-  <nav class="topnav">
-    <a href="index.html">← 回首頁</a>
-  </nav>
+    <header class="header">
+      <h1>開發者與技術說明</h1>
+      <p class="tagline">技術架構、資料模型、自建後端與貢獻指南。</p>
+    </header>
 
-  <header class="header">
-    <h1>開發者與技術說明</h1>
-    <p class="tagline">技術架構、資料模型、自建後端與貢獻指南。</p>
-  </header>
+    <main class="content">
+      <!-- Overview -->
+      <section>
+        <h2>專案總覽</h2>
+        <p>
+          墨家書櫃由三個部分組成：一個注入到讀墨網頁的 Chrome
+          擴充功能（Extension）、一個可在手機瀏覽家庭書櫃的 PWA，
+          以及一個可自建的 Cloudflare Workers 後端。三者共用同一組 API。
+        </p>
+        <p>所有資料透過 HTTPS 安全傳輸，以認證 Token 控管存取權限。</p>
+      </section>
 
-  <main class="content">
+      <!-- Architecture -->
+      <section>
+        <h2>技術架構</h2>
 
-    <!-- Overview -->
-    <section>
-      <h2>專案總覽</h2>
-      <p>
-        墨家書櫃由三個部分組成：一個注入到讀墨網頁的 Chrome 擴充功能（Extension）、一個可在手機瀏覽家庭書櫃的 PWA，
-        以及一個可自建的 Cloudflare Workers 後端。三者共用同一組 API。
-      </p>
-      <p>
-        所有資料透過 HTTPS 安全傳輸，以認證 Token 控管存取權限。
-      </p>
-    </section>
+        <table>
+          <thead>
+            <tr>
+              <th>層級</th>
+              <th>技術</th>
+              <th>說明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>前端</td>
+              <td>Chrome Extension（React 19 + TypeScript + Vite）</td>
+              <td>Content Script 注入 Dialog 至讀墨頁面；Manifest V3</td>
+            </tr>
+            <tr>
+              <td>行動端</td>
+              <td>PWA（React + TypeScript）</td>
+              <td>與 Extension 共用同一後端；無法爬取讀墨書單</td>
+            </tr>
+            <tr>
+              <td>後端</td>
+              <td>Cloudflare Workers + Hono</td>
+              <td>Serverless API，免費額度即可運行，可自建部署</td>
+            </tr>
+            <tr>
+              <td>儲存</td>
+              <td>Cloudflare KV</td>
+              <td>個人設定（per user）+ 家庭群組（per family）</td>
+            </tr>
+            <tr>
+              <td>雜湊</td>
+              <td>Web Crypto API（SHA-256）</td>
+              <td>使用者識別碼雜湊</td>
+            </tr>
+            <tr>
+              <td>測試</td>
+              <td>Vitest + React Testing Library + Playwright + Miniflare</td>
+              <td>單元／元件／E2E／整合測試</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
 
-    <!-- Architecture -->
-    <section>
-      <h2>技術架構</h2>
+      <!-- Data Model -->
+      <section>
+        <h2>資料模型</h2>
+        <p>採兩層設計，將個人偏好與家庭群組解耦：</p>
 
-      <table>
-        <thead>
-          <tr><th>層級</th><th>技術</th><th>說明</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>前端</td>
-            <td>Chrome Extension（React 19 + TypeScript + Vite）</td>
-            <td>Content Script 注入 Dialog 至讀墨頁面；Manifest V3</td>
-          </tr>
-          <tr>
-            <td>行動端</td>
-            <td>PWA（React + TypeScript）</td>
-            <td>與 Extension 共用同一後端；無法爬取讀墨書單</td>
-          </tr>
-          <tr>
-            <td>後端</td>
-            <td>Cloudflare Workers + Hono</td>
-            <td>Serverless API，免費額度即可運行，可自建部署</td>
-          </tr>
-          <tr>
-            <td>儲存</td>
-            <td>Cloudflare KV</td>
-            <td>個人設定（per user）+ 家庭群組（per family）</td>
-          </tr>
-          <tr>
-            <td>雜湊</td>
-            <td>Web Crypto API（SHA-256）</td>
-            <td>使用者識別碼雜湊</td>
-          </tr>
-          <tr>
-            <td>測試</td>
-            <td>Vitest + React Testing Library + Playwright + Miniflare</td>
-            <td>單元／元件／E2E／整合測試</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+        <h3>1. 個人分享設定（<code>user:{user_id}</code>）</h3>
+        <ul>
+          <li>每位使用者自己的書單與逐本的分享旗標</li>
+          <li>
+            所有書籍預設 <code>is_shared: false</code>；新購入的書也預設不公開
+          </li>
+          <li>變更後需使用者明確「儲存」才會同步至伺服器</li>
+          <li>解綁或更換家庭時，此設定仍保留</li>
+        </ul>
 
-    <!-- Data Model -->
-    <section>
-      <h2>資料模型</h2>
-      <p>採兩層設計，將個人偏好與家庭群組解耦：</p>
+        <h3>2. 家庭群組（<code>family:{family_id}</code>）</h3>
+        <ul>
+          <li>儲存成員的 user ID 清單</li>
+          <li>家庭書櫃是動態聚合查詢，不獨立儲存</li>
+          <li>
+            反向索引 <code>member:{user_id}</code> →
+            <code>family_id</code> 用於快速查詢
+          </li>
+        </ul>
 
-      <h3>1. 個人分享設定（<code>user:{user_id}</code>）</h3>
-      <ul>
-        <li>每位使用者自己的書單與逐本的分享旗標</li>
-        <li>所有書籍預設 <code>is_shared: false</code>；新購入的書也預設不公開</li>
-        <li>變更後需使用者明確「儲存」才會同步至伺服器</li>
-        <li>解綁或更換家庭時，此設定仍保留</li>
-      </ul>
+        <div class="callout">
+          <strong>設計重點</strong> —
+          個人設定歸屬使用者，家庭書櫃只是「聚合查詢」的結果。使用者加入或離開家庭時，個人設定完全不動，
+          只是被聚合的對象改變。
+        </div>
+      </section>
 
-      <h3>2. 家庭群組（<code>family:{family_id}</code>）</h3>
-      <ul>
-        <li>儲存成員的 user ID 清單</li>
-        <li>家庭書櫃是動態聚合查詢，不獨立儲存</li>
-        <li>反向索引 <code>member:{user_id}</code> → <code>family_id</code> 用於快速查詢</li>
-      </ul>
-
-      <div class="callout">
-        <strong>設計重點</strong> — 個人設定歸屬使用者，家庭書櫃只是「聚合查詢」的結果。使用者加入或離開家庭時，個人設定完全不動，
-        只是被聚合的對象改變。
-      </div>
-    </section>
-
-    <!-- Sync Code -->
-    <section>
-      <h2>同步碼格式</h2>
-      <p>同步碼傳遞家庭 ID，以及（可選的）API 端點。</p>
-      <pre><code>moo-{family_id_short}            # 使用預設 API
+      <!-- Sync Code -->
+      <section>
+        <h2>同步碼格式</h2>
+        <p>同步碼傳遞家庭 ID，以及（可選的）API 端點。</p>
+        <pre><code>moo-{family_id_short}            # 使用預設 API
 moo-{family_id_short}@{host}     # 使用自訂 API 端點</code></pre>
-      <p>
-        當使用自建後端時，<code>@{host}</code> 後綴會自動帶入 API 端點設定，家人收到同步碼後無需手動設定，
-        確保同一家庭所有成員使用相同的後端。
-      </p>
-    </section>
+        <p>
+          當使用自建後端時，<code>@{host}</code> 後綴會自動帶入 API
+          端點設定，家人收到同步碼後無需手動設定，
+          確保同一家庭所有成員使用相同的後端。
+        </p>
+      </section>
 
-    <!-- Self-hosting -->
-    <section>
-      <h2>自建後端（BYO Backend）</h2>
-      <p>
-        不想把資料存在預設伺服器？你可以部署自己的 Cloudflare Worker，完全掌控資料。Cloudflare 的免費額度即可運行。
-      </p>
+      <!-- Self-hosting -->
+      <section>
+        <h2>自建後端（BYO Backend）</h2>
+        <p>
+          不想把資料存在預設伺服器？你可以部署自己的 Cloudflare
+          Worker，完全掌控資料。Cloudflare 的免費額度即可運行。
+        </p>
 
-      <ol class="steps">
-        <li>Fork 本專案，進入 <code>worker/</code> 目錄</li>
-        <li>安裝 Wrangler CLI：<code>npm install -g wrangler</code></li>
-        <li>
-          登入並部署至你的 Cloudflare 帳號：
-          <pre><code>cd worker
+        <ol class="steps">
+          <li>Fork 本專案，進入 <code>worker/</code> 目錄</li>
+          <li>安裝 Wrangler CLI：<code>npm install -g wrangler</code></li>
+          <li>
+            登入並部署至你的 Cloudflare 帳號：
+            <pre><code>cd worker
 wrangler login
 wrangler deploy</code></pre>
-        </li>
-        <li>在擴充功能或 PWA 的設定頁中，填入你的 Worker URL</li>
-        <li>建立家庭後，同步碼會自動帶入 <code>@{host}</code>，把它傳給家人即可</li>
-      </ol>
+          </li>
+          <li>在擴充功能或 PWA 的設定頁中，填入你的 Worker URL</li>
+          <li>
+            建立家庭後，同步碼會自動帶入 <code>@{host}</code>，把它傳給家人即可
+          </li>
+        </ol>
 
-      <div class="callout warning">
-        <strong>注意</strong> — 同一家庭內所有成員必須使用相同的 API 端點。改用不同端點的成員會被視為不同家庭。
-      </div>
+        <div class="callout warning">
+          <strong>注意</strong> — 同一家庭內所有成員必須使用相同的 API
+          端點。改用不同端點的成員會被視為不同家庭。
+        </div>
 
-      <p>
-        詳細部署步驟請參閱
-        <a href="https://github.com/reginna-chao/moo-family-bookshelf/blob/main/worker/DEPLOY.md">worker/DEPLOY.md</a>。
-      </p>
-    </section>
+        <p>
+          詳細部署步驟請參閱
+          <a
+            href="https://github.com/reginna-chao/moo-family-bookshelf/blob/main/worker/DEPLOY.md"
+            >worker/DEPLOY.md</a
+          >。
+        </p>
+      </section>
 
-    <!-- Extension vs PWA -->
-    <section>
-      <h2>Extension 與 PWA 功能對照</h2>
-      <p>
-        手機上無法安裝 Chrome Extension，因此 PWA 僅提供瀏覽與設定功能；<strong>爬取讀墨書單只能在桌面端 Extension 完成</strong>。
-      </p>
+      <!-- Extension vs PWA -->
+      <section>
+        <h2>Extension 與 PWA 功能對照</h2>
+        <p>
+          手機上無法安裝 Chrome Extension，因此 PWA
+          僅提供瀏覽與設定功能；<strong
+            >爬取讀墨書單只能在桌面端 Extension 完成</strong
+          >。
+        </p>
 
-      <table>
-        <thead>
-          <tr><th>功能</th><th>Extension</th><th>PWA</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>瀏覽家庭分享書櫃</td><td>✓</td><td>✓</td></tr>
-          <tr><td>建立／加入家庭</td><td>✓</td><td>✓</td></tr>
-          <tr><td>個人書櫃分享設定</td><td>✓</td><td>✓（針對已同步的書）</td></tr>
-          <tr><td>從讀墨網頁爬取書單</td><td>✓</td><td>✗</td></tr>
-          <tr><td>自訂 API 端點</td><td>✓</td><td>✓</td></tr>
-          <tr><td>離開家庭</td><td>✓</td><td>✓</td></tr>
-        </tbody>
-      </table>
+        <table>
+          <thead>
+            <tr>
+              <th>功能</th>
+              <th>Extension</th>
+              <th>PWA</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>瀏覽家庭分享書櫃</td>
+              <td>✓</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td>建立／加入家庭</td>
+              <td>✓</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td>個人書櫃分享設定</td>
+              <td>✓</td>
+              <td>✓（針對已同步的書）</td>
+            </tr>
+            <tr>
+              <td>從讀墨網頁爬取書單</td>
+              <td>✓</td>
+              <td>✗</td>
+            </tr>
+            <tr>
+              <td>自訂 API 端點</td>
+              <td>✓</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td>離開家庭</td>
+              <td>✓</td>
+              <td>✓</td>
+            </tr>
+          </tbody>
+        </table>
 
-      <div class="callout">
-        手機版無法自動匯入讀墨書單。首次使用需先在桌面端 Extension 完成至少一次同步，之後即可在 PWA 調整分享設定與瀏覽。
-      </div>
-    </section>
+        <div class="callout">
+          手機版無法自動匯入讀墨書單。首次使用需先在桌面端 Extension
+          完成至少一次同步，之後即可在 PWA 調整分享設定與瀏覽。
+        </div>
+      </section>
 
-    <!-- API -->
-    <section>
-      <h2>API 端點</h2>
-      <p>所有 API 使用 RESTful JSON，統一包在 <code>{ data, error }</code> envelope 內，前綴為 <code>/api/</code>。</p>
+      <!-- API -->
+      <section>
+        <h2>API 端點</h2>
+        <p>
+          所有 API 使用 RESTful JSON，統一包在
+          <code>{ data, error }</code> envelope 內，前綴為 <code>/api/</code>。
+        </p>
 
-      <h3>驗證</h3>
-      <table>
-        <thead><tr><th>Method</th><th>Path</th><th>說明</th></tr></thead>
-        <tbody>
-          <tr><td>POST</td><td><code>/api/auth/lookup</code></td><td>以預先雜湊的 userId 查詢家庭歸屬</td></tr>
-          <tr><td>POST</td><td><code>/api/auth/refresh</code></td><td>刷新驗證 token</td></tr>
-        </tbody>
-      </table>
+        <h3>驗證</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Path</th>
+              <th>說明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>POST</td>
+              <td><code>/api/auth/lookup</code></td>
+              <td>以預先雜湊的 userId 查詢家庭歸屬</td>
+            </tr>
+            <tr>
+              <td>POST</td>
+              <td><code>/api/auth/refresh</code></td>
+              <td>刷新驗證 token</td>
+            </tr>
+          </tbody>
+        </table>
 
-      <h3>個人設定</h3>
-      <table>
-        <thead><tr><th>Method</th><th>Path</th><th>說明</th></tr></thead>
-        <tbody>
-          <tr><td>GET</td><td><code>/api/user/:id/books</code></td><td>取得個人書單與分享設定</td></tr>
-          <tr><td>PUT</td><td><code>/api/user/:id/books</code></td><td>更新分享設定</td></tr>
-        </tbody>
-      </table>
+        <h3>個人設定</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Path</th>
+              <th>說明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>GET</td>
+              <td><code>/api/user/:id/books</code></td>
+              <td>取得個人書單與分享設定</td>
+            </tr>
+            <tr>
+              <td>PUT</td>
+              <td><code>/api/user/:id/books</code></td>
+              <td>更新分享設定</td>
+            </tr>
+          </tbody>
+        </table>
 
-      <h3>家庭群組</h3>
-      <table>
-        <thead><tr><th>Method</th><th>Path</th><th>說明</th></tr></thead>
-        <tbody>
-          <tr><td>POST</td><td><code>/api/family</code></td><td>建立新家庭</td></tr>
-          <tr><td>POST</td><td><code>/api/family/:id/join</code></td><td>以同步碼加入家庭</td></tr>
-          <tr><td>DELETE</td><td><code>/api/family/:id/member/:uid</code></td><td>離開家庭</td></tr>
-          <tr><td>GET</td><td><code>/api/family/:id/members</code></td><td>列出家庭成員</td></tr>
-          <tr><td>GET</td><td><code>/api/family/:id/bookshelf</code></td><td>聚合家庭分享書櫃</td></tr>
-        </tbody>
-      </table>
-    </section>
+        <h3>家庭群組</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Path</th>
+              <th>說明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>POST</td>
+              <td><code>/api/family</code></td>
+              <td>建立新家庭</td>
+            </tr>
+            <tr>
+              <td>POST</td>
+              <td><code>/api/family/:id/join</code></td>
+              <td>以同步碼加入家庭</td>
+            </tr>
+            <tr>
+              <td>DELETE</td>
+              <td><code>/api/family/:id/member/:uid</code></td>
+              <td>離開家庭</td>
+            </tr>
+            <tr>
+              <td>GET</td>
+              <td><code>/api/family/:id/members</code></td>
+              <td>列出家庭成員</td>
+            </tr>
+            <tr>
+              <td>GET</td>
+              <td><code>/api/family/:id/bookshelf</code></td>
+              <td>聚合家庭分享書櫃</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
 
-    <!-- Security -->
-    <section>
-      <h2>安全與隱私設計</h2>
-      <ul>
-        <li><strong>安全存取控制</strong> — 所有資料透過 HTTPS 安全傳輸，以認證 Token 嚴格控管誰能存取資料</li>
-        <li><strong>預設不公開</strong> — 所有書籍預設 <code>is_shared: false</code>，永不自動分享</li>
-        <li><strong>明確儲存</strong> — 變更必須經使用者按下「儲存」才會上傳</li>
-        <li><strong>離開即隔離</strong> — 退出家庭立刻從 member list 移除，其他成員即刻無法存取其資料</li>
-        <li><strong>不收集個資</strong> — 無帳號、無 Email、無追蹤</li>
-        <li><strong>可自建</strong> — Worker 程式碼公開，任何人皆可部署自己的後端</li>
-      </ul>
-    </section>
+      <!-- Security -->
+      <section>
+        <h2>安全與隱私設計</h2>
+        <ul>
+          <li>
+            <strong>安全存取控制</strong> — 所有資料透過 HTTPS 安全傳輸，以認證
+            Token 嚴格控管誰能存取資料
+          </li>
+          <li>
+            <strong>預設不公開</strong> — 所有書籍預設
+            <code>is_shared: false</code>，永不自動分享
+          </li>
+          <li>
+            <strong>明確儲存</strong> — 變更必須經使用者按下「儲存」才會上傳
+          </li>
+          <li>
+            <strong>離開即隔離</strong> — 退出家庭立刻從 member list
+            移除，其他成員即刻無法存取其資料
+          </li>
+          <li><strong>不收集個資</strong> — 無帳號、無 Email、無追蹤</li>
+          <li>
+            <strong>可自建</strong> — Worker
+            程式碼公開，任何人皆可部署自己的後端
+          </li>
+        </ul>
+      </section>
 
-    <!-- Contributing -->
-    <section>
-      <h2>參與開發</h2>
-      <p>歡迎提交 Issue 或 Pull Request。專案採 TypeScript 嚴格模式，核心流程（crypto、API）要求測試覆蓋率 ≥ 80%。</p>
+      <!-- Contributing -->
+      <section>
+        <h2>參與開發</h2>
+        <p>
+          歡迎提交 Issue 或 Pull Request。專案採 TypeScript
+          嚴格模式，核心流程（crypto、API）要求測試覆蓋率 ≥ 80%。
+        </p>
 
-      <h3>開發環境</h3>
-      <pre><code>pnpm install
+        <h3>開發環境</h3>
+        <pre><code>pnpm install
 pnpm dev           # 啟動 Extension 開發伺服器
 cd worker &amp;&amp; pnpm dev    # 啟動 Worker 本地開發（Miniflare）
 pnpm test          # 執行單元與元件測試
 pnpm test:e2e      # 執行 E2E 測試（Playwright）</code></pre>
 
+        <p>
+          詳細貢獻指南請參閱
+          <a
+            href="https://github.com/reginna-chao/moo-family-bookshelf/blob/main/CONTRIBUTING.md"
+            >CONTRIBUTING.md</a
+          >， 專案文件位於
+          <a
+            href="https://github.com/reginna-chao/moo-family-bookshelf/tree/main/docs"
+            >docs/</a
+          >。
+        </p>
+      </section>
+    </main>
+
+    <footer class="footer">
       <p>
-        詳細貢獻指南請參閱
-        <a href="https://github.com/reginna-chao/moo-family-bookshelf/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>，
-        專案文件位於
-        <a href="https://github.com/reginna-chao/moo-family-bookshelf/tree/main/docs">docs/</a>。
+        墨家書櫃 MooFamily Bookshelf — 以
+        <a href="https://opensource.org/licenses/MIT">MIT License</a> 開源
       </p>
-    </section>
-
-  </main>
-
-  <footer class="footer">
-    <p>
-      墨家書櫃 MooFamily Bookshelf — 以
-      <a href="https://opensource.org/licenses/MIT">MIT License</a> 開源
-    </p>
-    <p>
-      <a href="index.html">首頁</a> ·
-      <a href="privacy-policy.html">隱私政策</a> ·
-      <a href="https://github.com/reginna-chao/moo-family-bookshelf">GitHub</a>
-    </p>
-    <p>本專案與 Readmoo 讀墨無官方關聯。</p>
-  </footer>
-
-</body>
+      <p>
+        <a href="index.html">首頁</a> ·
+        <a href="privacy-policy.html">隱私政策</a> ·
+        <a href="https://github.com/reginna-chao/moo-family-bookshelf"
+          >GitHub</a
+        >
+      </p>
+      <p>本專案與 Readmoo 讀墨無官方關聯。</p>
+    </footer>
+  </body>
 </html>

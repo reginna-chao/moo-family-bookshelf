@@ -18,9 +18,14 @@ export function isValidFamilyId(id: string): boolean {
 
 export const DISPLAY_NAME_MAX_LENGTH = 20;
 
-// Strip zero-width, control, and directional override characters
-// eslint-disable-next-line no-control-regex
-const UNSAFE_UNICODE_RE = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF]/g;
+// Strip zero-width, control, and directional override characters. Prettier
+// breaks this declaration across two lines, so an `eslint-disable-next-line`
+// would land on the `const` instead of the literal — hence the block form.
+/* eslint-disable no-control-regex */
+const UNSAFE_UNICODE_RE =
+  /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF]/g;
+
+/* eslint-enable no-control-regex */
 
 function cleanDisplayName(raw: string): string {
   return raw.trim().replace(UNSAFE_UNICODE_RE, "");
@@ -35,7 +40,8 @@ export function sanitizeDisplayName(name: unknown): string | null {
 }
 
 export function validateDisplayName(name: unknown): string | null {
-  if (name === undefined || name === null || typeof name !== "string") return null;
+  if (name === undefined || name === null || typeof name !== "string")
+    return null;
   const cleaned = cleanDisplayName(name);
   if (cleaned.length > DISPLAY_NAME_MAX_LENGTH) return null;
   return cleaned;
@@ -43,7 +49,10 @@ export function validateDisplayName(name: unknown): string | null {
 
 const READMOO_NAME_MAX_LENGTH = 50;
 
-export function sanitizeShortString(value: unknown, maxLength = READMOO_NAME_MAX_LENGTH): string | null {
+export function sanitizeShortString(
+  value: unknown,
+  maxLength = READMOO_NAME_MAX_LENGTH,
+): string | null {
   if (typeof value !== "string") return null;
   const cleaned = value.trim().replace(UNSAFE_UNICODE_RE, "");
   if (cleaned.length === 0 || cleaned.length > maxLength) return null;
@@ -61,7 +70,10 @@ export function isValidRequestId(value: string): boolean {
 const VALID_VERIFY_METHODS: VerifyMethod[] = ["pin", "pattern", "code", "none"];
 
 export function isValidVerifyMethod(method: unknown): method is VerifyMethod {
-  return typeof method === "string" && VALID_VERIFY_METHODS.includes(method as VerifyMethod);
+  return (
+    typeof method === "string" &&
+    VALID_VERIFY_METHODS.includes(method as VerifyMethod)
+  );
 }
 
 export function isValidPin(value: string): boolean {

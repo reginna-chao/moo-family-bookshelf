@@ -38,7 +38,7 @@ Five sections:
    verifications, rework), each with evidence.
 3. **改進提案** — by lesson type:
    - **Flow-structural** L#: `target=<git-tracked path> | sketch=<one line> |
-     status=proposed`, naming the file (`.claude/rules/*.md`, `.claude/skills/**`,
+status=proposed`, naming the file (`.claude/rules/*.md`, `.claude/skills/**`,
      `.claude/agents/**`, `AGENTS.md`), or `不提升：<理由>`. Defer anchors / exact
      wording to apply time (`/distill`) — adoption is low, up-front precision is waste.
    - **執行槓桿 (no flow gap)** E#: run-agnostic habit that cuts time / imprecision /

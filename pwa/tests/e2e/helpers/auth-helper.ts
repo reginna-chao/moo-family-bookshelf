@@ -56,7 +56,10 @@ export async function setAuthState(
  */
 export async function clearAuthState(page: Page): Promise<void> {
   // Read userId first so we can build namespaced keys
-  const userId = await page.evaluate((key) => localStorage.getItem(key), USER_ID_KEY);
+  const userId = await page.evaluate(
+    (key) => localStorage.getItem(key),
+    USER_ID_KEY,
+  );
   if (userId) {
     const keysToRemove = [
       USER_ID_KEY,
@@ -220,7 +223,9 @@ export function fakeUserId(seed = "test"): string {
 /**
  * Generate a test auth state with reasonable defaults.
  */
-export function createTestAuth(overrides?: Partial<TestAuthState>): TestAuthState {
+export function createTestAuth(
+  overrides?: Partial<TestAuthState>,
+): TestAuthState {
   return {
     userId: fakeUserId("testuser"),
     familyId: "abcd-1234",

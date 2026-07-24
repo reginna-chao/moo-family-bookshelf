@@ -50,7 +50,8 @@ function stampBookData(): void {
 
           item.setAttribute(ATTR_BOOK_ID, String(book.id));
 
-          const coverHref = attrs?.cover?.medium?.href ?? attrs?.cover?.small?.href;
+          const coverHref =
+            attrs?.cover?.medium?.href ?? attrs?.cover?.small?.href;
           if (coverHref) item.setAttribute(ATTR_COVER, coverHref);
 
           if (attrs?.author) item.setAttribute(ATTR_AUTHOR, attrs.author);
@@ -58,7 +59,9 @@ function stampBookData(): void {
           if (attrs?.main_subject) {
             // Readmoo uses "\\" as separator (e.g. "奇幻\\科幻小說");
             // normalise to single backslash to match their book detail page.
-            const category = attrs.main_subject.replace(/\\\\/g, "\\").slice(0, MAX_CATEGORY_LEN);
+            const category = attrs.main_subject
+              .replace(/\\\\/g, "\\")
+              .slice(0, MAX_CATEGORY_LEN);
             item.setAttribute(ATTR_CATEGORY, category);
           }
 

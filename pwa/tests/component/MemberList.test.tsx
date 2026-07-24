@@ -40,7 +40,7 @@ describe("MemberList", () => {
     render(<MemberList {...defaultProps} />);
 
     expect(screen.getByText("aaaaaaaa")).toBeInTheDocument(); // no displayName, fallback
-    expect(screen.getByText("小明")).toBeInTheDocument();      // has displayName
+    expect(screen.getByText("小明")).toBeInTheDocument(); // has displayName
     expect(screen.getByText("aabbccdd")).toBeInTheDocument(); // no displayName, fallback
   });
 
@@ -94,9 +94,7 @@ describe("MemberList", () => {
     fireEvent.click(removeButtons[0]);
 
     // Confirm dialog appears
-    expect(
-      screen.getByText("確定要移除成員 小明？"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("確定要移除成員 小明？")).toBeInTheDocument();
 
     // Click 確定
     fireEvent.click(screen.getByRole("button", { name: "確定" }));
@@ -184,9 +182,7 @@ describe("MemberList", () => {
     expect(
       screen.queryByRole("button", { name: "確定" }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getAllByRole("button", { name: "移除" }),
-    ).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "移除" })).toHaveLength(2);
   });
 
   describe("readmooName section (read-only on PWA)", () => {
@@ -264,7 +260,9 @@ describe("MemberList", () => {
           ]}
         />,
       );
-      expect(screen.getAllByText(/尚未記錄（首次借出時自動建立）/)).toHaveLength(2);
+      expect(
+        screen.getAllByText(/尚未記錄（首次借出時自動建立）/),
+      ).toHaveLength(2);
     });
 
     it("non-owner does not see the readmooName section", () => {

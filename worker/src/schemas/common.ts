@@ -7,7 +7,11 @@ export const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
 // non-hex userId.
 export const UserIdSchema = Sha256HexSchema;
 export const FamilyIdSchema = z.string().regex(/^[a-z0-9]{4}-[a-z0-9]{4}$/);
-export const RequestIdSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+export const RequestIdSchema = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
 export const ShareTokenSchema = z.string().regex(/^[a-f0-9]{32}$/);
 export const PinSchema = z.string().regex(/^\d{6,12}$/);
 

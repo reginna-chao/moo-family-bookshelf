@@ -13,7 +13,8 @@ export function isPublicRoute(method: string, path: string): boolean {
   // POST /api/auth/lookup — look up family by userId
   if (method === "POST" && /^\/api\/auth\/lookup\/?$/.test(path)) return true;
   // GET /api/user/:id/verify — check verification method (needed before login)
-  if (method === "GET" && /^\/api\/user\/[^/]+\/verify\/?$/.test(path)) return true;
+  if (method === "GET" && /^\/api\/user\/[^/]+\/verify\/?$/.test(path))
+    return true;
   // GET /api/public/:shareToken — public bookshelf query
   if (method === "GET" && /^\/api\/public\/[^/]+\/?$/.test(path)) return true;
   // GET /api/_openapi.json + /api/_docs — dev-only API docs (handler gates with isDevMode)
@@ -27,6 +28,7 @@ export function isSensitivePublicRoute(method: string, path: string): boolean {
   // POST /api/family — create family (squatting prevention)
   if (method === "POST" && /^\/api\/family\/?$/.test(path)) return true;
   // POST /api/family/:id/join — join family
-  if (method === "POST" && /^\/api\/family\/[^/]+\/join\/?$/.test(path)) return true;
+  if (method === "POST" && /^\/api\/family\/[^/]+\/join\/?$/.test(path))
+    return true;
   return false;
 }

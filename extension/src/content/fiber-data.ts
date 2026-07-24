@@ -23,7 +23,8 @@ function wait(ms: number): Promise<void> {
  * was already present — letting callers skip the load wait on repeat calls.
  */
 export function injectFiberBridge(): boolean {
-  if (document.documentElement.hasAttribute("data-moo-fiber-bridge")) return false;
+  if (document.documentElement.hasAttribute("data-moo-fiber-bridge"))
+    return false;
   document.documentElement.setAttribute("data-moo-fiber-bridge", "1");
   const script = document.createElement("script");
   script.src = browser.runtime.getURL("fiber-bridge.js");

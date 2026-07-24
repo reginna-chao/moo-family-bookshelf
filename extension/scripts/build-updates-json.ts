@@ -63,7 +63,10 @@ export function buildUpdatesManifest(version: string): UpdatesManifest {
 }
 
 // Run when invoked directly (tsx scripts/build-updates-json.ts [--out <path>]).
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const root = resolve(__dirname, "..");
 
@@ -80,8 +83,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   const manifest = buildUpdatesManifest(pkg.version);
   writeFileSync(outPath, JSON.stringify(manifest, null, 2) + "\n");
 
-  const updateLink =
-    manifest.addons[GECKO_ID_DIRECT].updates[0].update_link;
+  const updateLink = manifest.addons[GECKO_ID_DIRECT].updates[0].update_link;
   console.log(`${outPath} written (version ${pkg.version})`);
   console.log(`  update_link=${updateLink}`);
 }

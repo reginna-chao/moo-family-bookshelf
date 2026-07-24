@@ -9,6 +9,7 @@
 MooFamily Bookshelf is a Chrome Extension that injects a Dialog into the Readmoo (讀墨) web interface, allowing family account members to browse each other's shared books. All interactions happen via Dialog overlays — no new routes/pages are created.
 
 Key design decisions:
+
 - **Privacy first**: all books default to not-shared; users opt-in per book.
 - **Personal settings persist across families**: sharing preferences are tied to the user, not the family group. Unbinding from a family does not reset settings.
 - **Family is a prerequisite**: the Dialog shows an onboarding screen until the user creates or joins a family.
@@ -65,12 +66,12 @@ moo-family-bookshelf/
 
 ## Tech Stack
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| Frontend | React + TypeScript + Vite | Chrome Extension, Dialog injected via Content Script |
-| Mobile | PWA | Shares the same Workers API; cannot scrape Readmoo |
-| Backend | Cloudflare Workers | Serverless; free tier sufficient; self-hostable |
-| Storage | Cloudflare KV | `user:{id}` for personal settings, `family:{id}` for groups |
+| Layer    | Technology                | Notes                                                       |
+| -------- | ------------------------- | ----------------------------------------------------------- |
+| Frontend | React + TypeScript + Vite | Chrome Extension, Dialog injected via Content Script        |
+| Mobile   | PWA                       | Shares the same Workers API; cannot scrape Readmoo          |
+| Backend  | Cloudflare Workers        | Serverless; free tier sufficient; self-hostable             |
+| Storage  | Cloudflare KV             | `user:{id}` for personal settings, `family:{id}` for groups |
 
 ## Build & Development Commands
 
@@ -94,12 +95,12 @@ moo-family-bookshelf/
 
 ### Framework & Tools
 
-| Tool | Scope | Purpose |
-|------|-------|---------|
-| Vitest | Extension + Worker | Unit & integration tests |
-| React Testing Library | Extension | Component tests for Dialog UI |
-| Playwright | Extension | E2E tests with Chrome Extension loaded |
-| Miniflare | Worker | Local Cloudflare Workers + KV simulation |
+| Tool                  | Scope              | Purpose                                  |
+| --------------------- | ------------------ | ---------------------------------------- |
+| Vitest                | Extension + Worker | Unit & integration tests                 |
+| React Testing Library | Extension          | Component tests for Dialog UI            |
+| Playwright            | Extension          | E2E tests with Chrome Extension loaded   |
+| Miniflare             | Worker             | Local Cloudflare Workers + KV simulation |
 
 ### Test Structure
 
@@ -128,18 +129,19 @@ moo-family-bookshelf/
 ### CI (GitHub Actions)
 
 Every push/PR triggers:
+
 - `extension-check`: lint → typecheck → test → build
 - `worker-check`: lint → typecheck → test → build
 - `e2e` (PR to `main` only): build extension + start Miniflare + Playwright E2E
 
 ### CD (GitHub Actions)
 
-| Trigger | Action |
-|---------|--------|
-| Merge to `main` + `worker/` changed | `wrangler deploy` |
-| Merge to `main` + `site/` changed | Deploy GitHub Pages |
-| Merge to `main` + `pwa/` changed | Deploy PWA to Cloudflare Pages |
-| Git tag `v*` | Build Extension → `.zip` → GitHub Release |
+| Trigger                             | Action                                    |
+| ----------------------------------- | ----------------------------------------- |
+| Merge to `main` + `worker/` changed | `wrangler deploy`                         |
+| Merge to `main` + `site/` changed   | Deploy GitHub Pages                       |
+| Merge to `main` + `pwa/` changed    | Deploy PWA to Cloudflare Pages            |
+| Git tag `v*`                        | Build Extension → `.zip` → GitHub Release |
 
 GitHub Release 內容：release job 會讀取 `docs/release-notes/v<X.Y.Z>.md`（雙語策展內容）放到 Release 正文最上方，並自動把 commit 清單收進 `<details>` 折疊區、補上 Full Changelog。此檔由 `/bump-ver` 產生，必須存在於 tag 指向的 commit；缺檔時 release job 會 fallback 成自動 commit 清單並印 `::warning::`。**先 `/bump-ver` 再打 tag**，順序顛倒會走 fallback。
 
@@ -209,29 +211,33 @@ Family membership is the gate for all features. Without a family, only onboardin
 ## API Endpoints
 
 ### Authentication
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/auth/lookup` | Look up family membership by pre-hashed userId |
+
+| Method | Path                | Description                                            |
+| ------ | ------------------- | ------------------------------------------------------ |
+| `POST` | `/api/auth/lookup`  | Look up family membership by pre-hashed userId         |
 | `POST` | `/api/auth/refresh` | Refresh auth token (uses userId + familyId membership) |
 
 ### Personal Settings
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/user/:id/books` | Get personal book list + sharing settings |
-| `PUT` | `/api/user/:id/books` | Update sharing settings |
+
+| Method | Path                  | Description                               |
+| ------ | --------------------- | ----------------------------------------- |
+| `GET`  | `/api/user/:id/books` | Get personal book list + sharing settings |
+| `PUT`  | `/api/user/:id/books` | Update sharing settings                   |
 
 ### Family Group
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/family` | Create new family group |
-| `POST` | `/api/family/:id/join` | Join family with sync code |
-| `DELETE` | `/api/family/:id/member/:uid` | Leave family |
-| `GET` | `/api/family/:id/members` | List family members |
+
+| Method   | Path                          | Description                |
+| -------- | ----------------------------- | -------------------------- |
+| `POST`   | `/api/family`                 | Create new family group    |
+| `POST`   | `/api/family/:id/join`        | Join family with sync code |
+| `DELETE` | `/api/family/:id/member/:uid` | Leave family               |
+| `GET`    | `/api/family/:id/members`     | List family members        |
 
 ### Family Bookshelf
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/family/:id/bookshelf` | Aggregated shared books from all members |
+
+| Method | Path                        | Description                              |
+| ------ | --------------------------- | ---------------------------------------- |
+| `GET`  | `/api/family/:id/bookshelf` | Aggregated shared books from all members |
 
 ## Security & Privacy Rules
 

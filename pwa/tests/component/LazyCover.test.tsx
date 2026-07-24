@@ -10,9 +10,7 @@ function fallbackDiv() {
 describe("LazyCover", () => {
   describe("empty src", () => {
     it("renders fallback directly when src is empty string", () => {
-      render(
-        <LazyCover src="" alt="book" fallback={fallbackDiv()} />,
-      );
+      render(<LazyCover src="" alt="book" fallback={fallbackDiv()} />);
 
       expect(screen.getByTestId("fallback")).toBeInTheDocument();
       expect(screen.queryByRole("img")).not.toBeInTheDocument();

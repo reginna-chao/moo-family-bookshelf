@@ -73,7 +73,8 @@ export async function paginateLibrary(
   // No pagination possible when the page isn't scrollable.
   // Also covers jsdom test envs where layout dimensions are 0.
   if (
-    document.documentElement.scrollHeight <= document.documentElement.clientHeight
+    document.documentElement.scrollHeight <=
+    document.documentElement.clientHeight
   ) {
     return;
   }

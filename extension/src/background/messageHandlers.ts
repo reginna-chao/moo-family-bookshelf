@@ -89,7 +89,9 @@ async function handleSetFamilyId(
   try {
     await browser.storage.sync.set({ [FAMILY_ID_KEY]: message.familyId });
   } catch {
-    console.warn("[Background] storage.sync.set failed for familyId; local write kept");
+    console.warn(
+      "[Background] storage.sync.set failed for familyId; local write kept",
+    );
   }
   return { ok: true };
 }
@@ -106,7 +108,9 @@ async function handleClearFamilyId(): Promise<unknown> {
   try {
     await browser.storage.sync.remove(SYNCED_KEYS as unknown as string[]);
   } catch {
-    console.warn("[Background] storage.sync.remove failed for familyId; local clear kept");
+    console.warn(
+      "[Background] storage.sync.remove failed for familyId; local clear kept",
+    );
   }
   return { ok: true };
 }
@@ -131,7 +135,10 @@ async function handleGetFloatingIconSize(): Promise<unknown> {
   const result = await browser.storage.local.get([FLOATING_ICON_SIZE_KEY]);
   const stored = result[FLOATING_ICON_SIZE_KEY];
   const size =
-    stored === "small" || stored === "medium" || stored === "large" || stored === "icon"
+    stored === "small" ||
+    stored === "medium" ||
+    stored === "large" ||
+    stored === "icon"
       ? stored
       : "medium";
   return { size };
@@ -141,8 +148,16 @@ async function handleSetFloatingIconSize(
   message: Extract<BackgroundMessage, { type: "SET_FLOATING_ICON_SIZE" }>,
 ): Promise<unknown> {
   const value = message.size;
-  if (value !== "small" && value !== "medium" && value !== "large" && value !== "icon") {
-    return { ok: false, error: "size must be 'small', 'medium', 'large', or 'icon'" };
+  if (
+    value !== "small" &&
+    value !== "medium" &&
+    value !== "large" &&
+    value !== "icon"
+  ) {
+    return {
+      ok: false,
+      error: "size must be 'small', 'medium', 'large', or 'icon'",
+    };
   }
   await browser.storage.local.set({ [FLOATING_ICON_SIZE_KEY]: value });
   return { ok: true };
@@ -152,7 +167,10 @@ async function handleGetAutoSyncInterval(): Promise<unknown> {
   const result = await browser.storage.local.get([AUTO_SYNC_INTERVAL_KEY]);
   const stored = result[AUTO_SYNC_INTERVAL_KEY];
   const interval =
-    stored === "daily" || stored === "weekly" || stored === "monthly" || stored === "never"
+    stored === "daily" ||
+    stored === "weekly" ||
+    stored === "monthly" ||
+    stored === "never"
       ? stored
       : "daily";
   return { interval };
@@ -162,8 +180,16 @@ async function handleSetAutoSyncInterval(
   message: Extract<BackgroundMessage, { type: "SET_AUTO_SYNC_INTERVAL" }>,
 ): Promise<unknown> {
   const value = message.interval;
-  if (value !== "daily" && value !== "weekly" && value !== "monthly" && value !== "never") {
-    return { ok: false, error: "interval must be 'daily', 'weekly', 'monthly', or 'never'" };
+  if (
+    value !== "daily" &&
+    value !== "weekly" &&
+    value !== "monthly" &&
+    value !== "never"
+  ) {
+    return {
+      ok: false,
+      error: "interval must be 'daily', 'weekly', 'monthly', or 'never'",
+    };
   }
   await browser.storage.local.set({ [AUTO_SYNC_INTERVAL_KEY]: value });
   return { ok: true };
@@ -176,7 +202,8 @@ async function handleGetBookSort(
   if (shelf !== "family" && shelf !== "personal") {
     return { sort: "default" };
   }
-  const key = shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
+  const key =
+    shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
   const result = await browser.storage.local.get([key]);
   // Normalize legacy stored values (`title`/`author`) to their canonical
   // `-asc` form so persisted preferences survive the schema change.
@@ -200,7 +227,8 @@ async function handleSetBookSort(
   if (normalized === "default" && value !== "default") {
     return { ok: false, error: "invalid sort mode" };
   }
-  const key = shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
+  const key =
+    shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
   await browser.storage.local.set({ [key]: normalized });
   return { ok: true };
 }

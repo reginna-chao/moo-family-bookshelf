@@ -24,9 +24,7 @@ export interface FamilyShelfPageProps {
   userId: string;
 }
 
-export function FamilyShelfPage({
-  userId,
-}: FamilyShelfPageProps) {
+export function FamilyShelfPage({ userId }: FamilyShelfPageProps) {
   const {
     bookshelfMembers: members,
     bookshelfState: state,
@@ -114,17 +112,22 @@ export function FamilyShelfPage({
     [memberFilteredBooks, categoryFilter],
   );
 
-  const {
-    searchTerm,
-    setSearchTerm,
-    filteredItems,
-    isFiltering,
-  } = useSearch(categoryFilteredBooks);
+  const { searchTerm, setSearchTerm, filteredItems, isFiltering } = useSearch(
+    categoryFilteredBooks,
+  );
 
-  const sortedBooks = useMemo(() => sortBooks(filteredItems, sort), [filteredItems, sort]);
+  const sortedBooks = useMemo(
+    () => sortBooks(filteredItems, sort),
+    [filteredItems, sort],
+  );
 
   const narrowingActive = searchTerm !== "" || categoryFilter !== "";
-  const { visibleItems: visibleBooks, hasMore, loadMore, reset: resetLoadMore } = useLoadMore({
+  const {
+    visibleItems: visibleBooks,
+    hasMore,
+    loadMore,
+    reset: resetLoadMore,
+  } = useLoadMore({
     items: sortedBooks,
     narrowingActive,
   });

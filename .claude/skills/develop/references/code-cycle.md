@@ -36,6 +36,7 @@ Guarantee the change lands on its own clean branch off `origin/main`, so another
 ## Phase 2: API Contract (full-stack features only)
 
 If the feature spans frontend and backend:
+
 1. Define the contract: endpoints, HTTP methods, request/response shapes, error codes.
 2. Document it in the work-item breakdown — both scopes code against it in parallel.
 
@@ -53,12 +54,14 @@ For each scope in play (frontend, backend — parallelize when file-disjoint):
    then ask the user to confirm it's correct OR point out fixes. **Rationale:** writing tests against unconfirmed behavior forces repeated rewrites. End with the Stop Block.
    - Fixes needed → dispatch `coder` to fix, re-run typecheck/lint, re-present this gate. **Batch feedback:** when one gate round returns several small UI remarks, fold them into ONE coder dispatch (file-disjoint) and one tester pass afterward — never one full round-trip per remark.
    - Confirmed correct → proceed to step 4.
+
 4. Dispatch **`tester`** with `scope`, `target`, `change_summary` (+ the actual diff).
 5. Run full verify: frontend `pnpm typecheck && pnpm lint && pnpm test`; backend `cd worker && pnpm typecheck && pnpm lint && pnpm test`.
 
 **Gate** — all must pass before Phase 4: coder done + user-confirmed; tester done; typecheck/lint/test green; E2E impact check (below) passes.
 
 **E2E Impact Check** (after unit/component tests pass, frontend scope):
+
 1. Identify whether any changed production files are imported (directly/transitively) by E2E tests (`extension/tests/e2e/`, `pwa/tests/e2e/`).
 2. Run E2E typecheck: `npx tsc --noEmit --project tests/e2e/tsconfig.json` in the affected package.
 3. On failure, dispatch `coder` to fix the breakage (imports, helpers). This catches compile-time breaks early; it does NOT require running the full E2E suite locally.
@@ -73,25 +76,25 @@ Findings are **always tables**, never free-form bullets (write "None." in a sing
 
 **CRITICAL** (pass through reviewer verbatim, no TL column — auto-fixed in 4.2):
 
-| # | Location | Issue / Impact | Suggested Fix |
-| --- | --- | --- | --- |
-| C1 | `file:line` | <issue><br>**Impact**: <impact> | ... |
+| #   | Location    | Issue / Impact                  | Suggested Fix |
+| --- | ----------- | ------------------------------- | ------------- |
+| C1  | `file:line` | <issue><br>**Impact**: <impact> | ...           |
 
 **SUGGESTION** (pass through verbatim; add the rightmost **TL 建議 / 原因** column — colored circle + Chinese label + one-line reason):
 
-| # | Location & Issue | Suggested Fix | TL 建議 / 原因 |
-| --- | --- | --- | --- |
-| S1 | `file:42` — <issue> | <fix> | 🟢 **建議修**<br><reason> |
-| S2 | `file:88` — <issue> | <fix> | 🟡 **建議修小細節**<br><reason> |
-| S3 | `file:120` — <issue> | <fix> | 🔴 **建議跳過**<br><reason> |
+| #   | Location & Issue     | Suggested Fix | TL 建議 / 原因                  |
+| --- | -------------------- | ------------- | ------------------------------- |
+| S1  | `file:42` — <issue>  | <fix>         | 🟢 **建議修**<br><reason>       |
+| S2  | `file:88` — <issue>  | <fix>         | 🟡 **建議修小細節**<br><reason> |
+| S3  | `file:120` — <issue> | <fix>         | 🔴 **建議跳過**<br><reason>     |
 
 **TL Recommendation legend** (use exactly these three — no variants):
 
-| Label | Use when |
-| --- | --- |
-| 🟢 **建議修** | Low risk, clear benefit — bugs, type/auth/KV-schema inconsistency, security gaps, broken invariants |
-| 🟡 **建議修小細節** | Optional quality lift — test cleanliness, naming, comments, minor consistency |
-| 🔴 **建議跳過** | YAGNI — boilerplate, premature abstraction, style preference, out-of-scope |
+| Label               | Use when                                                                                            |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| 🟢 **建議修**       | Low risk, clear benefit — bugs, type/auth/KV-schema inconsistency, security gaps, broken invariants |
+| 🟡 **建議修小細節** | Optional quality lift — test cleanliness, naming, comments, minor consistency                       |
+| 🔴 **建議跳過**     | YAGNI — boilerplate, premature abstraction, style preference, out-of-scope                          |
 
 The TL Recommendation is **your professional judgment** — the "原因" line lets the user confidently override. Be honest: many SUGGESTIONs are safe to skip. While classifying, flag any **special technical decision** (a choice between equally-reasonable options, e.g. strict vs lenient validation) for the 4.3 Decision Prompt.
 
@@ -109,11 +112,13 @@ The TL Recommendation is **your professional judgment** — the "原因" line le
    |---|---|---|---|
    | C1 | <issue> @ `file:42` | coder (frontend) | ✅ typecheck/lint/test |
    ```
+
 6. Return to 4.1 with the new results.
 
 ### 4.3 Handle SUGGESTION (requires user approval)
 
 When no CRITICAL remain and SUGGESTIONs exist:
+
 1. Present the classified table + a **TL 建議 summary + Decision Prompt**:
    ```
    ## TL 建議
@@ -137,6 +142,7 @@ Exit when **no CRITICAL remain AND no user-requested SUGGESTION fixes remain**. 
 ## Phase 5: Cross-Scope Validation (full-stack only)
 
 Only when both frontend and backend changed:
+
 1. Verify API contracts match (request/response shapes, error codes) between FE and BE.
 2. `pnpm test` (extension) → green; `cd worker && pnpm test` → green.
 3. `pnpm typecheck` both sides → clean.
@@ -146,6 +152,7 @@ Only when both frontend and backend changed:
 ## Phase 6: Security Scan
 
 Run **once** after the whole feature is complete (all sub-tasks done, cross-scope validation passed) and **before the commit gate**, not per sub-task.
+
 1. Pick scope(s) from all changed files since the feature began:
    - `extension/src/crypto/` → `crypto`; `worker/src/` → `api`; `extension/src/` → `code` + `extension`; `pwa/src/` → `code`; `.env*`/`wrangler.toml`/CI/CD → `secrets`; deps changed → `deps`; multiple areas → `full`.
    - **Business-logic / invariant surfaces → also add `invariants`** (Dimension 8): any change under `worker/src/routes/` (family / bookshelf / member / user / auth) or `worker/src/middleware/auth`, or any FE change to the sharing / save-before-sync flow (`PersonalShelf`, `api/client` sharing calls). These carry the security-UX invariants (Inv-1..5), which the plain `api` / `code` scopes do **not** cover.

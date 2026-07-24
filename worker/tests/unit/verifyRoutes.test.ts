@@ -127,7 +127,9 @@ describe("PUT /api/user/:id/verify", () => {
     expect(json.data.method).toBe("pin");
 
     // Verify KV record has hash and salt
-    const record = JSON.parse((await kv.get(`verify:${VALID_USER_ID}`)) as string) as VerifyRecord;
+    const record = JSON.parse(
+      (await kv.get(`verify:${VALID_USER_ID}`)) as string,
+    ) as VerifyRecord;
     expect(record.hash).toMatch(/^[a-f0-9]{64}$/);
     expect(record.salt).toMatch(/^[a-f0-9]{32}$/);
   });
@@ -315,7 +317,9 @@ describe("PUT /api/user/:id/verify", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    const record = JSON.parse((await kv.get(`verify:${VALID_USER_ID}`)) as string) as VerifyRecord;
+    const record = JSON.parse(
+      (await kv.get(`verify:${VALID_USER_ID}`)) as string,
+    ) as VerifyRecord;
     expect(record.failCount).toBe(0);
     expect(record.lockedUntil).toBeNull();
   });
@@ -395,7 +399,9 @@ describe("POST /api/user/:id/verify/otp", () => {
     });
 
     const json = (await res.json()) as Json;
-    const otpRecord = JSON.parse((await kv.get(`otp:${VALID_USER_ID}`)) as string);
+    const otpRecord = JSON.parse(
+      (await kv.get(`otp:${VALID_USER_ID}`)) as string,
+    );
     expect(otpRecord.code).toBe(json.data.code);
   });
 });
@@ -404,10 +410,14 @@ describe("POST /api/user/:id/verify/prompted", () => {
   it("should mark user as prompted with valid auth", async () => {
     const token = await seedAuthToken(VALID_USER_ID);
 
-    const res = await request("POST", `/api/user/${VALID_USER_ID}/verify/prompted`, {
-      body: JSON.stringify({}),
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await request(
+      "POST",
+      `/api/user/${VALID_USER_ID}/verify/prompted`,
+      {
+        body: JSON.stringify({}),
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
 
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
@@ -428,10 +438,14 @@ describe("POST /api/user/:id/verify/prompted", () => {
     };
     await kv.put(`verify:${VALID_USER_ID}`, JSON.stringify(record));
 
-    const res = await request("POST", `/api/user/${VALID_USER_ID}/verify/prompted`, {
-      body: JSON.stringify({}),
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await request(
+      "POST",
+      `/api/user/${VALID_USER_ID}/verify/prompted`,
+      {
+        body: JSON.stringify({}),
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
 
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
@@ -440,9 +454,13 @@ describe("POST /api/user/:id/verify/prompted", () => {
   });
 
   it("should return 401 without auth (now protected)", async () => {
-    const res = await request("POST", `/api/user/${VALID_USER_ID}/verify/prompted`, {
-      body: JSON.stringify({}),
-    });
+    const res = await request(
+      "POST",
+      `/api/user/${VALID_USER_ID}/verify/prompted`,
+      {
+        body: JSON.stringify({}),
+      },
+    );
     expect(res.status).toBe(401);
   });
 });
@@ -528,7 +546,10 @@ describe("Verification in join flow", () => {
     });
 
     const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "0,1,2,5,8" }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        verifySecret: "0,1,2,5,8",
+      }),
     });
 
     expect(res.status).toBe(200);
@@ -546,15 +567,22 @@ describe("Verification in join flow", () => {
     });
 
     // Generate OTP
-    const otpRes = await request("POST", `/api/user/${VALID_USER_ID}/verify/otp`, {
-      body: JSON.stringify({}),
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
+    const otpRes = await request(
+      "POST",
+      `/api/user/${VALID_USER_ID}/verify/otp`,
+      {
+        body: JSON.stringify({}),
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      },
+    );
     const otpJson = (await otpRes.json()) as Json;
 
     // Join with OTP
     const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: otpJson.data.code }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        verifySecret: otpJson.data.code,
+      }),
     });
 
     expect(res.status).toBe(200);
@@ -570,15 +598,22 @@ describe("Verification in join flow", () => {
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
 
-    const otpRes = await request("POST", `/api/user/${VALID_USER_ID}/verify/otp`, {
-      body: JSON.stringify({}),
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
+    const otpRes = await request(
+      "POST",
+      `/api/user/${VALID_USER_ID}/verify/otp`,
+      {
+        body: JSON.stringify({}),
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      },
+    );
     const otpJson = (await otpRes.json()) as Json;
 
     // First join succeeds
     await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: otpJson.data.code }),
+      body: JSON.stringify({
+        userId: VALID_USER_ID,
+        verifySecret: otpJson.data.code,
+      }),
     });
 
     // OTP should be deleted from KV
@@ -634,7 +669,9 @@ describe("Verification in join flow", () => {
     });
 
     // Verify fail count was reset
-    const record = JSON.parse((await kv.get(`verify:${VALID_USER_ID}`)) as string) as VerifyRecord;
+    const record = JSON.parse(
+      (await kv.get(`verify:${VALID_USER_ID}`)) as string,
+    ) as VerifyRecord;
     expect(record.failCount).toBe(0);
   });
 
@@ -648,7 +685,9 @@ describe("Verification in join flow", () => {
     });
 
     // Set lockout in the past
-    const record = JSON.parse((await kv.get(`verify:${VALID_USER_ID}`)) as string) as VerifyRecord;
+    const record = JSON.parse(
+      (await kv.get(`verify:${VALID_USER_ID}`)) as string,
+    ) as VerifyRecord;
     record.lockedUntil = Date.now() - 1000; // expired
     await kv.put(`verify:${VALID_USER_ID}`, JSON.stringify(record));
 

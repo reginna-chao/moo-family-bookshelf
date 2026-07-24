@@ -17,13 +17,21 @@ describe("isValidFamilyPrefRef", () => {
     // bookId may itself contain a colon — the regex only anchors the owner part.
     expect(isValidFamilyPrefRef(ref("book:with:colons"))).toBe(true);
     // full hex alphabet 0-9a-f
-    expect(isValidFamilyPrefRef(ref("x", "0123456789abcdef".repeat(4)))).toBe(true);
+    expect(isValidFamilyPrefRef(ref("x", "0123456789abcdef".repeat(4)))).toBe(
+      true,
+    );
   });
 
   it.each<{ label: string; value: string }>([
     { label: "uppercase hex ownerId", value: ref("b1", "A".repeat(64)) },
-    { label: "ownerId one char too short (63)", value: ref("b1", "a".repeat(63)) },
-    { label: "ownerId one char too long (65)", value: ref("b1", "a".repeat(65)) },
+    {
+      label: "ownerId one char too short (63)",
+      value: ref("b1", "a".repeat(63)),
+    },
+    {
+      label: "ownerId one char too long (65)",
+      value: ref("b1", "a".repeat(65)),
+    },
     { label: "missing ':' separator", value: `${OWNER}b1` },
     { label: "empty bookId after ':'", value: `${OWNER}:` },
     { label: "non-hex char in ownerId (g)", value: ref("b1", "g".repeat(64)) },
@@ -153,20 +161,64 @@ describe("parseFamilyPrefs", () => {
 
   it.each<{ label: string; body: Record<string, unknown>; max: number }>([
     { label: "neither hidden nor favorites present", body: {}, max: 100 },
-    { label: "hidden exceeds max after dedupe", body: { hidden: [ref("b1"), ref("b2"), ref("b3")] }, max: 2 },
-    { label: "hidden is an object", body: { hidden: { foo: "bar" } }, max: 100 },
+    {
+      label: "hidden exceeds max after dedupe",
+      body: { hidden: [ref("b1"), ref("b2"), ref("b3")] },
+      max: 2,
+    },
+    {
+      label: "hidden is an object",
+      body: { hidden: { foo: "bar" } },
+      max: 100,
+    },
     { label: "hidden is a string", body: { hidden: "not-array" }, max: 100 },
     { label: "hidden is a number", body: { hidden: 42 }, max: 100 },
-    { label: "a hidden entry is a number (non-string)", body: { hidden: [123] }, max: 100 },
-    { label: "a hidden entry fails isValidFamilyPrefRef (bad ref)", body: { hidden: ["not-a-valid-ref"] }, max: 100 },
-    { label: "a hidden entry has empty bookId", body: { hidden: [`${OWNER}:`] }, max: 100 },
-    { label: "favorites is a non-array (object)", body: { favorites: { foo: "bar" } }, max: 100 },
-    { label: "favorites is a string", body: { favorites: "not-array" }, max: 100 },
+    {
+      label: "a hidden entry is a number (non-string)",
+      body: { hidden: [123] },
+      max: 100,
+    },
+    {
+      label: "a hidden entry fails isValidFamilyPrefRef (bad ref)",
+      body: { hidden: ["not-a-valid-ref"] },
+      max: 100,
+    },
+    {
+      label: "a hidden entry has empty bookId",
+      body: { hidden: [`${OWNER}:`] },
+      max: 100,
+    },
+    {
+      label: "favorites is a non-array (object)",
+      body: { favorites: { foo: "bar" } },
+      max: 100,
+    },
+    {
+      label: "favorites is a string",
+      body: { favorites: "not-array" },
+      max: 100,
+    },
     { label: "favorites is a number", body: { favorites: 42 }, max: 100 },
-    { label: "a favorites entry is a number (non-string)", body: { favorites: [123] }, max: 100 },
-    { label: "a favorites entry fails isValidFamilyPrefRef (bad ref)", body: { favorites: ["not-a-valid-ref"] }, max: 100 },
-    { label: "favorites exceeds max after dedupe", body: { favorites: [ref("b1"), ref("b2"), ref("b3")] }, max: 2 },
-    { label: "both present but favorites invalid", body: { hidden: [ref("b1")], favorites: [123] }, max: 100 },
+    {
+      label: "a favorites entry is a number (non-string)",
+      body: { favorites: [123] },
+      max: 100,
+    },
+    {
+      label: "a favorites entry fails isValidFamilyPrefRef (bad ref)",
+      body: { favorites: ["not-a-valid-ref"] },
+      max: 100,
+    },
+    {
+      label: "favorites exceeds max after dedupe",
+      body: { favorites: [ref("b1"), ref("b2"), ref("b3")] },
+      max: 2,
+    },
+    {
+      label: "both present but favorites invalid",
+      body: { hidden: [ref("b1")], favorites: [123] },
+      max: 100,
+    },
   ])("returns INVALID_PAYLOAD when $label", ({ body, max }) => {
     const result = parseFamilyPrefs(body, max);
     expect(result.ok).toBe(false);
@@ -180,7 +232,9 @@ describe("parseFamilyPrefs", () => {
     const result = parseFamilyPrefs({}, 100);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.message).toBe("at least one of hidden/favorites array is required");
+      expect(result.message).toBe(
+        "at least one of hidden/favorites array is required",
+      );
     }
   });
 
@@ -192,12 +246,17 @@ describe("parseFamilyPrefs", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.message).toBe("favorites array exceeds maximum of 2 entries");
+      expect(result.message).toBe(
+        "favorites array exceeds maximum of 2 entries",
+      );
     }
   });
 
   it("reports the max and kind in the over-limit error message (hidden)", () => {
-    const result = parseFamilyPrefs({ hidden: [ref("b1"), ref("b2"), ref("b3")] }, 2);
+    const result = parseFamilyPrefs(
+      { hidden: [ref("b1"), ref("b2"), ref("b3")] },
+      2,
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.message).toBe("hidden array exceeds maximum of 2 entries");
@@ -205,10 +264,15 @@ describe("parseFamilyPrefs", () => {
   });
 
   it("reports the max and kind in the over-limit error message (favorites)", () => {
-    const result = parseFamilyPrefs({ favorites: [ref("b1"), ref("b2"), ref("b3")] }, 2);
+    const result = parseFamilyPrefs(
+      { favorites: [ref("b1"), ref("b2"), ref("b3")] },
+      2,
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.message).toBe("favorites array exceeds maximum of 2 entries");
+      expect(result.message).toBe(
+        "favorites array exceeds maximum of 2 entries",
+      );
     }
   });
 
@@ -222,14 +286,17 @@ describe("parseFamilyPrefs", () => {
     { label: "a boolean", body: true },
     { label: "a string", body: "x" },
     { label: "an array", body: [ref("b1")] },
-  ])("returns INVALID_PAYLOAD 'must be a JSON object' for $label", ({ body }) => {
-    // The production param is `unknown`; cast satisfies the signature while
-    // deliberately passing a non-object value.
-    const result = parseFamilyPrefs(body as never, 100);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe("INVALID_PAYLOAD");
-      expect(result.message).toBe("request body must be a JSON object");
-    }
-  });
+  ])(
+    "returns INVALID_PAYLOAD 'must be a JSON object' for $label",
+    ({ body }) => {
+      // The production param is `unknown`; cast satisfies the signature while
+      // deliberately passing a non-object value.
+      const result = parseFamilyPrefs(body as never, 100);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe("INVALID_PAYLOAD");
+        expect(result.message).toBe("request body must be a JSON object");
+      }
+    },
+  );
 });

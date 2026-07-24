@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { BoolFlag, kvKeys, MAX_FAMILY_PREF_ENTRIES, type UserBooksRecord } from "../../src/kv/schema";
+import {
+  BoolFlag,
+  kvKeys,
+  MAX_FAMILY_PREF_ENTRIES,
+  type UserBooksRecord,
+} from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
 import { parseBooks, MAX_PUT_BOOKS } from "../../src/routes/user";
 import { USER1 } from "../helpers/ids";
@@ -11,8 +16,15 @@ type Json = any;
 
 let kv: KVNamespace;
 
-function request(method: string, path: string, body?: unknown, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
@@ -100,10 +112,17 @@ describe("parseBooks", () => {
   });
 
   it("only emits isArchived when the field is present", () => {
-    const withArchive = parseBooks([{ bookId: "b1", isArchived: BoolFlag.TRUE }], MAX_PUT_BOOKS);
+    const withArchive = parseBooks(
+      [{ bookId: "b1", isArchived: BoolFlag.TRUE }],
+      MAX_PUT_BOOKS,
+    );
     const withoutArchive = parseBooks([{ bookId: "b2" }], MAX_PUT_BOOKS);
-    expect(withArchive.ok && withArchive.books[0].isArchived).toBe(BoolFlag.TRUE);
-    expect(withoutArchive.ok && "isArchived" in withoutArchive.books[0]).toBe(false);
+    expect(withArchive.ok && withArchive.books[0].isArchived).toBe(
+      BoolFlag.TRUE,
+    );
+    expect(withoutArchive.ok && "isArchived" in withoutArchive.books[0]).toBe(
+      false,
+    );
   });
 
   it("rejects a books array longer than the cap", () => {
@@ -156,10 +175,25 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
     await request(
       "PUT",
       `/api/user/${USER1}/books`,
-      { books: [{ bookId: "b1", title: "T", isShared: BoolFlag.FALSE, secret: "leak", isShared2: 1 }] },
+      {
+        books: [
+          {
+            bookId: "b1",
+            title: "T",
+            isShared: BoolFlag.FALSE,
+            secret: "leak",
+            isShared2: 1,
+          },
+        ],
+      },
       token,
     );
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, token);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      token,
+    );
     const json = (await getRes.json()) as Json;
     const book = json.data.books[0];
     expect("secret" in book).toBe(false);
@@ -185,7 +219,10 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
     await request(
       "PUT",
       `/api/user/${USER1}/books`,
-      { userId: "0".repeat(64), books: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      {
+        userId: "0".repeat(64),
+        books: [{ bookId: "b1", isShared: BoolFlag.TRUE }],
+      },
       token,
     );
     const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
@@ -205,14 +242,25 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
       },
       token,
     );
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, token);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      token,
+    );
     const json = (await getRes.json()) as Json;
-    expect(json.data.familyShelfPrefs).toEqual({ hidden: [ref("b1")], favorites: [ref("b2")] });
+    expect(json.data.familyShelfPrefs).toEqual({
+      hidden: [ref("b1")],
+      favorites: [ref("b2")],
+    });
   });
 
   it("returns 400 INVALID_PAYLOAD when familyShelfPrefs exceeds the cap (same as /family-prefs)", async () => {
     const token = await auth();
-    const tooMany = Array.from({ length: MAX_FAMILY_PREF_ENTRIES + 1 }, (_v, i) => ref(`b${i}`));
+    const tooMany = Array.from(
+      { length: MAX_FAMILY_PREF_ENTRIES + 1 },
+      (_v, i) => ref(`b${i}`),
+    );
     const res = await request(
       "PUT",
       `/api/user/${USER1}/books`,
@@ -243,7 +291,10 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
     await request(
       "PUT",
       `/api/user/${USER1}/books`,
-      { books: [{ bookId: "b1", isShared: BoolFlag.TRUE }], familyShelfPrefs: { hidden: [ref("b1")] } },
+      {
+        books: [{ bookId: "b1", isShared: BoolFlag.TRUE }],
+        familyShelfPrefs: { hidden: [ref("b1")] },
+      },
       token,
     );
     // Second save WITHOUT prefs — existing value must survive
@@ -253,7 +304,12 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
       { books: [{ bookId: "b1", isShared: BoolFlag.FALSE }] },
       token,
     );
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, token);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      token,
+    );
     const json = (await getRes.json()) as Json;
     expect(json.data.familyShelfPrefs.hidden).toEqual([ref("b1")]);
   });
@@ -265,8 +321,16 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
   // This test documents that over-cap payloads are rejected end-to-end.
   it("rejects an over-MAX_PUT_BOOKS payload end-to-end (body-size guard fires first)", async () => {
     const token = await auth();
-    const books = Array.from({ length: MAX_PUT_BOOKS + 1 }, (_v, i) => ({ bookId: `b${i}`, isShared: BoolFlag.FALSE }));
-    const res = await request("PUT", `/api/user/${USER1}/books`, { books }, token);
+    const books = Array.from({ length: MAX_PUT_BOOKS + 1 }, (_v, i) => ({
+      bookId: `b${i}`,
+      isShared: BoolFlag.FALSE,
+    }));
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      { books },
+      token,
+    );
     // Either the size guard (413) or the count cap (400) must reject it — never a 200.
     expect([400, 413]).toContain(res.status);
     expect(res.status).not.toBe(200);

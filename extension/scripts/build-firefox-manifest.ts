@@ -144,37 +144,41 @@ export function buildFirefoxManifest(
     readFileSync(resolve(root, "dist", "manifest.json"), "utf-8"),
   ) as Manifest;
 
-  const firefoxManifest = toFirefoxManifest(chromeManifest, pkg.version, target);
+  const firefoxManifest = toFirefoxManifest(
+    chromeManifest,
+    pkg.version,
+    target,
+  );
 
   const outPath = resolve(outDir, "manifest.json");
   writeFileSync(outPath, JSON.stringify(firefoxManifest, null, 2) + "\n");
 
   const gecko = firefoxManifest.browser_specific_settings?.gecko as
-    | GeckoSettings
-    | undefined;
-  console.log(
-    `${outPath} written (version ${pkg.version}, target ${target})`,
-  );
+    GeckoSettings | undefined;
+  console.log(`${outPath} written (version ${pkg.version}, target ${target})`);
   console.log(
     `  gecko.id=${gecko?.id} strict_min_version=${STRICT_MIN_VERSION}`,
   );
-  console.log(
-    `  update_url=${gecko?.update_url ?? "(none)"}`,
-  );
+  console.log(`  update_url=${gecko?.update_url ?? "(none)"}`);
   console.log(
     `  background.scripts=["${firefoxManifest.background?.scripts?.[0]}"] (event page)`,
   );
 }
 
 // Run when invoked directly (tsx scripts/build-firefox-manifest.ts [--target amo|direct]).
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const root = resolve(__dirname, "..");
   const targetArgIndex = process.argv.indexOf("--target");
   const targetArg =
     targetArgIndex !== -1 ? process.argv[targetArgIndex + 1] : "amo";
   if (targetArg !== "amo" && targetArg !== "direct") {
-    console.error(`FAIL: invalid --target "${targetArg}" (expected amo|direct)`);
+    console.error(
+      `FAIL: invalid --target "${targetArg}" (expected amo|direct)`,
+    );
     process.exit(1);
   }
   const target: FirefoxTarget = targetArg;

@@ -57,12 +57,12 @@
 
 ### 技術選型
 
-| 層級 | 技術 | 說明 |
-|------|------|------|
+| 層級         | 技術                      | 說明                                     |
+| ------------ | ------------------------- | ---------------------------------------- |
 | **Frontend** | React + TypeScript + Vite | Chrome Extension，Dialog UI 注入讀墨頁面 |
-| **Backend** | Cloudflare Workers | Serverless API，免費額度每日 10 萬次 |
-| **Storage** | Cloudflare KV | Key-Value 儲存，低延遲 |
-| **雜湊** | Web Crypto API (SHA-256) | 使用者識別碼雜湊 |
+| **Backend**  | Cloudflare Workers        | Serverless API，免費額度每日 10 萬次     |
+| **Storage**  | Cloudflare KV             | Key-Value 儲存，低延遲                   |
+| **雜湊**     | Web Crypto API (SHA-256)  | 使用者識別碼雜湊                         |
 
 ### 為何選擇 Cloudflare Workers + KV？
 
@@ -119,10 +119,10 @@
 
 提供兩種同步方式，使用者不需額外操作：
 
-| 方式 | 運作原理 | 適用場景 |
-|------|---------|---------|
-| `chrome.storage.sync` | Chrome 自動同步到同 Google 帳號的所有裝置 | 主要方式，零操作恢復 |
-| 同步碼（Sync Code） | 手動輸入同步碼恢復 | 備用方式，不同 Google 帳號時使用 |
+| 方式                  | 運作原理                                  | 適用場景                         |
+| --------------------- | ----------------------------------------- | -------------------------------- |
+| `chrome.storage.sync` | Chrome 自動同步到同 Google 帳號的所有裝置 | 主要方式，零操作恢復             |
+| 同步碼（Sync Code）   | 手動輸入同步碼恢復                        | 備用方式，不同 Google 帳號時使用 |
 
 - `familyId` 同時存入 `chrome.storage.sync` 和 `chrome.storage.local`
 - 新裝置安裝 Extension 後，自動從 sync storage 讀取，無感恢復
@@ -207,7 +207,7 @@
       "is_shared": false
     }
   ],
-  "last_updated": "2026-03-25T00:00:00Z",
+  "last_updated": "2026-03-25T00:00:00Z"
 }
 ```
 
@@ -315,13 +315,13 @@ Chrome Extension 僅限桌面端使用，手機端採用 **PWA 行動網頁** �
 
 #### 功能範圍
 
-| 功能 | PWA 支援 | 說明 |
-|------|---------|------|
-| 瀏覽家庭開放書櫃 | ✅ | 核心功能 |
-| 加入家庭（輸入同步碼） | ✅ | 首次使用時 |
-| 個人書櫃管理（開放/關閉） | ✅ | 需搭配讀墨網頁爬取書單，可能受限 |
-| 建立新家庭 | ✅ | 可在 PWA 操作 |
-| 自訂 API 端點 | ✅ | 與 Extension 相同的設定項 |
+| 功能                      | PWA 支援 | 說明                             |
+| ------------------------- | -------- | -------------------------------- |
+| 瀏覽家庭開放書櫃          | ✅       | 核心功能                         |
+| 加入家庭（輸入同步碼）    | ✅       | 首次使用時                       |
+| 個人書櫃管理（開放/關閉） | ✅       | 需搭配讀墨網頁爬取書單，可能受限 |
+| 建立新家庭                | ✅       | 可在 PWA 操作                    |
+| 自訂 API 端點             | ✅       | 與 Extension 相同的設定項        |
 
 #### PWA 與 Extension 共用後端
 
@@ -341,11 +341,11 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 
 ### 風險評估
 
-| 項目 | 風險等級 | 說明 |
-|------|---------|------|
-| 違反讀墨 ToS（自動化存取） | ⚠️ 中 | 個人合理使用、不營利，法律風險相對低 |
-| 商標侵權 | 🔴 高（若使用全名） | 命名避開 `Readmoo` 全稱即可降低 |
-| 個資法規 | ✅ 低 | 不收集個資 |
+| 項目                       | 風險等級            | 說明                                 |
+| -------------------------- | ------------------- | ------------------------------------ |
+| 違反讀墨 ToS（自動化存取） | ⚠️ 中               | 個人合理使用、不營利，法律風險相對低 |
+| 商標侵權                   | 🔴 高（若使用全名） | 命名避開 `Readmoo` 全稱即可降低      |
+| 個資法規                   | ✅ 低               | 不收集個資                           |
 
 ### 避險策略
 
@@ -382,11 +382,11 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 
 ### 前端測試（Extension / PWA）
 
-| 測試層級 | 工具 | 測試範圍 | 範例 |
-|---------|------|---------|------|
-| **Unit** | Vitest | 純邏輯模組：雜湊、同步碼解析、API client、資料合併 | `crypto/hash.test.ts`、`api/parseSyncCode.test.ts` |
-| **Component** | Vitest + React Testing Library | Dialog UI 元件：狀態切換、開關互動、表單驗證 | `dialog/PersonalShelf.test.tsx`、`dialog/Onboarding.test.tsx` |
-| **E2E** | Playwright + Chrome Extension testing | 完整流程：安裝 Extension → 開啟 Dialog → 建立家庭 → 設定開放書籍 | `e2e/family-flow.spec.ts` |
+| 測試層級      | 工具                                  | 測試範圍                                                         | 範例                                                          |
+| ------------- | ------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------- |
+| **Unit**      | Vitest                                | 純邏輯模組：雜湊、同步碼解析、API client、資料合併               | `crypto/hash.test.ts`、`api/parseSyncCode.test.ts`            |
+| **Component** | Vitest + React Testing Library        | Dialog UI 元件：狀態切換、開關互動、表單驗證                     | `dialog/PersonalShelf.test.tsx`、`dialog/Onboarding.test.tsx` |
+| **E2E**       | Playwright + Chrome Extension testing | 完整流程：安裝 Extension → 開啟 Dialog → 建立家庭 → 設定開放書籍 | `e2e/family-flow.spec.ts`                                     |
 
 #### 前端測試重點
 
@@ -397,10 +397,10 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 
 ### 後端測試（Worker）
 
-| 測試層級 | 工具 | 測試範圍 | 範例 |
-|---------|------|---------|------|
-| **Unit** | Vitest | 路由處理、資料驗證、權限檢查邏輯 | `routes/family.test.ts`、`middleware/auth.test.ts` |
-| **Integration** | Vitest + Miniflare | 完整 API 流程搭配本地模擬 KV | `integration/family-lifecycle.test.ts` |
+| 測試層級        | 工具               | 測試範圍                         | 範例                                               |
+| --------------- | ------------------ | -------------------------------- | -------------------------------------------------- |
+| **Unit**        | Vitest             | 路由處理、資料驗證、權限檢查邏輯 | `routes/family.test.ts`、`middleware/auth.test.ts` |
+| **Integration** | Vitest + Miniflare | 完整 API 流程搭配本地模擬 KV     | `integration/family-lifecycle.test.ts`             |
 
 #### 後端測試重點
 
@@ -412,22 +412,22 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 
 ### 共用測試工具
 
-| 工具 | 用途 |
-|------|------|
-| **Vitest** | 前後端統一測試框架 |
-| **Miniflare** | 本地模擬 Cloudflare Workers + KV 環境 |
-| **React Testing Library** | Dialog UI 元件測試 |
-| **Playwright** | Extension E2E 測試 |
-| **c8 / istanbul** | 程式碼覆蓋率（透過 Vitest 內建） |
+| 工具                      | 用途                                  |
+| ------------------------- | ------------------------------------- |
+| **Vitest**                | 前後端統一測試框架                    |
+| **Miniflare**             | 本地模擬 Cloudflare Workers + KV 環境 |
+| **React Testing Library** | Dialog UI 元件測試                    |
+| **Playwright**            | Extension E2E 測試                    |
+| **c8 / istanbul**         | 程式碼覆蓋率（透過 Vitest 內建）      |
 
 ### 覆蓋率目標
 
-| 範圍 | 目標 |
-|------|------|
-| `extension/src/api/` | ≥ 80% |
+| 範圍                    | 目標  |
+| ----------------------- | ----- |
+| `extension/src/api/`    | ≥ 80% |
 | `extension/src/dialog/` | ≥ 70% |
-| `worker/src/` | ≥ 80% |
-| 整體 | ≥ 70% |
+| `worker/src/`           | ≥ 80% |
+| 整體                    | ≥ 70% |
 
 ---
 
@@ -447,10 +447,10 @@ jobs:
     # Node 20
     steps:
       - pnpm install
-      - pnpm lint          # ESLint + Prettier
-      - pnpm typecheck     # tsc --noEmit
-      - pnpm test          # Vitest (unit + component)
-      - pnpm build         # Vite build，確認產出物正常
+      - pnpm lint # ESLint + Prettier
+      - pnpm typecheck # tsc --noEmit
+      - pnpm test # Vitest (unit + component)
+      - pnpm build # Vite build，確認產出物正常
 
   worker-check:
     # Node 20
@@ -458,8 +458,8 @@ jobs:
       - cd worker && pnpm install
       - pnpm lint
       - pnpm typecheck
-      - pnpm test          # Vitest + Miniflare (unit + integration)
-      - pnpm build         # wrangler build 驗證
+      - pnpm test # Vitest + Miniflare (unit + integration)
+      - pnpm build # wrangler build 驗證
 
   e2e:
     needs: [extension-check, worker-check]
@@ -471,26 +471,26 @@ jobs:
 
 #### CI 觸發規則
 
-| 事件 | extension-check | worker-check | e2e |
-|------|:---:|:---:|:---:|
-| Push to any branch | ✅ | ✅ | ❌ |
-| PR to `main` | ✅ | ✅ | ✅ |
-| Merge to `main` | ✅ | ✅ | ✅ |
+| 事件               | extension-check | worker-check | e2e |
+| ------------------ | :-------------: | :----------: | :-: |
+| Push to any branch |       ✅        |      ✅      | ❌  |
+| PR to `main`       |       ✅        |      ✅      | ✅  |
+| Merge to `main`    |       ✅        |      ✅      | ✅  |
 
 ### CD — 自動部署
 
-| 目標 | 觸發條件 | 動作 |
-|------|---------|------|
-| **Worker** | Merge to `main` + worker/ 有變更 | `wrangler deploy` 部署至 Cloudflare |
-| **GitHub Pages** | Merge to `main` + site/ 有變更 | 部署 `site/` 至 GitHub Pages |
-| **Extension** | Git tag `v*` | Build → 產出 `.zip` → GitHub Release artifact |
-| **PWA** | Merge to `main` + pwa/ 有變更 | 部署至 Cloudflare Pages（或 Vercel） |
+| 目標             | 觸發條件                         | 動作                                          |
+| ---------------- | -------------------------------- | --------------------------------------------- |
+| **Worker**       | Merge to `main` + worker/ 有變更 | `wrangler deploy` 部署至 Cloudflare           |
+| **GitHub Pages** | Merge to `main` + site/ 有變更   | 部署 `site/` 至 GitHub Pages                  |
+| **Extension**    | Git tag `v*`                     | Build → 產出 `.zip` → GitHub Release artifact |
+| **PWA**          | Merge to `main` + pwa/ 有變更    | 部署至 Cloudflare Pages（或 Vercel）          |
 
 ### CI/CD 所需的 GitHub Secrets
 
-| Secret | 用途 |
-|--------|------|
-| `CLOUDFLARE_API_TOKEN` | Worker / Pages 部署 |
+| Secret                  | 用途                |
+| ----------------------- | ------------------- |
+| `CLOUDFLARE_API_TOKEN`  | Worker / Pages 部署 |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 帳號識別 |
 
 > 不需要額外的 secrets 做測試 — Miniflare 在 CI 中模擬完整 KV 環境，不連接真實 Cloudflare。
@@ -558,6 +558,7 @@ jobs:
 > 在進入 PWA 行動端之前，先完善桌面版 Chrome Extension 的使用體驗。
 
 #### 初次使用流程簡化
+
 - [x] 「開始使用」一鍵引導（取代多步驟 Onboarding）— `useAutoSetup` hook + `LoadingOverlay` 元件
 - [x] Loading 遮罩 UI（半透明背景 + 進度提示文字）
 - [x] 自動導航抓取帳號資料（`#/me` 頁面 `.me-nickname` + email）
@@ -565,34 +566,41 @@ jobs:
 - [x] 完成後自動導航回原始頁面
 
 #### 多裝置同步
+
 - [x] `chrome.storage.sync` 支援（自動同步 familyId）— 寫入 sync + local，讀取 sync 優先
 - [x] 保留 Sync Code 作為備用恢復方式
 
 #### 顯示名稱
+
 - [x] 可編輯顯示名稱（Settings 頁面）— `DisplayNameEditor` + `useDisplayName` hook
 - [x] 初次使用時預設抓取讀墨使用者名稱（`.me-nickname`）
 - [x] UI 標註「此名稱僅用於家庭書櫃，不影響讀墨帳號」
 
 #### 家庭管理
+
 - [x] 家庭人數上限 2 人（後端驗證 + 前端提示）— 後端已於 Phase 2 完成
 - [x] Owner 角色（建立者 = 管理者）— `MemberList` 元件顯示 Owner 標記
 - [x] Owner 可移除其他成員 — `removeMember` API + 確認對話框
 - [x] Owner 離開前須轉移管理權 — `transferOwnership` API + 確認對話框
 
 #### 搜尋功能（純前端，不呼叫 API）
+
 - [x] 家庭書櫃：搜尋書名 + 作者（即時過濾，debounce 300ms）— `SearchBar` + `useSearch` hook
 - [x] 個人書櫃：搜尋書名 + 作者（即時過濾，debounce 300ms）
 
 #### 篩選功能
+
 - [x] 家庭書櫃：Dropdown 篩選成員（預設顯示其他成員）— `MemberDropdown` 元件
 - [x] 個人書櫃：Filter 切換 全部/開放/不開放 — `StatusFilterBar` 元件
 
 #### Dialog UI 補充
+
 - [x] Footer 標註「本功能由第三方開發，非 Readmoo 官方提供」— `DialogFooter` 元件
 - [x] Footer 顯示版本號（`v0.x.x`）
 - [x] 問題回報連結（GitHub / Plurk icons）— `config/links.ts` 配置檔管理
 
 #### 版本管理
+
 - [x] 版本格式：Semantic Versioning（MAJOR.MINOR.PATCH）
 - [x] Single Source of Truth：`extension/package.json` 的 `version` 欄位
 - [x] Build 時注入 `__APP_VERSION__` 環境變數（Vite `define`）
@@ -602,11 +610,13 @@ jobs:
 ### Phase 3：行動端支援與自訂後端 ✅ 已完成
 
 #### PWA 認證設計
+
 - [x] Extension 設定頁：「連結手機」按鈕，產生 QR Code（PWA URL + familyId + userId）
 - [x] PWA Landing Page：掃碼自動解析 URL params → 儲存至 localStorage → 自動 join 取得 auth token
 - [x] PWA 備用入口：手動輸入同步碼 + 讀墨 Email（前端 deriveUserId → userId，不上傳伺服器）
 
 #### PWA 核心功能
+
 - [x] PWA 專案建置（React + TypeScript + Vite + Tailwind，共用 api/ 模組）
 - [x] PWA 家庭書櫃瀏覽（成員篩選 + debounce 搜尋 + 2 欄書籍卡片）
 - [x] PWA 個人書櫃管理（開關已同步書籍的開放狀態，無法新增書籍）
@@ -614,11 +624,13 @@ jobs:
 - [x] 響應式 UI 設計（手機優先，底部導覽列，Tailwind CSS）
 
 #### 自訂後端
+
 - [x] Extension 設定頁：自訂 API 端點 UI（可展開「進階設定」，URL 驗證 + 儲存/重設）
 - [x] PWA 設定頁：自訂 API 端點 UI（同上，使用 localStorage）
 - [x] 同步碼中編碼 API 端點資訊（自建使用者友善）— 已於 Phase 0 實作 encode/decode
 
 #### 安全性強化（Security Audit 修復）
+
 - [x] API 認證 middleware（Bearer token，建立/加入家庭時產生 token）
 - [x] familyId 路徑參數驗證（`^[a-z0-9]{4}-[a-z0-9]{4}$`）
 - [x] 家庭成員授權檢查（非成員回傳 403）
@@ -629,6 +641,7 @@ jobs:
 - [x] 移除 production console.log 中的敏感資料
 
 #### 部署與發布
+
 - [x] PWA CI 設定（pwa-check job：lint + typecheck + test + build）
 - [x] PWA CD 設定（Cloudflare Pages，merge to main 自動部署）
 - [x] Extension release CD 已設定（git tag `v*` → build → zip → GitHub Release）
@@ -646,6 +659,7 @@ jobs:
 > **發布日期**：2026-04-28（commit `b6b5615`）
 
 #### 後端
+
 - [x] KV schema：新增 `borrow:{requestId}` + `borrows:family:{familyId}` 索引
 - [x] FamilyMember 擴充 `canLend` + `readmooName` 欄位（含向後相容，`normalizeFamilyRecord` 補回 legacy 紀錄的 canLend=TRUE）
 - [x] `POST /api/family/:id/borrow`（建立申請，含 canLend 雙向檢查 + duplicate 防護）
@@ -657,6 +671,7 @@ jobs:
 - [x] Unit + Integration tests（≥ 80% coverage，新增 borrow / member-settings / rateLimit 測試）
 
 #### 前端 Extension
+
 - [x] BookCard hover overlay「申請借閱」按鈕（僅 FamilyShelf context + 雙方 canLend）
 - [x] 第 4 個分頁「借閱」：收件匣/寄件匣 + status FSM 操作
 - [x] FamilySettings 新增 per-member canLend 切換（ownerId only）
@@ -666,10 +681,12 @@ jobs:
 - [x] Component tests（≥ 70% coverage，新增 BorrowTab / MemberList canLend / BookCard borrow button 測試）
 
 #### 前端 PWA
+
 - [x] 借閱 tab（共用設計，無「同意借閱」按鈕，引導書主回到桌面 Extension 操作）
 - [x] 申請 / 取消 / 標記已歸還（無同意 / 拒絕）
 
 #### 共用
+
 - [x] BorrowStatus enum + BorrowRequest 型別
 - [x] API client `createBorrowRequest` / `listBorrowRequests` / `updateBorrowStatus` / `updateMemberSettings`
 - [x] 版本 bump 至 `1.1.0`（Extension + PWA 同步）
@@ -681,6 +698,7 @@ jobs:
 > **發布日期**：2026-05-03（commit `c546277`）
 
 #### 核心功能
+
 - [x] 個人書櫃頁面新增「分享」icon，點擊開啟公開書櫃設定 Dialog
 - [x] 公開書櫃設定 Dialog：開啟/關閉公開分享（預設關閉）
 - [x] 公開書櫃設定 Dialog：自訂標題（預設「{display_name} 的公開書櫃」，可修改）
@@ -689,6 +707,7 @@ jobs:
 - [x] 公開書櫃設定 Dialog：複製公開連結
 
 #### 公開書櫃頁面（PWA 路由 `/public/{share_token}`）
+
 - [x] 不需登入即可瀏覽
 - [x] 頁面上方說明文字：「此為對外公開書櫃，無須登入即可瀏覽」
 - [x] 標題顯示使用者自訂的公開書櫃名稱
@@ -698,6 +717,7 @@ jobs:
 - [x] 顯示封面圖片（來源：讀墨 CDN，含 onError fallback）
 
 #### 後端 API（採「可定址」設計，從 day-1 即用 `:shelfId` 路由）
+
 - [x] `GET /api/user/:id/public-shelf` — 列出所有 shelves（v1.2.0 最多 1 組）
 - [x] `POST /api/user/:id/public-shelf` — 建立新 shelf（達上限時回 409 Conflict）
 - [x] `PUT /api/user/:id/public-shelf/:shelfId` — 更新指定 shelf 設定（標題、過期）
@@ -706,6 +726,7 @@ jobs:
 - [x] `GET /api/public/:shareToken` — 查詢公開書櫃（不需認證）
 
 #### KV Schema 擴充
+
 - [x] `public:{share_token}` → `{ userId, shelfId, title, books[], createdAt, expiresAt }` （明文快照，KV TTL 管理過期）
 - [x] `user:{id}` 擴充 `publicSharing` 欄位（array 結構）：
   ```typescript
@@ -725,6 +746,7 @@ jobs:
   ```
 
 #### 設計考量
+
 - **書單來源**：v1.2.0 公開書櫃的書 = 個人書櫃中 `isShared === BoolFlag.TRUE` 的同一組書（`selectionMode: "all-shared"`）
 - **資料同步**：採快照模式，`PUT /api/user/:id/books` 時自動更新所有 active shelves 的 `public:{token}` 快照
 - **使用前提**：曾加入過家庭以完成書單同步即可（不要求目前處於家庭中），詳見 Q2 解讀 B
@@ -737,6 +759,7 @@ jobs:
 - **PWA 路由**：v1.2.0 採混合路由（公開頁面 path-based `/public/:token`，其餘維持 hash routing）；全面遷移至 path-based 留待獨立 refactor
 
 #### 擴充路徑（v1.3+ 多組公開書櫃）
+
 - 將 worker 常數 `MAX_PUBLIC_SHELVES` 由 1 提升至 3（或設定值）
 - UI 增加 list view 管理多組 shelves
 - 啟用 `selectionMode: "explicit"` + `bookIds[]` 支援自選書籍
@@ -745,6 +768,7 @@ jobs:
 ### Phase 7：v1.3.0 — 簡易修正 + 影響現有使用者的修正 + 開發者體驗（規劃中）
 
 > 正式上線（v1.0.0 / v1.2.x）後使用者回饋。**v1.3 範圍只放三類**：
+>
 > 1. **簡易修正與驗證**：純 CSS / 文案 / 已實作項目的驗證（風險低，可快速放出）
 > 2. **影響現有使用者的修正**：補齊既有功能在實際使用上的痛點（爬不到 >200 本書、需要手動取名、借閱前置設定、>100 本書儲存卡頓）
 > 3. **開發者體驗（DX）**：dev 環境的 API 測試介面（不影響正式環境使用者）
@@ -1137,4 +1161,4 @@ moo-family-bookshelf/
 
 ---
 
-*最後更新：2026-07-09（新增 Phase 11：技術債與稽核改善 backlog — 記錄 2026-07 雙模型稽核的 Batch 1–3 已修復項目（#68/#69/#70）與經評估暫緩的 backlog）*
+_最後更新：2026-07-09（新增 Phase 11：技術債與稽核改善 backlog — 記錄 2026-07 雙模型稽核的 Batch 1–3 已修復項目（#68/#69/#70）與經評估暫緩的 backlog）_

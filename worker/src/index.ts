@@ -28,11 +28,15 @@ export function isAllowedOrigin(origin: string, devMode?: boolean): boolean {
 
   // PWA on Cloudflare Pages (production + preview deploys)
   if (origin === "https://moo-family-bookshelf.pages.dev") return true;
-  if (/^https:\/\/[a-z0-9]+\.moo-family-bookshelf\.pages\.dev$/.test(origin)) return true;
+  if (/^https:\/\/[a-z0-9]+\.moo-family-bookshelf\.pages\.dev$/.test(origin))
+    return true;
 
   // PWA on Cloudflare Pages (dev + preview deploys)
   if (origin === "https://moo-family-bookshelf-dev.pages.dev") return true;
-  if (/^https:\/\/[a-z0-9]+\.moo-family-bookshelf-dev\.pages\.dev$/.test(origin)) return true;
+  if (
+    /^https:\/\/[a-z0-9]+\.moo-family-bookshelf-dev\.pages\.dev$/.test(origin)
+  )
+    return true;
 
   // localhost (any port, http or https, dev only — gated behind DEV_MODE binding)
   if (devMode && /^https?:\/\/localhost(:\d+)?$/.test(origin)) return true;
@@ -85,14 +89,24 @@ app.use("/api/*", async (c, next) => {
   if (contentLength) {
     const size = parseInt(contentLength, 10);
     if (!Number.isNaN(size) && size > MAX_BODY_SIZE) {
-      return jsonError(c, 413, "PAYLOAD_TOO_LARGE", "Request body exceeds 256KB limit");
+      return jsonError(
+        c,
+        413,
+        "PAYLOAD_TOO_LARGE",
+        "Request body exceeds 256KB limit",
+      );
     }
   } else if (c.req.method !== "GET" && c.req.method !== "DELETE") {
     // No Content-Length: read body to verify size.
     // Cloudflare edge enforces its own body limit (~100MB) as a backstop.
     const buf = await c.req.raw.clone().arrayBuffer();
     if (buf.byteLength > MAX_BODY_SIZE) {
-      return jsonError(c, 413, "PAYLOAD_TOO_LARGE", "Request body exceeds 256KB limit");
+      return jsonError(
+        c,
+        413,
+        "PAYLOAD_TOO_LARGE",
+        "Request body exceeds 256KB limit",
+      );
     }
   }
   await next();

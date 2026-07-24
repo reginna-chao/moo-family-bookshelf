@@ -9,8 +9,15 @@ type Json = any;
 
 let kv: KVNamespace;
 
-function request(method: string, path: string, body?: unknown, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
@@ -19,11 +26,16 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-async function createFamily(userId: string): Promise<{ familyId: string; authToken: string }> {
+async function createFamily(
+  userId: string,
+): Promise<{ familyId: string; authToken: string }> {
   const res = await request("POST", "/api/family", { userId });
   expect(res.status).toBe(201);
   const json = (await res.json()) as Json;
-  return { familyId: json.data.familyId as string, authToken: json.data.authToken as string };
+  return {
+    familyId: json.data.familyId as string,
+    authToken: json.data.authToken as string,
+  };
 }
 
 beforeEach(() => {
@@ -62,7 +74,9 @@ describe("POST /api/family — duplicate prevention", () => {
   it("should return 409 ALREADY_IN_FAMILY when user has family with other members", async () => {
     // Create family with two members
     const { familyId } = await createFamily(USER1);
-    const joinRes = await request("POST", `/api/family/${familyId}/join`, { userId: USER2 });
+    const joinRes = await request("POST", `/api/family/${familyId}/join`, {
+      userId: USER2,
+    });
     expect(joinRes.status).toBe(200);
 
     // user1 tries to create a new family — should be blocked

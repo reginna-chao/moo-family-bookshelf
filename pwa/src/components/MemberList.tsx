@@ -25,8 +25,7 @@ interface MemberListProps {
 }
 
 type ConfirmAction =
-  | { type: "remove"; targetId: string }
-  | { type: "transfer"; targetId: string };
+  { type: "remove"; targetId: string } | { type: "transfer"; targetId: string };
 
 export function MemberList({
   members,
@@ -123,9 +122,7 @@ export function MemberList({
         return (
           <div key={memberId} className="px-3 py-2.5">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-700">
-                {label}
-              </span>
+              <span className="text-sm text-gray-700">{label}</span>
               {memberId === ownerId && (
                 <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
                   管理者
@@ -204,8 +201,12 @@ export function MemberList({
             )}
 
             {isConfirmTarget && (
-              <div className={`mt-2 rounded p-2 ${confirmAction.type === "remove" ? "bg-red-50" : "bg-blue-50"}`}>
-                <p className={`text-xs mb-2 ${confirmAction.type === "remove" ? "text-red-700" : "text-blue-700"}`}>
+              <div
+                className={`mt-2 rounded p-2 ${confirmAction.type === "remove" ? "bg-red-50" : "bg-blue-50"}`}
+              >
+                <p
+                  className={`text-xs mb-2 ${confirmAction.type === "remove" ? "text-red-700" : "text-blue-700"}`}
+                >
                   {confirmAction.type === "remove"
                     ? `確定要移除成員 ${label}？`
                     : `確定要將管理權轉移給 ${label}？轉移後你將無法移除其他成員。`}
@@ -232,7 +233,11 @@ export function MemberList({
         );
       })}
 
-      {error && <p role="alert" className="px-3 py-2 text-xs text-red-500">{error}</p>}
+      {error && (
+        <p role="alert" className="px-3 py-2 text-xs text-red-500">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

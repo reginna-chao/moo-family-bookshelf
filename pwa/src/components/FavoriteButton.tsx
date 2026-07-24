@@ -14,7 +14,10 @@ export interface FavoriteButtonProps {
  * The row wraps content in an `<a>`, so clicks are stopped from propagating
  * to (and navigating) the link.
  */
-export function FavoriteButton({ isFavorite, onFavoriteToggle }: FavoriteButtonProps) {
+export function FavoriteButton({
+  isFavorite,
+  onFavoriteToggle,
+}: FavoriteButtonProps) {
   const label = isFavorite ? "取消最愛" : "加入最愛";
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -22,7 +25,9 @@ export function FavoriteButton({ isFavorite, onFavoriteToggle }: FavoriteButtonP
     onFavoriteToggle();
   };
 
-  const colorClass = isFavorite ? "text-red-500" : "text-gray-400 hover:text-red-400";
+  const colorClass = isFavorite
+    ? "text-red-500"
+    : "text-gray-400 hover:text-red-400";
 
   return (
     <button

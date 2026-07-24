@@ -107,7 +107,9 @@ describe("isValidExpiresDays", () => {
 
 describe("isPublicRoute — public bookshelf", () => {
   it("recognizes GET /api/public/:token as public", () => {
-    expect(isPublicRoute("GET", "/api/public/abc123def456abc123def456abc123de")).toBe(true);
+    expect(
+      isPublicRoute("GET", "/api/public/abc123def456abc123def456abc123de"),
+    ).toBe(true);
   });
 
   it("rejects POST /api/public/:token", () => {

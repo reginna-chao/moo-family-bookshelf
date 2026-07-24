@@ -20,11 +20,14 @@ describe("useBookSort", () => {
   it.each<{ shelf: BookSortShelf; suffix: string }>([
     { shelf: "family", suffix: "familyShelfSort" },
     { shelf: "personal", suffix: "personalShelfSort" },
-  ])("reads stored value from correct key for shelf '$shelf'", ({ shelf, suffix }) => {
-    localStorage.setItem(namespacedKey(USER_ID, suffix), "title-desc");
-    const { result } = renderHook(() => useBookSort(USER_ID, shelf));
-    expect(result.current.sort).toBe("title-desc");
-  });
+  ])(
+    "reads stored value from correct key for shelf '$shelf'",
+    ({ shelf, suffix }) => {
+      localStorage.setItem(namespacedKey(USER_ID, suffix), "title-desc");
+      const { result } = renderHook(() => useBookSort(USER_ID, shelf));
+      expect(result.current.sort).toBe("title-desc");
+    },
+  );
 
   it.each<{ stored: string; expected: BookSortMode }>([
     { stored: "title", expected: "title-asc" },
@@ -52,7 +55,9 @@ describe("useBookSort", () => {
     });
 
     expect(result.current.sort).toBe("author-desc");
-    expect(localStorage.getItem(namespacedKey(USER_ID, "familyShelfSort"))).toBe("author-desc");
+    expect(
+      localStorage.getItem(namespacedKey(USER_ID, "familyShelfSort")),
+    ).toBe("author-desc");
   });
 
   it("writes to correct key for personal shelf", () => {
@@ -62,13 +67,21 @@ describe("useBookSort", () => {
       result.current.setSort("title-asc");
     });
 
-    expect(localStorage.getItem(namespacedKey(USER_ID, "personalShelfSort"))).toBe("title-asc");
+    expect(
+      localStorage.getItem(namespacedKey(USER_ID, "personalShelfSort")),
+    ).toBe("title-asc");
   });
 
   it("re-reads preference when userId changes", () => {
     const otherUserId = "other-user-456";
-    localStorage.setItem(namespacedKey(USER_ID, "familyShelfSort"), "title-asc");
-    localStorage.setItem(namespacedKey(otherUserId, "familyShelfSort"), "author-desc");
+    localStorage.setItem(
+      namespacedKey(USER_ID, "familyShelfSort"),
+      "title-asc",
+    );
+    localStorage.setItem(
+      namespacedKey(otherUserId, "familyShelfSort"),
+      "author-desc",
+    );
 
     const { result, rerender } = renderHook(
       ({ userId }) => useBookSort(userId, "family"),
@@ -81,8 +94,14 @@ describe("useBookSort", () => {
   });
 
   it("re-reads preference when shelf changes", () => {
-    localStorage.setItem(namespacedKey(USER_ID, "familyShelfSort"), "title-asc");
-    localStorage.setItem(namespacedKey(USER_ID, "personalShelfSort"), "author-desc");
+    localStorage.setItem(
+      namespacedKey(USER_ID, "familyShelfSort"),
+      "title-asc",
+    );
+    localStorage.setItem(
+      namespacedKey(USER_ID, "personalShelfSort"),
+      "author-desc",
+    );
 
     const { result, rerender } = renderHook(
       ({ shelf }) => useBookSort(USER_ID, shelf),
@@ -95,13 +114,19 @@ describe("useBookSort", () => {
   });
 
   it("keeps a stored preference instead of falling back to default", () => {
-    localStorage.setItem(namespacedKey(USER_ID, "familyShelfSort"), "title-desc");
+    localStorage.setItem(
+      namespacedKey(USER_ID, "familyShelfSort"),
+      "title-desc",
+    );
     const { result } = renderHook(() => useBookSort(USER_ID, "family"));
     expect(result.current.sort).toBe("title-desc");
   });
 
   it("defaults to 'default' when switching to user with no stored preference", () => {
-    localStorage.setItem(namespacedKey(USER_ID, "familyShelfSort"), "title-asc");
+    localStorage.setItem(
+      namespacedKey(USER_ID, "familyShelfSort"),
+      "title-asc",
+    );
 
     const { result, rerender } = renderHook(
       ({ userId }) => useBookSort(userId, "family"),

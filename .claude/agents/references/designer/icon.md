@@ -4,14 +4,14 @@ The designer agent reads this reference on demand when a request is for UI icons
 
 ## Scope
 
-| This reference handles | Use another reference / agent |
-|---|---|
-| Toolbar / action bar icons | Logos → logo reference |
-| Navigation / tab bar icons | App icons → logo reference |
-| Status / indicator icons | Banners → banner reference |
-| Menu / list item icons | |
-| Empty state illustrations (simple) | |
-| Badge / chip icons | |
+| This reference handles             | Use another reference / agent |
+| ---------------------------------- | ----------------------------- |
+| Toolbar / action bar icons         | Logos → logo reference        |
+| Navigation / tab bar icons         | App icons → logo reference    |
+| Status / indicator icons           | Banners → banner reference    |
+| Menu / list item icons             |                               |
+| Empty state illustrations (simple) |                               |
+| Badge / chip icons                 |                               |
 
 ## Output Location
 
@@ -53,13 +53,13 @@ All icons are designed on a 24×24 grid. This is the industry standard used by M
 
 ### Stroke Specifications
 
-| Property | Value |
-|----------|-------|
-| Stroke width | **2px** (default) or **1.5px** (for denser UIs) |
-| Stroke linecap | `round` |
-| Stroke linejoin | `round` |
-| Fill | `none` (outlined) or `currentColor` (filled variant) |
-| Corner radius | 1-2px for internal corners |
+| Property        | Value                                                |
+| --------------- | ---------------------------------------------------- |
+| Stroke width    | **2px** (default) or **1.5px** (for denser UIs)      |
+| Stroke linecap  | `round`                                              |
+| Stroke linejoin | `round`                                              |
+| Fill            | `none` (outlined) or `currentColor` (filled variant) |
+| Corner radius   | 1-2px for internal corners                           |
 
 **IMPORTANT:** Pick ONE stroke width for the entire set and use it consistently.
 
@@ -118,6 +118,7 @@ Before generating, the designer agent gathers requirements from the user:
 Generate all requested icons following the grid specs.
 
 **SVG template (outlined):**
+
 ```xml
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
      fill="none" stroke="currentColor" stroke-width="2"
@@ -128,6 +129,7 @@ Generate all requested icons following the grid specs.
 ```
 
 **SVG template (filled):**
+
 ```xml
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
      fill="currentColor" stroke="none">
@@ -137,6 +139,7 @@ Generate all requested icons following the grid specs.
 ```
 
 **Design principles:**
+
 - Each icon should be recognizable at 16px display
 - Consistent visual weight across all icons in the set
 - Avoid fine details that break at small sizes
@@ -168,11 +171,13 @@ Combine all icons into a single sprite file for efficient loading:
 ```
 
 **Usage in HTML:**
+
 ```html
-<svg width="24" height="24"><use href="sprite.svg#icon-home"/></svg>
+<svg width="24" height="24"><use href="sprite.svg#icon-home" /></svg>
 ```
 
 **Usage in React:**
+
 ```tsx
 const Icon = ({ name, size = 24 }: { name: string; size?: number }) => (
   <svg width={size} height={size}>
@@ -188,114 +193,237 @@ Generate a `preview.html` to display the full icon set:
 ```html
 <!DOCTYPE html>
 <html lang="zh-Hant">
-<head>
-  <meta charset="UTF-8">
-  <title>Icon Set Preview — {project}</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; background: #f5f5f5; padding: 2rem; }
-    h1 { text-align: center; margin-bottom: 0.5rem; color: #333; }
-    .subtitle { text-align: center; color: #888; margin-bottom: 2rem; font-size: 0.875rem; }
-    h2 { color: #555; margin: 2rem 0 1rem; }
-    .icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 1rem; max-width: 1200px; margin: 0 auto; }
-    .icon-card { background: white; border-radius: 8px; padding: 1.25rem 0.75rem; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.06); transition: all 0.15s; cursor: default; }
-    .icon-card:hover { background: #f0f4ff; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .icon-card svg, .icon-card img { width: 24px; height: 24px; margin-bottom: 0.5rem; color: #333; }
-    .icon-card .name { font-size: 0.75rem; color: #888; word-break: break-all; }
+  <head>
+    <meta charset="UTF-8" />
+    <title>Icon Set Preview — {project}</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        background: #f5f5f5;
+        padding: 2rem;
+      }
+      h1 {
+        text-align: center;
+        margin-bottom: 0.5rem;
+        color: #333;
+      }
+      .subtitle {
+        text-align: center;
+        color: #888;
+        margin-bottom: 2rem;
+        font-size: 0.875rem;
+      }
+      h2 {
+        color: #555;
+        margin: 2rem 0 1rem;
+      }
+      .icon-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 1rem;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .icon-card {
+        background: white;
+        border-radius: 8px;
+        padding: 1.25rem 0.75rem;
+        text-align: center;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+        transition: all 0.15s;
+        cursor: default;
+      }
+      .icon-card:hover {
+        background: #f0f4ff;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+      .icon-card svg,
+      .icon-card img {
+        width: 24px;
+        height: 24px;
+        margin-bottom: 0.5rem;
+        color: #333;
+      }
+      .icon-card .name {
+        font-size: 0.75rem;
+        color: #888;
+        word-break: break-all;
+      }
 
-    /* Size comparison */
-    .size-compare { display: flex; align-items: end; gap: 2rem; margin: 1rem 0; }
-    .size-compare .item { text-align: center; }
-    .size-compare .item svg, .size-compare .item img { color: #333; }
-    .size-compare .label { font-size: 0.7rem; color: #aaa; margin-top: 0.25rem; }
+      /* Size comparison */
+      .size-compare {
+        display: flex;
+        align-items: end;
+        gap: 2rem;
+        margin: 1rem 0;
+      }
+      .size-compare .item {
+        text-align: center;
+      }
+      .size-compare .item svg,
+      .size-compare .item img {
+        color: #333;
+      }
+      .size-compare .label {
+        font-size: 0.7rem;
+        color: #aaa;
+        margin-top: 0.25rem;
+      }
 
-    /* Dark mode */
-    .dark-section { background: #1e1e2e; padding: 2rem; border-radius: 12px; margin-top: 2rem; }
-    .dark-section h2 { color: #eee; }
-    .dark-section .icon-card { background: #2a2a3e; }
-    .dark-section .icon-card svg, .dark-section .icon-card img { color: #e0e0e0; }
-    .dark-section .icon-card .name { color: #888; }
+      /* Dark mode */
+      .dark-section {
+        background: #1e1e2e;
+        padding: 2rem;
+        border-radius: 12px;
+        margin-top: 2rem;
+      }
+      .dark-section h2 {
+        color: #eee;
+      }
+      .dark-section .icon-card {
+        background: #2a2a3e;
+      }
+      .dark-section .icon-card svg,
+      .dark-section .icon-card img {
+        color: #e0e0e0;
+      }
+      .dark-section .icon-card .name {
+        color: #888;
+      }
 
-    /* Grid overlay toggle */
-    .grid-overlay { position: relative; display: inline-block; }
-    .grid-overlay::after { content: ''; position: absolute; top: 2px; left: 2px; right: 2px; bottom: 2px; border: 1px dashed rgba(99,102,241,0.3); pointer-events: none; }
+      /* Grid overlay toggle */
+      .grid-overlay {
+        position: relative;
+        display: inline-block;
+      }
+      .grid-overlay::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        right: 2px;
+        bottom: 2px;
+        border: 1px dashed rgba(99, 102, 241, 0.3);
+        pointer-events: none;
+      }
 
-    /* Consistency check row */
-    .consistency-row { display: flex; gap: 4px; align-items: center; margin: 1rem 0; padding: 1rem; background: white; border-radius: 8px; flex-wrap: wrap; }
-    .consistency-row svg, .consistency-row img { width: 24px; height: 24px; color: #333; }
-  </style>
-</head>
-<body>
-  <h1>{project} UI Icon Set</h1>
-  <p class="subtitle">{stroke_width}px stroke · {icon_count} icons · 24×24 grid</p>
+      /* Consistency check row */
+      .consistency-row {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        margin: 1rem 0;
+        padding: 1rem;
+        background: white;
+        border-radius: 8px;
+        flex-wrap: wrap;
+      }
+      .consistency-row svg,
+      .consistency-row img {
+        width: 24px;
+        height: 24px;
+        color: #333;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{project} UI Icon Set</h1>
+    <p class="subtitle">
+      {stroke_width}px stroke · {icon_count} icons · 24×24 grid
+    </p>
 
-  <!-- Outlined icons -->
-  <h2>Outlined</h2>
-  <div class="icon-grid">
-    <div class="icon-card">
-      <img src="individual/home.svg">
-      <div class="name">home</div>
-    </div>
-    <!-- ... -->
-  </div>
-
-  <!-- Filled variants (if generated) -->
-  <h2>Filled</h2>
-  <div class="icon-grid">
-    <div class="icon-card">
-      <img src="individual/home-filled.svg">
-      <div class="name">home-filled</div>
-    </div>
-    <!-- ... -->
-  </div>
-
-  <!-- Size comparison -->
-  <h2>尺寸比較</h2>
-  <div class="size-compare">
-    <div class="item"><img src="individual/home.svg" width="16" height="16"><div class="label">16dp</div></div>
-    <div class="item"><img src="individual/home.svg" width="20" height="20"><div class="label">20dp</div></div>
-    <div class="item"><img src="individual/home.svg" width="24" height="24"><div class="label">24dp</div></div>
-    <div class="item"><img src="individual/home.svg" width="32" height="32"><div class="label">32dp</div></div>
-    <div class="item"><img src="individual/home.svg" width="48" height="48"><div class="label">48dp</div></div>
-  </div>
-
-  <!-- Consistency check — all icons side by side -->
-  <h2>一致性檢查</h2>
-  <p style="font-size:0.8rem;color:#888;margin-bottom:0.5rem;">所有 icon 並排，檢查視覺重量是否一致</p>
-  <div class="consistency-row">
-    <img src="individual/home.svg">
-    <img src="individual/search.svg">
-    <!-- ... all icons inline ... -->
-  </div>
-
-  <!-- Dark mode -->
-  <div class="dark-section">
-    <h2>深色主題</h2>
+    <!-- Outlined icons -->
+    <h2>Outlined</h2>
     <div class="icon-grid">
       <div class="icon-card">
-        <img src="individual/home.svg">
+        <img src="individual/home.svg" />
         <div class="name">home</div>
       </div>
       <!-- ... -->
     </div>
-  </div>
-</body>
+
+    <!-- Filled variants (if generated) -->
+    <h2>Filled</h2>
+    <div class="icon-grid">
+      <div class="icon-card">
+        <img src="individual/home-filled.svg" />
+        <div class="name">home-filled</div>
+      </div>
+      <!-- ... -->
+    </div>
+
+    <!-- Size comparison -->
+    <h2>尺寸比較</h2>
+    <div class="size-compare">
+      <div class="item">
+        <img src="individual/home.svg" width="16" height="16" />
+        <div class="label">16dp</div>
+      </div>
+      <div class="item">
+        <img src="individual/home.svg" width="20" height="20" />
+        <div class="label">20dp</div>
+      </div>
+      <div class="item">
+        <img src="individual/home.svg" width="24" height="24" />
+        <div class="label">24dp</div>
+      </div>
+      <div class="item">
+        <img src="individual/home.svg" width="32" height="32" />
+        <div class="label">32dp</div>
+      </div>
+      <div class="item">
+        <img src="individual/home.svg" width="48" height="48" />
+        <div class="label">48dp</div>
+      </div>
+    </div>
+
+    <!-- Consistency check — all icons side by side -->
+    <h2>一致性檢查</h2>
+    <p style="font-size:0.8rem;color:#888;margin-bottom:0.5rem;">
+      所有 icon 並排，檢查視覺重量是否一致
+    </p>
+    <div class="consistency-row">
+      <img src="individual/home.svg" />
+      <img src="individual/search.svg" />
+      <!-- ... all icons inline ... -->
+    </div>
+
+    <!-- Dark mode -->
+    <div class="dark-section">
+      <h2>深色主題</h2>
+      <div class="icon-grid">
+        <div class="icon-card">
+          <img src="individual/home.svg" />
+          <div class="name">home</div>
+        </div>
+        <!-- ... -->
+      </div>
+    </div>
+  </body>
 </html>
 ```
 
 Open in browser:
+
 - Windows: `start preview.html`
 - macOS/Linux: `open preview.html`
 
 ### Step 5: Iterate with User
 
 Ask the user to review:
+
 - 「所有 icon 的視覺重量是否一致？」
 - 「在一致性檢查中有沒有特別突兀的？」
 - 「在 16dp 小尺寸下是否清楚辨識？」
 - 「哪些需要調整？」
 
 Based on feedback:
+
 1. Regenerate specific icons
 2. Ensure consistency across the full set
 3. Update sprite.svg and preview.html
@@ -306,11 +434,13 @@ Based on feedback:
 Once the user approves the full set:
 
 **6a. Create final directory:**
+
 ```bash
 mkdir -p .skill-archive/designer/icon/<date-name>/final/individual
 ```
 
 **6b. Copy all approved icons + sprite:**
+
 ```bash
 cp individual/*.svg final/individual/
 cp sprite.svg final/sprite.svg
@@ -320,7 +450,7 @@ cp sprite.svg final/sprite.svg
 
 ```tsx
 // Icon.tsx
-import type { SVGProps } from 'react';
+import type { SVGProps } from "react";
 
 interface IconProps extends SVGProps<SVGSVGElement> {
   name: string;
@@ -337,6 +467,7 @@ export function Icon({ name, size = 24, ...props }: IconProps) {
 ```
 
 **6d. Copy to project (if requested):**
+
 ```bash
 mkdir -p src/assets/icons
 cp final/sprite.svg src/assets/icons/sprite.svg
@@ -347,12 +478,12 @@ cp final/individual/*.svg src/assets/icons/
 
 Present final deliverables:
 
-| File | Description |
-|------|-------------|
-| `final/sprite.svg` | Combined symbol sprite |
-| `final/individual/*.svg` | Individual icon files |
-| React component | `Icon.tsx` (if requested) |
-| CSS usage | `<svg><use href="..."/></svg>` |
+| File                     | Description                    |
+| ------------------------ | ------------------------------ |
+| `final/sprite.svg`       | Combined symbol sprite         |
+| `final/individual/*.svg` | Individual icon files          |
+| React component          | `Icon.tsx` (if requested)      |
+| CSS usage                | `<svg><use href="..."/></svg>` |
 
 All files in: `.skill-archive/designer/icon/<yyyy-mm-dd-summaryname>/final/`
 

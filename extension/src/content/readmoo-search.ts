@@ -67,13 +67,18 @@ export async function openSearchModal(
 
   let input: HTMLInputElement;
   try {
-    input = await waitForElement<HTMLInputElement>(SEARCH_INPUT_SELECTOR, timeoutMs);
+    input = await waitForElement<HTMLInputElement>(
+      SEARCH_INPUT_SELECTOR,
+      timeoutMs,
+    );
   } catch {
     throw searchUiNotFound();
   }
 
   const modal = input.closest<HTMLElement>(SEARCH_MODAL_SELECTOR);
-  const submitButton = modal?.querySelector<HTMLButtonElement>(SEARCH_SUBMIT_SELECTOR);
+  const submitButton = modal?.querySelector<HTMLButtonElement>(
+    SEARCH_SUBMIT_SELECTOR,
+  );
   if (!modal || !submitButton) throw searchUiNotFound();
 
   return { modal, input, submitButton };
@@ -98,7 +103,10 @@ function setControlledInputValue(input: HTMLInputElement, value: string): void {
  * Best-effort: resolves on timeout too, since the grid re-render — not the modal
  * removal — is what the caller actually depends on.
  */
-function waitForModalGone(modal: HTMLElement, timeoutMs: number): Promise<void> {
+function waitForModalGone(
+  modal: HTMLElement,
+  timeoutMs: number,
+): Promise<void> {
   return new Promise((resolve) => {
     if (!modal.isConnected) {
       resolve();
@@ -135,7 +143,10 @@ export async function submitSearch(
   const previousQuery = input.value;
   setControlledInputValue(input, query);
   submitButton.click();
-  await waitForModalGone(modal, READMOO_SEARCH_DEFAULTS.searchModalCloseTimeoutMs);
+  await waitForModalGone(
+    modal,
+    READMOO_SEARCH_DEFAULTS.searchModalCloseTimeoutMs,
+  );
   return previousQuery;
 }
 

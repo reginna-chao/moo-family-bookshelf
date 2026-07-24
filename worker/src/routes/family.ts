@@ -1,9 +1,33 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import type { Env } from "../utils/env";
-import { kvKeys, BoolFlag, BorrowStatus, type BorrowRequest, type FamilyMember, type RawFamilyRecord, type QrTokenRecord, type UserBooksRecord, normalizeFamilyRecord, hasMember, findMember, TOKEN_TTL_SECONDS } from "../kv/schema";
-import { isValidUserId, isValidFamilyId, sanitizeDisplayName, validateDisplayName, sanitizeShortString } from "../utils/validation";
-import { generateAuthToken, getOrGenerateAuthToken, deleteAuthToken, getAuthenticatedUserId } from "../middleware/auth";
+import {
+  kvKeys,
+  BoolFlag,
+  BorrowStatus,
+  type BorrowRequest,
+  type FamilyMember,
+  type RawFamilyRecord,
+  type QrTokenRecord,
+  type UserBooksRecord,
+  normalizeFamilyRecord,
+  hasMember,
+  findMember,
+  TOKEN_TTL_SECONDS,
+} from "../kv/schema";
+import {
+  isValidUserId,
+  isValidFamilyId,
+  sanitizeDisplayName,
+  validateDisplayName,
+  sanitizeShortString,
+} from "../utils/validation";
+import {
+  generateAuthToken,
+  getOrGenerateAuthToken,
+  deleteAuthToken,
+  getAuthenticatedUserId,
+} from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { validateVerification } from "./verify";
 import { defaultHook, jsonRes } from "../utils/openapi";
@@ -14,7 +38,12 @@ import { jsonError } from "../utils/errors";
 export const familyRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
 function invalidDisplayNameResponse(c: Context<{ Bindings: Env }>) {
-  return jsonError(c, 400, "INVALID_DISPLAY_NAME", "displayName must be a string of 20 characters or fewer");
+  return jsonError(
+    c,
+    400,
+    "INVALID_DISPLAY_NAME",
+    "displayName must be a string of 20 characters or fewer",
+  );
 }
 
 // --- Route definitions ---
@@ -180,15 +209,27 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
   // Prevent duplicate family creation — user must leave existing family first
   const existingFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
   if (existingFamilyId) {
-    const oldRaw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(existingFamilyId), "json");
+    const oldRaw = await c.env.KV.get<RawFamilyRecord>(
+      kvKeys.family(existingFamilyId),
+      "json",
+    );
     if (oldRaw) {
-      return jsonError(c, 409, "ALREADY_IN_FAMILY", "已有家庭群組，無法再建立新的");
+      return jsonError(
+        c,
+        409,
+        "ALREADY_IN_FAMILY",
+        "已有家庭群組，無法再建立新的",
+      );
     }
     // Orphaned member key (family record missing) — clean up and proceed
     await c.env.KV.delete(kvKeys.member(body.userId));
   }
 
-  const member: FamilyMember = { userId: body.userId, displayName, canLend: BoolFlag.TRUE };
+  const member: FamilyMember = {
+    userId: body.userId,
+    displayName,
+    canLend: BoolFlag.TRUE,
+  };
 
   const record = {
     familyId,
@@ -214,7 +255,12 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   let body: {
@@ -255,7 +301,12 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   // Check if user already belongs to a different family (before verify to avoid leaking membership info)
   const existingFamily = await c.env.KV.get(kvKeys.member(body.userId));
   if (existingFamily && existingFamily !== familyId) {
-    return jsonError(c, 409, "ALREADY_IN_FAMILY", "請先離開目前的家庭再加入新家庭");
+    return jsonError(
+      c,
+      409,
+      "ALREADY_IN_FAMILY",
+      "請先離開目前的家庭再加入新家庭",
+    );
   }
 
   const raw = await c.env.KV.get<RawFamilyRecord>(
@@ -281,7 +332,10 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   // QR token bypass: if a valid one-time QR token is provided, skip verification.
   let skipVerification = false;
   if (body.qrToken && typeof body.qrToken === "string") {
-    const qrRecord = await c.env.KV.get<QrTokenRecord>(kvKeys.qrToken(body.qrToken), "json");
+    const qrRecord = await c.env.KV.get<QrTokenRecord>(
+      kvKeys.qrToken(body.qrToken),
+      "json",
+    );
     if (qrRecord && qrRecord.userId === body.userId) {
       skipVerification = true;
       // One-time use: delete immediately
@@ -293,10 +347,19 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
   // Users with no verification record (method: "none") pass automatically.
   if (!skipVerification) {
-    const verification = await validateVerification(c.env.KV, body.userId, body.verifySecret);
+    const verification = await validateVerification(
+      c.env.KV,
+      body.userId,
+      body.verifySecret,
+    );
     if (!verification.valid && verification.error) {
       return c.json(
-        { error: { code: verification.error.code, message: verification.error.message } },
+        {
+          error: {
+            code: verification.error.code,
+            message: verification.error.message,
+          },
+        },
         verification.error.status as 403 | 429,
       );
     }
@@ -322,7 +385,11 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   if (record.members.length >= record.maxMembers) {
     return jsonError(c, 409, "FAMILY_FULL", "家庭成員已達上限");
   }
-  record.members.push({ userId: body.userId, displayName, canLend: BoolFlag.TRUE });
+  record.members.push({
+    userId: body.userId,
+    displayName,
+    canLend: BoolFlag.TRUE,
+  });
 
   await Promise.all([
     c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
@@ -341,7 +408,12 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   const targetUserId = c.req.param("uid");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   const callerId = getAuthenticatedUserId(c);
@@ -398,7 +470,12 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     await cancelPendingBorrowsForMember(c.env.KV, familyId, targetUserId);
   } catch (err) {
     console.error("BORROW_CLEANUP_FAILED", { familyId, targetUserId, err });
-    return jsonError(c, 500, "BORROW_CLEANUP_FAILED", "Failed to clean up borrow requests; member not removed");
+    return jsonError(
+      c,
+      500,
+      "BORROW_CLEANUP_FAILED",
+      "Failed to clean up borrow requests; member not removed",
+    );
   }
 
   record.members = record.members.filter((m) => m.userId !== targetUserId);
@@ -417,7 +494,12 @@ familyRoutes.openapi(listMembersRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   // Verify caller is authenticated and a member of this family
@@ -451,7 +533,12 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
   const targetUserId = c.req.param("uid");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   if (!isValidUserId(targetUserId)) {
@@ -522,7 +609,12 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
   const targetUserId = c.req.param("uid");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   if (!isValidUserId(targetUserId)) {
@@ -542,7 +634,12 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
   }
 
   if (!body || (body.canLend === undefined && body.readmooName === undefined)) {
-    return jsonError(c, 400, "MISSING_FIELDS", "At least one of canLend or readmooName is required");
+    return jsonError(
+      c,
+      400,
+      "MISSING_FIELDS",
+      "At least one of canLend or readmooName is required",
+    );
   }
 
   // Validate canLend if present
@@ -557,18 +654,27 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
   //   null      → delete field (clear readmooName)
   //   string    → set value (must pass sanitizeShortString: non-empty, ≤ 50 chars after cleaning)
   // Anything else (empty string, numbers, booleans, objects, …) → 400 INVALID_FIELDS.
-  let readmooNameAction: { type: "set"; value: string } | { type: "delete" } | null = null;
+  let readmooNameAction:
+    { type: "set"; value: string } | { type: "delete" } | null = null;
   if (body.readmooName === null) {
     readmooNameAction = { type: "delete" };
   } else if (body.readmooName !== undefined) {
     const sanitized = sanitizeShortString(body.readmooName, 50);
     if (sanitized === null) {
-      return jsonError(c, 400, "INVALID_FIELDS", "readmooName must be a non-empty string of 50 characters or fewer, or null to clear");
+      return jsonError(
+        c,
+        400,
+        "INVALID_FIELDS",
+        "readmooName must be a non-empty string of 50 characters or fewer, or null to clear",
+      );
     }
     readmooNameAction = { type: "set", value: sanitized };
   }
 
-  const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
+  const raw = await c.env.KV.get<RawFamilyRecord>(
+    kvKeys.family(familyId),
+    "json",
+  );
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
   }
@@ -577,23 +683,47 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
 
   // Verify caller is a member
   if (!hasMember(record.members, callerId)) {
-    return jsonError(c, 403, "NOT_FAMILY_MEMBER", "You are not a member of this family");
+    return jsonError(
+      c,
+      403,
+      "NOT_FAMILY_MEMBER",
+      "You are not a member of this family",
+    );
   }
 
   const member = findMember(record.members, targetUserId);
   if (!member) {
-    return jsonError(c, 404, "MEMBER_NOT_FOUND", "Target user is not a family member");
+    return jsonError(
+      c,
+      404,
+      "MEMBER_NOT_FOUND",
+      "Target user is not a family member",
+    );
   }
 
   // Permission checks
   // canLend: only owner can change
   if (body.canLend !== undefined && callerId !== record.ownerId) {
-    return jsonError(c, 403, "FORBIDDEN", "Only the family owner can change canLend");
+    return jsonError(
+      c,
+      403,
+      "FORBIDDEN",
+      "Only the family owner can change canLend",
+    );
   }
 
   // readmooName (set OR clear via null): owner OR the member themselves
-  if (body.readmooName !== undefined && callerId !== record.ownerId && callerId !== targetUserId) {
-    return jsonError(c, 403, "FORBIDDEN", "Only the family owner or the member themselves can change readmooName");
+  if (
+    body.readmooName !== undefined &&
+    callerId !== record.ownerId &&
+    callerId !== targetUserId
+  ) {
+    return jsonError(
+      c,
+      403,
+      "FORBIDDEN",
+      "Only the family owner or the member themselves can change readmooName",
+    );
   }
 
   // Apply updates
@@ -618,7 +748,12 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   const callerUserId = getAuthenticatedUserId(c);
@@ -626,7 +761,11 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  let body: { newOwnerId: string; userId?: string; clearEndpoint?: number } | null;
+  let body: {
+    newOwnerId: string;
+    userId?: string;
+    clearEndpoint?: number;
+  } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -679,7 +818,12 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   const callerId = getAuthenticatedUserId(c);
@@ -704,26 +848,50 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
   }
 
   if (typeof body.apiEndpoint === "string" && body.apiEndpoint.length > 2048) {
-    return jsonError(c, 400, "INVALID_ENDPOINT", "API endpoint URL is too long");
+    return jsonError(
+      c,
+      400,
+      "INVALID_ENDPOINT",
+      "API endpoint URL is too long",
+    );
   }
 
   let normalizedEndpoint: string | null = null;
 
   if (body.apiEndpoint !== null) {
     if (typeof body.apiEndpoint !== "string") {
-      return jsonError(c, 400, "INVALID_ENDPOINT", "apiEndpoint must be a string or null");
+      return jsonError(
+        c,
+        400,
+        "INVALID_ENDPOINT",
+        "apiEndpoint must be a string or null",
+      );
     }
 
     let url: URL;
     try {
       url = new URL(body.apiEndpoint);
     } catch {
-      return jsonError(c, 400, "INVALID_ENDPOINT", "apiEndpoint must be a valid URL");
+      return jsonError(
+        c,
+        400,
+        "INVALID_ENDPOINT",
+        "apiEndpoint must be a valid URL",
+      );
     }
 
-    const isLocalhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalhost)) {
-      return jsonError(c, 400, "INVALID_ENDPOINT", "API endpoint must use HTTPS (or HTTP for localhost)");
+    const isLocalhost =
+      url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    if (
+      url.protocol !== "https:" &&
+      !(url.protocol === "http:" && isLocalhost)
+    ) {
+      return jsonError(
+        c,
+        400,
+        "INVALID_ENDPOINT",
+        "API endpoint must use HTTPS (or HTTP for localhost)",
+      );
     }
 
     // Block private/internal IPs (SSRF prevention)
@@ -733,13 +901,18 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
       if (ipMatch) {
         const [, a, b] = ipMatch.map(Number);
         const isPrivate =
-          a === 10 ||                          // 10.0.0.0/8
+          a === 10 || // 10.0.0.0/8
           (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
-          (a === 192 && b === 168) ||          // 192.168.0.0/16
-          (a === 169 && b === 254) ||          // 169.254.0.0/16 (link-local)
-          a === 0;                             // 0.0.0.0/8
+          (a === 192 && b === 168) || // 192.168.0.0/16
+          (a === 169 && b === 254) || // 169.254.0.0/16 (link-local)
+          a === 0; // 0.0.0.0/8
         if (isPrivate) {
-          return jsonError(c, 400, "INVALID_ENDPOINT", "Private or internal IP addresses are not allowed");
+          return jsonError(
+            c,
+            400,
+            "INVALID_ENDPOINT",
+            "Private or internal IP addresses are not allowed",
+          );
         }
       }
     }
@@ -797,7 +970,8 @@ async function cancelPendingBorrowsForMember(
   for (const req of requests) {
     if (req === null) continue;
     if (req.status !== BorrowStatus.PENDING) continue;
-    if (req.borrowerId !== targetUserId && req.ownerId !== targetUserId) continue;
+    if (req.borrowerId !== targetUserId && req.ownerId !== targetUserId)
+      continue;
 
     req.status = BorrowStatus.CANCELLED;
     req.updatedAt = now;

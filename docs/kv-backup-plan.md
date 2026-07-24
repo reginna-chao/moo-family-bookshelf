@@ -28,20 +28,20 @@
 
 ## 2. 設計決策總覽
 
-| 項目 | 決定 | 理由 |
-|---|---|---|
-| 備份頻率 | **每日 03:00 UTC**（= 台灣時間 11:00） | KV 讀取量小（~1000 keys/day），free tier 綽綽有餘；daily 比 weekly 安全 |
-| 保留期 | **14 天** | 兩週恢復窗口足夠應付「上週某個 bug 誤刪」 |
-| 格式 | **JSONL**（每行一個 key-value pair） | 支援 streaming 序列化、容易 grep、資料變大也能處理 |
-| 環境範圍 | **只有 production**，dev 完全不備份 | dev 沒有值得保存的資料；簡化設定 |
-| Bucket 名稱 | **`moo-family-bookshelf-backups`** | 與 Worker / Pages 命名前綴一致 |
-| 物件路徑 | `daily/YYYY-MM-DD.jsonl` | 扁平結構，方便 list 與 lifecycle rule |
-| Restore 機制 | **本機 script + wrangler**，互動式雙段確認 | 比 admin endpoint 安全，必需有 wrangler 權限才能執行 |
-| 手動觸發 | 加一個 `POST /api/admin/backup` 端點，需 `BACKUP_TRIGGER_TOKEN` | 上線 / migration 前可一鍵 snapshot |
-| 失敗告警 | **v1 不做**，依賴 Cloudflare Dashboard Cron Trigger 紀錄 | YAGNI，真有需要再加 webhook |
-| 備份 metadata | **不備份**（worker 全部 source 沒用到 KV metadata，已 grep 驗證） | 無意義 |
-| 備份內容額外加密 | **不加**（R2 預設 private + 資料為明文 JSON / 雜湊 / UUID，不含 PII） | 降低實作複雜度 |
-| 單一 region | **OK**（不做 multi-region 備份） | 初期不需要 |
+| 項目             | 決定                                                                  | 理由                                                                    |
+| ---------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 備份頻率         | **每日 03:00 UTC**（= 台灣時間 11:00）                                | KV 讀取量小（~1000 keys/day），free tier 綽綽有餘；daily 比 weekly 安全 |
+| 保留期           | **14 天**                                                             | 兩週恢復窗口足夠應付「上週某個 bug 誤刪」                               |
+| 格式             | **JSONL**（每行一個 key-value pair）                                  | 支援 streaming 序列化、容易 grep、資料變大也能處理                      |
+| 環境範圍         | **只有 production**，dev 完全不備份                                   | dev 沒有值得保存的資料；簡化設定                                        |
+| Bucket 名稱      | **`moo-family-bookshelf-backups`**                                    | 與 Worker / Pages 命名前綴一致                                          |
+| 物件路徑         | `daily/YYYY-MM-DD.jsonl`                                              | 扁平結構，方便 list 與 lifecycle rule                                   |
+| Restore 機制     | **本機 script + wrangler**，互動式雙段確認                            | 比 admin endpoint 安全，必需有 wrangler 權限才能執行                    |
+| 手動觸發         | 加一個 `POST /api/admin/backup` 端點，需 `BACKUP_TRIGGER_TOKEN`       | 上線 / migration 前可一鍵 snapshot                                      |
+| 失敗告警         | **v1 不做**，依賴 Cloudflare Dashboard Cron Trigger 紀錄              | YAGNI，真有需要再加 webhook                                             |
+| 備份 metadata    | **不備份**（worker 全部 source 沒用到 KV metadata，已 grep 驗證）     | 無意義                                                                  |
+| 備份內容額外加密 | **不加**（R2 預設 private + 資料為明文 JSON / 雜湊 / UUID，不含 PII） | 降低實作複雜度                                                          |
+| 單一 region      | **OK**（不做 multi-region 備份）                                      | 初期不需要                                                              |
 
 ---
 
@@ -49,22 +49,22 @@
 
 ### 要備份
 
-| Key Pattern | 內容型態 | 備份理由 |
-|---|---|---|
-| `user:{userId}` | 明文 JSON（書櫃與分享設定） | 核心資料：書櫃與分享設定 |
-| `family:{familyId}` | 明文 JSON | 家庭群組（成員 UUID 列表，非 PII） |
-| `member:{userId}` | 明文字串（familyId） | 反向查找，restore 必需 |
-| `verify:{userId}` | 明文 JSON（雜湊 + salt） | PWA 登入驗證設定；雜湊過的非 PII |
-| `public:{shareToken}` | 明文 JSON | 用戶主動建立的公開書櫃 |
+| Key Pattern           | 內容型態                    | 備份理由                           |
+| --------------------- | --------------------------- | ---------------------------------- |
+| `user:{userId}`       | 明文 JSON（書櫃與分享設定） | 核心資料：書櫃與分享設定           |
+| `family:{familyId}`   | 明文 JSON                   | 家庭群組（成員 UUID 列表，非 PII） |
+| `member:{userId}`     | 明文字串（familyId）        | 反向查找，restore 必需             |
+| `verify:{userId}`     | 明文 JSON（雜湊 + salt）    | PWA 登入驗證設定；雜湊過的非 PII   |
+| `public:{shareToken}` | 明文 JSON                   | 用戶主動建立的公開書櫃             |
 
 ### 不備份
 
-| Key Pattern | 不備份原因 |
-|---|---|
-| `auth:{userId}` | 90 天 TTL，重新登入可重建 |
-| `token:{tokenHash}` | 同上 |
-| `otp:{userId}` | 5 分鐘 TTL，無意義 |
-| `ratelimit:*` | 2 分鐘 TTL，無意義 |
+| Key Pattern         | 不備份原因                |
+| ------------------- | ------------------------- |
+| `auth:{userId}`     | 90 天 TTL，重新登入可重建 |
+| `token:{tokenHash}` | 同上                      |
+| `otp:{userId}`      | 5 分鐘 TTL，無意義        |
+| `ratelimit:*`       | 2 分鐘 TTL，無意義        |
 
 ---
 
@@ -126,6 +126,7 @@ wrangler r2 bucket list
 
 可透過 wrangler 或 Cloudflare Dashboard 設定。Dashboard 路徑：
 **R2 → moo-family-bookshelf-backups → Settings → Object Lifecycle Rules → Add Rule**
+
 - Rule name: `delete-after-14-days`
 - Prefix: `daily/`
 - Action: `Delete objects` after `14 days`
@@ -169,14 +170,14 @@ wrangler secret put BACKUP_TRIGGER_TOKEN --env production
 
 ## 7. 風險與開放問題
 
-| # | 議題 | 嚴重度 | 處理方式 |
-|---|---|---|---|
-| R1 | KV `list()` 單次回 1000 keys，需要分頁 | 中 | exporter 必須處理 `cursor` 迴圈，否則資料量變大會漏備份 |
-| R2 | Backup 是 eventually-consistent snapshot，不是 transaction | 低 | KV 本身的限制，無解；在 manifest 註記 backup 時間範圍 |
-| R3 | Restore 會覆寫現有資料 | 高 | restore script 必須兩段確認（顯示要還原的 key 數量 + 提示輸入確認字串如 `RESTORE FROM 2026-04-14`） |
-| R4 | Daily cron 失敗無人知道 | 中 | v1 不解，依賴 CF Dashboard Cron Trigger 紀錄；若有實際漏備份事件再加 webhook |
-| R5 | R2 free tier 限制：10 GB 儲存、Class A 每月 100 萬次 | 低 | 估算資料量 ~5-10 MB × 14 snapshots = 140 MB，遠低於上限 |
-| R6 | **Miniflare R2 支援未驗證**，可能影響本機開發 | 高 | 實作前必須先跑 spike 驗證 |
+| #   | 議題                                                       | 嚴重度 | 處理方式                                                                                            |
+| --- | ---------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------- |
+| R1  | KV `list()` 單次回 1000 keys，需要分頁                     | 中     | exporter 必須處理 `cursor` 迴圈，否則資料量變大會漏備份                                             |
+| R2  | Backup 是 eventually-consistent snapshot，不是 transaction | 低     | KV 本身的限制，無解；在 manifest 註記 backup 時間範圍                                               |
+| R3  | Restore 會覆寫現有資料                                     | 高     | restore script 必須兩段確認（顯示要還原的 key 數量 + 提示輸入確認字串如 `RESTORE FROM 2026-04-14`） |
+| R4  | Daily cron 失敗無人知道                                    | 中     | v1 不解，依賴 CF Dashboard Cron Trigger 紀錄；若有實際漏備份事件再加 webhook                        |
+| R5  | R2 free tier 限制：10 GB 儲存、Class A 每月 100 萬次       | 低     | 估算資料量 ~5-10 MB × 14 snapshots = 140 MB，遠低於上限                                             |
+| R6  | **Miniflare R2 支援未驗證**，可能影響本機開發              | 高     | 實作前必須先跑 spike 驗證                                                                           |
 
 ---
 

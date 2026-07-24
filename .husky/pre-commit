@@ -1,1 +1,3 @@
-pnpm lint-staged
+# --concurrent false keeps the ordering of the lint-staged entries: ESLint --fix
+# runs before Prettier --write on the same staged file, so the two never race.
+pnpm lint-staged --concurrent false

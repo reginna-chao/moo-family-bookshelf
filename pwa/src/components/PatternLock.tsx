@@ -12,7 +12,11 @@ const DOT_COUNT = GRID_SIZE * GRID_SIZE;
 const MIN_DOTS = 4;
 
 /** Grid layout: 0-1-2 / 3-4-5 / 6-7-8 */
-function dotPosition(index: number, cellSize: number, padding: number): { cx: number; cy: number } {
+function dotPosition(
+  index: number,
+  cellSize: number,
+  padding: number,
+): { cx: number; cy: number } {
   const col = index % GRID_SIZE;
   const row = Math.floor(index / GRID_SIZE);
   return {
@@ -21,13 +25,20 @@ function dotPosition(index: number, cellSize: number, padding: number): { cx: nu
   };
 }
 
-export function PatternLock({ onComplete, mode, error, onCancel }: PatternLockProps) {
+export function PatternLock({
+  onComplete,
+  mode,
+  error,
+  onCancel,
+}: PatternLockProps) {
   const [selected, setSelected] = useState<number[]>([]);
   const [confirmPattern, setConfirmPattern] = useState("");
   const [isConfirming, setIsConfirming] = useState(false);
   const [mismatchError, setMismatchError] = useState("");
   const [isDrawing, setIsDrawing] = useState(false);
-  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const svgRef = useRef<SVGSVGElement>(null);
 
   const cellSize = 80;
@@ -35,12 +46,20 @@ export function PatternLock({ onComplete, mode, error, onCancel }: PatternLockPr
   const svgSize = cellSize * GRID_SIZE + padding * 2;
 
   const getEventPos = useCallback(
-    (e: React.TouchEvent | React.MouseEvent | TouchEvent | MouseEvent): { x: number; y: number } | null => {
+    (
+      e: React.TouchEvent | React.MouseEvent | TouchEvent | MouseEvent,
+    ): { x: number; y: number } | null => {
       const svg = svgRef.current;
       if (!svg) return null;
       const rect = svg.getBoundingClientRect();
-      const clientX = "touches" in e ? e.touches[0]?.clientX ?? 0 : (e as MouseEvent).clientX;
-      const clientY = "touches" in e ? e.touches[0]?.clientY ?? 0 : (e as MouseEvent).clientY;
+      const clientX =
+        "touches" in e
+          ? (e.touches[0]?.clientX ?? 0)
+          : (e as MouseEvent).clientX;
+      const clientY =
+        "touches" in e
+          ? (e.touches[0]?.clientY ?? 0)
+          : (e as MouseEvent).clientY;
       return {
         x: ((clientX - rect.left) / rect.width) * svgSize,
         y: ((clientY - rect.top) / rect.height) * svgSize,
@@ -149,7 +168,12 @@ export function PatternLock({ onComplete, mode, error, onCancel }: PatternLockPr
   const displayError = mismatchError || error;
 
   // Build line segments for connected dots
-  const lineSegments: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+  const lineSegments: Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  }> = [];
   for (let i = 1; i < selected.length; i++) {
     const from = dotPosition(selected[i - 1], cellSize, padding);
     const to = dotPosition(selected[i], cellSize, padding);
@@ -159,7 +183,12 @@ export function PatternLock({ onComplete, mode, error, onCancel }: PatternLockPr
   // Trailing line to cursor
   if (isDrawing && cursorPos && selected.length > 0) {
     const last = dotPosition(selected[selected.length - 1], cellSize, padding);
-    lineSegments.push({ x1: last.cx, y1: last.cy, x2: cursorPos.x, y2: cursorPos.y });
+    lineSegments.push({
+      x1: last.cx,
+      y1: last.cy,
+      x2: cursorPos.x,
+      y2: cursorPos.y,
+    });
   }
 
   return (

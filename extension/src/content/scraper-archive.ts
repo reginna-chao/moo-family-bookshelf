@@ -6,7 +6,11 @@
  */
 
 import { BoolFlag } from "../api/client";
-import { scrapeBooks, type ScrapedBook, type ScrapeBooksOptions } from "./scraper";
+import {
+  scrapeBooks,
+  type ScrapedBook,
+  type ScrapeBooksOptions,
+} from "./scraper";
 
 /** Wait for `ms` milliseconds. */
 function wait(ms: number): Promise<void> {

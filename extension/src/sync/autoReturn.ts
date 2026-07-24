@@ -51,7 +51,10 @@ export async function applyAutoReturns(
   const succeeded: string[] = [];
   for (const request of requests) {
     try {
-      await apiClient.updateBorrowStatus(request.requestId, BorrowStatus.RETURNED);
+      await apiClient.updateBorrowStatus(
+        request.requestId,
+        BorrowStatus.RETURNED,
+      );
       succeeded.push(request.requestId);
     } catch (err) {
       console.warn(

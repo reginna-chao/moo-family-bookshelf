@@ -1,9 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  beforeAll,
+} from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { webcrypto } from "node:crypto";
 import { LandingPage } from "@/pages/LandingPage";
-
 
 // Mock crypto modules
 vi.mock("@/crypto/syncCode", () => ({
@@ -36,7 +43,10 @@ import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {
-    Object.defineProperty(globalThis, "crypto", { value: webcrypto, writable: true });
+    Object.defineProperty(globalThis, "crypto", {
+      value: webcrypto,
+      writable: true,
+    });
   }
 });
 
@@ -49,7 +59,8 @@ function fillInput(label: string, value: string) {
 }
 
 function submitForm() {
-  const form = screen.getByRole("button", { name: /開始使用|處理中/ })
+  const form = screen
+    .getByRole("button", { name: /開始使用|處理中/ })
     .closest("form")!;
   fireEvent.submit(form);
 }
@@ -63,8 +74,12 @@ describe("LandingPage", () => {
     mockJoinFamily.mockReset();
     mockGetVerifyMethod.mockReset();
     // Default: no verification, joinFamily succeeds with token
-    mockGetVerifyMethod.mockResolvedValue({ data: { method: "none", prompted: 0 } });
-    mockJoinFamily.mockResolvedValue({ data: { ok: true, authToken: "tok-123" } as unknown as { ok: boolean } });
+    mockGetVerifyMethod.mockResolvedValue({
+      data: { method: "none", prompted: 0 },
+    });
+    mockJoinFamily.mockResolvedValue({
+      data: { ok: true, authToken: "tok-123" } as unknown as { ok: boolean },
+    });
   });
 
   afterEach(() => {
@@ -85,10 +100,10 @@ describe("LandingPage", () => {
     it("should show placeholders", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
-      expect(screen.getByPlaceholderText("moo-xxxxxxxx-xxxxxxxxxxxx")).toBeInTheDocument();
       expect(
-        screen.getByPlaceholderText("your@email.com"),
+        screen.getByPlaceholderText("moo-xxxxxxxx-xxxxxxxxxxxx"),
       ).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("your@email.com")).toBeInTheDocument();
     });
   });
 
@@ -99,9 +114,7 @@ describe("LandingPage", () => {
       submitForm();
 
       await waitFor(() => {
-        expect(
-          screen.getByText("請輸入同步碼。"),
-        ).toBeInTheDocument();
+        expect(screen.getByText("請輸入同步碼。")).toBeInTheDocument();
       });
       expect(mockOnAuth).not.toHaveBeenCalled();
     });
@@ -198,9 +211,7 @@ describe("LandingPage", () => {
       submitForm();
 
       await waitFor(() => {
-        expect(
-          screen.getByText("Email 格式不正確。"),
-        ).toBeInTheDocument();
+        expect(screen.getByText("Email 格式不正確。")).toBeInTheDocument();
       });
       expect(mockOnAuth).not.toHaveBeenCalled();
     });
@@ -222,9 +233,7 @@ describe("LandingPage", () => {
 
       fillInput("讀墨帳號 Email", "badx");
 
-      expect(
-        screen.queryByText("Email 格式不正確。"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText("Email 格式不正確。")).not.toBeInTheDocument();
     });
   });
 
@@ -415,12 +424,7 @@ describe("LandingPage", () => {
     });
 
     it("should not pre-fill when initialSyncCode is empty", () => {
-      render(
-        <LandingPage
-          onAuth={mockOnAuth}
-          initialSyncCode=""
-        />,
-      );
+      render(<LandingPage onAuth={mockOnAuth} initialSyncCode="" />);
 
       const syncCodeInput = screen.getByLabelText("同步碼") as HTMLInputElement;
       expect(syncCodeInput.value).toBe("");
@@ -429,7 +433,10 @@ describe("LandingPage", () => {
 
   describe("remembered sync code from localStorage", () => {
     it("should pre-fill sync code from REMEMBERED_LOGOUT_KEY on mount", () => {
-      localStorage.setItem("moo:rememberedLogout", "moo-fam1-key1@custom.host.com");
+      localStorage.setItem(
+        "moo:rememberedLogout",
+        "moo-fam1-key1@custom.host.com",
+      );
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
@@ -471,7 +478,9 @@ describe("LandingPage", () => {
       render(<LandingPage onAuth={mockOnAuth} />);
 
       // Uncheck the checkbox via change event
-      const checkbox = screen.getByRole("checkbox", { name: /記住同步碼/ }) as HTMLInputElement;
+      const checkbox = screen.getByRole("checkbox", {
+        name: /記住同步碼/,
+      }) as HTMLInputElement;
       fireEvent.change(checkbox, { target: { checked: false } });
       expect(checkbox.checked).toBe(false);
 
@@ -503,7 +512,9 @@ describe("LandingPage", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "顯示同步碼" }));
       expect(syncInput.type).toBe("text");
-      expect(screen.getByRole("button", { name: "隱藏同步碼" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "隱藏同步碼" }),
+      ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "隱藏同步碼" }));
       expect(syncInput.type).toBe("password");
@@ -530,7 +541,9 @@ describe("LandingPage", () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
       });
-      mockGetVerifyMethod.mockResolvedValue({ data: { method: "pin", prompted: 1 } });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "pin", prompted: 1 },
+      });
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
@@ -550,7 +563,9 @@ describe("LandingPage", () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
       });
-      mockGetVerifyMethod.mockResolvedValue({ data: { method: "pattern", prompted: 1 } });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "pattern", prompted: 1 },
+      });
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
@@ -569,7 +584,9 @@ describe("LandingPage", () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
       });
-      mockGetVerifyMethod.mockResolvedValue({ data: { method: "code", prompted: 1 } });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "code", prompted: 1 },
+      });
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
@@ -579,7 +596,9 @@ describe("LandingPage", () => {
 
       await waitFor(() => {
         expect(screen.getByText("輸入驗證碼")).toBeInTheDocument();
-        expect(screen.getByText("請在電腦版 Extension 查看驗證碼")).toBeInTheDocument();
+        expect(
+          screen.getByText("請在電腦版 Extension 查看驗證碼"),
+        ).toBeInTheDocument();
       });
 
       expect(mockJoinFamily).not.toHaveBeenCalled();
@@ -589,7 +608,9 @@ describe("LandingPage", () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
       });
-      mockGetVerifyMethod.mockResolvedValue({ data: { method: "pin", prompted: 1 } });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "pin", prompted: 1 },
+      });
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
@@ -612,7 +633,9 @@ describe("LandingPage", () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
       });
-      mockGetVerifyMethod.mockResolvedValue({ data: { method: "code", prompted: 1 } });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "code", prompted: 1 },
+      });
       mockJoinFamily.mockResolvedValue({
         error: { code: "VERIFICATION_FAILED", message: "Wrong code" },
       });
@@ -643,7 +666,9 @@ describe("LandingPage", () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
       });
-      mockGetVerifyMethod.mockResolvedValue({ data: { method: "none", prompted: 1 } });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "none", prompted: 1 },
+      });
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
@@ -663,7 +688,9 @@ describe("LandingPage", () => {
         familyId: "fam-qr",
         apiHost: "qr.host.com",
       });
-      mockGetVerifyMethod.mockResolvedValue({ data: { method: "none", prompted: 1 } });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "none", prompted: 1 },
+      });
 
       render(
         <LandingPage
@@ -680,7 +707,8 @@ describe("LandingPage", () => {
           expect.objectContaining({ verifySecret: undefined }),
         );
         expect(mockOnAuth).toHaveBeenCalledWith({
-          userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+          userId:
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
           familyId: "fam-qr",
           apiHost: "qr.host.com",
           authToken: "tok-123",
@@ -692,7 +720,9 @@ describe("LandingPage", () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-qr",
       });
-      mockGetVerifyMethod.mockResolvedValue({ data: { method: "pin", prompted: 1 } });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "pin", prompted: 1 },
+      });
 
       render(
         <LandingPage

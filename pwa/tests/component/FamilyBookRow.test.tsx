@@ -6,7 +6,9 @@ import { FamilyBookRow } from "@/components/FamilyBookRow";
 import type { FamilyBookRowBook } from "@/components/FamilyBookRow";
 import { BoolFlag } from "@/api/client";
 
-function makeBook(overrides: Partial<FamilyBookRowBook> = {}): FamilyBookRowBook {
+function makeBook(
+  overrides: Partial<FamilyBookRowBook> = {},
+): FamilyBookRowBook {
   return {
     bookId: "book-1",
     title: "測試書名",
@@ -47,7 +49,9 @@ describe("FamilyBookRow", () => {
   it("shows borrow button when showBorrowButton is true", () => {
     render(<FamilyBookRow book={makeBook()} showBorrowButton />);
 
-    expect(screen.getByRole("button", { name: "申請借閱" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "申請借閱" }),
+    ).toBeInTheDocument();
   });
 
   it("hides borrow button when showBorrowButton is false", () => {
@@ -58,14 +62,22 @@ describe("FamilyBookRow", () => {
 
   it("calls onBorrowClick when borrow button is clicked", () => {
     const onBorrowClick = vi.fn();
-    render(<FamilyBookRow book={makeBook()} showBorrowButton onBorrowClick={onBorrowClick} />);
+    render(
+      <FamilyBookRow
+        book={makeBook()}
+        showBorrowButton
+        onBorrowClick={onBorrowClick}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "申請借閱" }));
     expect(onBorrowClick).toHaveBeenCalledTimes(1);
   });
 
   it("shows disabled button with '申請中' when borrowRequestPending is true", () => {
-    render(<FamilyBookRow book={makeBook()} showBorrowButton borrowRequestPending />);
+    render(
+      <FamilyBookRow book={makeBook()} showBorrowButton borrowRequestPending />,
+    );
 
     const button = screen.getByRole("button", { name: "申請中" });
     expect(button).toBeDisabled();
@@ -97,30 +109,50 @@ describe("FamilyBookRow", () => {
   describe("hide action overflow menu (v1.5.0)", () => {
     it("renders the overflow trigger when onHideToggle and label are provided", () => {
       render(
-        <FamilyBookRow book={makeBook()} onHideToggle={() => {}} hideActionLabel="隱藏書籍" />,
+        <FamilyBookRow
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="隱藏書籍"
+        />,
       );
-      expect(screen.getByRole("button", { name: "更多選項" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "更多選項" }),
+      ).toBeInTheDocument();
     });
 
     it("shows the hide label as a menuitem after opening the menu", () => {
       render(
-        <FamilyBookRow book={makeBook()} onHideToggle={() => {}} hideActionLabel="隱藏書籍" />,
+        <FamilyBookRow
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="隱藏書籍"
+        />,
       );
       fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
-      expect(screen.getByRole("menuitem", { name: "隱藏書籍" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("menuitem", { name: "隱藏書籍" }),
+      ).toBeInTheDocument();
     });
 
     it("shows the unhide label as a menuitem in showHidden mode", () => {
       render(
-        <FamilyBookRow book={makeBook()} onHideToggle={() => {}} hideActionLabel="取消隱藏" />,
+        <FamilyBookRow
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="取消隱藏"
+        />,
       );
       fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
-      expect(screen.getByRole("menuitem", { name: "取消隱藏" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("menuitem", { name: "取消隱藏" }),
+      ).toBeInTheDocument();
     });
 
     it("does not render the overflow trigger when onHideToggle is missing", () => {
       render(<FamilyBookRow book={makeBook()} hideActionLabel="隱藏書籍" />);
-      expect(screen.queryByRole("button", { name: "更多選項" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "更多選項" }),
+      ).not.toBeInTheDocument();
     });
 
     it("calls onHideToggle when the menuitem is clicked", () => {

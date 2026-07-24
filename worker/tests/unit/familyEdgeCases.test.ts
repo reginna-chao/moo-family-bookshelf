@@ -9,8 +9,15 @@ type Json = any;
 
 let kv: KVNamespace;
 
-function request(method: string, path: string, body?: unknown, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
@@ -19,8 +26,15 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-function rawRequest(method: string, path: string, rawBody: string, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function rawRequest(
+  method: string,
+  path: string,
+  rawBody: string,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
@@ -42,7 +56,9 @@ async function createFamily(userId = USER1) {
 
 async function createFamilyWithTwoMembers() {
   const { familyId, authToken: token1 } = await createFamily(USER1);
-  const joinRes = await request("POST", `/api/family/${familyId}/join`, { userId: USER2 });
+  const joinRes = await request("POST", `/api/family/${familyId}/join`, {
+    userId: USER2,
+  });
   const joinJson = (await joinRes.json()) as Json;
   const token2 = joinJson.data.authToken as string;
   return { familyId, token1, token2 };
@@ -102,11 +118,9 @@ describe("PUT /api/family/:id/transfer edge cases", () => {
   it("should return 401 UNAUTHORIZED without auth token", async () => {
     const { familyId } = await createFamilyWithTwoMembers();
 
-    const res = await request(
-      "PUT",
-      `/api/family/${familyId}/transfer`,
-      { newOwnerId: USER2 },
-    );
+    const res = await request("PUT", `/api/family/${familyId}/transfer`, {
+      newOwnerId: USER2,
+    });
     expect(res.status).toBe(401);
   });
 });
@@ -168,14 +182,20 @@ describe("DELETE /api/family/:id/member/:uid edge cases", () => {
 
 describe("POST /api/family/:id/join edge cases", () => {
   it("should return 400 INVALID_FAMILY_ID for invalid family ID on join", async () => {
-    const res = await request("POST", "/api/family/INVALID/join", { userId: USER1 });
+    const res = await request("POST", "/api/family/INVALID/join", {
+      userId: USER1,
+    });
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_FAMILY_ID");
   });
 
   it("should return 400 INVALID_JSON for malformed JSON on join", async () => {
-    const res = await rawRequest("POST", "/api/family/abcd-1234/join", "{bad json}");
+    const res = await rawRequest(
+      "POST",
+      "/api/family/abcd-1234/join",
+      "{bad json}",
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_JSON");
@@ -191,7 +211,9 @@ describe("POST /api/family/:id/join edge cases", () => {
 
   it("should return 400 INVALID_USER_ID for invalid userId on join", async () => {
     const { familyId } = await createFamily(USER1);
-    const res = await request("POST", `/api/family/${familyId}/join`, { userId: "user<script>" });
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: "user<script>",
+    });
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_USER_ID");
@@ -206,7 +228,12 @@ describe("GET /api/family/:id/members edge cases", () => {
   it("should return 400 INVALID_FAMILY_ID for invalid family ID", async () => {
     const { authToken } = await createFamily(USER1);
 
-    const res = await request("GET", "/api/family/INVALID/members", undefined, authToken);
+    const res = await request(
+      "GET",
+      "/api/family/INVALID/members",
+      undefined,
+      authToken,
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_FAMILY_ID");
@@ -216,7 +243,12 @@ describe("GET /api/family/:id/members edge cases", () => {
     const { authToken } = await createFamily(USER1);
 
     // user1 is a member of their own family, not abcd-1234
-    const res = await request("GET", "/api/family/abcd-1234/members", undefined, authToken);
+    const res = await request(
+      "GET",
+      "/api/family/abcd-1234/members",
+      undefined,
+      authToken,
+    );
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("NOT_FOUND");
@@ -228,7 +260,12 @@ describe("GET /api/family/:id/members edge cases", () => {
     // Delete the family record from KV but keep the member mapping
     await kv.delete(`family:${familyId}`);
 
-    const res = await request("GET", `/api/family/${familyId}/members`, undefined, authToken);
+    const res = await request(
+      "GET",
+      `/api/family/${familyId}/members`,
+      undefined,
+      authToken,
+    );
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("FAMILY_NOT_FOUND");
@@ -261,14 +298,22 @@ describe("PUT /api/family/:id/member/:uid/displayName edge cases", () => {
 
 describe("Index fallback routes", () => {
   it("should return 404 for unknown routes", async () => {
-    const res = await app.request("/nonexistent", { method: "GET" }, { KV: kv, DEV_MODE: "1" });
+    const res = await app.request(
+      "/nonexistent",
+      { method: "GET" },
+      { KV: kv, DEV_MODE: "1" },
+    );
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("NOT_FOUND");
   });
 
   it("should return health check response on root", async () => {
-    const res = await app.request("/", { method: "GET" }, { KV: kv, DEV_MODE: "1" });
+    const res = await app.request(
+      "/",
+      { method: "GET" },
+      { KV: kv, DEV_MODE: "1" },
+    );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.status).toBe("ok");
@@ -277,11 +322,21 @@ describe("Index fallback routes", () => {
   it("should return 500 INTERNAL_ERROR when an unhandled error occurs", async () => {
     // Create a KV that throws on get to trigger an unhandled error in route handler
     const brokenKv = {
-      get: async () => { throw new Error("KV unavailable"); },
-      put: async () => { throw new Error("KV unavailable"); },
-      delete: async () => { throw new Error("KV unavailable"); },
-      list: async () => { throw new Error("KV unavailable"); },
-      getWithMetadata: async () => { throw new Error("KV unavailable"); },
+      get: async () => {
+        throw new Error("KV unavailable");
+      },
+      put: async () => {
+        throw new Error("KV unavailable");
+      },
+      delete: async () => {
+        throw new Error("KV unavailable");
+      },
+      list: async () => {
+        throw new Error("KV unavailable");
+      },
+      getWithMetadata: async () => {
+        throw new Error("KV unavailable");
+      },
     } as unknown as KVNamespace;
 
     // POST /api/family is a public route (no auth needed), triggers KV.get which will throw

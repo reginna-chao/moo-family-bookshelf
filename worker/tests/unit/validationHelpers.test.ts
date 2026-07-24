@@ -33,4 +33,3 @@ describe("isValidSha256Hex", () => {
     expect(isValidSha256Hex("a".repeat(63) + " ")).toBe(false);
   });
 });
-

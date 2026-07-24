@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  within,
+} from "@testing-library/react";
 import React from "react";
 import { BookSortDropdown } from "@/components/BookSortDropdown";
 import type { BookSortMode } from "@/utils/sortBooks";
@@ -35,7 +41,10 @@ describe("BookSortDropdown", () => {
       "作者 A → Z",
       "作者 Z → A",
     ]);
-    expect(screen.getByLabelText("排序方式")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("排序方式")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
   it.each<{ value: BookSortMode; label: string }>([
@@ -44,13 +53,16 @@ describe("BookSortDropdown", () => {
     { value: "title-desc", label: "書名 Z → A" },
     { value: "author-asc", label: "作者 A → Z" },
     { value: "author-desc", label: "作者 Z → A" },
-  ])("marks option '$label' as selected when value is '$value'", ({ value, label }) => {
-    render(<BookSortDropdown value={value} onChange={vi.fn()} />);
+  ])(
+    "marks option '$label' as selected when value is '$value'",
+    ({ value, label }) => {
+      render(<BookSortDropdown value={value} onChange={vi.fn()} />);
 
-    const listbox = openListbox();
-    const selected = within(listbox).getByRole("option", { name: label });
-    expect(selected).toHaveAttribute("aria-selected", "true");
-  });
+      const listbox = openListbox();
+      const selected = within(listbox).getByRole("option", { name: label });
+      expect(selected).toHaveAttribute("aria-selected", "true");
+    },
+  );
 
   it.each<{ label: string; expected: BookSortMode }>([
     { label: "預設順序", expected: "default" },
@@ -58,25 +70,34 @@ describe("BookSortDropdown", () => {
     { label: "書名 Z → A", expected: "title-desc" },
     { label: "作者 A → Z", expected: "author-asc" },
     { label: "作者 Z → A", expected: "author-desc" },
-  ])("calls onChange('$expected') and closes when selecting $label", ({ label, expected }) => {
-    const onChange = vi.fn();
-    render(<BookSortDropdown value="default" onChange={onChange} />);
+  ])(
+    "calls onChange('$expected') and closes when selecting $label",
+    ({ label, expected }) => {
+      const onChange = vi.fn();
+      render(<BookSortDropdown value="default" onChange={onChange} />);
 
-    const listbox = openListbox();
-    fireEvent.click(within(listbox).getByRole("option", { name: label }));
+      const listbox = openListbox();
+      fireEvent.click(within(listbox).getByRole("option", { name: label }));
 
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith(expected);
-    // Popover closes after selection.
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-  });
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith(expected);
+      // Popover closes after selection.
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    },
+  );
 
   it("applies active styling when value is not 'default'", () => {
-    const { rerender } = render(<BookSortDropdown value="default" onChange={vi.fn()} />);
-    expect(screen.getByLabelText("排序方式").className).not.toContain("border-blue-500");
+    const { rerender } = render(
+      <BookSortDropdown value="default" onChange={vi.fn()} />,
+    );
+    expect(screen.getByLabelText("排序方式").className).not.toContain(
+      "border-blue-500",
+    );
 
     rerender(<BookSortDropdown value="title-asc" onChange={vi.fn()} />);
-    expect(screen.getByLabelText("排序方式").className).toContain("border-blue-500");
+    expect(screen.getByLabelText("排序方式").className).toContain(
+      "border-blue-500",
+    );
   });
 
   it("closes the popover on an outside mousedown", () => {
