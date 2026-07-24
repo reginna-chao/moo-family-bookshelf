@@ -19,6 +19,18 @@ import { useAutoSetup } from "@/dialog/useAutoSetup";
 import { scrapeUserEmail } from "@/content/scraper";
 import { mergeBooks } from "@/dialog/mergeBooks";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
+import { LAST_SYNC_AT_KEY } from "@/constants";
+
+/** Return the value written to LAST_SYNC_AT_KEY across all storage.set calls, or undefined. */
+function lastSyncWrittenValue(): unknown {
+  const calls = vi.mocked(chrome.storage.local.set).mock.calls;
+  for (const [items] of calls) {
+    if (items && typeof items === "object" && LAST_SYNC_AT_KEY in items) {
+      return (items as Record<string, unknown>)[LAST_SYNC_AT_KEY];
+    }
+  }
+  return undefined;
+}
 
 function createMockApiClient(): ApiClient {
   return {
@@ -133,6 +145,66 @@ describe("useAutoSetup", () => {
 
     expect(success).toBe(true);
     expect(result.current.phase).toBe("done");
+  });
+
+  describe("syncBooks — last-sync timestamp (throttle guard)", () => {
+    it("writes LAST_SYNC_AT_KEY with the current time after a successful upload", async () => {
+      vi.setSystemTime(new Date("2026-07-23T00:00:00.000Z"));
+      const mockApi = createMockApiClient();
+      const { result } = renderHook(() => useAutoSetup());
+
+      const promise = act(async () => {
+        await result.current.syncBooks({ userId: "user-hash", apiClient: mockApi });
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+
+      const written = lastSyncWrittenValue();
+      expect(typeof written).toBe("number");
+      // Fake timers freeze after advancing, so Date.now() equals the value
+      // captured when the hook wrote it.
+      expect(written).toBe(Date.now());
+    });
+
+    it("does NOT write LAST_SYNC_AT_KEY when the upload responds with an error", async () => {
+      const mockApi = {
+        getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+        updatePersonalBooks: vi
+          .fn()
+          .mockResolvedValue({ error: { code: "UPLOAD_FAILED", message: "上傳失敗" } }),
+      } as unknown as ApiClient;
+      const { result } = renderHook(() => useAutoSetup());
+
+      let success = true;
+      const promise = act(async () => {
+        success = await result.current.syncBooks({ userId: "user-hash", apiClient: mockApi });
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+
+      expect(success).toBe(false);
+      expect(result.current.phase).toBe("error");
+      expect(lastSyncWrittenValue()).toBeUndefined();
+    });
+
+    it("does NOT write LAST_SYNC_AT_KEY when scraping throws", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockRejectedValueOnce(new Error("scrape boom"));
+      const mockApi = createMockApiClient();
+      const { result } = renderHook(() => useAutoSetup());
+
+      let success = true;
+      const promise = act(async () => {
+        success = await result.current.syncBooks({ userId: "user-hash", apiClient: mockApi });
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+
+      expect(success).toBe(false);
+      expect(result.current.phase).toBe("error");
+      expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
+      expect(lastSyncWrittenValue()).toBeUndefined();
+    });
   });
 
   describe("phaseMessage — dynamic progress (Wave G)", () => {

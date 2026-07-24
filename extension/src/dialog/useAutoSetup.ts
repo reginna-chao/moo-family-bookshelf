@@ -8,7 +8,7 @@ import {
 } from "../content/scraper";
 import { mergeBooks } from "./mergeBooks";
 import { ApiClient, BookEntry, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
-import { USER_EMAIL_KEY, DISPLAY_NAME_KEY } from "../constants";
+import { USER_EMAIL_KEY, DISPLAY_NAME_KEY, LAST_SYNC_AT_KEY } from "../constants";
 
 export type AutoSetupPhase =
   | "idle"
@@ -164,6 +164,11 @@ export function useAutoSetup(): UseAutoSetupReturn {
           restoreHash();
           return false;
         }
+
+        // Record the successful sync timestamp so the personal-shelf mount
+        // auto-sync (gated by canAutoSync() via LAST_SYNC_AT_KEY) does not
+        // treat a freshly onboarded user as never-synced and double-sync.
+        await browser.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now() });
 
         restoreHash();
         setPhase("done");
