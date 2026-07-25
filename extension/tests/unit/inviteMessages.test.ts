@@ -28,12 +28,12 @@ describe("buildSyncCodeInviteMessage", () => {
     );
   });
 
-  it.each([
-    "moo-abcd-1234",
-    "moo-ef01-5678@https://my.worker.dev",
-  ])("interpolates the variant sync code %s", (code) => {
-    expect(buildSyncCodeInviteMessage(code)).toContain(code);
-  });
+  it.each(["moo-abcd-1234", "moo-ef01-5678@https://my.worker.dev"])(
+    "interpolates the variant sync code %s",
+    (code) => {
+      expect(buildSyncCodeInviteMessage(code)).toContain(code);
+    },
+  );
 });
 
 describe("buildLinkInviteMessage", () => {

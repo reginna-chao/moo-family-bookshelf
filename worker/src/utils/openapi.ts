@@ -11,7 +11,12 @@ export function jsonRes(description: string) {
 export const defaultHook = (result: { success: boolean }, c: any) => {
   if (!result.success) {
     return c.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
+      {
+        error: {
+          code: "INVALID_JSON",
+          message: "Request body must be valid JSON",
+        },
+      },
       400,
     );
   }

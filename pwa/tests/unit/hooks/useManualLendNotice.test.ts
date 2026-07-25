@@ -36,9 +36,9 @@ describe("useManualLendNotice", () => {
     });
 
     expect(result.current.isDismissed).toBe(true);
-    expect(
-      localStorage.getItem(namespacedKey(USER_ID, STORAGE_SUFFIX)),
-    ).toBe("true");
+    expect(localStorage.getItem(namespacedKey(USER_ID, STORAGE_SUFFIX))).toBe(
+      "true",
+    );
   });
 
   it("uses the correct namespaced key (moo:{userId}:manualLendNoticeDismissed)", () => {

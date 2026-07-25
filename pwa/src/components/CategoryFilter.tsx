@@ -30,7 +30,11 @@ function buildCategories(books: { category: string }[]): CategoryOption[] {
     });
 }
 
-export function CategoryFilter({ books, value, onChange }: CategoryFilterProps) {
+export function CategoryFilter({
+  books,
+  value,
+  onChange,
+}: CategoryFilterProps) {
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const categories = useMemo(() => buildCategories(books), [books]);
@@ -40,7 +44,10 @@ export function CategoryFilter({ books, value, onChange }: CategoryFilterProps) 
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     }
@@ -80,9 +87,14 @@ export function CategoryFilter({ books, value, onChange }: CategoryFilterProps) 
           <button
             role="option"
             aria-selected={value === ""}
-            onClick={() => { onChange(""); setOpen(false); }}
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
             className={`flex justify-between w-full px-3 py-2 text-sm text-left ${
-              value === "" ? "bg-blue-50 text-blue-600" : "text-gray-700 hover:bg-gray-50"
+              value === ""
+                ? "bg-blue-50 text-blue-600"
+                : "text-gray-700 hover:bg-gray-50"
             }`}
           >
             <span>全部分類</span>
@@ -93,9 +105,14 @@ export function CategoryFilter({ books, value, onChange }: CategoryFilterProps) 
               key={cat.value}
               role="option"
               aria-selected={value === cat.value}
-              onClick={() => { onChange(cat.value); setOpen(false); }}
+              onClick={() => {
+                onChange(cat.value);
+                setOpen(false);
+              }}
               className={`flex justify-between w-full px-3 py-2 text-sm text-left ${
-                value === cat.value ? "bg-blue-50 text-blue-600" : "text-gray-700 hover:bg-gray-50"
+                value === cat.value
+                  ? "bg-blue-50 text-blue-600"
+                  : "text-gray-700 hover:bg-gray-50"
               }`}
             >
               <span>{cat.label}</span>

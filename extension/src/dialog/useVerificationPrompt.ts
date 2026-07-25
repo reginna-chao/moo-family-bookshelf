@@ -46,7 +46,10 @@ export interface UseVerificationPromptResult {
   submitting: boolean;
   /** Set up the prompt for a verification error code. Returns false (no-op) for
    *  non-verification codes so the caller falls back to its normal handling. */
-  begin: (errorCode: string | undefined, ctx: VerificationContext) => Promise<boolean>;
+  begin: (
+    errorCode: string | undefined,
+    ctx: VerificationContext,
+  ) => Promise<boolean>;
   submit: (secret: string) => Promise<void>;
   cancel: () => void;
 }
@@ -110,7 +113,11 @@ export function useVerificationPrompt(
   );
 
   const applyCode = useCallback(
-    async (code: string | undefined, userId: string, generation: number): Promise<void> => {
+    async (
+      code: string | undefined,
+      userId: string,
+      generation: number,
+    ): Promise<void> => {
       if (code === "VERIFICATION_LOCKED") {
         setLocked(true);
         setError("驗證已鎖定，請稍後再試");
@@ -143,7 +150,10 @@ export function useVerificationPrompt(
   }, [updateMethod, updateSubmitting]);
 
   const begin = useCallback(
-    async (errorCode: string | undefined, ctx: VerificationContext): Promise<boolean> => {
+    async (
+      errorCode: string | undefined,
+      ctx: VerificationContext,
+    ): Promise<boolean> => {
       if (!isVerificationError(errorCode)) return false;
       const generation = ++generationRef.current;
       ctxRef.current = ctx;
@@ -196,5 +206,15 @@ export function useVerificationPrompt(
     ctx?.onCancel();
   }, [reset]);
 
-  return { active, method, methodError, error, locked, submitting, begin, submit, cancel };
+  return {
+    active,
+    method,
+    methodError,
+    error,
+    locked,
+    submitting,
+    begin,
+    submit,
+    cancel,
+  };
 }

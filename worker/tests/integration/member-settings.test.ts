@@ -9,8 +9,15 @@ type Json = any;
 
 let kv: KVNamespace;
 
-function request(method: string, path: string, body?: unknown, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
@@ -28,8 +35,15 @@ async function createFamilyAndGetToken(userId: string, displayName = "") {
   };
 }
 
-async function joinFamilyAndGetToken(familyId: string, userId: string, displayName = "") {
-  const res = await request("POST", `/api/family/${familyId}/join`, { userId, displayName });
+async function joinFamilyAndGetToken(
+  familyId: string,
+  userId: string,
+  displayName = "",
+) {
+  const res = await request("POST", `/api/family/${familyId}/join`, {
+    userId,
+    displayName,
+  });
   const json = (await res.json()) as Json;
   return { authToken: json.data.authToken as string };
 }
@@ -44,7 +58,10 @@ beforeEach(() => {
 
 describe("PATCH /api/family/:id/member/:uid", () => {
   it("allows owner to update another member's canLend", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     const res = await request(
@@ -60,7 +77,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   });
 
   it("allows owner to update another member's readmooName", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     const res = await request(
@@ -76,7 +96,11 @@ describe("PATCH /api/family/:id/member/:uid", () => {
 
   it("allows a non-owner member to update their own readmooName", async () => {
     const { familyId } = await createFamilyAndGetToken(ALICE, "Alice");
-    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, BOB, "Bob");
+    const { authToken: bobToken } = await joinFamilyAndGetToken(
+      familyId,
+      BOB,
+      "Bob",
+    );
 
     const res = await request(
       "PATCH",
@@ -91,7 +115,11 @@ describe("PATCH /api/family/:id/member/:uid", () => {
 
   it("rejects non-owner trying to update another member's canLend with 403", async () => {
     const { familyId } = await createFamilyAndGetToken(ALICE, "Alice");
-    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, BOB, "Bob");
+    const { authToken: bobToken } = await joinFamilyAndGetToken(
+      familyId,
+      BOB,
+      "Bob",
+    );
 
     const res = await request(
       "PATCH",
@@ -106,7 +134,11 @@ describe("PATCH /api/family/:id/member/:uid", () => {
 
   it("rejects member trying to update their OWN canLend with 403 (only owner can)", async () => {
     const { familyId } = await createFamilyAndGetToken(ALICE, "Alice");
-    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, BOB, "Bob");
+    const { authToken: bobToken } = await joinFamilyAndGetToken(
+      familyId,
+      BOB,
+      "Bob",
+    );
 
     const res = await request(
       "PATCH",
@@ -120,7 +152,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   });
 
   it("allows owner to update their own readmooName", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     const res = await request(
@@ -135,7 +170,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   });
 
   it("rejects invalid canLend values (must be 0 or 1)", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     // Numeric out of range
@@ -160,7 +198,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   });
 
   it("rejects readmooName exceeding 50 characters", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     const res = await request(
@@ -175,7 +216,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   });
 
   it("rejects empty-string readmooName", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     const res = await request(
@@ -191,7 +235,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
 
   it("returns 404 when family does not exist", async () => {
     // Need a valid token to pass auth middleware
-    const { authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
 
     const res = await request(
       "PATCH",
@@ -205,7 +252,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   });
 
   it("returns 404 when target member is not in the family", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
 
     const res = await request(
       "PATCH",
@@ -234,7 +284,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   // ---------------------------------------------------------------------------
 
   it("readmooName: null removes the field from the stored member record", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     // First set a value so there is something to clear
@@ -260,14 +313,20 @@ describe("PATCH /api/family/:id/member/:uid", () => {
     expect("readmooName" in clearJson.data).toBe(false);
 
     // KV roundtrip: stored record must also have no readmooName key on Bob
-    const stored = (await kv.get(kvKeys.family(familyId), "json")) as RawFamilyRecord;
+    const stored = (await kv.get(
+      kvKeys.family(familyId),
+      "json",
+    )) as RawFamilyRecord;
     const storedBob = stored.members.find((m) => m.userId === BOB);
     expect(storedBob).toBeDefined();
     expect(storedBob && "readmooName" in storedBob).toBe(false);
   });
 
   it("readmooName: null is idempotent when the field was never set", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     const res = await request(
@@ -283,7 +342,11 @@ describe("PATCH /api/family/:id/member/:uid", () => {
 
   it("readmooName: null can be set by the member themselves (non-owner)", async () => {
     const { familyId } = await createFamilyAndGetToken(ALICE, "Alice");
-    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, BOB, "Bob");
+    const { authToken: bobToken } = await joinFamilyAndGetToken(
+      familyId,
+      BOB,
+      "Bob",
+    );
 
     // Bob sets his readmooName
     await request(
@@ -307,7 +370,11 @@ describe("PATCH /api/family/:id/member/:uid", () => {
 
   it("rejects non-owner trying to clear another member's readmooName with 403", async () => {
     const { familyId } = await createFamilyAndGetToken(ALICE, "Alice");
-    const { authToken: bobToken } = await joinFamilyAndGetToken(familyId, BOB, "Bob");
+    const { authToken: bobToken } = await joinFamilyAndGetToken(
+      familyId,
+      BOB,
+      "Bob",
+    );
 
     const res = await request(
       "PATCH",
@@ -321,7 +388,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   });
 
   it("rejects non-string-non-null readmooName (e.g. number) with 400 INVALID_FIELDS", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     const res = await request(
@@ -336,7 +406,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   });
 
   it("rejects boolean readmooName with 400 INVALID_FIELDS", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     const res = await request(
@@ -351,7 +424,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
   });
 
   it("readmooName: undefined + canLend present → only canLend changes, readmooName preserved", async () => {
-    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
     await joinFamilyAndGetToken(familyId, BOB, "Bob");
 
     // Seed Bob with a readmooName
@@ -375,7 +451,10 @@ describe("PATCH /api/family/:id/member/:uid", () => {
     expect(json.data.readmooName).toBe("SeededName");
 
     // KV roundtrip confirms preservation
-    const stored = (await kv.get(kvKeys.family(familyId), "json")) as RawFamilyRecord;
+    const stored = (await kv.get(
+      kvKeys.family(familyId),
+      "json",
+    )) as RawFamilyRecord;
     const storedBob = stored.members.find((m) => m.userId === BOB);
     expect(storedBob?.readmooName).toBe("SeededName");
     expect(storedBob?.canLend).toBe(BoolFlag.FALSE);

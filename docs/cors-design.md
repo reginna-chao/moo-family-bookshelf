@@ -8,12 +8,12 @@
 
 MooFamily Bookshelf 的 Cloudflare Worker（Hono）需要同時服務多種跨來源 client：
 
-| Client | Origin |
-|--------|--------|
-| Chrome Extension Content Script | 寄生於 `https://read.readmoo.com` |
-| Chrome Extension Service Worker / Popup | `chrome-extension://<id>` |
-| PWA on Cloudflare Pages | `https://moo-family-bookshelf.pages.dev`、`*.moo-family-bookshelf.pages.dev`、`*-dev.pages.dev` |
-| 本機開發 | `localhost`（任意 port、http/https）、RFC 1918 私有 IP（LAN 手機測 PWA 用） |
+| Client                                  | Origin                                                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Chrome Extension Content Script         | 寄生於 `https://read.readmoo.com`                                                               |
+| Chrome Extension Service Worker / Popup | `chrome-extension://<id>`                                                                       |
+| PWA on Cloudflare Pages                 | `https://moo-family-bookshelf.pages.dev`、`*.moo-family-bookshelf.pages.dev`、`*-dev.pages.dev` |
+| 本機開發                                | `localhost`（任意 port、http/https）、RFC 1918 私有 IP（LAN 手機測 PWA 用）                     |
 
 幾個關鍵特性，使得**每一筆 API 請求都會觸發 CORS preflight**：
 
@@ -51,11 +51,11 @@ app.use("*", async (c, next) => {
 
 ## 為何 `maxAge: 86400`
 
-| 瀏覽器 | preflight cache 上限 |
-|--------|---------------------|
-| Chromium | 7200 秒（2 小時） |
-| Firefox | 86400 秒（24 小時） |
-| Safari | 600 秒（10 分鐘）— 但會吃 server `Access-Control-Max-Age` 直到自家上限 |
+| 瀏覽器   | preflight cache 上限                                                   |
+| -------- | ---------------------------------------------------------------------- |
+| Chromium | 7200 秒（2 小時）                                                      |
+| Firefox  | 86400 秒（24 小時）                                                    |
+| Safari   | 600 秒（10 分鐘）— 但會吃 server `Access-Control-Max-Age` 直到自家上限 |
 
 設高於瀏覽器上限**不會壞** — 瀏覽器自行取較小值。設 86400 的目的：
 
@@ -71,10 +71,10 @@ app.use("*", async (c, next) => {
 
 撈 `$workers.event.request.method`，filter `OPTIONS` vs `GET`：
 
-| 方法 | 次數 |
-|------|------|
-| GET | 13 |
-| OPTIONS | 7 |
+| 方法    | 次數 |
+| ------- | ---- |
+| GET     | 13   |
+| OPTIONS | 7    |
 
 **最有力的單一 session 觀察**（5/19 13:50）：
 
@@ -181,17 +181,17 @@ X-Frame-Options: DENY
 
 ## 相關檔案
 
-| 檔案 | 用途 |
-|------|------|
-| [worker/src/index.ts:21-52](../worker/src/index.ts#L21-L52) | `isAllowedOrigin` — origin allowlist |
-| [worker/src/index.ts:68-78](../worker/src/index.ts#L68-L78) | CORS middleware 套用 |
-| [worker/tests/unit/securityHardening.test.ts](../worker/tests/unit/securityHardening.test.ts) | CORS 迴歸測試 |
-| [docs/project-plan.md](./project-plan.md) | Phase 7 Wave H 對應條目 |
+| 檔案                                                                                          | 用途                                 |
+| --------------------------------------------------------------------------------------------- | ------------------------------------ |
+| [worker/src/index.ts:21-52](../worker/src/index.ts#L21-L52)                                   | `isAllowedOrigin` — origin allowlist |
+| [worker/src/index.ts:68-78](../worker/src/index.ts#L68-L78)                                   | CORS middleware 套用                 |
+| [worker/tests/unit/securityHardening.test.ts](../worker/tests/unit/securityHardening.test.ts) | CORS 迴歸測試                        |
+| [docs/project-plan.md](./project-plan.md)                                                     | Phase 7 Wave H 對應條目              |
 
 ---
 
 ## 變更紀錄
 
-| 日期 | 變更 |
-|------|------|
+| 日期       | 變更                                                           |
+| ---------- | -------------------------------------------------------------- |
 | 2026-05-19 | 初版。Phase 7 Wave H production preflight 觀察 + curl 驗證完成 |

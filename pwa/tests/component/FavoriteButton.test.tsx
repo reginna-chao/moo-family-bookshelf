@@ -38,7 +38,9 @@ describe("FavoriteButton (PWA)", () => {
 
   it("calls onFavoriteToggle when clicked", () => {
     const onFavoriteToggle = vi.fn();
-    render(<FavoriteButton isFavorite={false} onFavoriteToggle={onFavoriteToggle} />);
+    render(
+      <FavoriteButton isFavorite={false} onFavoriteToggle={onFavoriteToggle} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "加入最愛" }));
     expect(onFavoriteToggle).toHaveBeenCalledTimes(1);
@@ -49,11 +51,16 @@ describe("FavoriteButton (PWA)", () => {
     const onLinkClick = vi.fn();
     render(
       <a href="https://readmoo.com/x" onClick={onLinkClick}>
-        <FavoriteButton isFavorite={false} onFavoriteToggle={onFavoriteToggle} />
+        <FavoriteButton
+          isFavorite={false}
+          onFavoriteToggle={onFavoriteToggle}
+        />
       </a>,
     );
 
-    const result = fireEvent.click(screen.getByRole("button", { name: "加入最愛" }));
+    const result = fireEvent.click(
+      screen.getByRole("button", { name: "加入最愛" }),
+    );
 
     expect(result).toBe(false);
     expect(onLinkClick).not.toHaveBeenCalled();

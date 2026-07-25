@@ -5,7 +5,9 @@ import type { ApiClient } from "@/api/client";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
-    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none", prompted: 0 } }),
+    getVerifyMethod: vi
+      .fn()
+      .mockResolvedValue({ data: { method: "none", prompted: 0 } }),
     setVerifyMethod: vi.fn().mockResolvedValue({ data: { ok: true } }),
     generateOtp: vi.fn().mockResolvedValue({
       data: { code: "482916", expiresAt: Date.now() + 300000 },
@@ -32,7 +34,9 @@ describe("VerificationSettings", () => {
 
   it("displays current method from server", async () => {
     const api = createMockApiClient({
-      getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pin", prompted: 1 } }),
+      getVerifyMethod: vi
+        .fn()
+        .mockResolvedValue({ data: { method: "pin", prompted: 1 } }),
     });
     render(<VerificationSettings userId="user-1" apiClient={api} />);
 
@@ -88,7 +92,9 @@ describe("VerificationSettings", () => {
     fireEvent.click(screen.getByText("隨機驗證碼"));
 
     await waitFor(() => {
-      expect(api.setVerifyMethod).toHaveBeenCalledWith("user-1", { method: "code" });
+      expect(api.setVerifyMethod).toHaveBeenCalledWith("user-1", {
+        method: "code",
+      });
     });
   });
 
@@ -118,13 +124,17 @@ describe("VerificationSettings", () => {
     fireEvent.click(screen.getByText("確定不設定驗證"));
 
     await waitFor(() => {
-      expect(api.setVerifyMethod).toHaveBeenCalledWith("user-1", { method: "none" });
+      expect(api.setVerifyMethod).toHaveBeenCalledWith("user-1", {
+        method: "none",
+      });
     });
   });
 
   it("shows generate OTP button when current method is code", async () => {
     const api = createMockApiClient({
-      getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "code", prompted: 0 } }),
+      getVerifyMethod: vi
+        .fn()
+        .mockResolvedValue({ data: { method: "code", prompted: 0 } }),
     });
     render(<VerificationSettings userId="user-1" apiClient={api} />);
 
@@ -135,7 +145,9 @@ describe("VerificationSettings", () => {
 
   it("generates and displays OTP code", async () => {
     const api = createMockApiClient({
-      getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "code", prompted: 0 } }),
+      getVerifyMethod: vi
+        .fn()
+        .mockResolvedValue({ data: { method: "code", prompted: 0 } }),
     });
     render(<VerificationSettings userId="user-1" apiClient={api} />);
 

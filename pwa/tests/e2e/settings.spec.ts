@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { loginAndNavigate, createTestAuth, mockDefaultApiRoutes } from "./helpers/auth-helper";
+import {
+  loginAndNavigate,
+  createTestAuth,
+  mockDefaultApiRoutes,
+} from "./helpers/auth-helper";
 
 test.describe("Settings page", () => {
   const auth = createTestAuth();
@@ -52,7 +56,9 @@ test.describe("Settings page", () => {
 
     // Check that both members are listed in the member list
     const memberSection = page.locator("text=成員 (2)").locator("..");
-    await expect(memberSection.locator("text=測試使用者").first()).toBeVisible();
+    await expect(
+      memberSection.locator("text=測試使用者").first(),
+    ).toBeVisible();
     await expect(page.locator("text=家人A")).toBeVisible();
 
     // Owner badge should be shown for the current user
@@ -72,9 +78,7 @@ test.describe("Settings page", () => {
     await leaveButton.click();
 
     // Confirmation buttons should appear
-    await expect(
-      page.getByRole("button", { name: "確定離開" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "確定離開" })).toBeVisible();
     await expect(page.getByRole("button", { name: "取消" })).toBeVisible();
 
     // Click cancel — should go back to idle state

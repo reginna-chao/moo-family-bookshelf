@@ -256,13 +256,17 @@ describe("readmoo-lend", () => {
       `;
       document.body.appendChild(card);
       const readerLinkClick = vi.fn();
-      card.querySelector("a.reader-link")!.addEventListener("click", readerLinkClick);
+      card
+        .querySelector("a.reader-link")!
+        .addEventListener("click", readerLinkClick);
       return { card, readerLinkClick };
     }
 
     it("clicks '.openbook-overlay .detail span' and never the reader-link, returning the modal", async () => {
       const { card, readerLinkClick } = buildCard("span");
-      const span = card.querySelector<HTMLElement>(".openbook-overlay .detail span")!;
+      const span = card.querySelector<HTMLElement>(
+        ".openbook-overlay .detail span",
+      )!;
       const spanClick = vi.fn();
       span.addEventListener("click", spanClick);
       const modal = document.createElement("div");
@@ -281,7 +285,9 @@ describe("readmoo-lend", () => {
 
     it("falls back to '.openbook-overlay .detail' when the inner span is absent", async () => {
       const { card } = buildCard("detail-only");
-      const detail = card.querySelector<HTMLElement>(".openbook-overlay .detail")!;
+      const detail = card.querySelector<HTMLElement>(
+        ".openbook-overlay .detail",
+      )!;
       const detailClick = vi.fn();
       detail.addEventListener("click", detailClick);
       const modal = document.createElement("div");
@@ -396,7 +402,9 @@ describe("readmoo-lend", () => {
       dialog.appendChild(btnClose);
       document.body.appendChild(dialog);
 
-      const err = await openLendDialogForBook("bk-1", "測試書名").catch((e) => e);
+      const err = await openLendDialogForBook("bk-1", "測試書名").catch(
+        (e) => e,
+      );
 
       expect((err as ReadmooLendError).code).toBe("BOOK_NOT_FOUND");
       expect((err as Error).message).toContain("《測試書名》");

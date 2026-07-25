@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 
 // Mock useAuth hook
 const mockLogin = vi.fn();
@@ -23,7 +29,9 @@ vi.mock("@/hooks/useAuth", () => ({
 }));
 
 // Shared mock for joinFamily — can be overridden per test
-const mockJoinFamily = vi.fn().mockResolvedValue({ data: { authToken: "new-token" } });
+const mockJoinFamily = vi
+  .fn()
+  .mockResolvedValue({ data: { authToken: "new-token" } });
 
 // Mock API client using class syntax to ensure proper prototype chain
 vi.mock("@/api/client", () => {
@@ -33,7 +41,9 @@ vi.mock("@/api/client", () => {
     getEndpoint = vi.fn().mockReturnValue("https://api.example.com");
     setEndpoint = vi.fn();
     joinFamily = mockJoinFamily;
-    getVerifyMethod = vi.fn().mockResolvedValue({ data: { method: "none", prompted: 1 } });
+    getVerifyMethod = vi
+      .fn()
+      .mockResolvedValue({ data: { method: "none", prompted: 1 } });
     setVerifyMethod = vi.fn().mockResolvedValue({ data: { ok: true } });
     markVerifyPrompted = vi.fn().mockResolvedValue({ data: { ok: true } });
   }
@@ -44,7 +54,11 @@ vi.mock("@/api/client", () => {
 vi.mock("@/pages/LandingPage", () => ({
   LandingPage: ({ onAuth }: { onAuth: (data: unknown) => void }) => (
     <div data-testid="landing-page">
-      <button onClick={() => onAuth({ userId: "u1", familyId: "f1", encryptionKey: "k1" })}>
+      <button
+        onClick={() =>
+          onAuth({ userId: "u1", familyId: "f1", encryptionKey: "k1" })
+        }
+      >
         Login
       </button>
     </div>
@@ -52,11 +66,15 @@ vi.mock("@/pages/LandingPage", () => ({
 }));
 
 vi.mock("@/pages/FamilyShelfPage", () => ({
-  FamilyShelfPage: () => <div data-testid="family-shelf-page">Family Shelf</div>,
+  FamilyShelfPage: () => (
+    <div data-testid="family-shelf-page">Family Shelf</div>
+  ),
 }));
 
 vi.mock("@/pages/PersonalShelfPage", () => ({
-  PersonalShelfPage: () => <div data-testid="personal-shelf-page">Personal Shelf</div>,
+  PersonalShelfPage: () => (
+    <div data-testid="personal-shelf-page">Personal Shelf</div>
+  ),
 }));
 
 vi.mock("@/pages/SettingsPage", () => ({
@@ -72,7 +90,9 @@ vi.mock("@/components/VersionWarning", () => ({
 }));
 
 vi.mock("@/hooks/useFamilyData", () => ({
-  FamilyDataProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  FamilyDataProvider: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
   useFamilyData: () => ({
     members: [],
     ownerId: "",
@@ -115,7 +135,8 @@ describe("App", () => {
     window.location.hash = "#personal-shelf";
 
     mockAuth = {
-      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "token-123",
@@ -131,7 +152,8 @@ describe("App", () => {
     window.location.hash = "#settings";
 
     mockAuth = {
-      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "token-123",
@@ -156,7 +178,8 @@ describe("App", () => {
 
   it("shows main view with navigation when authenticated", () => {
     mockAuth = {
-      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       apiHost: "https://api.example.com",
@@ -167,12 +190,15 @@ describe("App", () => {
     // Default page is family shelf
     expect(screen.getByTestId("family-shelf-page")).toBeInTheDocument();
     // Navigation bar visible
-    expect(screen.getByRole("navigation", { name: "主要導覽" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "主要導覽" }),
+    ).toBeInTheDocument();
   });
 
   it("navigates between tabs", async () => {
     mockAuth = {
-      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "token-123",
@@ -199,7 +225,8 @@ describe("App", () => {
 
   it("highlights current tab with aria-current", () => {
     mockAuth = {
-      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "token-123",
@@ -219,7 +246,8 @@ describe("App", () => {
 
   it("auto-acquires token when auth exists but authToken is missing", async () => {
     mockAuth = {
-      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       // No authToken — triggers acquireNewToken
@@ -240,7 +268,8 @@ describe("App", () => {
       error: { code: "INVALID_TOKEN", message: "Token invalid" },
     });
     mockAuth = {
-      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       // No authToken — triggers acquireNewToken via auto-acquire effect
@@ -267,7 +296,8 @@ describe("App", () => {
     });
 
     mockAuth = {
-      userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       // No authToken — triggers acquireNewToken via auto-acquire effect

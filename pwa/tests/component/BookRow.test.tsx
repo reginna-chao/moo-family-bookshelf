@@ -79,7 +79,9 @@ describe("BookRow (PWA) — rendering", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { pressed: true })).toHaveTextContent("開放");
+    expect(screen.getByRole("button", { pressed: true })).toHaveTextContent(
+      "開放",
+    );
   });
 
   it("shows '未開放' when isShared=FALSE", () => {
@@ -93,7 +95,9 @@ describe("BookRow (PWA) — rendering", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { pressed: false })).toHaveTextContent("未開放");
+    expect(screen.getByRole("button", { pressed: false })).toHaveTextContent(
+      "未開放",
+    );
   });
 
   it("renders checked checkbox when selected=true", () => {
@@ -203,9 +207,9 @@ describe("BookRow (PWA) — React.memo behavior", () => {
   it("is wrapped in React.memo (structural check)", () => {
     // React.memo returns an object exotic with $$typeof === Symbol.for("react.memo")
     const memoSymbol = Symbol.for("react.memo");
-    expect(
-      (BookRow as unknown as { $$typeof: symbol }).$$typeof,
-    ).toBe(memoSymbol);
+    expect((BookRow as unknown as { $$typeof: symbol }).$$typeof).toBe(
+      memoSymbol,
+    );
   });
 
   it("skips re-render when props are identical (memo short-circuit)", () => {

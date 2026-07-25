@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  within,
+} from "@testing-library/react";
 import React from "react";
 import { MemberDropdown } from "@/components/MemberDropdown";
 import {
@@ -117,26 +123,41 @@ describe("MemberDropdown", () => {
 
   it.each<{ name: string; label: string; expected: MemberFilterValue }>([
     { name: "all", label: "所有人的書", expected: "all" },
-    { name: "all-except-self", label: "其他家人的書", expected: "all-except-self" },
+    {
+      name: "all-except-self",
+      label: "其他家人的書",
+      expected: "all-except-self",
+    },
     { name: "self", label: "自己的書", expected: SELF_ID },
     { name: "other member", label: "Alice", expected: ALICE_ID },
-    { name: "favorite sentinel", label: "我的最愛", expected: FAVORITE_FILTER_VALUE },
-    { name: "hidden sentinel", label: "隱藏的書", expected: HIDDEN_FILTER_VALUE },
-  ])("calls onChange with the $name value and closes when its option is clicked", ({ label, expected }) => {
-    const onChange = vi.fn();
-    renderDropdown({ value: "all", onChange });
-    const listbox = openListbox();
+    {
+      name: "favorite sentinel",
+      label: "我的最愛",
+      expected: FAVORITE_FILTER_VALUE,
+    },
+    {
+      name: "hidden sentinel",
+      label: "隱藏的書",
+      expected: HIDDEN_FILTER_VALUE,
+    },
+  ])(
+    "calls onChange with the $name value and closes when its option is clicked",
+    ({ label, expected }) => {
+      const onChange = vi.fn();
+      renderDropdown({ value: "all", onChange });
+      const listbox = openListbox();
 
-    const option = within(listbox)
-      .getAllByRole("option")
-      .find((o) => o.textContent?.startsWith(label));
-    if (!option) throw new Error(`option not found: ${label}`);
-    fireEvent.click(option);
+      const option = within(listbox)
+        .getAllByRole("option")
+        .find((o) => o.textContent?.startsWith(label));
+      if (!option) throw new Error(`option not found: ${label}`);
+      fireEvent.click(option);
 
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith(expected);
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-  });
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith(expected);
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    },
+  );
 
   it("closes the popover on an outside mousedown", () => {
     render(

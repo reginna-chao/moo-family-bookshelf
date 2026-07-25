@@ -11,7 +11,8 @@ export const DEFAULT_API_ENDPOINT: string =
   "https://moo-family-bookshelf-dev.rcwork.workers.dev";
 
 export const DEFAULT_PWA_URL: string =
-  import.meta.env?.VITE_EXTENSION_PWA_URL || "https://moo-family-bookshelf-dev.pages.dev";
+  import.meta.env?.VITE_EXTENSION_PWA_URL ||
+  "https://moo-family-bookshelf-dev.pages.dev";
 
 export const PERSONAL_BOOKS_CACHE_KEY = "moo:personalBooksCache";
 
@@ -68,7 +69,11 @@ export function chipsKey(userId: string): string {
  * Build PWA URL with auth data in the fragment (never sent to server).
  * Format: https://pwa.example.com/#code={syncCode}&uid={userId}[&qrt={qrToken}]
  */
-export function buildPwaUrl(syncCode: string, userId: string, qrToken?: string): string {
+export function buildPwaUrl(
+  syncCode: string,
+  userId: string,
+  qrToken?: string,
+): string {
   let url = `${DEFAULT_PWA_URL}/#code=${encodeURIComponent(syncCode)}&uid=${encodeURIComponent(userId)}`;
   if (qrToken) {
     url += `&qrt=${encodeURIComponent(qrToken)}`;

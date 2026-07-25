@@ -8,7 +8,10 @@ export function FamilyShelfError({ message, onRetry }: FamilyShelfErrorProps) {
   return (
     <div className="moo-shelf-status">
       <p className="moo-shelf-status__error-text">{message}</p>
-      <button onClick={onRetry} className="moo-shelf-status__retry">
+      <button
+        onClick={onRetry}
+        className="moo-button moo-button--outline moo-shelf-status__retry"
+      >
         重試
       </button>
     </div>

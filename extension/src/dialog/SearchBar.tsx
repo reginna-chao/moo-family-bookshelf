@@ -19,7 +19,9 @@ export function SearchBar({
 }: SearchBarProps) {
   const isMobile = useIsMobile();
   // Mobile uses a 32px-tall touch target (user-specified, below the 44px guideline).
-  const inputClass = isMobile ? "moo-search__input moo-search__input--mobile" : "moo-search__input";
+  const inputClass = isMobile
+    ? "moo-form-input moo-search__input moo-search__input--mobile"
+    : "moo-form-input moo-search__input";
   return (
     <div className="moo-search">
       <div className="moo-search__field">

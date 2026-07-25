@@ -149,8 +149,7 @@ function installFiberBridgeMock(
     document.dispatchEvent(new CustomEvent("moo-fiber-data"));
   };
   document.addEventListener("moo-request-fiber-data", handler);
-  return () =>
-    document.removeEventListener("moo-request-fiber-data", handler);
+  return () => document.removeEventListener("moo-request-fiber-data", handler);
 }
 
 describe("scrapeBooks", () => {
@@ -398,7 +397,9 @@ describe("scrapeBooks", () => {
 });
 
 describe("scrapeArchivedBooks", () => {
-  let scrapeArchivedBooks: () => Promise<import("@/content/scraper").ScrapedBook[]>;
+  let scrapeArchivedBooks: () => Promise<
+    import("@/content/scraper").ScrapedBook[]
+  >;
 
   beforeEach(async () => {
     vi.useFakeTimers();

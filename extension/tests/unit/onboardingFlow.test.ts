@@ -3,7 +3,10 @@ import { webcrypto } from "node:crypto";
 
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {
-    Object.defineProperty(globalThis, "crypto", { value: webcrypto, writable: true });
+    Object.defineProperty(globalThis, "crypto", {
+      value: webcrypto,
+      writable: true,
+    });
   }
 });
 
@@ -37,7 +40,11 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
       data: { authToken: "tok", expiresAt: 9999999999 },
     }),
     createFamily: vi.fn().mockResolvedValue({
-      data: { familyId: "fam-created-1", authToken: "tok", expiresAt: 9999999999 },
+      data: {
+        familyId: "fam-created-1",
+        authToken: "tok",
+        expiresAt: 9999999999,
+      },
     }),
     updateFamilyEndpoint: vi.fn().mockResolvedValue({ data: { ok: true } }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
@@ -66,7 +73,8 @@ describe("performSoloRecovery", () => {
 
     // Reset chrome.storage mocks
     vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+      (_items: Record<string, unknown>, _callback?: () => void) =>
+        Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -75,7 +83,8 @@ describe("performSoloRecovery", () => {
       },
     );
     vi.mocked(chrome.storage.sync.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+      (_items: Record<string, unknown>, _callback?: () => void) =>
+        Promise.resolve(),
     );
     vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
   });
@@ -152,7 +161,10 @@ describe("performSoloRecovery", () => {
 
     // Background messages sent
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "SET_FAMILY_ID", familyId: "fam-solo-1" }),
+      expect.objectContaining({
+        type: "SET_FAMILY_ID",
+        familyId: "fam-solo-1",
+      }),
     );
   });
 
@@ -238,7 +250,9 @@ describe("performSoloRecovery", () => {
     const apiClient = createMockApiClient();
     const autoSetup = createMockAutoSetup();
 
-    vi.mocked(chrome.storage.sync.set).mockRejectedValue(new Error("sync unavailable"));
+    vi.mocked(chrome.storage.sync.set).mockRejectedValue(
+      new Error("sync unavailable"),
+    );
 
     const result = await performSoloRecovery({
       familyId: "fam-solo-syncerrr",
@@ -260,16 +274,21 @@ describe("tryAutoRecovery", () => {
     vi.clearAllMocks();
 
     vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+      (_items: Record<string, unknown>, _callback?: () => void) =>
+        Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+      (
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
         if (typeof callback === "function") callback({});
         return Promise.resolve({}) as unknown as void;
       },
     );
     vi.mocked(chrome.storage.sync.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+      (_items: Record<string, unknown>, _callback?: () => void) =>
+        Promise.resolve(),
     );
     vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
   });
@@ -307,10 +326,14 @@ describe("performJoin", () => {
     });
 
     vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+      (_items: Record<string, unknown>, _callback?: () => void) =>
+        Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+      (
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
         if (typeof callback === "function") callback({});
         return Promise.resolve({}) as unknown as void;
       },
@@ -360,7 +383,10 @@ describe("performJoin", () => {
   it("returns ok:false with errorCode and errorMessage when joinFamily fails", async () => {
     const apiClient = createMockApiClient({
       joinFamily: vi.fn().mockResolvedValue({
-        error: { code: "VERIFICATION_REQUIRED", message: "此帳號需要驗證才能登入" },
+        error: {
+          code: "VERIFICATION_REQUIRED",
+          message: "此帳號需要驗證才能登入",
+        },
       }),
     });
 
@@ -393,7 +419,9 @@ describe("performJoin", () => {
       apiClient,
     });
 
-    expect(apiClient.setEndpoint).toHaveBeenCalledWith("https://custom.example.com");
+    expect(apiClient.setEndpoint).toHaveBeenCalledWith(
+      "https://custom.example.com",
+    );
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "SET_API_ENDPOINT",
@@ -421,7 +449,10 @@ describe("performJoin", () => {
     );
 
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "SET_FAMILY_ID", familyId: "fam-join-1" }),
+      expect.objectContaining({
+        type: "SET_FAMILY_ID",
+        familyId: "fam-join-1",
+      }),
     );
   });
 });
@@ -438,16 +469,21 @@ describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
     vi.clearAllMocks();
     vi.mocked(decodeSyncCode).mockReturnValue({ familyId: "fam-join-1" });
     vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+      (_items: Record<string, unknown>, _callback?: () => void) =>
+        Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+      (
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
         if (typeof callback === "function") callback({});
         return Promise.resolve({}) as unknown as void;
       },
     );
     vi.mocked(chrome.storage.sync.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+      (_items: Record<string, unknown>, _callback?: () => void) =>
+        Promise.resolve(),
     );
     vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
   });
@@ -534,7 +570,10 @@ describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
       onFamilyJoined,
     });
 
-    expect(result).toEqual({ recovered: false, errorCode: "VERIFICATION_REQUIRED" });
+    expect(result).toEqual({
+      recovered: false,
+      errorCode: "VERIFICATION_REQUIRED",
+    });
     expect(onFamilyJoined).not.toHaveBeenCalled();
   });
 
@@ -554,7 +593,10 @@ describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
       onFamilyJoined: vi.fn(),
     });
 
-    expect(result).toEqual({ recovered: false, errorCode: "VERIFICATION_LOCKED" });
+    expect(result).toEqual({
+      recovered: false,
+      errorCode: "VERIFICATION_LOCKED",
+    });
   });
 
   it("success side-effects still fire when no verifySecret is needed", async () => {
@@ -605,20 +647,27 @@ describe("familyId persists to storage.local even when SET_FAMILY_ID message rej
     vi.mocked(decodeSyncCode).mockReturnValue({ familyId: "fam-join-1" });
 
     vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+      (_items: Record<string, unknown>, _callback?: () => void) =>
+        Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
-      (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+      (
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
         if (typeof callback === "function") callback({});
         return Promise.resolve({}) as unknown as void;
       },
     );
     vi.mocked(chrome.storage.sync.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => Promise.resolve(),
+      (_items: Record<string, unknown>, _callback?: () => void) =>
+        Promise.resolve(),
     );
     // Simulate sleeping Firefox background: every message round-trip rejects.
     vi.mocked(chrome.runtime.sendMessage).mockRejectedValue(
-      new Error("Could not establish connection. Receiving end does not exist."),
+      new Error(
+        "Could not establish connection. Receiving end does not exist.",
+      ),
     );
   });
 

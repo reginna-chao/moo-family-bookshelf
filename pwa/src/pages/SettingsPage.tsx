@@ -45,7 +45,7 @@ export function SettingsPage({
   });
 
   const handleToggleSyncArchived = useCallback(() => {
-    setSyncArchived(prev => {
+    setSyncArchived((prev) => {
       const next = prev === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
       localStorage.setItem(syncArchivedKey, String(next));
       return next;
@@ -94,7 +94,11 @@ export function SettingsPage({
         // Pass `url` alongside the message so share targets can render a link
         // preview / "open in browser" affordance. The URL also appears inline
         // in `text` for targets that ignore the `url` field.
-        await navigator.share({ title: "加入墨家書櫃", text: message, url: inviteUrl });
+        await navigator.share({
+          title: "加入墨家書櫃",
+          text: message,
+          url: inviteUrl,
+        });
         return;
       } catch {
         // User cancelled or share failed — fall through to clipboard
@@ -103,7 +107,10 @@ export function SettingsPage({
     try {
       await navigator.clipboard.writeText(message);
       setInviteCopied(true);
-      inviteCopyTimerRef.current = setTimeout(() => setInviteCopied(false), 2000);
+      inviteCopyTimerRef.current = setTimeout(
+        () => setInviteCopied(false),
+        2000,
+      );
     } catch {
       // Clipboard API failed — ignore silently on mobile
     }
@@ -130,7 +137,7 @@ export function SettingsPage({
   const [nameError, setNameError] = useState<string | null>(null);
 
   useEffect(() => {
-    const self = members.find(m => m.userId === userId);
+    const self = members.find((m) => m.userId === userId);
     if (self) {
       setCurrentName(self.displayName || "");
     }
@@ -161,7 +168,15 @@ export function SettingsPage({
     } finally {
       setNameSaving(false);
     }
-  }, [nameInput, currentName, apiClient, familyId, userId, loadMembers, updateMemberDisplayName]);
+  }, [
+    nameInput,
+    currentName,
+    apiClient,
+    familyId,
+    userId,
+    loadMembers,
+    updateMemberDisplayName,
+  ]);
 
   // --- Leave family ---
   const [leaveState, setLeaveState] = useState<LeaveState>("idle");
@@ -235,7 +250,11 @@ export function SettingsPage({
           aria-expanded={personalOpen}
           className="flex items-center gap-1.5 text-sm font-medium text-gray-500 w-full"
         >
-          {personalOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {personalOpen ? (
+            <ChevronDown size={14} />
+          ) : (
+            <ChevronRight size={14} />
+          )}
           個人設定
         </button>
 
@@ -264,7 +283,10 @@ export function SettingsPage({
                       <Check size={16} />
                     </button>
                     <button
-                      onClick={() => { setEditingName(false); setNameError(null); }}
+                      onClick={() => {
+                        setEditingName(false);
+                        setNameError(null);
+                      }}
                       disabled={nameSaving}
                       aria-label="取消修改名稱"
                       className="p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-50"
@@ -273,7 +295,9 @@ export function SettingsPage({
                     </button>
                   </div>
                   {nameError && (
-                    <p role="alert" className="text-red-500 text-xs mt-1">{nameError}</p>
+                    <p role="alert" className="text-red-500 text-xs mt-1">
+                      {nameError}
+                    </p>
                   )}
                 </div>
               ) : (
@@ -282,7 +306,10 @@ export function SettingsPage({
                     {currentName || userId.slice(0, 8)}
                   </span>
                   <button
-                    onClick={() => { setNameInput(currentName); setEditingName(true); }}
+                    onClick={() => {
+                      setNameInput(currentName);
+                      setEditingName(true);
+                    }}
                     aria-label="編輯顯示名稱"
                     className="p-1 text-gray-400 hover:text-gray-600"
                   >
@@ -317,7 +344,6 @@ export function SettingsPage({
             </p>
           </div>
         )}
-
       </section>
 
       {/* Family settings */}
@@ -348,7 +374,9 @@ export function SettingsPage({
             <button
               onClick={() => void handleInvite()}
               className={`w-full rounded-lg border border-green-600 px-4 py-2.5 text-sm font-semibold text-green-600 mt-2 ${
-                inviteCopied ? "bg-green-50" : "bg-transparent hover:bg-green-50"
+                inviteCopied
+                  ? "bg-green-50"
+                  : "bg-transparent hover:bg-green-50"
               } transition-colors`}
             >
               {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
@@ -358,14 +386,17 @@ export function SettingsPage({
             </p>
 
             <p className="text-xs text-gray-500 mb-1">
-              成員{!membersLoading && !membersError ? ` (${members.length})` : ""}
+              成員
+              {!membersLoading && !membersError ? ` (${members.length})` : ""}
             </p>
             {membersLoading && (
               <p className="text-gray-400 text-sm">載入中...</p>
             )}
             {membersError && (
               <div>
-                <p role="alert" className="text-red-500 text-sm mb-2">{membersError}</p>
+                <p role="alert" className="text-red-500 text-sm mb-2">
+                  {membersError}
+                </p>
                 <button
                   onClick={() => void loadMembers()}
                   className="text-sm font-semibold text-blue-600"
@@ -381,7 +412,10 @@ export function SettingsPage({
                 userId={userId}
                 familyId={familyId}
                 apiClient={apiClient}
-                onMembersChanged={() => { void loadMembers(); void refreshBookshelf(); }}
+                onMembersChanged={() => {
+                  void loadMembers();
+                  void refreshBookshelf();
+                }}
               />
             )}
             <p className="text-gray-400 text-xs mt-1.5">
@@ -389,13 +423,14 @@ export function SettingsPage({
             </p>
           </div>
         )}
-
       </section>
 
       {/* Leave family */}
       <section className="mb-6">
         {leaveError && (
-          <p role="alert" className="text-red-500 text-sm mb-2">{leaveError}</p>
+          <p role="alert" className="text-red-500 text-sm mb-2">
+            {leaveError}
+          </p>
         )}
         {leaveState === "idle" && (
           <button
@@ -471,7 +506,9 @@ export function SettingsPage({
       {/* Delete account */}
       <section className="mb-6 mt-4">
         {deleteError && (
-          <p role="alert" className="text-red-500 text-sm mb-2">{deleteError}</p>
+          <p role="alert" className="text-red-500 text-sm mb-2">
+            {deleteError}
+          </p>
         )}
         {deleteState === "idle" && (
           <button
@@ -484,7 +521,9 @@ export function SettingsPage({
         {deleteState === "confirming" && (
           <div>
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
-              <p className="text-sm font-bold text-red-700 mb-2">確定要移除帳戶嗎？</p>
+              <p className="text-sm font-bold text-red-700 mb-2">
+                確定要移除帳戶嗎？
+              </p>
               <ul className="text-xs text-red-600 list-disc list-inside space-y-1">
                 <li>將移除墨家書櫃中的所有資料</li>
                 <li>不影響你的讀墨帳號及書籍</li>
@@ -522,9 +561,7 @@ export function SettingsPage({
 
       {/* About */}
       <section className="pt-6 mt-6 border-t border-gray-200 text-center">
-        <p className="text-xs text-gray-400">
-          墨家書櫃 v{__APP_VERSION__}
-        </p>
+        <p className="text-xs text-gray-400">墨家書櫃 v{__APP_VERSION__}</p>
         <p className="text-xs text-gray-300 mt-1">
           本程式為第三方開發，非 Readmoo 讀墨官方提供。
         </p>

@@ -98,7 +98,9 @@ describe("PinInput", () => {
     });
 
     it("displays external error", () => {
-      render(<PinInput mode="verify" onComplete={vi.fn()} error="PIN 碼錯誤" />);
+      render(
+        <PinInput mode="verify" onComplete={vi.fn()} error="PIN 碼錯誤" />,
+      );
       expect(screen.getByText("PIN 碼錯誤")).toBeInTheDocument();
     });
   });

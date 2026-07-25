@@ -136,7 +136,9 @@ describe("migrateStorageKeys", () => {
   });
 
   it("migrates dynamic per-user keys (seen / chips)", async () => {
-    const seenValue = { [USER]: { lastUpdated: "2025-01-01", bookIds: ["b1"] } };
+    const seenValue = {
+      [USER]: { lastUpdated: "2025-01-01", bookIds: ["b1"] },
+    };
     const chipsValue = { bookIds: ["b1"], expiresAt: "2025-01-02" };
     await chrome.storage.local.set({
       [LEGACY_SEEN]: seenValue,
@@ -155,7 +157,9 @@ describe("migrateStorageKeys", () => {
   it("still completes local migration and sets the flag when sync storage is unavailable", async () => {
     await chrome.storage.local.set({ [LEGACY_USER_ID]: "user-1" });
     // Simulate sync storage being unavailable: get(null) rejects.
-    vi.mocked(chrome.storage.sync.get).mockRejectedValueOnce(new Error("sync unavailable"));
+    vi.mocked(chrome.storage.sync.get).mockRejectedValueOnce(
+      new Error("sync unavailable"),
+    );
 
     await expect(migrateStorageKeys()).resolves.toBeUndefined();
 

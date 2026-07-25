@@ -29,7 +29,9 @@ export const LazyCover = React.memo(function LazyCover({
 
   if (status === "error") return <>{fallback}</>;
 
-  const wrapperClass = className ? `moo-lazy-cover ${className}` : "moo-lazy-cover";
+  const wrapperClass = className
+    ? `moo-lazy-cover ${className}`
+    : "moo-lazy-cover";
   const imgClass = [
     "moo-lazy-cover__img",
     status === "loaded" ? "moo-lazy-cover__img--loaded" : "",

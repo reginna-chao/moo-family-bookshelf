@@ -86,7 +86,9 @@ describe("countFavorites", () => {
   });
 
   it("counts refs that match current cards", () => {
-    expect(countFavorites(members, new Set(["owner-1:b1", "owner-2:b3"]))).toBe(2);
+    expect(countFavorites(members, new Set(["owner-1:b1", "owner-2:b3"]))).toBe(
+      2,
+    );
   });
 
   it("ignores orphan refs that do not match any current card", () => {

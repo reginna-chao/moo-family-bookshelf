@@ -235,10 +235,7 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
     useState<BorrowRequest | null>(null);
   const [dontRemind, setDontRemind] = useState(false);
 
-  const memberNameMap = useMemo(
-    () => buildMemberNameMap(members),
-    [members],
-  );
+  const memberNameMap = useMemo(() => buildMemberNameMap(members), [members]);
 
   const updateStatus = useCallback(
     async (requestId: string, status: BorrowStatus) => {
@@ -279,7 +276,10 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
     setManualLendRequest(null);
   }, [manualLendRequest, dontRemind, dismiss, updateStatus]);
 
-  const closeManualLendDialog = useCallback(() => setManualLendRequest(null), []);
+  const closeManualLendDialog = useCallback(
+    () => setManualLendRequest(null),
+    [],
+  );
 
   const confirmManualLend = useCallback(() => {
     void handleConfirmManualLend();

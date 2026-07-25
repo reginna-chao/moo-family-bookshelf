@@ -1,10 +1,7 @@
 import { render, screen, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { useEffect } from "react";
-import {
-  FamilyDataProvider,
-  useFamilyData,
-} from "@/dialog/FamilyDataContext";
+import { FamilyDataProvider, useFamilyData } from "@/dialog/FamilyDataContext";
 import type { ApiClient } from "@/api/client";
 
 /**
@@ -19,9 +16,9 @@ import type { ApiClient } from "@/api/client";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
-    getFamilyMembers: vi
-      .fn()
-      .mockResolvedValue({ data: { familyId: "fam-1", ownerId: "user-1", members: [] } }),
+    getFamilyMembers: vi.fn().mockResolvedValue({
+      data: { familyId: "fam-1", ownerId: "user-1", members: [] },
+    }),
     getFamilyBookshelf: vi
       .fn()
       .mockResolvedValue({ data: { familyId: "fam-1", members: [] } }),
@@ -83,7 +80,9 @@ describe("FamilyDataProvider reloadSignal", () => {
     // First load fails at members; the second (post-bump) load succeeds.
     const getFamilyMembers = vi
       .fn()
-      .mockResolvedValueOnce({ error: { code: "SERVER_ERROR", message: "boom" } })
+      .mockResolvedValueOnce({
+        error: { code: "SERVER_ERROR", message: "boom" },
+      })
       .mockResolvedValueOnce({
         data: {
           familyId: "fam-1",

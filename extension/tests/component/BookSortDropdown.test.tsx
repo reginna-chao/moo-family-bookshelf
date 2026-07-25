@@ -72,7 +72,9 @@ describe("BookSortDropdown", () => {
     }
   });
 
-  it.each<{ label: string; expected: BookSortMode }>(OPTIONS.map((o) => ({ label: o.label, expected: o.value })))(
+  it.each<{ label: string; expected: BookSortMode }>(
+    OPTIONS.map((o) => ({ label: o.label, expected: o.value })),
+  )(
     "calls onChange('$expected') and closes when selecting $label",
     ({ label, expected }) => {
       const onChange = vi.fn();

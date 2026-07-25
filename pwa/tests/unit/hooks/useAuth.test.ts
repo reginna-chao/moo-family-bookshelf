@@ -34,7 +34,10 @@ function seedStorage(data: {
   if (data.userId) {
     localStorage.setItem("moo:userId", data.userId);
     if (data.familyId)
-      localStorage.setItem(namespacedKey(data.userId, "familyId"), data.familyId);
+      localStorage.setItem(
+        namespacedKey(data.userId, "familyId"),
+        data.familyId,
+      );
     if (data.apiHost)
       localStorage.setItem(namespacedKey(data.userId, "apiHost"), data.apiHost);
   }
@@ -248,7 +251,9 @@ describe("useAuth", () => {
       const { result } = renderHook(() => useAuth());
 
       expect(result.current.auth).toBeNull();
-      expect(result.current.initialSyncCode).toBe("moo-fam99-secretKey@custom.host");
+      expect(result.current.initialSyncCode).toBe(
+        "moo-fam99-secretKey@custom.host",
+      );
       expect(result.current.qrUserId).toBe("user-abc");
     });
 
@@ -429,14 +434,21 @@ describe("useAuth", () => {
         apiHost: "api.example.com",
       });
       expect(localStorage.getItem("moo:userId")).toBe("user-new");
-      expect(localStorage.getItem(namespacedKey("user-new", "familyId"))).toBe("fam-new");
-      expect(localStorage.getItem(namespacedKey("user-new", "apiHost"))).toBe("api.example.com");
+      expect(localStorage.getItem(namespacedKey("user-new", "familyId"))).toBe(
+        "fam-new",
+      );
+      expect(localStorage.getItem(namespacedKey("user-new", "apiHost"))).toBe(
+        "api.example.com",
+      );
     });
 
     it("should remove apiHost from localStorage when not provided", () => {
       // Seed old data
       localStorage.setItem("moo:userId", "user-new");
-      localStorage.setItem(namespacedKey("user-new", "apiHost"), "old-host.com");
+      localStorage.setItem(
+        namespacedKey("user-new", "apiHost"),
+        "old-host.com",
+      );
 
       const { result } = renderHook(() => useAuth());
 
@@ -447,7 +459,9 @@ describe("useAuth", () => {
         });
       });
 
-      expect(localStorage.getItem(namespacedKey("user-new", "apiHost"))).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-new", "apiHost")),
+      ).toBeNull();
     });
   });
 
@@ -470,8 +484,12 @@ describe("useAuth", () => {
 
       expect(result.current.auth).toBeNull();
       expect(localStorage.getItem("moo:userId")).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-1", "familyId")),
+      ).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-1", "apiHost")),
+      ).toBeNull();
     });
   });
 
@@ -503,7 +521,9 @@ describe("useAuth", () => {
 
       expect(result.current.auth).toBeNull();
       expect(localStorage.getItem("moo:userId")).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-cycle", "familyId"))).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-cycle", "familyId")),
+      ).toBeNull();
     });
   });
 
@@ -528,11 +548,19 @@ describe("useAuth", () => {
       expect(result.current.auth).toBeNull();
       // ALL auth keys cleared (including identity keys)
       expect(localStorage.getItem("moo:userId")).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "authToken"))).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-1", "familyId")),
+      ).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-1", "apiHost")),
+      ).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-1", "authToken")),
+      ).toBeNull();
       // REMEMBERED_LOGOUT_KEY stores the sync code string
-      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1@custom.host.com");
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe(
+        "moo-fam-1@custom.host.com",
+      );
     });
 
     it("should remember sync code when rememberSyncCode is not set (default to remember)", () => {
@@ -552,7 +580,9 @@ describe("useAuth", () => {
       expect(result.current.auth).toBeNull();
       // All auth keys should still be cleared
       expect(localStorage.getItem("moo:userId")).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-1", "familyId")),
+      ).toBeNull();
       // REMEMBERED_LOGOUT_KEY should be set (default is remember)
       expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1");
       // initialSyncCode should be set
@@ -583,14 +613,19 @@ describe("useAuth", () => {
     it("should not auto-login when REMEMBERED_LOGOUT_KEY is present (LandingPage reads it)", () => {
       // REMEMBERED_LOGOUT_KEY stores the sync code but useAuth does NOT consume it.
       // LandingPage reads it directly. useAuth just ensures no auto-login.
-      localStorage.setItem(REMEMBERED_LOGOUT_KEY, "moo-fam-1-key-1@custom.host.com");
+      localStorage.setItem(
+        REMEMBERED_LOGOUT_KEY,
+        "moo-fam-1-key-1@custom.host.com",
+      );
 
       const { result } = renderHook(() => useAuth());
 
       // Auth should NOT be set (no auth data in localStorage)
       expect(result.current.auth).toBeNull();
       // REMEMBERED_LOGOUT_KEY is NOT consumed by useAuth — LandingPage does that
-      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe("moo-fam-1-key-1@custom.host.com");
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe(
+        "moo-fam-1-key-1@custom.host.com",
+      );
     });
 
     it("should set initialSyncCode immediately on logout when remember is enabled", () => {
@@ -682,8 +717,12 @@ describe("useAuth", () => {
 
       expect(result.current.auth).toBeNull();
       expect(localStorage.getItem("moo:userId")).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "apiHost"))).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-1", "familyId")),
+      ).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-1", "apiHost")),
+      ).toBeNull();
       expect(localStorage.getItem(REMEMBER_SYNC_CODE_KEY)).toBeNull();
       expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
     });
@@ -730,7 +769,9 @@ describe("useAuth", () => {
 
       expect(result.current.auth).toBeNull();
       expect(localStorage.getItem("moo:userId")).toBeNull();
-      expect(localStorage.getItem(namespacedKey("user-1", "familyId"))).toBeNull();
+      expect(
+        localStorage.getItem(namespacedKey("user-1", "familyId")),
+      ).toBeNull();
       expect(localStorage.getItem(REMEMBER_SYNC_CODE_KEY)).toBeNull();
       expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
     });

@@ -12,6 +12,7 @@ ultrathink
 ## Mandatory Protocol
 
 Your invoker provides:
+
 - `scope` — `frontend` or `backend`
 - `target` — the production files/behavior to cover
 - `scope_intent` — `quick` (smoke the new behavior) or `full` (thorough coverage); default `full`
@@ -26,10 +27,10 @@ These files are authoritative.
 
 ## Scope Map
 
-| scope | test dir | command | stack | locations |
-| --- | --- | --- | --- | --- |
-| `frontend` | `extension/tests/` (or `pwa/tests/`) | `pnpm test` | Vitest + React Testing Library | `unit/` (crypto, api, sync-code, utils), `component/` (Dialog views, toggles, forms), `e2e/` (FIX existing only) |
-| `backend` | `worker/tests/` | `cd worker && pnpm test` | Vitest + Miniflare | `unit/` (validation, helpers, key gen, rate-limit logic), `integration/` (HTTP → handler → KV → response) |
+| scope      | test dir                             | command                  | stack                          | locations                                                                                                        |
+| ---------- | ------------------------------------ | ------------------------ | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `frontend` | `extension/tests/` (or `pwa/tests/`) | `pnpm test`              | Vitest + React Testing Library | `unit/` (crypto, api, sync-code, utils), `component/` (Dialog views, toggles, forms), `e2e/` (FIX existing only) |
+| `backend`  | `worker/tests/`                      | `cd worker && pnpm test` | Vitest + Miniflare             | `unit/` (validation, helpers, key gen, rate-limit logic), `integration/` (HTTP → handler → KV → response)        |
 
 ## Workflow
 

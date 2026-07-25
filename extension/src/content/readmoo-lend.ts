@@ -104,7 +104,9 @@ export async function openBookDetailModal(
       "找不到書籍詳情按鈕，可能是讀墨已改版，請改用「手動借出」",
     );
   }
-  trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  trigger.dispatchEvent(
+    new MouseEvent("click", { bubbles: true, cancelable: true }),
+  );
 
   return waitForElement<HTMLElement>(".book-detail-modal", timeoutMs);
 }
@@ -120,7 +122,9 @@ export async function clickLendButton(
   timeoutMs: number = READMOO_LEND_DEFAULTS.lendDialogOpenTimeoutMs,
 ): Promise<HTMLElement> {
   const envelopeIcon = modal.querySelector<HTMLElement>("i.mo-envelope");
-  const button = envelopeIcon?.closest<HTMLElement>(".cursor-pointer, button, [role='button']");
+  const button = envelopeIcon?.closest<HTMLElement>(
+    ".cursor-pointer, button, [role='button']",
+  );
   if (!button) {
     throw new ReadmooLendError(
       "LEND_BUTTON_NOT_FOUND",
@@ -133,10 +137,14 @@ export async function clickLendButton(
   return waitForLendDialog(modal, timeoutMs);
 }
 
-async function waitForLendDialog(excluding: HTMLElement, timeoutMs: number): Promise<HTMLElement> {
+async function waitForLendDialog(
+  excluding: HTMLElement,
+  timeoutMs: number,
+): Promise<HTMLElement> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const candidates = document.querySelectorAll<HTMLElement>("div[role='dialog']");
+    const candidates =
+      document.querySelectorAll<HTMLElement>("div[role='dialog']");
     for (const candidate of candidates) {
       if (candidate === excluding) continue;
       const title = candidate.querySelector(".modal-title");
@@ -156,7 +164,9 @@ async function waitForLendDialog(excluding: HTMLElement, timeoutMs: number): Pro
  * Read the family member options shown inside Readmoo's 「借出書籍」 dialog.
  * Used both for matching by `readmooName` and for the readmooName setup flow.
  */
-export function extractReadmooMembers(lendDialog: HTMLElement): ReadmooMember[] {
+export function extractReadmooMembers(
+  lendDialog: HTMLElement,
+): ReadmooMember[] {
   const items = lendDialog.querySelectorAll<HTMLElement>(".list-group-item");
   const members: ReadmooMember[] = [];
   for (const item of items) {
@@ -294,7 +304,9 @@ export function waitForLendDialogClose(
  * Used as cleanup if our automation needs to abort partway.
  */
 export function dismissOpenDialogs(): void {
-  const closes = document.querySelectorAll<HTMLElement>("[role='dialog'] .btn-close");
+  const closes = document.querySelectorAll<HTMLElement>(
+    "[role='dialog'] .btn-close",
+  );
   for (const btn of closes) {
     btn.click();
   }

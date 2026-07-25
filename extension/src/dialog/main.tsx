@@ -1,7 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App, type View } from "./App";
-import { PortalContainerContext, type PortalContainer } from "./PortalContainerContext";
+import {
+  PortalContainerContext,
+  type PortalContainer,
+} from "./PortalContainerContext";
 // Imported as a raw string so PostCSS/Tailwind never processes it; the exact
 // bytes are inlined into content-dialog.js (no separate CSS asset to declare as
 // a web-accessible resource).

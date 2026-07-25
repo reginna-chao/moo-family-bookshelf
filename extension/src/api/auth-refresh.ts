@@ -36,7 +36,11 @@ const VERIFICATION_ERROR_CODES = new Set([
 const FAMILY_GONE_ERROR_CODES = new Set(["FAMILY_NOT_FOUND", "FAMILY_FULL"]);
 
 interface RefreshDeps {
-  request: <T>(path: string, init?: RequestInit, skipRefresh?: boolean) => Promise<ApiResponse<T>>;
+  request: <T>(
+    path: string,
+    init?: RequestInit,
+    skipRefresh?: boolean,
+  ) => Promise<ApiResponse<T>>;
   setAuthToken: (token: string | null) => void;
   /** Invoked when the family is genuinely gone — clears local family data. */
   onFamilyRemoved: (() => void) | null;
@@ -93,9 +97,15 @@ export interface RefreshOutcome {
  * so an active cooldown suppresses the auto-join entirely — but never a manual,
  * user-initiated join (onboarding / re-verify), which live outside this module.
  */
-export async function doRefreshToken(deps: RefreshDeps): Promise<RefreshOutcome> {
+export async function doRefreshToken(
+  deps: RefreshDeps,
+): Promise<RefreshOutcome> {
   try {
-    const storage = await browser.storage.local.get([USER_ID_KEY, FAMILY_ID_KEY, AUTH_TOKEN_KEY]);
+    const storage = await browser.storage.local.get([
+      USER_ID_KEY,
+      FAMILY_ID_KEY,
+      AUTH_TOKEN_KEY,
+    ]);
     const userId = storage[USER_ID_KEY] as string | undefined;
     const familyId = storage[FAMILY_ID_KEY] as string | undefined;
     const storedToken = storage[AUTH_TOKEN_KEY] as string | undefined;
@@ -145,7 +155,11 @@ export async function doRefreshToken(deps: RefreshDeps): Promise<RefreshOutcome>
     // surface the rate-limit state so the UI can show a friendly message.
     const activeCooldownUntil = await getActiveRecoveryCooldown();
     if (activeCooldownUntil !== undefined) {
-      return { refreshed: false, rateLimited: true, cooldownUntil: activeCooldownUntil };
+      return {
+        refreshed: false,
+        rateLimited: true,
+        cooldownUntil: activeCooldownUntil,
+      };
     }
 
     const recovery = await attemptJoinRecovery(deps);
@@ -164,7 +178,10 @@ export async function doRefreshToken(deps: RefreshDeps): Promise<RefreshOutcome>
 
     // Verification-enabled member on a dead token: DO NOT clear family data.
     // Prompt the user to re-verify instead (Invariant 2).
-    if (recovery.errorCode && VERIFICATION_ERROR_CODES.has(recovery.errorCode)) {
+    if (
+      recovery.errorCode &&
+      VERIFICATION_ERROR_CODES.has(recovery.errorCode)
+    ) {
       deps.onReauthRequired?.();
       return { refreshed: false };
     }
@@ -194,13 +211,17 @@ async function getActiveRecoveryCooldown(): Promise<number | undefined> {
 }
 
 /** Persist a fresh recovery cooldown; returns the epoch-ms deadline written. */
-async function setRecoveryCooldown(retryAfterSeconds?: number): Promise<number> {
+async function setRecoveryCooldown(
+  retryAfterSeconds?: number,
+): Promise<number> {
   const seconds =
     typeof retryAfterSeconds === "number" && retryAfterSeconds > 0
       ? retryAfterSeconds
       : DEFAULT_RECOVERY_COOLDOWN_SECONDS;
   const cooldownUntil = Date.now() + seconds * 1000;
-  await browser.storage.local.set({ [RECOVERY_COOLDOWN_UNTIL_KEY]: cooldownUntil });
+  await browser.storage.local.set({
+    [RECOVERY_COOLDOWN_UNTIL_KEY]: cooldownUntil,
+  });
   return cooldownUntil;
 }
 

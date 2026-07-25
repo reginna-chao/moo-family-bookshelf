@@ -68,9 +68,7 @@ function isLegacyKey(key: string): boolean {
  * Migrate legacy keys within a single storage area.
  * Writes new keys first, then removes the old ones.
  */
-async function migrateArea(
-  area: browser.Storage.StorageArea,
-): Promise<void> {
+async function migrateArea(area: browser.Storage.StorageArea): Promise<void> {
   const all = await area.get(null);
 
   const toSet: Record<string, unknown> = {};

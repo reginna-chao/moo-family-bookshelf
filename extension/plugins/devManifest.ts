@@ -61,13 +61,19 @@ export function devManifest(): Plugin {
       const manifestPath = resolve(outDir, "manifest.json");
       let manifest: Record<string, unknown>;
       try {
-        manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
+        manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<
+          string,
+          unknown
+        >;
       } catch {
         // manifest.json not in this build's output (e.g., content-script config)
         return;
       }
 
-      const baseName = (manifest.name as string).replace(STRIP_SUFFIX_PATTERN, "");
+      const baseName = (manifest.name as string).replace(
+        STRIP_SUFFIX_PATTERN,
+        "",
+      );
       manifest.name = `${baseName} (${variant.label})`;
 
       rewriteIconPaths(
@@ -76,8 +82,13 @@ export function devManifest(): Plugin {
         "manifest.icons",
       );
 
-      const action = manifest.action as { default_icon?: Record<string, string> } | undefined;
-      rewriteIconPaths(action?.default_icon, variant.iconDir, "manifest.action.default_icon");
+      const action = manifest.action as
+        { default_icon?: Record<string, string> } | undefined;
+      rewriteIconPaths(
+        action?.default_icon,
+        variant.iconDir,
+        "manifest.action.default_icon",
+      );
 
       writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 

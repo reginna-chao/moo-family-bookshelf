@@ -79,9 +79,7 @@ function setMockFamilyData(partial: Partial<MockFamilyData>) {
 }
 
 function renderPage() {
-  return render(
-    <BorrowPage userId={SELF_USER_ID} apiClient={mockApiClient} />,
-  );
+  return render(<BorrowPage userId={SELF_USER_ID} apiClient={mockApiClient} />);
 }
 
 describe("BorrowPage", () => {
@@ -170,9 +168,7 @@ describe("BorrowPage", () => {
           status: BorrowStatus.PENDING,
         }),
       ],
-      members: [
-        { userId: OTHER_USER_ID, displayName: "持有者B" },
-      ],
+      members: [{ userId: OTHER_USER_ID, displayName: "持有者B" }],
     });
     renderPage();
 

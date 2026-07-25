@@ -53,12 +53,14 @@ browser.runtime.onStartup.addListener(() => {
  * types — the polyfill forwards that to the sender's awaited
  * `browser.runtime.sendMessage`. Unknown types return `undefined`.
  */
-browser.runtime.onMessage.addListener((message: unknown): Promise<unknown> | undefined => {
-  const msg = message as BackgroundMessage;
-  // messageHandlers[msg.type] is the specific variant handler for msg.type;
-  // a single localized cast to the union-accepting MessageHandler lets us
-  // invoke it with the full message (runtime dispatch is correct by key).
-  const handler = messageHandlers[msg.type] as MessageHandler | undefined;
-  if (!handler) return undefined;
-  return Promise.resolve(handler(msg));
-});
+browser.runtime.onMessage.addListener(
+  (message: unknown): Promise<unknown> | undefined => {
+    const msg = message as BackgroundMessage;
+    // messageHandlers[msg.type] is the specific variant handler for msg.type;
+    // a single localized cast to the union-accepting MessageHandler lets us
+    // invoke it with the full message (runtime dispatch is correct by key).
+    const handler = messageHandlers[msg.type] as MessageHandler | undefined;
+    if (!handler) return undefined;
+    return Promise.resolve(handler(msg));
+  },
+);

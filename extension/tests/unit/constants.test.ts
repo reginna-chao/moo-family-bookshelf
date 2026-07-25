@@ -43,7 +43,8 @@ describe("DEFAULT_PWA_URL", () => {
   it("DEFAULT_API_ENDPOINT and DEFAULT_PWA_URL are independent when both set", async () => {
     vi.stubEnv("VITE_EXTENSION_API_ENDPOINT", "https://api.custom.dev");
     vi.stubEnv("VITE_EXTENSION_PWA_URL", "https://pwa.custom.dev");
-    const { DEFAULT_API_ENDPOINT, DEFAULT_PWA_URL } = await import("@/constants");
+    const { DEFAULT_API_ENDPOINT, DEFAULT_PWA_URL } =
+      await import("@/constants");
     expect(DEFAULT_API_ENDPOINT).toBe("https://api.custom.dev");
     expect(DEFAULT_PWA_URL).toBe("https://pwa.custom.dev");
   });
@@ -72,7 +73,11 @@ describe("buildPwaUrl", () => {
   });
 
   it("encodes special characters in qrToken", () => {
-    const url = buildPwaUrl("moo-abc123", "user456", "token/with+special=chars");
+    const url = buildPwaUrl(
+      "moo-abc123",
+      "user456",
+      "token/with+special=chars",
+    );
     expect(url).toContain("qrt=token%2Fwith%2Bspecial%3Dchars");
   });
 

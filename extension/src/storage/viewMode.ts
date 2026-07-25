@@ -27,6 +27,8 @@ export async function readFamilyShelfViewMode(): Promise<FamilyShelfViewMode> {
   return result[FAMILY_SHELF_VIEW_MODE_KEY] === "row" ? "row" : "grid";
 }
 
-export async function writeFamilyShelfViewMode(mode: FamilyShelfViewMode): Promise<void> {
+export async function writeFamilyShelfViewMode(
+  mode: FamilyShelfViewMode,
+): Promise<void> {
   await browser.storage.local.set({ [FAMILY_SHELF_VIEW_MODE_KEY]: mode });
 }

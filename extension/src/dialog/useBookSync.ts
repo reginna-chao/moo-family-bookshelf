@@ -68,43 +68,49 @@ export function useBookSync({
     if (autoSyncTriggered.current) return;
     autoSyncTriggered.current = true;
 
-    canAutoSync().then(async (allowed) => {
-      if (!allowed) return;
+    canAutoSync()
+      .then(async (allowed) => {
+        if (!allowed) return;
 
-      setSyncStatus("syncing");
-      setProgressMessage("");
-      try {
-        const result = await syncBooks({
-          navigate: true,
-          userId,
-          apiClient,
-          familyId: familyIdRef.current,
-          onProgress: (page, count) =>
-            setProgressMessage(formatScrapeProgress(page, count)),
-        });
+        setSyncStatus("syncing");
         setProgressMessage("");
-        if (result.success) {
-          setLastSyncBooks(result.books);
-          setSyncStatus("done");
-          setAutoSyncDone(true);
-          const returnedIds = result.autoReturnedRequestIds;
-          if (returnedIds && returnedIds.length > 0) {
-            onAutoReturnedRef.current?.(returnedIds);
+        try {
+          const result = await syncBooks({
+            navigate: true,
+            userId,
+            apiClient,
+            familyId: familyIdRef.current,
+            onProgress: (page, count) =>
+              setProgressMessage(formatScrapeProgress(page, count)),
+          });
+          setProgressMessage("");
+          if (result.success) {
+            setLastSyncBooks(result.books);
+            setSyncStatus("done");
+            setAutoSyncDone(true);
+            const returnedIds = result.autoReturnedRequestIds;
+            if (returnedIds && returnedIds.length > 0) {
+              onAutoReturnedRef.current?.(returnedIds);
+            }
+            if (statusTimerRef.current !== null)
+              clearTimeout(statusTimerRef.current);
+            statusTimerRef.current = setTimeout(
+              () => setSyncStatus("idle"),
+              2000,
+            );
+          } else {
+            setSyncError(result.error ?? "自動同步失敗");
+            setSyncStatus("error");
           }
-          if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
-          statusTimerRef.current = setTimeout(() => setSyncStatus("idle"), 2000);
-        } else {
-          setSyncError(result.error ?? "自動同步失敗");
+        } catch (err) {
+          setProgressMessage("");
+          setSyncError(err instanceof Error ? err.message : "自動同步失敗");
           setSyncStatus("error");
         }
-      } catch (err) {
-        setProgressMessage("");
-        setSyncError(err instanceof Error ? err.message : "自動同步失敗");
-        setSyncStatus("error");
-      }
-    }).catch((err) => {
-      console.warn("[useBookSync] canAutoSync check failed:", err);
-    });
+      })
+      .catch((err) => {
+        console.warn("[useBookSync] canAutoSync check failed:", err);
+      });
   }, [userId, apiClient]);
 
   // Mechanism B: Manual sync (no rate limiting)

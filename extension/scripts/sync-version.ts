@@ -9,7 +9,9 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 
-const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf-8")) as {
+const pkg = JSON.parse(
+  readFileSync(resolve(root, "package.json"), "utf-8"),
+) as {
   version: string;
 };
 

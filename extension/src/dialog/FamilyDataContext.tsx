@@ -255,7 +255,10 @@ export function FamilyDataProvider({
       // Server now returns decoded book data per member directly
       const parsedMembers: MemberBooks[] = data.members.map((member) => ({
         userId: member.userId,
-        displayName: memberNameMap.get(member.userId) || member.displayName || member.userId.slice(0, 8),
+        displayName:
+          memberNameMap.get(member.userId) ||
+          member.displayName ||
+          member.userId.slice(0, 8),
         books: (member.books ?? []).filter((b) => b.isShared === BoolFlag.TRUE),
       }));
 
@@ -276,7 +279,8 @@ export function FamilyDataProvider({
         // Extension context invalidated
       }
       const seenData = (storageData[sk] ?? {}) as BookshelfSeenRecord;
-      const chipsData = (storageData[ck] ?? null) as BookshelfChipsRecord | null;
+      const chipsData = (storageData[ck] ??
+        null) as BookshelfChipsRecord | null;
 
       const freshIds = computeFreshBookIds(
         parsedMembers,
@@ -328,9 +332,7 @@ export function FamilyDataProvider({
       setBorrowRequestsState("loaded");
     } catch (err) {
       if (!mountedRef.current) return;
-      setBorrowRequestsError(
-        err instanceof Error ? err.message : "載入失敗",
-      );
+      setBorrowRequestsError(err instanceof Error ? err.message : "載入失敗");
       setBorrowRequestsState("error");
     }
   }, [familyId, apiClient]);
@@ -347,7 +349,9 @@ export function FamilyDataProvider({
   const updateMemberDisplayName = useCallback(
     (targetUserId: string, displayName: string) => {
       setMembers((prev) =>
-        prev.map((m) => (m.userId === targetUserId ? { ...m, displayName } : m)),
+        prev.map((m) =>
+          m.userId === targetUserId ? { ...m, displayName } : m,
+        ),
       );
       setBookshelfMembers((prev) =>
         prev.map((m) =>
@@ -396,9 +400,7 @@ export function FamilyDataProvider({
     const mergedChips = new Set(chipBookIdsRef.current);
     for (const id of freshUpdateBookIdsRef.current) mergedChips.add(id);
 
-    const expiresAt = new Date(
-      Date.now() + 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     try {
       void browser.storage.local.set({
         [seenKey(userId)]: baseline,

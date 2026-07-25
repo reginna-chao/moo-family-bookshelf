@@ -7,10 +7,7 @@ import React, {
   useRef,
   useMemo,
 } from "react";
-import {
-  BoolFlag,
-  BorrowStatus,
-} from "@/api/client";
+import { BoolFlag, BorrowStatus } from "@/api/client";
 import type {
   ApiClient,
   BookEntry,
@@ -245,8 +242,7 @@ export function FamilyDataProvider({
       // --- Update tracking ---
       const seenData =
         readLocalJson<BookshelfSeenRecord>(seenKey(userId)) ?? {};
-      const chipsData =
-        readLocalJson<BookshelfChipsRecord>(chipsKey(userId));
+      const chipsData = readLocalJson<BookshelfChipsRecord>(chipsKey(userId));
 
       const freshIds = computeFreshBookIds(
         memberBooks,
@@ -295,9 +291,7 @@ export function FamilyDataProvider({
       setBorrowRequestsState("loaded");
     } catch (err) {
       if (!mountedRef.current) return;
-      setBorrowRequestsError(
-        err instanceof Error ? err.message : "載入失敗",
-      );
+      setBorrowRequestsError(err instanceof Error ? err.message : "載入失敗");
       setBorrowRequestsState("error");
     }
   }, [familyId, apiClient]);
@@ -348,9 +342,7 @@ export function FamilyDataProvider({
     const mergedChips = new Set(chipBookIdsRef.current);
     for (const id of freshUpdateBookIdsRef.current) mergedChips.add(id);
 
-    const expiresAt = new Date(
-      Date.now() + 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
     writeLocalJson(seenKey(userId), baseline);
     writeLocalJson(chipsKey(userId), {

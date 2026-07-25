@@ -123,7 +123,10 @@ describe("deriveUserId", () => {
       "  User@Example.com  ",
       "89f7e39cc90a4bf90502af2f6862d07bcd3dbe9f08cb6dcc96e8a0fd1f404da1",
     ],
-  ])("cross-platform vector: deriveUserId(%j) = %s", async (input, expected) => {
-    expect(await deriveUserId(input)).toBe(expected);
-  });
+  ])(
+    "cross-platform vector: deriveUserId(%j) = %s",
+    async (input, expected) => {
+      expect(await deriveUserId(input)).toBe(expected);
+    },
+  );
 });

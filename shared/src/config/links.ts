@@ -8,9 +8,12 @@ export interface ReportLink {
   url: string;
 }
 
-const FEEDBACK_PAGE = "https://reginna-chao.github.io/moo-family-bookshelf/feedback.html";
+const FEEDBACK_PAGE =
+  "https://reginna-chao.github.io/moo-family-bookshelf/feedback.html";
 
-export function getReportLinks(opts: { appVersion: string }): readonly ReportLink[] {
+export function getReportLinks(opts: {
+  appVersion: string;
+}): readonly ReportLink[] {
   const googleFormParams = new URLSearchParams({
     platform: "googleform",
     v: opts.appVersion,

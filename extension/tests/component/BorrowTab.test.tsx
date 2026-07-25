@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { MANUAL_LEND_NOTICE_DISMISSED_KEY } from "@/constants";
@@ -19,13 +25,21 @@ vi.mock("@/content/readmoo-lend", async () => {
   return {
     ...actual,
     ReadmooLendError: class ReadmooLendError extends Error {
-      constructor(public code: string, message: string) { super(message); }
+      constructor(
+        public code: string,
+        message: string,
+      ) {
+        super(message);
+      }
     },
-    openLendDialogForBook: (...args: unknown[]) => mockOpenLendDialogForBook(...args),
+    openLendDialogForBook: (...args: unknown[]) =>
+      mockOpenLendDialogForBook(...args),
     selectMemberByName: (...args: unknown[]) => mockSelectMemberByName(...args),
-    waitForLendDialogClose: (...args: unknown[]) => mockWaitForLendDialogClose(...args),
+    waitForLendDialogClose: (...args: unknown[]) =>
+      mockWaitForLendDialogClose(...args),
     closeLendDialog: (...args: unknown[]) => mockCloseLendDialog(...args),
-    restoreLibrarySearch: (...args: unknown[]) => mockRestoreLibrarySearch(...args),
+    restoreLibrarySearch: (...args: unknown[]) =>
+      mockRestoreLibrarySearch(...args),
   };
 });
 
@@ -66,8 +80,18 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
         familyId: "fam-1",
         ownerId: OWNER_ID,
         members: [
-          { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE, readmooName: "Owner" },
-          { userId: BORROWER_ID, displayName: "Alice", canLend: BoolFlag.TRUE, readmooName: "Alice" },
+          {
+            userId: OWNER_ID,
+            displayName: "Owner",
+            canLend: BoolFlag.TRUE,
+            readmooName: "Owner",
+          },
+          {
+            userId: BORROWER_ID,
+            displayName: "Alice",
+            canLend: BoolFlag.TRUE,
+            readmooName: "Alice",
+          },
         ],
       },
     }),
@@ -82,10 +106,17 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
 
 function renderBorrowTab(
   apiClient: ApiClient,
-  { userId = OWNER_ID, familyId = "fam-1" }: { userId?: string; familyId?: string } = {},
+  {
+    userId = OWNER_ID,
+    familyId = "fam-1",
+  }: { userId?: string; familyId?: string } = {},
 ) {
   return render(
-    <FamilyDataProvider familyId={familyId} userId={userId} apiClient={apiClient}>
+    <FamilyDataProvider
+      familyId={familyId}
+      userId={userId}
+      apiClient={apiClient}
+    >
       <BorrowTab userId={userId} apiClient={apiClient} />
     </FamilyDataProvider>,
   );
@@ -269,7 +300,10 @@ describe("BorrowTab", () => {
     fireEvent.click(screen.getByText("同意借閱"));
 
     await waitFor(() => {
-      expect(updateBorrowStatus).toHaveBeenCalledWith("req-1", BorrowStatus.LENT);
+      expect(updateBorrowStatus).toHaveBeenCalledWith(
+        "req-1",
+        BorrowStatus.LENT,
+      );
     });
   });
 
@@ -443,8 +477,16 @@ describe("BorrowTab", () => {
             familyId: "fam-1",
             ownerId: OWNER_ID,
             members: [
-              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
-              { userId: BORROWER_ID, displayName: "Alice", canLend: BoolFlag.TRUE },
+              {
+                userId: OWNER_ID,
+                displayName: "Owner",
+                canLend: BoolFlag.TRUE,
+              },
+              {
+                userId: BORROWER_ID,
+                displayName: "Alice",
+                canLend: BoolFlag.TRUE,
+              },
             ],
           },
         }),
@@ -468,7 +510,10 @@ describe("BorrowTab", () => {
       fireEvent.click(screen.getByText("同意借閱"));
 
       await waitFor(() => {
-        expect(updateBorrowStatus).toHaveBeenCalledWith("req-1", BorrowStatus.LENT);
+        expect(updateBorrowStatus).toHaveBeenCalledWith(
+          "req-1",
+          BorrowStatus.LENT,
+        );
       });
       expect(updateMemberSettings).not.toHaveBeenCalled();
       expect(mockSelectMemberByName).toHaveBeenCalledWith(
@@ -488,7 +533,11 @@ describe("BorrowTab", () => {
             familyId: "fam-1",
             ownerId: OWNER_ID,
             members: [
-              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
+              {
+                userId: OWNER_ID,
+                displayName: "Owner",
+                canLend: BoolFlag.TRUE,
+              },
               {
                 userId: BORROWER_ID,
                 displayName: "Alice",
@@ -521,7 +570,10 @@ describe("BorrowTab", () => {
       fireEvent.click(screen.getByText("同意借閱"));
 
       await waitFor(() => {
-        expect(updateBorrowStatus).toHaveBeenCalledWith("req-1", BorrowStatus.LENT);
+        expect(updateBorrowStatus).toHaveBeenCalledWith(
+          "req-1",
+          BorrowStatus.LENT,
+        );
       });
       expect(updateMemberSettings).not.toHaveBeenCalled();
       expect(mockSelectMemberByName).toHaveBeenCalledWith(
@@ -546,7 +598,11 @@ describe("BorrowTab", () => {
             familyId: "fam-1",
             ownerId: OWNER_ID,
             members: [
-              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
+              {
+                userId: OWNER_ID,
+                displayName: "Owner",
+                canLend: BoolFlag.TRUE,
+              },
               {
                 userId: BORROWER_ID,
                 displayName: "Alice",
@@ -593,7 +649,10 @@ describe("BorrowTab", () => {
           BORROWER_ID,
           { readmooName: "Bob" },
         );
-        expect(updateBorrowStatus).toHaveBeenCalledWith("req-1", BorrowStatus.LENT);
+        expect(updateBorrowStatus).toHaveBeenCalledWith(
+          "req-1",
+          BorrowStatus.LENT,
+        );
       });
     });
 
@@ -606,7 +665,11 @@ describe("BorrowTab", () => {
             familyId: "fam-1",
             ownerId: OWNER_ID,
             members: [
-              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
+              {
+                userId: OWNER_ID,
+                displayName: "Owner",
+                canLend: BoolFlag.TRUE,
+              },
               {
                 userId: BORROWER_ID,
                 displayName: "Alice",
@@ -663,8 +726,13 @@ describe("BorrowTab", () => {
   describe("手動借出 flow", () => {
     function mockNoticeDismissed(dismissed: boolean) {
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = dismissed ? { [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true } : {};
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const result = dismissed
+            ? { [MANUAL_LEND_NOTICE_DISMISSED_KEY]: true }
+            : {};
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -895,8 +963,16 @@ describe("BorrowTab", () => {
             familyId: "fam-1",
             ownerId: OWNER_ID,
             members: [
-              { userId: OWNER_ID, displayName: "Owner", canLend: BoolFlag.TRUE },
-              { userId: BORROWER_ID, displayName: "Alice", canLend: BoolFlag.TRUE },
+              {
+                userId: OWNER_ID,
+                displayName: "Owner",
+                canLend: BoolFlag.TRUE,
+              },
+              {
+                userId: BORROWER_ID,
+                displayName: "Alice",
+                canLend: BoolFlag.TRUE,
+              },
             ],
           },
         }),

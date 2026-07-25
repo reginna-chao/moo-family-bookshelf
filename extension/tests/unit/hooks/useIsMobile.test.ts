@@ -14,11 +14,19 @@ function createMockMql(query: string, matches: boolean) {
       mql.matches = v;
       listeners.forEach((cb) => cb());
     },
-    addEventListener(type: string, cb: EventListenerOrEventListenerObject | null) {
-      if (type === "change" && typeof cb === "function") listeners.add(cb as ChangeListener);
+    addEventListener(
+      type: string,
+      cb: EventListenerOrEventListenerObject | null,
+    ) {
+      if (type === "change" && typeof cb === "function")
+        listeners.add(cb as ChangeListener);
     },
-    removeEventListener(type: string, cb: EventListenerOrEventListenerObject | null) {
-      if (type === "change" && typeof cb === "function") listeners.delete(cb as ChangeListener);
+    removeEventListener(
+      type: string,
+      cb: EventListenerOrEventListenerObject | null,
+    ) {
+      if (type === "change" && typeof cb === "function")
+        listeners.delete(cb as ChangeListener);
     },
     addListener: vi.fn(),
     removeListener: vi.fn(),

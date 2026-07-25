@@ -28,7 +28,9 @@ describe("isDevMode", () => {
 
   it("returns true when DEV_MODE=1 and CF_WORKER is a non-production name", () => {
     expect(
-      isDevMode(makeEnv({ DEV_MODE: "1", CF_WORKER: "moo-family-bookshelf-dev" })),
+      isDevMode(
+        makeEnv({ DEV_MODE: "1", CF_WORKER: "moo-family-bookshelf-dev" }),
+      ),
     ).toBe(true);
     expect(
       isDevMode(makeEnv({ DEV_MODE: "1", CF_WORKER: "my-custom-worker" })),

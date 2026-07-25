@@ -60,7 +60,7 @@ export function ReadmooMemberPicker({
             aria-label="關閉"
             onClick={onCancel}
             disabled={saving}
-            className="moo-modal__close"
+            className="moo-button moo-button--ghost-icon moo-modal__close"
           >
             <X size={16} />
           </button>
@@ -74,7 +74,9 @@ export function ReadmooMemberPicker({
           </div>
         )}
         {options.length === 0 ? (
-          <div className="moo-member-picker__empty">讀墨清單中沒有可選的家庭成員。</div>
+          <div className="moo-member-picker__empty">
+            讀墨清單中沒有可選的家庭成員。
+          </div>
         ) : (
           <ul className="moo-member-picker__list">
             {options.map((member) => (
@@ -105,7 +107,7 @@ export function ReadmooMemberPicker({
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="moo-modal__cancel moo-member-picker__cancel"
+            className="moo-button moo-button--ghost moo-button--sm moo-modal__cancel moo-member-picker__cancel"
           >
             {saving ? "處理中..." : "取消"}
           </button>

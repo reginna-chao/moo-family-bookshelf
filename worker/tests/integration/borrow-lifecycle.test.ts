@@ -9,8 +9,15 @@ type Json = any;
 
 let kv: KVNamespace;
 
-function request(method: string, path: string, body?: unknown, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
@@ -28,8 +35,15 @@ async function createFamilyAndGetToken(userId: string, displayName = "") {
   };
 }
 
-async function joinFamilyAndGetToken(familyId: string, userId: string, displayName = "") {
-  const res = await request("POST", `/api/family/${familyId}/join`, { userId, displayName });
+async function joinFamilyAndGetToken(
+  familyId: string,
+  userId: string,
+  displayName = "",
+) {
+  const res = await request("POST", `/api/family/${familyId}/join`, {
+    userId,
+    displayName,
+  });
   const json = (await res.json()) as Json;
   return { authToken: json.data.authToken as string };
 }
@@ -45,13 +59,25 @@ beforeEach(() => {
 describe("Borrow Lifecycle Integration", () => {
   it("should complete full lifecycle: create family → add members → create borrow → approve → return", async () => {
     // Step 1: Create family with user1 as owner
-    const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1, "Alice");
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(
+      USER1,
+      "Alice",
+    );
 
     // Step 2: user2 joins the family
-    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "Bob");
+    const { authToken: token2 } = await joinFamilyAndGetToken(
+      familyId,
+      USER2,
+      "Bob",
+    );
 
     // Verify both members are in the family
-    const membersRes = await request("GET", `/api/family/${familyId}/members`, undefined, token1);
+    const membersRes = await request(
+      "GET",
+      `/api/family/${familyId}/members`,
+      undefined,
+      token1,
+    );
     expect(membersRes.status).toBe(200);
     const membersJson = (await membersRes.json()) as Json;
     expect(membersJson.data.members).toHaveLength(2);
@@ -65,7 +91,12 @@ describe("Borrow Lifecycle Integration", () => {
       ownerId: USER1,
     };
 
-    const createRes = await request("POST", `/api/family/${familyId}/borrow`, borrowBody, token2);
+    const createRes = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      borrowBody,
+      token2,
+    );
     expect(createRes.status).toBe(201);
     const createJson = (await createRes.json()) as Json;
     const requestId = createJson.data.requestId;
@@ -76,7 +107,12 @@ describe("Borrow Lifecycle Integration", () => {
     expect(createJson.data.ownerId).toBe(USER1);
 
     // Step 4: Verify the request shows up in GET list
-    const listRes1 = await request("GET", `/api/family/${familyId}/borrow`, undefined, token1);
+    const listRes1 = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token1,
+    );
     expect(listRes1.status).toBe(200);
     const listJson1 = (await listRes1.json()) as Json;
     expect(listJson1.data).toHaveLength(1);
@@ -95,7 +131,12 @@ describe("Borrow Lifecycle Integration", () => {
     expect(lentJson.data.status).toBe(BorrowStatus.LENT);
 
     // Step 6: Verify status change via GET list
-    const listRes2 = await request("GET", `/api/family/${familyId}/borrow`, undefined, token2);
+    const listRes2 = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token2,
+    );
     expect(listRes2.status).toBe(200);
     const listJson2 = (await listRes2.json()) as Json;
     expect(listJson2.data[0].status).toBe(BorrowStatus.LENT);
@@ -112,7 +153,12 @@ describe("Borrow Lifecycle Integration", () => {
     expect(returnJson.data.status).toBe(BorrowStatus.RETURNED);
 
     // Step 8: Verify final state
-    const listRes3 = await request("GET", `/api/family/${familyId}/borrow`, undefined, token1);
+    const listRes3 = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token1,
+    );
     expect(listRes3.status).toBe(200);
     const listJson3 = (await listRes3.json()) as Json;
     expect(listJson3.data[0].status).toBe(BorrowStatus.RETURNED);
@@ -128,8 +174,15 @@ describe("Borrow Lifecycle Integration", () => {
   });
 
   it("should complete the rejection flow: PENDING → REJECTED", async () => {
-    const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1, "Alice");
-    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "Bob");
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(
+      USER1,
+      "Alice",
+    );
+    const { authToken: token2 } = await joinFamilyAndGetToken(
+      familyId,
+      USER2,
+      "Bob",
+    );
 
     // Create a borrow request
     const createRes = await request(
@@ -145,7 +198,7 @@ describe("Borrow Lifecycle Integration", () => {
       token2,
     );
     expect(createRes.status).toBe(201);
-    const { requestId } = (await createRes.json() as Json).data;
+    const { requestId } = ((await createRes.json()) as Json).data;
 
     // Owner rejects
     const rejectRes = await request(
@@ -155,7 +208,9 @@ describe("Borrow Lifecycle Integration", () => {
       token1,
     );
     expect(rejectRes.status).toBe(200);
-    expect((await rejectRes.json() as Json).data.status).toBe(BorrowStatus.REJECTED);
+    expect(((await rejectRes.json()) as Json).data.status).toBe(
+      BorrowStatus.REJECTED,
+    );
 
     // REJECTED is terminal
     const retryRes = await request(
@@ -168,8 +223,15 @@ describe("Borrow Lifecycle Integration", () => {
   });
 
   it("should complete the cancellation flow: PENDING → CANCELLED", async () => {
-    const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1, "Alice");
-    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "Bob");
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(
+      USER1,
+      "Alice",
+    );
+    const { authToken: token2 } = await joinFamilyAndGetToken(
+      familyId,
+      USER2,
+      "Bob",
+    );
 
     // Create a borrow request
     const createRes = await request(
@@ -185,7 +247,7 @@ describe("Borrow Lifecycle Integration", () => {
       token2,
     );
     expect(createRes.status).toBe(201);
-    const { requestId } = (await createRes.json() as Json).data;
+    const { requestId } = ((await createRes.json()) as Json).data;
 
     // Borrower cancels
     const cancelRes = await request(
@@ -195,7 +257,9 @@ describe("Borrow Lifecycle Integration", () => {
       token2,
     );
     expect(cancelRes.status).toBe(200);
-    expect((await cancelRes.json() as Json).data.status).toBe(BorrowStatus.CANCELLED);
+    expect(((await cancelRes.json()) as Json).data.status).toBe(
+      BorrowStatus.CANCELLED,
+    );
 
     // CANCELLED is terminal
     const retryRes = await request(
@@ -208,13 +272,35 @@ describe("Borrow Lifecycle Integration", () => {
   });
 
   it("should handle multiple concurrent borrow requests for different books", async () => {
-    const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1, "Alice");
-    const { authToken: token2 } = await joinFamilyAndGetToken(familyId, USER2, "Bob");
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(
+      USER1,
+      "Alice",
+    );
+    const { authToken: token2 } = await joinFamilyAndGetToken(
+      familyId,
+      USER2,
+      "Bob",
+    );
 
     const books = [
-      { bookId: "book-1", bookTitle: "Book One", bookAuthor: "Author 1", bookCoverUrl: "https://example.com/1.jpg" },
-      { bookId: "book-2", bookTitle: "Book Two", bookAuthor: "Author 2", bookCoverUrl: "https://example.com/2.jpg" },
-      { bookId: "book-3", bookTitle: "Book Three", bookAuthor: "Author 3", bookCoverUrl: "https://example.com/3.jpg" },
+      {
+        bookId: "book-1",
+        bookTitle: "Book One",
+        bookAuthor: "Author 1",
+        bookCoverUrl: "https://example.com/1.jpg",
+      },
+      {
+        bookId: "book-2",
+        bookTitle: "Book Two",
+        bookAuthor: "Author 2",
+        bookCoverUrl: "https://example.com/2.jpg",
+      },
+      {
+        bookId: "book-3",
+        bookTitle: "Book Three",
+        bookAuthor: "Author 3",
+        bookCoverUrl: "https://example.com/3.jpg",
+      },
     ];
 
     // Create 3 borrow requests
@@ -232,18 +318,44 @@ describe("Borrow Lifecycle Integration", () => {
     }
 
     // List should show 3 requests
-    const listRes = await request("GET", `/api/family/${familyId}/borrow`, undefined, token1);
-    expect((await listRes.json() as Json).data).toHaveLength(3);
+    const listRes = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token1,
+    );
+    expect(((await listRes.json()) as Json).data).toHaveLength(3);
 
     // Approve first, reject second, leave third pending
-    await request("PATCH", `/api/borrow/${requestIds[0]}`, { status: BorrowStatus.LENT }, token1);
-    await request("PATCH", `/api/borrow/${requestIds[1]}`, { status: BorrowStatus.REJECTED }, token1);
+    await request(
+      "PATCH",
+      `/api/borrow/${requestIds[0]}`,
+      { status: BorrowStatus.LENT },
+      token1,
+    );
+    await request(
+      "PATCH",
+      `/api/borrow/${requestIds[1]}`,
+      { status: BorrowStatus.REJECTED },
+      token1,
+    );
 
     // Verify statuses
-    const listRes2 = await request("GET", `/api/family/${familyId}/borrow`, undefined, token2);
-    const data = (await listRes2.json() as Json).data;
-    expect(data.find((r: Json) => r.requestId === requestIds[0]).status).toBe(BorrowStatus.LENT);
-    expect(data.find((r: Json) => r.requestId === requestIds[1]).status).toBe(BorrowStatus.REJECTED);
-    expect(data.find((r: Json) => r.requestId === requestIds[2]).status).toBe(BorrowStatus.PENDING);
+    const listRes2 = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token2,
+    );
+    const data = ((await listRes2.json()) as Json).data;
+    expect(data.find((r: Json) => r.requestId === requestIds[0]).status).toBe(
+      BorrowStatus.LENT,
+    );
+    expect(data.find((r: Json) => r.requestId === requestIds[1]).status).toBe(
+      BorrowStatus.REJECTED,
+    );
+    expect(data.find((r: Json) => r.requestId === requestIds[2]).status).toBe(
+      BorrowStatus.PENDING,
+    );
   });
 });

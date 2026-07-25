@@ -12,6 +12,7 @@ ultrathink
 ## Mandatory Protocol
 
 Your invoker provides:
+
 - `scope` — `frontend` or `backend` (decides which rules + commands apply)
 - `requirements` — what to implement and why
 - `files` — the specific files / globs you may touch
@@ -29,19 +30,21 @@ These files are **authoritative**. They override any generic habit and any invok
 
 ## Scope Map
 
-| scope | working dir | verify command | key rules |
-| --- | --- | --- | --- |
-| `frontend` | `extension/src/` or `pwa/src/` | `pnpm typecheck && pnpm lint` | functional components, `interface {Component}Props`, files < 200 LOC, max 3 nesting, no nested ternary, no `any`, Tailwind, custom hooks for reuse |
-| `backend` | `worker/src/` | `cd worker && pnpm typecheck && pnpm lint` | Hono routing, `{ data, error }` envelope, validate at handler, thin handlers, proper HTTP codes, machine-readable `code`, no `any`, documented KV key patterns |
+| scope      | working dir                    | verify command                             | key rules                                                                                                                                                      |
+| ---------- | ------------------------------ | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend` | `extension/src/` or `pwa/src/` | `pnpm typecheck && pnpm lint`              | functional components, `interface {Component}Props`, files < 200 LOC, max 3 nesting, no nested ternary, no `any`, Tailwind, custom hooks for reuse             |
+| `backend`  | `worker/src/`                  | `cd worker && pnpm typecheck && pnpm lint` | Hono routing, `{ data, error }` envelope, validate at handler, thin handlers, proper HTTP codes, machine-readable `code`, no `any`, documented KV key patterns |
 
 Cross-cutting (both scopes): all boolean-like fields use the `BoolFlag` enum (never raw `true/false` or `0/1`).
 
 ## Mode
 
 ### `production` (default)
+
 Write/modify production code per the workflow below. Verification is mandatory.
 
 ### `research-only`
+
 Pre-implementation impact analysis. **You MUST NOT use Edit, Write, or any git mutation** — not a single byte, even if obvious changes are tempting. Read the scope files, trace callers, identify the change shape and risks, return the research-only summary. No Verification block.
 
 ## Hard Boundaries

@@ -10,7 +10,9 @@ type Json = any;
 let kv: KVNamespace;
 
 function request(method: string, path: string, body?: unknown) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
@@ -78,7 +80,11 @@ describe("POST /:id/join — existing member rejoin (no verification set)", () =
     });
     const rejoinJson = (await rejoinRes.json()) as Json;
     expect(rejoinJson.data.members).toHaveLength(2);
-    expect(rejoinJson.data.members.filter((m: { userId: string }) => m.userId === USER2)).toHaveLength(1);
+    expect(
+      rejoinJson.data.members.filter(
+        (m: { userId: string }) => m.userId === USER2,
+      ),
+    ).toHaveLength(1);
   });
 
   it("should update displayName on rejoin when a new non-empty name is provided", async () => {
@@ -96,7 +102,9 @@ describe("POST /:id/join — existing member rejoin (no verification set)", () =
       displayName: "Bobby",
     });
     const rejoinJson = (await rejoinRes.json()) as Json;
-    const user2Member = rejoinJson.data.members.find((m: { userId: string }) => m.userId === USER2);
+    const user2Member = rejoinJson.data.members.find(
+      (m: { userId: string }) => m.userId === USER2,
+    );
     expect(user2Member.displayName).toBe("Bobby");
   });
 
@@ -114,7 +122,9 @@ describe("POST /:id/join — existing member rejoin (no verification set)", () =
       userId: USER2,
     });
     const rejoinJson = (await rejoinRes.json()) as Json;
-    const user2Member = rejoinJson.data.members.find((m: { userId: string }) => m.userId === USER2);
+    const user2Member = rejoinJson.data.members.find(
+      (m: { userId: string }) => m.userId === USER2,
+    );
     // Should keep the original displayName, not overwrite with ""
     expect(user2Member.displayName).toBe("Bob");
   });
@@ -170,7 +180,9 @@ describe("POST /:id/join — existing member rejoin verification enforcement (SE
     const { familyId } = await createFamily(USER1);
 
     // USER2 joins with no verification, then sets a real PIN via the verify route
-    const joinRes = await request("POST", `/api/family/${familyId}/join`, { userId: USER2 });
+    const joinRes = await request("POST", `/api/family/${familyId}/join`, {
+      userId: USER2,
+    });
     const joinJson = (await joinRes.json()) as Json;
     const user2Token = joinJson.data.authToken as string;
 
@@ -179,7 +191,10 @@ describe("POST /:id/join — existing member rejoin verification enforcement (SE
       `/api/user/${USER2}/verify`,
       {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${user2Token}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${user2Token}`,
+        },
         body: JSON.stringify({ method: "pin", secret: "123456" }),
       },
       { KV: kv, DEV_MODE: "1" },

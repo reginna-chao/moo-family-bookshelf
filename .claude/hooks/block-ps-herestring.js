@@ -18,7 +18,8 @@ process.stdin.on("end", () => {
   let command = "";
   try {
     const payload = JSON.parse(raw);
-    command = (payload && payload.tool_input && payload.tool_input.command) || "";
+    command =
+      (payload && payload.tool_input && payload.tool_input.command) || "";
   } catch {
     process.exit(0); // Unparseable input: fail open, never block on hook error.
   }
@@ -37,7 +38,7 @@ process.stdin.on("end", () => {
           permissionDecision: "deny",
           permissionDecisionReason: reason,
         },
-      })
+      }),
     );
   }
   process.exit(0);

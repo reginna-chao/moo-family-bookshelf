@@ -63,7 +63,9 @@ export function waitForElement<T extends HTMLElement>(
     observer.observe(document.body, { childList: true, subtree: true });
     const timer = setTimeout(() => {
       observer.disconnect();
-      reject(new ReadmooLendError("ELEMENT_TIMEOUT", `等待元素逾時：${selector}`));
+      reject(
+        new ReadmooLendError("ELEMENT_TIMEOUT", `等待元素逾時：${selector}`),
+      );
     }, timeoutMs);
   });
 }

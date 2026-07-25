@@ -138,7 +138,11 @@ describe("FamilyShelfPage", () => {
 
   it("clicking retry button re-fetches data", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [{ userId: "user-alice", displayName: "Alice" }],
+      },
     });
     mockGetFamilyBookshelf.mockRejectedValueOnce(new Error("Network error"));
     renderWithProvider(defaultProps);
@@ -156,7 +160,12 @@ describe("FamilyShelfPage", () => {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "Book 1", author: "Author 1", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "Book 1",
+                author: "Author 1",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -174,7 +183,11 @@ describe("FamilyShelfPage", () => {
 
   it("shows empty state when no books are shared", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [{ userId: "user-alice", displayName: "Alice" }],
+      },
     });
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
@@ -184,7 +197,12 @@ describe("FamilyShelfPage", () => {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "Hidden Book", author: "Author", isShared: BoolFlag.FALSE },
+              {
+                bookId: "b1",
+                title: "Hidden Book",
+                author: "Author",
+                isShared: BoolFlag.FALSE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -204,7 +222,12 @@ describe("FamilyShelfPage", () => {
       data: {
         familyId: "fam-1",
         members: [
-          { userId: "user-alice", displayName: "Alice", books: [], lastUpdated: null },
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: [],
+            lastUpdated: null,
+          },
         ],
       },
     });
@@ -218,7 +241,11 @@ describe("FamilyShelfPage", () => {
 
   it("renders books after successful load", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [{ userId: "user-alice", displayName: "Alice" }],
+      },
     });
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
@@ -228,8 +255,18 @@ describe("FamilyShelfPage", () => {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "React 深入淺出", author: "作者一", isShared: BoolFlag.TRUE },
-              { bookId: "b2", title: "TypeScript 指南", author: "作者二", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "React 深入淺出",
+                author: "作者一",
+                isShared: BoolFlag.TRUE,
+              },
+              {
+                bookId: "b2",
+                title: "TypeScript 指南",
+                author: "作者二",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -249,7 +286,11 @@ describe("FamilyShelfPage", () => {
 
   it("only renders books with isShared === 1", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [{ userId: "user-alice", displayName: "Alice" }],
+      },
     });
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
@@ -259,8 +300,18 @@ describe("FamilyShelfPage", () => {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "Shared Book", author: "Author", isShared: BoolFlag.TRUE },
-              { bookId: "b2", title: "Private Book", author: "Author", isShared: BoolFlag.FALSE },
+              {
+                bookId: "b1",
+                title: "Shared Book",
+                author: "Author",
+                isShared: BoolFlag.TRUE,
+              },
+              {
+                bookId: "b2",
+                title: "Private Book",
+                author: "Author",
+                isShared: BoolFlag.FALSE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -278,10 +329,14 @@ describe("FamilyShelfPage", () => {
 
   it("default member filter excludes self", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [
-        { userId: "user-self", displayName: "Me" },
-        { userId: "user-alice", displayName: "Alice" },
-      ] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [
+          { userId: "user-self", displayName: "Me" },
+          { userId: "user-alice", displayName: "Alice" },
+        ],
+      },
     });
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
@@ -291,7 +346,12 @@ describe("FamilyShelfPage", () => {
             userId: "user-self",
             displayName: "Me",
             books: makeBooks([
-              { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "My Book",
+                author: "Self Author",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -299,7 +359,12 @@ describe("FamilyShelfPage", () => {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b2",
+                title: "Alice Book",
+                author: "Alice Author",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -318,10 +383,14 @@ describe("FamilyShelfPage", () => {
 
   it("'所有人' filter shows all members including self", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [
-        { userId: "user-self", displayName: "Me" },
-        { userId: "user-alice", displayName: "Alice" },
-      ] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [
+          { userId: "user-self", displayName: "Me" },
+          { userId: "user-alice", displayName: "Alice" },
+        ],
+      },
     });
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
@@ -331,7 +400,12 @@ describe("FamilyShelfPage", () => {
             userId: "user-self",
             displayName: "Me",
             books: makeBooks([
-              { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "My Book",
+                author: "Self Author",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -339,7 +413,12 @@ describe("FamilyShelfPage", () => {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b2",
+                title: "Alice Book",
+                author: "Alice Author",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -364,7 +443,11 @@ describe("FamilyShelfPage", () => {
 
   it("search filters books by title", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [{ userId: "user-alice", displayName: "Alice" }],
+      },
     });
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
@@ -374,8 +457,18 @@ describe("FamilyShelfPage", () => {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "React 入門", author: "Author A", isShared: BoolFlag.TRUE },
-              { bookId: "b2", title: "Vue 入門", author: "Author B", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "React 入門",
+                author: "Author A",
+                isShared: BoolFlag.TRUE,
+              },
+              {
+                bookId: "b2",
+                title: "Vue 入門",
+                author: "Author B",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -413,7 +506,11 @@ describe("FamilyShelfPage", () => {
 
   it("books link to readmooUrl with target _blank", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [{ userId: "user-alice", displayName: "Alice" }] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [{ userId: "user-alice", displayName: "Alice" }],
+      },
     });
     const readmooUrl = "https://readmoo.com/book-123";
     mockGetFamilyBookshelf.mockResolvedValue({
@@ -452,10 +549,14 @@ describe("FamilyShelfPage", () => {
 
   it("updates member display name when the context method is called", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [
-        { userId: "user-self", displayName: "Me" },
-        { userId: "user-alice", displayName: "Alice" },
-      ] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [
+          { userId: "user-self", displayName: "Me" },
+          { userId: "user-alice", displayName: "Alice" },
+        ],
+      },
     });
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
@@ -465,7 +566,12 @@ describe("FamilyShelfPage", () => {
             userId: "user-self",
             displayName: "Me",
             books: makeBooks([
-              { bookId: "b1", title: "My Book", author: "Self Author", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "My Book",
+                author: "Self Author",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -473,7 +579,12 @@ describe("FamilyShelfPage", () => {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b2", title: "Alice Book", author: "Alice Author", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b2",
+                title: "Alice Book",
+                author: "Alice Author",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -532,10 +643,14 @@ describe("FamilyShelfPage", () => {
 
   it("shows total book count in header", async () => {
     mockGetFamilyMembers.mockResolvedValue({
-      data: { familyId: "fam-1", ownerId: "user-self", members: [
-        { userId: "user-alice", displayName: "Alice" },
-        { userId: "user-bob", displayName: "Bob" },
-      ] },
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [
+          { userId: "user-alice", displayName: "Alice" },
+          { userId: "user-bob", displayName: "Bob" },
+        ],
+      },
     });
     mockGetFamilyBookshelf.mockResolvedValue({
       data: {
@@ -545,7 +660,12 @@ describe("FamilyShelfPage", () => {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "Book 1", author: "A", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "Book 1",
+                author: "A",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -553,8 +673,18 @@ describe("FamilyShelfPage", () => {
             userId: "user-bob",
             displayName: "Bob",
             books: makeBooks([
-              { bookId: "b2", title: "Book 2", author: "B", isShared: BoolFlag.TRUE },
-              { bookId: "b3", title: "Book 3", author: "C", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b2",
+                title: "Book 2",
+                author: "B",
+                isShared: BoolFlag.TRUE,
+              },
+              {
+                bookId: "b3",
+                title: "Book 3",
+                author: "C",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -625,7 +755,9 @@ describe("FamilyShelfPage", () => {
         expect(screen.getByText("共享書 1")).toBeInTheDocument();
       });
 
-      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /載入更多/ }),
+      ).not.toBeInTheDocument();
     });
 
     it("click Load More appends pageSize to visible count", async () => {
@@ -642,7 +774,9 @@ describe("FamilyShelfPage", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByRole("button", { name: /載入更多.*已顯示 200.*共 250 本/ }),
+          screen.getByRole("button", {
+            name: /載入更多.*已顯示 200.*共 250 本/,
+          }),
         ).toBeInTheDocument();
       });
     });
@@ -660,7 +794,9 @@ describe("FamilyShelfPage", () => {
         target: { value: "共享" },
       });
 
-      expect(screen.queryByRole("button", { name: /載入更多/ })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /載入更多/ }),
+      ).not.toBeInTheDocument();
     });
   });
 });

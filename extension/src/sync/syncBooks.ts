@@ -9,7 +9,13 @@
  */
 
 import browser from "webextension-polyfill";
-import { ApiClient, BookEntry, BoolFlag, PersonalBooks, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import {
+  ApiClient,
+  BookEntry,
+  BoolFlag,
+  PersonalBooks,
+  PERSONAL_BOOKS_SCHEMA_VERSION,
+} from "../api/client";
 import {
   AUTO_SYNC_INTERVAL_KEY,
   LAST_SYNC_AT_KEY,
@@ -59,7 +65,10 @@ function wait(ms: number): Promise<void> {
  * relative to the user-configured `autoSyncInterval`.
  */
 async function canSyncByInterval(timestampKey: string): Promise<boolean> {
-  const result = await browser.storage.local.get([timestampKey, AUTO_SYNC_INTERVAL_KEY]);
+  const result = await browser.storage.local.get([
+    timestampKey,
+    AUTO_SYNC_INTERVAL_KEY,
+  ]);
   const interval = isAutoSyncInterval(result[AUTO_SYNC_INTERVAL_KEY])
     ? result[AUTO_SYNC_INTERVAL_KEY]
     : DEFAULT_AUTO_SYNC_INTERVAL;
@@ -86,9 +95,7 @@ interface LoadSavedResult {
   raw: Record<string, unknown> | null;
 }
 
-function loadSavedBooks(
-  data: Record<string, unknown>,
-): LoadSavedResult {
+function loadSavedBooks(data: Record<string, unknown>): LoadSavedResult {
   if (Array.isArray(data.books)) {
     return { books: data.books as BookEntry[], raw: data };
   }
@@ -170,7 +177,9 @@ async function runAutoReturn(
  * 6. Navigate back if needed
  * 7. Update lastSyncAt
  */
-export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksResult> {
+export async function syncBooks(
+  options: SyncBooksOptions,
+): Promise<SyncBooksResult> {
   const { navigate, userId, apiClient, onProgress, familyId } = options;
   const originalHash = window.location.hash;
   const isOnLibrary = originalHash.includes("#/library");
@@ -188,8 +197,12 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     // Step 3b: Optionally scrape archived books
     let syncArchived = BoolFlag.FALSE;
     try {
-      const archiveResult = await browser.storage.local.get([SYNC_ARCHIVED_KEY]);
-      syncArchived = (archiveResult[SYNC_ARCHIVED_KEY] as number | undefined) ?? BoolFlag.FALSE;
+      const archiveResult = await browser.storage.local.get([
+        SYNC_ARCHIVED_KEY,
+      ]);
+      syncArchived =
+        (archiveResult[SYNC_ARCHIVED_KEY] as number | undefined) ??
+        BoolFlag.FALSE;
     } catch {
       // Archive setting unavailable — skip archive sync
     }
@@ -218,7 +231,8 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
     const merged = mergeBooks(allScrapedBooks, savedBooks);
 
     // Step 5: Build PersonalBooks object and upload as plaintext JSON
-    const displayName = (storageResult[DISPLAY_NAME_KEY] as string | undefined) ?? "";
+    const displayName =
+      (storageResult[DISPLAY_NAME_KEY] as string | undefined) ?? "";
     const personalBooks: PersonalBooks = {
       ...savedRawPayload,
       schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
@@ -227,7 +241,10 @@ export async function syncBooks(options: SyncBooksOptions): Promise<SyncBooksRes
       books: merged,
       lastUpdated: new Date().toISOString(),
     };
-    const uploadResponse = await apiClient.updatePersonalBooks(userId, personalBooks);
+    const uploadResponse = await apiClient.updatePersonalBooks(
+      userId,
+      personalBooks,
+    );
 
     if (uploadResponse.error) {
       throw new Error(uploadResponse.error.message);

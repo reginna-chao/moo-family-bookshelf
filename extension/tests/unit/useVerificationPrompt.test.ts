@@ -11,7 +11,9 @@ import type { VerifyMethod } from "@/api/types";
 
 function createMockApiClient(method: VerifyMethod = "pin"): ApiClient {
   return {
-    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method, prompted: 0 } }),
+    getVerifyMethod: vi
+      .fn()
+      .mockResolvedValue({ data: { method, prompted: 0 } }),
   } as unknown as ApiClient;
 }
 
@@ -47,7 +49,9 @@ describe("useVerificationPrompt", () => {
   });
 
   it("starts inactive with no method and no method error", () => {
-    const { result } = renderHook(() => useVerificationPrompt(createMockApiClient()));
+    const { result } = renderHook(() =>
+      useVerificationPrompt(createMockApiClient()),
+    );
     expect(result.current.active).toBe(false);
     expect(result.current.method).toBeNull();
     expect(result.current.methodError).toBe(false);
@@ -75,7 +79,10 @@ describe("useVerificationPrompt", () => {
 
     let handled = false;
     await act(async () => {
-      handled = await result.current.begin("VERIFICATION_REQUIRED", makeCtx(vi.fn()));
+      handled = await result.current.begin(
+        "VERIFICATION_REQUIRED",
+        makeCtx(vi.fn()),
+      );
     });
 
     expect(handled).toBe(true);
@@ -223,7 +230,9 @@ describe("useVerificationPrompt", () => {
 
   it("submit() shows a generic error when retry fails with a non-verification code", async () => {
     const api = createMockApiClient();
-    const retry = vi.fn().mockResolvedValue({ ok: false, errorCode: "SERVER_ERROR" });
+    const retry = vi
+      .fn()
+      .mockResolvedValue({ ok: false, errorCode: "SERVER_ERROR" });
     const { result } = renderHook(() => useVerificationPrompt(api));
 
     await act(async () => {
@@ -262,7 +271,9 @@ describe("useVerificationPrompt", () => {
 
   it("shows the generic error message (not the rate-limit one) for an unknown non-verification code", async () => {
     const api = createMockApiClient();
-    const retry = vi.fn().mockResolvedValue({ ok: false, errorCode: "UNKNOWN_THING" });
+    const retry = vi
+      .fn()
+      .mockResolvedValue({ ok: false, errorCode: "UNKNOWN_THING" });
     const { result } = renderHook(() => useVerificationPrompt(api));
 
     await act(async () => {
@@ -283,7 +294,10 @@ describe("useVerificationPrompt", () => {
     const { result } = renderHook(() => useVerificationPrompt(api));
 
     await act(async () => {
-      await result.current.begin("VERIFICATION_REQUIRED", makeCtx(vi.fn(), onCancel));
+      await result.current.begin(
+        "VERIFICATION_REQUIRED",
+        makeCtx(vi.fn(), onCancel),
+      );
     });
     expect(result.current.active).toBe(true);
 
@@ -373,7 +387,10 @@ describe("useVerificationPrompt", () => {
     const { result } = renderHook(() => useVerificationPrompt(api));
 
     await act(async () => {
-      await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry, onCancel));
+      await result.current.begin(
+        "VERIFICATION_REQUIRED",
+        makeCtx(retry, onCancel),
+      );
     });
 
     // Kick off a submit but keep the retry promise pending.

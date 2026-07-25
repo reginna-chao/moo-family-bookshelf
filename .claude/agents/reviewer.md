@@ -12,6 +12,7 @@ ultrathink
 ## Mandatory Protocol
 
 Your invoker provides:
+
 - `scope` — `frontend` or `backend` (decides which review dimensions apply)
 - `target` — file paths, a git diff range, or a PR reference to review
 - `business_logic` — optional; the feature's intended behavior
@@ -73,11 +74,11 @@ Richly-formatted markdown, table-driven. Every finding is a table row (never fre
 
 ### Verdict (single-row table)
 
-| Verdict | Meaning |
-| --- | --- |
-| **PASS** | No issues. Ready to merge. |
-| **SUGGESTIONS** | Mergeable; non-blocking improvements exist. |
-| **CRITICAL — DO NOT MERGE** | Blocking issues. |
+| Verdict                     | Meaning                                     |
+| --------------------------- | ------------------------------------------- |
+| **PASS**                    | No issues. Ready to merge.                  |
+| **SUGGESTIONS**             | Mergeable; non-blocking improvements exist. |
+| **CRITICAL — DO NOT MERGE** | Blocking issues.                            |
 
 Then a **Changes Overview** table (file → one-line summary).
 

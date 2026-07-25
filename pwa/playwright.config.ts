@@ -19,7 +19,10 @@ export default defineConfig({
   retries: isCI ? 1 : 0,
   workers: 1,
   reporter: isCI
-    ? [["github"], ["html", { open: "never", outputFolder: "playwright-report" }]]
+    ? [
+        ["github"],
+        ["html", { open: "never", outputFolder: "playwright-report" }],
+      ]
     : "list",
   timeout: 60_000,
   expect: {
@@ -33,9 +36,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: isCI
-        ? "pnpm preview"
-        : `pnpm exec vite dev --port ${PWA_PORT}`,
+      command: isCI ? "pnpm preview" : `pnpm exec vite dev --port ${PWA_PORT}`,
       port: PWA_PORT,
       ignoreHTTPSErrors: true,
       reuseExistingServer: false,

@@ -16,7 +16,13 @@ interface ToggleButtonProps {
   children: React.ReactNode;
 }
 
-function ToggleButton({ active, ariaLabel, onClick, roundedClass, children }: ToggleButtonProps) {
+function ToggleButton({
+  active,
+  ariaLabel,
+  onClick,
+  roundedClass,
+  children,
+}: ToggleButtonProps) {
   const stateClasses = active
     ? "bg-blue-50 border-blue-600 text-blue-600"
     : "bg-white border-gray-300 text-gray-500";
@@ -35,11 +41,7 @@ function ToggleButton({ active, ariaLabel, onClick, roundedClass, children }: To
 
 export function ViewModeToggle({ mode, onChange }: ViewModeToggleProps) {
   return (
-    <div
-      role="group"
-      aria-label="家庭書櫃顯示模式"
-      className="inline-flex"
-    >
+    <div role="group" aria-label="家庭書櫃顯示模式" className="inline-flex">
       <ToggleButton
         active={mode === "grid"}
         ariaLabel="切換為網格檢視"

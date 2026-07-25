@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { BoolFlag, kvKeys, type UserBooksRecord, type PublicShelfSnapshot } from "../../src/kv/schema";
+import {
+  BoolFlag,
+  kvKeys,
+  type UserBooksRecord,
+  type PublicShelfSnapshot,
+} from "../../src/kv/schema";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -72,7 +77,10 @@ async function seedUser(userId: string, token: string) {
   };
   await kv.put(kvKeys.user(userId), JSON.stringify(record));
   await kv.put(`token:${token}`, userId);
-  await kv.put(`auth:${userId}`, JSON.stringify({ token, createdAt: new Date().toISOString() }));
+  await kv.put(
+    `auth:${userId}`,
+    JSON.stringify({ token, createdAt: new Date().toISOString() }),
+  );
 }
 
 async function seedMember(userId: string, familyId: string) {
@@ -125,23 +133,33 @@ describe("POST /api/user/:id/public-shelf", () => {
     const { json } = await createShelf(USER_ID, AUTH_TOKEN);
     const token = json.data.shelf.shareToken;
 
-    const snapshot = await kv.get(kvKeys.publicShelf(token), "json") as PublicShelfSnapshot;
+    const snapshot = (await kv.get(
+      kvKeys.publicShelf(token),
+      "json",
+    )) as PublicShelfSnapshot;
     expect(snapshot).not.toBeNull();
     expect(snapshot.books).toHaveLength(2);
-    expect(snapshot.books.every((b: Json) => b.isShared === BoolFlag.TRUE)).toBe(true);
+    expect(
+      snapshot.books.every((b: Json) => b.isShared === BoolFlag.TRUE),
+    ).toBe(true);
     expect(snapshot.title).toBe("我的公開書櫃");
   });
 
   it("creates a permanent shelf (expiresDays=null)", async () => {
     await seedUser(USER_ID, AUTH_TOKEN);
 
-    const { res, json } = await createShelf(USER_ID, AUTH_TOKEN, { expiresDays: null });
+    const { res, json } = await createShelf(USER_ID, AUTH_TOKEN, {
+      expiresDays: null,
+    });
 
     expect(res.status).toBe(201);
     expect(json.data.shelf.expiresDays).toBeNull();
     expect(json.data.shelf.expiresAt).toBeNull();
 
-    const snapshot = await kv.get(kvKeys.publicShelf(json.data.shelf.shareToken), "json") as PublicShelfSnapshot;
+    const snapshot = (await kv.get(
+      kvKeys.publicShelf(json.data.shelf.shareToken),
+      "json",
+    )) as PublicShelfSnapshot;
     expect(snapshot.expiresAt).toBeNull();
   });
 
@@ -197,7 +215,9 @@ describe("POST /api/user/:id/public-shelf", () => {
     await seedUser(USER_ID, AUTH_TOKEN);
     await createShelf(USER_ID, AUTH_TOKEN);
 
-    const { res, json } = await createShelf(USER_ID, AUTH_TOKEN, { title: "Second" });
+    const { res, json } = await createShelf(USER_ID, AUTH_TOKEN, {
+      title: "Second",
+    });
 
     expect(res.status).toBe(409);
     expect(json.error.code).toBe("MAX_SHELVES_REACHED");
@@ -205,7 +225,13 @@ describe("POST /api/user/:id/public-shelf", () => {
 
   it("returns 400 when user has no books record", async () => {
     await kv.put(`token:${AUTH_TOKEN}`, USER_ID);
-    await kv.put(`auth:${USER_ID}`, JSON.stringify({ token: AUTH_TOKEN, createdAt: new Date().toISOString() }));
+    await kv.put(
+      `auth:${USER_ID}`,
+      JSON.stringify({
+        token: AUTH_TOKEN,
+        createdAt: new Date().toISOString(),
+      }),
+    );
 
     const { res, json } = await createShelf(USER_ID, AUTH_TOKEN);
 
@@ -268,29 +294,42 @@ describe("PUT /api/user/:id/public-shelf/:shelfId", () => {
     const shelfId = created.data.shelf.shelfId;
     const shareToken = created.data.shelf.shareToken;
 
-    const res = await request("PUT", `/api/user/${USER_ID}/public-shelf/${shelfId}`, {
-      body: JSON.stringify({ title: "新標題" }),
-      token: AUTH_TOKEN,
-    });
+    const res = await request(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}`,
+      {
+        body: JSON.stringify({ title: "新標題" }),
+        token: AUTH_TOKEN,
+      },
+    );
 
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.shelf.title).toBe("新標題");
 
-    const snapshot = await kv.get(kvKeys.publicShelf(shareToken), "json") as PublicShelfSnapshot;
+    const snapshot = (await kv.get(
+      kvKeys.publicShelf(shareToken),
+      "json",
+    )) as PublicShelfSnapshot;
     expect(snapshot.title).toBe("新標題");
   });
 
   it("updates expiresDays and recalculates expiresAt from now", async () => {
     await seedUser(USER_ID, AUTH_TOKEN);
-    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN, { expiresDays: 30 });
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN, {
+      expiresDays: 30,
+    });
     const shelfId = created.data.shelf.shelfId;
 
     const before = Date.now();
-    const res = await request("PUT", `/api/user/${USER_ID}/public-shelf/${shelfId}`, {
-      body: JSON.stringify({ expiresDays: 90 }),
-      token: AUTH_TOKEN,
-    });
+    const res = await request(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}`,
+      {
+        body: JSON.stringify({ expiresDays: 90 }),
+        token: AUTH_TOKEN,
+      },
+    );
     const after = Date.now();
 
     expect(res.status).toBe(200);
@@ -306,10 +345,14 @@ describe("PUT /api/user/:id/public-shelf/:shelfId", () => {
     await seedUser(USER_ID, AUTH_TOKEN);
     const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
 
-    const res = await request("PUT", `/api/user/${USER_ID}/public-shelf/${created.data.shelf.shelfId}`, {
-      body: JSON.stringify({}),
-      token: AUTH_TOKEN,
-    });
+    const res = await request(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${created.data.shelf.shelfId}`,
+      {
+        body: JSON.stringify({}),
+        token: AUTH_TOKEN,
+      },
+    );
 
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
@@ -320,10 +363,14 @@ describe("PUT /api/user/:id/public-shelf/:shelfId", () => {
     await seedUser(USER_ID, AUTH_TOKEN);
 
     const fakeShelfId = "12345678-1234-4123-8123-123456789abc";
-    const res = await request("PUT", `/api/user/${USER_ID}/public-shelf/${fakeShelfId}`, {
-      body: JSON.stringify({ title: "Test" }),
-      token: AUTH_TOKEN,
-    });
+    const res = await request(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${fakeShelfId}`,
+      {
+        body: JSON.stringify({ title: "Test" }),
+        token: AUTH_TOKEN,
+      },
+    );
 
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
@@ -340,9 +387,13 @@ describe("POST reset-token", () => {
     const shelfId = created.data.shelf.shelfId;
     const oldToken = created.data.shelf.shareToken;
 
-    const res = await request("POST", `/api/user/${USER_ID}/public-shelf/${shelfId}/reset-token`, {
-      token: AUTH_TOKEN,
-    });
+    const res = await request(
+      "POST",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}/reset-token`,
+      {
+        token: AUTH_TOKEN,
+      },
+    );
 
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
@@ -357,16 +408,23 @@ describe("POST reset-token", () => {
     const shelfId = created.data.shelf.shelfId;
     const oldToken = created.data.shelf.shareToken;
 
-    const res = await request("POST", `/api/user/${USER_ID}/public-shelf/${shelfId}/reset-token`, {
-      token: AUTH_TOKEN,
-    });
+    const res = await request(
+      "POST",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}/reset-token`,
+      {
+        token: AUTH_TOKEN,
+      },
+    );
     const json = (await res.json()) as Json;
     const newToken = json.data.shelf.shareToken;
 
     const oldSnapshot = await kv.get(kvKeys.publicShelf(oldToken));
     expect(oldSnapshot).toBeNull();
 
-    const newSnapshot = await kv.get(kvKeys.publicShelf(newToken), "json") as PublicShelfSnapshot;
+    const newSnapshot = (await kv.get(
+      kvKeys.publicShelf(newToken),
+      "json",
+    )) as PublicShelfSnapshot;
     expect(newSnapshot).not.toBeNull();
     expect(newSnapshot.books).toHaveLength(2);
   });
@@ -375,9 +433,13 @@ describe("POST reset-token", () => {
     await seedUser(USER_ID, AUTH_TOKEN);
 
     const fakeShelfId = "12345678-1234-4123-8123-123456789abc";
-    const res = await request("POST", `/api/user/${USER_ID}/public-shelf/${fakeShelfId}/reset-token`, {
-      token: AUTH_TOKEN,
-    });
+    const res = await request(
+      "POST",
+      `/api/user/${USER_ID}/public-shelf/${fakeShelfId}/reset-token`,
+      {
+        token: AUTH_TOKEN,
+      },
+    );
 
     expect(res.status).toBe(404);
   });
@@ -392,13 +454,20 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId", () => {
     const shelfId = created.data.shelf.shelfId;
     const shareToken = created.data.shelf.shareToken;
 
-    const res = await request("DELETE", `/api/user/${USER_ID}/public-shelf/${shelfId}`, {
-      token: AUTH_TOKEN,
-    });
+    const res = await request(
+      "DELETE",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}`,
+      {
+        token: AUTH_TOKEN,
+      },
+    );
 
     expect(res.status).toBe(204);
 
-    const record = await kv.get(kvKeys.user(USER_ID), "json") as UserBooksRecord;
+    const record = (await kv.get(
+      kvKeys.user(USER_ID),
+      "json",
+    )) as UserBooksRecord;
     expect(record.publicSharing?.shelves).toHaveLength(0);
 
     const snapshot = await kv.get(kvKeys.publicShelf(shareToken));
@@ -409,9 +478,13 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId", () => {
     await seedUser(USER_ID, AUTH_TOKEN);
 
     const fakeShelfId = "12345678-1234-4123-8123-123456789abc";
-    const res = await request("DELETE", `/api/user/${USER_ID}/public-shelf/${fakeShelfId}`, {
-      token: AUTH_TOKEN,
-    });
+    const res = await request(
+      "DELETE",
+      `/api/user/${USER_ID}/public-shelf/${fakeShelfId}`,
+      {
+        token: AUTH_TOKEN,
+      },
+    );
 
     expect(res.status).toBe(404);
   });
@@ -440,7 +513,10 @@ describe("GET /api/public/:shareToken", () => {
     await seedUser(USER_ID, AUTH_TOKEN);
     const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
 
-    const res = await request("GET", `/api/public/${created.data.shelf.shareToken}`);
+    const res = await request(
+      "GET",
+      `/api/public/${created.data.shelf.shareToken}`,
+    );
     expect(res.status).toBe(200);
   });
 
@@ -471,7 +547,10 @@ describe("PUT /api/user/:id/books side-effect", () => {
     const shareToken = created.data.shelf.shareToken;
 
     // Verify initial snapshot has 2 shared books
-    const snap1 = await kv.get(kvKeys.publicShelf(shareToken), "json") as PublicShelfSnapshot;
+    const snap1 = (await kv.get(
+      kvKeys.publicShelf(shareToken),
+      "json",
+    )) as PublicShelfSnapshot;
     expect(snap1.books).toHaveLength(2);
 
     // Update books: make book2 shared, book1 unshared
@@ -492,7 +571,10 @@ describe("PUT /api/user/:id/books side-effect", () => {
     expect(res.status).toBe(200);
 
     // Verify snapshot updated
-    const snap2 = await kv.get(kvKeys.publicShelf(shareToken), "json") as PublicShelfSnapshot;
+    const snap2 = (await kv.get(
+      kvKeys.publicShelf(shareToken),
+      "json",
+    )) as PublicShelfSnapshot;
     expect(snap2.books).toHaveLength(2);
     const snapshotBookIds = snap2.books.map((b: Json) => b.bookId).sort();
     expect(snapshotBookIds).toEqual(["book2", "book3"]);
@@ -514,7 +596,10 @@ describe("PUT /api/user/:id/books side-effect", () => {
 
     expect(res.status).toBe(200);
 
-    const record = await kv.get(kvKeys.user(USER_ID), "json") as UserBooksRecord;
+    const record = (await kv.get(
+      kvKeys.user(USER_ID),
+      "json",
+    )) as UserBooksRecord;
     expect(record.publicSharing?.shelves).toHaveLength(1);
   });
 });
@@ -528,9 +613,15 @@ describe("PATCH /api/user/:id/books side-effect", () => {
     const shareToken = created.data.shelf.shareToken;
 
     // Initial snapshot: book1 (shared) + book3 (shared) = 2
-    const snap1 = await kv.get(kvKeys.publicShelf(shareToken), "json") as PublicShelfSnapshot;
+    const snap1 = (await kv.get(
+      kvKeys.publicShelf(shareToken),
+      "json",
+    )) as PublicShelfSnapshot;
     expect(snap1.books).toHaveLength(2);
-    expect(snap1.books.map((b: Json) => b.bookId).sort()).toEqual(["book1", "book3"]);
+    expect(snap1.books.map((b: Json) => b.bookId).sort()).toEqual([
+      "book1",
+      "book3",
+    ]);
 
     // PATCH: unshare book1, share book2
     const res = await request("PATCH", `/api/user/${USER_ID}/books`, {
@@ -549,9 +640,15 @@ describe("PATCH /api/user/:id/books side-effect", () => {
     expect(json.data.applied).toBe(2);
 
     // Verify snapshot updated: book2 (now shared) + book3 (still shared)
-    const snap2 = await kv.get(kvKeys.publicShelf(shareToken), "json") as PublicShelfSnapshot;
+    const snap2 = (await kv.get(
+      kvKeys.publicShelf(shareToken),
+      "json",
+    )) as PublicShelfSnapshot;
     expect(snap2.books).toHaveLength(2);
-    expect(snap2.books.map((b: Json) => b.bookId).sort()).toEqual(["book2", "book3"]);
+    expect(snap2.books.map((b: Json) => b.bookId).sort()).toEqual([
+      "book2",
+      "book3",
+    ]);
   });
 
   it("preserves publicSharing field after PATCH", async () => {
@@ -567,7 +664,10 @@ describe("PATCH /api/user/:id/books side-effect", () => {
 
     expect(res.status).toBe(200);
 
-    const record = await kv.get(kvKeys.user(USER_ID), "json") as UserBooksRecord;
+    const record = (await kv.get(
+      kvKeys.user(USER_ID),
+      "json",
+    )) as UserBooksRecord;
     expect(record.publicSharing?.shelves).toHaveLength(1);
   });
 });

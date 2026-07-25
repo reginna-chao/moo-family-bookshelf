@@ -21,7 +21,9 @@ export function validateEndpointUrl(raw: string): string {
   } catch {
     throw new Error(`Invalid API endpoint URL: ${raw}`);
   }
-  throw new Error(`Unsafe API endpoint scheme — only HTTPS or private-network HTTP is allowed: ${raw}`);
+  throw new Error(
+    `Unsafe API endpoint scheme — only HTTPS or private-network HTTP is allowed: ${raw}`,
+  );
 }
 
 export enum BoolFlag {
@@ -208,7 +210,7 @@ export class ApiClient {
     try {
       const res = await fetch(`${this.baseUrl}/api/version`);
       if (!res.ok) return null;
-      const json = await res.json() as ApiResponse<VersionInfo>;
+      const json = (await res.json()) as ApiResponse<VersionInfo>;
       return json.data ?? null;
     } catch {
       return null;
@@ -260,16 +262,18 @@ export class ApiClient {
   // --- Auth ---
 
   /** Look up family membership for a pre-hashed userId. Server never sees the email. */
-  async lookupUser(userId: string): Promise<ApiResponse<{ existingFamilyId: string | null; memberCount: number }>> {
+  async lookupUser(
+    userId: string,
+  ): Promise<
+    ApiResponse<{ existingFamilyId: string | null; memberCount: number }>
+  > {
     this.validateHexId(userId, "userId");
     return this.post("/api/auth/lookup", { userId });
   }
 
   // --- Personal Settings ---
 
-  async getPersonalBooks(
-    userId: string,
-  ): Promise<ApiResponse<PersonalBooks>> {
+  async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
     this.validateHexId(userId, "userId");
     return this.get(`/api/user/${userId}/books`);
   }
@@ -304,7 +308,9 @@ export class ApiClient {
   async updateFamilyPrefs(
     userId: string,
     prefs: { hidden?: string[]; favorites?: string[] },
-  ): Promise<ApiResponse<{ ok: boolean; hidden: string[]; favorites: string[] }>> {
+  ): Promise<
+    ApiResponse<{ ok: boolean; hidden: string[]; favorites: string[] }>
+  > {
     this.validateHexId(userId, "userId");
     return this.put(`/api/user/${userId}/family-prefs`, prefs);
   }
@@ -320,7 +326,10 @@ export class ApiClient {
     displayName?: string,
   ): Promise<ApiResponse<FamilyGroup>> {
     this.validateHexId(userId, "userId");
-    const body: Record<string, string> = { userId, displayName: displayName ?? "" };
+    const body: Record<string, string> = {
+      userId,
+      displayName: displayName ?? "",
+    };
     return this.post("/api/family", body);
   }
 
@@ -328,7 +337,9 @@ export class ApiClient {
     familyId: string,
     userId: string,
     opts?: { verifySecret?: string; qrToken?: string },
-  ): Promise<ApiResponse<{ ok: boolean; authToken?: string; expiresAt?: number }>> {
+  ): Promise<
+    ApiResponse<{ ok: boolean; authToken?: string; expiresAt?: number }>
+  > {
     this.validateHexId(userId, "userId");
     const body: Record<string, string> = { userId };
     if (opts?.verifySecret !== undefined) {
@@ -366,9 +377,7 @@ export class ApiClient {
     return this.put(`/api/family/${familyId}/transfer`, { userId, newOwnerId });
   }
 
-  async getFamilyMembers(
-    familyId: string,
-  ): Promise<ApiResponse<FamilyGroup>> {
+  async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
     return this.get(`/api/family/${familyId}/members`);
   }
 
@@ -378,14 +387,14 @@ export class ApiClient {
     displayName: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
-    return this.put(`/api/family/${familyId}/member/${userId}/displayName`, { displayName });
+    return this.put(`/api/family/${familyId}/member/${userId}/displayName`, {
+      displayName,
+    });
   }
 
   // --- Account ---
 
-  async deleteAccount(
-    userId: string,
-  ): Promise<ApiResponse<{ ok: boolean }>> {
+  async deleteAccount(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
     return this.del(`/api/user/${userId}`);
   }
@@ -422,10 +431,9 @@ export class ApiClient {
     requestId: string,
     status: BorrowStatus,
   ): Promise<BorrowRequest> {
-    const res = await this.patch<BorrowRequest>(
-      `/api/borrow/${requestId}`,
-      { status },
-    );
+    const res = await this.patch<BorrowRequest>(`/api/borrow/${requestId}`, {
+      status,
+    });
     return this.unwrap(res);
   }
 
@@ -459,7 +467,9 @@ export class ApiClient {
   }
 
   /** Mark verification as prompted (requires auth token). */
-  async markVerifyPrompted(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
+  async markVerifyPrompted(
+    userId: string,
+  ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
     return this.post(`/api/user/${userId}/verify/prompted`);
   }
@@ -468,7 +478,9 @@ export class ApiClient {
 
   async listPublicShelves(userId: string): Promise<{ shelves: PublicShelf[] }> {
     this.validateHexId(userId, "userId");
-    const res = await this.get<{ shelves: PublicShelf[] }>(`/api/user/${userId}/public-shelf`);
+    const res = await this.get<{ shelves: PublicShelf[] }>(
+      `/api/user/${userId}/public-shelf`,
+    );
     return this.unwrap(res);
   }
 
@@ -477,7 +489,10 @@ export class ApiClient {
     body: { title: string; expiresDays: number | null },
   ): Promise<{ shelf: PublicShelf }> {
     this.validateHexId(userId, "userId");
-    const res = await this.post<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf`, body);
+    const res = await this.post<{ shelf: PublicShelf }>(
+      `/api/user/${userId}/public-shelf`,
+      body,
+    );
     return this.unwrap(res);
   }
 
@@ -487,7 +502,10 @@ export class ApiClient {
     body: { title?: string; expiresDays?: number | null },
   ): Promise<{ shelf: PublicShelf }> {
     this.validateHexId(userId, "userId");
-    const res = await this.put<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf/${shelfId}`, body);
+    const res = await this.put<{ shelf: PublicShelf }>(
+      `/api/user/${userId}/public-shelf/${shelfId}`,
+      body,
+    );
     return this.unwrap(res);
   }
 
@@ -496,7 +514,9 @@ export class ApiClient {
     shelfId: string,
   ): Promise<{ shelf: PublicShelf }> {
     this.validateHexId(userId, "userId");
-    const res = await this.post<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf/${shelfId}/reset-token`);
+    const res = await this.post<{ shelf: PublicShelf }>(
+      `/api/user/${userId}/public-shelf/${shelfId}/reset-token`,
+    );
     return this.unwrap(res);
   }
 

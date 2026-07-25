@@ -34,7 +34,9 @@ function hideMenuLabelOf(title: string): string {
   fireEvent.click(within(card).getByRole("button", { name: "更多選項" }));
   const item = screen
     .getAllByRole("menuitem")
-    .find((el) => el.textContent === "隱藏書籍" || el.textContent === "取消隱藏");
+    .find(
+      (el) => el.textContent === "隱藏書籍" || el.textContent === "取消隱藏",
+    );
   if (!item) throw new Error(`hide menuitem not found for ${title}`);
   return item.textContent as string;
 }
@@ -71,7 +73,12 @@ vi.mock("@/api/client", async (importOriginal) => {
 import { BoolFlag, type ApiClient } from "@/api/client";
 
 function makeBooks(
-  books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>,
+  books: Array<{
+    bookId: string;
+    title: string;
+    author: string;
+    isShared: BoolFlag;
+  }>,
 ) {
   return books.map((b) => ({
     bookId: b.bookId,
@@ -105,15 +112,19 @@ function createApiClient(opts: MockOpts = {}) {
     }),
     updateFamilyPrefs:
       opts.updateFamilyPrefs ??
-      vi.fn().mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } }),
+      vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } }),
     getFamilyMembers: vi.fn().mockResolvedValue(
       opts.members ?? {
         data: { familyId: "fam-1", ownerId: "user-self", members: [] },
       },
     ),
-    getFamilyBookshelf: vi.fn().mockResolvedValue(
-      opts.bookshelf ?? { data: { familyId: "fam-1", members: [] } },
-    ),
+    getFamilyBookshelf: vi
+      .fn()
+      .mockResolvedValue(
+        opts.bookshelf ?? { data: { familyId: "fam-1", members: [] } },
+      ),
     listBorrowRequests: vi.fn().mockResolvedValue([]),
     createBorrowRequest: vi.fn(),
   } as unknown as ApiClient;
@@ -145,8 +156,18 @@ function aliceTwoBooks() {
             userId: "user-alice",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
-              { bookId: "b2", title: "書二", author: "B", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "書一",
+                author: "A",
+                isShared: BoolFlag.TRUE,
+              },
+              {
+                bookId: "b2",
+                title: "書二",
+                author: "B",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2026-01-01",
           },
@@ -277,7 +298,10 @@ describe("FamilyShelfPage — favorite feature", () => {
     const updateFamilyPrefs = vi
       .fn()
       .mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } });
-    const apiClient = createApiClient({ ...aliceTwoBooks(), updateFamilyPrefs });
+    const apiClient = createApiClient({
+      ...aliceTwoBooks(),
+      updateFamilyPrefs,
+    });
     renderPage(apiClient);
 
     await waitFor(() => {
@@ -333,8 +357,13 @@ describe("FamilyShelfPage — favorite feature", () => {
       const updateFamilyPrefs = vi
         .fn()
         .mockResolvedValueOnce({ error: { code: "KABOOM", message: "nope" } })
-        .mockResolvedValueOnce({ data: { ok: true, hidden: [], favorites: [] } });
-      const apiClient = createApiClient({ ...aliceTwoBooks(), updateFamilyPrefs });
+        .mockResolvedValueOnce({
+          data: { ok: true, hidden: [], favorites: [] },
+        });
+      const apiClient = createApiClient({
+        ...aliceTwoBooks(),
+        updateFamilyPrefs,
+      });
       renderPage(apiClient);
 
       await waitFor(() => {

@@ -10,26 +10,39 @@ interface VerifySetupPromptProps {
   onComplete: () => void;
 }
 
-type Step = "loading" | "choose" | "setup-pin" | "setup-pattern" | "confirm-skip" | "done";
+type Step =
+  | "loading"
+  | "choose"
+  | "setup-pin"
+  | "setup-pattern"
+  | "confirm-skip"
+  | "done";
 
-export function VerifySetupPrompt({ userId, apiClient, onComplete }: VerifySetupPromptProps) {
+export function VerifySetupPrompt({
+  userId,
+  apiClient,
+  onComplete,
+}: VerifySetupPromptProps) {
   const [step, setStep] = useState<Step>("loading");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
-    void apiClient.getVerifyMethod(userId).then((res) => {
-      const info: VerifyInfo | undefined = res.data;
-      // Only show prompt if not yet prompted
-      if (info && info.prompted === 0) {
-        setStep("choose");
-      } else {
+    void apiClient
+      .getVerifyMethod(userId)
+      .then((res) => {
+        const info: VerifyInfo | undefined = res.data;
+        // Only show prompt if not yet prompted
+        if (info && info.prompted === 0) {
+          setStep("choose");
+        } else {
+          setStep("done");
+        }
+      })
+      .catch(() => {
+        // On error, skip prompt to avoid blocking the user
         setStep("done");
-      }
-    }).catch(() => {
-      // On error, skip prompt to avoid blocking the user
-      setStep("done");
-    });
+      });
   }, [userId, apiClient]);
 
   const saveMethod = useCallback(
@@ -111,7 +124,10 @@ export function VerifySetupPrompt({ userId, apiClient, onComplete }: VerifySetup
             mode="setup"
             onComplete={(pin) => void handlePinComplete(pin)}
             error={saveError}
-            onCancel={() => { setStep("choose"); setSaveError(""); }}
+            onCancel={() => {
+              setStep("choose");
+              setSaveError("");
+            }}
           />
         )}
 
@@ -120,7 +136,10 @@ export function VerifySetupPrompt({ userId, apiClient, onComplete }: VerifySetup
             mode="setup"
             onComplete={(pattern) => void handlePatternComplete(pattern)}
             error={saveError}
-            onCancel={() => { setStep("choose"); setSaveError(""); }}
+            onCancel={() => {
+              setStep("choose");
+              setSaveError("");
+            }}
           />
         )}
 
@@ -170,7 +189,9 @@ function ChooseMethodView({
           className="w-full text-left px-4 py-3 rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-colors"
         >
           <span className="font-medium text-gray-900">PIN 碼</span>
-          <span className="block text-xs text-gray-500 mt-0.5">6-12 位數字</span>
+          <span className="block text-xs text-gray-500 mt-0.5">
+            6-12 位數字
+          </span>
         </button>
         <button
           type="button"

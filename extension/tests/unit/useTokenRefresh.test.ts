@@ -33,7 +33,10 @@ async function seedExpiry(expiresAt: number | undefined): Promise<void> {
 function createMockApiClient(
   proactiveRefresh: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue(true),
 ): { client: ApiClient; proactiveRefresh: ReturnType<typeof vi.fn> } {
-  return { client: { proactiveRefresh } as unknown as ApiClient, proactiveRefresh };
+  return {
+    client: { proactiveRefresh } as unknown as ApiClient,
+    proactiveRefresh,
+  };
 }
 
 /** Drain the hook's in-flight async scheduleRefresh chain and any 0ms timers. */
@@ -154,7 +157,9 @@ describe("useTokenRefresh", () => {
     expect(proactiveRefresh).not.toHaveBeenCalled();
 
     // While the tab was hidden the token drifted to inside the buffer.
-    await chrome.storage.local.set({ [TOKEN_EXPIRES_AT_KEY]: Date.now() + 2 * MINUTE });
+    await chrome.storage.local.set({
+      [TOKEN_EXPIRES_AT_KEY]: Date.now() + 2 * MINUTE,
+    });
 
     // Returning to the page recalibrates: recomputed delay <= 0 → refresh now.
     setVisibility("visible");
@@ -171,14 +176,17 @@ describe("useTokenRefresh", () => {
     renderHook(() => useTokenRefresh(client));
     await flush();
 
-    const getCallsBefore = vi.mocked(chrome.storage.local.get).mock.calls.length;
+    const getCallsBefore = vi.mocked(chrome.storage.local.get).mock.calls
+      .length;
 
     setVisibility("hidden");
     document.dispatchEvent(new Event("visibilitychange"));
     await flush();
 
     // Hidden-tab guard: no extra storage read, no refresh.
-    expect(vi.mocked(chrome.storage.local.get).mock.calls.length).toBe(getCallsBefore);
+    expect(vi.mocked(chrome.storage.local.get).mock.calls.length).toBe(
+      getCallsBefore,
+    );
     expect(proactiveRefresh).not.toHaveBeenCalled();
   });
 
@@ -189,7 +197,10 @@ describe("useTokenRefresh", () => {
     // Simulate a reloaded extension: runtime.id is no longer available, so
     // isExtensionContextValid() returns false before any storage access.
     const originalId = chrome.runtime.id;
-    Object.defineProperty(chrome.runtime, "id", { configurable: true, value: undefined });
+    Object.defineProperty(chrome.runtime, "id", {
+      configurable: true,
+      value: undefined,
+    });
 
     renderHook(() => useTokenRefresh(client));
     await flush();
@@ -197,7 +208,10 @@ describe("useTokenRefresh", () => {
     expect(vi.mocked(chrome.storage.local.get)).not.toHaveBeenCalled();
     expect(proactiveRefresh).not.toHaveBeenCalled();
 
-    Object.defineProperty(chrome.runtime, "id", { configurable: true, value: originalId });
+    Object.defineProperty(chrome.runtime, "id", {
+      configurable: true,
+      value: originalId,
+    });
   });
 
   it("does not schedule a follow-up refresh when the immediate refresh fails", async () => {

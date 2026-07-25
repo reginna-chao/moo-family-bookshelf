@@ -51,7 +51,9 @@ test.describe("Family Lifecycle", () => {
   }) => {
     test.setTimeout(120_000);
     // Multi-browser-context test is inherently flaky (idle page + shared Worker)
-    test.info().annotations.push({ type: "flaky", description: "two browser contexts" });
+    test
+      .info()
+      .annotations.push({ type: "flaky", description: "two browser contexts" });
 
     // --- User 1: Create family ---
 
@@ -59,9 +61,12 @@ test.describe("Family Lifecycle", () => {
 
     // Configure API endpoint to local worker
     await page1.goto(`chrome-extension://${extensionId}/background.js`);
-    await page1.evaluate(({ apiUrl, key }) => {
-      chrome.storage.local.set({ [key]: apiUrl });
-    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
+    await page1.evaluate(
+      ({ apiUrl, key }) => {
+        chrome.storage.local.set({ [key]: apiUrl });
+      },
+      { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+    );
 
     // Navigate to mock page
     await page1.goto(MOCK_READMOO_URL);
@@ -125,9 +130,12 @@ test.describe("Family Lifecycle", () => {
 
       // Configure API endpoint for user 2
       await page2.goto(`chrome-extension://${extensionId2}/background.js`);
-      await page2.evaluate(({ apiUrl, key }) => {
-        chrome.storage.local.set({ [key]: apiUrl });
-      }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
+      await page2.evaluate(
+        ({ apiUrl, key }) => {
+          chrome.storage.local.set({ [key]: apiUrl });
+        },
+        { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+      );
 
       // Navigate to mock page
       await page2.goto(MOCK_READMOO_URL);
@@ -181,7 +189,9 @@ test.describe("Family Lifecycle", () => {
       await navigateToTab(page1, "設定");
 
       // Wait for member list to load — should show "家庭成員 (2)"
-      await expect(dialog1.getByText("家庭成員 (2)")).toBeVisible({ timeout: 15_000 });
+      await expect(dialog1.getByText("家庭成員 (2)")).toBeVisible({
+        timeout: 15_000,
+      });
     } finally {
       await context2.close();
     }
@@ -229,11 +239,16 @@ test.describe("Family Lifecycle", () => {
 
     // Set up API endpoint + clear storage from previous tests
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate(({ apiUrl, key }) => {
-      chrome.storage.local.clear();
-      try { chrome.storage.sync.clear(); } catch {}
-      chrome.storage.local.set({ [key]: apiUrl });
-    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
+    await page.evaluate(
+      ({ apiUrl, key }) => {
+        chrome.storage.local.clear();
+        try {
+          chrome.storage.sync.clear();
+        } catch {}
+        chrome.storage.local.set({ [key]: apiUrl });
+      },
+      { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+    );
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);
@@ -263,13 +278,17 @@ test.describe("Family Lifecycle", () => {
     await clickCreateFamily(page);
 
     // Wait for sync code to appear, then continue
-    await dialog.locator("[data-testid='sync-code']").waitFor({ state: "visible", timeout: 15_000 });
+    await dialog
+      .locator("[data-testid='sync-code']")
+      .waitFor({ state: "visible", timeout: 15_000 });
     await clickContinue(page);
     await waitForMainView(page);
 
     // Navigate to Settings and leave — single-member owner should succeed
     await navigateToTab(page, "設定");
-    await expect(dialog.locator("text=離開家庭")).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.locator("text=離開家庭")).toBeVisible({
+      timeout: 10_000,
+    });
     await leaveFamily(page);
 
     // Should return to onboarding after successful leave

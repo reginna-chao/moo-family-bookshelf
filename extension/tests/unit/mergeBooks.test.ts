@@ -72,7 +72,9 @@ describe("mergeBooks — isArchived", () => {
 
   it("saved-only book with isArchived=1 stays as-is", () => {
     const scraped: ScrapedBook[] = [];
-    const saved = [makeSaved({ bookId: "b1", isArchived: 1, isShared: BoolFlag.TRUE })];
+    const saved = [
+      makeSaved({ bookId: "b1", isArchived: 1, isShared: BoolFlag.TRUE }),
+    ];
 
     const result = mergeBooks(scraped, saved);
 

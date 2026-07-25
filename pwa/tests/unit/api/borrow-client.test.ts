@@ -26,7 +26,9 @@ function jsonResponse(data: unknown, status = 200) {
   };
 }
 
-function makeBorrowRequest(overrides: Partial<BorrowRequest> = {}): BorrowRequest {
+function makeBorrowRequest(
+  overrides: Partial<BorrowRequest> = {},
+): BorrowRequest {
   return {
     requestId: REQUEST_ID,
     familyId: FAMILY_ID,
@@ -128,7 +130,12 @@ describe("ApiClient borrow methods (PWA)", () => {
     it("throws with formatted message on error envelope", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse(
-          { error: { code: "FORBIDDEN", message: "Not a member of this family" } },
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: "Not a member of this family",
+            },
+          },
           403,
         ),
       );
@@ -198,7 +205,9 @@ describe("ApiClient borrow methods (PWA)", () => {
 
       expect(result).toEqual(expected);
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toBe(`${ENDPOINT}/api/family/${FAMILY_ID}/member/${OWNER_ID}`);
+      expect(url).toBe(
+        `${ENDPOINT}/api/family/${FAMILY_ID}/member/${OWNER_ID}`,
+      );
       expect(init.method).toBe("PATCH");
       expect(JSON.parse(init.body)).toEqual({ canLend: BoolFlag.FALSE });
     });
@@ -239,7 +248,12 @@ describe("ApiClient borrow methods (PWA)", () => {
     it("throws with formatted message on error envelope", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse(
-          { error: { code: "FORBIDDEN", message: "Cannot modify another member" } },
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: "Cannot modify another member",
+            },
+          },
           403,
         ),
       );

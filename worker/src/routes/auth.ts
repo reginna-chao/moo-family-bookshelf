@@ -1,8 +1,16 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
-import { kvKeys, TOKEN_TTL_SECONDS, type RawFamilyRecord, normalizeFamilyRecord } from "../kv/schema";
+import {
+  kvKeys,
+  TOKEN_TTL_SECONDS,
+  type RawFamilyRecord,
+  normalizeFamilyRecord,
+} from "../kv/schema";
 import { isValidFamilyId, isValidSha256Hex } from "../utils/validation";
-import { getOrGenerateAuthToken, getAuthenticatedUserId } from "../middleware/auth";
+import {
+  getOrGenerateAuthToken,
+  getAuthenticatedUserId,
+} from "../middleware/auth";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 
@@ -44,8 +52,17 @@ authRoutes.openapi(lookupRoute, async (c) => {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
-  if (!body?.userId || typeof body.userId !== "string" || !isValidSha256Hex(body.userId)) {
-    return jsonError(c, 400, "INVALID_INPUT", "userId must be a 64-char hex string");
+  if (
+    !body?.userId ||
+    typeof body.userId !== "string" ||
+    !isValidSha256Hex(body.userId)
+  ) {
+    return jsonError(
+      c,
+      400,
+      "INVALID_INPUT",
+      "userId must be a 64-char hex string",
+    );
   }
 
   const userId = body.userId;
@@ -57,7 +74,10 @@ authRoutes.openapi(lookupRoute, async (c) => {
   const familyId = await c.env.KV.get(kvKeys.member(userId));
   if (familyId) {
     existingFamilyId = familyId;
-    const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
+    const raw = await c.env.KV.get<RawFamilyRecord>(
+      kvKeys.family(familyId),
+      "json",
+    );
     if (raw) {
       const record = normalizeFamilyRecord(raw);
       memberCount = record.members.length;
@@ -87,7 +107,12 @@ authRoutes.openapi(refreshRoute, async (c) => {
     typeof body.userId !== "string" ||
     !isValidSha256Hex(body.userId)
   ) {
-    return jsonError(c, 400, "INVALID_INPUT", "userId must be a 64-char hex string");
+    return jsonError(
+      c,
+      400,
+      "INVALID_INPUT",
+      "userId must be a 64-char hex string",
+    );
   }
 
   // Ensure the authenticated user matches the requested userId
@@ -98,7 +123,12 @@ authRoutes.openapi(refreshRoute, async (c) => {
   // If familyId is provided, verify membership (backward-compatible path)
   if (body.familyId !== undefined) {
     if (typeof body.familyId !== "string" || !isValidFamilyId(body.familyId)) {
-      return jsonError(c, 400, "INVALID_INPUT", "familyId must match format xxxx-xxxx");
+      return jsonError(
+        c,
+        400,
+        "INVALID_INPUT",
+        "familyId must match format xxxx-xxxx",
+      );
     }
     const storedFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
     if (!storedFamilyId || storedFamilyId !== body.familyId) {

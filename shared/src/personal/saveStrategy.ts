@@ -34,9 +34,10 @@ export function decideSaveStrategy<T extends { bookId: string }>(
   const dirtyBooks = books.filter((b) => dirtyBookIds.has(b.bookId));
   const rawServerBooks = savedRawPayload?.books;
   const serverKnownIds = new Set(
-    (Array.isArray(rawServerBooks) ? (rawServerBooks as Array<{ bookId: string }>) : []).map(
-      (b) => b.bookId,
-    ),
+    (Array.isArray(rawServerBooks)
+      ? (rawServerBooks as Array<{ bookId: string }>)
+      : []
+    ).map((b) => b.bookId),
   );
   const usePut =
     savedRawPayload === null ||

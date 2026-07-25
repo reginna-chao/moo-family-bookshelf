@@ -21,7 +21,12 @@ function validatePin(pin: string): string | null {
   return null;
 }
 
-export function PinInput({ onComplete, mode, error, disabled = false }: PinInputProps) {
+export function PinInput({
+  onComplete,
+  mode,
+  error,
+  disabled = false,
+}: PinInputProps) {
   const [pin, setPin] = useState("");
   const [setupStep, setSetupStep] = useState<SetupStep>("enter");
   const [firstPin, setFirstPin] = useState("");
@@ -33,17 +38,14 @@ export function PinInput({ onComplete, mode, error, disabled = false }: PinInput
     inputRef.current?.focus();
   }, []);
 
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value;
-      // Allow only digits, up to max length
-      if (value !== "" && !/^\d+$/.test(value)) return;
-      if (value.length > PIN_MAX) return;
-      setPin(value);
-      setLocalError("");
-    },
-    [],
-  );
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    // Allow only digits, up to max length
+    if (value !== "" && !/^\d+$/.test(value)) return;
+    if (value.length > PIN_MAX) return;
+    setPin(value);
+    setLocalError("");
+  }, []);
 
   const handleSubmit = useCallback(() => {
     if (disabled) return;
@@ -96,7 +98,11 @@ export function PinInput({ onComplete, mode, error, disabled = false }: PinInput
 
   // Border color is state-driven (error → filled → empty); the other field
   // metrics live in the .moo-pin-input__field class.
-  const fieldBorderColor = displayError ? "#ef4444" : pin ? "#2563eb" : "#cbd5e1";
+  const fieldBorderColor = displayError
+    ? "#ef4444"
+    : pin
+      ? "#2563eb"
+      : "#cbd5e1";
 
   return (
     <div
@@ -121,12 +127,18 @@ export function PinInput({ onComplete, mode, error, disabled = false }: PinInput
           className="moo-pin-input__field"
           style={{ border: `2px solid ${fieldBorderColor}` }}
         />
-        <button onClick={handleSubmit} disabled={disabled} className="moo-pin-input__submit">
+        <button
+          onClick={handleSubmit}
+          disabled={disabled}
+          className="moo-button moo-pin-input__submit"
+        >
           確認
         </button>
       </div>
       {displayError && (
-        <div className="moo-secret-entry__error moo-secret-entry__error--tight">{displayError}</div>
+        <div className="moo-secret-entry__error moo-secret-entry__error--tight">
+          {displayError}
+        </div>
       )}
       {mode === "setup" && setupStep === "confirm" && (
         <button
@@ -136,7 +148,7 @@ export function PinInput({ onComplete, mode, error, disabled = false }: PinInput
             setLocalError("");
             resetInput();
           }}
-          className="moo-secret-entry__reset"
+          className="moo-button moo-button--link moo-secret-entry__reset"
         >
           重新設定
         </button>

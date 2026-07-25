@@ -36,7 +36,9 @@ function seedStorage(
 function createApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     onReauthRequired: null,
-    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
+    getVerifyMethod: vi
+      .fn()
+      .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
     joinFamily: vi.fn().mockResolvedValue({
       data: { authToken: "fresh-token", expiresAt: 7777 },
     }),
@@ -79,7 +81,9 @@ describe("useReauth", () => {
   it("opens the verification prompt with the fetched method on the reauth signal", async () => {
     seedStorage();
     const apiClient = createApiClient({
-      getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pattern" } }),
+      getVerifyMethod: vi
+        .fn()
+        .mockResolvedValue({ data: { method: "pattern" } }),
     });
     const { result } = renderHook(() => useReauth(apiClient));
 
@@ -140,9 +144,9 @@ describe("useReauth", () => {
   it("does not clear the cooldown or call onSuccess when the re-verify fails", async () => {
     seedStorage();
     const apiClient = createApiClient({
-      joinFamily: vi
-        .fn()
-        .mockResolvedValue({ error: { code: "VERIFICATION_FAILED", message: "bad" } }),
+      joinFamily: vi.fn().mockResolvedValue({
+        error: { code: "VERIFICATION_FAILED", message: "bad" },
+      }),
     });
     const onSuccess = vi.fn();
     const { result } = renderHook(() => useReauth(apiClient, { onSuccess }));
@@ -165,8 +169,12 @@ describe("useReauth", () => {
     seedStorage();
     const joinFamily = vi
       .fn()
-      .mockResolvedValueOnce({ error: { code: "VERIFICATION_FAILED", message: "bad" } })
-      .mockResolvedValueOnce({ data: { authToken: "ok-token", expiresAt: 5555 } });
+      .mockResolvedValueOnce({
+        error: { code: "VERIFICATION_FAILED", message: "bad" },
+      })
+      .mockResolvedValueOnce({
+        data: { authToken: "ok-token", expiresAt: 5555 },
+      });
     const apiClient = createApiClient({ joinFamily });
     const { result } = renderHook(() => useReauth(apiClient));
 

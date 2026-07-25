@@ -6,7 +6,12 @@ export type FloatingIconSize = "small" | "medium" | "large" | "icon";
 const DEFAULT_SIZE: FloatingIconSize = "medium";
 
 function isSize(value: unknown): value is FloatingIconSize {
-  return value === "small" || value === "medium" || value === "large" || value === "icon";
+  return (
+    value === "small" ||
+    value === "medium" ||
+    value === "large" ||
+    value === "icon"
+  );
 }
 
 export interface UseFloatingIconSizeReturn {

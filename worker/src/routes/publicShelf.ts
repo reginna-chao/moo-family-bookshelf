@@ -10,7 +10,13 @@ import {
   type PublicShelfSnapshot,
   type UserBooksRecord,
 } from "../kv/schema";
-import { isValidUserId, isValidRequestId, isValidShareToken, sanitizePublicShelfTitle, isValidExpiresDays } from "../utils/validation";
+import {
+  isValidUserId,
+  isValidRequestId,
+  isValidShareToken,
+  sanitizePublicShelfTitle,
+  isValidExpiresDays,
+} from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError, type ErrorBody } from "../utils/errors";
@@ -61,7 +67,11 @@ export async function writePublicSnapshot(
   const snapshot = buildSnapshot(userId, shelf, books);
   const opts: KVNamespacePutOptions = {};
   if (ttl !== undefined) opts.expirationTtl = ttl;
-  await kv.put(kvKeys.publicShelf(shelf.shareToken), JSON.stringify(snapshot), opts);
+  await kv.put(
+    kvKeys.publicShelf(shelf.shareToken),
+    JSON.stringify(snapshot),
+    opts,
+  );
 }
 
 function authGuard(
@@ -202,7 +212,9 @@ const getPublicSnapshotRoute = createRoute({
 
 // ── Authenticated routes (mounted at /api/user) ───────────────
 
-export const publicShelfRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
+export const publicShelfRoutes = new OpenAPIHono<{ Bindings: Env }>({
+  defaultHook,
+});
 
 // GET /api/user/:id/public-shelf
 publicShelfRoutes.openapi(getPublicShelvesRoute, async (c) => {
@@ -214,7 +226,10 @@ publicShelfRoutes.openapi(getPublicShelvesRoute, async (c) => {
   const denied = authGuard(c, userId);
   if (denied) return denied;
 
-  const record = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
+  const record = await c.env.KV.get<UserBooksRecord>(
+    kvKeys.user(userId),
+    "json",
+  );
   const shelves = record?.publicSharing?.shelves ?? [];
   return c.json({ data: { shelves } });
 });
@@ -241,18 +256,36 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
     return jsonError(c, 400, "INVALID_TITLE", "Title must be 1–60 characters");
   }
   if (!isValidExpiresDays(body.expiresDays)) {
-    return jsonError(c, 400, "INVALID_EXPIRES_DAYS", "expiresDays must be 7, 30, 60, 90, or null");
+    return jsonError(
+      c,
+      400,
+      "INVALID_EXPIRES_DAYS",
+      "expiresDays must be 7, 30, 60, 90, or null",
+    );
   }
   const expiresDays = body.expiresDays as number | null;
 
-  const record = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
+  const record = await c.env.KV.get<UserBooksRecord>(
+    kvKeys.user(userId),
+    "json",
+  );
   if (!record) {
-    return jsonError(c, 400, "USER_NOT_FOUND", "User books must be synced before creating a public shelf");
+    return jsonError(
+      c,
+      400,
+      "USER_NOT_FOUND",
+      "User books must be synced before creating a public shelf",
+    );
   }
 
   const shelves = record.publicSharing?.shelves ?? [];
   if (shelves.length >= MAX_PUBLIC_SHELVES) {
-    return jsonError(c, 409, "MAX_SHELVES_REACHED", `Maximum ${MAX_PUBLIC_SHELVES} public shelf(s) allowed`);
+    return jsonError(
+      c,
+      409,
+      "MAX_SHELVES_REACHED",
+      `Maximum ${MAX_PUBLIC_SHELVES} public shelf(s) allowed`,
+    );
   }
 
   const now = Date.now();
@@ -298,22 +331,39 @@ publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
   const hasTitle = body.title !== undefined;
   const hasExpires = body.expiresDays !== undefined;
   if (!hasTitle && !hasExpires) {
-    return jsonError(c, 400, "INVALID_PAYLOAD", "At least one of title or expiresDays is required");
+    return jsonError(
+      c,
+      400,
+      "INVALID_PAYLOAD",
+      "At least one of title or expiresDays is required",
+    );
   }
 
   let newTitle: string | undefined;
   if (hasTitle) {
     const sanitized = sanitizePublicShelfTitle(body.title);
     if (sanitized === null) {
-      return jsonError(c, 400, "INVALID_TITLE", "Title must be 1–60 characters");
+      return jsonError(
+        c,
+        400,
+        "INVALID_TITLE",
+        "Title must be 1–60 characters",
+      );
     }
     newTitle = sanitized;
   }
 
   if (hasExpires && !isValidExpiresDays(body.expiresDays)) {
-    return jsonError(c, 400, "INVALID_EXPIRES_DAYS", "expiresDays must be 7, 30, 60, 90, or null");
+    return jsonError(
+      c,
+      400,
+      "INVALID_EXPIRES_DAYS",
+      "expiresDays must be 7, 30, 60, 90, or null",
+    );
   }
-  const newExpiresDays = hasExpires ? (body.expiresDays as number | null) : undefined;
+  const newExpiresDays = hasExpires
+    ? (body.expiresDays as number | null)
+    : undefined;
 
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
@@ -325,7 +375,9 @@ publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
   if (newTitle !== undefined) shelf.title = newTitle;
   if (newExpiresDays !== undefined) {
     shelf.expiresDays = newExpiresDays;
-    shelf.expiresAt = newExpiresDays ? Date.now() + newExpiresDays * 86_400_000 : null;
+    shelf.expiresAt = newExpiresDays
+      ? Date.now() + newExpiresDays * 86_400_000
+      : null;
   }
 
   shelves[idx] = shelf;
@@ -406,7 +458,9 @@ publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
 
 // ── Public query route (mounted at /api) ──────────────────────
 
-export const publicQueryRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
+export const publicQueryRoutes = new OpenAPIHono<{ Bindings: Env }>({
+  defaultHook,
+});
 
 // GET /api/public/:shareToken
 publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
@@ -420,7 +474,12 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
     "json",
   );
   if (!snapshot) {
-    return jsonError(c, 404, "PUBLIC_SHELF_NOT_FOUND", "Public shelf not found or expired");
+    return jsonError(
+      c,
+      404,
+      "PUBLIC_SHELF_NOT_FOUND",
+      "Public shelf not found or expired",
+    );
   }
 
   return c.json({

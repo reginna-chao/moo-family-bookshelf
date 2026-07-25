@@ -52,6 +52,7 @@ pnpm deploy
 ```
 
 部署完成後會顯示你的 Worker URL，例如：
+
 ```
 https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev
 ```
@@ -67,7 +68,9 @@ https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev
 3. 執行以下指令設定端點：
 
 ```js
-chrome.storage.local.set({ apiEndpoint: "https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev" });
+chrome.storage.local.set({
+  apiEndpoint: "https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev",
+});
 ```
 
 查詢目前端點：
@@ -91,7 +94,10 @@ chrome.storage.local.remove("apiEndpoint");
 3. 執行以下指令：
 
 ```js
-localStorage.setItem("moo_{userId}_apiHost", "https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev");
+localStorage.setItem(
+  "moo_{userId}_apiHost",
+  "https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev",
+);
 ```
 
 將 `{userId}` 替換為實際的使用者 ID。查詢目前端點：
@@ -149,10 +155,10 @@ pnpm test   # 執行測試
 
 Worker 內建 OpenAPI 文件與 Swagger UI，**僅在 dev 環境開啟**，production 完全關閉（回傳 404）。
 
-| 路由 | 說明 |
-|------|------|
+| 路由                     | 說明                  |
+| ------------------------ | --------------------- |
 | `GET /api/_openapi.json` | OpenAPI 3.1 JSON spec |
-| `GET /api/_docs` | Swagger UI 互動式文件 |
+| `GET /api/_docs`         | Swagger UI 互動式文件 |
 
 ### 開啟條件
 

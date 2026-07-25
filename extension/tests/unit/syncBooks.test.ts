@@ -58,7 +58,9 @@ function createMockApiClient(): ApiClient {
   } as unknown as ApiClient;
 }
 
-function makeStorageData(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function makeStorageData(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     displayName: "Test User",
     syncArchived: 0,
@@ -97,7 +99,9 @@ describe("syncBooks — archive sync path", () => {
           callback(result);
           return undefined as unknown as Promise<Record<string, unknown>>;
         }
-        return Promise.resolve(result) as unknown as Promise<Record<string, unknown>>;
+        return Promise.resolve(result) as unknown as Promise<
+          Record<string, unknown>
+        >;
       },
     );
     vi.mocked(chrome.storage.local.set).mockImplementation(
@@ -107,7 +111,9 @@ describe("syncBooks — archive sync path", () => {
     );
   }
 
-  function makeOptions(overrides: Partial<SyncBooksOptions> = {}): SyncBooksOptions {
+  function makeOptions(
+    overrides: Partial<SyncBooksOptions> = {},
+  ): SyncBooksOptions {
     return {
       navigate: false,
       userId: "user-123",
@@ -211,7 +217,9 @@ describe("syncBooks — archive sync path", () => {
     expect(result.success).toBe(true);
     // updatePersonalBooks should be called once with the userId
     expect(apiClient.updatePersonalBooks).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(apiClient.updatePersonalBooks).mock.calls[0][0]).toBe("user-123");
+    expect(vi.mocked(apiClient.updatePersonalBooks).mock.calls[0][0]).toBe(
+      "user-123",
+    );
   });
 });
 
@@ -239,7 +247,9 @@ describe("canAutoSync", () => {
           callback(result);
           return undefined as unknown as Promise<Record<string, unknown>>;
         }
-        return Promise.resolve(result) as unknown as Promise<Record<string, unknown>>;
+        return Promise.resolve(result) as unknown as Promise<
+          Record<string, unknown>
+        >;
       },
     );
   }
@@ -264,12 +274,18 @@ describe("canAutoSync", () => {
 
   describe("daily interval", () => {
     it("returns false when lastSyncAt is 1 hour ago", async () => {
-      setupStorage({ autoSyncInterval: "daily", lastSyncAt: Date.now() - HOUR });
+      setupStorage({
+        autoSyncInterval: "daily",
+        lastSyncAt: Date.now() - HOUR,
+      });
       expect(await canAutoSync()).toBe(false);
     });
 
     it("returns true when lastSyncAt is more than 24 hours ago", async () => {
-      setupStorage({ autoSyncInterval: "daily", lastSyncAt: Date.now() - 2 * DAY });
+      setupStorage({
+        autoSyncInterval: "daily",
+        lastSyncAt: Date.now() - 2 * DAY,
+      });
       expect(await canAutoSync()).toBe(true);
     });
 
@@ -281,31 +297,46 @@ describe("canAutoSync", () => {
 
   describe("weekly interval", () => {
     it("returns false when lastSyncAt is 3 days ago", async () => {
-      setupStorage({ autoSyncInterval: "weekly", lastSyncAt: Date.now() - 3 * DAY });
+      setupStorage({
+        autoSyncInterval: "weekly",
+        lastSyncAt: Date.now() - 3 * DAY,
+      });
       expect(await canAutoSync()).toBe(false);
     });
 
     it("returns true when lastSyncAt is more than 7 days ago", async () => {
-      setupStorage({ autoSyncInterval: "weekly", lastSyncAt: Date.now() - 8 * DAY });
+      setupStorage({
+        autoSyncInterval: "weekly",
+        lastSyncAt: Date.now() - 8 * DAY,
+      });
       expect(await canAutoSync()).toBe(true);
     });
   });
 
   describe("monthly interval", () => {
     it("returns false when lastSyncAt is 10 days ago", async () => {
-      setupStorage({ autoSyncInterval: "monthly", lastSyncAt: Date.now() - 10 * DAY });
+      setupStorage({
+        autoSyncInterval: "monthly",
+        lastSyncAt: Date.now() - 10 * DAY,
+      });
       expect(await canAutoSync()).toBe(false);
     });
 
     it("returns true when lastSyncAt is more than 30 days ago", async () => {
-      setupStorage({ autoSyncInterval: "monthly", lastSyncAt: Date.now() - 31 * DAY });
+      setupStorage({
+        autoSyncInterval: "monthly",
+        lastSyncAt: Date.now() - 31 * DAY,
+      });
       expect(await canAutoSync()).toBe(true);
     });
   });
 
   describe("never interval", () => {
     it("returns false even when lastSyncAt is very old", async () => {
-      setupStorage({ autoSyncInterval: "never", lastSyncAt: Date.now() - 365 * DAY });
+      setupStorage({
+        autoSyncInterval: "never",
+        lastSyncAt: Date.now() - 365 * DAY,
+      });
       expect(await canAutoSync()).toBe(false);
     });
 
@@ -322,7 +353,10 @@ describe("canAutoSync", () => {
     });
 
     it("invalid value behaves like daily — true at 25 hours ago", async () => {
-      setupStorage({ autoSyncInterval: "foo", lastSyncAt: Date.now() - 25 * HOUR });
+      setupStorage({
+        autoSyncInterval: "foo",
+        lastSyncAt: Date.now() - 25 * HOUR,
+      });
       expect(await canAutoSync()).toBe(true);
     });
 
@@ -367,7 +401,9 @@ describe("syncBooks — full flow", () => {
           callback(result);
           return undefined as unknown as Promise<Record<string, unknown>>;
         }
-        return Promise.resolve(result) as unknown as Promise<Record<string, unknown>>;
+        return Promise.resolve(result) as unknown as Promise<
+          Record<string, unknown>
+        >;
       },
     );
     vi.mocked(chrome.storage.local.set).mockImplementation(
@@ -567,7 +603,9 @@ describe("syncBooks — auto-return (familyId branch)", () => {
           callback(result);
           return undefined as unknown as Promise<Record<string, unknown>>;
         }
-        return Promise.resolve(result) as unknown as Promise<Record<string, unknown>>;
+        return Promise.resolve(result) as unknown as Promise<
+          Record<string, unknown>
+        >;
       },
     );
     vi.mocked(chrome.storage.local.set).mockImplementation(
@@ -577,7 +615,9 @@ describe("syncBooks — auto-return (familyId branch)", () => {
     );
   }
 
-  function makeLentRequest(overrides: Partial<BorrowRequest> = {}): BorrowRequest {
+  function makeLentRequest(
+    overrides: Partial<BorrowRequest> = {},
+  ): BorrowRequest {
     return {
       requestId: "req-lent",
       familyId: FAMILY_ID,
@@ -617,9 +657,7 @@ describe("syncBooks — auto-return (familyId branch)", () => {
     const updateBorrowStatus = vi
       .fn()
       .mockResolvedValue(makeLentRequest({ status: BorrowStatus.RETURNED }));
-    const listBorrowRequests = vi
-      .fn()
-      .mockResolvedValue([makeLentRequest()]);
+    const listBorrowRequests = vi.fn().mockResolvedValue([makeLentRequest()]);
     const apiClient: ApiClient = {
       getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
       updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
@@ -659,9 +697,7 @@ describe("syncBooks — auto-return (familyId branch)", () => {
     ]);
 
     const updateBorrowStatus = vi.fn();
-    const listBorrowRequests = vi
-      .fn()
-      .mockResolvedValue([makeLentRequest()]);
+    const listBorrowRequests = vi.fn().mockResolvedValue([makeLentRequest()]);
     const apiClient: ApiClient = {
       getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
       updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),

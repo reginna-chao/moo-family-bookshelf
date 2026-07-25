@@ -32,7 +32,9 @@ export function PublicShelfPage({ shareToken }: PublicShelfPageProps) {
     }
   }, [shareToken]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -41,24 +43,52 @@ export function PublicShelfPage({ shareToken }: PublicShelfPageProps) {
   }, [searchTerm]);
 
   if (state === "loading") return <LoadingView />;
-  if (state === "not-found") return <ErrorView icon={<BookX size={48} className="text-gray-300" />} message="此公開書櫃不存在或已過期" />;
-  if (state === "invalid") return <ErrorView icon={<AlertCircle size={48} className="text-gray-300" />} message="網址格式不正確" />;
-  if (state === "error") return <ErrorView icon={<AlertCircle size={48} className="text-gray-300" />} message="載入失敗，請稍後再試" onRetry={load} />;
+  if (state === "not-found")
+    return (
+      <ErrorView
+        icon={<BookX size={48} className="text-gray-300" />}
+        message="此公開書櫃不存在或已過期"
+      />
+    );
+  if (state === "invalid")
+    return (
+      <ErrorView
+        icon={<AlertCircle size={48} className="text-gray-300" />}
+        message="網址格式不正確"
+      />
+    );
+  if (state === "error")
+    return (
+      <ErrorView
+        icon={<AlertCircle size={48} className="text-gray-300" />}
+        message="載入失敗，請稍後再試"
+        onRetry={load}
+      />
+    );
   if (!data) return null;
 
   const term = debouncedTerm.toLowerCase();
   const filtered = term
-    ? data.books.filter((b) => b.title.toLowerCase().includes(term) || b.author.toLowerCase().includes(term))
+    ? data.books.filter(
+        (b) =>
+          b.title.toLowerCase().includes(term) ||
+          b.author.toLowerCase().includes(term),
+      )
     : data.books;
 
   return (
     <div className="max-w-3xl mx-auto min-h-screen px-4 py-6">
-      <p className="text-xs text-gray-400 mb-2">此為對外公開書櫃，無須登入即可瀏覽</p>
+      <p className="text-xs text-gray-400 mb-2">
+        此為對外公開書櫃，無須登入即可瀏覽
+      </p>
       <h1 className="text-xl font-bold text-gray-800 mb-4">{data.title}</h1>
 
       {data.books.length > 0 && (
         <div className="relative mb-4">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search
+            size={16}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
           <input
             type="text"
             value={searchTerm}
@@ -74,7 +104,9 @@ export function PublicShelfPage({ shareToken }: PublicShelfPageProps) {
       )}
 
       {data.books.length === 0 && (
-        <p className="text-center text-gray-400 py-12">此公開書櫃目前沒有書籍</p>
+        <p className="text-center text-gray-400 py-12">
+          此公開書櫃目前沒有書籍
+        </p>
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
@@ -113,12 +145,16 @@ function BookCard({ book }: { book: BookEntry }) {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center p-2 bg-gray-50">
-            <span className="text-xs text-gray-400 text-center line-clamp-3">{book.title}</span>
+            <span className="text-xs text-gray-400 text-center line-clamp-3">
+              {book.title}
+            </span>
           </div>
         )}
       </div>
       <div className="p-2">
-        <p className="text-sm font-medium text-gray-800 line-clamp-2 leading-tight">{book.title}</p>
+        <p className="text-sm font-medium text-gray-800 line-clamp-2 leading-tight">
+          {book.title}
+        </p>
         <p className="text-xs text-gray-500 mt-0.5 truncate">{book.author}</p>
       </div>
     </a>
@@ -133,13 +169,24 @@ function LoadingView() {
   );
 }
 
-function ErrorView({ icon, message, onRetry }: { icon: React.ReactNode; message: string; onRetry?: () => void }) {
+function ErrorView({
+  icon,
+  message,
+  onRetry,
+}: {
+  icon: React.ReactNode;
+  message: string;
+  onRetry?: () => void;
+}) {
   return (
     <div className="max-w-3xl mx-auto min-h-screen flex flex-col items-center justify-center gap-4 px-4">
       {icon}
       <p className="text-gray-500 text-center">{message}</p>
       {onRetry && (
-        <button onClick={onRetry} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">
+        <button
+          onClick={onRetry}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium"
+        >
           重試
         </button>
       )}

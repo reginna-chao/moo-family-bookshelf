@@ -6,7 +6,9 @@ import { OverflowMenu } from "@/components/OverflowMenu";
 
 describe("OverflowMenu", () => {
   it("renders a trigger with menu a11y attributes, collapsed by default", () => {
-    render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+    render(
+      <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,
+    );
 
     const trigger = screen.getByRole("button", { name: "更多選項" });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
@@ -15,7 +17,9 @@ describe("OverflowMenu", () => {
   });
 
   it("opens the menu and shows items as menuitems with correct labels", () => {
-    render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+    render(
+      <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
 
@@ -24,7 +28,9 @@ describe("OverflowMenu", () => {
       "aria-expanded",
       "true",
     );
-    expect(screen.getByRole("menuitem", { name: "隱藏書籍" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "隱藏書籍" }),
+    ).toBeInTheDocument();
   });
 
   it("renders all items (extensible to multiple options)", () => {
@@ -40,8 +46,12 @@ describe("OverflowMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
 
     expect(screen.getAllByRole("menuitem")).toHaveLength(2);
-    expect(screen.getByRole("menuitem", { name: "隱藏書籍" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "加入最愛" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "隱藏書籍" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "加入最愛" }),
+    ).toBeInTheDocument();
   });
 
   it("calls the item's onSelect and closes the menu when an item is clicked", () => {
@@ -60,7 +70,9 @@ describe("OverflowMenu", () => {
   });
 
   it("closes the menu on Escape", () => {
-    render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+    render(
+      <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
@@ -71,7 +83,9 @@ describe("OverflowMenu", () => {
   });
 
   it("closes the menu on outside click", () => {
-    render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+    render(
+      <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
@@ -82,7 +96,9 @@ describe("OverflowMenu", () => {
   });
 
   it("keeps the menu open when clicking inside the portaled menu", () => {
-    render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+    render(
+      <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
     const menu = screen.getByRole("menu");
@@ -96,7 +112,9 @@ describe("OverflowMenu", () => {
   });
 
   it("keeps the menu open when clicking the trigger button (toggle, not outside)", () => {
-    render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />);
+    render(
+      <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,
+    );
 
     const trigger = screen.getByRole("button", { name: "更多選項" });
     fireEvent.click(trigger);

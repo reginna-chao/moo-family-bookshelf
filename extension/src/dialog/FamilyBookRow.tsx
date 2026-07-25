@@ -44,8 +44,8 @@ export function FamilyBookRow({
   };
 
   const borrowBtnClass = borrowRequestPending
-    ? "moo-book-row__borrow-btn moo-book-row__borrow-btn--pending"
-    : "moo-book-row__borrow-btn";
+    ? "moo-button moo-button--xs moo-book-row__borrow-btn moo-book-row__borrow-btn--pending"
+    : "moo-button moo-button--xs moo-book-row__borrow-btn";
 
   return (
     <a
@@ -79,14 +79,18 @@ export function FamilyBookRow({
         >
           {book.title}
         </div>
-        {book.author && <div className="moo-book-row__author">{book.author}</div>}
+        {book.author && (
+          <div className="moo-book-row__author">{book.author}</div>
+        )}
         {isMobile && (
           <span className="moo-book-row__member moo-book-row__member--stacked">
             {book.memberName}
           </span>
         )}
       </div>
-      {!isMobile && <span className="moo-book-row__member">{book.memberName}</span>}
+      {!isMobile && (
+        <span className="moo-book-row__member">{book.memberName}</span>
+      )}
       {showBorrowButton && (
         <button
           type="button"
@@ -99,7 +103,10 @@ export function FamilyBookRow({
       )}
       {onFavoriteToggle && (
         <span className="moo-book-row__favorite">
-          <FavoriteButton isFavorite={isFavorite} onFavoriteToggle={onFavoriteToggle} />
+          <FavoriteButton
+            isFavorite={isFavorite}
+            onFavoriteToggle={onFavoriteToggle}
+          />
         </span>
       )}
       {menuItems.length > 0 && (

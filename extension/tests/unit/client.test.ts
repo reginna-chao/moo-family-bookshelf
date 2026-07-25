@@ -119,7 +119,8 @@ describe("ApiClient", () => {
       globalThis.fetch = mockFetchSuccess({ ok: true });
       await client.getPersonalBooks("user-1");
 
-      const callHeaders = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].headers;
+      const callHeaders = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
+        .calls[0][1].headers;
       expect(callHeaders["Authorization"]).toBeUndefined();
     });
 
@@ -128,7 +129,8 @@ describe("ApiClient", () => {
       client.setAuthToken("my-token");
       await client.getPersonalBooks("user-1");
 
-      const callHeaders = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].headers;
+      const callHeaders = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
+        .calls[0][1].headers;
       expect(callHeaders["Authorization"]).toBe("Bearer my-token");
     });
 
@@ -138,7 +140,8 @@ describe("ApiClient", () => {
       client.setAuthToken(null);
       await client.getPersonalBooks("user-1");
 
-      const callHeaders = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].headers;
+      const callHeaders = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
+        .calls[0][1].headers;
       expect(callHeaders["Authorization"]).toBeUndefined();
     });
   });
@@ -155,7 +158,8 @@ describe("ApiClient", () => {
       globalThis.fetch = mockFetchSuccess({});
       await client.getPersonalBooks("user-1");
 
-      const callHeaders = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].headers;
+      const callHeaders = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
+        .calls[0][1].headers;
       expect(callHeaders["Content-Type"]).toBe("application/json");
     });
   });
@@ -175,25 +179,37 @@ describe("ApiClient", () => {
         json: () => Promise.resolve({}),
       });
       const result = await client.getPersonalBooks("user-1");
-      expect(result.error).toEqual({ code: "UNKNOWN_ERROR", message: "HTTP 500" });
+      expect(result.error).toEqual({
+        code: "UNKNOWN_ERROR",
+        message: "HTTP 500",
+      });
     });
 
     it("returns NETWORK_ERROR on fetch rejection", async () => {
       globalThis.fetch = mockFetchNetworkError("Connection refused");
       const result = await client.getPersonalBooks("user-1");
-      expect(result.error).toEqual({ code: "NETWORK_ERROR", message: "Connection refused" });
+      expect(result.error).toEqual({
+        code: "NETWORK_ERROR",
+        message: "Connection refused",
+      });
     });
 
     it("returns generic NETWORK_ERROR for non-Error throws", async () => {
       globalThis.fetch = vi.fn().mockRejectedValue("string error");
       const result = await client.getPersonalBooks("user-1");
-      expect(result.error).toEqual({ code: "NETWORK_ERROR", message: "Network error" });
+      expect(result.error).toEqual({
+        code: "NETWORK_ERROR",
+        message: "Network error",
+      });
     });
   });
 
   describe("lookupUser", () => {
     it("sends POST to /api/auth/lookup with userId", async () => {
-      globalThis.fetch = mockFetchSuccess({ existingFamilyId: null, memberCount: 0 });
+      globalThis.fetch = mockFetchSuccess({
+        existingFamilyId: null,
+        memberCount: 0,
+      });
       const userId = "a".repeat(64);
       const result = await client.lookupUser(userId);
 
@@ -260,10 +276,13 @@ describe("ApiClient", () => {
 
     it("does not include a displayName in the PATCH body", async () => {
       globalThis.fetch = mockFetchSuccess({ ok: true, applied: 1 });
-      await client.patchPersonalBooks("u1", [{ bookId: "b1", isShared: BoolFlag.TRUE }]);
+      await client.patchPersonalBooks("u1", [
+        { bookId: "b1", isShared: BoolFlag.TRUE },
+      ]);
 
       const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
       );
       expect(body).not.toHaveProperty("displayName");
       expect(Object.keys(body)).toEqual(["changes"]);
@@ -272,7 +291,11 @@ describe("ApiClient", () => {
 
   describe("updateFamilyPrefs", () => {
     it("sends PUT to /api/user/:id/family-prefs with a { hidden, favorites } body", async () => {
-      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: ["o1:b1"], favorites: [] });
+      globalThis.fetch = mockFetchSuccess({
+        ok: true,
+        hidden: ["o1:b1"],
+        favorites: [],
+      });
       const userId = "a".repeat(64);
       const prefs = { hidden: ["o1:b1", "o2:b2"], favorites: ["o3:b3"] };
       await client.updateFamilyPrefs(userId, prefs);
@@ -305,29 +328,43 @@ describe("ApiClient", () => {
     });
 
     it("sends only the provided list (favorites-only update)", async () => {
-      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: [], favorites: ["o3:b3"] });
+      globalThis.fetch = mockFetchSuccess({
+        ok: true,
+        hidden: [],
+        favorites: ["o3:b3"],
+      });
       const userId = "a".repeat(64);
       await client.updateFamilyPrefs(userId, { favorites: ["o3:b3"] });
 
       const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
       );
       expect(body).toEqual({ favorites: ["o3:b3"] });
     });
 
     it("sends empty lists as { hidden: [], favorites: [] }", async () => {
-      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: [], favorites: [] });
+      globalThis.fetch = mockFetchSuccess({
+        ok: true,
+        hidden: [],
+        favorites: [],
+      });
       const userId = "a".repeat(64);
       await client.updateFamilyPrefs(userId, { hidden: [], favorites: [] });
 
       const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
       );
       expect(body).toEqual({ hidden: [], favorites: [] });
     });
 
     it("rejects a non-hex userId before issuing a request", async () => {
-      globalThis.fetch = mockFetchSuccess({ ok: true, hidden: [], favorites: [] });
+      globalThis.fetch = mockFetchSuccess({
+        ok: true,
+        hidden: [],
+        favorites: [],
+      });
       await expect(
         client.updateFamilyPrefs("invalid-id", { hidden: ["o1:b1"] }),
       ).rejects.toThrow("Invalid userId");
@@ -337,7 +374,9 @@ describe("ApiClient", () => {
     it("surfaces server error responses through the envelope", async () => {
       globalThis.fetch = mockFetchError("FORBIDDEN", "no access", 403);
       const userId = "a".repeat(64);
-      const result = await client.updateFamilyPrefs(userId, { hidden: ["o1:b1"] });
+      const result = await client.updateFamilyPrefs(userId, {
+        hidden: ["o1:b1"],
+      });
       expect(result.error).toEqual({ code: "FORBIDDEN", message: "no access" });
     });
   });
@@ -361,7 +400,8 @@ describe("ApiClient", () => {
       await client.createFamily("u1", "Alice");
 
       const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
       );
       expect(body.keyFingerprint).toBeUndefined();
     });
@@ -371,7 +411,8 @@ describe("ApiClient", () => {
       await client.createFamily("u1", undefined);
 
       const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
       );
       expect(body.displayName).toBe("");
     });
@@ -396,7 +437,8 @@ describe("ApiClient", () => {
       await client.joinFamily("fam-1", "u1");
 
       const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
       );
       expect(body.displayName).toBe("");
     });
@@ -406,7 +448,8 @@ describe("ApiClient", () => {
       await client.joinFamily("fam-1", "u1", "Bob", { verifySecret: "1234" });
 
       const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
       );
       expect(body.verifySecret).toBe("1234");
     });
@@ -416,7 +459,8 @@ describe("ApiClient", () => {
       await client.joinFamily("fam-1", "u1", "Bob");
 
       const body = JSON.parse(
-        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
       );
       expect(body.keyFingerprint).toBeUndefined();
       expect(body.verifySecret).toBeUndefined();
@@ -504,12 +548,16 @@ describe("ApiClient", () => {
   describe("401 token refresh logic", () => {
     it("attempts token refresh on 401 and retries original request", async () => {
       // First call: 401, second call (refresh): success, third call (retry): success
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         // Original request → 401
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         // Refresh request → success
         .mockResolvedValueOnce({
@@ -527,7 +575,10 @@ describe("ApiClient", () => {
 
       // Set up chrome.storage.local.get to return userId and familyId
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
           const result = toStorageKeys({ userId: "u1", familyId: "fam-1" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
@@ -540,30 +591,47 @@ describe("ApiClient", () => {
     });
 
     it("returns 401 error when refresh fails and recovery fails", async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         // Original request → 401
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         // Refresh request → REFRESH_FAILED
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Invalid" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "REFRESH_FAILED", message: "Invalid" },
+            }),
         })
         // joinFamily recovery → fails
         .mockResolvedValueOnce({
           ok: false,
           status: 404,
-          json: () => Promise.resolve({ error: { code: "FAMILY_NOT_FOUND", message: "Not found" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "FAMILY_NOT_FOUND", message: "Not found" },
+            }),
         });
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const result = toStorageKeys({
+            userId: "u1",
+            familyId: "fam-1",
+            displayName: "Test",
+          });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -574,16 +642,21 @@ describe("ApiClient", () => {
     });
 
     it("returns 401 error when no userId/familyId in storage", async () => {
-      const fetchMock = vi.fn()
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
-        });
+      const fetchMock = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () =>
+          Promise.resolve({
+            error: { code: "UNAUTHORIZED", message: "Expired" },
+          }),
+      });
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
           const result = {};
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
@@ -610,7 +683,10 @@ describe("ApiClient", () => {
           return Promise.resolve({
             ok: false,
             status: 401,
-            json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+            json: () =>
+              Promise.resolve({
+                error: { code: "UNAUTHORIZED", message: "Expired" },
+              }),
           });
         }
         // Retried requests → success
@@ -623,7 +699,10 @@ describe("ApiClient", () => {
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
           const result = toStorageKeys({ userId: "u1", familyId: "fam-1" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
@@ -643,28 +722,45 @@ describe("ApiClient", () => {
     });
 
     it("calls onFamilyRemoved callback on REFRESH_FAILED when recovery fails", async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Removed" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "REFRESH_FAILED", message: "Removed" },
+            }),
         })
         // joinFamily recovery → fails
         .mockResolvedValueOnce({
           ok: false,
           status: 404,
-          json: () => Promise.resolve({ error: { code: "FAMILY_NOT_FOUND", message: "Not found" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "FAMILY_NOT_FOUND", message: "Not found" },
+            }),
         });
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const result = toStorageKeys({
+            userId: "u1",
+            familyId: "fam-1",
+            displayName: "Test",
+          });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -679,28 +775,45 @@ describe("ApiClient", () => {
     });
 
     it("does not throw when onFamilyRemoved is null on REFRESH_FAILED", async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Removed" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "REFRESH_FAILED", message: "Removed" },
+            }),
         })
         // joinFamily recovery → fails
         .mockResolvedValueOnce({
           ok: false,
           status: 404,
-          json: () => Promise.resolve({ error: { code: "FAMILY_NOT_FOUND", message: "Not found" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "FAMILY_NOT_FOUND", message: "Not found" },
+            }),
         });
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const result = toStorageKeys({
+            userId: "u1",
+            familyId: "fam-1",
+            displayName: "Test",
+          });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -714,34 +827,42 @@ describe("ApiClient", () => {
     });
 
     it("recovers via joinFamily on REFRESH_FAILED and retries original request", async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         // Original request → 401
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         // Refresh request → REFRESH_FAILED
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Token expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "REFRESH_FAILED", message: "Token expired" },
+            }),
         })
         // joinFamily recovery → success with new token
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({
-            data: {
-              familyId: "fam-1",
-              ownerId: "owner-1",
-              members: [{ userId: "u1", displayName: "Test" }],
-              maxMembers: 6,
-              createdAt: "2026-01-01",
-              authToken: "recovered-token",
-              expiresAt: 9999999999,
-            },
-          }),
+          json: () =>
+            Promise.resolve({
+              data: {
+                familyId: "fam-1",
+                ownerId: "owner-1",
+                members: [{ userId: "u1", displayName: "Test" }],
+                maxMembers: 6,
+                createdAt: "2026-01-01",
+                authToken: "recovered-token",
+                expiresAt: 9999999999,
+              },
+            }),
         })
         // Retry original request → success
         .mockResolvedValueOnce({
@@ -752,8 +873,15 @@ describe("ApiClient", () => {
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test User" });
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const result = toStorageKeys({
+            userId: "u1",
+            familyId: "fam-1",
+            displayName: "Test User",
+          });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -771,36 +899,47 @@ describe("ApiClient", () => {
       expect(onFamilyRemoved).not.toHaveBeenCalled();
       // New token should be stored
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
-        expect.objectContaining({ [AUTH_TOKEN_KEY]: "recovered-token", [TOKEN_EXPIRES_AT_KEY]: 9999999999 }),
+        expect.objectContaining({
+          [AUTH_TOKEN_KEY]: "recovered-token",
+          [TOKEN_EXPIRES_AT_KEY]: 9999999999,
+        }),
       );
     });
 
     it("omits displayName from joinFamily recovery request so backend preserves existing member name", async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Token expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "REFRESH_FAILED", message: "Token expired" },
+            }),
         })
         // joinFamily recovery → success
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({
-            data: {
-              familyId: "fam-1",
-              ownerId: "owner-1",
-              members: [],
-              maxMembers: 6,
-              createdAt: "2026-01-01",
-              authToken: "new-token",
-            },
-          }),
+          json: () =>
+            Promise.resolve({
+              data: {
+                familyId: "fam-1",
+                ownerId: "owner-1",
+                members: [],
+                maxMembers: 6,
+                createdAt: "2026-01-01",
+                authToken: "new-token",
+              },
+            }),
         })
         // Retry → success
         .mockResolvedValueOnce({
@@ -811,8 +950,15 @@ describe("ApiClient", () => {
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "小明" });
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const result = toStorageKeys({
+            userId: "u1",
+            familyId: "fam-1",
+            displayName: "小明",
+          });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -832,27 +978,38 @@ describe("ApiClient", () => {
 
     it("does not attempt joinFamily recovery when familyId/userId missing from storage", async () => {
       let getCallCount = 0;
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Removed" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "REFRESH_FAILED", message: "Removed" },
+            }),
         });
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
           getCallCount++;
           // First call (for refresh): has userId/familyId
           // Second call (for recovery): missing familyId
-          const result = getCallCount === 1
-            ? toStorageKeys({ userId: "u1", familyId: "fam-1" })
-            : toStorageKeys({ userId: "u1" });
+          const result =
+            getCallCount === 1
+              ? toStorageKeys({ userId: "u1", familyId: "fam-1" })
+              : toStorageKeys({ userId: "u1" });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -870,38 +1027,48 @@ describe("ApiClient", () => {
       // new contract (Invariant 2) family data must be left intact and
       // onFamilyRemoved must NOT fire on this path.
       expect(onFamilyRemoved).not.toHaveBeenCalled();
-      expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([FAMILY_ID_KEY]);
+      expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
+        FAMILY_ID_KEY,
+      ]);
     });
 
     it("attempts joinFamily recovery on non-REFRESH_FAILED errors (e.g. rate limit)", async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         // Original request → 401
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         // Refresh request → rate limited (429, not REFRESH_FAILED)
         .mockResolvedValueOnce({
           ok: false,
           status: 429,
-          json: () => Promise.resolve({ error: { code: "RATE_LIMITED", message: "Too many requests" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "RATE_LIMITED", message: "Too many requests" },
+            }),
         })
         // joinFamily recovery → success with new token
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({
-            data: {
-              familyId: "fam-1",
-              ownerId: "u1",
-              members: [],
-              maxMembers: 2,
-              createdAt: "2026-01-01",
-              authToken: "recovered-token",
-              expiresAt: Date.now() + 90 * 24 * 60 * 60 * 1000,
-            },
-          }),
+          json: () =>
+            Promise.resolve({
+              data: {
+                familyId: "fam-1",
+                ownerId: "u1",
+                members: [],
+                maxMembers: 2,
+                createdAt: "2026-01-01",
+                authToken: "recovered-token",
+                expiresAt: Date.now() + 90 * 24 * 60 * 60 * 1000,
+              },
+            }),
         })
         // Retried original request → success
         .mockResolvedValueOnce({
@@ -912,8 +1079,15 @@ describe("ApiClient", () => {
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const result = toStorageKeys({
+            userId: "u1",
+            familyId: "fam-1",
+            displayName: "Test",
+          });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -932,30 +1106,47 @@ describe("ApiClient", () => {
     });
 
     it("does not propagate a rejected FAMILY_REMOVED sendMessage when recovery fails", async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         // Original request → 401
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         // Refresh request → REFRESH_FAILED
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Removed" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "REFRESH_FAILED", message: "Removed" },
+            }),
         })
         // joinFamily recovery → fails
         .mockResolvedValueOnce({
           ok: false,
           status: 404,
-          json: () => Promise.resolve({ error: { code: "FAMILY_NOT_FOUND", message: "Not found" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "FAMILY_NOT_FOUND", message: "Not found" },
+            }),
         });
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const result = toStorageKeys({
+            userId: "u1",
+            familyId: "fam-1",
+            displayName: "Test",
+          });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -965,7 +1156,9 @@ describe("ApiClient", () => {
       // the context is invalidated. A synchronous try/catch cannot catch this;
       // the recovery-failure path must still resolve cleanly.
       vi.mocked(chrome.runtime.sendMessage).mockRejectedValueOnce(
-        new Error("Could not establish connection. Receiving end does not exist."),
+        new Error(
+          "Could not establish connection. Receiving end does not exist.",
+        ),
       );
 
       const result = await client.getPersonalBooks("u1");
@@ -973,34 +1166,53 @@ describe("ApiClient", () => {
       // The rejected sendMessage must not propagate out of the refresh flow:
       // the original request still resolves to its 401 error envelope.
       expect(result.error?.code).toBe("UNAUTHORIZED");
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "FAMILY_REMOVED" });
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "FAMILY_REMOVED",
+      });
     });
 
     it("clears token then family data on REFRESH_FAILED when recovery fails", async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         // Original request → 401
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         })
         // Refresh request → REFRESH_FAILED
         .mockResolvedValueOnce({
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Removed" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "REFRESH_FAILED", message: "Removed" },
+            }),
         })
         // joinFamily recovery attempt → fails
         .mockResolvedValueOnce({
           ok: false,
           status: 404,
-          json: () => Promise.resolve({ error: { code: "FAMILY_NOT_FOUND", message: "Not found" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "FAMILY_NOT_FOUND", message: "Not found" },
+            }),
         });
       globalThis.fetch = fetchMock;
 
       vi.mocked(chrome.storage.local.get).mockImplementation(
-        (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-          const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+        (
+          keys: unknown,
+          callback?: (result: Record<string, unknown>) => void,
+        ) => {
+          const result = toStorageKeys({
+            userId: "u1",
+            familyId: "fam-1",
+            displayName: "Test",
+          });
           if (typeof callback === "function") callback(result);
           return Promise.resolve(result) as unknown as void;
         },
@@ -1009,13 +1221,12 @@ describe("ApiClient", () => {
       await client.getPersonalBooks("u1");
 
       // First: clear only token
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        [AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY],
-      );
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+        AUTH_TOKEN_KEY,
+        TOKEN_EXPIRES_AT_KEY,
+      ]);
       // Then: clear family data after recovery fails
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        [FAMILY_ID_KEY],
-      );
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([FAMILY_ID_KEY]);
     });
 
     /**
@@ -1027,37 +1238,54 @@ describe("ApiClient", () => {
     describe("rate-limited recovery", () => {
       /** 401 → refresh fails → join recovery is 429 RATE_LIMITED. */
       function mockRateLimitedRecovery(retryAfter?: number) {
-        return vi.fn()
-          // Original request → 401
-          .mockResolvedValueOnce({
-            ok: false,
-            status: 401,
-            json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
-          })
-          // Refresh request → REFRESH_FAILED
-          .mockResolvedValueOnce({
-            ok: false,
-            status: 401,
-            json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Token expired" } }),
-          })
-          // joinFamily recovery → 429 rate limited
-          .mockResolvedValueOnce({
-            ok: false,
-            status: 429,
-            json: () => Promise.resolve({
-              error: {
-                code: "RATE_LIMITED",
-                message: "Too many requests",
-                ...(retryAfter !== undefined ? { retryAfter } : {}),
-              },
-            }),
-          });
+        return (
+          vi
+            .fn()
+            // Original request → 401
+            .mockResolvedValueOnce({
+              ok: false,
+              status: 401,
+              json: () =>
+                Promise.resolve({
+                  error: { code: "UNAUTHORIZED", message: "Expired" },
+                }),
+            })
+            // Refresh request → REFRESH_FAILED
+            .mockResolvedValueOnce({
+              ok: false,
+              status: 401,
+              json: () =>
+                Promise.resolve({
+                  error: { code: "REFRESH_FAILED", message: "Token expired" },
+                }),
+            })
+            // joinFamily recovery → 429 rate limited
+            .mockResolvedValueOnce({
+              ok: false,
+              status: 429,
+              json: () =>
+                Promise.resolve({
+                  error: {
+                    code: "RATE_LIMITED",
+                    message: "Too many requests",
+                    ...(retryAfter !== undefined ? { retryAfter } : {}),
+                  },
+                }),
+            })
+        );
       }
 
       function seedMembership() {
         vi.mocked(chrome.storage.local.get).mockImplementation(
-          (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-            const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+          (
+            keys: unknown,
+            callback?: (result: Record<string, unknown>) => void,
+          ) => {
+            const result = toStorageKeys({
+              userId: "u1",
+              familyId: "fam-1",
+              displayName: "Test",
+            });
             if (typeof callback === "function") callback(result);
             return Promise.resolve(result) as unknown as void;
           },
@@ -1077,7 +1305,9 @@ describe("ApiClient", () => {
         expect(result.error?.message).toContain("稍後");
         expect(result.error?.message).toMatch(/分鐘後/);
         // No retry of the original request — it was never re-issued with a token.
-        expect((globalThis.fetch as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(3);
+        expect(
+          globalThis.fetch as ReturnType<typeof vi.fn>,
+        ).toHaveBeenCalledTimes(3);
       });
 
       it("still returns a localized RATE_LIMITED envelope when the 429 omits retryAfter", async () => {
@@ -1108,7 +1338,9 @@ describe("ApiClient", () => {
         expect(onReauthRequired).not.toHaveBeenCalled();
         expect(onFamilyRemoved).not.toHaveBeenCalled();
         // Family data must survive a rate-limited recovery (Invariant 2).
-        expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([FAMILY_ID_KEY]);
+        expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
+          FAMILY_ID_KEY,
+        ]);
       });
     });
 
@@ -1127,7 +1359,10 @@ describe("ApiClient", () => {
         return {
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "UNAUTHORIZED", message: "Expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "UNAUTHORIZED", message: "Expired" },
+            }),
         };
       }
       /** The refresh POST failing (dead token). */
@@ -1135,7 +1370,10 @@ describe("ApiClient", () => {
         return {
           ok: false,
           status: 401,
-          json: () => Promise.resolve({ error: { code: "REFRESH_FAILED", message: "Token expired" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "REFRESH_FAILED", message: "Token expired" },
+            }),
         };
       }
       /** The recovery join demanding a PWA-login verification secret. */
@@ -1143,14 +1381,24 @@ describe("ApiClient", () => {
         return {
           ok: false,
           status: 403,
-          json: () => Promise.resolve({ error: { code: "VERIFICATION_REQUIRED", message: "verify" } }),
+          json: () =>
+            Promise.resolve({
+              error: { code: "VERIFICATION_REQUIRED", message: "verify" },
+            }),
         };
       }
 
       function seedMembership() {
         vi.mocked(chrome.storage.local.get).mockImplementation(
-          (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-            const result = toStorageKeys({ userId: "u1", familyId: "fam-1", displayName: "Test" });
+          (
+            keys: unknown,
+            callback?: (result: Record<string, unknown>) => void,
+          ) => {
+            const result = toStorageKeys({
+              userId: "u1",
+              familyId: "fam-1",
+              displayName: "Test",
+            });
             if (typeof callback === "function") callback(result);
             return Promise.resolve(result) as unknown as void;
           },
@@ -1167,7 +1415,8 @@ describe("ApiClient", () => {
       it("fires the onReauthRequired user callback once and joins once across two 401 waves", async () => {
         // Wave 1: 401 → refresh-fail → join(VERIFICATION_REQUIRED)  [latches]
         // Wave 2: 401 → refresh-fail                                [join skipped]
-        const fetchMock = vi.fn()
+        const fetchMock = vi
+          .fn()
           .mockResolvedValueOnce(resp401())
           .mockResolvedValueOnce(respRefreshFailed())
           .mockResolvedValueOnce(respJoinVerification())
@@ -1191,7 +1440,8 @@ describe("ApiClient", () => {
 
       it("clears the latch on setAuthToken(<token>) so a later 401 wave joins again", async () => {
         // Wave 1 latches; setAuthToken("x") releases; Wave 2 re-attempts join.
-        const fetchMock = vi.fn()
+        const fetchMock = vi
+          .fn()
           .mockResolvedValueOnce(resp401())
           .mockResolvedValueOnce(respRefreshFailed())
           .mockResolvedValueOnce(respJoinVerification())
@@ -1214,7 +1464,8 @@ describe("ApiClient", () => {
       });
 
       it("does NOT clear the latch on setAuthToken(null) — join stays suppressed", async () => {
-        const fetchMock = vi.fn()
+        const fetchMock = vi
+          .fn()
           .mockResolvedValueOnce(resp401())
           .mockResolvedValueOnce(respRefreshFailed())
           .mockResolvedValueOnce(respJoinVerification())
@@ -1236,7 +1487,8 @@ describe("ApiClient", () => {
       });
 
       it("clears the latch on clearReauthPending() so a later 401 wave joins again", async () => {
-        const fetchMock = vi.fn()
+        const fetchMock = vi
+          .fn()
           .mockResolvedValueOnce(resp401())
           .mockResolvedValueOnce(respRefreshFailed())
           .mockResolvedValueOnce(respJoinVerification())

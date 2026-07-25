@@ -11,7 +11,11 @@ import {
   hasMember,
   findMember,
 } from "../kv/schema";
-import { isValidFamilyId, isValidUserId, isValidRequestId } from "../utils/validation";
+import {
+  isValidFamilyId,
+  isValidUserId,
+  isValidRequestId,
+} from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
@@ -90,7 +94,12 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   const userId = getAuthenticatedUserId(c);
@@ -118,12 +127,21 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     !body.bookCoverUrl ||
     !body.ownerId
   ) {
-    return jsonError(c, 400, "MISSING_FIELDS", "bookId, bookTitle, bookAuthor, bookCoverUrl, and ownerId are required");
+    return jsonError(
+      c,
+      400,
+      "MISSING_FIELDS",
+      "bookId, bookTitle, bookAuthor, bookCoverUrl, and ownerId are required",
+    );
   }
 
-  if (typeof body.bookId !== "string" || typeof body.bookTitle !== "string" ||
-      typeof body.bookAuthor !== "string" || typeof body.bookCoverUrl !== "string" ||
-      typeof body.ownerId !== "string") {
+  if (
+    typeof body.bookId !== "string" ||
+    typeof body.bookTitle !== "string" ||
+    typeof body.bookAuthor !== "string" ||
+    typeof body.bookCoverUrl !== "string" ||
+    typeof body.ownerId !== "string"
+  ) {
     return jsonError(c, 400, "INVALID_FIELDS", "All fields must be strings");
   }
 
@@ -145,7 +163,10 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   if (rateLimitResponse) return rateLimitResponse;
 
   // Load family record
-  const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
+  const raw = await c.env.KV.get<RawFamilyRecord>(
+    kvKeys.family(familyId),
+    "json",
+  );
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
   }
@@ -154,7 +175,12 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
 
   // Verify caller is a family member
   if (!hasMember(family.members, userId)) {
-    return jsonError(c, 403, "NOT_FAMILY_MEMBER", "You are not a member of this family");
+    return jsonError(
+      c,
+      403,
+      "NOT_FAMILY_MEMBER",
+      "You are not a member of this family",
+    );
   }
 
   // Verify ownerId is a different family member
@@ -163,7 +189,12 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   }
 
   if (!hasMember(family.members, ownerId)) {
-    return jsonError(c, 403, "INVALID_OWNER", "Owner is not a member of this family");
+    return jsonError(
+      c,
+      403,
+      "INVALID_OWNER",
+      "Owner is not a member of this family",
+    );
   }
 
   // Check canLend for both parties
@@ -173,8 +204,16 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     return jsonError(c, 500, "INTERNAL_ERROR", "Member lookup failed");
   }
 
-  if (!isMemberLendingEnabled(borrowerMember) || !isMemberLendingEnabled(ownerMember)) {
-    return jsonError(c, 403, "LENDING_DISABLED", "Lending is disabled for one or both members");
+  if (
+    !isMemberLendingEnabled(borrowerMember) ||
+    !isMemberLendingEnabled(ownerMember)
+  ) {
+    return jsonError(
+      c,
+      403,
+      "LENDING_DISABLED",
+      "Lending is disabled for one or both members",
+    );
   }
 
   // Check for duplicate PENDING request (same borrowerId + bookId)
@@ -184,7 +223,9 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
 
   if (requestIds.length > 0) {
     const existingRequests = await Promise.all(
-      requestIds.map((id) => c.env.KV.get<BorrowRequest>(kvKeys.borrow(id), "json")),
+      requestIds.map((id) =>
+        c.env.KV.get<BorrowRequest>(kvKeys.borrow(id), "json"),
+      ),
     );
 
     const hasDuplicate = existingRequests.some(
@@ -196,7 +237,12 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     );
 
     if (hasDuplicate) {
-      return jsonError(c, 400, "DUPLICATE_REQUEST", "A pending borrow request already exists for this book");
+      return jsonError(
+        c,
+        400,
+        "DUPLICATE_REQUEST",
+        "A pending borrow request already exists for this book",
+      );
     }
   }
 
@@ -241,7 +287,12 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   const userId = getAuthenticatedUserId(c);
@@ -258,25 +309,38 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
   if (rateLimitResponse) return rateLimitResponse;
 
   // Verify caller is a family member
-  const raw = await c.env.KV.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
+  const raw = await c.env.KV.get<RawFamilyRecord>(
+    kvKeys.family(familyId),
+    "json",
+  );
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
   }
 
   const family = normalizeFamilyRecord(raw);
   if (!hasMember(family.members, userId)) {
-    return jsonError(c, 403, "NOT_FAMILY_MEMBER", "You are not a member of this family");
+    return jsonError(
+      c,
+      403,
+      "NOT_FAMILY_MEMBER",
+      "You are not a member of this family",
+    );
   }
 
   // Load borrow index
-  const requestIds = await c.env.KV.get<string[]>(kvKeys.borrowsByFamily(familyId), "json");
+  const requestIds = await c.env.KV.get<string[]>(
+    kvKeys.borrowsByFamily(familyId),
+    "json",
+  );
   if (!requestIds || requestIds.length === 0) {
     return c.json({ data: [] });
   }
 
   // Batch load all borrow records, filter out null (defensive)
   const requests = await Promise.all(
-    requestIds.map((id) => c.env.KV.get<BorrowRequest>(kvKeys.borrow(id), "json")),
+    requestIds.map((id) =>
+      c.env.KV.get<BorrowRequest>(kvKeys.borrow(id), "json"),
+    ),
   );
 
   const validRequests = requests.filter((r): r is BorrowRequest => r !== null);
@@ -289,7 +353,12 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   const requestId = c.req.param("requestId");
 
   if (!isValidRequestId(requestId)) {
-    return jsonError(c, 400, "INVALID_REQUEST_ID", "Request ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_REQUEST_ID",
+      "Request ID format is invalid",
+    );
   }
 
   const userId = getAuthenticatedUserId(c);
@@ -324,7 +393,10 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   if (rateLimitResponse) return rateLimitResponse;
 
   // Load borrow record
-  const borrowRequest = await c.env.KV.get<BorrowRequest>(kvKeys.borrow(requestId), "json");
+  const borrowRequest = await c.env.KV.get<BorrowRequest>(
+    kvKeys.borrow(requestId),
+    "json",
+  );
   if (!borrowRequest) {
     return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
   }
@@ -334,7 +406,12 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   const isOwner = userId === borrowRequest.ownerId;
 
   if (!isBorrower && !isOwner) {
-    return jsonError(c, 403, "FORBIDDEN", "You are not authorized to update this request");
+    return jsonError(
+      c,
+      403,
+      "FORBIDDEN",
+      "You are not authorized to update this request",
+    );
   }
 
   // Validate status transition (FSM)
@@ -376,13 +453,19 @@ function validateStatusTransition(
     case BorrowStatus.LENT:
       if (currentStatus !== BorrowStatus.PENDING) {
         return {
-          error: { code: "INVALID_STATUS_TRANSITION", message: "Can only lend from PENDING status" },
+          error: {
+            code: "INVALID_STATUS_TRANSITION",
+            message: "Can only lend from PENDING status",
+          },
           status: 422,
         };
       }
       if (!isOwner) {
         return {
-          error: { code: "FORBIDDEN", message: "Only the book owner can approve lending" },
+          error: {
+            code: "FORBIDDEN",
+            message: "Only the book owner can approve lending",
+          },
           status: 403,
         };
       }
@@ -391,13 +474,19 @@ function validateStatusTransition(
     case BorrowStatus.REJECTED:
       if (currentStatus !== BorrowStatus.PENDING) {
         return {
-          error: { code: "INVALID_STATUS_TRANSITION", message: "Can only reject from PENDING status" },
+          error: {
+            code: "INVALID_STATUS_TRANSITION",
+            message: "Can only reject from PENDING status",
+          },
           status: 422,
         };
       }
       if (!isOwner) {
         return {
-          error: { code: "FORBIDDEN", message: "Only the book owner can reject a request" },
+          error: {
+            code: "FORBIDDEN",
+            message: "Only the book owner can reject a request",
+          },
           status: 403,
         };
       }
@@ -406,13 +495,19 @@ function validateStatusTransition(
     case BorrowStatus.CANCELLED:
       if (currentStatus !== BorrowStatus.PENDING) {
         return {
-          error: { code: "INVALID_STATUS_TRANSITION", message: "Can only cancel from PENDING status" },
+          error: {
+            code: "INVALID_STATUS_TRANSITION",
+            message: "Can only cancel from PENDING status",
+          },
           status: 422,
         };
       }
       if (!isBorrower) {
         return {
-          error: { code: "FORBIDDEN", message: "Only the borrower can cancel a request" },
+          error: {
+            code: "FORBIDDEN",
+            message: "Only the borrower can cancel a request",
+          },
           status: 403,
         };
       }
@@ -421,7 +516,10 @@ function validateStatusTransition(
     case BorrowStatus.RETURNED:
       if (currentStatus !== BorrowStatus.LENT) {
         return {
-          error: { code: "INVALID_STATUS_TRANSITION", message: "Can only return from LENT status" },
+          error: {
+            code: "INVALID_STATUS_TRANSITION",
+            message: "Can only return from LENT status",
+          },
           status: 422,
         };
       }
@@ -430,7 +528,10 @@ function validateStatusTransition(
 
     default:
       return {
-        error: { code: "INVALID_STATUS_TRANSITION", message: "Invalid target status" },
+        error: {
+          code: "INVALID_STATUS_TRANSITION",
+          message: "Invalid target status",
+        },
         status: 422,
       };
   }

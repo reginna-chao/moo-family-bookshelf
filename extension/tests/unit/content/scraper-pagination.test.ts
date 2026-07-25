@@ -167,9 +167,7 @@ describe("paginateLibrary", () => {
 
     expect(onProgress).toHaveBeenCalledTimes(100);
     expect(warnSpy).toHaveBeenCalledOnce();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("hard cap"),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("hard cap"));
   });
 
   it("runs without error when onProgress is not provided", async () => {

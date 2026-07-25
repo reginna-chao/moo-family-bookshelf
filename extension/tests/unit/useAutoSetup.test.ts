@@ -51,7 +51,9 @@ describe("useAutoSetup", () => {
           callback(result);
           return undefined as unknown as Promise<Record<string, unknown>>;
         }
-        return Promise.resolve(result) as unknown as Promise<Record<string, unknown>>;
+        return Promise.resolve(result) as unknown as Promise<
+          Record<string, unknown>
+        >;
       },
     );
     vi.mocked(chrome.storage.local.set).mockImplementation(
@@ -154,7 +156,10 @@ describe("useAutoSetup", () => {
       const { result } = renderHook(() => useAutoSetup());
 
       const promise = act(async () => {
-        await result.current.syncBooks({ userId: "user-hash", apiClient: mockApi });
+        await result.current.syncBooks({
+          userId: "user-hash",
+          apiClient: mockApi,
+        });
       });
       await vi.advanceTimersByTimeAsync(1500);
       await promise;
@@ -169,15 +174,18 @@ describe("useAutoSetup", () => {
     it("does NOT write LAST_SYNC_AT_KEY when the upload responds with an error", async () => {
       const mockApi = {
         getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
-        updatePersonalBooks: vi
-          .fn()
-          .mockResolvedValue({ error: { code: "UPLOAD_FAILED", message: "上傳失敗" } }),
+        updatePersonalBooks: vi.fn().mockResolvedValue({
+          error: { code: "UPLOAD_FAILED", message: "上傳失敗" },
+        }),
       } as unknown as ApiClient;
       const { result } = renderHook(() => useAutoSetup());
 
       let success = true;
       const promise = act(async () => {
-        success = await result.current.syncBooks({ userId: "user-hash", apiClient: mockApi });
+        success = await result.current.syncBooks({
+          userId: "user-hash",
+          apiClient: mockApi,
+        });
       });
       await vi.advanceTimersByTimeAsync(1500);
       await promise;
@@ -195,7 +203,10 @@ describe("useAutoSetup", () => {
 
       let success = true;
       const promise = act(async () => {
-        success = await result.current.syncBooks({ userId: "user-hash", apiClient: mockApi });
+        success = await result.current.syncBooks({
+          userId: "user-hash",
+          apiClient: mockApi,
+        });
       });
       await vi.advanceTimersByTimeAsync(1500);
       await promise;
@@ -235,7 +246,9 @@ describe("useAutoSetup", () => {
       });
 
       expect(result.current.phase).toBe("scraping-books");
-      expect(result.current.phaseMessage).toBe("正在讀取第 3 頁，已收集 600 本…");
+      expect(result.current.phaseMessage).toBe(
+        "正在讀取第 3 頁，已收集 600 本…",
+      );
     });
   });
 
@@ -265,15 +278,15 @@ describe("useAutoSetup", () => {
 
       const { result } = renderHook(() => useAutoSetup());
       const promise = act(async () => {
-        await result.current.syncBooks({ userId: "user-hash", apiClient: mockApi });
+        await result.current.syncBooks({
+          userId: "user-hash",
+          apiClient: mockApi,
+        });
       });
       await vi.advanceTimersByTimeAsync(1500);
       await promise;
 
-      expect(mergeBooks).toHaveBeenCalledWith(
-        expect.any(Array),
-        [savedBook],
-      );
+      expect(mergeBooks).toHaveBeenCalledWith(expect.any(Array), [savedBook]);
     });
 
     it("passes empty savedBooks when apiResponse.data is null (first-ever sync)", async () => {
@@ -284,7 +297,10 @@ describe("useAutoSetup", () => {
 
       const { result } = renderHook(() => useAutoSetup());
       const promise = act(async () => {
-        await result.current.syncBooks({ userId: "user-hash", apiClient: mockApi });
+        await result.current.syncBooks({
+          userId: "user-hash",
+          apiClient: mockApi,
+        });
       });
       await vi.advanceTimersByTimeAsync(1500);
       await promise;

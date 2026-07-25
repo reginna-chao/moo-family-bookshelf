@@ -9,8 +9,18 @@ function makeItems(count: number): number[] {
 describe("useLoadMore", () => {
   describe("initial state", () => {
     it.each([
-      { items: 100, pageSize: 100, expectedVisible: 100, expectedHasMore: false },
-      { items: 250, pageSize: 100, expectedVisible: 100, expectedHasMore: true },
+      {
+        items: 100,
+        pageSize: 100,
+        expectedVisible: 100,
+        expectedHasMore: false,
+      },
+      {
+        items: 250,
+        pageSize: 100,
+        expectedVisible: 100,
+        expectedHasMore: true,
+      },
       { items: 80, pageSize: 100, expectedVisible: 80, expectedHasMore: false },
       { items: 120, pageSize: 50, expectedVisible: 50, expectedHasMore: true },
     ])(
@@ -50,7 +60,11 @@ describe("useLoadMore", () => {
 
     it("respects a custom pageSize", () => {
       const { result } = renderHook(() =>
-        useLoadMore({ items: makeItems(120), pageSize: 50, narrowingActive: false }),
+        useLoadMore({
+          items: makeItems(120),
+          pageSize: 50,
+          narrowingActive: false,
+        }),
       );
 
       expect(result.current.visibleItems).toHaveLength(50);

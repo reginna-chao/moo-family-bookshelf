@@ -13,7 +13,9 @@ const USER_ID = "a".repeat(64);
 
 function createMockClient(overrides: Record<string, unknown> = {}) {
   return {
-    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none", prompted: 0 } }),
+    getVerifyMethod: vi
+      .fn()
+      .mockResolvedValue({ data: { method: "none", prompted: 0 } }),
     setVerifyMethod: vi.fn().mockResolvedValue({ data: { ok: true } }),
     markVerifyPrompted: vi.fn().mockResolvedValue({ data: { ok: true } }),
     ...overrides,
@@ -35,7 +37,11 @@ describe("VerifySetupPrompt", () => {
     const client = createMockClient();
 
     render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {
@@ -50,11 +56,17 @@ describe("VerifySetupPrompt", () => {
 
   it("should not render when already prompted", async () => {
     const client = createMockClient({
-      getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none", prompted: 1 } }),
+      getVerifyMethod: vi
+        .fn()
+        .mockResolvedValue({ data: { method: "none", prompted: 1 } }),
     });
 
     const { container } = render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {
@@ -69,7 +81,11 @@ describe("VerifySetupPrompt", () => {
     const client = createMockClient();
 
     render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {
@@ -80,9 +96,7 @@ describe("VerifySetupPrompt", () => {
 
     await waitFor(() => {
       expect(screen.getByText("確定不設定驗證？")).toBeInTheDocument();
-      expect(
-        screen.getByText(/家庭成員若知道你的 Email/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/家庭成員若知道你的 Email/)).toBeInTheDocument();
     });
   });
 
@@ -95,7 +109,11 @@ describe("VerifySetupPrompt", () => {
     });
 
     render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {
@@ -124,7 +142,11 @@ describe("VerifySetupPrompt", () => {
     });
 
     render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {
@@ -143,7 +165,11 @@ describe("VerifySetupPrompt", () => {
     const client = createMockClient();
 
     render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {
@@ -161,7 +187,11 @@ describe("VerifySetupPrompt", () => {
     const client = createMockClient();
 
     render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {
@@ -184,7 +214,11 @@ describe("VerifySetupPrompt", () => {
     });
 
     render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {
@@ -204,7 +238,11 @@ describe("VerifySetupPrompt", () => {
     const client = createMockClient();
 
     render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {
@@ -228,7 +266,11 @@ describe("VerifySetupPrompt", () => {
     });
 
     const { container } = render(
-      <VerifySetupPrompt userId={USER_ID} apiClient={client} onComplete={mockOnComplete} />,
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
     );
 
     await waitFor(() => {

@@ -75,12 +75,19 @@ export function FamilyBookCard({
             className="w-full aspect-[3/4] object-cover"
             fallback={
               <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center">
-                <BookOpen size={32} className="text-gray-300" aria-hidden="true" />
+                <BookOpen
+                  size={32}
+                  className="text-gray-300"
+                  aria-hidden="true"
+                />
               </div>
             }
           />
           {book.isUpdated === BoolFlag.TRUE && (
-            <span aria-label="新分享書籍" className="absolute bottom-1 left-1 bg-green-100 text-green-600 text-xs font-semibold px-1.5 rounded-full leading-4">
+            <span
+              aria-label="新分享書籍"
+              className="absolute bottom-1 left-1 bg-green-100 text-green-600 text-xs font-semibold px-1.5 rounded-full leading-4"
+            >
               更新
             </span>
           )}
@@ -103,8 +110,13 @@ export function FamilyBookCard({
           onBorrowClick={onBorrowClick}
         />
         <div className="ml-auto flex items-center gap-1">
-          <FavoriteButton isFavorite={isFavorite} onFavoriteToggle={onFavoriteToggle} />
-          <OverflowMenu items={[{ label: hideActionLabel, onSelect: onHideToggle }]} />
+          <FavoriteButton
+            isFavorite={isFavorite}
+            onFavoriteToggle={onFavoriteToggle}
+          />
+          <OverflowMenu
+            items={[{ label: hideActionLabel, onSelect: onHideToggle }]}
+          />
         </div>
       </div>
     </div>

@@ -130,14 +130,13 @@ function verifyTarget(target: FirefoxTarget): boolean {
     );
   }
 
-  const dataCollectionRequired =
-    gecko?.data_collection_permissions?.required;
+  const dataCollectionRequired = gecko?.data_collection_permissions?.required;
   if (
     !dataCollectionRequired ||
     !dataCollectionRequired.includes("websiteContent")
   ) {
     console.error(
-      "FAIL: manifest missing browser_specific_settings.gecko.data_collection_permissions.required containing \"websiteContent\"",
+      'FAIL: manifest missing browser_specific_settings.gecko.data_collection_permissions.required containing "websiteContent"',
     );
     failed = true;
   } else {

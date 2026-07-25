@@ -32,7 +32,9 @@ export const MOCK_PAGES = {
  * the local Miniflare worker. Should be called via page.evaluate()
  * after the extension loads.
  */
-export function getSetApiEndpointScript(apiUrl: string = WORKER_API_URL): string {
+export function getSetApiEndpointScript(
+  apiUrl: string = WORKER_API_URL,
+): string {
   return `
     if (typeof chrome !== 'undefined' && chrome.storage) {
       chrome.storage.local.set({ '${API_ENDPOINT_KEY}': '${apiUrl}' });

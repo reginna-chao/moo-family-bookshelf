@@ -47,7 +47,10 @@ function saveToStorage(data: AuthState): void {
     localStorage.removeItem(namespacedKey(data.userId, "apiHost"));
   }
   if (data.authToken) {
-    localStorage.setItem(namespacedKey(data.userId, "authToken"), data.authToken);
+    localStorage.setItem(
+      namespacedKey(data.userId, "authToken"),
+      data.authToken,
+    );
   } else {
     localStorage.removeItem(namespacedKey(data.userId, "authToken"));
   }
@@ -190,9 +193,14 @@ export function useAuth(): UseAuthReturn {
 
   useEffect(() => {
     // 0. If URL contains "invite=" param key, clear auth state to start fresh for invite.
-    const preCheckHashParams = new URLSearchParams(window.location.hash.slice(1));
+    const preCheckHashParams = new URLSearchParams(
+      window.location.hash.slice(1),
+    );
     const preCheckSearchParams = new URLSearchParams(window.location.search);
-    if (preCheckHashParams.has("invite") || preCheckSearchParams.has("invite")) {
+    if (
+      preCheckHashParams.has("invite") ||
+      preCheckSearchParams.has("invite")
+    ) {
       forceClearStorage();
     }
 
@@ -257,5 +265,14 @@ export function useAuth(): UseAuthReturn {
     setInitialSyncCode("");
   }, []);
 
-  return { auth, isLoading, login, logout, forceLogout, initialSyncCode, qrUserId, qrToken };
+  return {
+    auth,
+    isLoading,
+    login,
+    logout,
+    forceLogout,
+    initialSyncCode,
+    qrUserId,
+    qrToken,
+  };
 }

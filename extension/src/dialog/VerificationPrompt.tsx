@@ -42,12 +42,19 @@ export function VerificationPrompt({
       <p className="moo-onboarding-view__body">
         為了保護你的書櫃資料，請完成登入驗證後再重新加入家庭。
       </p>
-      {renderChallenge({ method, methodError, error, locked, submitting, onSubmit })}
+      {renderChallenge({
+        method,
+        methodError,
+        error,
+        locked,
+        submitting,
+        onSubmit,
+      })}
       <button
         type="button"
         onClick={onCancel}
         disabled={submitting}
-        className="moo-onboarding-view__secondary"
+        className="moo-button moo-button--outline moo-button--block moo-onboarding-view__secondary"
       >
         返回
       </button>
@@ -73,7 +80,9 @@ function renderChallenge({
   onSubmit,
 }: ChallengeProps): React.JSX.Element {
   if (locked) {
-    return <div className="moo-secret-entry__error">驗證已鎖定，請稍後再試</div>;
+    return (
+      <div className="moo-secret-entry__error">驗證已鎖定，請稍後再試</div>
+    );
   }
   if (methodError) {
     return <div className="moo-secret-entry__error">{METHOD_LOAD_ERROR}</div>;
@@ -166,7 +175,9 @@ function renderCodeGuidance(submitting: boolean): React.JSX.Element {
         <div className="moo-verify__none-text">{CODE_GUIDANCE}</div>
       </div>
       {submitting && (
-        <div className="moo-verify__status moo-verify__status--saving">驗證中...</div>
+        <div className="moo-verify__status moo-verify__status--saving">
+          驗證中...
+        </div>
       )}
     </div>
   );

@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { kvKeys, MAX_FAMILY_PREF_ENTRIES, type UserBooksRecord } from "../../src/kv/schema";
+import {
+  kvKeys,
+  MAX_FAMILY_PREF_ENTRIES,
+  type UserBooksRecord,
+} from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
 import { USER1, USER2 } from "../helpers/ids";
 
@@ -14,8 +18,15 @@ let kv: KVNamespace;
 const OWNER = "a".repeat(64);
 const ref = (bookId: string) => `${OWNER}:${bookId}`;
 
-function request(method: string, path: string, body?: unknown, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
@@ -25,12 +36,23 @@ function request(method: string, path: string, body?: unknown, authToken?: strin
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-function rawRequest(method: string, path: string, rawBody: string, authToken?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function rawRequest(
+  method: string,
+  path: string,
+  rawBody: string,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
-  return app.request(path, { method, headers, body: rawBody }, { KV: kv, DEV_MODE: "1" });
+  return app.request(
+    path,
+    { method, headers, body: rawBody },
+    { KV: kv, DEV_MODE: "1" },
+  );
 }
 
 async function createFamilyAndGetToken(userId = USER1) {
@@ -52,7 +74,16 @@ async function seedUser(
     userId,
     displayName: "Seeded Name",
     books: [
-      { bookId: "b1", title: "Book 1", author: "", isbn: "", coverUrl: "", readmooUrl: "", category: "", isShared: 0 },
+      {
+        bookId: "b1",
+        title: "Book 1",
+        author: "",
+        isbn: "",
+        coverUrl: "",
+        readmooUrl: "",
+        category: "",
+        isShared: 0,
+      },
     ],
     lastUpdated: "2020-01-01T00:00:00.000Z",
     ...overrides,
@@ -70,7 +101,9 @@ beforeEach(() => {
 
 describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
   it("returns 401 UNAUTHORIZED when no auth token is provided", async () => {
-    const res = await request("PUT", `/api/user/${USER1}/family-prefs`, { hidden: [] });
+    const res = await request("PUT", `/api/user/${USER1}/family-prefs`, {
+      hidden: [],
+    });
     expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("UNAUTHORIZED");
@@ -79,7 +112,12 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
   it("returns 403 FORBIDDEN when authenticated as a different user", async () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PUT", `/api/user/${USER2}/family-prefs`, { hidden: [] }, authToken);
+    const res = await request(
+      "PUT",
+      `/api/user/${USER2}/family-prefs`,
+      { hidden: [] },
+      authToken,
+    );
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("FORBIDDEN");
@@ -88,7 +126,12 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
   it("returns 400 INVALID_USER_ID for a malformed userId", async () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await request("PUT", "/api/user/user<script>/family-prefs", { hidden: [] }, authToken);
+    const res = await request(
+      "PUT",
+      "/api/user/user<script>/family-prefs",
+      { hidden: [] },
+      authToken,
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_USER_ID");
@@ -97,7 +140,12 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
   it("returns 400 INVALID_JSON for a non-JSON body", async () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
 
-    const res = await rawRequest("PUT", `/api/user/${USER1}/family-prefs`, "{not valid}", authToken);
+    const res = await rawRequest(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      "{not valid}",
+      authToken,
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_JSON");
@@ -109,7 +157,12 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
 
     // `5` is valid JSON but not an object; the parse guard must reject it as a
     // clean 400 rather than letting `kind in body` throw → 500.
-    const res = await rawRequest("PUT", `/api/user/${USER1}/family-prefs`, "5", authToken);
+    const res = await rawRequest(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      "5",
+      authToken,
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
@@ -124,7 +177,12 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
     await seedUser(USER1);
 
-    const res = await request("PUT", `/api/user/${USER1}/family-prefs`, body, authToken);
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      body,
+      authToken,
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
@@ -139,12 +197,19 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
     // body-size guard. The request therefore reaches the handler and trips its
     // own over-max → 400 INVALID_PAYLOAD branch (rather than being pre-empted
     // by the 413 body guard), keeping that branch reachable over real HTTP.
-    const hidden = Array.from({ length: MAX_FAMILY_PREF_ENTRIES + 1 }, (_, i) => ref(`book-${i}`));
+    const hidden = Array.from({ length: MAX_FAMILY_PREF_ENTRIES + 1 }, (_, i) =>
+      ref(`book-${i}`),
+    );
     // Guard the test itself: the payload must stay within the body limit, else
     // we'd be exercising the 413 path instead of the 400 branch under test.
     expect(JSON.stringify({ hidden }).length).toBeLessThan(262144);
 
-    const res = await request("PUT", `/api/user/${USER1}/family-prefs`, { hidden }, authToken);
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      { hidden },
+      authToken,
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
@@ -154,7 +219,12 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
     // Do NOT seed user:user1 — record is absent.
 
-    const res = await request("PUT", `/api/user/${USER1}/family-prefs`, { hidden: [ref("b1")] }, authToken);
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      { hidden: [ref("b1")] },
+      authToken,
+    );
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("NOT_FOUND");
@@ -182,9 +252,17 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
     expect(json.data.ok).toBe(true);
     expect(json.data.hidden).toEqual([ref("b1"), ref("b2")]);
 
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      authToken,
+    );
     const getJson = (await getRes.json()) as Json;
-    expect(getJson.data.familyShelfPrefs.hidden).toEqual([ref("b1"), ref("b2")]);
+    expect(getJson.data.familyShelfPrefs.hidden).toEqual([
+      ref("b1"),
+      ref("b2"),
+    ]);
   });
 
   it("an empty array clears a previously-set hidden list", async () => {
@@ -192,13 +270,28 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
     await seedUser(USER1);
 
     // Set some hidden refs first.
-    await request("PUT", `/api/user/${USER1}/family-prefs`, { hidden: [ref("b1"), ref("b2")] }, authToken);
+    await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      { hidden: [ref("b1"), ref("b2")] },
+      authToken,
+    );
 
     // Then clear with an empty array.
-    const res = await request("PUT", `/api/user/${USER1}/family-prefs`, { hidden: [] }, authToken);
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      { hidden: [] },
+      authToken,
+    );
     expect(res.status).toBe(200);
 
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      authToken,
+    );
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.familyShelfPrefs.hidden).toEqual([]);
   });
@@ -207,10 +300,25 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
     await seedUser(USER1);
 
-    await request("PUT", `/api/user/${USER1}/family-prefs`, { hidden: [ref("b1"), ref("b2")] }, authToken);
-    await request("PUT", `/api/user/${USER1}/family-prefs`, { hidden: [ref("b3")] }, authToken);
+    await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      { hidden: [ref("b1"), ref("b2")] },
+      authToken,
+    );
+    await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      { hidden: [ref("b3")] },
+      authToken,
+    );
 
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      authToken,
+    );
     const getJson = (await getRes.json()) as Json;
     // Full-overwrite: b1/b2 are gone, only the second set remains.
     expect(getJson.data.familyShelfPrefs.hidden).toEqual([ref("b3")]);
@@ -220,8 +328,26 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
     const KNOWN_LAST_UPDATED = "2021-06-15T08:30:00.000Z";
     const seededBooks = [
-      { bookId: "b1", title: "Preserved Book", author: "Jane", isbn: "978-x", coverUrl: "https://img/b1.jpg", readmooUrl: "https://readmoo.com/book/b1", category: "sci-fi", isShared: 1 },
-      { bookId: "b2", title: "Second Book", author: "Joe", isbn: "978-y", coverUrl: "https://img/b2.jpg", readmooUrl: "https://readmoo.com/book/b2", category: "fiction", isShared: 0 },
+      {
+        bookId: "b1",
+        title: "Preserved Book",
+        author: "Jane",
+        isbn: "978-x",
+        coverUrl: "https://img/b1.jpg",
+        readmooUrl: "https://readmoo.com/book/b1",
+        category: "sci-fi",
+        isShared: 1,
+      },
+      {
+        bookId: "b2",
+        title: "Second Book",
+        author: "Joe",
+        isbn: "978-y",
+        coverUrl: "https://img/b2.jpg",
+        readmooUrl: "https://readmoo.com/book/b2",
+        category: "fiction",
+        isShared: 0,
+      },
     ];
     await seedUser(USER1, {
       displayName: "Keep This Name",
@@ -229,10 +355,20 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
       lastUpdated: KNOWN_LAST_UPDATED,
     });
 
-    const res = await request("PUT", `/api/user/${USER1}/family-prefs`, { hidden: [ref("b1")] }, authToken);
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      { hidden: [ref("b1")] },
+      authToken,
+    );
     expect(res.status).toBe(200);
 
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      authToken,
+    );
     const getJson = (await getRes.json()) as Json;
     // Other fields unchanged.
     expect(getJson.data.displayName).toBe("Keep This Name");
@@ -284,10 +420,21 @@ describe("PUT /api/user/:id/family-prefs — favorites & merge semantics", () =>
     expect(json.data.favorites).toEqual([ref("f1"), ref("f2")]);
 
     // KV read-back confirms the same merge landed on disk.
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      authToken,
+    );
     const getJson = (await getRes.json()) as Json;
-    expect(getJson.data.familyShelfPrefs.hidden).toEqual([ref("h1"), ref("h2")]);
-    expect(getJson.data.familyShelfPrefs.favorites).toEqual([ref("f1"), ref("f2")]);
+    expect(getJson.data.familyShelfPrefs.hidden).toEqual([
+      ref("h1"),
+      ref("h2"),
+    ]);
+    expect(getJson.data.familyShelfPrefs.favorites).toEqual([
+      ref("f1"),
+      ref("f2"),
+    ]);
   });
 
   it("hidden-only PUT (old v1.5.0 client) preserves existing favorites — regression guard", async () => {
@@ -308,10 +455,18 @@ describe("PUT /api/user/:id/family-prefs — favorites & merge semantics", () =>
     expect(json.data.hidden).toEqual([ref("h1")]);
     expect(json.data.favorites).toEqual([ref("f1"), ref("f2")]);
 
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      authToken,
+    );
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.familyShelfPrefs.hidden).toEqual([ref("h1")]);
-    expect(getJson.data.familyShelfPrefs.favorites).toEqual([ref("f1"), ref("f2")]);
+    expect(getJson.data.familyShelfPrefs.favorites).toEqual([
+      ref("f1"),
+      ref("f2"),
+    ]);
   });
 
   it("PUT with both fields replaces both lists", async () => {
@@ -328,7 +483,12 @@ describe("PUT /api/user/:id/family-prefs — favorites & merge semantics", () =>
     );
     expect(res.status).toBe(200);
 
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      authToken,
+    );
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.familyShelfPrefs.hidden).toEqual([ref("h1")]);
     expect(getJson.data.familyShelfPrefs.favorites).toEqual([ref("f1")]);
@@ -351,16 +511,29 @@ describe("PUT /api/user/:id/family-prefs — favorites & merge semantics", () =>
     expect(json.data.favorites).toEqual([ref("f1")]);
     expect(json.data.hidden).toEqual([]);
 
-    const getRes = await request("GET", `/api/user/${USER1}/books`, undefined, authToken);
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      authToken,
+    );
     const getJson = (await getRes.json()) as Json;
-    expect(getJson.data.familyShelfPrefs).toEqual({ hidden: [], favorites: [ref("f1")] });
+    expect(getJson.data.familyShelfPrefs).toEqual({
+      hidden: [],
+      favorites: [ref("f1")],
+    });
   });
 
   it("returns 400 INVALID_PAYLOAD when neither hidden nor favorites is present", async () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
     await seedUser(USER1);
 
-    const res = await request("PUT", `/api/user/${USER1}/family-prefs`, { unrelated: true }, authToken);
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      { unrelated: true },
+      authToken,
+    );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
@@ -404,8 +577,15 @@ describe("PUT /api/user/:id/family-prefs — favorites & merge semantics", () =>
 describe("PUT /:id/family-prefs per-user rate limit", () => {
   const TEST_USER = "f".repeat(64);
 
-  function prodRequest(method: string, path: string, body?: unknown, authToken?: string) {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+  function prodRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+    authToken?: string,
+  ) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (authToken) {
       headers["Authorization"] = `Bearer ${authToken}`;
     }
@@ -421,11 +601,21 @@ describe("PUT /:id/family-prefs per-user rate limit", () => {
     const body = { hidden: [ref("b1")] };
 
     for (let i = 0; i < 60; i++) {
-      const res = await prodRequest("PUT", `/api/user/${TEST_USER}/family-prefs`, body, token);
+      const res = await prodRequest(
+        "PUT",
+        `/api/user/${TEST_USER}/family-prefs`,
+        body,
+        token,
+      );
       expect(res.status).toBe(200);
     }
 
-    const blocked = await prodRequest("PUT", `/api/user/${TEST_USER}/family-prefs`, body, token);
+    const blocked = await prodRequest(
+      "PUT",
+      `/api/user/${TEST_USER}/family-prefs`,
+      body,
+      token,
+    );
     expect(blocked.status).toBe(429);
     const json = (await blocked.json()) as Json;
     expect(json.error.code).toBe("RATE_LIMITED");

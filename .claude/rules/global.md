@@ -47,12 +47,12 @@
 
 #### Lifecycle & Resource Cost
 
-The Performance principles above govern *intra-request* efficiency. These rules govern *long-running* and *recurring* cost — the kind that quietly burns budget while no human is watching.
+The Performance principles above govern _intra-request_ efficiency. These rules govern _long-running_ and _recurring_ cost — the kind that quietly burns budget while no human is watching.
 
 - **On-demand over preemptive**: For features with non-trivial cost (network requests, KV writes, heavy computation), default to executing on user action — not on mount, not on a schedule. Preemptive execution is only justified when (a) the user cannot tolerate the latency of a fresh fetch, (b) data must stay consistent with an external source in real time, or (c) the work serves a race-against-time UX (e.g., notification arriving while user is away). Most CRUD-style features do not meet this bar.
 - **Match cadence to user need, not to TTL**: The frequency of a periodic operation must mirror how often the user actually needs it, not how often the underlying token / cache / data expires. A QR code that a user generates once a month does not need a 4-minute refresh timer just because the token has 5-minute TTL — generate it on click, mark expired in UI, regenerate on click.
 - **Cost the worst case before merging**: Before introducing any `setInterval`, recurring `setTimeout`, polling loop, or background sync, mentally simulate one user with this UI open for 8h / 24h / 7d, multiplied by realistic concurrent users. Compare against the platform's free tier (e.g., Cloudflare Workers ~100,000 req/day). **If the worst case exceeds 1,000 requests per user per day, the design is wrong — switch to user-triggered or visibility-gated.**
-- **Background-tab idle**: For any timer that lives across tab visibility changes, decide explicitly whether it should pause when hidden. The default answer is *yes*; a timer polling in a background tab for 24 hours is almost always a bug.
+- **Background-tab idle**: For any timer that lives across tab visibility changes, decide explicitly whether it should pause when hidden. The default answer is _yes_; a timer polling in a background tab for 24 hours is almost always a bug.
 - **Cleanup completeness**: Every resource acquired (timer, listener, subscription, abort controller) must have a matching cleanup on the unmount / disconnect / error path. Already covered under Side Effects, restated here because lifecycle bugs and resource bugs share a root cause.
 
 #### Side Effects
@@ -82,11 +82,13 @@ Any code modification — **regardless of size** — must go through the full cy
 "Size too small" is NEVER a valid reason to skip review. A one-line fix is subject to the same cycle as a 500-line feature. The cost of an extra review round is trivial; the cost of silently shipping unreviewed code is not.
 
 **Only exceptions:**
+
 - Pure typo fixes in user-facing strings (note: these may still break tests and should be verified).
 - Pure comment / doc changes that touch no executable code.
 - The user explicitly authorizes bypass for a specific task with a phrase such as "skip review", "just write the code", or "no need for the full workflow". Absent such explicit instruction, the cycle is mandatory.
 
 **Enforcement route:**
+
 - `/develop` is the single entry. On a CODE-intent request it runs the full lifecycle (`requirements → coder → tester → review → fix`) in one session, dispatching the `coder` / `tester` / `reviewer` / `security-auditor` agents (each scoped `frontend` or `backend`). It holds every user gate itself.
 - The Fix Cycle lives in `/develop` (`references/code-cycle.md`). The `coder` / `tester` / `reviewer` agents are dispatched ONLY by `/develop`'s orchestration — invoking an implementation agent in a way that skips the cycle is prohibited.
 - If the user dispatches a single agent directly (e.g. just a `coder`), follow that agent's own scope — but still run `pnpm typecheck` and report any lint/type issues before finishing.

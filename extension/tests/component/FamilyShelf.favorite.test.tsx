@@ -1,4 +1,11 @@
-import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+  within,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
@@ -30,7 +37,9 @@ function hideMenuLabelOf(title: string): string {
   fireEvent.click(within(card).getByRole("button", { name: "更多選項" }));
   const item = screen
     .getAllByRole("menuitem")
-    .find((el) => el.textContent === "隱藏書籍" || el.textContent === "取消隱藏");
+    .find(
+      (el) => el.textContent === "隱藏書籍" || el.textContent === "取消隱藏",
+    );
   if (!item) throw new Error(`hide menuitem not found for ${title}`);
   return item.textContent as string;
 }
@@ -65,7 +74,12 @@ vi.mock("@/constants", async (importOriginal) => {
 });
 
 function makeBooks(
-  books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>,
+  books: Array<{
+    bookId: string;
+    title: string;
+    author: string;
+    isShared: BoolFlag;
+  }>,
 ) {
   return books;
 }
@@ -94,15 +108,19 @@ function createMockApiClient(opts: MockOpts = {}): ApiClient {
     updatePersonalBooks: vi.fn(),
     updateFamilyPrefs:
       opts.updateFamilyPrefs ??
-      vi.fn().mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } }),
+      vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } }),
     getFamilyMembers: vi.fn().mockResolvedValue(
       opts.members ?? {
         data: { familyId: "fam-1", ownerId: "user-1", members: [] },
       },
     ),
-    getFamilyBookshelf: vi.fn().mockResolvedValue(
-      opts.bookshelf ?? { data: { familyId: "fam-1", members: [] } },
-    ),
+    getFamilyBookshelf: vi
+      .fn()
+      .mockResolvedValue(
+        opts.bookshelf ?? { data: { familyId: "fam-1", members: [] } },
+      ),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
     setAuthToken: vi.fn(),
@@ -115,9 +133,16 @@ function createMockApiClient(opts: MockOpts = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
-function renderShelf(apiClient: ApiClient, { familyId = "fam-1", userId = "user-1" } = {}) {
+function renderShelf(
+  apiClient: ApiClient,
+  { familyId = "fam-1", userId = "user-1" } = {},
+) {
   return render(
-    <FamilyDataProvider familyId={familyId} userId={userId} apiClient={apiClient}>
+    <FamilyDataProvider
+      familyId={familyId}
+      userId={userId}
+      apiClient={apiClient}
+    >
       <FamilyShelf userId={userId} />
     </FamilyDataProvider>,
   );
@@ -141,8 +166,18 @@ function aliceTwoBooks() {
             userId: "user-2",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
-              { bookId: "b2", title: "書二", author: "B", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "書一",
+                author: "A",
+                isShared: BoolFlag.TRUE,
+              },
+              {
+                bookId: "b2",
+                title: "書二",
+                author: "B",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2024-01-01",
           },
@@ -280,7 +315,10 @@ describe("FamilyShelf — favorite feature", () => {
     const updateFamilyPrefs = vi
       .fn()
       .mockResolvedValue({ data: { ok: true, hidden: [], favorites: [] } });
-    const apiClient = createMockApiClient({ ...aliceTwoBooks(), updateFamilyPrefs });
+    const apiClient = createMockApiClient({
+      ...aliceTwoBooks(),
+      updateFamilyPrefs,
+    });
     renderShelf(apiClient);
 
     await waitFor(() => {
@@ -337,8 +375,13 @@ describe("FamilyShelf — favorite feature", () => {
       const updateFamilyPrefs = vi
         .fn()
         .mockResolvedValueOnce({ error: { code: "KABOOM", message: "nope" } })
-        .mockResolvedValueOnce({ data: { ok: true, hidden: [], favorites: [] } });
-      const apiClient = createMockApiClient({ ...aliceTwoBooks(), updateFamilyPrefs });
+        .mockResolvedValueOnce({
+          data: { ok: true, hidden: [], favorites: [] },
+        });
+      const apiClient = createMockApiClient({
+        ...aliceTwoBooks(),
+        updateFamilyPrefs,
+      });
       renderShelf(apiClient);
 
       await waitFor(() => {

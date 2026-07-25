@@ -44,18 +44,18 @@ Read the following files (skip if not found):
 
 From the discovered context, extract:
 
-| Item                                                   | Where to Apply                                       |
-| ------------------------------------------------------ | ---------------------------------------------------- |
-| **Tech stack** (framework, language, DB, hosting)      | Rules: `frontend.md`, `backend.md`                   |
-| **Project structure** (directory layout)               | Rules: `frontend.md`, `backend.md`                   |
+| Item                                                   | Where to Apply                                                      |
+| ------------------------------------------------------ | ------------------------------------------------------------------- |
+| **Tech stack** (framework, language, DB, hosting)      | Rules: `frontend.md`, `backend.md`                                  |
+| **Project structure** (directory layout)               | Rules: `frontend.md`, `backend.md`                                  |
 | **Build/dev commands** (`pnpm dev`, `pnpm test`, etc.) | Rules: all; Agents: `coder`, `tester` (scope map); Skill: `develop` |
-| **Testing tools** (Vitest, Jest, Playwright, etc.)     | Rules: `test.md`; Agent: `tester`                   |
-| **API design** (REST, GraphQL, endpoints)              | Rules: `backend.md`; Agent: `coder` (backend scope) |
-| **Data model** (DB schema, KV patterns, etc.)          | Rules: `backend.md`; Agents: `coder`, `tester` (backend scope) |
-| **UI patterns** (component library, styling approach)  | Rules: `frontend.md`; Agent: `coder` (frontend scope) |
-| **State management** (Redux, Zustand, Context, etc.)   | Rules: `frontend.md`; Agent: `coder` (frontend scope) |
-| **CI/CD pipeline**                                     | Rules: `global.md`                                   |
-| **Naming conventions**                                 | Rules: `global.md`                                   |
+| **Testing tools** (Vitest, Jest, Playwright, etc.)     | Rules: `test.md`; Agent: `tester`                                   |
+| **API design** (REST, GraphQL, endpoints)              | Rules: `backend.md`; Agent: `coder` (backend scope)                 |
+| **Data model** (DB schema, KV patterns, etc.)          | Rules: `backend.md`; Agents: `coder`, `tester` (backend scope)      |
+| **UI patterns** (component library, styling approach)  | Rules: `frontend.md`; Agent: `coder` (frontend scope)               |
+| **State management** (Redux, Zustand, Context, etc.)   | Rules: `frontend.md`; Agent: `coder` (frontend scope)               |
+| **CI/CD pipeline**                                     | Rules: `global.md`                                                  |
+| **Naming conventions**                                 | Rules: `global.md`                                                  |
 
 ### Step 3: Propose Changes
 
@@ -100,20 +100,20 @@ Update each file according to the approved changes. For each file:
 
 ### Agents (`.claude/agents/`)
 
-| Agent              | What Gets Customized                                                         |
+| Agent              | What Gets Customized                                                        |
 | ------------------ | --------------------------------------------------------------------------- |
-| `coder`            | Scope map (frontend/backend working dirs, verify commands), coding rules     |
-| `tester`           | Scope map (test dirs, commands), test tools, mock policy, key scenarios      |
-| `reviewer`         | Review dimensions per scope (frontend framework / backend stack)             |
-| `designer`         | Triage table + surface frames; reference files under `references/designer/`   |
-| `security-auditor` | Audit dimensions adjusted for the stack (extension / API / crypto surfaces)   |
+| `coder`            | Scope map (frontend/backend working dirs, verify commands), coding rules    |
+| `tester`           | Scope map (test dirs, commands), test tools, mock policy, key scenarios     |
+| `reviewer`         | Review dimensions per scope (frontend framework / backend stack)            |
+| `designer`         | Triage table + surface frames; reference files under `references/designer/` |
+| `security-auditor` | Audit dimensions adjusted for the stack (extension / API / crypto surfaces) |
 
 ### Skills (`.claude/skills/`)
 
-| Skill         | What Gets Customized                                                       |
-| ------------- | -------------------------------------------------------------------------- |
-| `develop`     | Verification commands; scope tagging; phase commands in `references/`      |
-| `project-init`| (this file — stays unchanged)                                              |
+| Skill          | What Gets Customized                                                  |
+| -------------- | --------------------------------------------------------------------- |
+| `develop`      | Verification commands; scope tagging; phase commands in `references/` |
+| `project-init` | (this file — stays unchanged)                                         |
 
 ## What This Skill Does NOT Change
 

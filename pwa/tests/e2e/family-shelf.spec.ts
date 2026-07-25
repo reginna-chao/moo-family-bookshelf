@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { loginAndNavigate, createTestAuth, mockDefaultApiRoutes } from "./helpers/auth-helper";
+import {
+  loginAndNavigate,
+  createTestAuth,
+  mockDefaultApiRoutes,
+} from "./helpers/auth-helper";
 
 test.describe("Family shelf page", () => {
   const auth = createTestAuth();
@@ -33,9 +37,7 @@ test.describe("Family shelf page", () => {
     expect(typeof wasVisible).toBe("boolean");
   });
 
-  test("should show empty state when no books are shared", async ({
-    page,
-  }) => {
+  test("should show empty state when no books are shared", async ({ page }) => {
     // Mock the bookshelf API to return empty members list
     await page.route("**/api/family/*/bookshelf", (route) => {
       route.fulfill({
@@ -137,8 +139,6 @@ test.describe("Family shelf page", () => {
     await expect(page.locator("text=伺服器錯誤")).toBeVisible({
       timeout: 10_000,
     });
-    await expect(
-      page.getByRole("button", { name: "重試" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "重試" })).toBeVisible();
   });
 });

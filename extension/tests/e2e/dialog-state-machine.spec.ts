@@ -42,10 +42,14 @@ async function goThroughOnboarding(
 
   // Wait for sync code to appear (or dump dialog HTML on failure)
   try {
-    await dialog.locator("[data-testid='sync-code']").waitFor({ state: "visible", timeout: 30_000 });
+    await dialog
+      .locator("[data-testid='sync-code']")
+      .waitFor({ state: "visible", timeout: 30_000 });
   } catch (e) {
     const html = await dialog.innerHTML().catch(() => "(unreadable)");
-    throw new Error(`goThroughOnboarding: sync code not found.\nDialog HTML:\n${html}\n\nOriginal: ${e}`);
+    throw new Error(
+      `goThroughOnboarding: sync code not found.\nDialog HTML:\n${html}\n\nOriginal: ${e}`,
+    );
   }
   await clickContinue(page);
   await waitForMainView(page);
@@ -85,9 +89,12 @@ test.describe("Dialog State Machine", () => {
 
     // Set API endpoint
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate(({ apiUrl, key }) => {
-      chrome.storage.local.set({ [key]: apiUrl });
-    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
+    await page.evaluate(
+      ({ apiUrl, key }) => {
+        chrome.storage.local.set({ [key]: apiUrl });
+      },
+      { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+    );
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);
@@ -122,9 +129,12 @@ test.describe("Dialog State Machine", () => {
 
     // Set up with family
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate(({ apiUrl, key }) => {
-      chrome.storage.local.set({ [key]: apiUrl });
-    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
+    await page.evaluate(
+      ({ apiUrl, key }) => {
+        chrome.storage.local.set({ [key]: apiUrl });
+      },
+      { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+    );
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);
@@ -157,11 +167,16 @@ test.describe("Dialog State Machine", () => {
 
     // Set up with family — clear storage and use unique email to avoid KV collisions
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate(({ apiUrl, key }) => {
-      chrome.storage.local.clear();
-      try { chrome.storage.sync.clear(); } catch {}
-      chrome.storage.local.set({ [key]: apiUrl });
-    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
+    await page.evaluate(
+      ({ apiUrl, key }) => {
+        chrome.storage.local.clear();
+        try {
+          chrome.storage.sync.clear();
+        } catch {}
+        chrome.storage.local.set({ [key]: apiUrl });
+      },
+      { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+    );
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);
@@ -184,7 +199,9 @@ test.describe("Dialog State Machine", () => {
     await navigateToTab(page, "設定");
 
     const dialog = page.locator("#moo-family-bookshelf-dialog");
-    await expect(dialog.locator("text=離開家庭")).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.locator("text=離開家庭")).toBeVisible({
+      timeout: 10_000,
+    });
     await leaveFamily(page);
 
     // Single-member owner should successfully leave — returns to onboarding
@@ -201,11 +218,16 @@ test.describe("Dialog State Machine", () => {
 
     // Set up with family — clear storage and use unique email to avoid KV collisions
     await page.goto(`chrome-extension://${extensionId}/background.js`);
-    await page.evaluate(({ apiUrl, key }) => {
-      chrome.storage.local.clear();
-      try { chrome.storage.sync.clear(); } catch {}
-      chrome.storage.local.set({ [key]: apiUrl });
-    }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
+    await page.evaluate(
+      ({ apiUrl, key }) => {
+        chrome.storage.local.clear();
+        try {
+          chrome.storage.sync.clear();
+        } catch {}
+        chrome.storage.local.set({ [key]: apiUrl });
+      },
+      { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+    );
 
     await page.goto(MOCK_READMOO_URL);
     await waitForPageReady(page);

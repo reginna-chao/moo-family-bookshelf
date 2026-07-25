@@ -2,7 +2,10 @@ import React from "react";
 import { getAppEnv } from "../utils/appEnv";
 import type { AppEnv } from "../utils/appEnv";
 
-const ENV_CONFIG: Record<Exclude<AppEnv, "prod">, { label: string; bg: string; color: string; border: string }> = {
+const ENV_CONFIG: Record<
+  Exclude<AppEnv, "prod">,
+  { label: string; bg: string; color: string; border: string }
+> = {
   local: {
     label: "LOCAL",
     bg: "#fedbdb",

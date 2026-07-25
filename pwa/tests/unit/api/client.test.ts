@@ -113,9 +113,7 @@ describe("ApiClient", () => {
 
   describe("updatePersonalBooks", () => {
     it("should call PUT /api/user/:id/books with PersonalBooks object", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({ data: { ok: true } }),
-      );
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
 
       const personalBooks = {
         schemaVersion: 1,
@@ -156,9 +154,13 @@ describe("ApiClient", () => {
     });
 
     it("should not include a displayName in the PATCH body", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true, applied: 1 } }));
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { ok: true, applied: 1 } }),
+      );
 
-      await client.patchPersonalBooks(USER_1, [{ bookId: "b1", isShared: BoolFlag.TRUE }]);
+      await client.patchPersonalBooks(USER_1, [
+        { bookId: "b1", isShared: BoolFlag.TRUE },
+      ]);
 
       const [, init] = mockFetch.mock.calls[0];
       const body = JSON.parse(init.body);
@@ -168,7 +170,9 @@ describe("ApiClient", () => {
 
     it("should reject invalid userId", async () => {
       await expect(
-        client.patchPersonalBooks("invalid-id", [{ bookId: "b1", isShared: BoolFlag.TRUE }]),
+        client.patchPersonalBooks("invalid-id", [
+          { bookId: "b1", isShared: BoolFlag.TRUE },
+        ]),
       ).rejects.toThrow("Invalid userId");
     });
   });
@@ -176,7 +180,9 @@ describe("ApiClient", () => {
   describe("updateFamilyPrefs", () => {
     it("should call PUT /api/user/:id/family-prefs with a { hidden, favorites } body", async () => {
       mockFetch.mockResolvedValueOnce(
-        jsonResponse({ data: { ok: true, hidden: ["o1:b1"], favorites: ["o3:b3"] } }),
+        jsonResponse({
+          data: { ok: true, hidden: ["o1:b1"], favorites: ["o3:b3"] },
+        }),
       );
 
       const prefs = { hidden: ["o1:b1", "o2:b2"], favorites: ["o3:b3"] };
@@ -184,7 +190,9 @@ describe("ApiClient", () => {
 
       expect(mockFetch).toHaveBeenCalledOnce();
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toBe(`https://api.example.com/api/user/${USER_1}/family-prefs`);
+      expect(url).toBe(
+        `https://api.example.com/api/user/${USER_1}/family-prefs`,
+      );
       expect(init.method).toBe("PUT");
       expect(JSON.parse(init.body)).toEqual(prefs);
       expect(result.data).toEqual({
@@ -246,7 +254,9 @@ describe("ApiClient", () => {
     });
 
     it("should include displayName when provided", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { familyId: "fam-1" } }));
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { familyId: "fam-1" } }),
+      );
 
       await client.createFamily(USER_1, "Alice");
 
@@ -256,15 +266,15 @@ describe("ApiClient", () => {
     });
 
     it("should reject invalid userId", async () => {
-      await expect(client.createFamily("invalid")).rejects.toThrow("Invalid userId");
+      await expect(client.createFamily("invalid")).rejects.toThrow(
+        "Invalid userId",
+      );
     });
   });
 
   describe("joinFamily", () => {
     it("should call POST /api/family/:id/join with userId when no opts", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({ data: { ok: true } }),
-      );
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
 
       const result = await client.joinFamily("fam-1", USER_2);
 
@@ -297,20 +307,22 @@ describe("ApiClient", () => {
     });
 
     it("should reject invalid userId", async () => {
-      await expect(client.joinFamily("fam-1", "bad-id")).rejects.toThrow("Invalid userId");
+      await expect(client.joinFamily("fam-1", "bad-id")).rejects.toThrow(
+        "Invalid userId",
+      );
     });
   });
 
   describe("leaveFamily", () => {
     it("should call DELETE /api/family/:id/member/:uid", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({ data: { ok: true } }),
-      );
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
 
       const result = await client.leaveFamily("fam-1", USER_2);
 
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toBe(`https://api.example.com/api/family/fam-1/member/${USER_2}`);
+      expect(url).toBe(
+        `https://api.example.com/api/family/fam-1/member/${USER_2}`,
+      );
       expect(init.method).toBe("DELETE");
       expect(result.data).toEqual({ ok: true });
     });
@@ -318,9 +330,7 @@ describe("ApiClient", () => {
 
   describe("removeMember", () => {
     it("should call DELETE /api/family/:id/member/:uid", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({ data: { ok: true } }),
-      );
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
 
       await client.removeMember("fam-1", USER_TARGET);
 
@@ -334,9 +344,7 @@ describe("ApiClient", () => {
 
   describe("transferOwnership", () => {
     it("should call PUT /api/family/:id/transfer with userId and newOwnerId", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({ data: { ok: true } }),
-      );
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
 
       await client.transferOwnership("fam-1", USER_1, USER_2);
 
@@ -425,11 +433,13 @@ describe("ApiClient", () => {
 
   describe("updateDisplayName", () => {
     it("should call PUT /api/family/:id/member/:uid/displayName", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({ data: { ok: true } }),
-      );
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
 
-      const result = await client.updateDisplayName("fam-1", USER_1, "New Name");
+      const result = await client.updateDisplayName(
+        "fam-1",
+        USER_1,
+        "New Name",
+      );
 
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toBe(
@@ -473,7 +483,10 @@ describe("ApiClient", () => {
 
       // First call returns 401
       mockFetch.mockResolvedValueOnce(
-        jsonResponse({ error: { code: "UNAUTHORIZED", message: "expired" } }, 401),
+        jsonResponse(
+          { error: { code: "UNAUTHORIZED", message: "expired" } },
+          401,
+        ),
       );
       // Retry with new token succeeds
       mockFetch.mockResolvedValueOnce(
@@ -494,7 +507,10 @@ describe("ApiClient", () => {
       // No refresher set
 
       mockFetch.mockResolvedValueOnce(
-        jsonResponse({ error: { code: "UNAUTHORIZED", message: "expired" } }, 401),
+        jsonResponse(
+          { error: { code: "UNAUTHORIZED", message: "expired" } },
+          401,
+        ),
       );
 
       const result = await client.getPersonalBooks(USER_1);
@@ -509,10 +525,16 @@ describe("ApiClient", () => {
 
       // Both calls return 401
       mockFetch.mockResolvedValueOnce(
-        jsonResponse({ error: { code: "UNAUTHORIZED", message: "expired" } }, 401),
+        jsonResponse(
+          { error: { code: "UNAUTHORIZED", message: "expired" } },
+          401,
+        ),
       );
       mockFetch.mockResolvedValueOnce(
-        jsonResponse({ error: { code: "UNAUTHORIZED", message: "still expired" } }, 401),
+        jsonResponse(
+          { error: { code: "UNAUTHORIZED", message: "still expired" } },
+          401,
+        ),
       );
 
       const result = await client.getPersonalBooks(USER_1);
@@ -527,7 +549,10 @@ describe("ApiClient", () => {
       client.setTokenRefresher(async () => null);
 
       mockFetch.mockResolvedValueOnce(
-        jsonResponse({ error: { code: "UNAUTHORIZED", message: "expired" } }, 401),
+        jsonResponse(
+          { error: { code: "UNAUTHORIZED", message: "expired" } },
+          401,
+        ),
       );
 
       const result = await client.getPersonalBooks(USER_1);

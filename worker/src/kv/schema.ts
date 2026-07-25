@@ -56,8 +56,8 @@ export const kvKeys = {
 export interface FamilyMember {
   userId: string;
   displayName: string;
-  canLend: BoolFlag;     // 0 = false, 1 = true. Default TRUE for backward compat.
-  readmooName?: string;  // Readmoo display name for lending automation
+  canLend: BoolFlag; // 0 = false, 1 = true. Default TRUE for backward compat.
+  readmooName?: string; // Readmoo display name for lending automation
 }
 
 export interface FamilyRecord {
@@ -73,20 +73,23 @@ export interface FamilyRecord {
  * Raw member shape from KV — may lack fields added after initial release
  * (e.g. `canLend`, `readmooName` added in v1.1.0).
  */
-export type RawFamilyMember = Omit<FamilyMember, 'canLend' | 'readmooName'> & {
+export type RawFamilyMember = Omit<FamilyMember, "canLend" | "readmooName"> & {
   canLend?: BoolFlag;
   readmooName?: string;
 };
 
 /** Raw family record from KV — may lack fields added after initial release. */
-export type RawFamilyRecord = Omit<Partial<FamilyRecord>, 'members'> & {
+export type RawFamilyRecord = Omit<Partial<FamilyRecord>, "members"> & {
   familyId: string;
   members: RawFamilyMember[];
   createdAt: string;
 };
 
 /** Find a member by userId in the members array. */
-export function findMember(members: FamilyMember[], userId: string): FamilyMember | undefined {
+export function findMember(
+  members: FamilyMember[],
+  userId: string,
+): FamilyMember | undefined {
   return members.find((m) => m.userId === userId);
 }
 
@@ -100,7 +103,9 @@ export function normalizeFamilyRecord(record: RawFamilyRecord): FamilyRecord {
     throw new Error("Corrupted family record: members array is empty");
   }
   const firstMember = record.members[0];
-  const ownerId = record.ownerId ?? (typeof firstMember === 'string' ? firstMember : firstMember.userId);
+  const ownerId =
+    record.ownerId ??
+    (typeof firstMember === "string" ? firstMember : firstMember.userId);
 
   // Backward compat: add canLend default for members that lack it
   const members: FamilyMember[] = record.members.map((m) => ({

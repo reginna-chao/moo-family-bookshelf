@@ -94,9 +94,12 @@ describe("useFamilyShelfPrefs", () => {
     });
 
     it("starts empty and does not throw when load rejects", async () => {
-      const apiClient = createMockApiClient({}, {
-        getPersonalBooks: vi.fn().mockRejectedValue(new Error("boom")),
-      });
+      const apiClient = createMockApiClient(
+        {},
+        {
+          getPersonalBooks: vi.fn().mockRejectedValue(new Error("boom")),
+        },
+      );
       const { result } = renderHook(() =>
         useFamilyShelfPrefs("user-1", apiClient),
       );
@@ -267,9 +270,14 @@ describe("useFamilyShelfPrefs", () => {
     });
 
     it("swallows flush errors without throwing", async () => {
-      const apiClient = createMockApiClient({}, {
-        updateFamilyPrefs: vi.fn().mockRejectedValue(new Error("flush failed")),
-      });
+      const apiClient = createMockApiClient(
+        {},
+        {
+          updateFamilyPrefs: vi
+            .fn()
+            .mockRejectedValue(new Error("flush failed")),
+        },
+      );
       const { result } = renderHook(() =>
         useFamilyShelfPrefs("user-1", apiClient),
       );
@@ -348,7 +356,9 @@ describe("useFamilyShelfPrefs", () => {
       const updateFamilyPrefs = vi
         .fn()
         .mockResolvedValueOnce({ error: { code: "KABOOM", message: "nope" } })
-        .mockResolvedValueOnce({ data: { ok: true, hidden: [], favorites: [] } });
+        .mockResolvedValueOnce({
+          data: { ok: true, hidden: [], favorites: [] },
+        });
       const apiClient = createMockApiClient({}, { updateFamilyPrefs });
       const { result } = renderHook(() =>
         useFamilyShelfPrefs("user-1", apiClient),
@@ -378,9 +388,14 @@ describe("useFamilyShelfPrefs", () => {
     });
 
     it("sets syncFailed true when the flush rejects (network throw)", async () => {
-      const apiClient = createMockApiClient({}, {
-        updateFamilyPrefs: vi.fn().mockRejectedValue(new Error("network down")),
-      });
+      const apiClient = createMockApiClient(
+        {},
+        {
+          updateFamilyPrefs: vi
+            .fn()
+            .mockRejectedValue(new Error("network down")),
+        },
+      );
       const { result } = renderHook(() =>
         useFamilyShelfPrefs("user-1", apiClient),
       );
@@ -398,13 +413,16 @@ describe("useFamilyShelfPrefs", () => {
 
     it("does not warn when a failing flush resolves after unmount (guarded setState)", async () => {
       let rejectFlush: (reason: unknown) => void = () => {};
-      const apiClient = createMockApiClient({}, {
-        updateFamilyPrefs: vi.fn().mockReturnValue(
-          new Promise((_resolve, reject) => {
-            rejectFlush = reject;
-          }),
-        ),
-      });
+      const apiClient = createMockApiClient(
+        {},
+        {
+          updateFamilyPrefs: vi.fn().mockReturnValue(
+            new Promise((_resolve, reject) => {
+              rejectFlush = reject;
+            }),
+          ),
+        },
+      );
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const { result, unmount } = renderHook(() =>
         useFamilyShelfPrefs("user-1", apiClient),

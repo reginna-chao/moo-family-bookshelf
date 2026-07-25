@@ -14,13 +14,18 @@ export interface UseBookSortReturn {
   setSort: (mode: BookSortMode) => void;
 }
 
-export function useBookSort(userId: string, shelf: BookSortShelf): UseBookSortReturn {
+export function useBookSort(
+  userId: string,
+  shelf: BookSortShelf,
+): UseBookSortReturn {
   const storageKey = namespacedKey(
     userId,
     shelf === "family" ? "familyShelfSort" : "personalShelfSort",
   );
 
-  const [sort, setSortState] = useState<BookSortMode>(() => readSort(storageKey));
+  const [sort, setSortState] = useState<BookSortMode>(() =>
+    readSort(storageKey),
+  );
 
   useEffect(() => {
     setSortState(readSort(storageKey));

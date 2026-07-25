@@ -23,7 +23,10 @@ import browser from "webextension-polyfill";
 import { FAMILY_ID_KEY, USER_ID_KEY } from "../constants";
 
 export async function readFamilyId(): Promise<string | null> {
-  const localResult = await browser.storage.local.get([FAMILY_ID_KEY, USER_ID_KEY]);
+  const localResult = await browser.storage.local.get([
+    FAMILY_ID_KEY,
+    USER_ID_KEY,
+  ]);
   const local = localResult[FAMILY_ID_KEY];
   if (typeof local === "string") {
     return local;
@@ -57,7 +60,10 @@ export async function readFamilyId(): Promise<string | null> {
  * sync-code input so the user can rejoin in one tap. Returns null otherwise.
  */
 export async function readSyncFamilyIdRemnant(): Promise<string | null> {
-  const localResult = await browser.storage.local.get([USER_ID_KEY, FAMILY_ID_KEY]);
+  const localResult = await browser.storage.local.get([
+    USER_ID_KEY,
+    FAMILY_ID_KEY,
+  ]);
   if (typeof localResult[USER_ID_KEY] !== "string") return null; // never onboarded
   if (typeof localResult[FAMILY_ID_KEY] === "string") return null; // local familyId present
 

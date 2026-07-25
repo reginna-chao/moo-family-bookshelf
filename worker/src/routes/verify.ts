@@ -10,7 +10,12 @@ import {
   type OtpRecord,
   type QrTokenRecord,
 } from "../kv/schema";
-import { isValidUserId, isValidVerifyMethod, isValidPin, isValidPattern } from "../utils/validation";
+import {
+  isValidUserId,
+  isValidVerifyMethod,
+  isValidPin,
+  isValidPattern,
+} from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
@@ -56,7 +61,8 @@ function generateSalt(): string {
 function generateOtpCode(): string {
   const bytes = new Uint8Array(4);
   crypto.getRandomValues(bytes);
-  const num = ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
+  const num =
+    ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
   return String(num % 1000000).padStart(6, "0");
 }
 
@@ -100,7 +106,10 @@ verifyRoutes.openapi(getVerifyRoute, async (c) => {
     return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
-  const record = await c.env.KV.get<VerifyRecord>(kvKeys.verify(userId), "json");
+  const record = await c.env.KV.get<VerifyRecord>(
+    kvKeys.verify(userId),
+    "json",
+  );
   const method = record?.method ?? "none";
   const prompted = record?.prompted ?? 0;
 
@@ -143,19 +152,37 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
   }
 
   if (!body || !isValidVerifyMethod(body.method)) {
-    return jsonError(c, 400, "INVALID_METHOD", "method must be one of: pin, pattern, code, none");
+    return jsonError(
+      c,
+      400,
+      "INVALID_METHOD",
+      "method must be one of: pin, pattern, code, none",
+    );
   }
 
   const method = body.method;
 
   // Validate secret for pin/pattern
   if (method === "pin") {
-    if (!body.secret || typeof body.secret !== "string" || !isValidPin(body.secret)) {
+    if (
+      !body.secret ||
+      typeof body.secret !== "string" ||
+      !isValidPin(body.secret)
+    ) {
       return jsonError(c, 400, "INVALID_SECRET", "PIN must be 6-12 digits");
     }
   } else if (method === "pattern") {
-    if (!body.secret || typeof body.secret !== "string" || !isValidPattern(body.secret)) {
-      return jsonError(c, 400, "INVALID_SECRET", "Pattern must have 4-9 unique nodes (0-8), comma-separated");
+    if (
+      !body.secret ||
+      typeof body.secret !== "string" ||
+      !isValidPattern(body.secret)
+    ) {
+      return jsonError(
+        c,
+        400,
+        "INVALID_SECRET",
+        "Pattern must have 4-9 unique nodes (0-8), comma-separated",
+      );
     }
   }
 
@@ -167,7 +194,10 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     hash = await hashSecret(salt, body.secret);
   }
 
-  const existing = await c.env.KV.get<VerifyRecord>(kvKeys.verify(userId), "json");
+  const existing = await c.env.KV.get<VerifyRecord>(
+    kvKeys.verify(userId),
+    "json",
+  );
 
   const record: VerifyRecord = {
     method,
@@ -212,9 +242,17 @@ verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
   }
 
   // Verify user has 'code' method set
-  const verifyRecord = await c.env.KV.get<VerifyRecord>(kvKeys.verify(userId), "json");
+  const verifyRecord = await c.env.KV.get<VerifyRecord>(
+    kvKeys.verify(userId),
+    "json",
+  );
   if (!verifyRecord || verifyRecord.method !== "code") {
-    return jsonError(c, 400, "INVALID_METHOD", "Verification method must be 'code' to generate OTP");
+    return jsonError(
+      c,
+      400,
+      "INVALID_METHOD",
+      "Verification method must be 'code' to generate OTP",
+    );
   }
 
   const code = generateOtpCode();
@@ -260,7 +298,10 @@ verifyRoutes.openapi(postVerifyPromptedRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  const existing = await c.env.KV.get<VerifyRecord>(kvKeys.verify(userId), "json");
+  const existing = await c.env.KV.get<VerifyRecord>(
+    kvKeys.verify(userId),
+    "json",
+  );
   const record: VerifyRecord = existing ?? defaultVerifyRecord();
   record.prompted = 1;
 
@@ -330,7 +371,10 @@ export async function validateVerification(
   kv: KVNamespace,
   userId: string,
   secret: string | undefined,
-): Promise<{ valid: boolean; error?: { code: string; message: string; status: number } }> {
+): Promise<{
+  valid: boolean;
+  error?: { code: string; message: string; status: number };
+}> {
   const record = await kv.get<VerifyRecord>(kvKeys.verify(userId), "json");
 
   // No verification set or method is 'none' — allow through
@@ -342,7 +386,11 @@ export async function validateVerification(
   if (isLockedOut(record)) {
     return {
       valid: false,
-      error: { code: "VERIFICATION_LOCKED", message: "驗證已鎖定，請稍後再試", status: 429 },
+      error: {
+        code: "VERIFICATION_LOCKED",
+        message: "驗證已鎖定，請稍後再試",
+        status: 429,
+      },
     };
   }
 
@@ -350,7 +398,11 @@ export async function validateVerification(
   if (!secret || typeof secret !== "string") {
     return {
       valid: false,
-      error: { code: "VERIFICATION_REQUIRED", message: "此帳號需要驗證才能登入", status: 403 },
+      error: {
+        code: "VERIFICATION_REQUIRED",
+        message: "此帳號需要驗證才能登入",
+        status: 403,
+      },
     };
   }
 
@@ -366,7 +418,11 @@ export async function validateVerification(
   } else if (record.method === "code") {
     // Validate OTP — pad both to same length for constant-time comparison
     const otpRecord = await kv.get<OtpRecord>(kvKeys.otp(userId), "json");
-    if (otpRecord && secret.length === otpRecord.code.length && timingSafeEqual(otpRecord.code, secret)) {
+    if (
+      otpRecord &&
+      secret.length === otpRecord.code.length &&
+      timingSafeEqual(otpRecord.code, secret)
+    ) {
       valid = true;
       // Delete OTP after successful use (one-time)
       await kv.delete(kvKeys.otp(userId));

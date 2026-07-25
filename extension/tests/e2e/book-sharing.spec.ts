@@ -28,9 +28,12 @@ async function setupFamily(
 ): Promise<void> {
   // Set API endpoint
   await page.goto(`chrome-extension://${extensionId}/background.js`);
-  await page.evaluate(({ apiUrl, key }) => {
-    chrome.storage.local.set({ [key]: apiUrl });
-  }, { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY });
+  await page.evaluate(
+    ({ apiUrl, key }) => {
+      chrome.storage.local.set({ [key]: apiUrl });
+    },
+    { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+  );
 
   await page.goto(MOCK_READMOO_URL);
   await waitForPageReady(page);
@@ -47,10 +50,14 @@ async function setupFamily(
 
   // Wait for sync code to appear (or dump dialog HTML on failure)
   try {
-    await dialog.locator("[data-testid='sync-code']").waitFor({ state: "visible", timeout: 30_000 });
+    await dialog
+      .locator("[data-testid='sync-code']")
+      .waitFor({ state: "visible", timeout: 30_000 });
   } catch (e) {
     const html = await dialog.innerHTML().catch(() => "(unreadable)");
-    throw new Error(`setupFamily: sync code not found after create.\nDialog HTML:\n${html}\n\nOriginal: ${e}`);
+    throw new Error(
+      `setupFamily: sync code not found after create.\nDialog HTML:\n${html}\n\nOriginal: ${e}`,
+    );
   }
   await clickContinue(page);
   await waitForMainView(page);
@@ -124,7 +131,11 @@ test.describe("Book Sharing", () => {
     await navigateToTab(page, "家庭書櫃");
 
     // Wait for family shelf to load
-    await expect(dialog.locator("text=家庭開放書櫃").or(dialog.locator("text=尚無家人分享書籍"))).toBeVisible({
+    await expect(
+      dialog
+        .locator("text=家庭開放書櫃")
+        .or(dialog.locator("text=尚無家人分享書籍")),
+    ).toBeVisible({
       timeout: 10_000,
     });
 
@@ -139,12 +150,16 @@ test.describe("Book Sharing", () => {
 
       // Wait for re-render after filter change — use BookCard's <a> tag to avoid
       // strict mode violation from hidden PersonalShelf tab's <span> elements
-      await expect(dialog.locator("a", { hasText: "被討厭的勇氣" }).first()).toBeVisible({
+      await expect(
+        dialog.locator("a", { hasText: "被討厭的勇氣" }).first(),
+      ).toBeVisible({
         timeout: 10_000,
       });
 
       // Assert that the shared books are visible
-      await expect(dialog.locator("a", { hasText: "原子習慣" }).first()).toBeVisible({
+      await expect(
+        dialog.locator("a", { hasText: "原子習慣" }).first(),
+      ).toBeVisible({
         timeout: 5_000,
       });
     }
@@ -182,7 +197,9 @@ test.describe("Book Sharing", () => {
     await expect(saveButton).not.toBeVisible({ timeout: 10_000 });
 
     // Now toggle them back off — they now show "開放" text
-    const sharedToggles = dialog.locator("button", { hasText: "開放" }).filter({ hasNotText: "未開放" });
+    const sharedToggles = dialog
+      .locator("button", { hasText: "開放" })
+      .filter({ hasNotText: "未開放" });
     await sharedToggles.nth(0).click();
     await sharedToggles.nth(1).click();
 
@@ -198,9 +215,9 @@ test.describe("Book Sharing", () => {
     await navigateToTab(page, "家庭書櫃");
 
     // Family shelf should show the empty state message
-    await expect(
-      dialog.locator("text=尚無家人分享書籍"),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.locator("text=尚無家人分享書籍")).toBeVisible({
+      timeout: 10_000,
+    });
 
     await page.close();
   });

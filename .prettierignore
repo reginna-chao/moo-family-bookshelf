@@ -1,0 +1,36 @@
+# Prettier formats the whole repo (`pnpm format` = `prettier --write .`).
+# Everything below is either not ours, generated, or owned by another tool.
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Package manager lockfile (owned by pnpm)
+pnpm-lock.yaml
+
+# Build output
+dist/
+dist-firefox/
+dist-firefox-amo/
+dist-firefox-direct/
+dist-firefox-updates.json
+web-ext-artifacts/
+web-ext-artifacts-amo/
+web-ext-artifacts-direct/
+
+# Test / tooling artifacts
+coverage/
+playwright-report/
+test-results/
+.verify-selectors-profile/
+.wrangler/
+
+# Generated files — rewritten verbatim by the scripts that own them, so
+# reformatting them here would just churn on the next build.
+# extension/public/manifest.json: extension/scripts/sync-version.ts + extension/plugins/devManifest.ts
+# mock-readmoo.html: extension/scripts/verify-selectors.ts --update-mock
+extension/public/manifest.json
+extension/tests/e2e/fixtures/mock-readmoo.html
+
+# VCS
+.git/

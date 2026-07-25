@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import {
-  showSyncErrorBadge,
-  clearSyncErrorBadge,
-} from "@/background/badge";
+import { showSyncErrorBadge, clearSyncErrorBadge } from "@/background/badge";
 
 /**
  * Regression tests for the sync error badge helpers.

@@ -1,6 +1,9 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { StatusFilterBar, StatusFilterBarProps } from "@/dialog/StatusFilterBar";
+import {
+  StatusFilterBar,
+  StatusFilterBarProps,
+} from "@/dialog/StatusFilterBar";
 
 function renderBar(overrides: Partial<StatusFilterBarProps> = {}) {
   const defaultProps: StatusFilterBarProps = {
@@ -8,7 +11,10 @@ function renderBar(overrides: Partial<StatusFilterBarProps> = {}) {
     onChange: vi.fn(),
     ...overrides,
   };
-  return { ...render(<StatusFilterBar {...defaultProps} />), onChange: defaultProps.onChange };
+  return {
+    ...render(<StatusFilterBar {...defaultProps} />),
+    onChange: defaultProps.onChange,
+  };
 }
 
 describe("StatusFilterBar", () => {

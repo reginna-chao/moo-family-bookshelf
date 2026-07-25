@@ -157,12 +157,16 @@ describe("Join with QR token bypass", () => {
     const qrJson = (await qrRes.json()) as Json;
 
     // Join with qrToken — no verifySecret needed
-    const joinRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({
-        userId: VALID_USER_ID,
-        qrToken: qrJson.data.token,
-      }),
-    });
+    const joinRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      {
+        body: JSON.stringify({
+          userId: VALID_USER_ID,
+          qrToken: qrJson.data.token,
+        }),
+      },
+    );
 
     expect(joinRes.status).toBe(200);
     const joinJson = (await joinRes.json()) as Json;
@@ -214,17 +218,25 @@ describe("Join with QR token bypass", () => {
     const qrToken = qrJson.data.token;
 
     // First use succeeds (new member join via one-time QR bypass, token consumed)
-    const firstRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, qrToken }),
-    });
+    const firstRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      {
+        body: JSON.stringify({ userId: VALID_USER_ID, qrToken }),
+      },
+    );
     expect(firstRes.status).toBe(200);
 
     // Second use — token is deleted. Since SEC-1 the verification gate runs
     // BEFORE the existing-member branch, so an existing member with a PIN set
     // and no valid qrToken/verifySecret is now rejected (was 200 pre-SEC-1).
-    const secondRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID, qrToken }),
-    });
+    const secondRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      {
+        body: JSON.stringify({ userId: VALID_USER_ID, qrToken }),
+      },
+    );
 
     expect(secondRes.status).toBe(403);
     const json = (await secondRes.json()) as Json;
@@ -275,12 +287,16 @@ describe("Join with QR token bypass", () => {
     });
 
     // Try to join with the wrong user's QR token
-    const joinRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({
-        userId: VALID_USER_ID,
-        qrToken: qrJson.data.token,
-      }),
-    });
+    const joinRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      {
+        body: JSON.stringify({
+          userId: VALID_USER_ID,
+          qrToken: qrJson.data.token,
+        }),
+      },
+    );
 
     expect(joinRes.status).toBe(403);
     const json = (await joinRes.json()) as Json;
@@ -299,12 +315,16 @@ describe("Join with QR token bypass", () => {
     // Use a fabricated token that doesn't exist in KV (simulates expired)
     const fakeToken = "f".repeat(64);
 
-    const joinRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({
-        userId: VALID_USER_ID,
-        qrToken: fakeToken,
-      }),
-    });
+    const joinRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      {
+        body: JSON.stringify({
+          userId: VALID_USER_ID,
+          qrToken: fakeToken,
+        }),
+      },
+    );
 
     expect(joinRes.status).toBe(403);
     const json = (await joinRes.json()) as Json;
@@ -321,12 +341,16 @@ describe("Join with QR token bypass", () => {
     });
 
     // Join with correct verifySecret, no qrToken
-    const joinRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({
-        userId: VALID_USER_ID,
-        verifySecret: "123456",
-      }),
-    });
+    const joinRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      {
+        body: JSON.stringify({
+          userId: VALID_USER_ID,
+          verifySecret: "123456",
+        }),
+      },
+    );
 
     expect(joinRes.status).toBe(200);
   });
@@ -335,9 +359,13 @@ describe("Join with QR token bypass", () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
     // No verification set — method defaults to "none"
-    const joinRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({ userId: VALID_USER_ID }),
-    });
+    const joinRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      {
+        body: JSON.stringify({ userId: VALID_USER_ID }),
+      },
+    );
 
     expect(joinRes.status).toBe(200);
   });
@@ -359,12 +387,16 @@ describe("Join with QR token bypass", () => {
     const qrJson = (await qrRes.json()) as Json;
 
     // Join with qrToken, bypassing pattern verification
-    const joinRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({
-        userId: VALID_USER_ID,
-        qrToken: qrJson.data.token,
-      }),
-    });
+    const joinRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      {
+        body: JSON.stringify({
+          userId: VALID_USER_ID,
+          qrToken: qrJson.data.token,
+        }),
+      },
+    );
 
     expect(joinRes.status).toBe(200);
   });
@@ -386,12 +418,16 @@ describe("Join with QR token bypass", () => {
     const qrJson = (await qrRes.json()) as Json;
 
     // Join with qrToken, bypassing OTP verification
-    const joinRes = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
-      body: JSON.stringify({
-        userId: VALID_USER_ID,
-        qrToken: qrJson.data.token,
-      }),
-    });
+    const joinRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      {
+        body: JSON.stringify({
+          userId: VALID_USER_ID,
+          qrToken: qrJson.data.token,
+        }),
+      },
+    );
 
     expect(joinRes.status).toBe(200);
   });

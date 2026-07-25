@@ -30,7 +30,9 @@ export interface UseDisplayNameResult {
   handleSaveDisplayName: () => Promise<boolean>;
 }
 
-export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameResult {
+export function useDisplayName(
+  options?: UseDisplayNameOptions,
+): UseDisplayNameResult {
   const [displayName, setDisplayName] = useState("");
   const [savedDisplayName, setSavedDisplayName] = useState("");
   const [nameSaveState, setNameSaveState] = useState<NameSaveState>("idle");
@@ -73,7 +75,9 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
       setDisplayName((prev) => (prev === "" ? cached : prev));
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [options?.initialDisplayName]);
 
   useEffect(() => {
@@ -112,7 +116,9 @@ export function useDisplayName(options?: UseDisplayNameOptions): UseDisplayNameR
         await browser.storage.sync.set({ [DISPLAY_NAME_KEY]: trimmed });
       } catch {
         // local persisted; sync is best-effort (may reject in Firefox)
-        console.warn("[useDisplayName] storage.sync.set failed; local write kept");
+        console.warn(
+          "[useDisplayName] storage.sync.set failed; local write kept",
+        );
       }
       setDisplayName(trimmed);
       setSavedDisplayName(trimmed);

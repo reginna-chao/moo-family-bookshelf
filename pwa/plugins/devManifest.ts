@@ -38,7 +38,10 @@ export function devManifest(): Plugin {
       return html
         .replace(/href="\/icon\.svg"/g, `href="${prefix}icon.svg"`)
         .replace(/href="\/icon-192\.png"/g, `href="${prefix}icon-192.png"`)
-        .replace(/<title>墨家書櫃<\/title>/, `<title>墨家書櫃 (${variant.label})</title>`);
+        .replace(
+          /<title>墨家書櫃<\/title>/,
+          `<title>墨家書櫃 (${variant.label})</title>`,
+        );
     },
 
     closeBundle() {
@@ -47,7 +50,10 @@ export function devManifest(): Plugin {
       const manifestPath = resolve(outDir, "manifest.json");
       let manifest: Record<string, unknown>;
       try {
-        manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
+        manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<
+          string,
+          unknown
+        >;
       } catch {
         return;
       }

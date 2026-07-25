@@ -39,7 +39,10 @@ afterEach(() => {
 function ttlsPutFor(key: string): (number | undefined)[] {
   return putSpy.mock.calls
     .filter(([k]) => k === key)
-    .map(([, , opts]) => (opts as KVNamespacePutOptions | undefined)?.expirationTtl);
+    .map(
+      ([, , opts]) =>
+        (opts as KVNamespacePutOptions | undefined)?.expirationTtl,
+    );
 }
 
 async function seedValidToken(userId: string, token: string) {
@@ -129,7 +132,9 @@ describe("getOrGenerateAuthToken", () => {
         // New reverse lookup resolves; both entries carry the 90d TTL.
         expect(await kv.get(kvKeys.authToken(token))).toBe(USER1);
         expect(ttlsPutFor(kvKeys.auth(USER1))).toContain(TOKEN_TTL_SECONDS);
-        expect(ttlsPutFor(kvKeys.authToken(token))).toContain(TOKEN_TTL_SECONDS);
+        expect(ttlsPutFor(kvKeys.authToken(token))).toContain(
+          TOKEN_TTL_SECONDS,
+        );
       });
     });
   });

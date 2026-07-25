@@ -45,18 +45,28 @@ describe("FamilyBookRow", () => {
   it("shows borrow button when showBorrowButton is true", () => {
     render(<FamilyBookRow book={makeBook()} showBorrowButton />);
 
-    expect(screen.getByRole("button", { name: "申請借閱" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "申請借閱" }),
+    ).toBeInTheDocument();
   });
 
   it("hides borrow button when showBorrowButton is false", () => {
     render(<FamilyBookRow book={makeBook()} showBorrowButton={false} />);
 
-    expect(screen.queryByRole("button", { name: "申請借閱" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "申請借閱" }),
+    ).not.toBeInTheDocument();
   });
 
   it("calls onBorrowClick when borrow button is clicked", () => {
     const onBorrowClick = vi.fn();
-    render(<FamilyBookRow book={makeBook()} showBorrowButton onBorrowClick={onBorrowClick} />);
+    render(
+      <FamilyBookRow
+        book={makeBook()}
+        showBorrowButton
+        onBorrowClick={onBorrowClick}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "申請借閱" }));
     expect(onBorrowClick).toHaveBeenCalledTimes(1);
@@ -64,7 +74,13 @@ describe("FamilyBookRow", () => {
 
   it("prevents default on borrow button click", () => {
     const onBorrowClick = vi.fn();
-    render(<FamilyBookRow book={makeBook()} showBorrowButton onBorrowClick={onBorrowClick} />);
+    render(
+      <FamilyBookRow
+        book={makeBook()}
+        showBorrowButton
+        onBorrowClick={onBorrowClick}
+      />,
+    );
 
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     const preventDefaultSpy = vi.spyOn(event, "preventDefault");
@@ -73,7 +89,9 @@ describe("FamilyBookRow", () => {
   });
 
   it("shows disabled state when borrowRequestPending is true", () => {
-    render(<FamilyBookRow book={makeBook()} showBorrowButton borrowRequestPending />);
+    render(
+      <FamilyBookRow book={makeBook()} showBorrowButton borrowRequestPending />,
+    );
 
     const button = screen.getByRole("button", { name: "申請中" });
     expect(button).toBeDisabled();
@@ -104,7 +122,9 @@ describe("FamilyBookRow", () => {
 
   describe("owner badge placement (isMobile)", () => {
     it("renders the owner badge as a trailing sibling on desktop (isMobile omitted)", () => {
-      const { container } = render(<FamilyBookRow book={makeBook({ memberName: "Alice" })} />);
+      const { container } = render(
+        <FamilyBookRow book={makeBook({ memberName: "Alice" })} />,
+      );
 
       const badge = screen.getByText("Alice");
       // Desktop badge is the trailing `.moo-book-row__member` sibling of __info,
@@ -128,16 +148,20 @@ describe("FamilyBookRow", () => {
       expect(info).not.toBeNull();
       expect(info?.contains(badge)).toBe(true);
       // Exactly one owner badge exists — no trailing desktop sibling as well.
-      expect(container.querySelectorAll(".moo-book-row__member")).toHaveLength(1);
+      expect(container.querySelectorAll(".moo-book-row__member")).toHaveLength(
+        1,
+      );
     });
 
     it("appends the --mobile title modifier only when isMobile is true", () => {
-      const { container: desktop } = render(<FamilyBookRow book={makeBook()} />);
-      expect(
-        desktop.querySelector(".moo-book-row__title--mobile"),
-      ).toBeNull();
+      const { container: desktop } = render(
+        <FamilyBookRow book={makeBook()} />,
+      );
+      expect(desktop.querySelector(".moo-book-row__title--mobile")).toBeNull();
 
-      const { container: mobile } = render(<FamilyBookRow book={makeBook()} isMobile />);
+      const { container: mobile } = render(
+        <FamilyBookRow book={makeBook()} isMobile />,
+      );
       expect(
         mobile.querySelector(".moo-book-row__title--mobile"),
       ).not.toBeNull();
@@ -147,30 +171,50 @@ describe("FamilyBookRow", () => {
   describe("hide action overflow menu (v1.5.0)", () => {
     it("renders the overflow trigger when onHideToggle and label are provided", () => {
       render(
-        <FamilyBookRow book={makeBook()} onHideToggle={() => {}} hideActionLabel="隱藏書籍" />,
+        <FamilyBookRow
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="隱藏書籍"
+        />,
       );
-      expect(screen.getByRole("button", { name: "更多選項" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "更多選項" }),
+      ).toBeInTheDocument();
     });
 
     it("shows the hide label as a menuitem after opening the menu", () => {
       render(
-        <FamilyBookRow book={makeBook()} onHideToggle={() => {}} hideActionLabel="隱藏書籍" />,
+        <FamilyBookRow
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="隱藏書籍"
+        />,
       );
       fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
-      expect(screen.getByRole("menuitem", { name: "隱藏書籍" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("menuitem", { name: "隱藏書籍" }),
+      ).toBeInTheDocument();
     });
 
     it("shows the unhide label as a menuitem in showHidden mode", () => {
       render(
-        <FamilyBookRow book={makeBook()} onHideToggle={() => {}} hideActionLabel="取消隱藏" />,
+        <FamilyBookRow
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="取消隱藏"
+        />,
       );
       fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
-      expect(screen.getByRole("menuitem", { name: "取消隱藏" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("menuitem", { name: "取消隱藏" }),
+      ).toBeInTheDocument();
     });
 
     it("does not render the overflow trigger when onHideToggle is missing", () => {
       render(<FamilyBookRow book={makeBook()} hideActionLabel="隱藏書籍" />);
-      expect(screen.queryByRole("button", { name: "更多選項" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "更多選項" }),
+      ).not.toBeInTheDocument();
     });
 
     it("calls onHideToggle when the menuitem is clicked", () => {

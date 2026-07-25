@@ -28,19 +28,27 @@ export function FloatingActionBar({
   const saveDisabled = !isDirty || isSaving;
 
   const cancelClass = hasSelection
-    ? "moo-action-bar__cancel moo-action-bar__cancel--pushed"
-    : "moo-action-bar__cancel";
-  const saveClass = hasSelection ? "moo-action-bar__save" : "moo-action-bar__save moo-action-bar__save--grow";
+    ? "moo-button moo-button--ghost moo-button--sm moo-action-bar__cancel moo-action-bar__cancel--pushed"
+    : "moo-button moo-button--ghost moo-button--sm moo-action-bar__cancel";
+  const saveClass = hasSelection
+    ? "moo-button moo-button--sm moo-action-bar__save"
+    : "moo-button moo-button--sm moo-action-bar__save moo-action-bar__save--grow";
 
   return (
     <div className="moo-action-bar">
       {hasSelection && (
         <>
           <span className="moo-action-bar__count">已選 {selectedCount} 本</span>
-          <button onClick={onBatchShare} className="moo-action-bar__btn moo-action-bar__btn--share">
+          <button
+            onClick={onBatchShare}
+            className="moo-button moo-button--sm moo-button--success moo-action-bar__btn moo-action-bar__btn--share"
+          >
             設為開放
           </button>
-          <button onClick={onBatchHide} className="moo-action-bar__btn moo-action-bar__btn--hide">
+          <button
+            onClick={onBatchHide}
+            className="moo-button moo-button--sm moo-button--muted moo-action-bar__btn moo-action-bar__btn--hide"
+          >
             設為隱藏
           </button>
         </>

@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import browser from "webextension-polyfill";
-import { ApiClient, BookEntry, BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "../api/client";
+import {
+  ApiClient,
+  BookEntry,
+  BoolFlag,
+  PERSONAL_BOOKS_SCHEMA_VERSION,
+} from "../api/client";
 import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import {
   PERSONAL_BOOKS_CACHE_KEY,
@@ -8,7 +13,8 @@ import {
 } from "../constants";
 import { mergeBooks } from "./mergeBooks";
 
-export type PersonalBooksStatus = "loading" | "ready" | "saving" | "saved" | "error";
+export type PersonalBooksStatus =
+  "loading" | "ready" | "saving" | "saved" | "error";
 
 /** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
 const MAX_PATCH_CHANGES = 1000;
@@ -27,9 +33,7 @@ interface LoadSavedResult {
   raw: Record<string, unknown> | null;
 }
 
-function loadSavedBooks(
-  data: Record<string, unknown>,
-): LoadSavedResult {
+function loadSavedBooks(data: Record<string, unknown>): LoadSavedResult {
   if (Array.isArray(data.books)) {
     return { books: data.books as BookEntry[], raw: data };
   }
@@ -52,7 +56,10 @@ function parseCachedBooks(raw: unknown): BookEntry[] {
  * reconciled against the server (API wins for known books; cache value
  * retained for cache-only books). API-only books are appended.
  */
-function reconcileBaseline(cached: BookEntry[], saved: BookEntry[]): BookEntry[] {
+function reconcileBaseline(
+  cached: BookEntry[],
+  saved: BookEntry[],
+): BookEntry[] {
   const savedMap = new Map(saved.map((b) => [b.bookId, b]));
   const cachedIds = new Set(cached.map((b) => b.bookId));
   const reconciled = cached.map((b) => {
@@ -63,7 +70,12 @@ function reconcileBaseline(cached: BookEntry[], saved: BookEntry[]): BookEntry[]
   return [...reconciled, ...apiOnly];
 }
 
-export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName }: UsePersonalBooksParams) {
+export function usePersonalBooks({
+  userId,
+  apiClient,
+  lastSyncBooks,
+  displayName,
+}: UsePersonalBooksParams) {
   const [books, setBooks] = useState<BookEntry[]>([]);
   const originalBooks = useRef<BookEntry[]>([]);
   /** Raw payload — kept so save can spread back unknown fields from future versions */
@@ -123,11 +135,16 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
           savedBooks = result.books;
           savedRawPayload.current = result.raw;
         }
-        const cachedBooks = parseCachedBooks(cacheResult[PERSONAL_BOOKS_CACHE_KEY]);
+        const cachedBooks = parseCachedBooks(
+          cacheResult[PERSONAL_BOOKS_CACHE_KEY],
+        );
 
         // Baseline display from cache reconciled against the server (API wins for
         // share flags). Empty baseline still resolves to "ready" → "尚無書籍".
-        const baseline = cachedBooks.length > 0 ? reconcileBaseline(cachedBooks, savedBooks) : savedBooks;
+        const baseline =
+          cachedBooks.length > 0
+            ? reconcileBaseline(cachedBooks, savedBooks)
+            : savedBooks;
         originalBooks.current = baseline;
         setBooks(baseline);
         setStatus("ready");
@@ -140,7 +157,9 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     }
 
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [userId, apiClient]);
 
   // Merge new books from auto-sync or manual sync into both the display list and
@@ -165,12 +184,23 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
     }
   }, [lastSyncBooks, status]);
 
-  const handleToggle = useCallback((bookId: string) => {
-    setBooks((prev) =>
-      prev.map((b) => (b.bookId === bookId ? { ...b, isShared: b.isShared === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE } : b)),
-    );
-    markDirty(bookId);
-  }, [markDirty]);
+  const handleToggle = useCallback(
+    (bookId: string) => {
+      setBooks((prev) =>
+        prev.map((b) =>
+          b.bookId === bookId
+            ? {
+                ...b,
+                isShared:
+                  b.isShared === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE,
+              }
+            : b,
+        ),
+      );
+      markDirty(bookId);
+    },
+    [markDirty],
+  );
 
   const handleSave = useCallback(async () => {
     // Nothing changed → treat as an instant no-op save (UI guards this too).
@@ -220,8 +250,12 @@ export function usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName
       if (usePut) {
         savedRawPayload.current = { ...(savedRawPayload.current ?? {}), books };
       }
-      void browser.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books) });
-      void browser.storage.local.set({ [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now() });
+      void browser.storage.local.set({
+        [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books),
+      });
+      void browser.storage.local.set({
+        [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now(),
+      });
       clearDirty();
       setStatus("saved");
       setTimeout(() => setStatus("ready"), 1500);

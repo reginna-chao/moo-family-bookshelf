@@ -4,14 +4,14 @@ This reference is read on demand by the `designer` agent (`.claude/agents/design
 
 ## Scope
 
-| This reference handles | Use another reference / agent |
-|---|---|
-| GitHub README banner | Logos / app icons → logo reference |
-| Open Graph image (og:image) | UI icons → icon reference |
-| Twitter/X header | |
-| LinkedIn banner | |
-| Website hero image | |
-| YouTube channel art | |
+| This reference handles      | Use another reference / agent      |
+| --------------------------- | ---------------------------------- |
+| GitHub README banner        | Logos / app icons → logo reference |
+| Open Graph image (og:image) | UI icons → icon reference          |
+| Twitter/X header            |                                    |
+| LinkedIn banner             |                                    |
+| Website hero image          |                                    |
+| YouTube channel art         |                                    |
 
 ## Output Location
 
@@ -30,38 +30,40 @@ All generated files saved to `.skill-archive/designer/banner/<yyyy-mm-dd-summary
 
 ## Platform Specifications
 
-| Platform | Ratio | Recommended Size | Notes |
-|----------|-------|-----------------|-------|
-| GitHub README | 2:1 | 1280×640 | SVG works natively |
-| Open Graph (og:image) | 1.91:1 | 1200×630 | Must convert to PNG/JPG for meta tags |
-| Twitter/X header | 3:1 | 1500×500 | Upload as PNG |
-| Twitter/X card (summary_large_image) | 2:1 | 1200×600 | Same as OG in most cases |
-| LinkedIn banner | 4:1 | 1584×396 | Upload as PNG |
-| Website hero | 16:9 | 1920×1080 | SVG or responsive |
-| YouTube channel art | 16:9 | 2560×1440 | Safe area: 1546×423 center |
+| Platform                             | Ratio  | Recommended Size | Notes                                 |
+| ------------------------------------ | ------ | ---------------- | ------------------------------------- |
+| GitHub README                        | 2:1    | 1280×640         | SVG works natively                    |
+| Open Graph (og:image)                | 1.91:1 | 1200×630         | Must convert to PNG/JPG for meta tags |
+| Twitter/X header                     | 3:1    | 1500×500         | Upload as PNG                         |
+| Twitter/X card (summary_large_image) | 2:1    | 1200×600         | Same as OG in most cases              |
+| LinkedIn banner                      | 4:1    | 1584×396         | Upload as PNG                         |
+| Website hero                         | 16:9   | 1920×1080        | SVG or responsive                     |
+| YouTube channel art                  | 16:9   | 2560×1440        | Safe area: 1546×423 center            |
 
 ### Open Graph Image (og:image) Spec
 
-| Spec | Value |
-|------|-------|
-| Size | 1200 × 630 px |
-| Ratio | 1.91:1 |
-| Format | PNG or JPG (SVG not supported by crawlers) |
-| Min size | 600 × 315 (Facebook minimum) |
-| Max file size | 5 MB (recommended < 1 MB) |
+| Spec           | Value                                        |
+| -------------- | -------------------------------------------- |
+| Size           | 1200 × 630 px                                |
+| Ratio          | 1.91:1                                       |
+| Format         | PNG or JPG (SVG not supported by crawlers)   |
+| Min size       | 600 × 315 (Facebook minimum)                 |
+| Max file size  | 5 MB (recommended < 1 MB)                    |
 | Text safe area | Keep text within inner 80% to avoid clipping |
 
 **Meta tags:**
+
 ```html
-<meta property="og:image" content="https://example.com/og-image.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="{project} — {tagline}">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://example.com/og-image.png">
+<meta property="og:image" content="https://example.com/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="{project} — {tagline}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://example.com/og-image.png" />
 ```
 
 **Design guidelines for OG images:**
+
 - Text must be large enough to read in thumbnail (≥ 40px at 1200w)
 - High contrast between text and background
 - Keep critical content centered (platforms crop edges differently)
@@ -131,129 +133,251 @@ Generate a `preview.html` that displays all banner variations:
 ```html
 <!DOCTYPE html>
 <html lang="zh-Hant">
-<head>
-  <meta charset="UTF-8">
-  <title>Banner Preview — {project}</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; background: #f5f5f5; padding: 2rem; }
-    h1 { text-align: center; margin-bottom: 0.5rem; color: #333; }
-    .subtitle { text-align: center; color: #888; margin-bottom: 2rem; font-size: 0.875rem; }
-    h2 { color: #555; margin: 2rem 0 1rem; font-size: 1.1rem; }
-    .gallery { max-width: 1000px; margin: 0 auto; }
-    .card { background: white; border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .card img { width: 100%; height: auto; border-radius: 8px; display: block; }
-    .card .label { font-size: 0.875rem; color: #666; margin-top: 0.5rem; text-align: center; }
+  <head>
+    <meta charset="UTF-8" />
+    <title>Banner Preview — {project}</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        background: #f5f5f5;
+        padding: 2rem;
+      }
+      h1 {
+        text-align: center;
+        margin-bottom: 0.5rem;
+        color: #333;
+      }
+      .subtitle {
+        text-align: center;
+        color: #888;
+        margin-bottom: 2rem;
+        font-size: 0.875rem;
+      }
+      h2 {
+        color: #555;
+        margin: 2rem 0 1rem;
+        font-size: 1.1rem;
+      }
+      .gallery {
+        max-width: 1000px;
+        margin: 0 auto;
+      }
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      }
+      .card img {
+        width: 100%;
+        height: auto;
+        border-radius: 8px;
+        display: block;
+      }
+      .card .label {
+        font-size: 0.875rem;
+        color: #666;
+        margin-top: 0.5rem;
+        text-align: center;
+      }
 
-    /* GitHub README mock */
-    .readme-mock { max-width: 800px; margin: 2rem auto; background: white;
-                   border: 1px solid #d0d7de; border-radius: 6px; padding: 2rem; }
-    .readme-mock img { width: 100%; height: auto; border-radius: 4px; margin-bottom: 1rem; }
-    .readme-mock h3 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    .readme-mock p { color: #656d76; }
+      /* GitHub README mock */
+      .readme-mock {
+        max-width: 800px;
+        margin: 2rem auto;
+        background: white;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        padding: 2rem;
+      }
+      .readme-mock img {
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+        margin-bottom: 1rem;
+      }
+      .readme-mock h3 {
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+      .readme-mock p {
+        color: #656d76;
+      }
 
-    /* OG image mock — social card */
-    .og-mock { max-width: 600px; margin: 1rem auto; background: white; border: 1px solid #ddd;
-               border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-    .og-mock img { width: 100%; height: auto; display: block; }
-    .og-mock .og-info { padding: 12px 16px; }
-    .og-mock .og-domain { font-size: 0.75rem; color: #888; text-transform: uppercase; }
-    .og-mock .og-title { font-size: 1rem; font-weight: 600; color: #333; margin: 4px 0; }
-    .og-mock .og-desc { font-size: 0.85rem; color: #666; }
+      /* OG image mock — social card */
+      .og-mock {
+        max-width: 600px;
+        margin: 1rem auto;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+      .og-mock img {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      .og-mock .og-info {
+        padding: 12px 16px;
+      }
+      .og-mock .og-domain {
+        font-size: 0.75rem;
+        color: #888;
+        text-transform: uppercase;
+      }
+      .og-mock .og-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #333;
+        margin: 4px 0;
+      }
+      .og-mock .og-desc {
+        font-size: 0.85rem;
+        color: #666;
+      }
 
-    /* Twitter card mock */
-    .twitter-mock { max-width: 550px; margin: 1rem auto; background: white; border: 1px solid #e1e8ed;
-                    border-radius: 16px; overflow: hidden; }
-    .twitter-mock img { width: 100%; height: auto; display: block; }
-    .twitter-mock .tw-info { padding: 10px 14px; }
-    .twitter-mock .tw-domain { font-size: 0.8rem; color: #536471; }
-    .twitter-mock .tw-title { font-size: 0.95rem; font-weight: 600; color: #0f1419; }
+      /* Twitter card mock */
+      .twitter-mock {
+        max-width: 550px;
+        margin: 1rem auto;
+        background: white;
+        border: 1px solid #e1e8ed;
+        border-radius: 16px;
+        overflow: hidden;
+      }
+      .twitter-mock img {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      .twitter-mock .tw-info {
+        padding: 10px 14px;
+      }
+      .twitter-mock .tw-domain {
+        font-size: 0.8rem;
+        color: #536471;
+      }
+      .twitter-mock .tw-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #0f1419;
+      }
 
-    /* Dark theme */
-    .dark-preview { background: #0d1117; padding: 2rem; border-radius: 12px; margin-top: 2rem; }
-    .dark-preview h2 { color: #eee; }
-    .dark-preview .card { background: #161b22; }
-    .dark-preview .card .label { color: #aaa; }
-    .dark-preview .readme-mock { background: #0d1117; border-color: #30363d; }
-    .dark-preview .readme-mock h3 { color: #f0f6fc; }
-    .dark-preview .readme-mock p { color: #8b949e; }
-  </style>
-</head>
-<body>
-  <h1>{project} Banner 預覽</h1>
-  <p class="subtitle">點選喜歡的方案編號回饋</p>
+      /* Dark theme */
+      .dark-preview {
+        background: #0d1117;
+        padding: 2rem;
+        border-radius: 12px;
+        margin-top: 2rem;
+      }
+      .dark-preview h2 {
+        color: #eee;
+      }
+      .dark-preview .card {
+        background: #161b22;
+      }
+      .dark-preview .card .label {
+        color: #aaa;
+      }
+      .dark-preview .readme-mock {
+        background: #0d1117;
+        border-color: #30363d;
+      }
+      .dark-preview .readme-mock h3 {
+        color: #f0f6fc;
+      }
+      .dark-preview .readme-mock p {
+        color: #8b949e;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{project} Banner 預覽</h1>
+    <p class="subtitle">點選喜歡的方案編號回饋</p>
 
-  <!-- All variations -->
-  <div class="gallery">
-    <div class="card">
-      <img src="banner-01.svg" alt="Banner variation 1">
-      <div class="label">#1</div>
-    </div>
-    <!-- ... repeat ... -->
-  </div>
-
-  <!-- GitHub README mock -->
-  <h2>GitHub README 模擬</h2>
-  <div class="readme-mock">
-    <img src="banner-01.svg" alt="README banner">
-    <h3>{project}</h3>
-    <p>A brief project description goes here.</p>
-  </div>
-
-  <!-- OG image / social share mock -->
-  <h2>Social Share 預覽 (Open Graph)</h2>
-  <div class="og-mock">
-    <img src="banner-01.svg" alt="OG image">
-    <div class="og-info">
-      <div class="og-domain">example.com</div>
-      <div class="og-title">{project} — Your tagline here</div>
-      <div class="og-desc">A brief description of the project for social sharing.</div>
-    </div>
-  </div>
-
-  <!-- Twitter card mock -->
-  <h2>Twitter Card 預覽</h2>
-  <div class="twitter-mock">
-    <img src="banner-01.svg" alt="Twitter card">
-    <div class="tw-info">
-      <div class="tw-domain">example.com</div>
-      <div class="tw-title">{project} — Your tagline here</div>
-    </div>
-  </div>
-
-  <!-- Dark theme preview -->
-  <div class="dark-preview">
-    <h2>深色主題預覽 (GitHub Dark)</h2>
+    <!-- All variations -->
     <div class="gallery">
       <div class="card">
-        <img src="banner-01.svg" alt="Banner variation 1">
+        <img src="banner-01.svg" alt="Banner variation 1" />
         <div class="label">#1</div>
       </div>
+      <!-- ... repeat ... -->
     </div>
-    <h2>GitHub README (Dark)</h2>
+
+    <!-- GitHub README mock -->
+    <h2>GitHub README 模擬</h2>
     <div class="readme-mock">
-      <img src="banner-01.svg" alt="README banner dark">
+      <img src="banner-01.svg" alt="README banner" />
       <h3>{project}</h3>
       <p>A brief project description goes here.</p>
     </div>
-  </div>
-</body>
+
+    <!-- OG image / social share mock -->
+    <h2>Social Share 預覽 (Open Graph)</h2>
+    <div class="og-mock">
+      <img src="banner-01.svg" alt="OG image" />
+      <div class="og-info">
+        <div class="og-domain">example.com</div>
+        <div class="og-title">{project} — Your tagline here</div>
+        <div class="og-desc">
+          A brief description of the project for social sharing.
+        </div>
+      </div>
+    </div>
+
+    <!-- Twitter card mock -->
+    <h2>Twitter Card 預覽</h2>
+    <div class="twitter-mock">
+      <img src="banner-01.svg" alt="Twitter card" />
+      <div class="tw-info">
+        <div class="tw-domain">example.com</div>
+        <div class="tw-title">{project} — Your tagline here</div>
+      </div>
+    </div>
+
+    <!-- Dark theme preview -->
+    <div class="dark-preview">
+      <h2>深色主題預覽 (GitHub Dark)</h2>
+      <div class="gallery">
+        <div class="card">
+          <img src="banner-01.svg" alt="Banner variation 1" />
+          <div class="label">#1</div>
+        </div>
+      </div>
+      <h2>GitHub README (Dark)</h2>
+      <div class="readme-mock">
+        <img src="banner-01.svg" alt="README banner dark" />
+        <h3>{project}</h3>
+        <p>A brief project description goes here.</p>
+      </div>
+    </div>
+  </body>
 </html>
 ```
 
 Open in browser:
+
 - Windows: `start preview.html`
 - macOS/Linux: `open preview.html`
 
 ### Step 4: Iterate with User
 
 Ask user which banners they prefer:
+
 - 「你喜歡哪幾個方案？（例如 #2, #5）」
 - 「在 OG 預覽中文字是否夠大、夠清楚？」
 - 「有什麼想調整的地方？文字、配色、排版？」
 
 Based on feedback:
+
 1. Generate 3-5 refined variations based on favorites
 2. Name as `banner-{original}-v{n}.svg` (e.g., `banner-02-v1.svg`)
 3. Update preview.html
@@ -264,11 +388,13 @@ Based on feedback:
 Once user approves:
 
 **5a. Create final directory:**
+
 ```bash
 mkdir -p .skill-archive/designer/banner/<date-name>/final
 ```
 
 **5b. Copy final SVG:**
+
 ```bash
 cp banner-{chosen}.svg final/banner.svg
 ```
@@ -285,6 +411,7 @@ cp banner-{chosen}.svg final/og-image.svg
 ```
 
 **5d. Generate README snippet:**
+
 ```markdown
 <!-- Add to top of README.md -->
 <p align="center">
@@ -293,14 +420,15 @@ cp banner-{chosen}.svg final/og-image.svg
 ```
 
 **5e. Generate OG meta tags:**
+
 ```html
 <!-- Add to <head> — NOTE: og:image requires PNG/JPG URL, not SVG -->
-<meta property="og:image" content="https://{domain}/og-image.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="{project} — {tagline}">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://{domain}/og-image.png">
+<meta property="og:image" content="https://{domain}/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="{project} — {tagline}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://{domain}/og-image.png" />
 ```
 
 **5f. SVG → PNG Conversion:**
@@ -316,6 +444,7 @@ npx sharp-cli -i final/og-image.svg -o final/og-image.png -- resize 1200 630
 If `sharp-cli` is not available, write a small Node script using `sharp` or `@resvg/resvg-js`.
 
 **5g. Copy to project (if requested):**
+
 ```bash
 mkdir -p assets
 cp final/banner.svg assets/banner.svg
@@ -327,12 +456,12 @@ cp final/og-image.png assets/og-image.png
 
 Present final deliverables:
 
-| File | Description | Usage |
-|------|-------------|-------|
-| `final/banner.svg` | Vector banner | GitHub README, website |
+| File                 | Description         | Usage                                    |
+| -------------------- | ------------------- | ---------------------------------------- |
+| `final/banner.svg`   | Vector banner       | GitHub README, website                   |
 | `final/og-image.svg` | OG image (1200×630) | Social sharing (convert to PNG for meta) |
-| README snippet | Markdown embed code | Copy to README.md |
-| OG meta tags | HTML meta tags | Copy to `<head>` |
+| README snippet       | Markdown embed code | Copy to README.md                        |
+| OG meta tags         | HTML meta tags      | Copy to `<head>`                         |
 
 All files in: `.skill-archive/designer/banner/<yyyy-mm-dd-summaryname>/`
 
@@ -345,6 +474,7 @@ Options: use a build tool, online converter, or `sharp`/`puppeteer` script.
 ## SVG Banner Best Practices
 
 ### Typography
+
 - Use `<text>` with generic font families or convert to `<path>` for guaranteed rendering
 - Project name: large, bold (`font-weight="700"`, `font-size="48-72"`)
 - Tagline: smaller, lighter (`font-weight="400"`, `font-size="20-28"`)
@@ -352,6 +482,7 @@ Options: use a build tool, online converter, or `sharp`/`puppeteer` script.
 - **OG images: minimum 40px font-size** to remain readable in thumbnails
 
 ### Background Patterns
+
 - **Dot grid:** `<pattern>` with small `<circle>` elements
 - **Diagonal lines:** `<pattern>` with rotated `<line>` elements
 - **Gradient mesh:** Multiple overlapping radial gradients
@@ -373,6 +504,7 @@ Purple:       bg=#1e1b4b  accent=#818cf8  text=#e0e7ff
 ### Layout Patterns
 
 **Centered (most common for README):**
+
 ```
 ┌──────────────────────────────┐
 │                              │
@@ -384,6 +516,7 @@ Purple:       bg=#1e1b4b  accent=#818cf8  text=#e0e7ff
 ```
 
 **Left-aligned with illustration:**
+
 ```
 ┌──────────────────────────────┐
 │                              │
@@ -394,6 +527,7 @@ Purple:       bg=#1e1b4b  accent=#818cf8  text=#e0e7ff
 ```
 
 **Badge style:**
+
 ```
 ┌──────────────────────────────┐
 │  ┌─────┐                     │
@@ -406,6 +540,7 @@ Purple:       bg=#1e1b4b  accent=#818cf8  text=#e0e7ff
 ## Common SVG Patterns
 
 **Gradient background with text:**
+
 ```xml
 <svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -423,6 +558,7 @@ Purple:       bg=#1e1b4b  accent=#818cf8  text=#e0e7ff
 ```
 
 **OG image template (1200×630):**
+
 ```xml
 <svg viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
   <rect width="1200" height="630" fill="#0d1117"/>
@@ -437,6 +573,7 @@ Purple:       bg=#1e1b4b  accent=#818cf8  text=#e0e7ff
 ```
 
 **Dark theme with dot pattern:**
+
 ```xml
 <svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -454,6 +591,7 @@ Purple:       bg=#1e1b4b  accent=#818cf8  text=#e0e7ff
 ```
 
 **Wave decoration:**
+
 ```xml
 <svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg">
   <rect width="1280" height="640" fill="#1e293b"/>

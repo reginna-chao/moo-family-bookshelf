@@ -17,8 +17,14 @@ function getDotClientPos(index: number) {
 function simulatePattern(svg: Element, dotIndices: number[]) {
   // Mock getBoundingClientRect so getEventPos computes correct coordinates
   vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
-    left: 0, top: 0, right: 200, bottom: 200,
-    width: 200, height: 200, x: 0, y: 0,
+    left: 0,
+    top: 0,
+    right: 200,
+    bottom: 200,
+    width: 200,
+    height: 200,
+    x: 0,
+    y: 0,
     toJSON: () => ({}),
   });
 
@@ -52,7 +58,9 @@ describe("PatternLock", () => {
     });
 
     it("displays external error", () => {
-      render(<PatternLock mode="verify" onComplete={vi.fn()} error="圖形錯誤" />);
+      render(
+        <PatternLock mode="verify" onComplete={vi.fn()} error="圖形錯誤" />,
+      );
       expect(screen.getByText("圖形錯誤")).toBeInTheDocument();
     });
 

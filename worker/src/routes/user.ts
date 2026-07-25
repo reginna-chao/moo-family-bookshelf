@@ -1,8 +1,21 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
-import { kvKeys, BoolFlag, type RawFamilyRecord, normalizeFamilyRecord, type UserBooksRecord, type PublicShelf, type BookEntry, MAX_FAMILY_PREF_ENTRIES } from "../kv/schema";
+import {
+  kvKeys,
+  BoolFlag,
+  type RawFamilyRecord,
+  normalizeFamilyRecord,
+  type UserBooksRecord,
+  type PublicShelf,
+  type BookEntry,
+  MAX_FAMILY_PREF_ENTRIES,
+} from "../kv/schema";
 import { writePublicSnapshot } from "./publicShelf";
-import { isValidUserId, sanitizeDisplayName, isValidFamilyPrefRef } from "../utils/validation";
+import {
+  isValidUserId,
+  sanitizeDisplayName,
+  isValidFamilyPrefRef,
+} from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
@@ -35,9 +48,14 @@ async function resolveDisplayName(
   clientValue: unknown,
 ): Promise<string> {
   if (memberFamilyId) {
-    const familyRaw = await kv.get<RawFamilyRecord>(kvKeys.family(memberFamilyId), "json");
+    const familyRaw = await kv.get<RawFamilyRecord>(
+      kvKeys.family(memberFamilyId),
+      "json",
+    );
     if (familyRaw) {
-      const self = normalizeFamilyRecord(familyRaw).members.find((m) => m.userId === userId);
+      const self = normalizeFamilyRecord(familyRaw).members.find(
+        (m) => m.userId === userId,
+      );
       if (self) return self.displayName;
     }
   }
@@ -49,7 +67,11 @@ async function resolveDisplayName(
 // ---------------------------------------------------------------------------
 
 export type ParseChangesOk = { ok: true; changeMap: Map<string, BoolFlag> };
-export type ParseChangesErr = { ok: false; code: "INVALID_PAYLOAD"; message: string };
+export type ParseChangesErr = {
+  ok: false;
+  code: "INVALID_PAYLOAD";
+  message: string;
+};
 export type ParseChangesResult = ParseChangesOk | ParseChangesErr;
 
 /**
@@ -62,26 +84,50 @@ export function parsePatchChanges(
   maxChanges: number,
 ): ParseChangesResult {
   if (!Array.isArray(body.changes)) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: "changes array is required" };
+    return {
+      ok: false,
+      code: "INVALID_PAYLOAD",
+      message: "changes array is required",
+    };
   }
   const changes = body.changes as unknown[];
   if (changes.length === 0) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: "changes array must not be empty" };
+    return {
+      ok: false,
+      code: "INVALID_PAYLOAD",
+      message: "changes array must not be empty",
+    };
   }
   if (changes.length > maxChanges) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: `changes array exceeds maximum of ${maxChanges}` };
+    return {
+      ok: false,
+      code: "INVALID_PAYLOAD",
+      message: `changes array exceeds maximum of ${maxChanges}`,
+    };
   }
   const changeMap = new Map<string, BoolFlag>();
   for (const entry of changes) {
     if (typeof entry !== "object" || entry === null) {
-      return { ok: false, code: "INVALID_PAYLOAD", message: "Each change must be an object with bookId and isShared" };
+      return {
+        ok: false,
+        code: "INVALID_PAYLOAD",
+        message: "Each change must be an object with bookId and isShared",
+      };
     }
     const { bookId, isShared } = entry as Record<string, unknown>;
     if (typeof bookId !== "string" || bookId.length === 0) {
-      return { ok: false, code: "INVALID_PAYLOAD", message: "bookId must be a non-empty string" };
+      return {
+        ok: false,
+        code: "INVALID_PAYLOAD",
+        message: "bookId must be a non-empty string",
+      };
     }
     if (isShared !== BoolFlag.FALSE && isShared !== BoolFlag.TRUE) {
-      return { ok: false, code: "INVALID_PAYLOAD", message: "isShared must be 0 or 1" };
+      return {
+        ok: false,
+        code: "INVALID_PAYLOAD",
+        message: "isShared must be 0 or 1",
+      };
     }
     changeMap.set(bookId, isShared as BoolFlag);
   }
@@ -89,20 +135,29 @@ export function parsePatchChanges(
 }
 
 export type ValidateDisplayNameResult =
-  | { ok: true }
-  | { ok: false; code: "INVALID_PAYLOAD"; message: string };
+  { ok: true } | { ok: false; code: "INVALID_PAYLOAD"; message: string };
 
 /**
  * Validate the optional `displayName` field on a PATCH body.
  * Returns ok:true when the field is absent OR valid; an error descriptor otherwise.
  */
-export function validatePatchDisplayName(body: Record<string, unknown>): ValidateDisplayNameResult {
+export function validatePatchDisplayName(
+  body: Record<string, unknown>,
+): ValidateDisplayNameResult {
   if (body.displayName === undefined) return { ok: true };
   if (typeof body.displayName === "string" && body.displayName === "") {
-    return { ok: false, code: "INVALID_PAYLOAD", message: "displayName must not be empty string" };
+    return {
+      ok: false,
+      code: "INVALID_PAYLOAD",
+      message: "displayName must not be empty string",
+    };
   }
   if (sanitizeDisplayName(body.displayName) === null) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: "displayName is invalid" };
+    return {
+      ok: false,
+      code: "INVALID_PAYLOAD",
+      message: "displayName is invalid",
+    };
   }
   return { ok: true };
 }
@@ -117,7 +172,11 @@ export type FamilyPrefKind = (typeof FAMILY_PREF_KINDS)[number];
 
 export type ParsedFamilyPrefs = Partial<Record<FamilyPrefKind, string[]>>;
 export type ParseFamilyPrefsOk = { ok: true; prefs: ParsedFamilyPrefs };
-export type ParseFamilyPrefsErr = { ok: false; code: "INVALID_PAYLOAD"; message: string };
+export type ParseFamilyPrefsErr = {
+  ok: false;
+  code: "INVALID_PAYLOAD";
+  message: string;
+};
 export type ParseFamilyPrefsResult = ParseFamilyPrefsOk | ParseFamilyPrefsErr;
 
 type ParseListResult =
@@ -129,7 +188,11 @@ type ParseListResult =
  * form `"{ownerId}:{bookId}"`, deduped (first-seen order preserved), capped at
  * `max`. An empty array is valid and means "clear this list".
  */
-function parsePrefList(kind: FamilyPrefKind, value: unknown[], max: number): ParseListResult {
+function parsePrefList(
+  kind: FamilyPrefKind,
+  value: unknown[],
+  max: number,
+): ParseListResult {
   const seen = new Set<string>();
   const values: string[] = [];
   for (const entry of value) {
@@ -145,7 +208,11 @@ function parsePrefList(kind: FamilyPrefKind, value: unknown[], max: number): Par
     values.push(entry);
   }
   if (values.length > max) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: `${kind} array exceeds maximum of ${max} entries` };
+    return {
+      ok: false,
+      code: "INVALID_PAYLOAD",
+      message: `${kind} array exceeds maximum of ${max} entries`,
+    };
   }
   return { ok: true, values };
 }
@@ -166,7 +233,11 @@ export function parseFamilyPrefs(
   // true, "x"); without this guard `kind in body` throws a TypeError that
   // surfaces as 500 instead of a clean 400.
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: "request body must be a JSON object" };
+    return {
+      ok: false,
+      code: "INVALID_PAYLOAD",
+      message: "request body must be a JSON object",
+    };
   }
   const record = body as Record<string, unknown>;
   const prefs: ParsedFamilyPrefs = {};
@@ -175,20 +246,32 @@ export function parseFamilyPrefs(
     if (!(kind in record)) continue;
     anyPresent = true;
     if (!Array.isArray(record[kind])) {
-      return { ok: false, code: "INVALID_PAYLOAD", message: `${kind} must be an array` };
+      return {
+        ok: false,
+        code: "INVALID_PAYLOAD",
+        message: `${kind} must be an array`,
+      };
     }
     const result = parsePrefList(kind, record[kind] as unknown[], max);
     if (!result.ok) return result;
     prefs[kind] = result.values;
   }
   if (!anyPresent) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: "at least one of hidden/favorites array is required" };
+    return {
+      ok: false,
+      code: "INVALID_PAYLOAD",
+      message: "at least one of hidden/favorites array is required",
+    };
   }
   return { ok: true, prefs };
 }
 
 export type ParseBooksOk = { ok: true; books: BookEntry[] };
-export type ParseBooksErr = { ok: false; code: "INVALID_PAYLOAD"; message: string };
+export type ParseBooksErr = {
+  ok: false;
+  code: "INVALID_PAYLOAD";
+  message: string;
+};
 export type ParseBooksResult = ParseBooksOk | ParseBooksErr;
 
 /** Coerce a raw isShared/isArchived value to a BoolFlag. Any truthy-1 maps to TRUE, everything else FALSE. */
@@ -206,18 +289,33 @@ function asString(value: unknown): string {
  * Every entry is rebuilt from an explicit field allowlist so unvalidated client
  * fields never reach KV; isShared/isArchived are normalized to BoolFlag.
  */
-export function parseBooks(rawBooks: unknown[], maxBooks: number): ParseBooksResult {
+export function parseBooks(
+  rawBooks: unknown[],
+  maxBooks: number,
+): ParseBooksResult {
   if (rawBooks.length > maxBooks) {
-    return { ok: false, code: "INVALID_PAYLOAD", message: `books array exceeds maximum of ${maxBooks}` };
+    return {
+      ok: false,
+      code: "INVALID_PAYLOAD",
+      message: `books array exceeds maximum of ${maxBooks}`,
+    };
   }
   const books: BookEntry[] = [];
   for (const entry of rawBooks) {
     if (typeof entry !== "object" || entry === null) {
-      return { ok: false, code: "INVALID_PAYLOAD", message: "Each book must be an object" };
+      return {
+        ok: false,
+        code: "INVALID_PAYLOAD",
+        message: "Each book must be an object",
+      };
     }
     const e = entry as Record<string, unknown>;
     if (typeof e.bookId !== "string" || e.bookId.length === 0) {
-      return { ok: false, code: "INVALID_PAYLOAD", message: "Each book requires a non-empty string bookId" };
+      return {
+        ok: false,
+        code: "INVALID_PAYLOAD",
+        message: "Each book requires a non-empty string bookId",
+      };
     }
     const book: BookEntry = {
       bookId: e.bookId,
@@ -362,7 +460,10 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
   // Extension/PWA clients always round-trip a full `{ hidden, favorites }` object.
   let parsedPrefs: { hidden: string[]; favorites: string[] } | undefined;
   if (body.familyShelfPrefs !== undefined) {
-    const prefsResult = parseFamilyPrefs(body.familyShelfPrefs, MAX_FAMILY_PREF_ENTRIES);
+    const prefsResult = parseFamilyPrefs(
+      body.familyShelfPrefs,
+      MAX_FAMILY_PREF_ENTRIES,
+    );
     if (!prefsResult.ok) {
       return jsonError(c, 400, prefsResult.code, prefsResult.message);
     }
@@ -381,12 +482,18 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
   // Resolve displayName: family record is authoritative when the user is in a family
   // (even an empty value, which represents a deliberate clear). Only fall back to the
   // client-supplied value when there is no family membership / family record.
-  const serverDisplayName = await resolveDisplayName(c.env.KV, userId, memberFamilyId, body.displayName);
+  const serverDisplayName = await resolveDisplayName(
+    c.env.KV,
+    userId,
+    memberFamilyId,
+    body.displayName,
+  );
 
   // Build the persisted record from a fixed allowlist only. userId always comes
   // from the authenticated path param, never from body.userId.
   const record: UserBooksRecord = {
-    schemaVersion: typeof body.schemaVersion === "number" ? body.schemaVersion : 1,
+    schemaVersion:
+      typeof body.schemaVersion === "number" ? body.schemaVersion : 1,
     userId,
     displayName: serverDisplayName,
     books: parsedBooks.books,
@@ -503,9 +610,15 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   }
 
   // Resolve displayName: only update if explicitly provided in body
-  const displayName = body.displayName !== undefined
-    ? await resolveDisplayName(c.env.KV, userId, memberFamilyId, body.displayName)
-    : existing.displayName;
+  const displayName =
+    body.displayName !== undefined
+      ? await resolveDisplayName(
+          c.env.KV,
+          userId,
+          memberFamilyId,
+          body.displayName,
+        )
+      : existing.displayName;
 
   const record: UserBooksRecord = {
     ...existing,
@@ -582,14 +695,22 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
   }
 
   if (!body) {
-    return jsonError(c, 400, "INVALID_PAYLOAD", "at least one of hidden/favorites array is required");
+    return jsonError(
+      c,
+      400,
+      "INVALID_PAYLOAD",
+      "at least one of hidden/favorites array is required",
+    );
   }
   const parsed = parseFamilyPrefs(body, MAX_FAMILY_PREF_ENTRIES);
   if (!parsed.ok) {
     return jsonError(c, 400, parsed.code, parsed.message);
   }
 
-  const existing = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
+  const existing = await c.env.KV.get<UserBooksRecord>(
+    kvKeys.user(userId),
+    "json",
+  );
   if (!existing) {
     return jsonError(c, 404, "NOT_FOUND", "User record not found");
   }
@@ -614,7 +735,9 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
 
   await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
 
-  return c.json({ data: { ok: true, hidden: merged.hidden, favorites: merged.favorites } });
+  return c.json({
+    data: { ok: true, hidden: merged.hidden, favorites: merged.favorites },
+  });
 });
 
 // DELETE /api/user/:id — delete user account
@@ -648,7 +771,12 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
   }
 
   if (callerId !== userId) {
-    return jsonError(c, 403, "FORBIDDEN", "Cannot delete another user's account");
+    return jsonError(
+      c,
+      403,
+      "FORBIDDEN",
+      "Cannot delete another user's account",
+    );
   }
 
   // Check family membership
@@ -665,7 +793,12 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
 
       if (record.ownerId === userId) {
         if (record.members.length > 1) {
-          return jsonError(c, 403, "OWNER_CANNOT_DELETE", "管理者必須先轉移管理權才能移除帳戶");
+          return jsonError(
+            c,
+            403,
+            "OWNER_CANNOT_DELETE",
+            "管理者必須先轉移管理權才能移除帳戶",
+          );
         }
 
         // Single-member owner: delete entire family record
@@ -679,8 +812,12 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
   }
 
   // Collect public shelf tokens for cleanup
-  const userRecord = await c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json");
-  const publicTokens = userRecord?.publicSharing?.shelves?.map((s) => s.shareToken) ?? [];
+  const userRecord = await c.env.KV.get<UserBooksRecord>(
+    kvKeys.user(userId),
+    "json",
+  );
+  const publicTokens =
+    userRecord?.publicSharing?.shelves?.map((s) => s.shareToken) ?? [];
 
   // Delete all user data in parallel
   await Promise.all([

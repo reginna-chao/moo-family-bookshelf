@@ -184,10 +184,9 @@ describe("useSearch", () => {
   });
 
   it("updates filtered items when source items change", () => {
-    const { result, rerender } = renderHook(
-      ({ items }) => useSearch(items),
-      { initialProps: { items: ITEMS } },
-    );
+    const { result, rerender } = renderHook(({ items }) => useSearch(items), {
+      initialProps: { items: ITEMS },
+    });
 
     act(() => {
       result.current.setSearchTerm("React");

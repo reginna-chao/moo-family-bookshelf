@@ -60,7 +60,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   const optionId = useId();
 
   const triggerClass = [
-    "moo-sort__trigger",
+    "moo-button moo-button--ghost-icon moo-button--icon moo-sort__trigger",
     isMobile ? "moo-sort__trigger--mobile" : "",
     isActive ? "moo-sort__trigger--active" : "",
   ]

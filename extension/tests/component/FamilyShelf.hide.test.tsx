@@ -1,4 +1,11 @@
-import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+  within,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
@@ -58,7 +65,12 @@ vi.mock("@/constants", async (importOriginal) => {
 });
 
 function makeBooks(
-  books: Array<{ bookId: string; title: string; author: string; isShared: BoolFlag }>,
+  books: Array<{
+    bookId: string;
+    title: string;
+    author: string;
+    isShared: BoolFlag;
+  }>,
 ) {
   return books;
 }
@@ -87,9 +99,11 @@ function createMockApiClient(opts: MockOpts = {}): ApiClient {
         data: { familyId: "fam-1", ownerId: "user-1", members: [] },
       },
     ),
-    getFamilyBookshelf: vi.fn().mockResolvedValue(
-      opts.bookshelf ?? { data: { familyId: "fam-1", members: [] } },
-    ),
+    getFamilyBookshelf: vi
+      .fn()
+      .mockResolvedValue(
+        opts.bookshelf ?? { data: { familyId: "fam-1", members: [] } },
+      ),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
     setEndpoint: vi.fn(),
     setAuthToken: vi.fn(),
@@ -107,14 +121,20 @@ function renderShelf(
   { familyId = "fam-1", userId = "user-1" } = {},
 ) {
   return render(
-    <FamilyDataProvider familyId={familyId} userId={userId} apiClient={apiClient}>
+    <FamilyDataProvider
+      familyId={familyId}
+      userId={userId}
+      apiClient={apiClient}
+    >
       <FamilyShelf userId={userId} />
     </FamilyDataProvider>,
   );
 }
 
 /** Single member (Alice) with two shared books. */
-function aliceTwoBooks(members?: Array<{ userId: string; displayName: string }>) {
+function aliceTwoBooks(
+  members?: Array<{ userId: string; displayName: string }>,
+) {
   return {
     members: {
       data: {
@@ -131,8 +151,18 @@ function aliceTwoBooks(members?: Array<{ userId: string; displayName: string }>)
             userId: "user-2",
             displayName: "Alice",
             books: makeBooks([
-              { bookId: "b1", title: "書一", author: "A", isShared: BoolFlag.TRUE },
-              { bookId: "b2", title: "書二", author: "B", isShared: BoolFlag.TRUE },
+              {
+                bookId: "b1",
+                title: "書一",
+                author: "A",
+                isShared: BoolFlag.TRUE,
+              },
+              {
+                bookId: "b2",
+                title: "書二",
+                author: "B",
+                isShared: BoolFlag.TRUE,
+              },
             ]),
             lastUpdated: "2024-01-01",
           },
@@ -288,7 +318,12 @@ describe("FamilyShelf — hide feature", () => {
               userId: "user-1",
               displayName: "Me",
               books: makeBooks([
-                { bookId: "self-1", title: "我的書", author: "A", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "self-1",
+                  title: "我的書",
+                  author: "A",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },
@@ -296,7 +331,12 @@ describe("FamilyShelf — hide feature", () => {
               userId: "user-2",
               displayName: "Alice",
               books: makeBooks([
-                { bookId: "b2", title: "Alice的書", author: "B", isShared: BoolFlag.TRUE },
+                {
+                  bookId: "b2",
+                  title: "Alice的書",
+                  author: "B",
+                  isShared: BoolFlag.TRUE,
+                },
               ]),
               lastUpdated: "2024-01-01",
             },

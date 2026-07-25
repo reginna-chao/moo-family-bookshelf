@@ -1,6 +1,12 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
-import { kvKeys, BoolFlag, type RawFamilyRecord, type UserBooksRecord, normalizeFamilyRecord } from "../kv/schema";
+import {
+  kvKeys,
+  BoolFlag,
+  type RawFamilyRecord,
+  type UserBooksRecord,
+  normalizeFamilyRecord,
+} from "../kv/schema";
 import { isValidFamilyId } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
@@ -8,7 +14,9 @@ import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 import { FamilyIdParam } from "../schemas/common";
 
-export const bookshelfRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
+export const bookshelfRoutes = new OpenAPIHono<{ Bindings: Env }>({
+  defaultHook,
+});
 
 // --- Route definition ---
 
@@ -36,7 +44,12 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
   const familyId = c.req.param("id");
 
   if (!isValidFamilyId(familyId)) {
-    return jsonError(c, 400, "INVALID_FAMILY_ID", "Family ID format is invalid");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
   }
 
   // Verify caller is authenticated and a member of this family
@@ -80,7 +93,9 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
         kvKeys.user(member.userId),
         "json",
       );
-      const sharedBooks = (record?.books ?? []).filter((b) => b.isShared === BoolFlag.TRUE);
+      const sharedBooks = (record?.books ?? []).filter(
+        (b) => b.isShared === BoolFlag.TRUE,
+      );
       return {
         userId: member.userId,
         displayName: member.displayName,
@@ -90,10 +105,13 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
     }),
   );
 
-  return c.json({
-    data: {
-      familyId,
-      members: memberBooks,
+  return c.json(
+    {
+      data: {
+        familyId,
+        members: memberBooks,
+      },
     },
-  }, 200);
+    200,
+  );
 });

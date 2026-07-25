@@ -29,7 +29,9 @@ describe("ApiClient verification methods", () => {
 
   describe("getVerifyMethod", () => {
     it("should call GET /api/user/:id/verify", async () => {
-      const responseData = { data: { method: "pin" as VerifyMethod, prompted: 1 } };
+      const responseData = {
+        data: { method: "pin" as VerifyMethod, prompted: 1 },
+      };
       mockFetch.mockResolvedValueOnce(jsonResponse(responseData));
 
       const result = await client.getVerifyMethod(USER_1);
@@ -41,7 +43,9 @@ describe("ApiClient verification methods", () => {
     });
 
     it("should reject invalid userId", async () => {
-      await expect(client.getVerifyMethod("invalid")).rejects.toThrow("Invalid userId");
+      await expect(client.getVerifyMethod("invalid")).rejects.toThrow(
+        "Invalid userId",
+      );
     });
   });
 
@@ -86,13 +90,17 @@ describe("ApiClient verification methods", () => {
 
       expect(mockFetch).toHaveBeenCalledOnce();
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toBe(`https://api.example.com/api/user/${USER_1}/verify/prompted`);
+      expect(url).toBe(
+        `https://api.example.com/api/user/${USER_1}/verify/prompted`,
+      );
       expect(init.method).toBe("POST");
       expect(result.data).toEqual({ ok: true });
     });
 
     it("should reject invalid userId", async () => {
-      await expect(client.markVerifyPrompted("bad")).rejects.toThrow("Invalid userId");
+      await expect(client.markVerifyPrompted("bad")).rejects.toThrow(
+        "Invalid userId",
+      );
     });
   });
 

@@ -44,8 +44,10 @@ export function useTokenRefresh(apiClient: ApiClient): void {
         if (success) {
           // Re-read tokenExpiresAt to see if it was updated by the refresh
           try {
-            const updated = await browser.storage.local.get(TOKEN_EXPIRES_AT_KEY);
-            const newExpiry = updated[TOKEN_EXPIRES_AT_KEY] as number | undefined;
+            const updated =
+              await browser.storage.local.get(TOKEN_EXPIRES_AT_KEY);
+            const newExpiry = updated[TOKEN_EXPIRES_AT_KEY] as
+              number | undefined;
             const newDelay = newExpiry
               ? newExpiry - Date.now() - REFRESH_BUFFER_MS
               : 0;

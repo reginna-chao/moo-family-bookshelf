@@ -21,21 +21,26 @@ describe("sortBooks", () => {
     expect(result).toBe(books);
   });
 
-  it.each<BookSortMode>(["title-asc", "title-desc", "author-asc", "author-desc"])(
-    "does not mutate the input array for '%s'",
-    (mode) => {
-      const copy = [...books];
-      sortBooks(books, mode);
-      expect(books).toEqual(copy);
-    },
-  );
+  it.each<BookSortMode>([
+    "title-asc",
+    "title-desc",
+    "author-asc",
+    "author-desc",
+  ])("does not mutate the input array for '%s'", (mode) => {
+    const copy = [...books];
+    sortBooks(books, mode);
+    expect(books).toEqual(copy);
+  });
 
-  it.each<BookSortMode>(["default", "title-asc", "title-desc", "author-asc", "author-desc"])(
-    "returns empty array for empty input with '%s'",
-    (mode) => {
-      expect(sortBooks([], mode)).toEqual([]);
-    },
-  );
+  it.each<BookSortMode>([
+    "default",
+    "title-asc",
+    "title-desc",
+    "author-asc",
+    "author-desc",
+  ])("returns empty array for empty input with '%s'", (mode) => {
+    expect(sortBooks([], mode)).toEqual([]);
+  });
 
   describe("sort by title", () => {
     it("sorts titles ascending in zh-Hant collation order for 'title-asc'", () => {
@@ -95,9 +100,21 @@ describe("normalizeSortMode", () => {
   it.each<{ input: unknown; expected: BookSortMode; desc: string }>([
     { input: "default", expected: "default", desc: "canonical default" },
     { input: "title-asc", expected: "title-asc", desc: "canonical title-asc" },
-    { input: "title-desc", expected: "title-desc", desc: "canonical title-desc" },
-    { input: "author-asc", expected: "author-asc", desc: "canonical author-asc" },
-    { input: "author-desc", expected: "author-desc", desc: "canonical author-desc" },
+    {
+      input: "title-desc",
+      expected: "title-desc",
+      desc: "canonical title-desc",
+    },
+    {
+      input: "author-asc",
+      expected: "author-asc",
+      desc: "canonical author-asc",
+    },
+    {
+      input: "author-desc",
+      expected: "author-desc",
+      desc: "canonical author-desc",
+    },
     { input: "title", expected: "title-asc", desc: "legacy title alias" },
     { input: "author", expected: "author-asc", desc: "legacy author alias" },
     { input: "bogus", expected: "default", desc: "unknown string" },
@@ -109,9 +126,21 @@ describe("normalizeSortMode", () => {
     // Regression guard (W1): prototype-chain keys must not resolve to inherited
     // Object/Function members via LEGACY_ALIASES lookup. The Object.hasOwn guard
     // makes these fall back to 'default' instead of returning an object/function.
-    { input: "__proto__", expected: "default", desc: "prototype-chain key __proto__" },
-    { input: "constructor", expected: "default", desc: "prototype-chain key constructor" },
-    { input: "toString", expected: "default", desc: "prototype-chain key toString" },
+    {
+      input: "__proto__",
+      expected: "default",
+      desc: "prototype-chain key __proto__",
+    },
+    {
+      input: "constructor",
+      expected: "default",
+      desc: "prototype-chain key constructor",
+    },
+    {
+      input: "toString",
+      expected: "default",
+      desc: "prototype-chain key toString",
+    },
   ])("normalizes $desc to '$expected'", ({ input, expected }) => {
     expect(normalizeSortMode(input)).toBe(expected);
   });

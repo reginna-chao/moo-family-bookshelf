@@ -114,7 +114,8 @@ describe("BookCard", () => {
   });
 
   it("renders with a long title without error", () => {
-    const longTitle = "這是一個非常長的書名，用來測試文字截斷功能是否正常運作，超過兩行後應該要顯示省略號";
+    const longTitle =
+      "這是一個非常長的書名，用來測試文字截斷功能是否正常運作，超過兩行後應該要顯示省略號";
     render(<BookCard book={makeBook({ title: longTitle })} />);
 
     expect(screen.getByText(longTitle)).toBeInTheDocument();
@@ -130,35 +131,57 @@ describe("BookCard", () => {
   describe("hide action overflow menu (v1.5.0)", () => {
     it("renders the overflow trigger when both onHideToggle and label are provided", () => {
       render(
-        <BookCard book={makeBook()} onHideToggle={() => {}} hideActionLabel="隱藏書籍" />,
+        <BookCard
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="隱藏書籍"
+        />,
       );
-      expect(screen.getByRole("button", { name: "更多選項" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "更多選項" }),
+      ).toBeInTheDocument();
     });
 
     it("shows the hide label as a menuitem after opening the menu", () => {
       render(
-        <BookCard book={makeBook()} onHideToggle={() => {}} hideActionLabel="隱藏書籍" />,
+        <BookCard
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="隱藏書籍"
+        />,
       );
       fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
-      expect(screen.getByRole("menuitem", { name: "隱藏書籍" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("menuitem", { name: "隱藏書籍" }),
+      ).toBeInTheDocument();
     });
 
     it("shows the unhide label as a menuitem in showHidden mode", () => {
       render(
-        <BookCard book={makeBook()} onHideToggle={() => {}} hideActionLabel="取消隱藏" />,
+        <BookCard
+          book={makeBook()}
+          onHideToggle={() => {}}
+          hideActionLabel="取消隱藏"
+        />,
       );
       fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
-      expect(screen.getByRole("menuitem", { name: "取消隱藏" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("menuitem", { name: "取消隱藏" }),
+      ).toBeInTheDocument();
     });
 
     it("does not render the overflow trigger when onHideToggle is missing", () => {
       render(<BookCard book={makeBook()} hideActionLabel="隱藏書籍" />);
-      expect(screen.queryByRole("button", { name: "更多選項" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "更多選項" }),
+      ).not.toBeInTheDocument();
     });
 
     it("does not render the overflow trigger when label is missing", () => {
       render(<BookCard book={makeBook()} onHideToggle={() => {}} />);
-      expect(screen.queryByRole("button", { name: "更多選項" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "更多選項" }),
+      ).not.toBeInTheDocument();
     });
 
     it("calls onHideToggle when the menuitem is clicked", () => {
@@ -185,21 +208,31 @@ describe("BookCard", () => {
         />,
       );
       fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
-      expect(screen.queryByRole("menuitem", { name: "加入最愛" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("menuitem", { name: "取消最愛" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("menuitem", { name: "加入最愛" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("menuitem", { name: "取消最愛" }),
+      ).not.toBeInTheDocument();
     });
   });
 
   describe("favorite heart button (v1.5.0)", () => {
     it("renders the heart button (always visible) when onFavoriteToggle is provided", () => {
       render(<BookCard book={makeBook()} onFavoriteToggle={() => {}} />);
-      expect(screen.getByRole("button", { name: "加入最愛" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "加入最愛" }),
+      ).toBeInTheDocument();
     });
 
     it("does not render the heart button when onFavoriteToggle is missing", () => {
       render(<BookCard book={makeBook()} />);
-      expect(screen.queryByRole("button", { name: "加入最愛" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "取消最愛" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "加入最愛" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "取消最愛" }),
+      ).not.toBeInTheDocument();
     });
 
     it("shows the filled/pressed state and 取消最愛 label when isFavorite is true", () => {
@@ -218,7 +251,9 @@ describe("BookCard", () => {
 
     it("calls onFavoriteToggle when the heart is clicked", () => {
       const onFavoriteToggle = vi.fn();
-      render(<BookCard book={makeBook()} onFavoriteToggle={onFavoriteToggle} />);
+      render(
+        <BookCard book={makeBook()} onFavoriteToggle={onFavoriteToggle} />,
+      );
       fireEvent.click(screen.getByRole("button", { name: "加入最愛" }));
       expect(onFavoriteToggle).toHaveBeenCalledTimes(1);
     });
@@ -234,9 +269,15 @@ describe("BookCard", () => {
           onFavoriteToggle={() => {}}
         />,
       );
-      expect(screen.getByRole("button", { name: "申請借閱" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "加入最愛" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "更多選項" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "申請借閱" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "加入最愛" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "更多選項" }),
+      ).toBeInTheDocument();
     });
   });
 });

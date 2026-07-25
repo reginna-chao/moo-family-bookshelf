@@ -15,15 +15,27 @@ describe("ViewModeToggle", () => {
   it("marks grid button as pressed when mode is 'grid'", () => {
     render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
 
-    expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("marks row button as pressed when mode is 'row'", () => {
     render(<ViewModeToggle mode="row" onChange={vi.fn()} />);
 
-    expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("切換為網格檢視")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByLabelText("切換為列表檢視")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("calls onChange('grid') when grid button is clicked", () => {
@@ -45,7 +57,9 @@ describe("ViewModeToggle", () => {
   it("has a group role with accessible label", () => {
     render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
 
-    expect(screen.getByRole("group", { name: "家庭書櫃顯示模式" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: "家庭書櫃顯示模式" }),
+    ).toBeInTheDocument();
   });
 
   it("places the grid button first with left-rounded corners", () => {

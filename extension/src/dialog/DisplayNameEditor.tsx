@@ -7,8 +7,13 @@ export interface DisplayNameEditorProps extends UseDisplayNameResult {
 }
 
 export function DisplayNameEditor({
-  displayName, savedDisplayName, nameSaveState, nameSaveError,
-  setDisplayName, handleSaveDisplayName, userId,
+  displayName,
+  savedDisplayName,
+  nameSaveState,
+  nameSaveError,
+  setDisplayName,
+  handleSaveDisplayName,
+  userId,
 }: DisplayNameEditorProps) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -36,7 +41,9 @@ export function DisplayNameEditor({
   return (
     <div className="moo-name-editor">
       <div className="moo-name-editor__label">顯示名稱</div>
-      <div className="moo-name-editor__hint">此名稱僅用於家庭書櫃，不影響讀墨帳號</div>
+      <div className="moo-name-editor__hint">
+        此名稱僅用於家庭書櫃，不影響讀墨帳號
+      </div>
       {editing ? (
         <>
           <div className="moo-name-editor__row" aria-busy={saving}>
@@ -56,40 +63,44 @@ export function DisplayNameEditor({
               maxLength={20}
               placeholder="輸入顯示名稱"
               disabled={saving}
-              className="moo-name-editor__input"
+              className="moo-form-input moo-form-input--block moo-name-editor__input"
             />
             <button
               onClick={() => void handleConfirm()}
               disabled={saving}
               aria-label={saving ? "儲存中" : "確認儲存"}
-              className="moo-name-editor__icon-btn"
+              className="moo-button moo-button--ghost-icon moo-name-editor__icon-btn"
             >
               {saving ? (
                 <div className="moo-name-editor__spinner" />
               ) : (
-                <Check size={16} style={{ color: "var(--moo-primary)" }} />
+                <Check size={16} />
               )}
             </button>
             <button
               onClick={handleCancel}
               disabled={saving}
               aria-label="取消編輯"
-              className="moo-name-editor__icon-btn moo-name-editor__icon-btn--dim"
+              className="moo-button moo-button--ghost-icon moo-name-editor__icon-btn moo-name-editor__icon-btn--dim"
             >
-              <X size={16} style={{ color: "var(--moo-text-faint)" }} />
+              <X size={16} />
             </button>
           </div>
-          {nameSaveError && <div className="moo-name-editor__error">{nameSaveError}</div>}
+          {nameSaveError && (
+            <div className="moo-name-editor__error">{nameSaveError}</div>
+          )}
         </>
       ) : (
         <div className="moo-name-editor__row">
-          <span className="moo-name-editor__value">{savedDisplayName || userId.slice(0, 8)}</span>
+          <span className="moo-name-editor__value">
+            {savedDisplayName || userId.slice(0, 8)}
+          </span>
           <button
             onClick={() => setEditing(true)}
             aria-label="編輯顯示名稱"
-            className="moo-name-editor__icon-btn"
+            className="moo-button moo-button--ghost-icon moo-name-editor__icon-btn"
           >
-            <Pencil size={16} style={{ color: "var(--moo-text-faint)" }} />
+            <Pencil size={16} />
           </button>
         </div>
       )}

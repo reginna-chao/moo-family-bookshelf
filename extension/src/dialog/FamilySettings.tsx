@@ -37,6 +37,16 @@ function switchKnobClass(on: boolean): string {
   return on ? "moo-switch__knob moo-switch__knob--on" : "moo-switch__knob";
 }
 
+// Map each report service to its brand-color hover modifier (see styles.css).
+function reportLinkClass(name: string): string {
+  const modifier =
+    { GoogleForm: "--google", GitHub: "--github", Plurk: "--plurk" }[name] ??
+    "";
+  return modifier
+    ? `moo-settings__report-link moo-settings__report-link${modifier}`
+    : "moo-settings__report-link";
+}
+
 export interface FamilySettingsProps {
   familyId: string;
   userId: string;
@@ -46,7 +56,12 @@ export interface FamilySettingsProps {
 type LeaveState = "idle" | "confirming" | "leaving";
 type DeleteState = "idle" | "confirming" | "deleting";
 
-export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilySettingsProps) {
+export function FamilySettings({
+  familyId,
+  userId,
+  apiClient,
+  onLeave,
+}: FamilySettingsProps) {
   const {
     members,
     ownerId,
@@ -69,22 +84,29 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
   const [deleteError, setDeleteError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
   const { size: iconSize, setSize: setIconSize } = useFloatingIconSize();
-  const { interval: autoSyncInterval, setInterval: setAutoSyncInterval } = useAutoSyncInterval();
+  const { interval: autoSyncInterval, setInterval: setAutoSyncInterval } =
+    useAutoSyncInterval();
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inviteCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inviteCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const selfMember = members.find((m) => m.userId === userId);
   // Pass the server's authoritative displayName from context. While members is
   // still loading, selfMember is undefined → useDisplayName falls back to
   // chrome.storage.local for an optimistic display.
   const initialDisplayName = selfMember?.displayName;
   const displayNameState = useDisplayName({
-    apiClient, familyId, userId, initialDisplayName,
+    apiClient,
+    familyId,
+    userId,
+    initialDisplayName,
   });
 
   useEffect(() => {
     return () => {
       if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
-      if (inviteCopiedTimerRef.current !== null) clearTimeout(inviteCopiedTimerRef.current);
+      if (inviteCopiedTimerRef.current !== null)
+        clearTimeout(inviteCopiedTimerRef.current);
     };
   }, []);
 
@@ -148,12 +170,18 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     if (familyEndpoint && familyEndpoint !== currentEndpoint) {
       apiClient.setEndpoint(familyEndpoint);
       void Promise.resolve(
-        browser.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: familyEndpoint }),
+        browser.runtime.sendMessage({
+          type: "SET_API_ENDPOINT",
+          apiEndpoint: familyEndpoint,
+        }),
       ).catch(() => {});
     } else if (!familyEndpoint && currentEndpoint !== DEFAULT_API_ENDPOINT) {
       apiClient.setEndpoint(DEFAULT_API_ENDPOINT);
       void Promise.resolve(
-        browser.runtime.sendMessage({ type: "SET_API_ENDPOINT", apiEndpoint: null }),
+        browser.runtime.sendMessage({
+          type: "SET_API_ENDPOINT",
+          apiEndpoint: null,
+        }),
       ).catch(() => {});
     }
   }, [membersState, familyEndpoint, apiClient]);
@@ -168,10 +196,16 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
 
   const handleInviteCopy = async () => {
     if (!syncCode) return;
-    await navigator.clipboard.writeText(buildLinkInviteMessage(buildInviteUrl(syncCode)));
+    await navigator.clipboard.writeText(
+      buildLinkInviteMessage(buildInviteUrl(syncCode)),
+    );
     setInviteCopied(true);
-    if (inviteCopiedTimerRef.current !== null) clearTimeout(inviteCopiedTimerRef.current);
-    inviteCopiedTimerRef.current = setTimeout(() => setInviteCopied(false), 2000);
+    if (inviteCopiedTimerRef.current !== null)
+      clearTimeout(inviteCopiedTimerRef.current);
+    inviteCopiedTimerRef.current = setTimeout(
+      () => setInviteCopied(false),
+      2000,
+    );
   };
 
   const handleLeaveConfirm = async () => {
@@ -180,9 +214,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     try {
       const response = await apiClient.leaveFamily(familyId, userId);
       if (response.error) {
-        const msg = response.error.code === "OWNER_CANNOT_LEAVE"
-          ? "管理者必須先轉移管理權才能離開家庭"
-          : response.error.message;
+        const msg =
+          response.error.code === "OWNER_CANNOT_LEAVE"
+            ? "管理者必須先轉移管理權才能離開家庭"
+            : response.error.message;
         setLeaveError(msg);
         setLeaveState("idle");
         return;
@@ -200,9 +235,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
     try {
       const response = await apiClient.deleteAccount(userId);
       if (response.error) {
-        const msg = response.error.code === "OWNER_CANNOT_DELETE"
-          ? "管理者必須先轉移管理權才能移除帳戶"
-          : response.error.message;
+        const msg =
+          response.error.code === "OWNER_CANNOT_DELETE"
+            ? "管理者必須先轉移管理權才能移除帳戶"
+            : response.error.message;
         setDeleteError(msg);
         setDeleteState("idle");
         return;
@@ -213,7 +249,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
       try {
         await browser.storage.local.clear();
       } catch (clearErr) {
-        console.warn("[FamilySettings] Failed to clear local storage after account deletion", clearErr);
+        console.warn(
+          "[FamilySettings] Failed to clear local storage after account deletion",
+          clearErr,
+        );
       }
       onLeave();
     } catch (err) {
@@ -243,22 +282,35 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
               onClick={handleToggleSyncArchived}
               className="moo-switch"
             >
-              <span className={switchTrackClass(syncArchived === BoolFlag.TRUE)}>
-                <span className={switchKnobClass(syncArchived === BoolFlag.TRUE)} />
+              <span
+                className={switchTrackClass(syncArchived === BoolFlag.TRUE)}
+              >
+                <span
+                  className={switchKnobClass(syncArchived === BoolFlag.TRUE)}
+                />
               </span>
               同步封存書籍
             </button>
-            <div className="moo-settings__hint">啟用後，同步時會一併讀取已封存的書籍</div>
+            <div className="moo-settings__hint">
+              啟用後，同步時會一併讀取已封存的書籍
+            </div>
           </div>
           <div className="moo-settings__block">
             <div className="moo-settings__label">自動同步頻率</div>
-            <AutoSyncIntervalSelector value={autoSyncInterval} onChange={setAutoSyncInterval} />
-            <div className="moo-settings__hint">家庭書櫃自動讀取書單的頻率；手動同步不受此限制</div>
+            <AutoSyncIntervalSelector
+              value={autoSyncInterval}
+              onChange={setAutoSyncInterval}
+            />
+            <div className="moo-settings__hint">
+              家庭書櫃自動讀取書單的頻率；手動同步不受此限制
+            </div>
           </div>
           <div className="moo-settings__block">
             <div className="moo-settings__label">家庭書櫃按鈕大小</div>
             <FloatingIconSizeSelector size={iconSize} onChange={setIconSize} />
-            <div className="moo-settings__hint">在讀墨頁面顯示的家庭書櫃按鈕大小</div>
+            <div className="moo-settings__hint">
+              在讀墨頁面顯示的家庭書櫃按鈕大小
+            </div>
           </div>
         </>
       )}
@@ -276,7 +328,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           <div className="moo-settings__block">
             <div className="moo-settings__group-label">家庭同步碼</div>
             <div className="moo-settings__sync-code-box">
-              <span data-testid="sync-code" className="moo-settings__sync-code-text">
+              <span
+                data-testid="sync-code"
+                className="moo-settings__sync-code-text"
+              >
                 {syncCode ?? "載入中..."}
               </span>
             </div>
@@ -284,24 +339,35 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
               <button
                 onClick={handleCopy}
                 disabled={!syncCode}
-                className={copied ? "moo-settings__copy-btn moo-settings__copy-btn--copied" : "moo-settings__copy-btn"}
+                className={
+                  copied
+                    ? "moo-button moo-button--outline moo-settings__copy-btn moo-settings__copy-btn--copied"
+                    : "moo-button moo-button--outline moo-settings__copy-btn"
+                }
               >
                 {copied ? "已複製" : "複製同步碼"}
               </button>
               <button
                 onClick={() => void handleInviteCopy()}
                 disabled={!syncCode}
-                className={inviteCopied ? "moo-settings__invite-btn moo-settings__invite-btn--copied" : "moo-settings__invite-btn"}
+                className={
+                  inviteCopied
+                    ? "moo-button moo-button--outline-success moo-settings__invite-btn moo-settings__invite-btn--copied"
+                    : "moo-button moo-button--outline-success moo-settings__invite-btn"
+                }
               >
                 {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
               </button>
             </div>
-            <div className="moo-settings__hint">將同步碼或邀請連結分享給家人即可加入書櫃</div>
+            <div className="moo-settings__hint">
+              將同步碼或邀請連結分享給家人即可加入書櫃
+            </div>
             {syncCode && <InviteQrCode syncCode={syncCode} />}
           </div>
           <div className="moo-settings__block">
             <div className="moo-settings__group-label moo-settings__group-label--members">
-              家庭成員{!membersLoading && !membersError ? ` (${members.length})` : ""}
+              家庭成員
+              {!membersLoading && !membersError ? ` (${members.length})` : ""}
             </div>
             {membersLoading && (
               <div className="moo-settings__members-loading">載入中...</div>
@@ -309,7 +375,10 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
             {!membersLoading && membersError && (
               <div className="moo-settings__members-error">
                 <div className="moo-settings__error-text">{membersError}</div>
-                <button onClick={() => void fetchMembers()} className="moo-settings__retry-btn">
+                <button
+                  onClick={() => void fetchMembers()}
+                  className="moo-button moo-button--outline moo-settings__retry-btn"
+                >
                   重試
                 </button>
               </div>
@@ -321,18 +390,28 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
                 userId={userId}
                 familyId={familyId}
                 apiClient={apiClient}
-                onMembersChanged={() => { void fetchMembers(); void refreshBookshelf(); }}
+                onMembersChanged={() => {
+                  void fetchMembers();
+                  void refreshBookshelf();
+                }}
                 familyEndpoint={familyEndpoint}
               />
             )}
-            <div className="moo-settings__hint">基於讀墨家庭帳戶限制，每個家庭最多 2 位成員</div>
+            <div className="moo-settings__hint">
+              基於讀墨家庭帳戶限制，每個家庭最多 2 位成員
+            </div>
           </div>
         </>
       )}
       <div className="moo-settings__block">
-        {leaveError && <div className="moo-settings__error-text">{leaveError}</div>}
+        {leaveError && (
+          <div className="moo-settings__error-text">{leaveError}</div>
+        )}
         {leaveState === "idle" && (
-          <button onClick={() => setLeaveState("confirming")} className="moo-settings__danger-btn">
+          <button
+            onClick={() => setLeaveState("confirming")}
+            className="moo-button moo-button--outline-danger moo-button--block moo-settings__danger-btn"
+          >
             離開家庭
           </button>
         )}
@@ -340,17 +419,28 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           <div>
             <div className="moo-settings__confirm-prompt">確定要離開嗎？</div>
             <div className="moo-settings__confirm-row">
-              <button onClick={() => void handleLeaveConfirm()} className="moo-settings__confirm-yes">
+              <button
+                onClick={() => void handleLeaveConfirm()}
+                className="moo-button moo-button--danger moo-settings__confirm-yes"
+              >
                 確定離開
               </button>
-              <button onClick={() => setLeaveState("idle")} className="moo-settings__confirm-no">
+              <button
+                onClick={() => setLeaveState("idle")}
+                className="moo-button moo-button--ghost moo-settings__confirm-no"
+              >
                 取消
               </button>
             </div>
           </div>
         )}
         {leaveState === "leaving" && (
-          <button disabled className="moo-settings__danger-btn">離開中...</button>
+          <button
+            disabled
+            className="moo-button moo-button--outline-danger moo-button--block moo-settings__danger-btn"
+          >
+            離開中...
+          </button>
         )}
       </div>
       <div className="moo-settings__section-divider">
@@ -365,23 +455,34 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
         {mobileOpen && (
           <>
             {syncCode && (
-              <QrCodeLink syncCode={syncCode} userId={userId} apiClient={apiClient} />
+              <QrCodeLink
+                syncCode={syncCode}
+                userId={userId}
+                apiClient={apiClient}
+              />
             )}
             <VerificationSettings userId={userId} apiClient={apiClient} />
           </>
         )}
       </div>
       <div className="moo-settings__section-divider--spaced">
-        {deleteError && <div className="moo-settings__error-text">{deleteError}</div>}
+        {deleteError && (
+          <div className="moo-settings__error-text">{deleteError}</div>
+        )}
         {deleteState === "idle" && (
-          <button onClick={() => setDeleteState("confirming")} className="moo-settings__danger-btn">
+          <button
+            onClick={() => setDeleteState("confirming")}
+            className="moo-button moo-button--outline-danger moo-button--block moo-settings__danger-btn"
+          >
             移除帳戶
           </button>
         )}
         {deleteState === "confirming" && (
           <div>
             <div className="moo-settings__delete-warning">
-              <div className="moo-settings__delete-warning-title">確定要移除帳戶嗎？</div>
+              <div className="moo-settings__delete-warning-title">
+                確定要移除帳戶嗎？
+              </div>
               <ul className="moo-settings__delete-warning-list">
                 <li>將移除墨家書櫃中的所有資料</li>
                 <li>不影響你的讀墨帳號及書籍</li>
@@ -389,12 +490,18 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
               </ul>
             </div>
             <div className="moo-settings__confirm-row">
-              <button onClick={() => void handleDeleteConfirm()} className="moo-settings__confirm-yes">
+              <button
+                onClick={() => void handleDeleteConfirm()}
+                className="moo-button moo-button--danger moo-settings__confirm-yes"
+              >
                 確定移除
               </button>
               <button
-                onClick={() => { setDeleteState("idle"); setDeleteError(""); }}
-                className="moo-settings__confirm-no"
+                onClick={() => {
+                  setDeleteState("idle");
+                  setDeleteError("");
+                }}
+                className="moo-button moo-button--ghost moo-settings__confirm-no"
               >
                 取消
               </button>
@@ -402,7 +509,12 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
           </div>
         )}
         {deleteState === "deleting" && (
-          <button disabled className="moo-settings__danger-btn">移除中...</button>
+          <button
+            disabled
+            className="moo-button moo-button--outline-danger moo-button--block moo-settings__danger-btn"
+          >
+            移除中...
+          </button>
         )}
       </div>
       <div className="moo-settings__report">
@@ -415,7 +527,7 @@ export function FamilySettings({ familyId, userId, apiClient, onLeave }: FamilyS
               target="_blank"
               rel="noopener noreferrer"
               title={link.name}
-              className="moo-settings__report-link"
+              className={reportLinkClass(link.name)}
             >
               <svg
                 aria-hidden="true"

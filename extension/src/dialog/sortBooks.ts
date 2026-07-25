@@ -1,9 +1,5 @@
 export type BookSortMode =
-  | "default"
-  | "title-asc"
-  | "title-desc"
-  | "author-asc"
-  | "author-desc";
+  "default" | "title-asc" | "title-desc" | "author-asc" | "author-desc";
 
 /** Canonical sort modes (post-normalization). Excludes legacy aliases. */
 const CANONICAL_MODES: readonly BookSortMode[] = [
@@ -36,7 +32,9 @@ export function normalizeSortMode(value: unknown): BookSortMode {
   }
   // Own-property guard: prototype-chain keys (e.g. "__proto__", "toString")
   // must not resolve to inherited members; only real aliases map through.
-  return Object.hasOwn(LEGACY_ALIASES, value) ? LEGACY_ALIASES[value] : "default";
+  return Object.hasOwn(LEGACY_ALIASES, value)
+    ? LEGACY_ALIASES[value]
+    : "default";
 }
 
 const collator = new Intl.Collator("zh-Hant", { sensitivity: "base" });
@@ -46,7 +44,12 @@ export function sortBooks<T extends { title: string; author: string }>(
   mode: BookSortMode,
 ): T[] {
   if (mode === "default") return items;
-  const [field, direction] = mode.split("-") as ["title" | "author", "asc" | "desc"];
+  const [field, direction] = mode.split("-") as [
+    "title" | "author",
+    "asc" | "desc",
+  ];
   const factor = direction === "desc" ? -1 : 1;
-  return [...items].sort((a, b) => factor * collator.compare(a[field], b[field]));
+  return [...items].sort(
+    (a, b) => factor * collator.compare(a[field], b[field]),
+  );
 }

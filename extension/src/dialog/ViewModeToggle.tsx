@@ -19,8 +19,20 @@ interface ToggleButtonProps {
   position: Extract<SegmentPosition, "first" | "last">;
 }
 
-function ToggleButton({ active, ariaLabel, onClick, children, isMobile, position }: ToggleButtonProps) {
+function ToggleButton({
+  active,
+  ariaLabel,
+  onClick,
+  children,
+  isMobile,
+  position,
+}: ToggleButtonProps) {
   const className = [
+    "moo-segmented__item",
+    `moo-segmented__item--${position}`,
+    // The shared --active class is required: .moo-segmented__item's hover rule
+    // excludes it, otherwise hover would override the active fill.
+    active ? "moo-segmented__item--active" : "",
     "moo-view-toggle__btn",
     isMobile ? "moo-view-toggle__btn--mobile" : "",
     active ? "moo-view-toggle__btn--active" : "",

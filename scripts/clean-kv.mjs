@@ -18,7 +18,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // execFile() .CMD shims (CVE-2024-27980), and the extension-less shell script
 // cannot be executed at all.
 const workerDir = resolve(__dirname, "../worker");
-const wranglerEntry = resolve(workerDir, "node_modules/wrangler/bin/wrangler.js");
+const wranglerEntry = resolve(
+  workerDir,
+  "node_modules/wrangler/bin/wrangler.js",
+);
 
 function runWrangler(args, options = {}) {
   // cwd must be the worker/ directory so wrangler picks up wrangler.toml
@@ -53,7 +56,9 @@ function safeParseJson(raw) {
   }
 
   if (start === -1) {
-    throw new Error(`Could not find JSON in wrangler output:\n${raw.slice(0, 200)}`);
+    throw new Error(
+      `Could not find JSON in wrangler output:\n${raw.slice(0, 200)}`,
+    );
   }
   return JSON.parse(raw.slice(start));
 }
@@ -67,7 +72,9 @@ function resolveNamespaceId(input) {
   if (!pattern) {
     // Direct namespace ID — validate format
     if (!UUID_RE.test(input)) {
-      console.error(`Invalid namespace ID format: "${input}". Expected a 32-char hex UUID or alias (dev/prod).`);
+      console.error(
+        `Invalid namespace ID format: "${input}". Expected a 32-char hex UUID or alias (dev/prod).`,
+      );
       process.exit(1);
     }
     return input;
@@ -78,9 +85,7 @@ function resolveNamespaceId(input) {
   const match = namespaces.find((ns) => pattern.test(ns.title));
 
   if (!match) {
-    console.error(
-      `Could not find a KV namespace matching alias "${input}".`,
-    );
+    console.error(`Could not find a KV namespace matching alias "${input}".`);
     console.error(
       "Available namespaces:",
       namespaces.map((ns) => `  ${ns.title} (${ns.id})`).join("\n"),
@@ -124,7 +129,14 @@ const tmpFile = resolve(tmpDir, ".kv-delete-tmp.json");
 try {
   writeFileSync(tmpFile, JSON.stringify(keys));
   runWrangler(
-    ["kv", "bulk", "delete", tmpFile, `--namespace-id=${namespaceId}`, "--force"],
+    [
+      "kv",
+      "bulk",
+      "delete",
+      tmpFile,
+      `--namespace-id=${namespaceId}`,
+      "--force",
+    ],
     { stdio: ["pipe", "inherit", "inherit"] },
   );
 } finally {

@@ -13,10 +13,14 @@ export interface UseFamilyShelfViewModeReturn {
   setViewMode: (mode: FamilyShelfViewMode) => void;
 }
 
-export function useFamilyShelfViewMode(userId: string): UseFamilyShelfViewModeReturn {
+export function useFamilyShelfViewMode(
+  userId: string,
+): UseFamilyShelfViewModeReturn {
   const storageKey = namespacedKey(userId, "familyShelfViewMode");
 
-  const [viewMode, setViewModeState] = useState<FamilyShelfViewMode>(() => readViewMode(storageKey));
+  const [viewMode, setViewModeState] = useState<FamilyShelfViewMode>(() =>
+    readViewMode(storageKey),
+  );
 
   useEffect(() => {
     setViewModeState(readViewMode(storageKey));

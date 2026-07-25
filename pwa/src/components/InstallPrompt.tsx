@@ -21,7 +21,8 @@ function isIosSafari(): boolean {
 function isStandalone(): boolean {
   return (
     window.matchMedia("(display-mode: standalone)").matches ||
-    ("standalone" in navigator && (navigator as unknown as { standalone: boolean }).standalone === true)
+    ("standalone" in navigator &&
+      (navigator as unknown as { standalone: boolean }).standalone === true)
   );
 }
 
@@ -81,7 +82,21 @@ export function InstallPrompt({ userId }: InstallPromptProps) {
             <p className="text-sm text-blue-800">
               點選 Safari 底部的
               <span className="inline-block mx-1 align-middle">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="inline"
+                >
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                  <polyline points="16 6 12 2 8 6" />
+                  <line x1="12" y1="2" x2="12" y2="15" />
+                </svg>
               </span>
               分享按鈕，然後選擇「加入主畫面」即可安裝。
             </p>

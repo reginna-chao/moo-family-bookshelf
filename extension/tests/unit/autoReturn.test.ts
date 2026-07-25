@@ -1,13 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  detectReturnedRequests,
-  applyAutoReturns,
-} from "@/sync/autoReturn";
-import {
-  BorrowStatus,
-  type ApiClient,
-  type BorrowRequest,
-} from "@/api/client";
+import { detectReturnedRequests, applyAutoReturns } from "@/sync/autoReturn";
+import { BorrowStatus, type ApiClient, type BorrowRequest } from "@/api/client";
 
 const OWNER_ID = "user-owner";
 const NOW = Date.parse("2026-07-01T12:00:00.000Z");
@@ -133,7 +126,9 @@ describe("detectReturnedRequests", () => {
   });
 
   it("honours a custom minLentAgeMs threshold", () => {
-    const req = makeRequest({ updatedAt: new Date(NOW - 60_000).toISOString() });
+    const req = makeRequest({
+      updatedAt: new Date(NOW - 60_000).toISOString(),
+    });
 
     // 1-min-old book is too young for the default 30-min gate...
     expect(

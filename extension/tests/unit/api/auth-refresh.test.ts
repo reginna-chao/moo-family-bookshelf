@@ -42,10 +42,14 @@ interface RequestOutcome {
 function makeRequest(outcome: Partial<RequestOutcome>) {
   return vi.fn((path: string) => {
     if (path === "/api/auth/refresh") {
-      return Promise.resolve(outcome.refresh ?? { error: { code: "REFRESH_FAILED", message: "x" } });
+      return Promise.resolve(
+        outcome.refresh ?? { error: { code: "REFRESH_FAILED", message: "x" } },
+      );
     }
     if (path.endsWith("/join")) {
-      return Promise.resolve(outcome.join ?? { error: { code: "UNKNOWN", message: "x" } });
+      return Promise.resolve(
+        outcome.join ?? { error: { code: "UNKNOWN", message: "x" } },
+      );
     }
     return Promise.resolve({});
   }) as never;
@@ -80,7 +84,8 @@ function familyWasCleared(): boolean {
   return vi
     .mocked(chrome.storage.local.remove)
     .mock.calls.some(
-      (call) => Array.isArray(call[0]) && (call[0] as string[]).includes(FAMILY_ID_KEY),
+      (call) =>
+        Array.isArray(call[0]) && (call[0] as string[]).includes(FAMILY_ID_KEY),
     );
 }
 
@@ -88,7 +93,9 @@ function familyWasCleared(): boolean {
 function cooldownWasCleared(): boolean {
   return vi
     .mocked(chrome.storage.local.remove)
-    .mock.calls.some((call) => (call[0] as unknown) === RECOVERY_COOLDOWN_UNTIL_KEY);
+    .mock.calls.some(
+      (call) => (call[0] as unknown) === RECOVERY_COOLDOWN_UNTIL_KEY,
+    );
 }
 
 /** The epoch-ms deadline the cooldown key was last written with, or undefined. */
@@ -229,9 +236,7 @@ describe("doRefreshToken", () => {
     for (const c of cases) {
       it(c.name, async () => {
         seedStorage();
-        const join = c.code
-          ? { error: { code: c.code, message: "x" } }
-          : {}; // no data.authToken and no error.code
+        const join = c.code ? { error: { code: c.code, message: "x" } } : {}; // no data.authToken and no error.code
         const deps = makeDeps({
           refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
           join: join as ApiResponse<{ authToken: string; expiresAt: number }>,
@@ -240,7 +245,9 @@ describe("doRefreshToken", () => {
         const result = await doRefreshToken(deps);
 
         expect(result.refreshed).toBe(false);
-        expect(deps.onReauthRequired).toHaveBeenCalledTimes(c.expectReauth ? 1 : 0);
+        expect(deps.onReauthRequired).toHaveBeenCalledTimes(
+          c.expectReauth ? 1 : 0,
+        );
         expect(deps.onFamilyRemoved).toHaveBeenCalledTimes(
           c.expectFamilyRemoved ? 1 : 0,
         );
@@ -335,7 +342,9 @@ describe("doRefreshToken", () => {
             error: {
               code: "RATE_LIMITED",
               message: "too many",
-              ...(c.retryAfter !== undefined ? { retryAfter: c.retryAfter } : {}),
+              ...(c.retryAfter !== undefined
+                ? { retryAfter: c.retryAfter }
+                : {}),
             },
           } as ApiResponse<{ authToken: string; expiresAt: number }>,
         });

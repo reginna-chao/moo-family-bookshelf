@@ -22,7 +22,9 @@ export function validateEndpointUrl(raw: string): string {
   } catch {
     throw new Error(`Invalid API endpoint URL: ${raw}`);
   }
-  throw new Error(`Unsafe API endpoint scheme — only HTTPS or private-network HTTP is allowed: ${raw}`);
+  throw new Error(
+    `Unsafe API endpoint scheme — only HTTPS or private-network HTTP is allowed: ${raw}`,
+  );
 }
 
 import type {
@@ -135,7 +137,7 @@ export class ApiClient {
     try {
       const res = await fetch(`${this.baseUrl}/api/version`);
       if (!res.ok) return null;
-      const json = await res.json() as ApiResponse<VersionInfo>;
+      const json = (await res.json()) as ApiResponse<VersionInfo>;
       return json.data ?? null;
     } catch {
       return null;
@@ -208,7 +210,11 @@ export class ApiClient {
   // --- Auth ---
 
   /** Look up family membership for a pre-hashed userId. Server never sees the email. */
-  async lookupUser(userId: string): Promise<ApiResponse<{ existingFamilyId: string | null; memberCount: number }>> {
+  async lookupUser(
+    userId: string,
+  ): Promise<
+    ApiResponse<{ existingFamilyId: string | null; memberCount: number }>
+  > {
     this.validateHexId(userId, "userId");
     return this.post("/api/auth/lookup", { userId });
   }
@@ -247,7 +253,9 @@ export class ApiClient {
   async updateFamilyPrefs(
     userId: string,
     prefs: { hidden?: string[]; favorites?: string[] },
-  ): Promise<ApiResponse<{ ok: boolean; hidden: string[]; favorites: string[] }>> {
+  ): Promise<
+    ApiResponse<{ ok: boolean; hidden: string[]; favorites: string[] }>
+  > {
     this.validateHexId(userId, "userId");
     return this.put(`/api/user/${userId}/family-prefs`, prefs);
   }
@@ -267,7 +275,10 @@ export class ApiClient {
     displayName?: string,
     opts?: { verifySecret?: string },
   ): Promise<ApiResponse<FamilyGroup>> {
-    const body: Record<string, string> = { userId, displayName: displayName ?? "" };
+    const body: Record<string, string> = {
+      userId,
+      displayName: displayName ?? "",
+    };
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
     }
@@ -279,7 +290,9 @@ export class ApiClient {
     userId: string,
     displayName: string,
   ): Promise<ApiResponse<{ userId: string; displayName: string }>> {
-    return this.put(`/api/family/${familyId}/member/${userId}/displayName`, { displayName });
+    return this.put(`/api/family/${familyId}/member/${userId}/displayName`, {
+      displayName,
+    });
   }
 
   async leaveFamily(
@@ -358,10 +371,9 @@ export class ApiClient {
     requestId: string,
     status: BorrowStatus,
   ): Promise<BorrowRequest> {
-    const res = await this.patch<BorrowRequest>(
-      `/api/borrow/${requestId}`,
-      { status },
-    );
+    const res = await this.patch<BorrowRequest>(`/api/borrow/${requestId}`, {
+      status,
+    });
     return this.unwrap(res);
   }
 
@@ -397,21 +409,26 @@ export class ApiClient {
   // --- QR Token ---
 
   /** Create a short-lived QR token for PWA auto-login (bypasses verification). */
-  async createQrToken(userId: string): Promise<ApiResponse<{ token: string; expiresIn: number }>> {
+  async createQrToken(
+    userId: string,
+  ): Promise<ApiResponse<{ token: string; expiresIn: number }>> {
     return this.post(`/api/user/${userId}/qr-token`);
   }
 
   // --- Public Shelf (v1.2.0) ---
 
   getPublicShelfUrl(shareToken: string, pwaOriginOverride?: string): string {
-    const origin = pwaOriginOverride && pwaOriginOverride.length > 0
-      ? pwaOriginOverride
-      : DEFAULT_PWA_URL;
+    const origin =
+      pwaOriginOverride && pwaOriginOverride.length > 0
+        ? pwaOriginOverride
+        : DEFAULT_PWA_URL;
     return `${origin}/public/${shareToken}`;
   }
 
   async listPublicShelves(userId: string): Promise<{ shelves: PublicShelf[] }> {
-    const res = await this.get<{ shelves: PublicShelf[] }>(`/api/user/${userId}/public-shelf`);
+    const res = await this.get<{ shelves: PublicShelf[] }>(
+      `/api/user/${userId}/public-shelf`,
+    );
     return this.unwrap(res);
   }
 
@@ -419,7 +436,10 @@ export class ApiClient {
     userId: string,
     body: { title: string; expiresDays: number | null },
   ): Promise<{ shelf: PublicShelf }> {
-    const res = await this.post<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf`, body);
+    const res = await this.post<{ shelf: PublicShelf }>(
+      `/api/user/${userId}/public-shelf`,
+      body,
+    );
     return this.unwrap(res);
   }
 
@@ -428,7 +448,10 @@ export class ApiClient {
     shelfId: string,
     body: { title?: string; expiresDays?: number | null },
   ): Promise<{ shelf: PublicShelf }> {
-    const res = await this.put<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf/${shelfId}`, body);
+    const res = await this.put<{ shelf: PublicShelf }>(
+      `/api/user/${userId}/public-shelf/${shelfId}`,
+      body,
+    );
     return this.unwrap(res);
   }
 
@@ -436,7 +459,9 @@ export class ApiClient {
     userId: string,
     shelfId: string,
   ): Promise<{ shelf: PublicShelf }> {
-    const res = await this.post<{ shelf: PublicShelf }>(`/api/user/${userId}/public-shelf/${shelfId}/reset-token`);
+    const res = await this.post<{ shelf: PublicShelf }>(
+      `/api/user/${userId}/public-shelf/${shelfId}/reset-token`,
+    );
     return this.unwrap(res);
   }
 
@@ -561,7 +586,9 @@ export class ApiClient {
     return doRefreshToken({
       request: this.request.bind(this),
       // Route through setAuthToken so a recovered token also clears the latch.
-      setAuthToken: (token) => { this.setAuthToken(token); },
+      setAuthToken: (token) => {
+        this.setAuthToken(token);
+      },
       onFamilyRemoved: this.onFamilyRemoved,
       // Wrap the caller's callback so raising the prompt also sets the latch;
       // auth-refresh.ts stays latch-agnostic except for the isReauthPending skip.

@@ -30,11 +30,15 @@ async function computeUserId(email: string): Promise<string> {
   const normalized = email.toLowerCase().trim();
   const encoded = new TextEncoder().encode(`moo:${normalized}`);
   const hash = await crypto.subtle.digest("SHA-256", encoded);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /** Helper: create a family for a given userId, returns familyId + authToken. */
-async function createFamily(userId: string): Promise<{ familyId: string; authToken: string }> {
+async function createFamily(
+  userId: string,
+): Promise<{ familyId: string; authToken: string }> {
   const res = await app.request(
     "/api/family",
     {
@@ -45,7 +49,10 @@ async function createFamily(userId: string): Promise<{ familyId: string; authTok
     { KV: kv, DEV_MODE: "1" },
   );
   const json = (await res.json()) as Json;
-  return { familyId: json.data.familyId as string, authToken: json.data.authToken as string };
+  return {
+    familyId: json.data.familyId as string,
+    authToken: json.data.authToken as string,
+  };
 }
 
 beforeEach(() => {

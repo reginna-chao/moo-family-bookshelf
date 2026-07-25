@@ -33,7 +33,13 @@ interface PendingAuth {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_ENV = getAppEnv();
 
-export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", qrToken = "", externalError = "" }: LandingPageProps) {
+export function LandingPage({
+  onAuth,
+  initialSyncCode = "",
+  qrUserId = "",
+  qrToken = "",
+  externalError = "",
+}: LandingPageProps) {
   const [syncCodeInput, setSyncCodeInput] = useState("");
   const [showCode, setShowCode] = useState(false);
   const [email, setEmail] = useState("");
@@ -42,7 +48,10 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", qrTok
   });
 
   // Cache join client per apiHost to avoid re-creating on each submit
-  const joinClientRef = useRef<{ host: string | undefined; client: ApiClient } | null>(null);
+  const joinClientRef = useRef<{
+    host: string | undefined;
+    client: ApiClient;
+  } | null>(null);
   function getJoinClient(host: string | undefined): ApiClient {
     if (joinClientRef.current !== null && joinClientRef.current.host === host) {
       return joinClientRef.current.client;
@@ -157,18 +166,29 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", qrTok
     setIsSubmitting(true);
     try {
       const joinClient = getJoinClient(apiHost);
-      const joinRes = await joinClient.joinFamily(familyId, userId, { verifySecret, qrToken: tokenFromQr });
+      const joinRes = await joinClient.joinFamily(familyId, userId, {
+        verifySecret,
+        qrToken: tokenFromQr,
+      });
       if (joinRes.error) {
         const code = joinRes.error.code;
         if (code === "FAMILY_FULL") {
           setGeneralError("家庭成員已達上限（每個家庭最多 2 位成員）");
-        } else if (code === "VERIFICATION_REQUIRED" || code === "VERIFICATION_FAILED") {
+        } else if (
+          code === "VERIFICATION_REQUIRED" ||
+          code === "VERIFICATION_FAILED"
+        ) {
           // If QR token was used but rejected, fall back to verification UI
           if (tokenFromQr && !pendingAuth) {
             const verifyRes = await joinClient.getVerifyMethod(userId);
             const method: VerifyMethod = verifyRes.data?.method ?? "none";
             if (method !== "none") {
-              setPendingAuth({ userId, familyId, apiHost, verifyMethod: method });
+              setPendingAuth({
+                userId,
+                familyId,
+                apiHost,
+                verifyMethod: method,
+              });
               if (code === "VERIFICATION_FAILED") {
                 setVerifyError("QR 驗證碼已過期，請手動驗證。");
               }
@@ -242,36 +262,44 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", qrTok
 
     // When qrToken is available, skip the verification check and join directly
     if (qrToken) {
-      void completeJoin(decoded.familyId, qrUserId, decoded.apiHost, undefined, qrToken)
-        .catch(() => {
-          setGeneralError("處理失敗，請重試。");
-          setIsSubmitting(false);
-        });
+      void completeJoin(
+        decoded.familyId,
+        qrUserId,
+        decoded.apiHost,
+        undefined,
+        qrToken,
+      ).catch(() => {
+        setGeneralError("處理失敗，請重試。");
+        setIsSubmitting(false);
+      });
       return;
     }
 
     const joinClient = getJoinClient(decoded.apiHost);
-    void joinClient.getVerifyMethod(qrUserId).then((verifyRes) => {
-      const method: VerifyMethod = verifyRes.data?.method ?? "none";
+    void joinClient
+      .getVerifyMethod(qrUserId)
+      .then((verifyRes) => {
+        const method: VerifyMethod = verifyRes.data?.method ?? "none";
 
-      if (method !== "none") {
-        setPendingAuth({
-          userId: qrUserId,
-          familyId: decoded.familyId,
-          apiHost: decoded.apiHost,
-          verifyMethod: method,
-        });
+        if (method !== "none") {
+          setPendingAuth({
+            userId: qrUserId,
+            familyId: decoded.familyId,
+            apiHost: decoded.apiHost,
+            verifyMethod: method,
+          });
+          setIsSubmitting(false);
+          return;
+        }
+
+        // No verification needed — join directly
+        void completeJoin(decoded.familyId, qrUserId, decoded.apiHost);
+      })
+      .catch(() => {
+        setGeneralError("處理失敗，請重試。");
         setIsSubmitting(false);
-        return;
-      }
-
-      // No verification needed — join directly
-      void completeJoin(decoded.familyId, qrUserId, decoded.apiHost);
-    }).catch(() => {
-      setGeneralError("處理失敗，請重試。");
-      setIsSubmitting(false);
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qrUserId, initialSyncCode, qrToken]);
 
   // Show verification UI
@@ -337,7 +365,11 @@ export function LandingPage({ onAuth, initialSyncCode = "", qrUserId = "", qrTok
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
-      <img src={APP_ENV !== "prod" ? "/dev/icon.svg" : "/icon.svg"} alt="墨家書櫃" className="w-16 h-16 rounded-2xl mb-4" />
+      <img
+        src={APP_ENV !== "prod" ? "/dev/icon.svg" : "/icon.svg"}
+        alt="墨家書櫃"
+        className="w-16 h-16 rounded-2xl mb-4"
+      />
       <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-2">
         墨家書櫃
         {APP_ENV !== "prod" && (

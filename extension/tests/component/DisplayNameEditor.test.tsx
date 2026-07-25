@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, act, renderHook } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  act,
+  renderHook,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DisplayNameEditor } from "@/dialog/DisplayNameEditor";
 import { useDisplayName } from "@/dialog/useDisplayName";
@@ -22,7 +28,9 @@ describe("DisplayNameEditor", () => {
     render(<DisplayNameEditor {...baseProps} />);
 
     expect(screen.getByText("顯示名稱")).toBeInTheDocument();
-    expect(screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號")).toBeInTheDocument();
+    expect(
+      screen.getByText("此名稱僅用於家庭書櫃，不影響讀墨帳號"),
+    ).toBeInTheDocument();
   });
 
   it("shows saved display name in display mode", () => {
@@ -32,7 +40,9 @@ describe("DisplayNameEditor", () => {
   });
 
   it("shows userId prefix when no saved display name", () => {
-    render(<DisplayNameEditor {...baseProps} savedDisplayName="" displayName="" />);
+    render(
+      <DisplayNameEditor {...baseProps} savedDisplayName="" displayName="" />,
+    );
 
     expect(screen.getByText("user1234")).toBeInTheDocument();
   });
@@ -41,7 +51,9 @@ describe("DisplayNameEditor", () => {
     render(<DisplayNameEditor {...baseProps} />);
 
     // Display mode: no input visible
-    expect(screen.queryByPlaceholderText("輸入顯示名稱")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("輸入顯示名稱"),
+    ).not.toBeInTheDocument();
   });
 
   it("enters edit mode on pencil click", () => {
@@ -60,13 +72,17 @@ describe("DisplayNameEditor", () => {
     // Enter edit mode
     fireEvent.click(screen.getAllByRole("button")[0]);
 
-    const input = screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement;
+    const input = screen.getByPlaceholderText(
+      "輸入顯示名稱",
+    ) as HTMLInputElement;
     expect(input.maxLength).toBe(20);
   });
 
   it("calls setDisplayName on input change in edit mode", () => {
     const setDisplayName = vi.fn();
-    render(<DisplayNameEditor {...baseProps} setDisplayName={setDisplayName} />);
+    render(
+      <DisplayNameEditor {...baseProps} setDisplayName={setDisplayName} />,
+    );
 
     // Enter edit mode
     fireEvent.click(screen.getAllByRole("button")[0]);
@@ -80,10 +96,7 @@ describe("DisplayNameEditor", () => {
   it("calls handleSaveDisplayName on check icon click", async () => {
     const handleSave = vi.fn().mockResolvedValue(true);
     render(
-      <DisplayNameEditor
-        {...baseProps}
-        handleSaveDisplayName={handleSave}
-      />,
+      <DisplayNameEditor {...baseProps} handleSaveDisplayName={handleSave} />,
     );
 
     // Enter edit mode
@@ -162,10 +175,7 @@ describe("DisplayNameEditor", () => {
   it("stays in edit mode when save fails (returns false)", async () => {
     const handleSave = vi.fn().mockResolvedValue(false);
     render(
-      <DisplayNameEditor
-        {...baseProps}
-        handleSaveDisplayName={handleSave}
-      />,
+      <DisplayNameEditor {...baseProps} handleSaveDisplayName={handleSave} />,
     );
 
     // Enter edit mode
@@ -185,10 +195,7 @@ describe("DisplayNameEditor", () => {
   it("exits edit mode when save succeeds (returns true)", async () => {
     const handleSave = vi.fn().mockResolvedValue(true);
     render(
-      <DisplayNameEditor
-        {...baseProps}
-        handleSaveDisplayName={handleSave}
-      />,
+      <DisplayNameEditor {...baseProps} handleSaveDisplayName={handleSave} />,
     );
 
     // Enter edit mode
@@ -203,7 +210,9 @@ describe("DisplayNameEditor", () => {
 
     expect(handleSave).toHaveBeenCalled();
     // Should exit edit mode — input gone
-    expect(screen.queryByPlaceholderText("輸入顯示名稱")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("輸入顯示名稱"),
+    ).not.toBeInTheDocument();
   });
 
   it("disables input field during saving state", () => {
@@ -211,7 +220,9 @@ describe("DisplayNameEditor", () => {
 
     fireEvent.click(screen.getAllByRole("button")[0]);
 
-    const input = screen.getByPlaceholderText("輸入顯示名稱") as HTMLInputElement;
+    const input = screen.getByPlaceholderText(
+      "輸入顯示名稱",
+    ) as HTMLInputElement;
     expect(input).toBeDisabled();
   });
 
@@ -249,6 +260,68 @@ describe("DisplayNameEditor", () => {
     fireEvent.click(buttons[0]);
 
     expect(handleSave).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The editor's controls were re-based on the shared `.moo-form-input` /
+   * `.moo-button` component classes, and the icon colours moved from inline
+   * `style={{ color }}` on the SVG to the button's own `color` (so hover/focus
+   * variants can recolour them). jsdom does not apply the stylesheet, so the
+   * class list — and the *absence* of the inline colour — is the contract.
+   */
+  describe("shared component class contract", () => {
+    it("opts the pencil button into the shared ghost-icon button base", () => {
+      render(<DisplayNameEditor {...baseProps} />);
+
+      const pencil = screen.getByRole("button", { name: "編輯顯示名稱" });
+      expect(pencil).toHaveClass("moo-button");
+      expect(pencil).toHaveClass("moo-button--ghost-icon");
+      expect(pencil).toHaveClass("moo-name-editor__icon-btn");
+    });
+
+    it("opts the name input into the shared full-width form input base", () => {
+      render(<DisplayNameEditor {...baseProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+
+      const input = screen.getByPlaceholderText("輸入顯示名稱");
+      expect(input).toHaveClass("moo-form-input");
+      expect(input).toHaveClass("moo-form-input--block");
+      expect(input).toHaveClass("moo-name-editor__input");
+    });
+
+    it.each([
+      { label: "確認儲存", dim: false },
+      { label: "取消編輯", dim: true },
+    ])(
+      "opts the $label button into the shared ghost-icon button base",
+      ({ label, dim }) => {
+        render(<DisplayNameEditor {...baseProps} />);
+        fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+
+        const button = screen.getByRole("button", { name: label });
+        expect(button).toHaveClass("moo-button");
+        expect(button).toHaveClass("moo-button--ghost-icon");
+        expect(
+          button.classList.contains("moo-name-editor__icon-btn--dim"),
+        ).toBe(dim);
+      },
+    );
+
+    it.each(["編輯顯示名稱", "確認儲存", "取消編輯"])(
+      "leaves the %s icon without an inline colour so the button's color wins",
+      (label) => {
+        render(<DisplayNameEditor {...baseProps} />);
+        if (label !== "編輯顯示名稱") {
+          fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+        }
+
+        const icon = screen
+          .getByRole("button", { name: label })
+          .querySelector("svg");
+        expect(icon).not.toBeNull();
+        expect(icon?.style.color).toBe("");
+      },
+    );
   });
 });
 
