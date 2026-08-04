@@ -21,9 +21,13 @@ const MAX_BODY_SIZE = 262144;
 
 /** Check if the origin is allowed for CORS */
 export function isAllowedOrigin(origin: string, devMode?: boolean): boolean {
-  // Readmoo domains (exact + subdomains)
+  // Readmoo domains — the content script runs on both bookshelf sites:
+  //   read.readmoo.com = legacy bookshelf, next.readmoo.com = new bookshelf.
+  // Both are listed explicitly so the intent is testable; the subdomain regex
+  // below stays as the catch-all for any other readmoo subdomain.
   if (origin === "https://readmoo.com") return true;
   if (origin === "https://read.readmoo.com") return true;
+  if (origin === "https://next.readmoo.com") return true;
   if (/^https:\/\/[a-zA-Z0-9-]+\.readmoo\.com$/.test(origin)) return true;
 
   // PWA on Cloudflare Pages (production + preview deploys)

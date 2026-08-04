@@ -7,6 +7,8 @@
  * hard cap as a safety valve.
  */
 
+import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
+
 const SCROLL_HARD_CAP = 100;
 const PAGE_TIMEOUT_MS = 10000;
 const POLL_INTERVAL_MS = 500;
@@ -28,7 +30,7 @@ function wait(ms: number): Promise<void> {
 }
 
 function countLibraryItems(): number {
-  return document.querySelectorAll(".library-item").length;
+  return document.querySelectorAll(READMOO_SELECTORS.libraryItem).length;
 }
 
 /**

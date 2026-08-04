@@ -1,10 +1,16 @@
 /**
  * Book scraping logic for Readmoo library page.
- * `.library-item` divs require a hover event to reveal `.openbook` links.
+ * `.library-item` divs require a hover event to reveal the `.openbook-overlay`
+ * action layer (named `.openbook` on the legacy host).
+ *
+ * Works on both `next.readmoo.com` and `read.readmoo.com`; selectors that moved
+ * between the two go through `queryWithLegacyFallback`.
  */
 
+import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BoolFlag } from "../api/client";
 import { requestFiberData } from "./fiber-data";
+import { queryWithLegacyFallback, warnOnce } from "./readmoo-dom";
 import {
   paginateLibrary,
   type ScrapeBooksOptions,
@@ -32,7 +38,7 @@ const ATTR_CATEGORY = "data-moo-category";
 export type { ScrapeProgressCallback, ScrapeBooksOptions };
 export { formatScrapeProgress } from "./scraper-pagination";
 
-/** Dispatch synthetic hover events so Readmoo renders the `.openbook` overlay. */
+/** Dispatch synthetic hover events so Readmoo renders the `.openbook-overlay` layer. */
 function triggerHover(element: HTMLElement): void {
   const options: MouseEventInit = { bubbles: true, cancelable: true };
   element.dispatchEvent(new MouseEvent("mouseenter", options));
@@ -44,7 +50,11 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Extract book ID (last path segment) from `.openbook a.reader-link` href. */
+/**
+ * Extract book ID (last path segment) from the `a.reader-link` href.
+ * The link lives under `.cover` on the new host and under `.openbook` on the
+ * legacy one; the href format is identical on both.
+ */
 function extractBookIdFromHref(href: string): string | null {
   try {
     const url = new URL(href);
@@ -55,24 +65,43 @@ function extractBookIdFromHref(href: string): string | null {
   }
 }
 
-/** Extract fallback book ID from `.privacy` element (id="privacy-{id}"). */
+/**
+ * Extract fallback book ID from a `.privacy` element (`id="privacy-{id}"`).
+ *
+ * LENGTH GUARD — the two sites put DIFFERENT ids in this attribute:
+ *   - legacy `read.readmoo.com`: the 15-digit book id itself, so the fallback
+ *     yields a usable id and this guard never rejects anything.
+ *   - new `next.readmoo.com`: an 8-digit INTERNAL id from a different
+ *     namespace. Accepting it would upload a book keyed by an id that matches
+ *     no real book — a ghost entry in the user's shelf that never resolves.
+ *
+ * So we only accept 12+ digits and otherwise return null, skipping the book.
+ * A skipped book reappears on the next sync once a real id is available;
+ * a ghost book has to be cleaned up by hand. Skipping is the safer failure.
+ */
 function extractFallbackId(item: Element): string | null {
-  const privacy = item.querySelector<HTMLElement>(".privacy[id^='privacy-']");
+  const privacy = item.querySelector<HTMLElement>(READMOO_SELECTORS.privacyId);
   if (!privacy) return null;
-  const match = privacy.id.match(/^privacy-(\d+)$/);
-  return match ? match[1] : null;
+  const match = privacy.id.match(/^privacy-(\d{12,})$/);
+  if (match) return match[1];
+
+  warnOnce(
+    "scraper:privacy-id-rejected",
+    `[moo] rejected .privacy fallback bookId "${privacy.id}" — not a 12+ digit book id; skipping this book`,
+  );
+  return null;
 }
 
 /** Extract title from `.info .title[title]`. */
 function extractTitle(item: Element): string | null {
-  const titleEl = item.querySelector<HTMLElement>(".info .title[title]");
+  const titleEl = item.querySelector<HTMLElement>(READMOO_SELECTORS.title);
   return titleEl?.getAttribute("title")?.trim() || null;
 }
 
 const PLACEHOLDER_COVER = "openbook.png";
 
 function extractCoverUrl(item: Element): string {
-  const img = item.querySelector<HTMLImageElement>(".cover-img[src]");
+  const img = item.querySelector<HTMLImageElement>(READMOO_SELECTORS.coverImg);
   const src = img?.src ?? "";
   // Return empty string for placeholder so mergeBooks preserves real cover URL.
   return src.endsWith(PLACEHOLDER_COVER) ? "" : src;
@@ -85,7 +114,7 @@ function extractBookIdFromFiber(item: Element): string | null {
 
 /** Check if the book is borrowed (借入) — not part of the user's own bookshelf. */
 function isBorrowed(item: Element): boolean {
-  return item.querySelector('[type="borrowed"]') !== null;
+  return item.querySelector(READMOO_SELECTORS.borrowedBadge) !== null;
 }
 
 async function scrapeItem(item: Element): Promise<ScrapedBook | null> {
@@ -109,11 +138,14 @@ async function scrapeItem(item: Element): Promise<ScrapedBook | null> {
     }
     await wait(HOVER_SETTLE_MS);
 
-    const openbookLink = item.querySelector<HTMLAnchorElement>(
-      ".openbook a.reader-link[href]",
+    const readerLink = queryWithLegacyFallback<HTMLAnchorElement>(
+      item,
+      READMOO_SELECTORS.readerLink,
+      READMOO_SELECTORS.readerLinkLegacy,
+      "scraper:reader-link",
     );
-    if (openbookLink) {
-      bookId = extractBookIdFromHref(openbookLink.href);
+    if (readerLink) {
+      bookId = extractBookIdFromHref(readerLink.href);
     }
 
     if (!bookId) {
@@ -139,7 +171,7 @@ async function scrapeItem(item: Element): Promise<ScrapedBook | null> {
 
 /** Scrape user email from the Readmoo profile panel (#/me page). */
 export function scrapeUserEmail(): string | null {
-  const panel = document.querySelector(".me-panel");
+  const panel = document.querySelector(READMOO_SELECTORS.mePanel);
   if (!panel) return null;
 
   // Email is a leaf div (no child elements) containing "@".
@@ -156,7 +188,7 @@ export function scrapeUserEmail(): string | null {
 
 /** Scrape display name from the Readmoo profile panel (#/me page). */
 export function scrapeDisplayName(): string | null {
-  const panel = document.querySelector(".me-panel");
+  const panel = document.querySelector(READMOO_SELECTORS.mePanel);
   if (!panel) return null;
   const nameEl = panel.querySelector<HTMLElement>(
     "div[style*='font-size: 16px']",
@@ -172,7 +204,7 @@ export async function scrapeBooks(
   try {
     await requestFiberData();
     await paginateLibrary(opts?.onProgress);
-    const items = document.querySelectorAll(".library-item");
+    const items = document.querySelectorAll(READMOO_SELECTORS.libraryItem);
     const books: ScrapedBook[] = [];
     for (const item of items) {
       const book = await scrapeItem(item);

@@ -32,6 +32,7 @@ import {
   scrapeArchivedBooks,
   type ScrapeProgressCallback,
 } from "../content/scraper";
+import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { mergeBooks } from "./mergeBooks";
 import { detectReturnedRequests, applyAutoReturns } from "./autoReturn";
 
@@ -183,6 +184,12 @@ export async function syncBooks(
   const { navigate, userId, apiClient, onProgress, familyId } = options;
   const originalHash = window.location.hash;
   const isOnLibrary = originalHash.includes("#/library");
+
+  // Readmoo's library is a SPA that can stay open for days, so warn-once state
+  // bound to page load would fire at most once ever. Reset it per sync instead:
+  // if a degraded path (legacy selector, rejected bookId) is still being hit,
+  // it must show up in the console on every sync, not only the first.
+  resetScrapeWarnings();
 
   try {
     // Step 1+2: Navigate to library page if needed

@@ -34,6 +34,7 @@ extension/src/
 - Max 3 levels of nesting. Use early return.
 - No nested ternary operators.
 - No `any` type. Use `unknown` + type guards when needed.
+- Node helper-script dirs (e.g. `extension/scripts/`) must be covered by a tsconfig project wired into `pnpm typecheck` (see `extension/tsconfig.scripts.json`). When adding a script dir, wire it in — a script with zero static checking in CI is a defect.
 
 ### State Management
 

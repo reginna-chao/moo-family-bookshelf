@@ -10,6 +10,7 @@
  * injectable and failures throw `ReadmooLendError`.
  */
 
+import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { requestFiberData } from "./fiber-data";
 import {
   ReadmooLendError,
@@ -29,7 +30,7 @@ const SEARCH_MODAL_SELECTOR = ".search-modal";
 const SEARCH_INPUT_SELECTOR = ".search-modal input.form-control";
 const SEARCH_SUBMIT_SELECTOR = "button[type='submit']";
 const SEARCH_ICON_SELECTOR = "i.mo-search";
-const SEARCH_BUTTON_SELECTOR = ".desktop-top-nav-btn";
+const SEARCH_BUTTON_SELECTOR = READMOO_SELECTORS.topNavBtn;
 
 export interface SearchModalRefs {
   modal: HTMLElement;

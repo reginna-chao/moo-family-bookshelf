@@ -6,6 +6,7 @@ import {
   scrapeBooks,
   formatScrapeProgress,
 } from "../content/scraper";
+import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { mergeBooks } from "./mergeBooks";
 import {
   ApiClient,
@@ -143,6 +144,12 @@ export function useAutoSetup(): UseAutoSetupReturn {
       setPhase("scraping-books");
       setErrorMessage("");
       setProgressMessage("");
+
+      // Auto-setup is a scrape ENTRY POINT, so it owns the warn-once reset (see
+      // content/readmoo-dom.ts). Without it, a degraded path already warned
+      // about by an earlier sync in this same page session would stay silenced
+      // here — and onboarding is exactly when we most want that signal.
+      resetScrapeWarnings();
 
       try {
         const scrapedBooks = await navigateAndRun("#/library", () =>

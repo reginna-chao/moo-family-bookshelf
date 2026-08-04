@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Build/verify scripts run under tsx (Node), not in the browser or vitest,
+    // so the base config's chrome / vitest / webextension ambient types do not
+    // apply here. Node's own types arrive transitively through the tooling
+    // packages these scripts import (@playwright/test, vite, tsx), so no
+    // explicit "node" entry is needed — and adding one would fail, since
+    // @types/node is not a direct dependency of this package.
+    "types": []
+  },
+  "include": ["scripts/**/*"]
+}

@@ -5,6 +5,7 @@
  * view, scrapes the results, then restores the normal library view.
  */
 
+import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BoolFlag } from "../api/client";
 import {
   scrapeBooks,
@@ -55,7 +56,9 @@ function clickElement(selector: string): boolean {
  * Find the filter button in the Readmoo nav bar.
  */
 function findFilterButton(): HTMLElement | null {
-  const btns = document.querySelectorAll<HTMLElement>(".desktop-top-nav-btn");
+  const btns = document.querySelectorAll<HTMLElement>(
+    READMOO_SELECTORS.topNavBtn,
+  );
   for (const btn of btns) {
     if (btn.querySelector("i.mo-filter")) return btn;
   }
@@ -72,10 +75,14 @@ async function waitForLibraryReload(timeoutMs: number): Promise<void> {
   const start = Date.now();
 
   // Phase 1: Wait for items to disappear or change (Readmoo clears the list)
-  const initialCount = document.querySelectorAll(".library-item").length;
+  const initialCount = document.querySelectorAll(
+    READMOO_SELECTORS.libraryItem,
+  ).length;
   while (Date.now() - start < timeoutMs) {
     await wait(300);
-    const count = document.querySelectorAll(".library-item").length;
+    const count = document.querySelectorAll(
+      READMOO_SELECTORS.libraryItem,
+    ).length;
     if (count !== initialCount) break;
   }
 
@@ -85,7 +92,9 @@ async function waitForLibraryReload(timeoutMs: number): Promise<void> {
   let stableChecks = 0;
   while (Date.now() - start < timeoutMs) {
     await wait(500);
-    const count = document.querySelectorAll(".library-item").length;
+    const count = document.querySelectorAll(
+      READMOO_SELECTORS.libraryItem,
+    ).length;
     if (count > 0 && count === stableCount) {
       stableChecks++;
       if (stableChecks >= 2) break;

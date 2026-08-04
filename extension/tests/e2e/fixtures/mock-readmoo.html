@@ -3,14 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <title>Readmoo 讀墨電子書</title>
+  <!--
+    書卡結構說明：
+    - 書籍 1~4 與「借入的書」使用「新站」(next.readmoo.com) 結構：
+      .cover-outer > .cover-container > .cover > a.reader-link > img.cover-img
+      .cover-outer > .desktop-overlay > .openbook-overlay > (.detail / .privacy / .menu-status)
+    - 書籍 5 刻意保留「舊站」(read.readmoo.com) 的 .openbook 結構，
+      作為 legacy selector fallback 的迴歸守衛（見 shared/src/config/readmoo.ts 的 *Legacy 選擇器）。
+    書籍總數、各書的 title / bookId / data-testid 皆不可變動，E2E spec 對其有斷言。
+  -->
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
     .desktop-top-nav-btn { display: inline-flex; align-items: center; padding: 8px 16px; cursor: pointer; border: 1px solid #ddd; border-radius: 4px; background: white; margin-right: 8px; }
     .desktop-top-nav-btn i { margin-right: 4px; }
     .library-item { display: flex; gap: 12px; background: white; padding: 16px; margin-bottom: 12px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative; }
+    .library-item .cover-outer { position: relative; }
     .library-item .cover-img { width: 80px; height: 110px; object-fit: cover; border-radius: 4px; }
     .library-item .info { flex: 1; }
     .library-item .info .title { font-size: 16px; font-weight: 600; color: #333; display: block; margin-bottom: 4px; }
+    /* 新站：操作區以 opacity / pointer-events 隱藏（inline style 亦同） */
+    .library-item .openbook-overlay { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+    .library-item:hover .openbook-overlay { opacity: 1; pointer-events: auto; }
+    /* 舊站 fallback：操作區以 display 隱藏 */
     .library-item .openbook { display: none; position: absolute; top: 0; right: 0; padding: 8px; }
     .library-item:hover .openbook { display: block; }
     .library-item .privacy { display: none; }
@@ -29,59 +43,124 @@
       </button>
     </div>
 
-    <!-- 書籍 1：正常書籍 -->
+    <!-- 書籍 1：正常書籍（新站結構） -->
     <div class="library-item" data-testid="book-1">
-      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book1" alt="cover" />
+      <div class="cover-outer">
+        <div class="cover-container">
+          <div class="cover">
+            <a class="reader-link" href="https://readmoo.com/api/reader/210439468000101">
+              <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book1" alt="cover" />
+            </a>
+          </div>
+        </div>
+        <div class="rendition-overlay"><div class="label rendition">流式</div></div>
+        <div class="desktop-overlay">
+          <div class="openbook-overlay" style="opacity: 0; pointer-events: none;">
+            <div class="detail"><span><i class="mo mo-ellipsis-horizontal"></i></span></div>
+            <div class="privacy" id="privacy-210439468000101"><span><i class="mo mo-lock-off"></i></span></div>
+            <div class="menu-status"><div class="dropdown"><button class="dropdown-toggle">正在閱讀</button></div></div>
+          </div>
+        </div>
+      </div>
       <div class="info">
-        <span class="title" title="被討厭的勇氣">被討厭的勇氣</span>
-        <span class="author">岸見一郎、古賀史健</span>
+        <div class="progress"><div class="progress-bar"></div></div>
+        <div class="title" title="被討厭的勇氣">被討厭的勇氣</div>
+        <div class="star-rating"></div>
       </div>
-      <div class="openbook">
-        <a class="reader-link" href="https://readmoo.com/api/reader/210439468000101">閱讀</a>
-      </div>
-      <div class="privacy" id="privacy-210439468000101"></div>
+      <div class="select-overlay"></div>
     </div>
 
-    <!-- 書籍 2：正常書籍 -->
+    <!-- 書籍 2：正常書籍（新站結構） -->
     <div class="library-item" data-testid="book-2">
-      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book2" alt="cover" />
+      <div class="cover-outer">
+        <div class="cover-container">
+          <div class="cover">
+            <a class="reader-link" href="https://readmoo.com/api/reader/210439468000102">
+              <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book2" alt="cover" />
+            </a>
+          </div>
+        </div>
+        <div class="rendition-overlay"><div class="label rendition">流式</div></div>
+        <div class="desktop-overlay">
+          <div class="openbook-overlay" style="opacity: 0; pointer-events: none;">
+            <div class="detail"><span><i class="mo mo-ellipsis-horizontal"></i></span></div>
+            <div class="privacy" id="privacy-210439468000102"><span><i class="mo mo-lock-off"></i></span></div>
+            <div class="menu-status"><div class="dropdown"><button class="dropdown-toggle">正在閱讀</button></div></div>
+          </div>
+        </div>
+      </div>
       <div class="info">
-        <span class="title" title="原子習慣">原子習慣</span>
-        <span class="author">James Clear</span>
+        <div class="progress"><div class="progress-bar"></div></div>
+        <div class="title" title="原子習慣">原子習慣</div>
+        <div class="star-rating"></div>
       </div>
-      <div class="openbook">
-        <a class="reader-link" href="https://readmoo.com/api/reader/210439468000102">閱讀</a>
-      </div>
-      <div class="privacy" id="privacy-210439468000102"></div>
+      <div class="select-overlay"></div>
     </div>
 
-    <!-- 書籍 3：正常書籍 -->
+    <!-- 書籍 3：正常書籍（新站結構） -->
     <div class="library-item" data-testid="book-3">
-      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book3" alt="cover" />
+      <div class="cover-outer">
+        <div class="cover-container">
+          <div class="cover">
+            <a class="reader-link" href="https://readmoo.com/api/reader/210439468000103">
+              <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book3" alt="cover" />
+            </a>
+          </div>
+        </div>
+        <div class="rendition-overlay"><div class="label rendition">流式</div></div>
+        <div class="desktop-overlay">
+          <div class="openbook-overlay" style="opacity: 0; pointer-events: none;">
+            <div class="detail"><span><i class="mo mo-ellipsis-horizontal"></i></span></div>
+            <div class="privacy" id="privacy-210439468000103"><span><i class="mo mo-lock-off"></i></span></div>
+            <div class="menu-status"><div class="dropdown"><button class="dropdown-toggle">正在閱讀</button></div></div>
+          </div>
+        </div>
+      </div>
       <div class="info">
-        <span class="title" title="人類大歷史">人類大歷史</span>
-        <span class="author">哈拉瑞</span>
+        <div class="progress"><div class="progress-bar"></div></div>
+        <div class="title" title="人類大歷史">人類大歷史</div>
+        <div class="star-rating"></div>
       </div>
-      <div class="openbook">
-        <a class="reader-link" href="https://readmoo.com/api/reader/210439468000103">閱讀</a>
-      </div>
-      <div class="privacy" id="privacy-210439468000103"></div>
+      <div class="select-overlay"></div>
     </div>
 
-    <!-- 書籍 4：正常書籍（僅有 fallback ID，無 reader-link） -->
+    <!--
+      書籍 4：新站結構但沒有 a.reader-link → 只剩 .privacy fallback。
+      新站的 privacy id 是 8 碼「內部 id」，不是 15 碼書籍 id（真實抓包確認），
+      拿它當 bookId 會上傳一本永遠對不到真書的幽靈書。scraper 的長度守衛
+      （extractFallbackId 只收 12 碼以上）因此會直接跳過這本書。
+      所以這張卡的預期行為是「不會出現在個人書櫃」——請勿把 id 改長。
+    -->
     <div class="library-item" data-testid="book-4">
-      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book4" alt="cover" />
+      <div class="cover-outer">
+        <div class="cover-container">
+          <div class="cover">
+            <!-- 無 a.reader-link，bookId 只能從 .privacy 的 id 取得 -->
+            <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book4" alt="cover" />
+          </div>
+        </div>
+        <div class="rendition-overlay"><div class="label rendition">流式</div></div>
+        <div class="desktop-overlay">
+          <div class="openbook-overlay" style="opacity: 0; pointer-events: none;">
+            <div class="detail"><span><i class="mo mo-ellipsis-horizontal"></i></span></div>
+            <div class="privacy" id="privacy-18548672"><span><i class="mo mo-lock-off"></i></span></div>
+            <div class="menu-status"><div class="dropdown"><button class="dropdown-toggle">正在閱讀</button></div></div>
+          </div>
+        </div>
+      </div>
       <div class="info">
-        <span class="title" title="薩提爾的對話練習">薩提爾的對話練習</span>
-        <span class="author">李崇建</span>
+        <div class="progress"><div class="progress-bar"></div></div>
+        <div class="title" title="薩提爾的對話練習">薩提爾的對話練習</div>
+        <div class="star-rating"></div>
       </div>
-      <div class="openbook">
-        <!-- 無 reader-link，使用 privacy fallback -->
-      </div>
-      <div class="privacy" id="privacy-210439468000104"></div>
+      <div class="select-overlay"></div>
     </div>
 
-    <!-- 書籍 5：正常書籍 -->
+    <!--
+      書籍 5：legacy 結構迴歸守衛。
+      刻意保留舊站 read.readmoo.com 的 .openbook 結構（reader-link 在 .openbook 內），
+      確保 queryWithLegacyFallback 的舊站路徑不會在改版中被靜默弄壞。請勿改成新站結構。
+    -->
     <div class="library-item" data-testid="book-5">
       <img class="cover-img" src="https://via.placeholder.com/80x110?text=Book5" alt="cover" />
       <div class="info">
@@ -89,23 +168,38 @@
         <span class="author">Anders Ericsson</span>
       </div>
       <div class="openbook">
+        <div class="detail"><span><i class="mo mo-ellipsis-horizontal"></i></span></div>
         <a class="reader-link" href="https://readmoo.com/api/reader/210439468000105">閱讀</a>
       </div>
       <div class="privacy" id="privacy-210439468000105"></div>
     </div>
 
-    <!-- 書籍 6：借入書籍（應被排除） -->
+    <!-- 書籍 6：借入書籍（新站結構，[type="borrowed"] 在 .cover 內，應被排除） -->
     <div class="library-item" data-testid="book-borrowed">
-      <img class="cover-img" src="https://via.placeholder.com/80x110?text=Borrowed" alt="cover" />
+      <div class="cover-outer">
+        <div class="cover-container">
+          <div class="cover">
+            <div type="borrowed"><div class="ribbon"><span>借入</span></div></div>
+            <a class="reader-link" href="https://readmoo.com/api/reader/999999999999999">
+              <img class="cover-img" src="https://via.placeholder.com/80x110?text=Borrowed" alt="cover" />
+            </a>
+          </div>
+        </div>
+        <div class="rendition-overlay"><div class="label rendition">流式</div></div>
+        <div class="desktop-overlay">
+          <div class="openbook-overlay" style="opacity: 0; pointer-events: none;">
+            <div class="detail"><span><i class="mo mo-ellipsis-horizontal"></i></span></div>
+            <div class="privacy" id="privacy-999999999999999"><span><i class="mo mo-lock-off"></i></span></div>
+            <div class="menu-status"><div class="dropdown"><button class="dropdown-toggle">正在閱讀</button></div></div>
+          </div>
+        </div>
+      </div>
       <div class="info">
-        <span class="title" title="借入的書">借入的書</span>
-        <span class="author">某作者</span>
+        <div class="progress"><div class="progress-bar"></div></div>
+        <div class="title" title="借入的書">借入的書</div>
+        <div class="star-rating"></div>
       </div>
-      <div type="borrowed"></div>
-      <div class="openbook">
-        <a class="reader-link" href="https://readmoo.com/api/reader/999999999999999">閱讀</a>
-      </div>
-      <div class="privacy" id="privacy-999999999999999"></div>
+      <div class="select-overlay"></div>
     </div>
   </div>
 
@@ -155,13 +249,18 @@
     // 監聽 hash 變更（SPA 導航）
     window.addEventListener("hashchange", showCurrentView);
 
-    // 模擬 hover 觸發 openbook 顯示（Content Script 會 dispatch mouseenter）
+    // 模擬 hover 顯示操作區（Content Script 會 dispatch mouseenter）。
+    // 新站的 .openbook-overlay 用 opacity / pointer-events 隱藏；
+    // 舊站的 .openbook 用 display 隱藏，兩者都要處理。
     document.querySelectorAll(".library-item").forEach(function(item) {
       item.addEventListener("mouseenter", function() {
-        var openbook = item.querySelector(".openbook");
-        if (openbook) {
+        item.querySelectorAll(".openbook-overlay").forEach(function(overlay) {
+          overlay.style.opacity = "1";
+          overlay.style.pointerEvents = "auto";
+        });
+        item.querySelectorAll(".openbook").forEach(function(openbook) {
           openbook.style.display = "block";
-        }
+        });
       });
     });
   </script>
