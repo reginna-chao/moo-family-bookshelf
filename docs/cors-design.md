@@ -10,7 +10,7 @@ MooFamily Bookshelf 的 Cloudflare Worker（Hono）需要同時服務多種跨�
 
 | Client                                  | Origin                                                                                          |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Chrome Extension Content Script         | 寄生於 `https://read.readmoo.com`                                                               |
+| Chrome Extension Content Script         | 寄生於 `https://next.readmoo.com`、`https://read.readmoo.com`                                   |
 | Chrome Extension Service Worker / Popup | `chrome-extension://<id>`                                                                       |
 | PWA on Cloudflare Pages                 | `https://moo-family-bookshelf.pages.dev`、`*.moo-family-bookshelf.pages.dev`、`*-dev.pages.dev` |
 | 本機開發                                | `localhost`（任意 port、http/https）、RFC 1918 私有 IP（LAN 手機測 PWA 用）                     |
@@ -110,6 +110,8 @@ X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 ```
 
+> 以上實測使用舊站 `https://read.readmoo.com` 作為 Origin。讀墨書櫃已搬到新站 `https://next.readmoo.com`（路徑前綴 `/read`），兩個網域都在 allowlist 內，把上面的 `Origin` 換成 `https://next.readmoo.com` 會得到相同結構的回應（`Access-Control-Allow-Origin` 回填該 Origin）。
+
 關鍵點：
 
 - `Access-Control-Max-Age: 86400` ✅
@@ -135,7 +137,7 @@ X-Frame-Options: DENY
 
 結論：API 設計受損遠大於少幾次 OPTIONS 的收益。
 
-### 2. 反向代理（讓 worker 同源於 `read.readmoo.com`）
+### 2. 反向代理（讓 worker 同源於 `next.readmoo.com` / `read.readmoo.com`）
 
 **不採用**。Readmoo 網域不在我們控制範圍，無法掛 reverse proxy。
 
@@ -150,7 +152,7 @@ X-Frame-Options: DENY
 申請自有 domain 將 worker 從 `*.workers.dev` 移至 `api.<own-domain>`：
 
 - ✅ Worker 與 PWA 若都掛在同一個 apex domain 下，可以同源化 PWA ↔ API
-- ❌ 對 Chrome Extension Content Script（寄生於 `read.readmoo.com`）仍跨來源 → 仍需 preflight
+- ❌ 對 Chrome Extension Content Script（寄生於 `next.readmoo.com` / `read.readmoo.com`）仍跨來源 → 仍需 preflight
 - ❌ 需處理 domain 註冊、DNS、Cloudflare custom domain 設定，營運成本上升
 
 → 不是根本解，僅是中期收斂選項。觸發條件：當 `*.workers.dev` 出現信任問題（例如 ISP / 企業防火牆封鎖）、或需要把 PWA 與 API 同源時再考慮。

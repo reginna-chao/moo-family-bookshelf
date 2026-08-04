@@ -1015,8 +1015,13 @@ describe("BorrowTab", () => {
           .fn()
           .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
       });
+      // Must stay in sync with the NOT_ON_LIBRARY message thrown by
+      // `openLendDialogForBook` in extension/src/content/readmoo-lend.ts — that
+      // module is mocked here, so this file cannot import the real string.
+      // `tests/unit/readmooLend.test.ts` pins the exact wording against
+      // production; this case only checks that whatever it throws is surfaced.
       mockOpenLendDialogForBook.mockRejectedValue(
-        new Error("請先前往讀墨書庫頁面（read.readmoo.com）"),
+        new Error("請先切換到讀墨的「書櫃」頁面後再試一次"),
       );
 
       renderBorrowTab(apiClient, { userId: OWNER_ID });
@@ -1029,7 +1034,7 @@ describe("BorrowTab", () => {
       // The error surfaces and previousQuery stayed null → no restore attempt.
       await waitFor(() => {
         expect(screen.getByRole("alert")).toHaveTextContent(
-          "請先前往讀墨書庫頁面",
+          "請先切換到讀墨的「書櫃」頁面後再試一次",
         );
       });
       expect(mockRestoreLibrarySearch).not.toHaveBeenCalled();

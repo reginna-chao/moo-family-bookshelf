@@ -800,7 +800,7 @@ jobs:
   - 待辦：
     - 觀察 production preflight log，確認 24h max-age 對使用者連續操作生效（Chromium 上限 7200s，但仍能達到「短時間連續操作只發一次 OPTIONS」效果）
     - 文件記錄此設計決策（避免未來誤改）
-  - **中期選項（非 v1.3 必做）**：申請自有 domain 將 Worker 從 `*.workers.dev` 移至 `api.<own-domain>`；同源化是長期解，但前端寄生於 `read.readmoo.com`，本質上仍跨來源，僅是中期收斂選項。優先級 **低**。
+  - **中期選項（非 v1.3 必做）**：申請自有 domain 將 Worker 從 `*.workers.dev` 移至 `api.<own-domain>`；同源化是長期解，但前端寄生於 `next.readmoo.com` / `read.readmoo.com`，本質上仍跨來源，僅是中期收斂選項。優先級 **低**。
   - **不採用**：
     - 改用 cookie / form-encoded body 規避 preflight（API 設計受損，得不償失）
     - 反向代理（無法控制 readmoo 網域）
@@ -1023,7 +1023,7 @@ jobs:
   - `web-ext` lint / build / sign；`.github/workflows/cicd.yml` 新增 Firefox release job（`v*` tag 觸發，與既有 `release-extension` 並列）
   - 需 GitHub Secrets：`AMO_JWT_ISSUER` / `AMO_JWT_SECRET`（須向 Mozilla AMO 申請）
 - [x] **#37 文件**：`README` / `worker/DEPLOY.md` 補 Firefox 安裝說明；`site/` 加「Available on Firefox for Android™」入口
-- [x] **#38 實機驗證（需手動）**：Firefox Desktop + Android（Fenix）載入、content script 注入 `read.readmoo.com`、`storage.sync`（需登入 Firefox 帳號，已有 sync code fallback）、`#/me` / `#/library` 爬取流程
+- [x] **#38 實機驗證（需手動）**：Firefox Desktop + Android（Fenix）載入、content script 注入 `next.readmoo.com` / `read.readmoo.com`、`storage.sync`（需登入 Firefox 帳號，已有 sync code fallback）、`#/me` / `#/library` 爬取流程
 
 > ⚠️ E2E（Playwright）目前僅載入 Chrome；Firefox E2E 視成本決定，**預設先不擴充**，列為後續追蹤。
 > ⚠️ 版號與 CHANGELOG 不在 Wave M 內手動處理 — 於 release 前以 `/bump-ver` 統一 bump 至 `v1.5.0` 並自動產生涵蓋隱藏書籍 + Firefox 的條目。

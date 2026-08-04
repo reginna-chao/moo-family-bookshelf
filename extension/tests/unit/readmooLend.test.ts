@@ -22,19 +22,54 @@ import {
   selectMemberByName,
   waitForLendDialogClose,
   closeLendDialog,
+  ensureOnLibraryPage,
   openBookDetailModal,
   openLendDialogForBook,
   ReadmooLendError,
   READMOO_LEND_DEFAULTS,
 } from "@/content/readmoo-lend";
+import { resetScrapeWarnings } from "@/content/readmoo-dom";
 import { submitSearch, waitForBookCard } from "@/content/readmoo-search";
 
+const realLocation = window.location;
+
+/**
+ * Replace window.location with a minimal stub the lend flow can read.
+ *
+ * `pathname` matters: the new host only serves the web app under `/read`, so the
+ * library gate reads all three parts. Callers must pass the pathname that goes
+ * with the host they are simulating (`/read/` for next, `/` for legacy).
+ */
+function stubLocation(hostname: string, pathname: string, hash: string): void {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    writable: true,
+    value: { hostname, pathname, hash },
+  });
+}
+
+function restoreLocation(): void {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    writable: true,
+    value: realLocation,
+  });
+}
+
 describe("readmoo-lend", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     document.body.innerHTML = "";
+    // queryWithLegacyFallback de-duplicates its warning in a module-scoped Set;
+    // reset it around every case so warning assertions are order-independent.
+    resetScrapeWarnings();
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
+    warnSpy.mockRestore();
+    resetScrapeWarnings();
     document.body.innerHTML = "";
   });
 
@@ -237,22 +272,26 @@ describe("readmoo-lend", () => {
       vi.useRealTimers();
     });
 
+    /** Overlay markup keyed by the ⋯ button shape we want the card to expose. */
+    const OVERLAY_MARKUP = {
+      span: `<div class="openbook-overlay"><div class="detail"><span>⋯</span></div></div>`,
+      "detail-only": `<div class="openbook-overlay"><div class="detail">⋯</div></div>`,
+      // Legacy host: the overlay is named `.openbook`, not `.openbook-overlay`.
+      "legacy-span": `<div class="openbook"><div class="detail"><span>⋯</span></div></div>`,
+      "legacy-detail-only": `<div class="openbook"><div class="detail">⋯</div></div>`,
+      none: "",
+    } as const;
+
     /** Build a library card; `withTrigger` controls the ⋯ overlay button shape. */
-    function buildCard(withTrigger: "span" | "detail-only" | "none"): {
+    function buildCard(withTrigger: keyof typeof OVERLAY_MARKUP): {
       card: HTMLElement;
       readerLinkClick: ReturnType<typeof vi.fn>;
     } {
       const card = document.createElement("div");
       card.className = "library-item";
-      const overlay =
-        withTrigger === "span"
-          ? `<div class="openbook-overlay"><div class="detail"><span>⋯</span></div></div>`
-          : withTrigger === "detail-only"
-            ? `<div class="openbook-overlay"><div class="detail">⋯</div></div>`
-            : "";
       card.innerHTML = `
         <a class="reader-link"><img class="cover-img" /></a>
-        ${overlay}
+        ${OVERLAY_MARKUP[withTrigger]}
       `;
       document.body.appendChild(card);
       const readerLinkClick = vi.fn();
@@ -301,6 +340,52 @@ describe("readmoo-lend", () => {
       expect(detailClick).toHaveBeenCalledTimes(1);
     });
 
+    it("falls back to the legacy '.openbook .detail span' and warns once", async () => {
+      const { card, readerLinkClick } = buildCard("legacy-span");
+      const span = card.querySelector<HTMLElement>(".openbook .detail span")!;
+      const spanClick = vi.fn();
+      span.addEventListener("click", spanClick);
+      const modal = document.createElement("div");
+      modal.className = "book-detail-modal";
+      document.body.appendChild(modal);
+
+      const promise = openBookDetailModal(card);
+      await vi.advanceTimersByTimeAsync(700);
+      const result = await promise;
+
+      expect(result).toBe(modal);
+      expect(spanClick).toHaveBeenCalledTimes(1);
+      expect(readerLinkClick).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'legacy selector fallback hit for "lend:detail-trigger"',
+        ),
+      );
+    });
+
+    it("falls back to the legacy '.openbook .detail' when the inner span is absent", async () => {
+      const { card } = buildCard("legacy-detail-only");
+      const detail = card.querySelector<HTMLElement>(".openbook .detail")!;
+      const detailClick = vi.fn();
+      detail.addEventListener("click", detailClick);
+      const modal = document.createElement("div");
+      modal.className = "book-detail-modal";
+      document.body.appendChild(modal);
+
+      const promise = openBookDetailModal(card);
+      await vi.advanceTimersByTimeAsync(700);
+      await promise;
+
+      expect(detailClick).toHaveBeenCalledTimes(1);
+      // Both the strict and the loose lookup fell through to the legacy host.
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'legacy selector fallback hit for "lend:detail-trigger-loose"',
+        ),
+      );
+    });
+
     it("throws DETAIL_TRIGGER_NOT_FOUND when no overlay detail trigger exists", async () => {
       const { card } = buildCard("none");
 
@@ -313,42 +398,142 @@ describe("readmoo-lend", () => {
     });
   });
 
-  describe("openLendDialogForBook", () => {
-    const realLocation = window.location;
+  describe("ensureOnLibraryPage", () => {
+    afterEach(() => {
+      restoreLocation();
+    });
 
-    function stubLocation(hostname: string, hash: string): void {
-      Object.defineProperty(window, "location", {
-        configurable: true,
-        writable: true,
-        value: { hostname, hash },
+    const alreadyThere: Array<{
+      hostname: string;
+      pathname: string;
+      hash: string;
+    }> = [
+      { hostname: "next.readmoo.com", pathname: "/read/", hash: "#/library" },
+      // The new host also serves the app at `/read` with no trailing slash.
+      { hostname: "next.readmoo.com", pathname: "/read", hash: "#/library" },
+      { hostname: "read.readmoo.com", pathname: "/", hash: "#/library" },
+      {
+        hostname: "next.readmoo.com",
+        pathname: "/read/",
+        hash: "#/library/all",
+      },
+    ];
+
+    for (const { hostname, pathname, hash } of alreadyThere) {
+      it(`returns true without navigating on ${hostname}${pathname}${hash}`, () => {
+        stubLocation(hostname, pathname, hash);
+
+        expect(ensureOnLibraryPage()).toBe(true);
+        expect(window.location.href).toBeUndefined();
       });
     }
 
+    const redirects: Array<{
+      name: string;
+      hostname: string;
+      pathname: string;
+      hash: string;
+      expectedHref: string;
+    }> = [
+      {
+        name: "keeps a new-site user on the new site (with the /read prefix)",
+        hostname: "next.readmoo.com",
+        pathname: "/read/",
+        hash: "#/me",
+        expectedHref: "https://next.readmoo.com/read/#/library",
+      },
+      {
+        name: "keeps a legacy-site user on the legacy site (no prefix)",
+        hostname: "read.readmoo.com",
+        pathname: "/",
+        hash: "#/me",
+        expectedHref: "https://read.readmoo.com/#/library",
+      },
+      {
+        name: "sends an unrecognised host to the legacy library URL",
+        hostname: "localhost",
+        pathname: "/",
+        hash: "",
+        expectedHref: "https://read.readmoo.com/#/library",
+      },
+      {
+        // The new host's root serves the storefront, not the web app, so the
+        // library hash alone must not open the gate there.
+        name: "rejects the new site's root path even with the library hash",
+        hostname: "next.readmoo.com",
+        pathname: "/",
+        hash: "#/library",
+        expectedHref: "https://next.readmoo.com/read/#/library",
+      },
+      {
+        // `#/librarything` merely prefixes `#/library`; only the exact route or
+        // a `#/library/…` sub-route counts.
+        name: "rejects a sibling hash route that only prefixes #/library",
+        hostname: "next.readmoo.com",
+        pathname: "/read/",
+        hash: "#/librarything",
+        expectedHref: "https://next.readmoo.com/read/#/library",
+      },
+    ];
+
+    for (const { name, hostname, pathname, hash, expectedHref } of redirects) {
+      it(`returns false and ${name}`, () => {
+        stubLocation(hostname, pathname, hash);
+
+        expect(ensureOnLibraryPage()).toBe(false);
+        expect(window.location.href).toBe(expectedHref);
+      });
+    }
+  });
+
+  describe("openLendDialogForBook", () => {
     beforeEach(() => {
       vi.mocked(submitSearch).mockReset();
       vi.mocked(waitForBookCard).mockReset();
       Element.prototype.scrollIntoView = vi.fn();
-      stubLocation("read.readmoo.com", "#/library");
+      stubLocation("read.readmoo.com", "/", "#/library");
     });
 
     afterEach(() => {
       vi.useRealTimers();
-      Object.defineProperty(window, "location", {
-        configurable: true,
-        writable: true,
-        value: realLocation,
-      });
+      restoreLocation();
     });
 
     it("throws NOT_ON_LIBRARY without searching when not on the library page", async () => {
-      stubLocation("localhost", "");
+      stubLocation("localhost", "/", "");
 
       const err = await openLendDialogForBook("bk-1", "書名").catch((e) => e);
 
       expect(err).toBeInstanceOf(ReadmooLendError);
       expect((err as ReadmooLendError).code).toBe("NOT_ON_LIBRARY");
+      // Pins the shipped copy: BorrowTab renders this message verbatim in its
+      // error alert, so a wording change must be a deliberate edit here too.
+      expect((err as Error).message).toBe(
+        "請先切換到讀墨的「書櫃」頁面後再試一次",
+      );
       // Bailing before the search means no library filter was ever applied.
       expect(submitSearch).not.toHaveBeenCalled();
+    });
+
+    it("throws NOT_ON_LIBRARY on a host that merely looks like Readmoo", async () => {
+      stubLocation("next.readmoo.com.evil.com", "/read/", "#/library");
+
+      const err = await openLendDialogForBook("bk-1", "書名").catch((e) => e);
+
+      expect((err as ReadmooLendError).code).toBe("NOT_ON_LIBRARY");
+      expect(submitSearch).not.toHaveBeenCalled();
+    });
+
+    it("proceeds past the host gate on the new next.readmoo.com library page", async () => {
+      stubLocation("next.readmoo.com", "/read/", "#/library");
+      vi.mocked(submitSearch).mockResolvedValue("");
+      vi.mocked(waitForBookCard).mockResolvedValue(null);
+
+      const err = await openLendDialogForBook("bk-1", "書名").catch((e) => e);
+
+      // Reaching BOOK_NOT_FOUND proves the new host cleared the library gate.
+      expect((err as ReadmooLendError).code).toBe("BOOK_NOT_FOUND");
+      expect(submitSearch).toHaveBeenCalled();
     });
 
     it("returns the lend dialog + members + previousQuery on the success path", async () => {

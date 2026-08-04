@@ -34,9 +34,16 @@ beforeEach(() => {
 // B1: CORS Origin Validation
 // ===========================================================================
 
+// Content script 實際執行的書櫃站：read = 舊站，next = 新站。
+// 成對釘住，避免日後收緊 subdomain regex 時無聲失效。新增書櫃站時只改這裡。
+const BOOKSHELF_ORIGINS = [
+  "https://read.readmoo.com",
+  "https://next.readmoo.com",
+];
+
 describe("isAllowedOrigin", () => {
   const alwaysAllowed = [
-    "https://read.readmoo.com",
+    ...BOOKSHELF_ORIGINS,
     "https://readmoo.com",
     "https://store.readmoo.com",
     "https://moo-family-bookshelf.pages.dev",
@@ -52,6 +59,13 @@ describe("isAllowedOrigin", () => {
     "https://notreadmoo.com",
     "http://readmoo.com",
     "https://read.readmoo.com:8080",
+    "https://next.readmoo.com.evil.com",
+    "http://next.readmoo.com",
+    "https://next.readmoo.com:8080",
+    // 多層子網域：釘住 subdomain 字元類 [a-zA-Z0-9-] 不含 "."
+    "https://sub.next.readmoo.com",
+    // 同字首不同 TLD：釘住 regex 尾端的 $ 錨點
+    "https://next.readmoo.com.tw",
     "http://localhost:abc",
     "https://localhost:3000",
     "chrome-extension://",
@@ -126,14 +140,16 @@ describe("isAllowedOrigin", () => {
 });
 
 describe("CORS headers on responses", () => {
-  it("should set Access-Control-Allow-Origin for allowed origins", async () => {
-    const res = await request("GET", "/", {
-      headers: { Origin: "https://read.readmoo.com" },
-    });
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(
-      "https://read.readmoo.com",
-    );
-  });
+  // 每個書櫃站都必須拿到自己的 Access-Control-Allow-Origin 回填
+  it.each(BOOKSHELF_ORIGINS)(
+    "should set Access-Control-Allow-Origin for allowed origin: %s",
+    async (origin) => {
+      const res = await request("GET", "/", {
+        headers: { Origin: origin },
+      });
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+    },
+  );
 
   it("should not set Access-Control-Allow-Origin for disallowed origins", async () => {
     const res = await request("GET", "/", {

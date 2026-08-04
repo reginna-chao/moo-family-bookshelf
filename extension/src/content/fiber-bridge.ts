@@ -11,6 +11,8 @@
  * can read them without CustomEvents or cache matching.
  */
 
+import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
+
 const ATTR_BOOK_ID = "data-moo-book-id";
 const ATTR_COVER = "data-moo-cover-url";
 const ATTR_AUTHOR = "data-moo-author";
@@ -28,7 +30,7 @@ const MAX_CATEGORY_LEN = 50;
  * - `data-moo-author`    — author from `book.attributes.author`
  */
 function stampBookData(): void {
-  const items = document.querySelectorAll(".library-item");
+  const items = document.querySelectorAll(READMOO_SELECTORS.libraryItem);
 
   for (const item of items) {
     if (item.hasAttribute(ATTR_BOOK_ID)) continue;

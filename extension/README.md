@@ -7,10 +7,13 @@ This extension injects a "Family Bookshelf" Dialog into Readmoo (readmoo.com) we
 ## Why host_permissions Are Required
 
 ```
-"host_permissions": ["https://read.readmoo.com/*"]
+"host_permissions": [
+  "https://next.readmoo.com/*",
+  "https://read.readmoo.com/*"
+]
 ```
 
-This permission is scoped to `read.readmoo.com` and is used exclusively for the following purposes:
+These permissions are scoped to Readmoo's bookshelf web app hosts (`next.readmoo.com`, and the legacy `read.readmoo.com`) and are used exclusively for the following purposes:
 
 - Injecting the Family Bookshelf Dialog UI into Readmoo pages so users can browse shared books without leaving the site
 - Scraping the current logged-in user's book list from the Readmoo page DOM (only publicly visible book information such as title, cover, and author is read; no account credentials or cookies are read, stored, or transmitted)

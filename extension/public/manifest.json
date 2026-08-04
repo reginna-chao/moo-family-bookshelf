@@ -11,6 +11,7 @@
     "extension_pages": "script-src 'self'; object-src 'self'; base-uri 'self';"
   },
   "host_permissions": [
+    "https://next.readmoo.com/*",
     "https://read.readmoo.com/*"
   ],
   "background": {
@@ -20,6 +21,7 @@
   "content_scripts": [
     {
       "matches": [
+        "https://next.readmoo.com/*",
         "https://read.readmoo.com/*"
       ],
       "js": [
@@ -36,6 +38,7 @@
         "fiber-bridge.js"
       ],
       "matches": [
+        "https://next.readmoo.com/*",
         "https://read.readmoo.com/*"
       ]
     }

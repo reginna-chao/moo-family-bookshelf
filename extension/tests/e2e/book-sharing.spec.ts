@@ -85,6 +85,12 @@ test.describe("Book Sharing", () => {
       timeout: 10_000,
     });
 
+    // Fixture book-4 has no reader-link and only the new site's 8-digit internal
+    // `privacy-` id, which the scraper's length guard rejects. Skipping it is the
+    // expected behaviour — accepting it would create a ghost book that resolves
+    // to no real title.
+    await expect(dialog.locator("text=薩提爾的對話練習")).toHaveCount(0);
+
     await page.close();
   });
 

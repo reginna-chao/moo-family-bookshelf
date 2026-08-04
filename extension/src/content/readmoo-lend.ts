@@ -3,7 +3,8 @@
  *
  * Orchestrates clicks through Readmoo's native lending flow when the book
  * owner approves a MooFamily borrow request:
- *   1. Locate the book card in `read.readmoo.com/#/library`
+ *   1. Locate the book card on the Readmoo library page — either
+ *      `next.readmoo.com/read/#/library` or `read.readmoo.com/#/library`
  *   2. Open the book detail modal
  *   3. Click the 「借出」 button to open the lending dialog
  *   4. Select the family member matching `readmooName`
@@ -17,8 +18,18 @@
  * Letting the user click OK manually keeps the integration safe.
  */
 
+import {
+  LIBRARY_HASH,
+  READMOO_SELECTORS,
+  isLibraryUrl,
+  readmooAppUrl,
+} from "moo-family-bookshelf-shared/config/readmoo";
 import { submitSearch, waitForBookCard } from "./readmoo-search";
-import { ReadmooLendError, waitForElement } from "./readmoo-dom";
+import {
+  ReadmooLendError,
+  queryWithLegacyFallback,
+  waitForElement,
+} from "./readmoo-dom";
 
 // Re-export shared DOM primitives so existing importers (tests, BorrowTab) keep
 // importing them from "./readmoo-lend" unchanged. Definitions live in readmoo-dom
@@ -29,8 +40,15 @@ export {
   waitForElement,
 } from "./readmoo-dom";
 
-const LIBRARY_HASH = "#/library";
-const READMOO_LIBRARY_URL = "https://read.readmoo.com/#/library";
+/**
+ * Absolute URL of the library page on the host the user is currently on.
+ * Resolved per call (not a module constant) so the new and legacy hosts each
+ * keep the user on the site they started from — the two use different path
+ * prefixes (`/read/#/library` vs `/#/library`).
+ */
+function libraryUrlForCurrentHost(): string {
+  return readmooAppUrl(window.location.hostname, LIBRARY_HASH);
+}
 
 /** Default timeouts (ms) — exposed for testing. */
 export const READMOO_LEND_DEFAULTS = {
@@ -50,10 +68,8 @@ function wait(ms: number): Promise<void> {
 }
 
 function isOnLibraryPage(): boolean {
-  return (
-    window.location.hostname === "read.readmoo.com" &&
-    window.location.hash.startsWith(LIBRARY_HASH)
-  );
+  const { hostname, pathname, hash } = window.location;
+  return isLibraryUrl(hostname, pathname, hash);
 }
 
 /**
@@ -65,19 +81,21 @@ export function ensureOnLibraryPage(): boolean {
   // Cross-page navigation; caller flow needs a different strategy
   // (e.g. open a new tab, or instruct user). We do NOT auto-navigate
   // here because it would unmount the Dialog UI immediately.
-  window.location.href = READMOO_LIBRARY_URL;
+  window.location.href = libraryUrlForCurrentHost();
   return false;
 }
 
 /**
  * Open Readmoo's `.book-detail-modal` for a library card.
  *
- * Verified against production read.readmoo.com (2026-07-11): the modal is opened
- * by the hover-revealed 「⋯」 overlay button, NOT the title/cover. The card's
- * `.cover-img` sits inside `a.reader-link` (opens the reader) and must never be
- * clicked. Working sequence: dispatch `mouseenter`+`mouseover` on the card to
- * reveal `.openbook-overlay`, wait ~300ms for it to render, then dispatch a
- * single `click` on `.openbook-overlay .detail span` (the ellipsis button).
+ * Verified against production read.readmoo.com (2026-07-11) and
+ * next.readmoo.com (2026-08-04): the modal is opened by the hover-revealed
+ * 「⋯」 overlay button, NOT the title/cover. The card's `.cover-img` sits
+ * inside `a.reader-link` (opens the reader) and must never be clicked. Working
+ * sequence: dispatch `mouseenter`+`mouseover` on the card to reveal
+ * `.openbook-overlay`, wait ~300ms for it to render, then dispatch a single
+ * `click` on `.openbook-overlay .detail span` (the ellipsis button). The legacy
+ * host names that layer `.openbook`, hence the fallback below.
  *
  * Returns the modal element once it appears, or throws on timeout.
  */
@@ -96,8 +114,18 @@ export async function openBookDetailModal(
   // Click the 「⋯」 detail button inside the overlay. NEVER target a.reader-link
   // or .cover-img — those open the Readmoo reader.
   const trigger =
-    bookCard.querySelector<HTMLElement>(".openbook-overlay .detail span") ??
-    bookCard.querySelector<HTMLElement>(".openbook-overlay .detail");
+    queryWithLegacyFallback<HTMLElement>(
+      bookCard,
+      READMOO_SELECTORS.detailTrigger,
+      READMOO_SELECTORS.detailTriggerLegacy,
+      "lend:detail-trigger",
+    ) ??
+    queryWithLegacyFallback<HTMLElement>(
+      bookCard,
+      READMOO_SELECTORS.detailTriggerLoose,
+      READMOO_SELECTORS.detailTriggerLooseLegacy,
+      "lend:detail-trigger-loose",
+    );
   if (!trigger) {
     throw new ReadmooLendError(
       "DETAIL_TRIGGER_NOT_FOUND",
@@ -332,7 +360,7 @@ export async function openLendDialogForBook(
   if (!isOnLibraryPage()) {
     throw new ReadmooLendError(
       "NOT_ON_LIBRARY",
-      "請先前往讀墨書庫頁面（read.readmoo.com）",
+      "請先切換到讀墨的「書櫃」頁面後再試一次",
     );
   }
   // Readmoo's library grid is infinite-scroll, so the target book may not be in

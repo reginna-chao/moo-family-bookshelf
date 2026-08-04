@@ -154,17 +154,22 @@ function installFiberBridgeMock(
 
 describe("scrapeBooks", () => {
   let scrapeBooks: () => Promise<import("@/content/scraper").ScrapedBook[]>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     document.body.innerHTML = "";
     document.documentElement.removeAttribute("data-moo-fiber-bridge");
+    // vi.resetModules() also gives every case a fresh readmoo-dom module, so the
+    // module-scoped legacy-warning de-duplication set never leaks between tests.
     vi.resetModules();
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await import("@/content/scraper");
     scrapeBooks = mod.scrapeBooks;
   });
 
   afterEach(() => {
+    warnSpy.mockRestore();
     vi.useRealTimers();
     document.body.innerHTML = "";
     document.documentElement.removeAttribute("data-moo-fiber-bridge");
@@ -185,7 +190,7 @@ describe("scrapeBooks", () => {
       <div class="library-item">
         <div class="info"><div class="title" title="Test Book">Test Book</div></div>
         <img class="cover-img" src="https://example.com/cover.jpg" />
-        <div class="privacy" id="privacy-99999"></div>
+        <div class="privacy" id="privacy-210439468000101"></div>
       </div>
     `;
 
@@ -198,7 +203,7 @@ describe("scrapeBooks", () => {
 
     const result = await promise;
     expect(result).toHaveLength(1);
-    expect(result[0].bookId).toBe("99999");
+    expect(result[0].bookId).toBe("210439468000101");
     expect(result[0].title).toBe("Test Book");
     expect(result[0].coverUrl).toBe("https://example.com/cover.jpg");
   });
@@ -275,6 +280,216 @@ describe("scrapeBooks", () => {
     const result = await promise;
     expect(result).toHaveLength(1);
     expect(result[0].bookId).toBe("123456");
+    // The legacy host still works, but must announce itself exactly once so we
+    // can tell when the `.openbook` fallback is safe to delete.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'legacy selector fallback hit for "scraper:reader-link"',
+      ),
+    );
+  });
+
+  it("extracts bookId from the reader-link under .cover (new site markup)", async () => {
+    document.body.innerHTML = `
+      <div class="library-item">
+        <div class="cover-outer">
+          <div class="cover-container">
+            <div class="cover">
+              <a class="reader-link" href="https://readmoo.com/api/reader/210017268000101">
+                <img class="cover-img" src="https://cdn.readmoo.com/cover/next-site.jpg" />
+              </a>
+            </div>
+          </div>
+          <div class="desktop-overlay">
+            <div class="openbook-overlay" style="opacity: 0; pointer-events: none;">
+              <div class="detail"><span></span></div>
+              <div class="privacy" id="privacy-18548671"><span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="info"><div class="title" title="新站書">新站書</div></div>
+      </div>
+    `;
+
+    const promise = scrapeBooks();
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+
+    const result = await promise;
+    expect(result).toHaveLength(1);
+    // reader-link wins over the .privacy fallback id.
+    expect(result[0].bookId).toBe("210017268000101");
+    expect(result[0].title).toBe("新站書");
+    expect(result[0].coverUrl).toBe(
+      "https://cdn.readmoo.com/cover/next-site.jpg",
+    );
+    // Primary selector hit → no legacy fallback warning.
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the .privacy id when there is no reader-link and the id is a real book id", async () => {
+    document.body.innerHTML = `
+      <div class="library-item">
+        <div class="cover-outer">
+          <div class="cover-container">
+            <div class="cover">
+              <img class="cover-img" src="https://cdn.readmoo.com/cover/no-link.jpg" />
+            </div>
+          </div>
+          <div class="desktop-overlay">
+            <div class="openbook-overlay" style="opacity: 0; pointer-events: none;">
+              <div class="detail"><span></span></div>
+              <div class="privacy" id="privacy-210439468000107"><span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="info"><div class="title" title="無連結新站書">無連結新站書</div></div>
+      </div>
+    `;
+
+    const promise = scrapeBooks();
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+
+    const result = await promise;
+    expect(result).toHaveLength(1);
+    expect(result[0].bookId).toBe("210439468000107");
+    // Neither reader-link selector matched → nothing to warn about, and the id
+    // cleared the length guard so no rejection warning either.
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Length guard on the `.privacy` fallback id.
+   *
+   * The two hosts put different ids in `id="privacy-…"`: the legacy host repeats
+   * the real 15-digit book id, the new host exposes an unrelated 8-digit internal
+   * id. Accepting the short one would upload a book keyed by an id that resolves
+   * to nothing, so the scraper skips the book instead.
+   */
+  describe("privacy fallback id length guard", () => {
+    const cases: Array<{
+      name: string;
+      privacyId: string;
+      expectedBookId: string | null;
+    }> = [
+      {
+        name: "an 8-digit internal id from the new host",
+        privacyId: "privacy-18548672",
+        expectedBookId: null,
+      },
+      {
+        name: "an 11-digit id (one short of the threshold)",
+        privacyId: "privacy-12345678901",
+        expectedBookId: null,
+      },
+      {
+        name: "a non-numeric id",
+        privacyId: "privacy-abcdefghijklm",
+        expectedBookId: null,
+      },
+      {
+        name: "a 12-digit id (the threshold)",
+        privacyId: "privacy-123456789012",
+        expectedBookId: "123456789012",
+      },
+      {
+        name: "a real 15-digit book id",
+        privacyId: "privacy-210439468000108",
+        expectedBookId: "210439468000108",
+      },
+    ];
+
+    for (const { name, privacyId, expectedBookId } of cases) {
+      const verb = expectedBookId ? "accepts" : "skips the book for";
+      it(`${verb} ${name}`, async () => {
+        document.body.innerHTML = `
+          <div class="library-item">
+            <div class="info"><div class="title" title="守衛書">守衛書</div></div>
+            <img class="cover-img" src="https://example.com/cover.jpg" />
+            <div class="privacy" id="${privacyId}"></div>
+          </div>
+        `;
+
+        const promise = scrapeBooks();
+        for (let i = 0; i < 25; i++) {
+          await vi.advanceTimersByTimeAsync(100);
+        }
+        const result = await promise;
+
+        if (!expectedBookId) {
+          expect(result).toEqual([]);
+          // A rejected id is a degraded path the user must be able to see.
+          expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining(
+              `rejected .privacy fallback bookId "${privacyId}"`,
+            ),
+          );
+          return;
+        }
+        expect(result).toHaveLength(1);
+        expect(result[0].bookId).toBe(expectedBookId);
+        expect(warnSpy).not.toHaveBeenCalled();
+      });
+    }
+
+    it("warns once per sync no matter how many books are rejected", async () => {
+      document.body.innerHTML = `
+        <div class="library-item">
+          <div class="info"><div class="title" title="短碼一">短碼一</div></div>
+          <div class="privacy" id="privacy-18548672"></div>
+        </div>
+        <div class="library-item">
+          <div class="info"><div class="title" title="短碼二">短碼二</div></div>
+          <div class="privacy" id="privacy-18548673"></div>
+        </div>
+      `;
+
+      const promise = scrapeBooks();
+      for (let i = 0; i < 25; i++) {
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      const result = await promise;
+
+      expect(result).toEqual([]);
+      // A 25-card library would otherwise bury real errors under 25 identical
+      // lines; the label is de-duplicated until the next sync resets it.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("skips borrowed items in the new markup (badge inside .cover)", async () => {
+    document.body.innerHTML = `
+      <div class="library-item">
+        <div class="cover-outer">
+          <div class="cover-container">
+            <div class="cover">
+              <div type="borrowed"><div class="ribbon"><span>借入</span></div></div>
+              <a class="reader-link" href="https://readmoo.com/api/reader/210017268000102">
+                <img class="cover-img" src="https://cdn.readmoo.com/cover/borrowed.jpg" />
+              </a>
+            </div>
+          </div>
+          <div class="desktop-overlay">
+            <div class="openbook-overlay">
+              <div class="privacy" id="privacy-18548672"><span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="info"><div class="title" title="新站借入書">新站借入書</div></div>
+      </div>
+    `;
+
+    const promise = scrapeBooks();
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+
+    const result = await promise;
+    expect(result).toEqual([]);
   });
 
   it("extracts bookId from fiber bridge (primary method)", async () => {
@@ -334,7 +549,7 @@ describe("scrapeBooks", () => {
       <div class="library-item">
         <div class="info"><div class="title" title="Fallback Book">Fallback Book</div></div>
         <img class="cover-img" src="https://example.com/cover.jpg" />
-        <div class="privacy" id="privacy-55555"></div>
+        <div class="privacy" id="privacy-210439468000103"></div>
       </div>
     `;
 
@@ -346,7 +561,7 @@ describe("scrapeBooks", () => {
 
     const result = await promise;
     expect(result).toHaveLength(1);
-    expect(result[0].bookId).toBe("55555");
+    expect(result[0].bookId).toBe("210439468000103");
   });
 
   it("skips hover when fiber bridge extraction succeeds", async () => {
@@ -381,7 +596,7 @@ describe("scrapeBooks", () => {
       <div class="library-item">
         <div class="info"><div class="title" title="Active Book">Active Book</div></div>
         <img class="cover-img" src="" />
-        <div class="privacy" id="privacy-33333"></div>
+        <div class="privacy" id="privacy-210439468000104"></div>
       </div>
     `;
 
@@ -485,7 +700,7 @@ describe("scrapeArchivedBooks", () => {
       <div class="library-item">
         <div class="info"><div class="title" title="Book One">Book One</div></div>
         <img class="cover-img" src="https://example.com/cover1.jpg" />
-        <div class="privacy" id="privacy-12345"></div>
+        <div class="privacy" id="privacy-210439468000105"></div>
       </div>
     `;
 
@@ -511,7 +726,7 @@ describe("scrapeArchivedBooks", () => {
     newItem.innerHTML = `
       <div class="info"><div class="title" title="Archived Book">Archived Book</div></div>
       <img class="cover-img" src="https://example.com/cover2.jpg" />
-      <div class="privacy" id="privacy-67890"></div>
+      <div class="privacy" id="privacy-210439468000106"></div>
     `;
     document.body.appendChild(newItem);
 

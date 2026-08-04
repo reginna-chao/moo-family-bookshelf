@@ -62,7 +62,8 @@ export const UPDATE_URL =
  * Firefox built-in data-consent declaration (required by AMO for all new
  * Firefox extensions; see mzl.la/firefox-builtin-data-consent).
  *
- * The extension syncs book-list content scraped from read.readmoo.com, so it
+ * The extension syncs book-list content scraped from Readmoo's bookshelf web
+ * app (next.readmoo.com and the legacy read.readmoo.com), so it
  * declares the "websiteContent" data category. Email is hashed client-side
  * (no PII category) and there is no tracking/telemetry. Applied to BOTH
  * channels (Mozilla will require it for unlisted builds too).

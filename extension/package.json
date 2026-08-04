@@ -21,7 +21,7 @@
     "build:firefox:dev": "pnpm build:dev && tsx scripts/build-firefox.ts --target direct && tsx scripts/verify-firefox-build.ts --target direct",
     "build:updates-json": "tsx scripts/build-updates-json.ts",
     "lint:firefox": "pnpm build:firefox && web-ext lint --source-dir=dist-firefox-amo && web-ext lint --source-dir=dist-firefox-direct --self-hosted",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.scripts.json",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",

@@ -52,3 +52,7 @@ test-results/
 
 # Skill archive
 .skill-archive/
+
+# Local Readmoo DOM snapshots — real page dumps containing personal data
+# (account nickname, owned book list). Keep them local, never commit.
+docs/resource/

@@ -19,6 +19,8 @@ vi.mock("@/sync/mergeBooks", () => ({
 
 import { syncBooks, type SyncBooksOptions } from "@/sync/syncBooks";
 import { scrapeBooks, scrapeArchivedBooks } from "@/content/scraper";
+import { queryWithLegacyFallback } from "@/content/readmoo-dom";
+import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import {
   BoolFlag,
   BorrowStatus,
@@ -771,5 +773,80 @@ describe("syncBooks — auto-return (familyId branch)", () => {
     expect(listBorrowRequests).not.toHaveBeenCalled();
     expect(updateBorrowStatus).not.toHaveBeenCalled();
     expect(result.autoReturnedRequestIds).toBeUndefined();
+  });
+});
+
+describe("syncBooks — scrape-time warning reset", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { hash: "#/library" },
+    });
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(chrome.storage.local.get).mockImplementation(
+      (
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
+        if (typeof callback === "function") {
+          callback({});
+          return undefined as unknown as Promise<Record<string, unknown>>;
+        }
+        return Promise.resolve({}) as unknown as Promise<
+          Record<string, unknown>
+        >;
+      },
+    );
+    vi.mocked(chrome.storage.local.set).mockImplementation(() =>
+      Promise.resolve(),
+    );
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.restoreAllMocks();
+  });
+
+  it("re-arms the warn-once state so a still-degraded scrape warns on every sync", async () => {
+    // The real scraper is mocked in this file, so stand in for the one scrape-time
+    // behaviour under test: a card that only matches the legacy selector, which
+    // warns at most once per warn-once window.
+    document.body.innerHTML = `
+      <div class="library-item">
+        <div class="openbook">
+          <a class="reader-link" href="https://readmoo.com/api/reader/210439468000101"></a>
+        </div>
+      </div>
+    `;
+    vi.mocked(scrapeBooks).mockImplementation(async () => {
+      queryWithLegacyFallback(
+        document,
+        READMOO_SELECTORS.readerLink,
+        READMOO_SELECTORS.readerLinkLegacy,
+        "scraper:reader-link",
+      );
+      return [];
+    });
+
+    const options: SyncBooksOptions = {
+      navigate: false,
+      userId: "user-123",
+      apiClient: createMockApiClient(),
+    };
+    await syncBooks(options);
+    await syncBooks(options);
+
+    // Readmoo's library is a SPA that can stay open for days. Without the
+    // per-sync reset the second sync would stay silent and the degraded path
+    // would look fixed.
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenLastCalledWith(
+      expect.stringContaining(
+        'legacy selector fallback hit for "scraper:reader-link"',
+      ),
+    );
   });
 });
