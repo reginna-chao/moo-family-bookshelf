@@ -94,6 +94,8 @@ export interface RecoveryResult {
   recovered: boolean;
   /** Backend error code when recovery failed (e.g. VERIFICATION_REQUIRED). */
   errorCode?: string;
+  /** Seconds to wait before retrying, present on rate-limit (429) failures. */
+  retryAfter?: number;
 }
 
 /**
@@ -120,7 +122,13 @@ export async function tryAutoRecovery(opts: {
       ? { verifySecret: opts.verifySecret }
       : undefined,
   );
-  if (joinRes.error) return { recovered: false, errorCode: joinRes.error.code };
+  if (joinRes.error) {
+    return {
+      recovered: false,
+      errorCode: joinRes.error.code,
+      retryAfter: joinRes.error.retryAfter,
+    };
+  }
 
   const joinData = joinRes.data;
 
@@ -160,6 +168,8 @@ export interface SoloRecoveryResult {
   recovered: boolean;
   /** Backend error code when recovery failed (e.g. VERIFICATION_REQUIRED). */
   errorCode?: string;
+  /** Seconds to wait before retrying, present on rate-limit (429) failures. */
+  retryAfter?: number;
 }
 
 /**
@@ -183,7 +193,13 @@ export async function performSoloRecovery(opts: {
       ? { verifySecret: opts.verifySecret }
       : undefined,
   );
-  if (joinRes.error) return { recovered: false, errorCode: joinRes.error.code };
+  if (joinRes.error) {
+    return {
+      recovered: false,
+      errorCode: joinRes.error.code,
+      retryAfter: joinRes.error.retryAfter,
+    };
+  }
 
   const joinData = joinRes.data;
 
@@ -290,6 +306,8 @@ export interface PerformJoinFailure {
   ok: false;
   errorCode?: string;
   errorMessage: string;
+  /** Seconds to wait before retrying, present on rate-limit (429) failures. */
+  retryAfter?: number;
 }
 
 export type PerformJoinResult = PerformJoinSuccess | PerformJoinFailure;
@@ -332,6 +350,7 @@ export async function performJoin(opts: {
       ok: false,
       errorCode: response.error.code,
       errorMessage: response.error.message,
+      retryAfter: response.error.retryAfter,
     };
   }
 

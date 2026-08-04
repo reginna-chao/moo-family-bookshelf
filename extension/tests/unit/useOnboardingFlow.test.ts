@@ -588,6 +588,141 @@ describe("useOnboardingFlow", () => {
       expect(result.current.state).toBe("verify-prompt");
       expect(result.current.verify.active).toBe(true);
     });
+
+    /**
+     * REGRESSION: a 429 lockout carries `retryAfter`. Every join path must
+     * forward it into the prompt so a dialog opened while the account is locked
+     * shows the remaining wait immediately, instead of an open-ended
+     * "請稍後再試" that never resolves on its own. The handleStart path used to
+     * drop it — each call site is pinned below.
+     */
+    describe("lockout countdown (retryAfter forwarding)", () => {
+      const LOCKED = "VERIFICATION_LOCKED";
+
+      it("auto-recovery on handleStart forwards retryAfter into the prompt", async () => {
+        vi.mocked(tryAutoRecovery).mockResolvedValue({
+          recovered: false,
+          errorCode: LOCKED,
+          retryAfter: 120,
+        });
+        const { result } = renderFlow(apiClientWithFamily());
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.locked).toBe(true);
+        expect(result.current.verify.countdownSeconds).toBe(120);
+      });
+
+      it("auto-recovery on handleCreate forwards retryAfter into the prompt", async () => {
+        vi.mocked(tryAutoRecovery)
+          // handleStart: plain failure → recovery-choice.
+          .mockResolvedValueOnce({ recovered: false })
+          // handleCreate: the family is locked.
+          .mockResolvedValueOnce({
+            recovered: false,
+            errorCode: LOCKED,
+            retryAfter: 75,
+          });
+        const { result } = renderFlow(apiClientWithFamily());
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        await act(async () => {
+          await result.current.handleCreate();
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.countdownSeconds).toBe(75);
+      });
+
+      it("solo recovery (skip) forwards retryAfter into the prompt", async () => {
+        const { result } = await driveToRecoveryChoice(apiClientWithFamily());
+
+        vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+          recovered: false,
+          errorCode: LOCKED,
+          retryAfter: 45,
+        });
+        await act(async () => {
+          await result.current.handleRecoveryChoiceSkip();
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.countdownSeconds).toBe(45);
+      });
+
+      it("solo recovery (confirm) forwards retryAfter into the prompt", async () => {
+        vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+          recovered: false,
+        });
+        const { result } = await driveToRecoveryChoice(apiClientWithFamily());
+        await act(async () => {
+          await result.current.handleRecoveryChoiceSkip();
+        });
+        expect(result.current.state).toBe("solo-recovery-confirm");
+
+        vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+          recovered: false,
+          errorCode: LOCKED,
+          retryAfter: 30,
+        });
+        await act(async () => {
+          await result.current.handleSoloRecoveryConfirm();
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.countdownSeconds).toBe(30);
+      });
+
+      it("manual sync-code join forwards retryAfter into the prompt", async () => {
+        vi.mocked(performJoin).mockResolvedValue({
+          ok: false,
+          errorCode: LOCKED,
+          errorMessage: "locked",
+          retryAfter: 90,
+        });
+        const api = createMockApiClient({
+          getVerifyMethod: vi
+            .fn()
+            .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
+        });
+        const { result } = renderFlow(api);
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        act(() => {
+          result.current.setSyncCodeInput("moo-fam-joined");
+        });
+        await act(async () => {
+          await result.current.handleJoin();
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.locked).toBe(true);
+        expect(result.current.verify.countdownSeconds).toBe(90);
+      });
+
+      it("leaves countdownSeconds null when the backend omits retryAfter", async () => {
+        vi.mocked(tryAutoRecovery).mockResolvedValue({
+          recovered: false,
+          errorCode: LOCKED,
+        });
+        const { result } = renderFlow(apiClientWithFamily());
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+
+        // Older backend: still locked, but with the open-ended static copy.
+        expect(result.current.verify.locked).toBe(true);
+        expect(result.current.verify.countdownSeconds).toBeNull();
+      });
+    });
   });
 
   /**

@@ -10,6 +10,7 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
 } from "@/constants";
+import { verificationLockedMessage } from "@/dialog/verificationMessages";
 
 /**
  * useReauth drives the in-place re-verification prompt shown when a dead token
@@ -48,13 +49,18 @@ function createApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
-/** Fire the reauth signal and wait for the prompt to become active. */
+/**
+ * Fire the reauth signal and wait for the prompt to become active.
+ * `info` mirrors what auth-refresh hands over (the code that blocked the silent
+ * recovery + its retryAfter); omitting it exercises the legacy no-arg call.
+ */
 async function triggerReauth(
   apiClient: ApiClient,
   result: { current: ReturnType<typeof useReauth> },
+  info?: { errorCode: string; retryAfter?: number },
 ): Promise<void> {
   await act(async () => {
-    apiClient.onReauthRequired?.();
+    apiClient.onReauthRequired?.(info);
   });
   await waitFor(() => expect(result.current.active).toBe(true));
 }
@@ -213,6 +219,101 @@ describe("useReauth", () => {
     expect(apiClient.clearReauthPending).toHaveBeenCalledTimes(1);
     expect(result.current.active).toBe(false);
     expect(apiClient.joinFamily).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The client now hands over WHAT blocked the silent recovery. A locked member
+   * must land on the lockout screen (with the wait, when the backend sent one)
+   * instead of an active input that can only fail — while any non-verification
+   * code still falls back to the plain VERIFICATION_REQUIRED challenge.
+   */
+  describe("blocking-code seeding", () => {
+    it("opens already locked with the countdown for VERIFICATION_LOCKED + retryAfter", async () => {
+      // countdownSeconds is derived from Date.now() and re-derived once a second
+      // by the real (unmocked) useRetryCountdown. This file runs on real timers,
+      // so a slow render would tick 60 → 59 before the assertion below and make
+      // the test flake. Freeze the clock instead: the seeded wait then stays
+      // exactly what the backend sent. Restored by the afterEach
+      // vi.restoreAllMocks(); no timers are faked, so nothing else changes.
+      const frozenNow = Date.now();
+      vi.spyOn(Date, "now").mockReturnValue(frozenNow);
+
+      seedStorage();
+      const apiClient = createApiClient();
+      const { result } = renderHook(() => useReauth(apiClient));
+
+      await triggerReauth(apiClient, result, {
+        errorCode: "VERIFICATION_LOCKED",
+        retryAfter: 60,
+      });
+
+      await waitFor(() => expect(result.current.locked).toBe(true));
+      expect(result.current.countdownSeconds).toBe(60);
+      // Copy pinned in tests/unit/dialog/verificationMessages.test.ts; the live
+      // countdown variant is rendered by VerificationPrompt.
+      expect(result.current.error).toBe(verificationLockedMessage(null));
+      // The method is still fetched so the input renders once the lock clears.
+      expect(apiClient.getVerifyMethod).toHaveBeenCalledWith("u1");
+    });
+
+    it("locks without a countdown when the backend sends no retryAfter", async () => {
+      seedStorage();
+      const apiClient = createApiClient();
+      const { result } = renderHook(() => useReauth(apiClient));
+
+      await triggerReauth(apiClient, result, {
+        errorCode: "VERIFICATION_LOCKED",
+      });
+
+      await waitFor(() => expect(result.current.locked).toBe(true));
+      expect(result.current.countdownSeconds).toBeNull();
+    });
+
+    it("seeds the wrong-secret message for VERIFICATION_FAILED", async () => {
+      seedStorage();
+      const apiClient = createApiClient();
+      const { result } = renderHook(() => useReauth(apiClient));
+
+      await triggerReauth(apiClient, result, {
+        errorCode: "VERIFICATION_FAILED",
+      });
+
+      expect(result.current.locked).toBe(false);
+      expect(result.current.error).toBe("驗證失敗，請重新輸入");
+      expect(result.current.countdownSeconds).toBeNull();
+    });
+
+    it("falls back to the plain challenge for a non-verification blocking code", async () => {
+      seedStorage();
+      const apiClient = createApiClient();
+      const { result } = renderHook(() => useReauth(apiClient));
+
+      // RATE_LIMITED is not a verification code: seeding it verbatim would make
+      // begin() a no-op and never open the prompt.
+      await triggerReauth(apiClient, result, {
+        errorCode: "RATE_LIMITED",
+        retryAfter: 300,
+      });
+
+      expect(result.current.active).toBe(true);
+      expect(result.current.locked).toBe(false);
+      expect(result.current.error).toBe("");
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.method).toBe("pin");
+    });
+
+    it("keeps the legacy VERIFICATION_REQUIRED path for a no-arg signal", async () => {
+      seedStorage();
+      const apiClient = createApiClient();
+      const { result } = renderHook(() => useReauth(apiClient));
+
+      await triggerReauth(apiClient, result);
+
+      expect(result.current.locked).toBe(false);
+      expect(result.current.error).toBe("");
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.method).toBe("pin");
+    });
   });
 
   it("no-ops the reauth signal when userId or familyId is missing from storage", async () => {

@@ -1,10 +1,18 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { ErrorAlert } from "./ErrorAlert";
 
 interface PatternLockProps {
   onComplete: (pattern: string) => void;
   mode: "setup" | "verify";
   error?: string;
+  /** Stable sentence announced to assistive tech in place of `error` when the
+   *  latter ticks (e.g. a back-off countdown). Defaults to `error`. */
+  errorAnnouncement?: string;
   onCancel?: () => void;
+  /** When true, block confirmation and drawing, and dim the grid (e.g. while a
+   *  back-off countdown is running or a submit is in flight). Cancel stays
+   *  available. Defaults to false. */
+  disabled?: boolean;
 }
 
 const GRID_SIZE = 3;
@@ -29,7 +37,9 @@ export function PatternLock({
   onComplete,
   mode,
   error,
+  errorAnnouncement,
   onCancel,
+  disabled = false,
 }: PatternLockProps) {
   const [selected, setSelected] = useState<number[]>([]);
   const [confirmPattern, setConfirmPattern] = useState("");
@@ -84,6 +94,7 @@ export function PatternLock({
 
   const handleStart = useCallback(
     (e: React.TouchEvent | React.MouseEvent) => {
+      if (disabled) return;
       e.preventDefault();
       setMismatchError("");
       setSelected([]);
@@ -94,7 +105,7 @@ export function PatternLock({
       const dot = hitTest(pos);
       if (dot !== null) setSelected([dot]);
     },
-    [getEventPos, hitTest],
+    [disabled, getEventPos, hitTest],
   );
 
   const handleMove = useCallback(
@@ -135,7 +146,7 @@ export function PatternLock({
   }, [isDrawing, handleMove, handleEnd]);
 
   const handleConfirm = useCallback(() => {
-    if (selected.length < MIN_DOTS) return;
+    if (disabled || selected.length < MIN_DOTS) return;
     const pattern = selected.join(",");
 
     if (mode === "verify") {
@@ -156,7 +167,7 @@ export function PatternLock({
       setMismatchError("兩次圖形不一致，請重新繪製。");
       setSelected([]);
     }
-  }, [selected, mode, isConfirming, confirmPattern, onComplete]);
+  }, [disabled, selected, mode, isConfirming, confirmPattern, onComplete]);
 
   const title =
     mode === "verify"
@@ -166,6 +177,11 @@ export function PatternLock({
         : "設定圖形驗證（至少連接 4 個點）";
 
   const displayError = mismatchError || error;
+  // A local mismatch is static copy — it announces itself.
+  const displayAnnouncement = mismatchError ? undefined : errorAnnouncement;
+  const gridClass = disabled
+    ? "opacity-50 pointer-events-none"
+    : "cursor-pointer";
 
   // Build line segments for connected dots
   const lineSegments: Array<{
@@ -195,19 +211,20 @@ export function PatternLock({
     <div className="flex flex-col items-center w-full max-w-xs mx-auto">
       <h2 className="text-lg font-bold text-gray-900 mb-4">{title}</h2>
 
-      {displayError && (
-        <p role="alert" className="text-red-500 text-sm mb-3 text-center">
-          {displayError}
-        </p>
-      )}
+      <ErrorAlert
+        message={displayError ?? ""}
+        announcement={displayAnnouncement}
+        className="mb-3"
+      />
 
       <svg
         ref={svgRef}
         viewBox={`0 0 ${svgSize} ${svgSize}`}
-        className="w-full max-w-[280px] aspect-square touch-none select-none mb-4"
+        className={`w-full max-w-[280px] aspect-square touch-none select-none mb-4 ${gridClass}`}
         onMouseDown={handleStart}
         onTouchStart={handleStart}
         aria-label="圖形鎖定"
+        aria-disabled={disabled || undefined}
       >
         {/* Lines */}
         {lineSegments.map((seg, i) => (
@@ -248,7 +265,7 @@ export function PatternLock({
       <button
         type="button"
         onClick={handleConfirm}
-        disabled={selected.length < MIN_DOTS}
+        disabled={disabled || selected.length < MIN_DOTS}
         className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         確認

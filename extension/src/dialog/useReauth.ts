@@ -23,6 +23,7 @@ import {
 } from "../constants";
 import { safeStorageGet } from "../storage/safeStorage";
 import {
+  isVerificationError,
   useVerificationPrompt,
   type UseVerificationPromptResult,
   type VerificationAttemptResult,
@@ -54,7 +55,11 @@ async function runReauthJoin(
     verifySecret,
   });
   if (res.error) {
-    return { ok: false, errorCode: res.error.code };
+    return {
+      ok: false,
+      errorCode: res.error.code,
+      retryAfter: res.error.retryAfter,
+    };
   }
   const authToken = res.data?.authToken;
   if (authToken) {
@@ -82,7 +87,7 @@ export function useReauth(
   const onSuccess = opts?.onSuccess;
 
   useEffect(() => {
-    apiClient.onReauthRequired = () => {
+    apiClient.onReauthRequired = (info) => {
       void (async () => {
         const stored = await safeStorageGet([
           USER_ID_KEY,
@@ -102,26 +107,33 @@ export function useReauth(
           return;
         }
 
-        // Seed with VERIFICATION_REQUIRED so the prompt fetches the method and
-        // renders the matching challenge (pin / pattern / OTP guidance).
-        await verifyBegin("VERIFICATION_REQUIRED", {
-          userId,
-          retry: (verifySecret) =>
-            runReauthJoin(
-              apiClient,
-              familyId,
-              userId,
-              displayName,
-              verifySecret,
-              onSuccess,
-            ),
-          // Abandoning the prompt just closes it; the user stays on the main
-          // view. Release the reauth latch so a later authenticated action can
-          // re-trigger the challenge (otherwise the latch would suppress it).
-          onCancel: () => {
-            apiClient.clearReauthPending();
+        // Seed with the code that actually blocked the silent recovery, so a
+        // locked user sees the countdown right away instead of an active input.
+        // Anything unexpected falls back to VERIFICATION_REQUIRED, which fetches
+        // the method and renders the matching challenge (pin / pattern / OTP).
+        const blocked = isVerificationError(info?.errorCode) ? info : undefined;
+        await verifyBegin(
+          blocked?.errorCode ?? "VERIFICATION_REQUIRED",
+          {
+            userId,
+            retry: (verifySecret) =>
+              runReauthJoin(
+                apiClient,
+                familyId,
+                userId,
+                displayName,
+                verifySecret,
+                onSuccess,
+              ),
+            // Abandoning the prompt just closes it; the user stays on the main
+            // view. Release the reauth latch so a later authenticated action can
+            // re-trigger the challenge (otherwise the latch would suppress it).
+            onCancel: () => {
+              apiClient.clearReauthPending();
+            },
           },
-        });
+          blocked?.retryAfter,
+        );
       })();
     };
     return () => {

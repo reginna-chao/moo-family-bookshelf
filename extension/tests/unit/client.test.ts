@@ -1438,6 +1438,39 @@ describe("ApiClient", () => {
         expect(fetchMock).toHaveBeenCalledTimes(5);
       });
 
+      it("forwards the blocking code and retryAfter to the onReauthRequired callback", async () => {
+        // The prompt needs to know WHY recovery was blocked so a locked member
+        // opens straight onto the countdown instead of a doomed input.
+        const fetchMock = vi
+          .fn()
+          .mockResolvedValueOnce(resp401())
+          .mockResolvedValueOnce(respRefreshFailed())
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 429,
+            json: () =>
+              Promise.resolve({
+                error: {
+                  code: "VERIFICATION_LOCKED",
+                  message: "locked",
+                  retryAfter: 120,
+                },
+              }),
+          });
+        globalThis.fetch = fetchMock;
+        seedMembership();
+
+        const onReauthRequired = vi.fn();
+        client.onReauthRequired = onReauthRequired;
+
+        await client.getPersonalBooks("u1");
+
+        expect(onReauthRequired).toHaveBeenCalledWith({
+          errorCode: "VERIFICATION_LOCKED",
+          retryAfter: 120,
+        });
+      });
+
       it("clears the latch on setAuthToken(<token>) so a later 401 wave joins again", async () => {
         // Wave 1 latches; setAuthToken("x") releases; Wave 2 re-attempts join.
         const fetchMock = vi

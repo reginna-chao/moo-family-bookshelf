@@ -8,6 +8,12 @@ import {
 } from "@/dialog/useVerificationPrompt";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
+// Copy is asserted through the production formatters (the literals themselves
+// are pinned in tests/unit/dialog/verificationMessages.test.ts).
+import {
+  rateLimitedMessage,
+  verificationLockedMessage,
+} from "@/dialog/verificationMessages";
 
 function createMockApiClient(method: VerifyMethod = "pin"): ApiClient {
   return {
@@ -418,5 +424,470 @@ describe("useVerificationPrompt", () => {
     expect(result.current.error).toBe("");
     expect(result.current.submitting).toBe(false);
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * 429 responses (RATE_LIMITED / VERIFICATION_LOCKED on a newer backend) carry
+   * `retryAfter`. The controller turns it into a live countdown so the user is
+   * told how long to wait, and — when the wait ends — drops the lock + stale
+   * message so the input becomes usable again without reopening the prompt.
+   * The countdown is purely local (no polling), so the only leak risk is the
+   * interval itself: `vi.getTimerCount()` is asserted on every exit path.
+   */
+  describe("retry countdown (429 retryAfter)", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    });
+
+    it("starts the countdown when a submit is rate-limited with retryAfter", async () => {
+      const api = createMockApiClient();
+      const retry = vi.fn().mockResolvedValue({
+        ok: false,
+        errorCode: "RATE_LIMITED",
+        retryAfter: 90,
+      });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+
+      expect(result.current.countdownSeconds).toBe(90);
+      // A quota wait never locks the input — only wrong secrets do.
+      expect(result.current.locked).toBe(false);
+      // State keeps the STATIC copy; the live variant is rendered from
+      // countdownSeconds by VerificationPrompt.
+      expect(result.current.error).toBe(rateLimitedMessage(null));
+    });
+
+    it("keeps countdownSeconds null when RATE_LIMITED arrives without retryAfter", async () => {
+      const api = createMockApiClient();
+      const retry = vi
+        .fn()
+        .mockResolvedValue({ ok: false, errorCode: "RATE_LIMITED" });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+
+      // Legacy behaviour is unchanged: static message, prompt open, no ticker.
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.error).toBe(rateLimitedMessage(null));
+      expect(result.current.active).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("locks and counts down when a submit returns VERIFICATION_LOCKED with retryAfter", async () => {
+      const api = createMockApiClient();
+      const retry = vi.fn().mockResolvedValue({
+        ok: false,
+        errorCode: "VERIFICATION_LOCKED",
+        retryAfter: 30,
+      });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("000000");
+      });
+
+      expect(result.current.locked).toBe(true);
+      expect(result.current.countdownSeconds).toBe(30);
+      expect(result.current.error).toBe(verificationLockedMessage(null));
+    });
+
+    it("unlocks the input and drops the stale message when the lockout wait elapses", async () => {
+      const api = createMockApiClient();
+      const retry = vi.fn().mockResolvedValue({
+        ok: false,
+        errorCode: "VERIFICATION_LOCKED",
+        retryAfter: 30,
+      });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("000000");
+      });
+
+      act(() => vi.advanceTimersByTime(29_000));
+      expect(result.current.countdownSeconds).toBe(1);
+      expect(result.current.locked).toBe(true);
+
+      act(() => vi.advanceTimersByTime(1000));
+
+      // Server window cleared → the user can type again in the SAME prompt.
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.locked).toBe(false);
+      expect(result.current.error).toBe("");
+      expect(result.current.active).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("allows a fresh submit once the lockout wait has elapsed", async () => {
+      const api = createMockApiClient();
+      const retry = vi.fn().mockResolvedValue({
+        ok: false,
+        errorCode: "VERIFICATION_LOCKED",
+        retryAfter: 10,
+      });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("000000");
+      });
+      expect(retry).toHaveBeenCalledTimes(1);
+
+      // Blocked while the lock stands...
+      await act(async () => {
+        await result.current.submit("111111");
+      });
+      expect(retry).toHaveBeenCalledTimes(1);
+
+      act(() => vi.advanceTimersByTime(10_000));
+
+      // ...and accepted once the wait is over.
+      await act(async () => {
+        await result.current.submit("222222");
+      });
+      expect(retry).toHaveBeenCalledTimes(2);
+      expect(retry).toHaveBeenLastCalledWith("222222");
+    });
+
+    it("begin(VERIFICATION_LOCKED, ctx, retryAfter) opens the prompt already counting down", async () => {
+      const api = createMockApiClient("pin");
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_LOCKED", makeCtx(vi.fn()), 45);
+      });
+
+      // A dialog opened while the account is locked shows the wait immediately.
+      expect(result.current.active).toBe(true);
+      expect(result.current.locked).toBe(true);
+      expect(result.current.countdownSeconds).toBe(45);
+      expect(result.current.method).toBe("pin");
+    });
+
+    it("stays locked with no countdown when begin() gets no retryAfter (older backend)", async () => {
+      const api = createMockApiClient("pin");
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_LOCKED", makeCtx(vi.fn()));
+      });
+
+      expect(result.current.locked).toBe(true);
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+
+      // Without a deadline the lock persists until the user leaves the prompt.
+      act(() => vi.advanceTimersByTime(600_000));
+      expect(result.current.locked).toBe(true);
+      expect(result.current.error).toBe(verificationLockedMessage(null));
+    });
+
+    it("ignores a non-positive retryAfter and shows the static message", async () => {
+      const api = createMockApiClient("pin");
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_LOCKED", makeCtx(vi.fn()), 0);
+      });
+
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.locked).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("clears the countdown when a later attempt fails with a verification code", async () => {
+      const api = createMockApiClient();
+      const retry = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          errorCode: "RATE_LIMITED",
+          retryAfter: 60,
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          errorCode: "VERIFICATION_FAILED",
+        });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+      expect(result.current.countdownSeconds).toBe(60);
+
+      // The quota window reopened before the countdown ended; the wrong-secret
+      // message must not sit next to a stale ticker.
+      await act(async () => {
+        await result.current.submit("654321");
+      });
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.error).toBe("驗證失敗，請重新輸入");
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("clears the countdown when a later attempt fails with a generic error", async () => {
+      const api = createMockApiClient();
+      const retry = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          errorCode: "RATE_LIMITED",
+          retryAfter: 60,
+        })
+        .mockResolvedValueOnce({ ok: false, errorCode: "SERVER_ERROR" });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+      await act(async () => {
+        await result.current.submit("654321");
+      });
+
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.error).toBe("發生錯誤，請稍後再試");
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("clears a stale countdown when a later attempt locks without retryAfter", async () => {
+      const api = createMockApiClient();
+      const retry = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          errorCode: "RATE_LIMITED",
+          retryAfter: 300,
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          errorCode: "VERIFICATION_LOCKED",
+        });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+      expect(result.current.countdownSeconds).toBe(300);
+      expect(vi.getTimerCount()).toBe(1);
+
+      // Second attempt is refused by an OLDER backend that sends no retryAfter:
+      // the 300s deadline from the previous 429 must not survive into the lock.
+      await act(async () => {
+        await result.current.submit("654321");
+      });
+
+      expect(result.current.locked).toBe(true);
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.error).toBe(verificationLockedMessage(null));
+      expect(vi.getTimerCount()).toBe(0);
+
+      // Past the stale deadline the lock must STILL stand — a surviving deadline
+      // would fire handleWaitElapsed and silently unlock the prompt.
+      act(() => vi.advanceTimersByTime(400_000));
+
+      expect(result.current.locked).toBe(true);
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.error).toBe(verificationLockedMessage(null));
+      expect(result.current.active).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // Still locked ⇒ further submits stay blocked.
+      await act(async () => {
+        await result.current.submit("111111");
+      });
+      expect(retry).toHaveBeenCalledTimes(2);
+    });
+
+    it("clears a stale countdown when a later RATE_LIMITED arrives without retryAfter", async () => {
+      const api = createMockApiClient();
+      const retry = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          errorCode: "RATE_LIMITED",
+          retryAfter: 300,
+        })
+        .mockResolvedValueOnce({ ok: false, errorCode: "RATE_LIMITED" });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+      expect(result.current.countdownSeconds).toBe(300);
+
+      // A second 429 without retryAfter downgrades to the static message, so the
+      // ticker from the first one must go too — otherwise the UI would render a
+      // live wait the server never promised.
+      await act(async () => {
+        await result.current.submit("654321");
+      });
+
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.error).toBe(rateLimitedMessage(null));
+      expect(result.current.locked).toBe(false);
+      expect(result.current.active).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // The stale deadline must not resurface and wipe the message on elapse.
+      act(() => vi.advanceTimersByTime(400_000));
+
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.error).toBe(rateLimitedMessage(null));
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("re-arms the countdown to the new retryAfter when a lockout follows a rate limit", async () => {
+      const api = createMockApiClient();
+      const retry = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          errorCode: "RATE_LIMITED",
+          retryAfter: 60,
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          errorCode: "VERIFICATION_LOCKED",
+          retryAfter: 120,
+        });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+      expect(result.current.countdownSeconds).toBe(60);
+
+      await act(async () => {
+        await result.current.submit("654321");
+      });
+
+      expect(result.current.locked).toBe(true);
+      expect(result.current.countdownSeconds).toBe(120);
+      expect(result.current.error).toBe(verificationLockedMessage(null));
+
+      // The old 60s deadline would have elapsed (and unlocked) by now; the new
+      // one still has half its wait left.
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(result.current.countdownSeconds).toBe(60);
+      expect(result.current.locked).toBe(true);
+
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.locked).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("clears the countdown and its interval when the user cancels", async () => {
+      const api = createMockApiClient();
+      const retry = vi.fn().mockResolvedValue({
+        ok: false,
+        errorCode: "RATE_LIMITED",
+        retryAfter: 120,
+      });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+      expect(vi.getTimerCount()).toBe(1);
+
+      act(() => {
+        result.current.cancel();
+      });
+
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(result.current.active).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("clears the countdown when a retry finally succeeds", async () => {
+      const api = createMockApiClient();
+      const retry = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          errorCode: "RATE_LIMITED",
+          retryAfter: 120,
+        })
+        .mockResolvedValueOnce({ ok: true });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+      await act(async () => {
+        await result.current.submit("654321");
+      });
+
+      expect(result.current.active).toBe(false);
+      expect(result.current.countdownSeconds).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("does not leak the countdown interval when the prompt unmounts mid-wait", async () => {
+      const api = createMockApiClient();
+      const retry = vi.fn().mockResolvedValue({
+        ok: false,
+        errorCode: "RATE_LIMITED",
+        retryAfter: 300,
+      });
+      const { result, unmount } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+      expect(vi.getTimerCount()).toBe(1);
+
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });

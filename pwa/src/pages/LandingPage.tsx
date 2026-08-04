@@ -7,8 +7,15 @@ import type { VerifyMethod } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
 import { REMEMBERED_LOGOUT_KEY, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import { getAppEnv } from "@/utils/appEnv";
+import { useRetryCountdown } from "@/hooks/useRetryCountdown";
+import {
+  buildRetryMessage,
+  buildStaticRetryMessage,
+} from "@/utils/retryMessage";
+import type { RetryErrorCode } from "@/utils/retryMessage";
 import { PinInput } from "@/components/PinInput";
 import { PatternLock } from "@/components/PatternLock";
+import { ErrorAlert } from "@/components/ErrorAlert";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
@@ -87,11 +94,39 @@ export function LandingPage({
   const [verifyError, setVerifyError] = useState("");
   const [codeInput, setCodeInput] = useState("");
 
+  // Back-off state (429): the code drives the copy, the countdown the seconds.
+  const [retryCode, setRetryCode] = useState<RetryErrorCode | null>(null);
+  const retryCountdown = useRetryCountdown(() => setRetryCode(null));
+  const retryMessage =
+    retryCode === null
+      ? ""
+      : buildRetryMessage(retryCode, retryCountdown.remaining);
+  /** Countdown-free twin of `retryMessage`, announced once instead of per tick.
+   *  Undefined when no back-off notice is showing, so any other error copy —
+   *  which never ticks — keeps announcing itself. */
+  const retryAnnouncement =
+    retryCode === null ? undefined : buildStaticRetryMessage(retryCode);
+  /** True only while a countdown is running — blocks submit/verify actions. */
+  const retryBlocked = retryCode !== null && retryCountdown.remaining > 0;
+
+  /** Show a back-off notice; a positive `retryAfter` starts the live countdown. */
+  function startRetryLock(code: RetryErrorCode, retryAfter?: number) {
+    setRetryCode(code);
+    retryCountdown.start(retryAfter ?? 0);
+  }
+
+  function clearRetryLock() {
+    setRetryCode(null);
+    retryCountdown.clear();
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (retryBlocked) return;
     setSyncCodeError("");
     setEmailError("");
     setGeneralError("");
+    clearRetryLock();
 
     const trimmedCode = syncCodeInput.trim();
 
@@ -172,6 +207,8 @@ export function LandingPage({
       });
       if (joinRes.error) {
         const code = joinRes.error.code;
+        const retryAfter = joinRes.error.retryAfter;
+        const hasRetryHint = typeof retryAfter === "number" && retryAfter > 0;
         if (code === "FAMILY_FULL") {
           setGeneralError("家庭成員已達上限（每個家庭最多 2 位成員）");
         } else if (
@@ -202,8 +239,18 @@ export function LandingPage({
             setVerifyError("驗證失敗，請重新輸入。");
           }
         } else if (code === "VERIFICATION_LOCKED") {
-          setVerifyError("驗證錯誤次數過多，請稍後再試。");
+          // Lockout is server-side, so drop the challenge UI and surface the
+          // wait on the form. Without `retryAfter` the copy stays static.
+          setVerifyError("");
+          startRetryLock("VERIFICATION_LOCKED", retryAfter);
           setPendingAuth(null);
+          // Drop the rejected OTP so a re-opened prompt starts empty.
+          setCodeInput("");
+        } else if (code === "RATE_LIMITED" && hasRetryHint) {
+          // Keep the challenge UI mounted: the user may retry once the window
+          // clears. Quota errors without a hint fall through to generic copy.
+          setVerifyError("");
+          startRetryLock("RATE_LIMITED", retryAfter);
         } else {
           setGeneralError(joinRes.error.message || "加入家庭失敗，請重試。");
         }
@@ -225,8 +272,9 @@ export function LandingPage({
   }
 
   function handleVerifyComplete(secret: string) {
-    if (!pendingAuth) return;
+    if (!pendingAuth || retryBlocked) return;
     setVerifyError("");
+    clearRetryLock();
     void completeJoin(
       pendingAuth.familyId,
       pendingAuth.userId,
@@ -302,6 +350,11 @@ export function LandingPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qrUserId, initialSyncCode, qrToken]);
 
+  // Back-off copy wins over the per-attempt error: it carries the live
+  // countdown. `generalError` is last so non-verification failures (a 429 with
+  // no retryAfter, NOT_FOUND, …) stay visible while the challenge UI is open.
+  const promptError = retryMessage || verifyError || generalError;
+
   // Show verification UI
   if (pendingAuth) {
     return (
@@ -309,7 +362,9 @@ export function LandingPage({
         {pendingAuth.verifyMethod === "pin" && (
           <PinInput
             mode="verify"
-            error={verifyError}
+            error={promptError}
+            errorAnnouncement={retryAnnouncement}
+            disabled={retryBlocked || isSubmitting}
             onComplete={handleVerifyComplete}
             onCancel={handleVerifyCancel}
           />
@@ -317,7 +372,9 @@ export function LandingPage({
         {pendingAuth.verifyMethod === "pattern" && (
           <PatternLock
             mode="verify"
-            error={verifyError}
+            error={promptError}
+            errorAnnouncement={retryAnnouncement}
+            disabled={retryBlocked || isSubmitting}
             onComplete={handleVerifyComplete}
             onCancel={handleVerifyCancel}
           />
@@ -328,11 +385,11 @@ export function LandingPage({
             <p className="text-sm text-gray-500 mb-4 text-center">
               請在電腦版 Extension 查看驗證碼
             </p>
-            {verifyError && (
-              <p role="alert" className="text-red-500 text-sm mb-3 text-center">
-                {verifyError}
-              </p>
-            )}
+            <ErrorAlert
+              message={promptError}
+              announcement={retryAnnouncement}
+              className="mb-3"
+            />
             <input
               type="text"
               inputMode="numeric"
@@ -345,7 +402,7 @@ export function LandingPage({
             <button
               type="button"
               onClick={() => handleVerifyComplete(codeInput)}
-              disabled={codeInput.length !== 6 || isSubmitting}
+              disabled={codeInput.length !== 6 || isSubmitting || retryBlocked}
               className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmitting ? "驗證中..." : "確認"}
@@ -362,6 +419,8 @@ export function LandingPage({
       </div>
     );
   }
+
+  const formError = retryMessage || generalError || externalError;
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
@@ -389,11 +448,7 @@ export function LandingPage({
       </p>
 
       <form onSubmit={handleSubmit} className="w-full space-y-4 mt-8">
-        {(generalError || externalError) && (
-          <p role="alert" className="text-red-500 text-sm text-center">
-            {generalError || externalError}
-          </p>
-        )}
+        <ErrorAlert message={formError} announcement={retryAnnouncement} />
 
         <div>
           <label
@@ -472,7 +527,7 @@ export function LandingPage({
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || retryBlocked}
           aria-busy={isSubmitting || undefined}
           className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >

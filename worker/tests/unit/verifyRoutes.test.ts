@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import type { VerifyRecord } from "../../src/kv/schema";
+import { VERIFY_LOCKOUT_MS, type VerifyRecord } from "../../src/kv/schema";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -53,8 +53,29 @@ async function seedFamily(userId: string, familyId: string) {
   );
 }
 
+/** Seed a PIN verification record that is locked until the given timestamp. */
+async function seedLockedVerifyRecord(userId: string, lockedUntil: number) {
+  const record: VerifyRecord = {
+    method: "pin",
+    hash: "placeholder",
+    salt: "placeholder",
+    prompted: 1,
+    failCount: 0,
+    lockedUntil,
+  };
+  await kv.put(`verify:${userId}`, JSON.stringify(record));
+}
+
+/** Lockout window in whole seconds — upper bound for any retryAfter hint. */
+const LOCKOUT_SECONDS = VERIFY_LOCKOUT_MS / 1000;
+
 beforeEach(() => {
   kv = createMockKV();
+});
+
+afterEach(() => {
+  // Some cases pin Date via fake timers; always restore the real clock.
+  vi.useRealTimers();
 });
 
 describe("GET /api/user/:id/verify", () => {
@@ -645,6 +666,80 @@ describe("Verification in join flow", () => {
     expect(res.status).toBe(429);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("VERIFICATION_LOCKED");
+
+    // Back-off hint: whole seconds, inside the lockout window, and mirrored
+    // into the Retry-After header so clients can render a countdown.
+    expect(Number.isInteger(json.error.retryAfter)).toBe(true);
+    expect(json.error.retryAfter).toBeGreaterThan(0);
+    expect(json.error.retryAfter).toBeLessThanOrEqual(LOCKOUT_SECONDS);
+    expect(res.headers.get("Retry-After")).toBe(String(json.error.retryAfter));
+  });
+
+  it.each([
+    { remainingMs: 1, expected: 1 },
+    { remainingMs: 400, expected: 1 },
+    { remainingMs: 1000, expected: 1 },
+    { remainingMs: 1001, expected: 2 },
+    { remainingMs: 1500, expected: 2 },
+    { remainingMs: 59_000, expected: 59 },
+    { remainingMs: VERIFY_LOCKOUT_MS, expected: LOCKOUT_SECONDS },
+  ])(
+    "should round $remainingMs ms of remaining lockout up to retryAfter=$expected",
+    async ({ remainingMs, expected }) => {
+      // Pin Date only (timers stay real) so the remaining lockout is exact.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+      await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+      await seedLockedVerifyRecord(VALID_USER_ID, Date.now() + remainingMs);
+
+      const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
+        body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "123456" }),
+      });
+
+      expect(res.status).toBe(429);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("VERIFICATION_LOCKED");
+      expect(json.error.retryAfter).toBe(expected);
+      expect(res.headers.get("Retry-After")).toBe(String(expected));
+    },
+  );
+
+  it("should not expose retryAfter when verification is merely required", async () => {
+    await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+    await seedLockedVerifyRecord(VALID_USER_ID, Date.now() - 1000); // expired lockout
+
+    const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
+      body: JSON.stringify({ userId: VALID_USER_ID }),
+    });
+
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_REQUIRED");
+    expect("retryAfter" in json.error).toBe(false);
+    expect(Object.keys(json.error).sort()).toEqual(["code", "message"]);
+    expect(res.headers.get("Retry-After")).toBeNull();
+  });
+
+  it("should not expose retryAfter when verification fails", async () => {
+    await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+
+    const ownerToken = await seedAuthToken(VALID_USER_ID);
+    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+
+    const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
+      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "999999" }),
+    });
+
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_FAILED");
+    expect("retryAfter" in json.error).toBe(false);
+    expect(Object.keys(json.error).sort()).toEqual(["code", "message"]);
+    expect(res.headers.get("Retry-After")).toBeNull();
   });
 
   it("should reset fail count on successful verification", async () => {

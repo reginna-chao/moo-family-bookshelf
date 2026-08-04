@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PatternLock } from "@/dialog/PatternLock";
+import { dimmedAncestor, dimmedElements } from "./helpers/dimStyle";
 
 // The SVG is 200x200 viewBox, rendered at 200x200 pixels.
 // Dots: spacing = 200/3 ~66.67, offset = 33.33
@@ -123,6 +124,102 @@ describe("PatternLock", () => {
       simulatePattern(svg, [0, 1, 4, 7]);
 
       expect(onComplete).toHaveBeenCalledWith("0,1,4,7");
+    });
+
+    /**
+     * 重新設定 sits OUTSIDE the dimmed wrapper (so it stays readable during a
+     * lockout countdown), which means `pointerEvents: none` does not cover it.
+     * It therefore needs its own `disabled` — otherwise a locked-out user could
+     * still wipe the first pattern and restart the setup mid-lockout.
+     */
+    it("marks the setup reset button as disabled while disabled", () => {
+      const { rerender } = render(
+        <PatternLock mode="setup" onComplete={vi.fn()} />,
+      );
+      simulatePattern(screen.getByRole("application"), [0, 3, 6, 7]);
+
+      rerender(<PatternLock mode="setup" onComplete={vi.fn()} disabled />);
+
+      expect(screen.getByText("重新設定")).toBeDisabled();
+    });
+
+    it("does not return to the enter step when the reset button is clicked while disabled", () => {
+      const { rerender } = render(
+        <PatternLock mode="setup" onComplete={vi.fn()} />,
+      );
+      simulatePattern(screen.getByRole("application"), [0, 3, 6, 7]);
+      rerender(<PatternLock mode="setup" onComplete={vi.fn()} disabled />);
+
+      fireEvent.click(screen.getByText("重新設定"));
+
+      // Still on the confirm step — the reset never ran.
+      expect(screen.getByText("再次繪製圖形確認")).toBeInTheDocument();
+      expect(screen.queryByText("設定解鎖圖形")).not.toBeInTheDocument();
+    });
+
+    it("keeps the setup reset button enabled and working when disabled is omitted", () => {
+      render(<PatternLock mode="setup" onComplete={vi.fn()} />);
+      simulatePattern(screen.getByRole("application"), [0, 3, 6, 7]);
+
+      expect(screen.getByText("重新設定")).not.toBeDisabled();
+
+      fireEvent.click(screen.getByText("重新設定"));
+      expect(screen.getByText("設定解鎖圖形")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The dim wraps ONLY the interactive cluster (label + dot grid). The error
+   * line is what explains the lock during a rate-limit countdown, so it — and
+   * the reset button — must stay readable at full opacity for the whole wait.
+   */
+  describe("disabled dim scope", () => {
+    it("dims the dot grid while disabled", () => {
+      render(<PatternLock mode="verify" onComplete={vi.fn()} disabled />);
+
+      expect(dimmedAncestor(screen.getByRole("application"))).not.toBeNull();
+    });
+
+    it("keeps the error line outside the dimmed cluster while disabled", () => {
+      render(
+        <PatternLock
+          mode="verify"
+          onComplete={vi.fn()}
+          disabled
+          error="圖形錯誤"
+        />,
+      );
+
+      expect(dimmedAncestor(screen.getByText("圖形錯誤"))).toBeNull();
+    });
+
+    it("renders no dimmed wrapper at all when enabled", () => {
+      const { container } = render(
+        <PatternLock mode="verify" onComplete={vi.fn()} error="圖形錯誤" />,
+      );
+
+      expect(dimmedElements(container)).toHaveLength(0);
+    });
+
+    it("keeps the reset button outside the dimmed cluster while disabled", () => {
+      const { rerender } = render(
+        <PatternLock mode="setup" onComplete={vi.fn()} />,
+      );
+      // Advance to the confirm step so 重新設定 renders, then lock the widget.
+      simulatePattern(screen.getByRole("application"), [0, 3, 6, 7]);
+      rerender(
+        <PatternLock
+          mode="setup"
+          onComplete={vi.fn()}
+          disabled
+          error="圖形錯誤"
+        />,
+      );
+
+      expect(dimmedAncestor(screen.getByText("重新設定"))).toBeNull();
+      expect(dimmedAncestor(screen.getByText("圖形錯誤"))).toBeNull();
+      // Sanity: the widget the user cannot use IS dimmed.
+      expect(dimmedAncestor(screen.getByRole("application"))).not.toBeNull();
     });
   });
 });
