@@ -72,6 +72,8 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 
 Parallelize across file-disjoint scopes (frontend + backend coders run concurrently); never let two concurrent agents own the same file. Independent verification legs also run in parallel — e.g. reviewer dispatch + E2E typecheck, or (small diffs) focused re-review + security scan — issue them in the same message. Re-review only the files changed by a fix, unless the user asks for a full re-review.
 
+If a dispatched agent dies mid-run (API error, connection closed), re-dispatch a FRESH agent with the original prompt plus a one-line "previous attempt was cut off" note — never build on the partial output and never SendMessage-resume the dead agent.
+
 ## §4 References
 
 - `references/code-cycle.md` — the CODE lifecycle: branch preflight (fresh from origin/main) → requirements + risk analysis → API contract → coder → verify-before-test gate → tester → review → Fix Cycle (CRITICAL auto-fix / SUGGESTION decision with 🟢🟡🔴 TL 建議) → cross-scope validation → security scan → retro offer → commit.

@@ -70,6 +70,11 @@ For each scope in play (frontend, backend — parallelize when file-disjoint):
 
 Dispatch **`reviewer`** (`scope`, `target` = changed files, `business_logic`) per scope. Then repeat **Review → Fix → Re-review** until clean. Maintain a running **Fix Cycle Log** of every CRITICAL auto-fixed and every SUGGESTION accepted/skipped — present it each round and on exit.
 
+**Fix-round handoffs:**
+
+- **Rename handoff**: when a fix renames a production export, the coder prompt lists the expected red tests and the new name; the follow-up tester prompt carries that new-name list verbatim — one coder→tester round, no discovery pass.
+- **Prescription exception to re-review**: when a fix lands the reviewer's own suggested change verbatim and touches ≤ 5 lines, the orchestrator MAY verify the diff itself instead of dispatching a re-review — record the self-check in the Fix Cycle Log. Any deviation from the prescription, or a larger diff, gets a normal focused re-review.
+
 Findings are **always tables**, never free-form bullets (write "None." in a single row when empty). **All tables ≤ 4 columns** for narrow terminals.
 
 ### 4.1 Present Findings

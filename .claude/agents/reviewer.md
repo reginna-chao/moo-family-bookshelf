@@ -92,4 +92,5 @@ Then a **Changes Overview** table (file → one-line summary).
 
 - Be precise (exact file:line). Be constructive (every criticism carries a fix). Be honest (don't soften CRITICAL).
 - Don't nitpick formatting a linter handles (assume ESLint + Prettier).
+- On focused re-reviews, when only minor nits remain, verdict PASS and record them as Observations — never manufacture findings to justify the dispatch.
 - If uncertain about intent, ask rather than assume.
