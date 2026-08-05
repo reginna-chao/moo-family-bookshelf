@@ -3,6 +3,10 @@ import { Loader2 } from "lucide-react";
 import type { VerifyMethod } from "../api/types";
 import { PinInput } from "./PinInput";
 import { PatternLock } from "./PatternLock";
+import {
+  rateLimitedMessage,
+  verificationLockedMessage,
+} from "./verificationMessages";
 
 export interface VerificationPromptProps {
   /** null while the method is still being fetched from the backend. */
@@ -12,6 +16,9 @@ export interface VerificationPromptProps {
   error: string;
   locked: boolean;
   submitting: boolean;
+  /** Remaining seconds of a rate-limit / lockout wait. null (or omitted) when
+   *  the backend sent no `retryAfter` — the static copy is shown instead. */
+  countdownSeconds?: number | null;
   onSubmit: (secret: string) => void;
   onCancel: () => void;
 }
@@ -21,6 +28,11 @@ const CODE_GUIDANCE =
   "或改用 PIN／圖形驗證後再試一次。";
 
 const METHOD_LOAD_ERROR = "無法載入驗證方式，請稍後再試";
+
+/** Error message rendered as the entire challenge slot; --gap16 keeps it from
+ *  butting against the 返回 button below. */
+const MESSAGE_CHALLENGE_CLASS =
+  "moo-secret-entry__error moo-secret-entry__error--gap16";
 
 /**
  * Collects the PWA-login verification secret an existing member must supply when
@@ -33,9 +45,14 @@ export function VerificationPrompt({
   error,
   locked,
   submitting,
+  countdownSeconds = null,
   onSubmit,
   onCancel,
 }: VerificationPromptProps): React.JSX.Element {
+  // An unlocked countdown only ever runs for a rate-limited (429) wait, so
+  // while one ticks it supersedes whatever static message is in state.
+  const displayError =
+    countdownSeconds === null ? error : rateLimitedMessage(countdownSeconds);
   return (
     <div className="moo-onboarding-view">
       <h2 className="moo-onboarding-view__heading">需要驗證</h2>
@@ -45,9 +62,10 @@ export function VerificationPrompt({
       {renderChallenge({
         method,
         methodError,
-        error,
+        error: displayError,
         locked,
         submitting,
+        countdownSeconds,
         onSubmit,
       })}
       <button
@@ -68,6 +86,7 @@ interface ChallengeProps {
   error: string;
   locked: boolean;
   submitting: boolean;
+  countdownSeconds: number | null;
   onSubmit: (secret: string) => void;
 }
 
@@ -77,26 +96,34 @@ function renderChallenge({
   error,
   locked,
   submitting,
+  countdownSeconds,
   onSubmit,
 }: ChallengeProps): React.JSX.Element {
   if (locked) {
     return (
-      <div className="moo-secret-entry__error">驗證已鎖定，請稍後再試</div>
+      <div className={MESSAGE_CHALLENGE_CLASS}>
+        {verificationLockedMessage(countdownSeconds)}
+      </div>
     );
   }
   if (methodError) {
-    return <div className="moo-secret-entry__error">{METHOD_LOAD_ERROR}</div>;
+    return <div className={MESSAGE_CHALLENGE_CLASS}>{METHOD_LOAD_ERROR}</div>;
   }
   if (method === null) {
     return <div className="moo-verify__loading">載入中...</div>;
   }
+  // While an (unlocked) rate-limit countdown ticks, the server window has not
+  // cleared yet, so any submit is a guaranteed 429 — keep the widget inert until
+  // it elapses. The hook then resets countdownSeconds to null, which re-enables
+  // the widget automatically without any extra state.
+  const inputDisabled = submitting || countdownSeconds !== null;
   if (method === "pin") {
     return renderWidgetChallenge(
       <PinInput
         mode="verify"
         onComplete={onSubmit}
         error={error || undefined}
-        disabled={submitting}
+        disabled={inputDisabled}
       />,
       submitting,
     );
@@ -107,7 +134,7 @@ function renderChallenge({
         mode="verify"
         onComplete={onSubmit}
         error={error || undefined}
-        disabled={submitting}
+        disabled={inputDisabled}
       />,
       submitting,
     );
@@ -117,7 +144,7 @@ function renderChallenge({
   }
   // method === "none": inconsistent for an active challenge — treat as a load
   // error rather than showing OTP guidance.
-  return <div className="moo-secret-entry__error">{METHOD_LOAD_ERROR}</div>;
+  return <div className={MESSAGE_CHALLENGE_CLASS}>{METHOD_LOAD_ERROR}</div>;
 }
 
 /**

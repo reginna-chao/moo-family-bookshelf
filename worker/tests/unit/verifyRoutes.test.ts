@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import {
@@ -99,8 +99,49 @@ function joinFamily(userId: string, verifySecret?: string, callerIp?: string) {
   });
 }
 
+/**
+ * Seed a PIN verify record for `userId`. The stored hash is a placeholder, so no
+ * submitted secret can ever match it — use this when the test only needs
+ * verification to be ACTIVE (the lockout branch runs before any hash compare).
+ */
+async function seedPinAccount(userId: string) {
+  const record: VerifyRecord = {
+    method: "pin",
+    hash: "placeholder",
+    salt: "placeholder",
+    prompted: 1,
+  };
+  await kv.put(kvKeys.verify(userId), JSON.stringify(record));
+}
+
+/**
+ * Lock out ONE CALLER until `lockedUntil`, by seeding the caller-scoped
+ * `verifyfail:{userId}:{callerKey}` record. Lockout state deliberately does not
+ * live on `verify:{userId}` — see the DoS regression suite below — so a lockout
+ * fixture must be keyed on the caller, normalized exactly as the Worker does.
+ */
+async function seedCallerLockout(
+  userId: string,
+  callerIp: string,
+  lockedUntil: number,
+) {
+  const record: VerifyFailRecord = { failCount: 0, lockedUntil };
+  await kv.put(
+    kvKeys.verifyFail(userId, normalizeCallerIp(callerIp)),
+    JSON.stringify(record),
+  );
+}
+
+/** Lockout window in whole seconds — upper bound for any retryAfter hint. */
+const LOCKOUT_SECONDS = VERIFY_LOCKOUT_MS / 1000;
+
 beforeEach(() => {
   kv = createMockKV();
+});
+
+afterEach(() => {
+  // Some cases pin Date via fake timers; always restore the real clock.
+  vi.useRealTimers();
 });
 
 describe("GET /api/user/:id/verify", () => {
@@ -736,6 +777,124 @@ describe("Verification failure accounting in join flow (caller-scoped)", () => {
     expect(res.status).toBe(429);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("VERIFICATION_LOCKED");
+
+    // Back-off hint: whole seconds, inside the lockout window, and mirrored
+    // into the Retry-After header so clients can render a countdown.
+    expect(Number.isInteger(json.error.retryAfter)).toBe(true);
+    expect(json.error.retryAfter).toBeGreaterThan(0);
+    expect(json.error.retryAfter).toBeLessThanOrEqual(LOCKOUT_SECONDS);
+    expect(res.headers.get("Retry-After")).toBe(String(json.error.retryAfter));
+  });
+
+  it.each([
+    { remainingMs: 1, expected: 1 },
+    { remainingMs: 400, expected: 1 },
+    { remainingMs: 1000, expected: 1 },
+    { remainingMs: 1001, expected: 2 },
+    { remainingMs: 1500, expected: 2 },
+    { remainingMs: 59_000, expected: 59 },
+    { remainingMs: VERIFY_LOCKOUT_MS, expected: LOCKOUT_SECONDS },
+  ])(
+    "should round $remainingMs ms of remaining lockout up to retryAfter=$expected",
+    async ({ remainingMs, expected }) => {
+      // Pin Date only (timers stay real) so the remaining lockout is exact.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+      await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+      await seedPinAccount(VALID_USER_ID);
+      await seedCallerLockout(
+        VALID_USER_ID,
+        ATTACKER_IP,
+        Date.now() + remainingMs,
+      );
+
+      const res = await joinFamily(VALID_USER_ID, CORRECT_PIN, ATTACKER_IP);
+
+      expect(res.status).toBe(429);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("VERIFICATION_LOCKED");
+      expect(json.error.retryAfter).toBe(expected);
+      expect(res.headers.get("Retry-After")).toBe(String(expected));
+    },
+  );
+
+  it("should derive retryAfter from the caller's lockout, not from the account record", async () => {
+    // Pin Date only (timers stay real) so the remaining lockout is exact.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+    await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+    // A legacy account record still carrying the removed `lockedUntil` field —
+    // exactly what a KV entry written by a pre-migration Worker looks like. It
+    // must be inert: neither the lockout decision nor the back-off hint may be
+    // read off `verify:{userId}`.
+    await kv.put(
+      kvKeys.verify(VALID_USER_ID),
+      JSON.stringify({
+        method: "pin",
+        hash: "placeholder",
+        salt: "placeholder",
+        prompted: 1,
+        failCount: VERIFY_MAX_FAILURES,
+        lockedUntil: Date.now() + VERIFY_LOCKOUT_MS,
+      }),
+    );
+    await seedCallerLockout(VALID_USER_ID, ATTACKER_IP, Date.now() + 30_000);
+
+    const res = await joinFamily(VALID_USER_ID, CORRECT_PIN, ATTACKER_IP);
+
+    expect(res.status).toBe(429);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_LOCKED");
+    // 30s from the CALLER record, not the 900s sitting on the account record.
+    expect(json.error.retryAfter).toBe(30);
+    expect(res.headers.get("Retry-After")).toBe("30");
+
+    // And the stale account field grants no lockout of its own: a caller with a
+    // clean record still gets a normal 403 attempt.
+    const other = await joinFamily(VALID_USER_ID, CORRECT_PIN, VICTIM_IP);
+    expect(other.status).toBe(403);
+    const otherJson = (await other.json()) as Json;
+    expect(otherJson.error.code).toBe("VERIFICATION_FAILED");
+  });
+
+  it("should not expose retryAfter when verification is merely required", async () => {
+    await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+    await seedPinAccount(VALID_USER_ID);
+    // Expired caller lockout — the lockout branch must fall through to the
+    // "secret missing" branch, which carries no back-off hint.
+    await seedCallerLockout(VALID_USER_ID, ATTACKER_IP, Date.now() - 1000);
+
+    const res = await joinFamily(VALID_USER_ID, undefined, ATTACKER_IP);
+
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_REQUIRED");
+    expect("retryAfter" in json.error).toBe(false);
+    expect(Object.keys(json.error).sort()).toEqual(["code", "message"]);
+    expect(res.headers.get("Retry-After")).toBeNull();
+  });
+
+  it("should not expose retryAfter when verification fails", async () => {
+    await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+
+    const ownerToken = await seedAuthToken(VALID_USER_ID);
+    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
+      body: JSON.stringify({ method: "pin", secret: "123456" }),
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+
+    const res = await request("POST", `/api/family/${VALID_FAMILY_ID}/join`, {
+      body: JSON.stringify({ userId: VALID_USER_ID, verifySecret: "999999" }),
+    });
+
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_FAILED");
+    expect("retryAfter" in json.error).toBe(false);
+    expect(Object.keys(json.error).sort()).toEqual(["code", "message"]);
+    expect(res.headers.get("Retry-After")).toBeNull();
   });
 
   it("should not apply one caller's lockout to a different caller", async () => {
@@ -814,9 +973,11 @@ describe("Verification failure accounting in join flow (caller-scoped)", () => {
 
       const failKey = kvKeys.verifyFail(VALID_USER_ID, ATTACKER_IP);
       const lockedRaw = await kv.get(failKey);
-      const lockedUntil = (JSON.parse(lockedRaw as string) as VerifyFailRecord)
-        .lockedUntil;
-      expect(lockedUntil).toBe(Date.now() + VERIFY_LOCKOUT_MS);
+      const expectedLockExpiry = Date.now() + VERIFY_LOCKOUT_MS;
+      const { lockedUntil } = JSON.parse(
+        lockedRaw as string,
+      ) as VerifyFailRecord;
+      expect(lockedUntil).toBe(expectedLockExpiry);
 
       // Keep hammering well into the lockout window, wrong secret and right one.
       vi.setSystemTime(Date.now() + 60_000);
@@ -836,7 +997,7 @@ describe("Verification failure accounting in join flow (caller-scoped)", () => {
       expect(await kv.get(failKey)).toBe(lockedRaw);
 
       // It therefore ends exactly on schedule.
-      vi.setSystemTime(lockedUntil! + 1);
+      vi.setSystemTime(expectedLockExpiry + 1);
       const afterExpiry = await joinFamily(
         VALID_USER_ID,
         CORRECT_PIN,

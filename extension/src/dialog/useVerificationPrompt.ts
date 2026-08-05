@@ -9,6 +9,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../api/client";
 import type { VerifyMethod } from "../api/types";
+import { useRetryCountdown } from "./useRetryCountdown";
+import {
+  rateLimitedMessage,
+  verificationLockedMessage,
+} from "./verificationMessages";
 
 const VERIFICATION_CODES = new Set([
   "VERIFICATION_REQUIRED",
@@ -24,6 +29,12 @@ export function isVerificationError(code: string | undefined): boolean {
 export interface VerificationAttemptResult {
   ok: boolean;
   errorCode?: string;
+  /**
+   * Seconds the caller must wait before retrying, from the 429 body
+   * (`error.retryAfter`). Optional: RATE_LIMITED always carries it, while
+   * VERIFICATION_LOCKED only does on newer backends.
+   */
+  retryAfter?: number;
 }
 
 export interface VerificationContext {
@@ -44,11 +55,16 @@ export interface UseVerificationPromptResult {
   error: string;
   locked: boolean;
   submitting: boolean;
+  /** Remaining seconds of a rate-limit / lockout wait, or null when the backend
+   *  sent no `retryAfter` and no wait is being tracked. */
+  countdownSeconds: number | null;
   /** Set up the prompt for a verification error code. Returns false (no-op) for
-   *  non-verification codes so the caller falls back to its normal handling. */
+   *  non-verification codes so the caller falls back to its normal handling.
+   *  `retryAfter` (seconds) starts the lockout countdown when available. */
   begin: (
     errorCode: string | undefined,
     ctx: VerificationContext,
+    retryAfter?: number,
   ) => Promise<boolean>;
   submit: (secret: string) => Promise<void>;
   cancel: () => void;
@@ -81,6 +97,30 @@ export function useVerificationPrompt(
       isMountedRef.current = false;
     };
   }, []);
+
+  // A finished wait means the server window has cleared: drop the lock and the
+  // stale message so the user can type again without reopening the prompt. If
+  // the server still refuses, the next attempt brings a fresh retryAfter.
+  const handleWaitElapsed = useCallback(() => {
+    setLocked(false);
+    setError("");
+  }, []);
+
+  const countdown = useRetryCountdown(handleWaitElapsed);
+  const startCountdown = countdown.start;
+  const clearCountdown = countdown.clear;
+
+  // Arms the wait countdown from a 429 response, or clears any running one when
+  // the response carried no usable `retryAfter`. Without the clear, a deadline
+  // armed by an earlier 429 would survive into the new state: it would render
+  // the wrong remaining wait and, on elapse, unlock a prompt that should have
+  // stayed locked.
+  const syncCountdown = useCallback(
+    (retryAfter: number | undefined): void => {
+      if (!startCountdown(retryAfter)) clearCountdown();
+    },
+    [startCountdown, clearCountdown],
+  );
 
   const updateMethod = useCallback((next: VerifyMethod | null) => {
     methodRef.current = next;
@@ -117,17 +157,24 @@ export function useVerificationPrompt(
       code: string | undefined,
       userId: string,
       generation: number,
+      retryAfter?: number,
     ): Promise<void> => {
       if (code === "VERIFICATION_LOCKED") {
         setLocked(true);
-        setError("驗證已鎖定，請稍後再試");
+        // Static copy; the live variant is rendered from countdownSeconds.
+        setError(verificationLockedMessage(null));
+        // No retryAfter (older backend) → locked stays until the user leaves,
+        // so any countdown from an earlier 429 must be dropped here.
+        syncCountdown(retryAfter);
       } else if (code === "VERIFICATION_FAILED") {
         setLocked(false);
         setError("驗證失敗，請重新輸入");
+        clearCountdown();
       } else {
         // VERIFICATION_REQUIRED
         setLocked(false);
         setError("");
+        clearCountdown();
       }
       // Any active challenge needs a method to render the right input; fetch it
       // once if unknown so the prompt never dead-loads on "載入中…".
@@ -135,7 +182,7 @@ export function useVerificationPrompt(
         await fetchMethod(userId, generation);
       }
     },
-    [fetchMethod],
+    [fetchMethod, syncCountdown, clearCountdown],
   );
 
   const reset = useCallback(() => {
@@ -146,13 +193,15 @@ export function useVerificationPrompt(
     setError("");
     setLocked(false);
     updateSubmitting(false);
+    clearCountdown();
     ctxRef.current = null;
-  }, [updateMethod, updateSubmitting]);
+  }, [updateMethod, updateSubmitting, clearCountdown]);
 
   const begin = useCallback(
     async (
       errorCode: string | undefined,
       ctx: VerificationContext,
+      retryAfter?: number,
     ): Promise<boolean> => {
       if (!isVerificationError(errorCode)) return false;
       const generation = ++generationRef.current;
@@ -161,7 +210,8 @@ export function useVerificationPrompt(
       updateSubmitting(false);
       setMethodError(false);
       updateMethod(null);
-      await applyCode(errorCode, ctx.userId, generation);
+      // applyCode restarts or clears the countdown for the new generation.
+      await applyCode(errorCode, ctx.userId, generation, retryAfter);
       return true;
     },
     [applyCode, updateMethod, updateSubmitting],
@@ -186,18 +236,25 @@ export function useVerificationPrompt(
         return;
       }
       if (isVerificationError(result.errorCode)) {
-        await applyCode(result.errorCode, ctx.userId, generation);
+        await applyCode(
+          result.errorCode,
+          ctx.userId,
+          generation,
+          result.retryAfter,
+        );
         return;
       }
       if (result.errorCode === "RATE_LIMITED") {
         // Server join quota exhausted (429). Keep the prompt open so the user
         // can retry once the window clears, with a specific message.
-        setError("嘗試次數過多，請稍後再試");
+        setError(rateLimitedMessage(null));
+        syncCountdown(result.retryAfter);
         return;
       }
+      clearCountdown();
       setError("發生錯誤，請稍後再試");
     },
-    [locked, applyCode, reset, updateSubmitting],
+    [locked, applyCode, reset, updateSubmitting, syncCountdown, clearCountdown],
   );
 
   const cancel = useCallback(() => {
@@ -213,6 +270,7 @@ export function useVerificationPrompt(
     error,
     locked,
     submitting,
+    countdownSeconds: countdown.seconds,
     begin,
     submit,
     cancel,

@@ -3860,6 +3860,13 @@
   margin-top: 4px;
 }
 
+/* VerificationPrompt renders this error as the whole challenge slot (locked /
+   method-load failure), so it needs its own bottom gap before the 返回 button —
+   the PIN/pattern widgets get that spacing from the widget itself. */
+.moo-secret-entry__error--gap16 {
+  margin-bottom: 16px;
+}
+
 /* Underlined "重新設定" reset link (shared by both). Built on .moo-button
    .moo-button--link; object recolors the label to slate-500, keeps the permanent
    underline, the 8px top gap and the lighter 400 weight (base is 600). */

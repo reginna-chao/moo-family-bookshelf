@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { PinInput } from "@/dialog/PinInput";
+import { dimmedAncestor, dimmedElements } from "./helpers/dimStyle";
 
 function getInput(): HTMLInputElement {
   return screen.getByLabelText("PIN 碼輸入") as HTMLInputElement;
@@ -8,6 +9,16 @@ function getInput(): HTMLInputElement {
 
 function getSubmitButton(): HTMLElement {
   return screen.getByText("確認");
+}
+
+function getResetButton(): HTMLElement {
+  return screen.getByText("重新設定");
+}
+
+/** Advance a setup-mode PinInput to the confirm step, where 重新設定 renders. */
+function advanceToConfirmStep(): void {
+  fireEvent.change(getInput(), { target: { value: "123456" } });
+  fireEvent.click(getSubmitButton());
 }
 
 describe("PinInput", () => {
@@ -129,6 +140,105 @@ describe("PinInput", () => {
       fireEvent.change(getInput(), { target: { value: "123456" } });
       fireEvent.click(getSubmitButton());
       expect(onComplete).toHaveBeenCalledWith("123456");
+    });
+
+    /**
+     * 重新設定 sits OUTSIDE the dimmed wrapper (so it stays readable during a
+     * lockout countdown), which means `pointerEvents: none` does not cover it.
+     * It therefore needs its own `disabled` — otherwise a locked-out user could
+     * still wipe the first PIN and restart the setup mid-lockout.
+     */
+    it("marks the setup reset button as disabled while disabled", () => {
+      const { rerender } = render(
+        <PinInput mode="setup" onComplete={vi.fn()} />,
+      );
+      advanceToConfirmStep();
+
+      rerender(<PinInput mode="setup" onComplete={vi.fn()} disabled />);
+
+      expect(getResetButton()).toBeDisabled();
+    });
+
+    it("does not return to the enter step when the reset button is clicked while disabled", () => {
+      const { rerender } = render(
+        <PinInput mode="setup" onComplete={vi.fn()} />,
+      );
+      advanceToConfirmStep();
+      rerender(<PinInput mode="setup" onComplete={vi.fn()} disabled />);
+
+      fireEvent.click(getResetButton());
+
+      // Still on the confirm step — the reset never ran.
+      expect(screen.getByText("再次輸入 PIN 碼確認")).toBeInTheDocument();
+      expect(screen.queryByText("設定 PIN 碼")).not.toBeInTheDocument();
+    });
+
+    it("keeps the setup reset button enabled and working when disabled is omitted", () => {
+      render(<PinInput mode="setup" onComplete={vi.fn()} />);
+      advanceToConfirmStep();
+
+      expect(getResetButton()).not.toBeDisabled();
+
+      fireEvent.click(getResetButton());
+      expect(screen.getByText("設定 PIN 碼")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The dim wraps ONLY the interactive cluster (label / hint / input /
+   * 確認). The error line is what explains the lock during a rate-limit
+   * countdown, so it — and the reset button — must stay readable at full
+   * opacity for the whole wait.
+   */
+  describe("disabled dim scope", () => {
+    it("dims the input and confirm button while disabled", () => {
+      render(<PinInput mode="verify" onComplete={vi.fn()} disabled />);
+
+      expect(dimmedAncestor(getInput())).not.toBeNull();
+      expect(dimmedAncestor(getSubmitButton())).not.toBeNull();
+    });
+
+    it("keeps the error line outside the dimmed cluster while disabled", () => {
+      render(
+        <PinInput
+          mode="verify"
+          onComplete={vi.fn()}
+          disabled
+          error="PIN 碼錯誤"
+        />,
+      );
+
+      expect(dimmedAncestor(screen.getByText("PIN 碼錯誤"))).toBeNull();
+    });
+
+    it("renders no dimmed wrapper at all when enabled", () => {
+      const { container } = render(
+        <PinInput mode="verify" onComplete={vi.fn()} error="PIN 碼錯誤" />,
+      );
+
+      expect(dimmedElements(container)).toHaveLength(0);
+    });
+
+    it("keeps the reset button outside the dimmed cluster while disabled", () => {
+      const { rerender } = render(
+        <PinInput mode="setup" onComplete={vi.fn()} />,
+      );
+      // Advance to the confirm step so 重新設定 renders, then lock the widget.
+      fireEvent.change(getInput(), { target: { value: "123456" } });
+      fireEvent.click(getSubmitButton());
+      rerender(
+        <PinInput
+          mode="setup"
+          onComplete={vi.fn()}
+          disabled
+          error="PIN 碼錯誤"
+        />,
+      );
+
+      expect(dimmedAncestor(screen.getByText("重新設定"))).toBeNull();
+      expect(dimmedAncestor(screen.getByText("PIN 碼錯誤"))).toBeNull();
+      // Sanity: the widget the user cannot use IS dimmed.
+      expect(dimmedAncestor(getInput())).not.toBeNull();
     });
   });
 

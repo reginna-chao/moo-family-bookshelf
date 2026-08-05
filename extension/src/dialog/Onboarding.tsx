@@ -149,6 +149,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
           error={flow.verify.error}
           locked={flow.verify.locked}
           submitting={flow.verify.submitting}
+          countdownSeconds={flow.verify.countdownSeconds}
           onSubmit={(secret) => void flow.verify.submit(secret)}
           onCancel={flow.verify.cancel}
         />

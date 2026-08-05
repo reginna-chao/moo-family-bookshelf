@@ -78,10 +78,22 @@ function defaultVerifyRecord(): VerifyRecord {
   };
 }
 
-/** Check if the caller is currently locked out. Returns true if locked. */
-function isLockedOut(record: VerifyFailRecord | null): boolean {
+/**
+ * Check if the CALLER is currently locked out. Returns true if locked.
+ * Lockout is caller-scoped (`verifyfail:{userId}:{callerKey}`), never charged
+ * to the target account. Narrows `lockedUntil` to a number so callers can
+ * derive the remaining back-off without re-checking for null.
+ */
+function isLockedOut(
+  record: VerifyFailRecord | null,
+): record is VerifyFailRecord & { lockedUntil: number } {
   if (!record?.lockedUntil) return false;
   return Date.now() < record.lockedUntil;
+}
+
+/** Remaining lockout time in whole seconds, rounded up (minimum 1). */
+function lockoutRetryAfterSeconds(lockedUntil: number): number {
+  return Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000));
 }
 
 // GET /:id/verify — get verification method (public, needed before login)
@@ -360,6 +372,25 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
   return c.json({ data: { token, expiresIn: QR_TOKEN_TTL_SECONDS } });
 });
 
+/** Error descriptor returned by {@link validateVerification} on failure. */
+export type VerificationError =
+  | {
+      code: "VERIFICATION_LOCKED";
+      message: string;
+      status: 429;
+      /** Remaining lockout seconds — required for lockout, absent elsewhere. */
+      retryAfter: number;
+    }
+  | {
+      code: "VERIFICATION_REQUIRED" | "VERIFICATION_FAILED";
+      message: string;
+      status: 403;
+    };
+
+/** Outcome of a verification check. */
+export type VerificationResult =
+  { valid: true } | { valid: false; error: VerificationError };
+
 /**
  * Compare a submitted secret against the stored verify record.
  *
@@ -445,10 +476,7 @@ export async function validateVerification(
   userId: string,
   secret: string | undefined,
   opts: { callerKey: string },
-): Promise<{
-  valid: boolean;
-  error?: { code: string; message: string; status: number };
-}> {
+): Promise<VerificationResult> {
   const record = await kv.get<VerifyRecord>(kvKeys.verify(userId), "json");
 
   // No verification set or method is 'none' — allow through
@@ -467,6 +495,7 @@ export async function validateVerification(
         code: "VERIFICATION_LOCKED",
         message: "驗證已鎖定，請稍後再試",
         status: 429,
+        retryAfter: lockoutRetryAfterSeconds(failRecord.lockedUntil),
       },
     };
   }

@@ -364,16 +364,15 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
       body.verifySecret,
       { callerKey: getCallerIp(c) },
     );
-    if (!verification.valid && verification.error) {
-      return c.json(
-        {
-          error: {
-            code: verification.error.code,
-            message: verification.error.message,
-          },
-        },
-        verification.error.status as 403 | 429,
-      );
+    if (!verification.valid) {
+      const { code, message, status } = verification.error;
+      // retryAfter is only present on VERIFICATION_LOCKED; jsonError omits both
+      // the body field and the Retry-After header when it is undefined.
+      const retryAfter =
+        verification.error.code === "VERIFICATION_LOCKED"
+          ? verification.error.retryAfter
+          : undefined;
+      return jsonError(c, status, code, message, { retryAfter });
     }
   }
 
