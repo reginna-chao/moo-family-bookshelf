@@ -175,6 +175,15 @@ Worker 內建 OpenAPI 文件與 Swagger UI，**僅在 dev 環境開啟**，produ
 - 自建的 dev worker：在 Cloudflare Dashboard 的 Worker Settings → Environment Variables 中加入 `DEV_MODE=1`，即可從瀏覽器直接訪問 `/api/_docs`
 - **不建議在 production 開啟**。若確實需要，請自行加上 IP 白名單或 Basic Auth 保護，避免 API 結構暴露
 
+> ⚠️ **`DEV_MODE=1` 不只是開啟文件，它會一併關掉防濫用機制**
+>
+> `worker/src/middleware/rateLimit.ts` 會在 `isDevMode` 為真時直接短路，等同關閉：
+>
+> - **per-IP 速率限制**（一般 60／公開 10／敏感端點 3 次每分鐘）
+> - **per-userId 速率限制**（例如加入家庭每小時 10 次）
+>
+> 這代表 PWA 登入驗證（PIN／圖形／驗證碼）少了暴力破解的煞車；再加上 dev 模式下 CORS 放寬、`/api/_docs` 對外開放，**開啟 `DEV_MODE=1` 的 Worker 絕對不能存放真實家庭資料**，請只用在測試用的 KV Namespace。
+
 ## 更新
 
 ```bash

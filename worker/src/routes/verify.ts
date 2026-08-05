@@ -6,7 +6,9 @@ import {
   QR_TOKEN_TTL_SECONDS,
   VERIFY_MAX_FAILURES,
   VERIFY_LOCKOUT_MS,
+  VERIFY_FAIL_TTL_SECONDS,
   type VerifyRecord,
+  type VerifyFailRecord,
   type OtpRecord,
   type QrTokenRecord,
 } from "../kv/schema";
@@ -73,14 +75,12 @@ function defaultVerifyRecord(): VerifyRecord {
     hash: null,
     salt: null,
     prompted: 0,
-    failCount: 0,
-    lockedUntil: null,
   };
 }
 
-/** Check if user is currently locked out. Returns true if locked. */
-function isLockedOut(record: VerifyRecord): boolean {
-  if (!record.lockedUntil) return false;
+/** Check if the caller is currently locked out. Returns true if locked. */
+function isLockedOut(record: VerifyFailRecord | null): boolean {
+  if (!record?.lockedUntil) return false;
   return Date.now() < record.lockedUntil;
 }
 
@@ -204,8 +204,6 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     hash,
     salt,
     prompted: body.prompted === 1 ? 1 : (existing?.prompted ?? 0),
-    failCount: 0,
-    lockedUntil: null,
   };
 
   await c.env.KV.put(kvKeys.verify(userId), JSON.stringify(record));
@@ -363,14 +361,90 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
 });
 
 /**
- * Validate a verification secret against stored record.
- * Used by join flow.
+ * Compare a submitted secret against the stored verify record.
+ *
+ * Returns null when a pin/pattern record is corrupted (missing hash/salt);
+ * callers treat that as "no verification configured". Consumes the OTP on a
+ * successful `code` match (one-time use).
+ */
+async function matchesSecret(
+  kv: KVNamespace,
+  userId: string,
+  record: VerifyRecord,
+  secret: string,
+): Promise<boolean | null> {
+  if (record.method === "pin" || record.method === "pattern") {
+    if (!record.hash || !record.salt) return null;
+    const inputHash = await hashSecret(record.salt, secret);
+    return timingSafeEqual(inputHash, record.hash);
+  }
+
+  if (record.method === "code") {
+    // Validate OTP — lengths must match for a meaningful constant-time compare
+    const otpRecord = await kv.get<OtpRecord>(kvKeys.otp(userId), "json");
+    if (
+      otpRecord &&
+      secret.length === otpRecord.code.length &&
+      timingSafeEqual(otpRecord.code, secret)
+    ) {
+      // Delete OTP after successful use (one-time)
+      await kv.delete(kvKeys.otp(userId));
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Charge one failed attempt against the caller-scoped record, locking that
+ * caller out once VERIFY_MAX_FAILURES is reached. Side effect: writes
+ * `verifyfail:{userId}:{callerKey}` with a TTL; never touches `verify:{userId}`.
+ */
+async function chargeFailure(
+  kv: KVNamespace,
+  failKey: string,
+  existing: VerifyFailRecord | null,
+): Promise<void> {
+  const next: VerifyFailRecord = {
+    failCount: (existing?.failCount ?? 0) + 1,
+    lockedUntil: null,
+  };
+  if (next.failCount >= VERIFY_MAX_FAILURES) {
+    next.lockedUntil = Date.now() + VERIFY_LOCKOUT_MS;
+    next.failCount = 0; // Reset count after lockout
+  }
+  await kv.put(failKey, JSON.stringify(next), {
+    expirationTtl: VERIFY_FAIL_TTL_SECONDS,
+  });
+}
+
+/**
+ * Validate a verification secret against the stored `verify:{userId}` record.
+ * Used by the join flow.
+ *
+ * Failure accounting and lockout are keyed on the CALLER (`opts.callerKey`,
+ * normally the Cloudflare-supplied client IP, IPv6 bucketed per /64), never on
+ * the target user, and live in a TTL-backed `verifyfail:{userId}:{callerKey}`
+ * entry. Reason: join is a public endpoint, the submitted userId is derived
+ * from the user's email with a fixed salt, and the victim's own familyId is
+ * retrievable from the public `POST /api/auth/lookup` — so ANY counter keyed on
+ * the victim's identity is a denial-of-service lever, letting a stranger lock
+ * the victim out of PWA login on demand. Brute force from a SINGLE source stays
+ * bounded by the per-IP sensitive-route limit (3/min); an attacker who rotates
+ * source prefixes is bounded only by the per-userId join rate limit (10/hour).
+ * Neither bound holds under `DEV_MODE=1`, which short-circuits both limits and
+ * leaves lockout as the only brake.
+ *
+ * This function never writes `verify:{userId}`.
+ *
  * Returns: { valid: true } or error response.
  */
 export async function validateVerification(
   kv: KVNamespace,
   userId: string,
   secret: string | undefined,
+  opts: { callerKey: string },
 ): Promise<{
   valid: boolean;
   error?: { code: string; message: string; status: number };
@@ -382,8 +456,11 @@ export async function validateVerification(
     return { valid: true };
   }
 
-  // Check lockout
-  if (isLockedOut(record)) {
+  const failKey = kvKeys.verifyFail(userId, opts.callerKey);
+  const failRecord = await kv.get<VerifyFailRecord>(failKey, "json");
+
+  // Check lockout for this caller
+  if (isLockedOut(failRecord)) {
     return {
       valid: false,
       error: {
@@ -394,7 +471,7 @@ export async function validateVerification(
     };
   }
 
-  // Secret required but not provided
+  // Secret required but not provided — no attempt was made, so nothing to charge
   if (!secret || typeof secret !== "string") {
     return {
       valid: false,
@@ -406,49 +483,24 @@ export async function validateVerification(
     };
   }
 
-  let valid = false;
+  const matched = await matchesSecret(kv, userId, record, secret);
 
-  if (record.method === "pin" || record.method === "pattern") {
-    if (!record.hash || !record.salt) {
-      // Corrupted record — treat as no verification
-      return { valid: true };
-    }
-    const inputHash = await hashSecret(record.salt, secret);
-    valid = timingSafeEqual(inputHash, record.hash);
-  } else if (record.method === "code") {
-    // Validate OTP — pad both to same length for constant-time comparison
-    const otpRecord = await kv.get<OtpRecord>(kvKeys.otp(userId), "json");
-    if (
-      otpRecord &&
-      secret.length === otpRecord.code.length &&
-      timingSafeEqual(otpRecord.code, secret)
-    ) {
-      valid = true;
-      // Delete OTP after successful use (one-time)
-      await kv.delete(kvKeys.otp(userId));
-    }
+  // Corrupted record — treat as no verification
+  if (matched === null) {
+    return { valid: true };
   }
 
-  if (!valid) {
-    // Increment fail count
-    record.failCount = (record.failCount || 0) + 1;
-    if (record.failCount >= VERIFY_MAX_FAILURES) {
-      record.lockedUntil = Date.now() + VERIFY_LOCKOUT_MS;
-      record.failCount = 0; // Reset count after lockout
-    }
-    await kv.put(kvKeys.verify(userId), JSON.stringify(record));
-
+  if (!matched) {
+    await chargeFailure(kv, failKey, failRecord);
     return {
       valid: false,
       error: { code: "VERIFICATION_FAILED", message: "驗證失敗", status: 403 },
     };
   }
 
-  // Reset fail count on success
-  if (record.failCount > 0) {
-    record.failCount = 0;
-    record.lockedUntil = null;
-    await kv.put(kvKeys.verify(userId), JSON.stringify(record));
+  // Success — clear this caller's failure history
+  if (failRecord) {
+    await kv.delete(failKey);
   }
 
   return { valid: true };

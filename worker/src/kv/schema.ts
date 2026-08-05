@@ -6,6 +6,7 @@
  *   family:{familyId} → family member list (JSON)
  *   member:{userId}  → familyId (reverse lookup)
  *   qr:{token}       → QrTokenRecord (one-time QR login bypass, TTL 300s)
+ *   verifyfail:{userId}:{callerKey} → VerifyFailRecord (per-caller failure accounting, TTL 900s)
  *   borrow:{requestId} → BorrowRequest (JSON)
  *   borrows:family:{familyId} → string[] (requestId index)
  *   public:{shareToken} → PublicShelfSnapshot (plaintext public bookshelf, optional TTL)
@@ -46,6 +47,8 @@ export const kvKeys = {
   auth: (userId: string) => `auth:${userId}`,
   authToken: (token: string) => `token:${token}`,
   verify: (userId: string) => `verify:${userId}`,
+  verifyFail: (userId: string, callerKey: string) =>
+    `verifyfail:${userId}:${callerKey}`,
   otp: (userId: string) => `otp:${userId}`,
   qrToken: (token: string) => `qr:${token}`,
   borrow: (requestId: string) => `borrow:${requestId}`,
@@ -231,9 +234,22 @@ export interface VerifyRecord {
   salt: string | null;
   /** Whether user has been prompted to set up verification (0 or 1). */
   prompted: number;
-  /** Consecutive failed verification attempts. */
+}
+
+/**
+ * Verification failure accounting, scoped to a (target user, caller) pair and
+ * stored under `verifyfail:{userId}:{callerKey}` with a TTL.
+ *
+ * Deliberately NOT part of `VerifyRecord`: the join endpoint is public and the
+ * submitted userId is guessable, so a counter living on the account itself would
+ * let any stranger lock the account owner out. Keying on the caller means an
+ * attacker can only ever lock themselves out, and the TTL guarantees the entry
+ * disappears on its own.
+ */
+export interface VerifyFailRecord {
+  /** Consecutive failed verification attempts from this caller. */
   failCount: number;
-  /** Lockout expiry timestamp (ms). null if not locked. */
+  /** Lockout expiry timestamp (ms) for this caller. null if not locked. */
   lockedUntil: number | null;
 }
 
@@ -246,3 +262,5 @@ export interface OtpRecord {
 export const VERIFY_MAX_FAILURES = 5;
 /** Lockout duration: 15 minutes in ms. */
 export const VERIFY_LOCKOUT_MS = 15 * 60 * 1000;
+/** TTL for `verifyfail:*` entries: 900s, matching the 15-minute lockout window. */
+export const VERIFY_FAIL_TTL_SECONDS = 15 * 60;

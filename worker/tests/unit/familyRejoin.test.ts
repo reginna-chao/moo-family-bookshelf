@@ -34,8 +34,6 @@ async function seedVerifyRecord(userId: string, method: "pin" | "pattern") {
     hash: "fakehash1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
     salt: "fakesalt1234567890abcdef12345678",
     prompted: 1,
-    failCount: 0,
-    lockedUntil: null,
   };
   await kv.put(kvKeys.verify(userId), JSON.stringify(record));
 }
