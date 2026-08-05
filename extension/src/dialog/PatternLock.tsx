@@ -159,75 +159,80 @@ export function PatternLock({
         : "再次繪製圖形確認";
 
   return (
-    <div
-      className="moo-secret-entry"
-      style={disabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
-    >
-      <div className="moo-secret-entry__label">{label}</div>
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
-        width={CANVAS_SIZE}
-        height={CANVAS_SIZE}
-        className="moo-pattern-lock__svg"
-        onMouseDown={handleStart}
-        onMouseMove={handleMove}
-        onMouseUp={handleEnd}
-        onMouseLeave={handleEnd}
-        onTouchStart={handleStart}
-        onTouchMove={handleMove}
-        onTouchEnd={handleEnd}
-        role="application"
-        aria-label="圖形鎖"
+    <div className="moo-secret-entry">
+      {/* The dim only covers the interactive cluster. The error line below stays
+          at full opacity: during a rate-limit countdown it is the only text
+          explaining why input is locked, so dimming it would leave the sole
+          explanation unreadable for the whole wait. */}
+      <div
+        style={disabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
       >
-        {/* Lines between selected dots */}
-        {selected.map((dotIdx, i) => {
-          if (i === 0) return null;
-          const prev = getDotCenter(selected[i - 1]);
-          const curr = getDotCenter(dotIdx);
-          return (
+        <div className="moo-secret-entry__label">{label}</div>
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
+          width={CANVAS_SIZE}
+          height={CANVAS_SIZE}
+          className="moo-pattern-lock__svg"
+          onMouseDown={handleStart}
+          onMouseMove={handleMove}
+          onMouseUp={handleEnd}
+          onMouseLeave={handleEnd}
+          onTouchStart={handleStart}
+          onTouchMove={handleMove}
+          onTouchEnd={handleEnd}
+          role="application"
+          aria-label="圖形鎖"
+        >
+          {/* Lines between selected dots */}
+          {selected.map((dotIdx, i) => {
+            if (i === 0) return null;
+            const prev = getDotCenter(selected[i - 1]);
+            const curr = getDotCenter(dotIdx);
+            return (
+              <line
+                key={`line-${i}`}
+                x1={prev.x}
+                y1={prev.y}
+                x2={curr.x}
+                y2={curr.y}
+                stroke="#2563eb"
+                strokeWidth={3}
+                strokeLinecap="round"
+              />
+            );
+          })}
+          {/* Trailing line from last dot to mouse */}
+          {drawing && mousePos && selected.length > 0 && (
             <line
-              key={`line-${i}`}
-              x1={prev.x}
-              y1={prev.y}
-              x2={curr.x}
-              y2={curr.y}
-              stroke="#2563eb"
-              strokeWidth={3}
+              x1={getDotCenter(selected[selected.length - 1]).x}
+              y1={getDotCenter(selected[selected.length - 1]).y}
+              x2={mousePos.x}
+              y2={mousePos.y}
+              stroke="#93c5fd"
+              strokeWidth={2}
               strokeLinecap="round"
             />
-          );
-        })}
-        {/* Trailing line from last dot to mouse */}
-        {drawing && mousePos && selected.length > 0 && (
-          <line
-            x1={getDotCenter(selected[selected.length - 1]).x}
-            y1={getDotCenter(selected[selected.length - 1]).y}
-            x2={mousePos.x}
-            y2={mousePos.y}
-            stroke="#93c5fd"
-            strokeWidth={2}
-            strokeLinecap="round"
-          />
-        )}
-        {/* Dots */}
-        {Array.from({ length: DOT_COUNT }, (_, i) => {
-          const { x, y } = getDotCenter(i);
-          const isActive = selected.includes(i);
-          return (
-            <circle
-              key={`dot-${i}`}
-              cx={x}
-              cy={y}
-              r={isActive ? DOT_RADIUS : DOT_RADIUS * 0.6}
-              fill={isActive ? "#2563eb" : "#cbd5e1"}
-              stroke={isActive ? "#1d4ed8" : "none"}
-              strokeWidth={2}
-              data-testid={`dot-${i}`}
-            />
-          );
-        })}
-      </svg>
+          )}
+          {/* Dots */}
+          {Array.from({ length: DOT_COUNT }, (_, i) => {
+            const { x, y } = getDotCenter(i);
+            const isActive = selected.includes(i);
+            return (
+              <circle
+                key={`dot-${i}`}
+                cx={x}
+                cy={y}
+                r={isActive ? DOT_RADIUS : DOT_RADIUS * 0.6}
+                fill={isActive ? "#2563eb" : "#cbd5e1"}
+                stroke={isActive ? "#1d4ed8" : "none"}
+                strokeWidth={2}
+                data-testid={`dot-${i}`}
+              />
+            );
+          })}
+        </svg>
+      </div>
       {displayError && (
         <div className="moo-secret-entry__error">{displayError}</div>
       )}
@@ -239,6 +244,7 @@ export function PatternLock({
             reset();
             setMismatchError("");
           }}
+          disabled={disabled}
           className="moo-button moo-button--link moo-secret-entry__reset"
         >
           重新設定

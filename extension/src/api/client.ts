@@ -42,7 +42,11 @@ import type {
   VersionInfo,
 } from "./types";
 import { BorrowStatus, type VerifyMethod, type BoolFlag } from "./types";
-import { doRefreshToken, type RefreshOutcome } from "./auth-refresh";
+import {
+  doRefreshToken,
+  type ReauthInfo,
+  type RefreshOutcome,
+} from "./auth-refresh";
 
 // Re-export all types so existing imports from "./client" continue to work
 export { BoolFlag, BorrowStatus, PERSONAL_BOOKS_SCHEMA_VERSION } from "./types";
@@ -101,8 +105,10 @@ export class ApiClient {
    *  gone (deleted / user no longer a member) — the caller clears family data. */
   onFamilyRemoved: (() => void) | null = null;
   /** Callback invoked when recovery needs a PWA-login verification secret, so
-   *  the caller can prompt re-verification instead of dropping the user's data. */
-  onReauthRequired: (() => void) | null = null;
+   *  the caller can prompt re-verification instead of dropping the user's data.
+   *  Receives the blocking error code (+ retryAfter when the backend sent one)
+   *  so the prompt can open already locked with a countdown. */
+  onReauthRequired: ((info?: ReauthInfo) => void) | null = null;
   /** In-flight GET request deduplication map: URL -> Promise */
   private inflightGets = new Map<string, Promise<ApiResponse<unknown>>>();
 
@@ -592,9 +598,9 @@ export class ApiClient {
       onFamilyRemoved: this.onFamilyRemoved,
       // Wrap the caller's callback so raising the prompt also sets the latch;
       // auth-refresh.ts stays latch-agnostic except for the isReauthPending skip.
-      onReauthRequired: () => {
+      onReauthRequired: (info) => {
         this.reauthPending = true;
-        this.onReauthRequired?.();
+        this.onReauthRequired?.(info);
       },
       isReauthPending: () => this.reauthPending,
     });

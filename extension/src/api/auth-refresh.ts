@@ -16,6 +16,15 @@ import {
 const DEFAULT_RECOVERY_COOLDOWN_SECONDS = 300;
 
 /**
+ * Upper bound (1 hour) applied to any backend-supplied `retryAfter`. The official
+ * worker never asks for more than 900s, so this only guards against a hostile or
+ * buggy self-hosted (BYO) backend locking recovery out effectively forever.
+ * Mirrors the cap in `dialog/useRetryCountdown.ts`; kept local so the api layer
+ * does not depend on the dialog layer.
+ */
+const MAX_RECOVERY_COOLDOWN_SECONDS = 3600;
+
+/**
  * Backend join error codes that mean the member exists but must supply their
  * PWA-login verification secret (PIN/pattern/OTP). Mirrors the set in
  * `dialog/useVerificationPrompt.ts`; kept local so the api layer does not
@@ -35,6 +44,17 @@ const VERIFICATION_ERROR_CODES = new Set([
  */
 const FAMILY_GONE_ERROR_CODES = new Set(["FAMILY_NOT_FOUND", "FAMILY_FULL"]);
 
+/**
+ * What blocked the silent recovery, handed to `onReauthRequired` so the prompt
+ * can open in the right state (e.g. VERIFICATION_LOCKED renders the countdown
+ * immediately instead of an active pin/pattern input).
+ */
+export interface ReauthInfo {
+  errorCode: string;
+  /** Seconds to wait before retrying, present on lockout / rate-limit failures. */
+  retryAfter?: number;
+}
+
 interface RefreshDeps {
   request: <T>(
     path: string,
@@ -45,7 +65,7 @@ interface RefreshDeps {
   /** Invoked when the family is genuinely gone — clears local family data. */
   onFamilyRemoved: (() => void) | null;
   /** Invoked when recovery needs a PWA-login verification secret (re-verify). */
-  onReauthRequired: (() => void) | null;
+  onReauthRequired: ((info?: ReauthInfo) => void) | null;
   /**
    * Returns true when a re-verification prompt is already pending from an
    * earlier 401 wave. When latched, silent join-recovery is skipped so the
@@ -182,7 +202,10 @@ export async function doRefreshToken(
       recovery.errorCode &&
       VERIFICATION_ERROR_CODES.has(recovery.errorCode)
     ) {
-      deps.onReauthRequired?.();
+      deps.onReauthRequired?.({
+        errorCode: recovery.errorCode,
+        retryAfter: recovery.retryAfter,
+      });
       return { refreshed: false };
     }
 
@@ -204,20 +227,30 @@ export async function doRefreshToken(
 async function getActiveRecoveryCooldown(): Promise<number | undefined> {
   const stored = await browser.storage.local.get(RECOVERY_COOLDOWN_UNTIL_KEY);
   const cooldownUntil = stored[RECOVERY_COOLDOWN_UNTIL_KEY];
-  if (typeof cooldownUntil === "number" && Date.now() < cooldownUntil) {
-    return cooldownUntil;
-  }
-  return undefined;
+  if (typeof cooldownUntil !== "number") return undefined;
+  // Clamp on read as well as on write: a deadline persisted before the write-side
+  // cap existed (or one inflated by a clock skew) must not outlive the max.
+  const now = Date.now();
+  const bounded = Math.min(
+    cooldownUntil,
+    now + MAX_RECOVERY_COOLDOWN_SECONDS * 1000,
+  );
+  return now < bounded ? bounded : undefined;
 }
 
-/** Persist a fresh recovery cooldown; returns the epoch-ms deadline written. */
+/**
+ * Persist a fresh recovery cooldown; returns the epoch-ms deadline written.
+ * The requested wait is clamped to `MAX_RECOVERY_COOLDOWN_SECONDS` so an
+ * untrusted backend cannot suppress auto-recovery indefinitely.
+ */
 async function setRecoveryCooldown(
   retryAfterSeconds?: number,
 ): Promise<number> {
-  const seconds =
+  const requested =
     typeof retryAfterSeconds === "number" && retryAfterSeconds > 0
       ? retryAfterSeconds
       : DEFAULT_RECOVERY_COOLDOWN_SECONDS;
+  const seconds = Math.min(requested, MAX_RECOVERY_COOLDOWN_SECONDS);
   const cooldownUntil = Date.now() + seconds * 1000;
   await browser.storage.local.set({
     [RECOVERY_COOLDOWN_UNTIL_KEY]: cooldownUntil,

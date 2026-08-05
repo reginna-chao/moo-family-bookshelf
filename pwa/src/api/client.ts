@@ -33,7 +33,12 @@ export enum BoolFlag {
 
 export interface ApiResponse<T> {
   data?: T;
-  error?: { code: string; message: string };
+  error?: {
+    code: string;
+    message: string;
+    /** Seconds to wait before retrying, present on rate-limit (429) responses. */
+    retryAfter?: number;
+  };
 }
 
 export interface BookEntry {

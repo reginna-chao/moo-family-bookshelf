@@ -105,35 +105,40 @@ export function PinInput({
       : "#cbd5e1";
 
   return (
-    <div
-      className="moo-secret-entry"
-      style={disabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
-    >
-      <div className="moo-secret-entry__label">{label}</div>
-      <div className="moo-pin-input__hint">
-        {PIN_MIN}-{PIN_MAX} 位數字
-      </div>
-      <div className="moo-pin-input__row">
-        <input
-          ref={inputRef}
-          type="password"
-          inputMode="numeric"
-          value={pin}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          disabled={disabled}
-          aria-label="PIN 碼輸入"
-          placeholder={`輸入 ${PIN_MIN}-${PIN_MAX} 位數字`}
-          className="moo-pin-input__field"
-          style={{ border: `2px solid ${fieldBorderColor}` }}
-        />
-        <button
-          onClick={handleSubmit}
-          disabled={disabled}
-          className="moo-button moo-pin-input__submit"
-        >
-          確認
-        </button>
+    <div className="moo-secret-entry">
+      {/* The dim only covers the interactive cluster. The error line below stays
+          at full opacity: during a rate-limit countdown it is the only text
+          explaining why input is locked, so dimming it would leave the sole
+          explanation unreadable for the whole wait. */}
+      <div
+        style={disabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+      >
+        <div className="moo-secret-entry__label">{label}</div>
+        <div className="moo-pin-input__hint">
+          {PIN_MIN}-{PIN_MAX} 位數字
+        </div>
+        <div className="moo-pin-input__row">
+          <input
+            ref={inputRef}
+            type="password"
+            inputMode="numeric"
+            value={pin}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            disabled={disabled}
+            aria-label="PIN 碼輸入"
+            placeholder={`輸入 ${PIN_MIN}-${PIN_MAX} 位數字`}
+            className="moo-pin-input__field"
+            style={{ border: `2px solid ${fieldBorderColor}` }}
+          />
+          <button
+            onClick={handleSubmit}
+            disabled={disabled}
+            className="moo-button moo-pin-input__submit"
+          >
+            確認
+          </button>
+        </div>
       </div>
       {displayError && (
         <div className="moo-secret-entry__error moo-secret-entry__error--tight">
@@ -148,6 +153,7 @@ export function PinInput({
             setLocalError("");
             resetInput();
           }}
+          disabled={disabled}
           className="moo-button moo-button--link moo-secret-entry__reset"
         >
           重新設定

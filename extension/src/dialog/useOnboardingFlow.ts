@@ -175,22 +175,34 @@ export function useOnboardingFlow(
   const promptRecoveryVerification = useCallback(
     async (params: {
       errorCode: string | undefined;
+      /** Seconds to wait, from the originating 429 (drives the countdown). */
+      retryAfter?: number;
       userId: string;
-      run: (
-        verifySecret: string,
-      ) => Promise<{ recovered: boolean; errorCode?: string }>;
+      run: (verifySecret: string) => Promise<{
+        recovered: boolean;
+        errorCode?: string;
+        retryAfter?: number;
+      }>;
       onCancel: () => void;
     }): Promise<boolean> => {
       if (!isVerificationError(params.errorCode)) return false;
       setState("verify-prompt");
-      await verifyBegin(params.errorCode, {
-        userId: params.userId,
-        retry: async (secret) => {
-          const result = await params.run(secret);
-          return { ok: result.recovered, errorCode: result.errorCode };
+      await verifyBegin(
+        params.errorCode,
+        {
+          userId: params.userId,
+          retry: async (secret) => {
+            const result = await params.run(secret);
+            return {
+              ok: result.recovered,
+              errorCode: result.errorCode,
+              retryAfter: result.retryAfter,
+            };
+          },
+          onCancel: params.onCancel,
         },
-        onCancel: params.onCancel,
-      });
+        params.retryAfter,
+      );
       return true;
     },
     [verifyBegin],
@@ -231,6 +243,7 @@ export function useOnboardingFlow(
           // and retry, instead of silently dropping to the generic screen.
           const handled = await promptRecoveryVerification({
             errorCode: recovery.errorCode,
+            retryAfter: recovery.retryAfter,
             userId,
             run: (verifySecret) =>
               tryAutoRecovery({
@@ -299,6 +312,7 @@ export function useOnboardingFlow(
         };
         const handled = await promptRecoveryVerification({
           errorCode: recovery.errorCode,
+          retryAfter: recovery.retryAfter,
           userId,
           run: (verifySecret) =>
             tryAutoRecovery({
@@ -378,26 +392,34 @@ export function useOnboardingFlow(
       // retry the same join with it, rather than failing the sync code.
       if (isVerificationError(result.errorCode)) {
         setState("verify-prompt");
-        await verifyBegin(result.errorCode, {
-          userId,
-          retry: async (verifySecret) => {
-            const retryResult = await performJoin({
-              syncCodeInput: syncCodeInputRef.current,
-              userId,
-              displayName: userDisplayNameRef.current,
-              apiClient,
-              verifySecret,
-            });
-            if (retryResult.ok) {
-              await finishJoin(retryResult.familyId, retryResult.userId);
-              return { ok: true };
-            }
-            return { ok: false, errorCode: retryResult.errorCode };
+        await verifyBegin(
+          result.errorCode,
+          {
+            userId,
+            retry: async (verifySecret) => {
+              const retryResult = await performJoin({
+                syncCodeInput: syncCodeInputRef.current,
+                userId,
+                displayName: userDisplayNameRef.current,
+                apiClient,
+                verifySecret,
+              });
+              if (retryResult.ok) {
+                await finishJoin(retryResult.familyId, retryResult.userId);
+                return { ok: true };
+              }
+              return {
+                ok: false,
+                errorCode: retryResult.errorCode,
+                retryAfter: retryResult.retryAfter,
+              };
+            },
+            onCancel: () => {
+              setState(recoveryActiveRef.current ? "recovery-join" : "idle");
+            },
           },
-          onCancel: () => {
-            setState(recoveryActiveRef.current ? "recovery-join" : "idle");
-          },
-        });
+          result.retryAfter,
+        );
         return;
       }
 
@@ -458,6 +480,7 @@ export function useOnboardingFlow(
       if (solo.recovered) return;
       const handled = await promptRecoveryVerification({
         errorCode: solo.errorCode,
+        retryAfter: solo.retryAfter,
         userId,
         run: (verifySecret) =>
           performSoloRecovery({
@@ -514,6 +537,7 @@ export function useOnboardingFlow(
       if (solo.recovered) return;
       const handled = await promptRecoveryVerification({
         errorCode: solo.errorCode,
+        retryAfter: solo.retryAfter,
         userId,
         run: (verifySecret) =>
           performSoloRecovery({

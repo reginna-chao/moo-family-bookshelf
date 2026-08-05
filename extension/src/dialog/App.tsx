@@ -246,6 +246,7 @@ export function App({
               error={reauth.error}
               locked={reauth.locked}
               submitting={reauth.submitting}
+              countdownSeconds={reauth.countdownSeconds}
               onSubmit={(secret) => void reauth.submit(secret)}
               onCancel={reauth.cancel}
             />

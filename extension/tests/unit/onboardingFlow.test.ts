@@ -599,6 +599,86 @@ describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
     });
   });
 
+  /**
+   * A 429 lockout body carries `error.retryAfter` (seconds). Each flow must pass
+   * it through untouched — it is what lets the verification prompt show a live
+   * countdown instead of an open-ended "請稍後再試".
+   */
+  describe("retryAfter surfacing on 429 failures", () => {
+    /** joinFamily answering with a locked 429 that includes retryAfter. */
+    function lockedApiClient(retryAfter?: number): ApiClient {
+      return createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "VERIFICATION_LOCKED", message: "已鎖定", retryAfter },
+        }),
+      });
+    }
+
+    it("tryAutoRecovery surfaces retryAfter alongside the errorCode", async () => {
+      const result = await tryAutoRecovery({
+        familyId: "fam-existing",
+        userId: "user-abc",
+        displayName: "Test User",
+        apiClient: lockedApiClient(120),
+        autoSetup: createMockAutoSetup(),
+        onFamilyJoined: vi.fn(),
+      });
+
+      expect(result).toEqual({
+        recovered: false,
+        errorCode: "VERIFICATION_LOCKED",
+        retryAfter: 120,
+      });
+    });
+
+    it("performSoloRecovery surfaces retryAfter alongside the errorCode", async () => {
+      const result = await performSoloRecovery({
+        familyId: "fam-solo-1",
+        userId: "user-abc",
+        displayName: "Test User",
+        apiClient: lockedApiClient(45),
+        autoSetup: createMockAutoSetup(),
+        onFamilyJoined: vi.fn(),
+      });
+
+      expect(result).toEqual({
+        recovered: false,
+        errorCode: "VERIFICATION_LOCKED",
+        retryAfter: 45,
+      });
+    });
+
+    it("performJoin surfaces retryAfter alongside the errorCode", async () => {
+      const result = await performJoin({
+        syncCodeInput: "moo-fam-join-1",
+        userId: "user-x",
+        displayName: "Name",
+        apiClient: lockedApiClient(90),
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        errorCode: "VERIFICATION_LOCKED",
+        errorMessage: "已鎖定",
+        retryAfter: 90,
+      });
+    });
+
+    it("leaves retryAfter undefined when the backend omits it", async () => {
+      const result = await tryAutoRecovery({
+        familyId: "fam-existing",
+        userId: "user-abc",
+        displayName: "Test User",
+        apiClient: lockedApiClient(),
+        autoSetup: createMockAutoSetup(),
+        onFamilyJoined: vi.fn(),
+      });
+
+      expect(result.retryAfter).toBeUndefined();
+      expect(result.errorCode).toBe("VERIFICATION_LOCKED");
+    });
+  });
+
   it("success side-effects still fire when no verifySecret is needed", async () => {
     const onFamilyJoined = vi.fn();
     const apiClient = createMockApiClient();

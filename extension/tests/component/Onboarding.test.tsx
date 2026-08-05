@@ -5,11 +5,20 @@ import {
   waitFor,
   act,
 } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  onTestFinished,
+} from "vitest";
 import { Onboarding, OnboardingProps } from "@/dialog/Onboarding";
 import { BoolFlag, type ApiClient } from "@/api/client";
 import { scrapeUserEmail } from "@/content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY, FAMILY_ID_KEY } from "@/constants";
+import { verificationLockedMessage } from "@/dialog/verificationMessages";
 
 import { webcrypto } from "node:crypto";
 
@@ -1238,8 +1247,44 @@ describe("Onboarding", () => {
       await joinWithError("VERIFICATION_LOCKED");
 
       await waitFor(() => {
-        expect(screen.getByText("驗證已鎖定，請稍後再試")).toBeInTheDocument();
+        // Asserted through the production formatter; the literal is pinned in
+        // tests/unit/dialog/verificationMessages.test.ts.
+        expect(
+          screen.getByText(verificationLockedMessage(null)),
+        ).toBeInTheDocument();
       });
+    });
+
+    it("shows the remaining wait when the backend sends retryAfter with the lock", async () => {
+      // The lockout line is re-rendered from Date.now() once a second, and this
+      // file's fake clock auto-advances with real time (shouldAdvanceTime), so a
+      // join flow taking over a second would tick 90 → 89 and flake the exact
+      // copy assertion. Freeze Date only — the timer machinery that
+      // clickStartAndWait drives keeps advancing normally.
+      const frozenNow = Date.now();
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(frozenNow);
+      onTestFinished(() => nowSpy.mockRestore());
+
+      // A locked join that carries `retryAfter` must open the prompt already
+      // counting down instead of showing the open-ended static copy.
+      await joinWithError("VERIFICATION_LOCKED", {
+        joinFamily: vi.fn().mockResolvedValue({
+          error: {
+            code: "VERIFICATION_LOCKED",
+            message: "locked",
+            retryAfter: 90,
+          },
+        }),
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(verificationLockedMessage(90)),
+        ).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByText(verificationLockedMessage(null)),
+      ).not.toBeInTheDocument();
     });
   });
 

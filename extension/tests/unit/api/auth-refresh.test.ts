@@ -265,6 +265,50 @@ describe("doRefreshToken", () => {
     }
   });
 
+  /**
+   * The verification branch now reports WHAT blocked recovery, so the dialog can
+   * open the prompt in the right state (locked + countdown vs. plain challenge).
+   */
+  describe("onReauthRequired payload", () => {
+    it("passes the blocking code and retryAfter from a 429 lockout", async () => {
+      seedStorage();
+      const deps = makeDeps({
+        refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+        join: {
+          error: {
+            code: "VERIFICATION_LOCKED",
+            message: "locked",
+            retryAfter: 120,
+          },
+        },
+      });
+
+      await doRefreshToken(deps);
+
+      expect(deps.onReauthRequired).toHaveBeenCalledWith({
+        errorCode: "VERIFICATION_LOCKED",
+        retryAfter: 120,
+      });
+      // Invariant 2: a lockout must never drop the user's family data.
+      expect(familyWasCleared()).toBe(false);
+    });
+
+    it("passes the code with an undefined retryAfter when the backend omits it", async () => {
+      seedStorage();
+      const deps = makeDeps({
+        refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+        join: { error: { code: "VERIFICATION_REQUIRED", message: "verify" } },
+      });
+
+      await doRefreshToken(deps);
+
+      expect(deps.onReauthRequired).toHaveBeenCalledWith({
+        errorCode: "VERIFICATION_REQUIRED",
+        retryAfter: undefined,
+      });
+    });
+  });
+
   it("always clears only the token (not family) before attempting recovery", async () => {
     seedStorage();
     const deps = makeDeps({
@@ -320,6 +364,12 @@ describe("doRefreshToken", () => {
       expectedSeconds: number;
     }
 
+    /**
+     * The requested wait is clamped to 1 hour (MAX_RECOVERY_COOLDOWN_SECONDS in
+     * `src/api/auth-refresh.ts`) and any non-positive/absent value falls back to
+     * 300s, so a hostile or buggy self-hosted (BYO) backend cannot suppress
+     * auto-recovery effectively forever.
+     */
     const cases: CooldownCase[] = [
       {
         name: "derives the cooldown from the join's retryAfter",
@@ -329,6 +379,31 @@ describe("doRefreshToken", () => {
       {
         name: "falls back to 300s when the 429 omits retryAfter",
         retryAfter: undefined,
+        expectedSeconds: 300,
+      },
+      {
+        name: "caps an oversized retryAfter (24h) at the 1h maximum",
+        retryAfter: 86_400,
+        expectedSeconds: 3600,
+      },
+      {
+        name: "keeps a retryAfter sitting exactly on the 1h cap",
+        retryAfter: 3600,
+        expectedSeconds: 3600,
+      },
+      {
+        name: "keeps a retryAfter just under the 1h cap unclamped",
+        retryAfter: 3599,
+        expectedSeconds: 3599,
+      },
+      {
+        name: "falls back to 300s when retryAfter is 0",
+        retryAfter: 0,
+        expectedSeconds: 300,
+      },
+      {
+        name: "falls back to 300s when retryAfter is negative",
+        retryAfter: -60,
         expectedSeconds: 300,
       },
     ];
@@ -396,6 +471,97 @@ describe("doRefreshToken", () => {
       expect(cooldownWriteValue()).toBeUndefined();
       expect(deps.onReauthRequired).not.toHaveBeenCalled();
       expect(familyWasCleared()).toBe(false);
+    });
+
+    /**
+     * The persisted deadline is clamped on READ as well as on write: a value
+     * written before the write-side cap existed (or inflated by clock skew)
+     * must not outlive MAX_RECOVERY_COOLDOWN_SECONDS (1h). The clamped value is
+     * also what gets returned, so the UI countdown driven by `cooldownUntil`
+     * can never show more than the maximum either.
+     */
+    describe("clamping a persisted cooldown on read", () => {
+      const HOUR_MS = 3_600_000;
+
+      interface ReadCase {
+        name: string;
+        storedOffsetMs: number;
+        expectedOffsetMs: number;
+      }
+
+      const readCases: ReadCase[] = [
+        {
+          name: "passes a 60s deadline through unchanged",
+          storedOffsetMs: 60_000,
+          expectedOffsetMs: 60_000,
+        },
+        {
+          name: "passes a deadline sitting exactly on the 1h cap through unchanged",
+          storedOffsetMs: HOUR_MS,
+          expectedOffsetMs: HOUR_MS,
+        },
+        {
+          name: "clamps a deadline 1ms past the 1h cap",
+          storedOffsetMs: HOUR_MS + 1,
+          expectedOffsetMs: HOUR_MS,
+        },
+        {
+          name: "clamps a 24h deadline down to the 1h cap",
+          storedOffsetMs: 24 * HOUR_MS,
+          expectedOffsetMs: HOUR_MS,
+        },
+      ];
+
+      for (const c of readCases) {
+        it(c.name, async () => {
+          seedStorage({
+            [USER_ID_KEY]: "u1",
+            [FAMILY_ID_KEY]: "fam-1",
+            [AUTH_TOKEN_KEY]: "old-token",
+            [RECOVERY_COOLDOWN_UNTIL_KEY]: FIXED_NOW + c.storedOffsetMs,
+          });
+          const deps = makeDeps({
+            refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+            // Would recover if called — the point is that it must NOT be called.
+            join: {
+              data: { authToken: "should-not-be-used", expiresAt: 8888 },
+            },
+          });
+
+          const result = await doRefreshToken(deps);
+
+          expect(result).toEqual({
+            refreshed: false,
+            rateLimited: true,
+            cooldownUntil: FIXED_NOW + c.expectedOffsetMs,
+          });
+          // Still an active cooldown, so the quota-sensitive join stays suppressed
+          // and nothing is re-persisted or dropped on the way out.
+          expect(joinWasRequested(deps.request)).toBe(false);
+          expect(cooldownWriteValue()).toBeUndefined();
+          expect(deps.onReauthRequired).not.toHaveBeenCalled();
+          expect(familyWasCleared()).toBe(false);
+        });
+      }
+
+      it("ignores a non-number persisted cooldown and attempts the join", async () => {
+        seedStorage({
+          [USER_ID_KEY]: "u1",
+          [FAMILY_ID_KEY]: "fam-1",
+          [AUTH_TOKEN_KEY]: "old-token",
+          // Corrupted/legacy value — must not be treated as an active cooldown.
+          [RECOVERY_COOLDOWN_UNTIL_KEY]: String(FIXED_NOW + 60_000),
+        });
+        const deps = makeDeps({
+          refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+          join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+        });
+
+        const result = await doRefreshToken(deps);
+
+        expect(result.refreshed).toBe(true);
+        expect(joinWasRequested(deps.request)).toBe(true);
+      });
     });
 
     it("attempts the join when the stored cooldown has expired", async () => {

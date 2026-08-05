@@ -78,10 +78,21 @@ function defaultVerifyRecord(): VerifyRecord {
   };
 }
 
-/** Check if user is currently locked out. Returns true if locked. */
-function isLockedOut(record: VerifyRecord): boolean {
+/**
+ * Check if user is currently locked out. Returns true if locked.
+ * Narrows `lockedUntil` to a number so callers can derive the remaining
+ * back-off without re-checking for null.
+ */
+function isLockedOut(
+  record: VerifyRecord,
+): record is VerifyRecord & { lockedUntil: number } {
   if (!record.lockedUntil) return false;
   return Date.now() < record.lockedUntil;
+}
+
+/** Remaining lockout time in whole seconds, rounded up (minimum 1). */
+function lockoutRetryAfterSeconds(lockedUntil: number): number {
+  return Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000));
 }
 
 // GET /:id/verify — get verification method (public, needed before login)
@@ -362,6 +373,25 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
   return c.json({ data: { token, expiresIn: QR_TOKEN_TTL_SECONDS } });
 });
 
+/** Error descriptor returned by {@link validateVerification} on failure. */
+export type VerificationError =
+  | {
+      code: "VERIFICATION_LOCKED";
+      message: string;
+      status: 429;
+      /** Remaining lockout seconds — required for lockout, absent elsewhere. */
+      retryAfter: number;
+    }
+  | {
+      code: "VERIFICATION_REQUIRED" | "VERIFICATION_FAILED";
+      message: string;
+      status: 403;
+    };
+
+/** Outcome of a verification check. */
+export type VerificationResult =
+  { valid: true } | { valid: false; error: VerificationError };
+
 /**
  * Validate a verification secret against stored record.
  * Used by join flow.
@@ -371,10 +401,7 @@ export async function validateVerification(
   kv: KVNamespace,
   userId: string,
   secret: string | undefined,
-): Promise<{
-  valid: boolean;
-  error?: { code: string; message: string; status: number };
-}> {
+): Promise<VerificationResult> {
   const record = await kv.get<VerifyRecord>(kvKeys.verify(userId), "json");
 
   // No verification set or method is 'none' — allow through
@@ -390,6 +417,7 @@ export async function validateVerification(
         code: "VERIFICATION_LOCKED",
         message: "驗證已鎖定，請稍後再試",
         status: 429,
+        retryAfter: lockoutRetryAfterSeconds(record.lockedUntil),
       },
     };
   }
