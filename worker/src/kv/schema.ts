@@ -6,6 +6,7 @@
  *   family:{familyId} → family member list (JSON)
  *   member:{userId}  → familyId (reverse lookup)
  *   qr:{token}       → QrTokenRecord (one-time QR login bypass, TTL 300s)
+ *   verifyfail:{userId}:{callerKey} → VerifyFailRecord (per-caller failure accounting, TTL 900s)
  *   borrow:{requestId} → BorrowRequest (JSON)
  *   borrows:family:{familyId} → string[] (requestId index)
  *   public:{shareToken} → PublicShelfSnapshot (plaintext public bookshelf, optional TTL)
@@ -46,6 +47,8 @@ export const kvKeys = {
   auth: (userId: string) => `auth:${userId}`,
   authToken: (token: string) => `token:${token}`,
   verify: (userId: string) => `verify:${userId}`,
+  verifyFail: (userId: string, callerKey: string) =>
+    `verifyfail:${userId}:${callerKey}`,
   otp: (userId: string) => `otp:${userId}`,
   qrToken: (token: string) => `qr:${token}`,
   borrow: (requestId: string) => `borrow:${requestId}`,
@@ -231,10 +234,48 @@ export interface VerifyRecord {
   salt: string | null;
   /** Whether user has been prompted to set up verification (0 or 1). */
   prompted: number;
-  /** Consecutive failed verification attempts. */
+  /**
+   * Epoch ms of when the verification secret/method was last changed. Failure
+   * records whose streak began before this timestamp are void — the secret they
+   * accumulated against no longer exists. Only `PUT /:id/verify` advances it.
+   *
+   * OPTIONAL on purpose: records already in production KV predate this field,
+   * and `kv.get<VerifyRecord>(key, "json")` casts the parsed JSON without
+   * validating it — there is no migration step that could backfill them. Typing
+   * it as required would be a lie the compiler cannot catch, and would make read
+   * sites skip the `undefined` handling they actually need. Absent value means
+   * "unknown"; consumers must fall back to the safe (still-locked) behaviour.
+   */
+  secretUpdatedAt?: number;
+}
+
+/**
+ * Verification failure accounting, scoped to a (target user, caller) pair and
+ * stored under `verifyfail:{userId}:{callerKey}` with a TTL.
+ *
+ * Deliberately NOT part of `VerifyRecord`: the join endpoint is public and the
+ * submitted userId is guessable, so a counter living on the account itself would
+ * let any stranger lock the account owner out. Keying on the caller means an
+ * attacker can only ever lock themselves out, and the TTL guarantees the entry
+ * disappears on its own.
+ */
+export interface VerifyFailRecord {
+  /** Consecutive failed verification attempts from this caller. */
   failCount: number;
-  /** Lockout expiry timestamp (ms). null if not locked. */
+  /** Lockout expiry timestamp (ms) for this caller. null if not locked. */
   lockedUntil: number | null;
+  /**
+   * Epoch ms of when this caller's current failure streak began. Compared
+   * against `VerifyRecord.secretUpdatedAt`: a streak that started before the
+   * secret was last changed is void. Preserved across a lockout (the streak is
+   * the same until the entry expires or is cleared).
+   *
+   * OPTIONAL for the same reason as `VerifyRecord.secretUpdatedAt`: entries
+   * written before this field existed can still be live for up to
+   * `VERIFY_FAIL_TTL_SECONDS` after a deploy, and nothing validates the JSON on
+   * read. Absent value means "unknown" and must NOT void the record.
+   */
+  startedAt?: number;
 }
 
 export interface OtpRecord {
@@ -244,5 +285,24 @@ export interface OtpRecord {
 
 /** Max consecutive failures before lockout. */
 export const VERIFY_MAX_FAILURES = 5;
-/** Lockout duration: 15 minutes in ms. */
+/**
+ * Lockout duration: 15 minutes in ms.
+ *
+ * INVARIANT: `VERIFY_LOCKOUT_MS === VERIFY_FAIL_TTL_SECONDS * 1000`. The entry
+ * must expire exactly when the lockout ends. This is what makes it harmless for
+ * `chargeFailure` to preserve `startedAt` across the lockout reset: the record
+ * cannot outlive its own lockout, so the stale streak start is never reused.
+ *
+ * If they diverge:
+ * - TTL SHORTER than the lockout → the entry vanishes mid-lockout and the
+ *   lockout is silently truncated.
+ * - TTL LONGER than the lockout → a failure arriving after the lockout ended
+ *   continues the pre-lockout streak, so `startedAt` no longer describes the
+ *   current streak and the `secretUpdatedAt` void comparison misjudges it.
+ */
 export const VERIFY_LOCKOUT_MS = 15 * 60 * 1000;
+/**
+ * TTL for `verifyfail:*` entries: 900s, matching the 15-minute lockout window.
+ * Must stay equal to `VERIFY_LOCKOUT_MS` — see the invariant documented there.
+ */
+export const VERIFY_FAIL_TTL_SECONDS = 15 * 60;

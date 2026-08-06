@@ -28,7 +28,7 @@ import {
   deleteAuthToken,
   getAuthenticatedUserId,
 } from "../middleware/auth";
-import { enforcePerUserRateLimit } from "../middleware/rateLimit";
+import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
 import { validateVerification } from "./verify";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
@@ -347,10 +347,22 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
   // Users with no verification record (method: "none") pass automatically.
   if (!skipVerification) {
+    // Failure accounting / lockout is charged to the CALLER (client IP, IPv6
+    // bucketed per /64), never to the target account. This endpoint is public,
+    // body.userId is derived from the user's email with a fixed salt, and the
+    // victim's own familyId is retrievable from the public POST
+    // /api/auth/lookup — so a counter keyed on the victim would let any
+    // stranger lock them out of PWA login on demand (DoS). Membership is NOT a
+    // usable trust signal here for the same reason. Brute force from a SINGLE
+    // source stays bounded by the per-IP sensitive-route limit (3/min); an
+    // attacker who rotates source prefixes is bounded only by the per-userId
+    // join rate limit above (10/hour). Neither bound holds under DEV_MODE=1,
+    // which short-circuits both limits.
     const verification = await validateVerification(
       c.env.KV,
       body.userId,
       body.verifySecret,
+      { callerKey: getCallerIp(c) },
     );
     if (!verification.valid) {
       const { code, message, status } = verification.error;

@@ -6,7 +6,9 @@ import {
   QR_TOKEN_TTL_SECONDS,
   VERIFY_MAX_FAILURES,
   VERIFY_LOCKOUT_MS,
+  VERIFY_FAIL_TTL_SECONDS,
   type VerifyRecord,
+  type VerifyFailRecord,
   type OtpRecord,
   type QrTokenRecord,
 } from "../kv/schema";
@@ -73,20 +75,19 @@ function defaultVerifyRecord(): VerifyRecord {
     hash: null,
     salt: null,
     prompted: 0,
-    failCount: 0,
-    lockedUntil: null,
   };
 }
 
 /**
- * Check if user is currently locked out. Returns true if locked.
- * Narrows `lockedUntil` to a number so callers can derive the remaining
- * back-off without re-checking for null.
+ * Check if the CALLER is currently locked out. Returns true if locked.
+ * Lockout is caller-scoped (`verifyfail:{userId}:{callerKey}`), never charged
+ * to the target account. Narrows `lockedUntil` to a number so callers can
+ * derive the remaining back-off without re-checking for null.
  */
 function isLockedOut(
-  record: VerifyRecord,
-): record is VerifyRecord & { lockedUntil: number } {
-  if (!record.lockedUntil) return false;
+  record: VerifyFailRecord | null,
+): record is VerifyFailRecord & { lockedUntil: number } {
+  if (!record?.lockedUntil) return false;
   return Date.now() < record.lockedUntil;
 }
 
@@ -215,8 +216,10 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     hash,
     salt,
     prompted: body.prompted === 1 ? 1 : (existing?.prompted ?? 0),
-    failCount: 0,
-    lockedUntil: null,
+    // Stamping the change voids failure streaks that began before it, so an
+    // owner who reset a forgotten PIN/pattern can log in without waiting out a
+    // lockout charged against the old secret. See `isFailStreakVoid`.
+    secretUpdatedAt: Date.now(),
   };
 
   await c.env.KV.put(kvKeys.verify(userId), JSON.stringify(record));
@@ -393,14 +396,133 @@ export type VerificationResult =
   { valid: true } | { valid: false; error: VerificationError };
 
 /**
- * Validate a verification secret against stored record.
- * Used by join flow.
+ * Compare a submitted secret against the stored verify record.
+ *
+ * Returns null when a pin/pattern record is corrupted (missing hash/salt);
+ * callers treat that as "no verification configured". Consumes the OTP on a
+ * successful `code` match (one-time use).
+ */
+async function matchesSecret(
+  kv: KVNamespace,
+  userId: string,
+  record: VerifyRecord,
+  secret: string,
+): Promise<boolean | null> {
+  if (record.method === "pin" || record.method === "pattern") {
+    if (!record.hash || !record.salt) return null;
+    const inputHash = await hashSecret(record.salt, secret);
+    return timingSafeEqual(inputHash, record.hash);
+  }
+
+  if (record.method === "code") {
+    // Validate OTP — lengths must match for a meaningful constant-time compare
+    const otpRecord = await kv.get<OtpRecord>(kvKeys.otp(userId), "json");
+    if (
+      otpRecord &&
+      secret.length === otpRecord.code.length &&
+      timingSafeEqual(otpRecord.code, secret)
+    ) {
+      // Delete OTP after successful use (one-time)
+      await kv.delete(kvKeys.otp(userId));
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Charge one failed attempt against the caller-scoped record, locking that
+ * caller out once VERIFY_MAX_FAILURES is reached. Side effect: writes
+ * `verifyfail:{userId}:{callerKey}` with a TTL; never touches `verify:{userId}`.
+ */
+async function chargeFailure(
+  kv: KVNamespace,
+  failKey: string,
+  existing: VerifyFailRecord | null,
+): Promise<void> {
+  const next: VerifyFailRecord = {
+    failCount: (existing?.failCount ?? 0) + 1,
+    lockedUntil: null,
+    // Continuing an existing streak keeps its original start; a fresh streak
+    // starts now. Kept as-is through the lockout reset below — the entry remains
+    // the same streak until its TTL expires or it is cleared/voided.
+    startedAt: existing?.startedAt ?? Date.now(),
+  };
+  if (next.failCount >= VERIFY_MAX_FAILURES) {
+    next.lockedUntil = Date.now() + VERIFY_LOCKOUT_MS;
+    next.failCount = 0; // Reset count after lockout
+  }
+  await kv.put(failKey, JSON.stringify(next), {
+    expirationTtl: VERIFY_FAIL_TTL_SECONDS,
+  });
+}
+
+/**
+ * Whether a caller's failure streak is void because the account owner changed
+ * the verification secret/method after the streak began. A void streak must not
+ * lock anyone out and must not carry its `failCount` forward: it accumulated
+ * against a secret that no longer exists, so holding it would only punish the
+ * owner who just reset a forgotten PIN/pattern.
+ *
+ * Missing-field default is the SAFE side: legacy records written before either
+ * timestamp existed lack one or both values, and those keep the lockout in
+ * force (current behaviour). Absence never unlocks.
+ *
+ * Threat model — this is not a DoS lever. `secretUpdatedAt` can only be advanced
+ * through `PUT /:id/verify`, which requires a valid auth token AND
+ * `callerId === userId`. So only the account owner can void failure records, and
+ * only on their own account.
+ *
+ * Pure predicate: re-derived on every read, so a void record that has not been
+ * deleted yet is still inert. Deletion is cleanup, never correctness.
+ */
+function isFailStreakVoid(
+  verifyRecord: VerifyRecord,
+  failRecord: VerifyFailRecord | null,
+): boolean {
+  if (!failRecord) return false;
+  if (verifyRecord.secretUpdatedAt === undefined) return false;
+  if (failRecord.startedAt === undefined) return false;
+  return failRecord.startedAt < verifyRecord.secretUpdatedAt;
+}
+
+/**
+ * Validate a verification secret against the stored `verify:{userId}` record.
+ * Used by the join flow.
+ *
+ * Failure accounting and lockout are keyed on the CALLER (`opts.callerKey`,
+ * normally the Cloudflare-supplied client IP, IPv6 bucketed per /64), never on
+ * the target user, and live in a TTL-backed `verifyfail:{userId}:{callerKey}`
+ * entry. Reason: join is a public endpoint, the submitted userId is derived
+ * from the user's email with a fixed salt, and the victim's own familyId is
+ * retrievable from the public `POST /api/auth/lookup` — so ANY counter keyed on
+ * the victim's identity is a denial-of-service lever, letting a stranger lock
+ * the victim out of PWA login on demand. Brute force from a SINGLE source stays
+ * bounded by the per-IP sensitive-route limit (3/min); an attacker who rotates
+ * source prefixes is bounded only by the per-userId join rate limit (10/hour).
+ * Neither bound holds under `DEV_MODE=1`, which short-circuits both limits and
+ * leaves lockout as the only brake.
+ *
+ * A failure record whose streak began before the account owner last changed the
+ * secret is void and is ignored for this request. Voiding is an in-memory
+ * verdict ({@link isFailStreakVoid}); the stored entry is removed only on paths
+ * that would otherwise leave it behind — see the per-path notes below. Cleanup
+ * always targets this caller's own key, never a KV.list scan.
+ *
+ * At most ONE write happens to `verifyfail:{userId}:{callerKey}` per request:
+ * Cloudflare KV allows only one write per second per key, so a delete followed
+ * by a put in the same request could silently drop the newly charged failure.
+ *
+ * This function never writes `verify:{userId}`.
+ *
  * Returns: { valid: true } or error response.
  */
 export async function validateVerification(
   kv: KVNamespace,
   userId: string,
   secret: string | undefined,
+  opts: { callerKey: string },
 ): Promise<VerificationResult> {
   const record = await kv.get<VerifyRecord>(kvKeys.verify(userId), "json");
 
@@ -409,20 +531,31 @@ export async function validateVerification(
     return { valid: true };
   }
 
-  // Check lockout
-  if (isLockedOut(record)) {
+  const failKey = kvKeys.verifyFail(userId, opts.callerKey);
+  const storedFail = await kv.get<VerifyFailRecord>(failKey, "json");
+
+  // Streak predating the current secret — treat this request as a clean slate.
+  // Decided in memory only; whether the stale entry is deleted depends on which
+  // path we exit through (a path that writes the same key must not delete first).
+  const voided = isFailStreakVoid(record, storedFail);
+  const failRecord = voided ? null : storedFail;
+
+  // Check lockout for this caller
+  if (isLockedOut(failRecord)) {
     return {
       valid: false,
       error: {
         code: "VERIFICATION_LOCKED",
         message: "驗證已鎖定，請稍後再試",
         status: 429,
-        retryAfter: lockoutRetryAfterSeconds(record.lockedUntil),
+        retryAfter: lockoutRetryAfterSeconds(failRecord.lockedUntil),
       },
     };
   }
 
-  // Secret required but not provided
+  // Secret required but not provided — no attempt was made, so nothing to
+  // charge. This path performs no KV write at all: a void leftover is inert and
+  // simply waits for its TTL or for the next request to overwrite/clear it.
   if (!secret || typeof secret !== "string") {
     return {
       valid: false,
@@ -434,49 +567,27 @@ export async function validateVerification(
     };
   }
 
-  let valid = false;
+  const matched = await matchesSecret(kv, userId, record, secret);
 
-  if (record.method === "pin" || record.method === "pattern") {
-    if (!record.hash || !record.salt) {
-      // Corrupted record — treat as no verification
-      return { valid: true };
-    }
-    const inputHash = await hashSecret(record.salt, secret);
-    valid = timingSafeEqual(inputHash, record.hash);
-  } else if (record.method === "code") {
-    // Validate OTP — pad both to same length for constant-time comparison
-    const otpRecord = await kv.get<OtpRecord>(kvKeys.otp(userId), "json");
-    if (
-      otpRecord &&
-      secret.length === otpRecord.code.length &&
-      timingSafeEqual(otpRecord.code, secret)
-    ) {
-      valid = true;
-      // Delete OTP after successful use (one-time)
-      await kv.delete(kvKeys.otp(userId));
-    }
+  // Corrupted record — treat as no verification
+  if (matched === null) {
+    return { valid: true };
   }
 
-  if (!valid) {
-    // Increment fail count
-    record.failCount = (record.failCount || 0) + 1;
-    if (record.failCount >= VERIFY_MAX_FAILURES) {
-      record.lockedUntil = Date.now() + VERIFY_LOCKOUT_MS;
-      record.failCount = 0; // Reset count after lockout
-    }
-    await kv.put(kvKeys.verify(userId), JSON.stringify(record));
-
+  if (!matched) {
+    // Single write: `chargeFailure` overwrites the whole entry, so a void
+    // leftover is replaced here rather than deleted first.
+    await chargeFailure(kv, failKey, failRecord);
     return {
       valid: false,
       error: { code: "VERIFICATION_FAILED", message: "驗證失敗", status: 403 },
     };
   }
 
-  // Reset fail count on success
-  if (record.failCount > 0) {
-    record.failCount = 0;
-    record.lockedUntil = null;
-    await kv.put(kvKeys.verify(userId), JSON.stringify(record));
+  // Success — clear this caller's failure history, including a void leftover
+  // that no later write will replace.
+  if (failRecord || voided) {
+    await kv.delete(failKey);
   }
 
   return { valid: true };
