@@ -103,14 +103,18 @@ function joinFamily(userId: string, verifySecret?: string, callerIp?: string) {
  * Seed a PIN verify record for `userId`. The stored hash is a placeholder, so no
  * submitted secret can ever match it — use this when the test only needs
  * verification to be ACTIVE (the lockout branch runs before any hash compare).
+ *
+ * `secretUpdatedAt` is OMITTED unless passed, reproducing a record written
+ * before that field existed (absence must never void a failure streak).
  */
-async function seedPinAccount(userId: string) {
+async function seedPinAccount(userId: string, secretUpdatedAt?: number) {
   const record: VerifyRecord = {
     method: "pin",
     hash: "placeholder",
     salt: "placeholder",
     prompted: 1,
   };
+  if (secretUpdatedAt !== undefined) record.secretUpdatedAt = secretUpdatedAt;
   await kv.put(kvKeys.verify(userId), JSON.stringify(record));
 }
 
@@ -119,13 +123,18 @@ async function seedPinAccount(userId: string) {
  * `verifyfail:{userId}:{callerKey}` record. Lockout state deliberately does not
  * live on `verify:{userId}` — see the DoS regression suite below — so a lockout
  * fixture must be keyed on the caller, normalized exactly as the Worker does.
+ *
+ * `startedAt` is OMITTED unless passed, reproducing an entry written before that
+ * field existed (a legacy entry must stay locked, never be voided).
  */
 async function seedCallerLockout(
   userId: string,
   callerIp: string,
   lockedUntil: number,
+  startedAt?: number,
 ) {
   const record: VerifyFailRecord = { failCount: 0, lockedUntil };
+  if (startedAt !== undefined) record.startedAt = startedAt;
   await kv.put(
     kvKeys.verifyFail(userId, normalizeCallerIp(callerIp)),
     JSON.stringify(record),
@@ -382,6 +391,7 @@ describe("PUT /api/user/:id/verify", () => {
 
   it("should store only account fields, never failure accounting", async () => {
     const token = await seedAuthToken(VALID_USER_ID);
+    const before = Date.now();
 
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pin", secret: "999999" }),
@@ -389,7 +399,10 @@ describe("PUT /api/user/:id/verify", () => {
     });
 
     // Failure counters live in `verifyfail:{userId}:{callerKey}`, never on the
-    // account record — a counter on the account would be a DoS lever.
+    // account record — a counter on the account would be a DoS lever. The only
+    // failure-adjacent field allowed here is `secretUpdatedAt`, which records
+    // WHEN the secret changed (not how often anyone failed) and is what voids
+    // streaks charged against the replaced secret.
     const record = JSON.parse(
       (await kv.get(kvKeys.verify(VALID_USER_ID))) as string,
     ) as Record<string, unknown>;
@@ -398,7 +411,11 @@ describe("PUT /api/user/:id/verify", () => {
       "method",
       "prompted",
       "salt",
+      "secretUpdatedAt",
     ]);
+    expect(record.secretUpdatedAt).toBeTypeOf("number");
+    expect(record.secretUpdatedAt as number).toBeGreaterThanOrEqual(before);
+    expect(record.secretUpdatedAt as number).toBeLessThanOrEqual(Date.now());
   });
 });
 
@@ -680,6 +697,24 @@ async function readFailRecord(
   return raw ? (JSON.parse(raw) as VerifyFailRecord) : null;
 }
 
+async function readVerifyRecord(userId: string): Promise<VerifyRecord | null> {
+  const raw = await kv.get(kvKeys.verify(userId));
+  return raw ? (JSON.parse(raw) as VerifyRecord) : null;
+}
+
+/**
+ * Range-check the streak start stamp against the wall clock window the test ran
+ * in. Paired with a `toEqual` on the rest of the record, this pins the exact
+ * field set while still tolerating a real (unpinned) `Date.now()`.
+ */
+function expectStreakStartedBetween(
+  record: VerifyFailRecord | null,
+  notBefore: number,
+) {
+  expect(record?.startedAt).toBeGreaterThanOrEqual(notBefore);
+  expect(record?.startedAt).toBeLessThanOrEqual(Date.now());
+}
+
 /** Victim has a PIN and is ALREADY a member of the family being targeted. */
 async function seedVictimInsideTargetFamily() {
   await seedFamilyWithMembers([OTHER_USER_ID, VALID_USER_ID], VALID_FAMILY_ID);
@@ -743,24 +778,32 @@ describe("Verification failure accounting in join flow (caller-scoped)", () => {
 
   it("should count failures per caller under verifyfail:{userId}:{callerKey}", async () => {
     await seedVictimInsideTargetFamily();
+    const before = Date.now();
 
     await submitWrongSecrets(2, ATTACKER_IP);
 
-    expect(await readFailRecord(VALID_USER_ID, ATTACKER_IP)).toEqual({
+    const record = await readFailRecord(VALID_USER_ID, ATTACKER_IP);
+    expect(record).toEqual({
       failCount: 2,
       lockedUntil: null,
+      startedAt: expect.any(Number),
     });
+    expectStreakStartedBetween(record, before);
   });
 
   it("should charge failures to the fallback caller bucket when no client IP is present", async () => {
     await seedVictimInsideTargetFamily();
+    const before = Date.now();
 
     await submitWrongSecrets(2);
 
-    expect(await readFailRecord(VALID_USER_ID, UNKNOWN_CALLER_KEY)).toEqual({
+    const record = await readFailRecord(VALID_USER_ID, UNKNOWN_CALLER_KEY);
+    expect(record).toEqual({
       failCount: 2,
       lockedUntil: null,
+      startedAt: expect.any(Number),
     });
+    expectStreakStartedBetween(record, before);
   });
 
   it("should lock out the caller after the max failures from the same IP", async () => {
@@ -1007,6 +1050,354 @@ describe("Verification failure accounting in join flow (caller-scoped)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ===========================================================================
+// Failure-streak voiding after a secret change (owner recovery path)
+//
+// An owner who forgot their PIN/pattern resets it through the AUTHENTICATED
+// `PUT /api/user/:id/verify` (callerId === userId). That stamps
+// `secretUpdatedAt`, which voids any failure streak that began earlier: the
+// streak accumulated against a secret that no longer exists, so honouring it
+// would lock the owner out of their own account right after a legitimate reset.
+//
+// Voiding is deliberately narrow — it needs BOTH timestamps, compares them
+// strictly, and only ever deletes the CALLER's own key. A missing timestamp
+// (legacy KV entry) keeps the lockout in force: absence never unlocks.
+// ===========================================================================
+
+const SECOND_CALLER_IP = "203.0.113.77";
+const NEW_PIN = "654321";
+/** Baseline instant: both the original secret and the first streak start here. */
+const T0 = new Date("2026-01-01T00:00:00.000Z").getTime();
+/** 1s later — still deep inside the 15-minute lockout window. */
+const T1 = T0 + 1000;
+
+/** Pin Date only (timers stay real) so streak/secret ordering is exact. */
+function pinClock(at: number) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(at);
+}
+
+describe("Verification failure streak voiding after a secret change", () => {
+  it("should let a locked-out caller in with the new secret after the owner resets it", async () => {
+    pinClock(T0);
+    await seedVictimInsideTargetFamily();
+
+    await submitWrongSecrets(VERIFY_MAX_FAILURES, ATTACKER_IP);
+    const beforeReset = await joinFamily(
+      VALID_USER_ID,
+      CORRECT_PIN,
+      ATTACKER_IP,
+    );
+    expect(beforeReset.status).toBe(429);
+
+    // The owner resets the forgotten PIN on their own account.
+    vi.setSystemTime(T1);
+    await setPin(VALID_USER_ID, NEW_PIN);
+
+    // Same caller IP, new secret: the pre-reset streak no longer applies.
+    const res = await joinFamily(VALID_USER_ID, NEW_PIN, ATTACKER_IP);
+    expect(res.status).toBe(200);
+
+    // The void removed exactly that caller's entry.
+    expect(await readFailRecord(VALID_USER_ID, ATTACKER_IP)).toBeNull();
+  });
+
+  it("should start a fresh streak instead of carrying the pre-reset failure count forward", async () => {
+    pinClock(T0);
+    await seedVictimInsideTargetFamily();
+
+    // One short of the lockout threshold — a carried-forward count would lock.
+    await submitWrongSecrets(VERIFY_MAX_FAILURES - 1, ATTACKER_IP);
+    expect((await readFailRecord(VALID_USER_ID, ATTACKER_IP))?.failCount).toBe(
+      VERIFY_MAX_FAILURES - 1,
+    );
+
+    vi.setSystemTime(T1);
+    await setPin(VALID_USER_ID, NEW_PIN);
+
+    const res = await joinFamily(VALID_USER_ID, WRONG_PIN, ATTACKER_IP);
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_FAILED");
+
+    expect(await readFailRecord(VALID_USER_ID, ATTACKER_IP)).toEqual({
+      failCount: 1,
+      lockedUntil: null,
+      startedAt: T1,
+    });
+  });
+
+  // Voiding must fire ONLY on a strict "streak started before the secret
+  // changed". Everything else — including either timestamp being absent on a
+  // legacy KV entry — leaves the lockout untouched.
+  it.each([
+    {
+      label: "the failure entry predates the startedAt field",
+      secretUpdatedAt: T1,
+      startedAt: undefined,
+    },
+    {
+      label: "the account record predates the secretUpdatedAt field",
+      secretUpdatedAt: undefined,
+      startedAt: T0,
+    },
+    {
+      label: "the streak began after the last secret change",
+      secretUpdatedAt: T0,
+      startedAt: T1,
+    },
+    {
+      label: "the streak began in the same millisecond as the secret change",
+      secretUpdatedAt: T0,
+      startedAt: T0,
+    },
+  ])(
+    "should keep the lockout in force when $label",
+    async ({ secretUpdatedAt, startedAt }) => {
+      pinClock(T1);
+      await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+      await seedPinAccount(VALID_USER_ID, secretUpdatedAt);
+      await seedCallerLockout(
+        VALID_USER_ID,
+        ATTACKER_IP,
+        Date.now() + 30_000,
+        startedAt,
+      );
+
+      const res = await joinFamily(VALID_USER_ID, CORRECT_PIN, ATTACKER_IP);
+
+      expect(res.status).toBe(429);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("VERIFICATION_LOCKED");
+      // Only a genuine void deletes the entry.
+      expect(await readFailRecord(VALID_USER_ID, ATTACKER_IP)).not.toBeNull();
+    },
+  );
+
+  it("should void only the streak that predates the reset, leaving another caller's later lockout intact", async () => {
+    pinClock(T0);
+    await seedVictimInsideTargetFamily();
+
+    // Caller A burns their budget against the OLD secret.
+    await submitWrongSecrets(VERIFY_MAX_FAILURES, ATTACKER_IP);
+
+    vi.setSystemTime(T1);
+    await setPin(VALID_USER_ID, NEW_PIN);
+
+    // Caller B burns theirs AFTER the reset.
+    vi.setSystemTime(T1 + 1000);
+    await submitWrongSecrets(VERIFY_MAX_FAILURES, SECOND_CALLER_IP);
+
+    // A is released...
+    const a = await joinFamily(VALID_USER_ID, NEW_PIN, ATTACKER_IP);
+    expect(a.status).toBe(200);
+    expect(await readFailRecord(VALID_USER_ID, ATTACKER_IP)).toBeNull();
+
+    // ...B is not, and B's entry was not swept up by A's void.
+    const b = await joinFamily(VALID_USER_ID, NEW_PIN, SECOND_CALLER_IP);
+    expect(b.status).toBe(429);
+    const json = (await b.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_LOCKED");
+    expect(
+      await readFailRecord(VALID_USER_ID, SECOND_CALLER_IP),
+    ).not.toBeNull();
+  });
+
+  it("should not advance secretUpdatedAt when only the prompted flag is written", async () => {
+    pinClock(T0);
+    await seedVictimInsideTargetFamily();
+    await submitWrongSecrets(VERIFY_MAX_FAILURES, ATTACKER_IP);
+
+    // `POST /verify/prompted` rewrites the account record but changes no secret,
+    // so it must not hand out a lockout reset.
+    vi.setSystemTime(T1);
+    const token = await seedAuthToken(VALID_USER_ID);
+    const prompted = await request(
+      "POST",
+      `/api/user/${VALID_USER_ID}/verify/prompted`,
+      {
+        body: JSON.stringify({}),
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    expect(prompted.status).toBe(200);
+    expect((await readVerifyRecord(VALID_USER_ID))?.secretUpdatedAt).toBe(T0);
+
+    const res = await joinFamily(VALID_USER_ID, CORRECT_PIN, ATTACKER_IP);
+    expect(res.status).toBe(429);
+  });
+
+  it("should not let a third party stamp the victim's account to clear their own lockout", async () => {
+    pinClock(T0);
+    await seedVictimInsideTargetFamily();
+    await submitWrongSecrets(VERIFY_MAX_FAILURES, ATTACKER_IP);
+    const accountRecordBefore = await kv.get(kvKeys.verify(VALID_USER_ID));
+
+    // The attacker holds a valid token — for their OWN account only.
+    vi.setSystemTime(T1);
+    const attackerToken = await seedAuthToken(OTHER_USER_ID);
+    const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
+      body: JSON.stringify({ method: "pin", secret: NEW_PIN }),
+      headers: {
+        Authorization: `Bearer ${attackerToken}`,
+        "cf-connecting-ip": ATTACKER_IP,
+      },
+    });
+    expect(res.status).toBe(401);
+
+    // secretUpdatedAt is unreachable from outside — byte-identical record.
+    expect(await kv.get(kvKeys.verify(VALID_USER_ID))).toBe(
+      accountRecordBefore,
+    );
+
+    // So the self-inflicted lockout still stands.
+    const stillLocked = await joinFamily(
+      VALID_USER_ID,
+      CORRECT_PIN,
+      ATTACKER_IP,
+    );
+    expect(stillLocked.status).toBe(429);
+  });
+});
+
+// ===========================================================================
+// KV write budget per exit path (void-streak leftovers)
+//
+// Cloudflare KV accepts at most one write per second per key, so deleting
+// `verifyfail:{userId}:{callerKey}` and writing it again within the same request
+// can silently drop the second write — i.e. the failure just charged. Voiding is
+// therefore an in-memory verdict only (re-derived on every read, so an undeleted
+// void entry is already inert), and each exit path touches the key AT MOST ONCE:
+// nothing while locked, nothing when no secret was submitted, one put on a wrong
+// secret, one delete on success.
+//
+// The in-memory mock has no one-write-per-second limit, so a delete followed by
+// a put leaves exactly the same stored value as a lone put — only the recorded
+// op sequence can tell those two apart.
+// ===========================================================================
+
+/** 5s after the reset — a freshly charged streak must stamp THIS instant. */
+const T2 = T1 + 5000;
+
+type KvWriteOp = "put" | "delete";
+
+/**
+ * Replace `kv` with a wrapper that logs every write aimed at `key`, and return
+ * the live log. The wrapper is discarded together with the per-test `kv`
+ * instance (`beforeEach` builds a fresh mock), so there is nothing to restore.
+ *
+ * Note: `getPutTtl` is keyed on the original mock instance and therefore reports
+ * nothing for the wrapper — assert TTLs outside a tracked request.
+ */
+function trackWritesTo(key: string): KvWriteOp[] {
+  const ops: KvWriteOp[] = [];
+  const base = kv;
+  kv = {
+    ...base,
+    put: async (
+      k: string,
+      value: string,
+      opts?: { expirationTtl?: number },
+    ): Promise<void> => {
+      if (k === key) ops.push("put");
+      await base.put(k, value, opts);
+    },
+    delete: async (k: string): Promise<void> => {
+      if (k === key) ops.push("delete");
+      await base.delete(k);
+    },
+  } as unknown as KVNamespace;
+  return ops;
+}
+
+describe("Verification KV write budget on the void-streak paths", () => {
+  const failKey = kvKeys.verifyFail(
+    VALID_USER_ID,
+    normalizeCallerIp(ATTACKER_IP),
+  );
+
+  /**
+   * Leave a genuine VOID leftover under `failKey`: a real streak of `failCount`
+   * wrong secrets charged at T0 against the old PIN, then an owner reset at T1
+   * that stamps `secretUpdatedAt` after it. The clock ends at T2, so a freshly
+   * charged streak differs from the leftover in `startedAt` as well as in
+   * `failCount`. Returns the raw stored leftover for byte-identity checks.
+   */
+  async function seedVoidedStreak(failCount: number): Promise<string> {
+    pinClock(T0);
+    await seedVictimInsideTargetFamily();
+    await submitWrongSecrets(failCount, ATTACKER_IP);
+
+    vi.setSystemTime(T1);
+    await setPin(VALID_USER_ID, NEW_PIN);
+
+    vi.setSystemTime(T2);
+    const raw = await kv.get(failKey);
+    expect(raw).not.toBeNull();
+    return raw as string;
+  }
+
+  it("should leave a void leftover in place when no secret is submitted", async () => {
+    // A leftover that still LOOKS locked, to show the void verdict alone makes
+    // it inert — no delete is required to neutralise it.
+    const leftover = await seedVoidedStreak(VERIFY_MAX_FAILURES);
+    expect(
+      (JSON.parse(leftover) as VerifyFailRecord).lockedUntil,
+    ).toBeGreaterThan(Date.now());
+    const writes = trackWritesTo(failKey);
+
+    const res = await joinFamily(VALID_USER_ID, undefined, ATTACKER_IP);
+
+    // Inert, not locking: 403 REQUIRED rather than 429 LOCKED.
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_REQUIRED");
+
+    // No attempt was made, so nothing is charged — and nothing is cleaned up
+    // either. Spending the key's one write here would leave the next request in
+    // the same second unable to record a real failure.
+    expect(await kv.get(failKey)).toBe(leftover);
+    expect(writes).toEqual([]);
+  });
+
+  it("should replace a void leftover with a freshly started streak on a wrong secret", async () => {
+    await seedVoidedStreak(2);
+    const writes = trackWritesTo(failKey);
+
+    const res = await joinFamily(VALID_USER_ID, WRONG_PIN, ATTACKER_IP);
+
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_FAILED");
+
+    // A fresh streak stamped now — the leftover's count is neither carried
+    // forward (would read 3) nor merged, and its T0 start is not preserved.
+    expect(await readFailRecord(VALID_USER_ID, ATTACKER_IP)).toEqual({
+      failCount: 1,
+      lockedUntil: null,
+      startedAt: T2,
+    });
+    // Exactly one write, and it is a PUT: `chargeFailure` rewrites the whole
+    // entry, so deleting the leftover first would only put this write at risk.
+    expect(writes).toEqual(["put"]);
+  });
+
+  it("should delete a void leftover on a successful verification", async () => {
+    // The leftover is a live, non-null entry with no lockout on it, so nothing
+    // but the void verdict can zero out `failRecord` — this reaches the cleanup
+    // through the `|| voided` half of the condition, which the plain
+    // `failRecord` half could not cover.
+    await seedVoidedStreak(2);
+    const writes = trackWritesTo(failKey);
+
+    const res = await joinFamily(VALID_USER_ID, NEW_PIN, ATTACKER_IP);
+
+    expect(res.status).toBe(200);
+    expect(await kv.get(failKey)).toBeNull();
+    expect(writes).toEqual(["delete"]);
   });
 });
 

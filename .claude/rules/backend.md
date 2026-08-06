@@ -38,15 +38,15 @@ worker/src/
 
 ### KV Key Patterns
 
-| Key                             | Value                                                | TTL                                       |
-| ------------------------------- | ---------------------------------------------------- | ----------------------------------------- |
-| `user:{user_id}`                | Personal book list + sharing settings (JSON)         | None (persistent)                         |
-| `family:{family_id}`            | Family member list                                   | Configurable                              |
-| `member:{user_id}`              | `family_id` (reverse lookup)                         | Follows family TTL                        |
-| `public:{share_token}`          | Plaintext public bookshelf (v1.2.0)                  | User-configured (7/30/60/90 days or none) |
-| `verify:{user_id}`              | PWA login verification settings (hash, salt, method) | None (persistent)                         |
-| `verifyfail:{user_id}:{caller}` | Verification failure count + lockout, per caller IP  | 900s (15 minutes)                         |
-| `otp:{user_id}`                 | One-time verification code                           | 300s (5 minutes)                          |
+| Key                             | Value                                                                                                                      | TTL                                       |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `user:{user_id}`                | Personal book list + sharing settings (JSON)                                                                               | None (persistent)                         |
+| `family:{family_id}`            | Family member list                                                                                                         | Configurable                              |
+| `member:{user_id}`              | `family_id` (reverse lookup)                                                                                               | Follows family TTL                        |
+| `public:{share_token}`          | Plaintext public bookshelf (v1.2.0)                                                                                        | User-configured (7/30/60/90 days or none) |
+| `verify:{user_id}`              | PWA login verification settings (`method`, `hash`, `salt`, `prompted`, `secretUpdatedAt?`)                                 | None (persistent)                         |
+| `verifyfail:{user_id}:{caller}` | Per-caller verification failures (`failCount`, `lockedUntil`, `startedAt?`); streaks older than `secretUpdatedAt` are void | 900s (15 minutes)                         |
+| `otp:{user_id}`                 | One-time verification code                                                                                                 | 300s (5 minutes)                          |
 
 ### Coding Conventions
 

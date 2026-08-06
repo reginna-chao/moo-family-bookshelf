@@ -216,6 +216,10 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     hash,
     salt,
     prompted: body.prompted === 1 ? 1 : (existing?.prompted ?? 0),
+    // Stamping the change voids failure streaks that began before it, so an
+    // owner who reset a forgotten PIN/pattern can log in without waiting out a
+    // lockout charged against the old secret. See `isFailStreakVoid`.
+    secretUpdatedAt: Date.now(),
   };
 
   await c.env.KV.put(kvKeys.verify(userId), JSON.stringify(record));
@@ -440,6 +444,10 @@ async function chargeFailure(
   const next: VerifyFailRecord = {
     failCount: (existing?.failCount ?? 0) + 1,
     lockedUntil: null,
+    // Continuing an existing streak keeps its original start; a fresh streak
+    // starts now. Kept as-is through the lockout reset below — the entry remains
+    // the same streak until its TTL expires or it is cleared/voided.
+    startedAt: existing?.startedAt ?? Date.now(),
   };
   if (next.failCount >= VERIFY_MAX_FAILURES) {
     next.lockedUntil = Date.now() + VERIFY_LOCKOUT_MS;
@@ -448,6 +456,35 @@ async function chargeFailure(
   await kv.put(failKey, JSON.stringify(next), {
     expirationTtl: VERIFY_FAIL_TTL_SECONDS,
   });
+}
+
+/**
+ * Whether a caller's failure streak is void because the account owner changed
+ * the verification secret/method after the streak began. A void streak must not
+ * lock anyone out and must not carry its `failCount` forward: it accumulated
+ * against a secret that no longer exists, so holding it would only punish the
+ * owner who just reset a forgotten PIN/pattern.
+ *
+ * Missing-field default is the SAFE side: legacy records written before either
+ * timestamp existed lack one or both values, and those keep the lockout in
+ * force (current behaviour). Absence never unlocks.
+ *
+ * Threat model — this is not a DoS lever. `secretUpdatedAt` can only be advanced
+ * through `PUT /:id/verify`, which requires a valid auth token AND
+ * `callerId === userId`. So only the account owner can void failure records, and
+ * only on their own account.
+ *
+ * Pure predicate: re-derived on every read, so a void record that has not been
+ * deleted yet is still inert. Deletion is cleanup, never correctness.
+ */
+function isFailStreakVoid(
+  verifyRecord: VerifyRecord,
+  failRecord: VerifyFailRecord | null,
+): boolean {
+  if (!failRecord) return false;
+  if (verifyRecord.secretUpdatedAt === undefined) return false;
+  if (failRecord.startedAt === undefined) return false;
+  return failRecord.startedAt < verifyRecord.secretUpdatedAt;
 }
 
 /**
@@ -467,6 +504,16 @@ async function chargeFailure(
  * Neither bound holds under `DEV_MODE=1`, which short-circuits both limits and
  * leaves lockout as the only brake.
  *
+ * A failure record whose streak began before the account owner last changed the
+ * secret is void and is ignored for this request. Voiding is an in-memory
+ * verdict ({@link isFailStreakVoid}); the stored entry is removed only on paths
+ * that would otherwise leave it behind — see the per-path notes below. Cleanup
+ * always targets this caller's own key, never a KV.list scan.
+ *
+ * At most ONE write happens to `verifyfail:{userId}:{callerKey}` per request:
+ * Cloudflare KV allows only one write per second per key, so a delete followed
+ * by a put in the same request could silently drop the newly charged failure.
+ *
  * This function never writes `verify:{userId}`.
  *
  * Returns: { valid: true } or error response.
@@ -485,7 +532,13 @@ export async function validateVerification(
   }
 
   const failKey = kvKeys.verifyFail(userId, opts.callerKey);
-  const failRecord = await kv.get<VerifyFailRecord>(failKey, "json");
+  const storedFail = await kv.get<VerifyFailRecord>(failKey, "json");
+
+  // Streak predating the current secret — treat this request as a clean slate.
+  // Decided in memory only; whether the stale entry is deleted depends on which
+  // path we exit through (a path that writes the same key must not delete first).
+  const voided = isFailStreakVoid(record, storedFail);
+  const failRecord = voided ? null : storedFail;
 
   // Check lockout for this caller
   if (isLockedOut(failRecord)) {
@@ -500,7 +553,9 @@ export async function validateVerification(
     };
   }
 
-  // Secret required but not provided — no attempt was made, so nothing to charge
+  // Secret required but not provided — no attempt was made, so nothing to
+  // charge. This path performs no KV write at all: a void leftover is inert and
+  // simply waits for its TTL or for the next request to overwrite/clear it.
   if (!secret || typeof secret !== "string") {
     return {
       valid: false,
@@ -520,6 +575,8 @@ export async function validateVerification(
   }
 
   if (!matched) {
+    // Single write: `chargeFailure` overwrites the whole entry, so a void
+    // leftover is replaced here rather than deleted first.
     await chargeFailure(kv, failKey, failRecord);
     return {
       valid: false,
@@ -527,8 +584,9 @@ export async function validateVerification(
     };
   }
 
-  // Success — clear this caller's failure history
-  if (failRecord) {
+  // Success — clear this caller's failure history, including a void leftover
+  // that no later write will replace.
+  if (failRecord || voided) {
     await kv.delete(failKey);
   }
 

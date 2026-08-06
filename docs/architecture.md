@@ -181,15 +181,15 @@
 - **職責**：儲存資料（明文 JSON）
 - **Key 設計**：
 
-| Key Pattern                     | Value                                                       | 說明                                                  |
-| ------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------- |
-| `user:{user_id}`                | 個人書單 + 開放設定（JSON）                                 | 歸屬個人，不隨家庭變動                                |
-| `family:{family_id}`            | `{ owner_id, members[], max_members, created_at }`          | 記錄家庭組成 + 管理者                                 |
-| `member:{user_id}`              | 所屬 family_id                                              | 反向查詢用                                            |
-| `public:{share_token}`          | `{ userId, shelfId, title, books[], createdAt, expiresAt }` | 公開書櫃明文快照（v1.2.0）                            |
-| `verify:{user_id}`              | `{ method, hash, salt, prompted }`                          | PWA 登入驗證設定                                      |
-| `verifyfail:{user_id}:{caller}` | `{ failCount, lockedUntil }`                                | 依「來源 + 目標帳號」計算的驗證失敗次數（TTL 900 秒） |
-| `otp:{user_id}`                 | `{ code, createdAt }`                                       | 一次性驗證碼（TTL 5 分鐘）                            |
+| Key Pattern                     | Value                                                       | 說明                                                                                                          |
+| ------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `user:{user_id}`                | 個人書單 + 開放設定（JSON）                                 | 歸屬個人，不隨家庭變動                                                                                        |
+| `family:{family_id}`            | `{ owner_id, members[], max_members, created_at }`          | 記錄家庭組成 + 管理者                                                                                         |
+| `member:{user_id}`              | 所屬 family_id                                              | 反向查詢用                                                                                                    |
+| `public:{share_token}`          | `{ userId, shelfId, title, books[], createdAt, expiresAt }` | 公開書櫃明文快照（v1.2.0）                                                                                    |
+| `verify:{user_id}`              | `{ method, hash, salt, prompted, secretUpdatedAt? }`        | PWA 登入驗證設定（`secretUpdatedAt` 為驗證方式／密鑰最後變更時間，epoch 毫秒）                                |
+| `verifyfail:{user_id}:{caller}` | `{ failCount, lockedUntil, startedAt? }`                    | 依「來源 + 目標帳號」計算的驗證失敗次數（TTL 900 秒）；`startedAt` 為該次失敗連續累計的起始時間（epoch 毫秒） |
+| `otp:{user_id}`                 | `{ code, createdAt }`                                       | 一次性驗證碼（TTL 5 分鐘）                                                                                    |
 
 - **TTL**：個人開放設定不設過期（持久化）；家庭群組可設定過期時間；公開書櫃依使用者設定（7/30/60/90 天或永久）
 - **家庭人數上限**：`max_members` 預設為 2（配合讀墨官方限制）
@@ -362,6 +362,7 @@ moo-{family_id_short}@{api_host_encoded}
 
 - PIN/Pattern hash 以 SHA-256(salt + secret) 儲存於 `verify:{userId}`（server 端驗證）
 - 連續 5 次驗證失敗 → 鎖定 15 分鐘。失敗次數與鎖定狀態是「以來源 + 目標帳號」為單位計算，記錄在獨立且有 TTL（900 秒）的 `verifyfail:{userId}:{caller}`，不會寫入帳號本身的 `verify:{userId}`。因為加入家庭是公開端點、userId 由 email 推導、familyId 又可從公開的 `/api/auth/lookup` 查到，若把失敗次數記在帳號上，任何第三方都能靠亂送錯誤驗證把別人鎖在 PWA 登入之外（DoS）；改為記在來源後，攻擊者只會鎖住自己
+- **變更驗證方式／密鑰會作廢先前的失敗紀錄**：`PUT /api/user/:id/verify` 會在 `verify:{userId}` 寫入 `secretUpdatedAt`（epoch 毫秒）；`verifyfail:{userId}:{caller}` 則記錄該次連續失敗的起始時間 `startedAt`。驗證時若 `startedAt < secretUpdatedAt`，代表這筆失敗紀錄是針對「已經不存在的舊密鑰」累積的，直接視為作廢：不觸發鎖定、失敗次數不再累加。作廢是每次請求即時重算的記憶體判定，未刪除的殘留紀錄本身即失效；實際清除只發生在「驗證成功」時（刪除該來源自己的那把 key，不做 KV list 掃描），輸入錯誤密鑰時則由新的失敗紀錄整筆覆寫，未帶密鑰或鎖定中則完全不寫入。理由是 Cloudflare KV 對同一個 key 每秒僅允許一次寫入，先刪後寫可能讓剛計數的失敗被靜默丟棄，因此每次請求對 `verifyfail:{userId}:{caller}` 至多一次寫入。因此忘記 PIN 而在手機被鎖定的使用者，只要在桌面 Extension 重設 PIN／圖形，就能立即登入，不必等 15 分鐘。兩個欄位任一缺漏（舊資料）時一律**維持鎖定**，缺值永遠不會解鎖。這不會成為 DoS 手段：`secretUpdatedAt` 只能透過 `PUT /api/user/:id/verify` 更新，該端點需要有效 token 且 `callerId === userId`，只有帳號本人能作廢失敗紀錄，而且只能作廢自己帳號上的
 - 來源（caller key）取自 Cloudflare 的 `cf-connecting-ip`（邊緣設定、無法偽造）。IPv4 直接使用；IPv6 正規化為 /64 前綴後才當 key，因為家用 IPv6 至少配發一個 /64，且 privacy extensions 可讓用戶端隨意更換介面識別碼——若以完整位址為 key，攻擊者每送一次請求就能換到全新的失敗額度與全新的速率限制桶。兩個例外：IPv4-mapped 位址（`::ffff:a.b.c.d`）會收斂成內嵌的 IPv4，與該 IPv4 共用同一個 key；無法解析的值則加上 `raw:` 前綴自成一個命名空間，確保不會與真正的 /64 桶撞在一起。同一套正規化也套用在 per-IP 速率限制上
 - 已接受的殘餘風險（非缺陷，權衡後保留）：
   - **共用對外 IP**：CGNAT、公司／校園 NAT 之後的多個使用者（IPv6 則是同一個 /64 內的裝置）針對「同一個目標帳號」會共用同一份失敗額度，可能被同來源的其他人連帶鎖住 15 分鐘。相對於「任何陌生人都能鎖住任何帳號」，此風險範圍小很多
@@ -374,11 +375,11 @@ moo-{family_id_short}@{api_host_encoded}
 
 #### KV Key 設計
 
-| Key Pattern                    | Value                              | TTL    |
-| ------------------------------ | ---------------------------------- | ------ |
-| `verify:{userId}`              | `{ method, hash, salt, prompted }` | None   |
-| `verifyfail:{userId}:{caller}` | `{ failCount, lockedUntil }`       | 900 秒 |
-| `otp:{userId}`                 | `{ code, createdAt }`              | 300 秒 |
+| Key Pattern                    | Value                                                | TTL    |
+| ------------------------------ | ---------------------------------------------------- | ------ |
+| `verify:{userId}`              | `{ method, hash, salt, prompted, secretUpdatedAt? }` | None   |
+| `verifyfail:{userId}:{caller}` | `{ failCount, lockedUntil, startedAt? }`             | 900 秒 |
+| `otp:{userId}`                 | `{ code, createdAt }`                                | 300 秒 |
 
 #### API 端點
 
