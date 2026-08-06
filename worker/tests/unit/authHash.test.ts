@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { kvKeys } from "../../src/kv/schema";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;

@@ -106,11 +106,9 @@ describe("syncBooks — archive sync path", () => {
         >;
       },
     );
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => {
-        return Promise.resolve();
-      },
-    );
+    vi.mocked(chrome.storage.local.set).mockImplementation(() => {
+      return Promise.resolve();
+    });
   }
 
   function makeOptions(
@@ -408,11 +406,9 @@ describe("syncBooks — full flow", () => {
         >;
       },
     );
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => {
-        return Promise.resolve();
-      },
-    );
+    vi.mocked(chrome.storage.local.set).mockImplementation(() => {
+      return Promise.resolve();
+    });
   }
 
   it("returns error when upload fails", async () => {
@@ -610,11 +606,9 @@ describe("syncBooks — auto-return (familyId branch)", () => {
         >;
       },
     );
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => {
-        return Promise.resolve();
-      },
-    );
+    vi.mocked(chrome.storage.local.set).mockImplementation(() => {
+      return Promise.resolve();
+    });
   }
 
   function makeLentRequest(

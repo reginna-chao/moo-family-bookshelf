@@ -10,9 +10,11 @@ vi.mock("@/content/scraper", () => ({
     `正在讀取第 ${page} 頁，已收集 ${count} 本…`,
 }));
 
-// Mock mergeBooks so tests can inspect what savedBooks gets passed in
+// Mock mergeBooks to pass the scraped list straight through, so tests assert on
+// the arguments it receives (the vi.fn records every actual arg, including the
+// savedBooks one this stub ignores) without depending on real merge logic.
 vi.mock("@/dialog/mergeBooks", () => ({
-  mergeBooks: vi.fn((scraped: unknown[], _saved: unknown[]) => scraped),
+  mergeBooks: vi.fn((scraped: unknown[]) => scraped),
 }));
 
 import { useAutoSetup } from "@/dialog/useAutoSetup";
@@ -56,11 +58,9 @@ describe("useAutoSetup", () => {
         >;
       },
     );
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => {
-        return Promise.resolve();
-      },
-    );
+    vi.mocked(chrome.storage.local.set).mockImplementation(() => {
+      return Promise.resolve();
+    });
   });
 
   afterEach(() => {

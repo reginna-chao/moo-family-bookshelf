@@ -10,7 +10,7 @@
     "//build:dev": "Worker-only build for the dev environment (uses wrangler.toml top-level config). To build extension + pwa + worker together, run `pnpm build:dev` from the repo root, NOT from worker/.",
     "build:dev": "wrangler deploy --dry-run --outdir=dist",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/",
+    "lint": "eslint src/ tests/",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

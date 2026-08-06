@@ -3,7 +3,6 @@ import {
   navigateAndWaitForLoad,
   loginAndNavigate,
   createTestAuth,
-  clearAuthState,
 } from "./helpers/auth-helper";
 
 test.describe("Auth flow", () => {

@@ -72,9 +72,8 @@ describe("performSoloRecovery", () => {
     vi.clearAllMocks();
 
     // Reset chrome.storage mocks
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) =>
-        Promise.resolve(),
+    vi.mocked(chrome.storage.local.set).mockImplementation(() =>
+      Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -82,9 +81,8 @@ describe("performSoloRecovery", () => {
         return Promise.resolve({}) as unknown as void;
       },
     );
-    vi.mocked(chrome.storage.sync.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) =>
-        Promise.resolve(),
+    vi.mocked(chrome.storage.sync.set).mockImplementation(() =>
+      Promise.resolve(),
     );
     vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
   });
@@ -273,9 +271,8 @@ describe("tryAutoRecovery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) =>
-        Promise.resolve(),
+    vi.mocked(chrome.storage.local.set).mockImplementation(() =>
+      Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (
@@ -286,9 +283,8 @@ describe("tryAutoRecovery", () => {
         return Promise.resolve({}) as unknown as void;
       },
     );
-    vi.mocked(chrome.storage.sync.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) =>
-        Promise.resolve(),
+    vi.mocked(chrome.storage.sync.set).mockImplementation(() =>
+      Promise.resolve(),
     );
     vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
   });
@@ -325,9 +321,8 @@ describe("performJoin", () => {
       familyId: "fam-join-1",
     });
 
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) =>
-        Promise.resolve(),
+    vi.mocked(chrome.storage.local.set).mockImplementation(() =>
+      Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (
@@ -468,9 +463,8 @@ describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(decodeSyncCode).mockReturnValue({ familyId: "fam-join-1" });
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) =>
-        Promise.resolve(),
+    vi.mocked(chrome.storage.local.set).mockImplementation(() =>
+      Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (
@@ -481,9 +475,8 @@ describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
         return Promise.resolve({}) as unknown as void;
       },
     );
-    vi.mocked(chrome.storage.sync.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) =>
-        Promise.resolve(),
+    vi.mocked(chrome.storage.sync.set).mockImplementation(() =>
+      Promise.resolve(),
     );
     vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
   });
@@ -726,9 +719,8 @@ describe("familyId persists to storage.local even when SET_FAMILY_ID message rej
 
     vi.mocked(decodeSyncCode).mockReturnValue({ familyId: "fam-join-1" });
 
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) =>
-        Promise.resolve(),
+    vi.mocked(chrome.storage.local.set).mockImplementation(() =>
+      Promise.resolve(),
     );
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (
@@ -739,9 +731,8 @@ describe("familyId persists to storage.local even when SET_FAMILY_ID message rej
         return Promise.resolve({}) as unknown as void;
       },
     );
-    vi.mocked(chrome.storage.sync.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) =>
-        Promise.resolve(),
+    vi.mocked(chrome.storage.sync.set).mockImplementation(() =>
+      Promise.resolve(),
     );
     // Simulate sleeping Firefox background: every message round-trip rejects.
     vi.mocked(chrome.runtime.sendMessage).mockRejectedValue(

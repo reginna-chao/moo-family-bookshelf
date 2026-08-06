@@ -36,7 +36,10 @@ async function createFamilyAndGetSyncCode(
       chrome.storage.local.clear();
       try {
         chrome.storage.sync.clear();
-      } catch {}
+      } catch {
+        // Best-effort cleanup: chrome.storage.sync is not available in every
+        // extension context, so a failure here must not fail the test setup.
+      }
       chrome.storage.local.set({ [key]: apiUrl });
     },
     { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },

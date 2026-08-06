@@ -796,7 +796,6 @@ describe("PATCH /api/user/:id/books", () => {
       displayName: "Family Name",
     });
     const createJson = (await createRes.json()) as Json;
-    const familyId = createJson.data.familyId as string;
     const authToken = createJson.data.authToken as string;
 
     // Seed books for user1

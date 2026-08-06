@@ -717,7 +717,7 @@ function sanitizeLibraryTitles(html: string): string {
   let index = 0;
   return html.replace(
     TITLE_ELEMENT_PATTERN,
-    (_match, tag: string, attrs: string, _text: string) => {
+    (_match, tag: string, attrs: string) => {
       index += 1;
       const name = `測試書籍 ${index}`;
       const safeAttrs = attrs.replace(

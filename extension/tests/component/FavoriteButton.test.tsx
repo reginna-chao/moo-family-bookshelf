@@ -50,7 +50,6 @@ describe("FavoriteButton (Extension)", () => {
     const onFavoriteToggle = vi.fn();
     const onLinkClick = vi.fn();
     render(
-      // eslint-disable-next-line jsx-a11y/anchor-is-valid
       <a href="https://readmoo.com/x" onClick={onLinkClick}>
         <FavoriteButton
           isFavorite={false}

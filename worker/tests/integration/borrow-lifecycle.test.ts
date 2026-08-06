@@ -223,10 +223,7 @@ describe("Borrow Lifecycle Integration", () => {
   });
 
   it("should complete the cancellation flow: PENDING → CANCELLED", async () => {
-    const { familyId, authToken: token1 } = await createFamilyAndGetToken(
-      USER1,
-      "Alice",
-    );
+    const { familyId } = await createFamilyAndGetToken(USER1, "Alice");
     const { authToken: token2 } = await joinFamilyAndGetToken(
       familyId,
       USER2,

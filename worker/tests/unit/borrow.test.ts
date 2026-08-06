@@ -6,9 +6,7 @@ import {
   BorrowStatus,
   BoolFlag,
   type BorrowRequest,
-  type FamilyRecord,
 } from "../../src/kv/schema";
-import { generateAuthToken } from "../../src/middleware/auth";
 import { NOBODY, USER1, USER2, USER3 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

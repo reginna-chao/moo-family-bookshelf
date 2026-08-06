@@ -54,7 +54,7 @@ beforeEach(() => {
 
 describe("DELETE /api/user/:id", () => {
   it("should successfully delete account when user is not in any family", async () => {
-    const { authToken } = await createFamilyAndGetToken(USER1);
+    await createFamilyAndGetToken(USER1);
 
     // Leave family first by removing member key (simulate no family)
     // Instead, create a user with books but no family membership
