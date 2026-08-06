@@ -71,6 +71,26 @@ export type {
 
 import { DEFAULT_PWA_URL } from "../constants";
 
+/**
+ * Resolved `POST /api/auth/lookup` payload.
+ *
+ * `userId` is derived from a publicly guessable email, so an account that has
+ * PWA login verification configured only gets its family data back when the
+ * request carries the matching secret. Until then the server answers HTTP 200
+ * with `requiresVerification: TRUE` and withholds the data
+ * (`existingFamilyId: null`, `memberCount: 0`) — informational, not an error.
+ */
+export interface LookupResult {
+  existingFamilyId: string | null;
+  memberCount: number;
+  /**
+   * Optional on the wire: Workers predating the verification gate never send
+   * this field, and self-hosted (BYO) backends can lag the Extension by any
+   * number of releases. Absent means "no verification gate on this account".
+   */
+  requiresVerification?: BoolFlag;
+}
+
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
@@ -215,14 +235,24 @@ export class ApiClient {
 
   // --- Auth ---
 
-  /** Look up family membership for a pre-hashed userId. Server never sees the email. */
+  /**
+   * Look up family membership for a pre-hashed userId. Server never sees the email.
+   *
+   * `verifySecret` unlocks the payload for accounts with PWA login verification
+   * configured; without it the response carries `requiresVerification: TRUE`.
+   * A wrong secret is a 403 `VERIFICATION_FAILED` (or 429 `VERIFICATION_LOCKED`
+   * with `error.retryAfter`), never a silent empty result.
+   */
   async lookupUser(
     userId: string,
-  ): Promise<
-    ApiResponse<{ existingFamilyId: string | null; memberCount: number }>
-  > {
+    opts?: { verifySecret?: string },
+  ): Promise<ApiResponse<LookupResult>> {
     this.validateHexId(userId, "userId");
-    return this.post("/api/auth/lookup", { userId });
+    const body: Record<string, string> = { userId };
+    if (opts?.verifySecret !== undefined) {
+      body.verifySecret = opts.verifySecret;
+    }
+    return this.post("/api/auth/lookup", body);
   }
 
   // --- Personal Settings ---
@@ -268,11 +298,25 @@ export class ApiClient {
 
   // --- Family Group ---
 
+  /**
+   * Create a new family. Accounts with PWA login verification configured must
+   * supply `verifySecret`; otherwise the server replies 403
+   * `VERIFICATION_REQUIRED` / `VERIFICATION_FAILED`, or 429
+   * `VERIFICATION_LOCKED` with `error.retryAfter`.
+   */
   async createFamily(
     userId: string,
     displayName: string | undefined,
+    opts?: { verifySecret?: string },
   ): Promise<ApiResponse<FamilyGroup>> {
-    return this.post("/api/family", { userId, displayName: displayName ?? "" });
+    const body: Record<string, string> = {
+      userId,
+      displayName: displayName ?? "",
+    };
+    if (opts?.verifySecret !== undefined) {
+      body.verifySecret = opts.verifySecret;
+    }
+    return this.post("/api/family", body);
   }
 
   async joinFamily(

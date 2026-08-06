@@ -429,6 +429,21 @@ describe("ApiClient", () => {
         "Invalid userId",
       );
     });
+
+    // Mirrors extension/tests/unit/client.test.ts — the PWA has no call site for
+    // the verification gate yet, so this is the only thing stopping the two
+    // client contracts from drifting.
+    it("should include verifySecret in the body only when supplied", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { existingFamilyId: "fam-1", memberCount: 2 } }),
+      );
+
+      const userId = "a".repeat(64);
+      await client.lookupUser(userId, { verifySecret: "123456" });
+
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body)).toEqual({ userId, verifySecret: "123456" });
+    });
   });
 
   describe("updateDisplayName", () => {

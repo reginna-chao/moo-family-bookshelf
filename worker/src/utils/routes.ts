@@ -23,12 +23,64 @@ export function isPublicRoute(method: string, path: string): boolean {
   return false;
 }
 
-/** Sensitive public routes that need extra-strict rate limits (e.g. resource creation). */
-export function isSensitivePublicRoute(method: string, path: string): boolean {
+/**
+ * Counter buckets on the sensitive tier.
+ *
+ * Every sensitive route carries the SAME per-minute limit, but not the same
+ * counter. `onboarding` (family create / join) and `lookup` are isolated so
+ * neither can crowd the other out: one clean onboarding of a verified account
+ * spends two lookups (the no-secret probe, then the same call carrying the
+ * secret) plus one create / join — three sensitive requests in one minute from
+ * one IP. Sharing a single 3/min counter would leave zero headroom for a
+ * mistyped PIN, or for a second household member onboarding behind the same NAT
+ * / IPv6 /64. Split, that flow costs 2 of 3 in `lookup` and 1 of 3 in
+ * `onboarding`.
+ */
+export type SensitiveBucket = "onboarding" | "lookup";
+
+/**
+ * Classify a sensitive public route into its rate-limit bucket, or `null` when
+ * the route is not on the sensitive tier.
+ *
+ * Two kinds of request qualify, and both are entry points of the verification
+ * gate (`validateVerification`): those that create a resource for a publicly
+ * guessable userId (family create / join), and those where an unauthenticated
+ * caller can test a `verifySecret` against someone else's account
+ * (`POST /api/auth/lookup`). Lookup is the CHEAPEST oracle of the three — a pure
+ * read with no terminal 409 in front of it — so leaving it on the looser public
+ * tier would hand an attacker several times the per-IP guess rate on the easiest
+ * path.
+ *
+ * Lookup is classified unconditionally, not only when the body carries a
+ * `verifySecret`: the rate-limit middleware runs before any body parsing, so the
+ * decision cannot depend on the payload without reading (and buffering) the body
+ * on every request — and an attacker would simply always send the field anyway.
+ *
+ * Isolating lookup's counter does NOT loosen the tier: the limit is unchanged
+ * (`RATE_LIMIT_SENSITIVE` in `middleware/rateLimit.ts`), only the key it counts
+ * under differs.
+ */
+export function sensitiveBucketFor(
+  method: string,
+  path: string,
+): SensitiveBucket | null {
   // POST /api/family — create family (squatting prevention)
-  if (method === "POST" && /^\/api\/family\/?$/.test(path)) return true;
+  if (method === "POST" && /^\/api\/family\/?$/.test(path)) return "onboarding";
   // POST /api/family/:id/join — join family
   if (method === "POST" && /^\/api\/family\/[^/]+\/join\/?$/.test(path))
-    return true;
-  return false;
+    return "onboarding";
+  // POST /api/auth/lookup — verification-secret oracle (see note above)
+  if (method === "POST" && /^\/api\/auth\/lookup\/?$/.test(path))
+    return "lookup";
+  return null;
+}
+
+/**
+ * Sensitive public routes that need extra-strict rate limits.
+ *
+ * Membership of the tier and the bucket split share one set of path patterns —
+ * see {@link sensitiveBucketFor} for the classification and its rationale.
+ */
+export function isSensitivePublicRoute(method: string, path: string): boolean {
+  return sensitiveBucketFor(method, path) !== null;
 }

@@ -27,8 +27,27 @@ function createMockApiClient(method: VerifyMethod = "pin"): ApiClient {
 function makeCtx(
   retry: VerificationContext["retry"],
   onCancel: () => void = vi.fn(),
+  onAttemptFailed?: () => void,
 ): VerificationContext {
-  return { userId: "user-1", retry, onCancel };
+  return { userId: "user-1", retry, onCancel, onAttemptFailed };
+}
+
+/** A retry closure the test can settle by hand, to interleave unmount/begin. */
+function deferredRetry() {
+  let settle!: (r: VerificationAttemptResult) => void;
+  let fail!: (e: unknown) => void;
+  const retry = vi.fn(
+    () =>
+      new Promise<VerificationAttemptResult>((resolve, reject) => {
+        settle = resolve;
+        fail = reject;
+      }),
+  );
+  return {
+    retry,
+    resolve: (r: VerificationAttemptResult) => settle(r),
+    reject: (e: unknown) => fail(e),
+  };
 }
 
 describe("isVerificationError", () => {
@@ -424,6 +443,259 @@ describe("useVerificationPrompt", () => {
     expect(result.current.error).toBe("");
     expect(result.current.submitting).toBe(false);
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * REGRESSION (UI deadlock): the `retry` closure runs a whole onboarding flow
+   * that moves the caller into a progress view ("recovering", "syncing-books"),
+   * which renders a full-screen loading overlay OVER the still-open prompt. When
+   * the attempt then fails, nothing brought the caller back — a single wrong PIN
+   * bricked the dialog until it was reopened. `onAttemptFailed` is that restore
+   * hook: it must fire on every failure (including an unexpected throw), never
+   * on success, and never after the session it belongs to is gone.
+   */
+  describe("onAttemptFailed (prompt restore)", () => {
+    it.each([
+      ["a wrong secret", { ok: false, errorCode: "VERIFICATION_FAILED" }],
+      ["a lockout", { ok: false, errorCode: "VERIFICATION_LOCKED" }],
+      ["a rate limit", { ok: false, errorCode: "RATE_LIMITED" }],
+      ["a generic backend error", { ok: false, errorCode: "SERVER_ERROR" }],
+      ["a failure with no code at all", { ok: false }],
+    ])("fires once when the attempt fails with %s", async (_label, outcome) => {
+      const api = createMockApiClient();
+      const onAttemptFailed = vi.fn();
+      const retry = vi.fn().mockResolvedValue(outcome);
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(retry, vi.fn(), onAttemptFailed),
+        );
+      });
+      await act(async () => {
+        await result.current.submit("000000");
+      });
+
+      expect(onAttemptFailed).toHaveBeenCalledTimes(1);
+      // The prompt is still the live view, and usable again.
+      expect(result.current.active).toBe(true);
+      expect(result.current.submitting).toBe(false);
+    });
+
+    it("does NOT fire when the attempt succeeds", async () => {
+      const api = createMockApiClient();
+      const onAttemptFailed = vi.fn();
+      const retry = vi.fn().mockResolvedValue({ ok: true });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(retry, vi.fn(), onAttemptFailed),
+        );
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+
+      // The flow has navigated away; restoring the prompt would render it over
+      // an already-completed journey.
+      expect(onAttemptFailed).not.toHaveBeenCalled();
+      expect(result.current.active).toBe(false);
+    });
+
+    it("fires and leaves the prompt usable when the retry closure throws", async () => {
+      const api = createMockApiClient();
+      const onAttemptFailed = vi.fn();
+      const retry = vi.fn().mockRejectedValue(new Error("storage exploded"));
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(retry, vi.fn(), onAttemptFailed),
+        );
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+
+      expect(onAttemptFailed).toHaveBeenCalledTimes(1);
+      expect(result.current.submitting).toBe(false);
+      expect(result.current.active).toBe(true);
+      expect(result.current.error).toBe("發生錯誤，請稍後再試");
+    });
+
+    it("does not require onAttemptFailed to be provided", async () => {
+      const api = createMockApiClient();
+      const retry = vi
+        .fn()
+        .mockResolvedValue({ ok: false, errorCode: "VERIFICATION_FAILED" });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      // Older call sites pass no restore hook; the failure path must not throw.
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(retry));
+      });
+      await act(async () => {
+        await result.current.submit("000000");
+      });
+
+      expect(result.current.active).toBe(true);
+      expect(result.current.error).toBe("驗證失敗，請重新輸入");
+    });
+
+    it("does NOT fire when the prompt unmounted while the attempt was in flight", async () => {
+      const api = createMockApiClient();
+      const onAttemptFailed = vi.fn();
+      const deferred = deferredRetry();
+      const { result, unmount } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(deferred.retry, vi.fn(), onAttemptFailed),
+        );
+      });
+      let submitPromise: Promise<void> = Promise.resolve();
+      act(() => {
+        submitPromise = result.current.submit("123456");
+      });
+
+      unmount();
+      await act(async () => {
+        deferred.resolve({ ok: false, errorCode: "VERIFICATION_FAILED" });
+        await submitPromise;
+      });
+
+      // Restoring a view on an unmounted tree is exactly the setState-after-
+      // unmount warning the mount guard exists to prevent.
+      expect(onAttemptFailed).not.toHaveBeenCalled();
+    });
+
+    it("does NOT fire when the prompt unmounted before the attempt threw", async () => {
+      const api = createMockApiClient();
+      const onAttemptFailed = vi.fn();
+      const deferred = deferredRetry();
+      const { result, unmount } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(deferred.retry, vi.fn(), onAttemptFailed),
+        );
+      });
+      let submitPromise: Promise<void> = Promise.resolve();
+      act(() => {
+        submitPromise = result.current.submit("123456");
+      });
+
+      unmount();
+      await act(async () => {
+        deferred.reject(new Error("network down"));
+        await submitPromise;
+      });
+
+      expect(onAttemptFailed).not.toHaveBeenCalled();
+    });
+
+    it("does NOT fire for an attempt superseded by a newer begin()", async () => {
+      const api = createMockApiClient();
+      const staleOnAttemptFailed = vi.fn();
+      const freshOnAttemptFailed = vi.fn();
+      const deferred = deferredRetry();
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(deferred.retry, vi.fn(), staleOnAttemptFailed),
+        );
+      });
+      let submitPromise: Promise<void> = Promise.resolve();
+      act(() => {
+        submitPromise = result.current.submit("123456");
+      });
+
+      // A new challenge (different flow) takes over while the first is pending.
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(vi.fn(), vi.fn(), freshOnAttemptFailed),
+        );
+      });
+
+      await act(async () => {
+        deferred.resolve({ ok: false, errorCode: "VERIFICATION_FAILED" });
+        await submitPromise;
+      });
+
+      // The stale attempt must not drag the UI back to a torn-down context...
+      expect(staleOnAttemptFailed).not.toHaveBeenCalled();
+      // ...nor be misattributed to the new session.
+      expect(freshOnAttemptFailed).not.toHaveBeenCalled();
+      expect(result.current.error).toBe("");
+    });
+
+    it("does NOT fire for an attempt the user cancelled mid-flight", async () => {
+      const api = createMockApiClient();
+      const onAttemptFailed = vi.fn();
+      const onCancel = vi.fn();
+      const deferred = deferredRetry();
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(deferred.retry, onCancel, onAttemptFailed),
+        );
+      });
+      let submitPromise: Promise<void> = Promise.resolve();
+      act(() => {
+        submitPromise = result.current.submit("123456");
+      });
+
+      act(() => {
+        result.current.cancel();
+      });
+      await act(async () => {
+        deferred.resolve({ ok: false, errorCode: "VERIFICATION_FAILED" });
+        await submitPromise;
+      });
+
+      // onCancel already restored the caller's view; re-opening the prompt on
+      // top of it would undo the user's explicit exit.
+      expect(onCancel).toHaveBeenCalledTimes(1);
+      expect(onAttemptFailed).not.toHaveBeenCalled();
+      expect(result.current.active).toBe(false);
+    });
+
+    it("fires before the new prompt state is applied on a repeated failure", async () => {
+      const api = createMockApiClient();
+      const onAttemptFailed = vi.fn();
+      const retry = vi
+        .fn()
+        .mockResolvedValue({ ok: false, errorCode: "VERIFICATION_FAILED" });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(retry, vi.fn(), onAttemptFailed),
+        );
+      });
+      await act(async () => {
+        await result.current.submit("000000");
+      });
+      await act(async () => {
+        await result.current.submit("111111");
+      });
+
+      // Every failed attempt restores the prompt — not just the first.
+      expect(onAttemptFailed).toHaveBeenCalledTimes(2);
+      expect(result.current.error).toBe("驗證失敗，請重新輸入");
+    });
   });
 
   /**

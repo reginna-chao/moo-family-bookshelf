@@ -242,20 +242,55 @@ export interface CreateFamilyResult {
 }
 
 /**
+ * Thrown when the backend refuses to create the family. Carries the
+ * machine-readable code (and the rate-limit wait, when sent) so callers can
+ * bridge a verification challenge instead of dead-ending on the message.
+ */
+export class CreateFamilyError extends Error {
+  readonly code: string;
+  readonly retryAfter?: number;
+
+  constructor(message: string, code: string, retryAfter?: number) {
+    super(message);
+    this.name = "CreateFamilyError";
+    this.code = code;
+    this.retryAfter = retryAfter;
+  }
+}
+
+/**
  * Create a new family on the backend and persist all credentials locally.
  * Backend auto-cleans any solo-member old family for this userId.
+ *
+ * Throws `CreateFamilyError` when the backend refuses — including the
+ * verification codes raised for accounts with PWA login verification
+ * configured (`VERIFICATION_REQUIRED` / `VERIFICATION_FAILED` /
+ * `VERIFICATION_LOCKED`).
  */
 export async function createNewFamily(opts: {
   userId: string;
   displayName: string;
   apiClient: ApiClient;
+  /** PWA login verification secret (PIN/pattern) for verification-enabled users. */
+  verifySecret?: string;
 }): Promise<CreateFamilyResult> {
   const response = await opts.apiClient.createFamily(
     opts.userId,
     opts.displayName,
+    opts.verifySecret !== undefined
+      ? { verifySecret: opts.verifySecret }
+      : undefined,
   );
-  if (response.error) throw new Error(response.error.message);
-  if (!response.data) throw new Error("伺服器未回傳資料");
+  if (response.error) {
+    throw new CreateFamilyError(
+      response.error.message,
+      response.error.code,
+      response.error.retryAfter,
+    );
+  }
+  if (!response.data) {
+    throw new CreateFamilyError("伺服器未回傳資料", "EMPTY_RESPONSE");
+  }
 
   const data: FamilyGroup = response.data;
   const familyId = data.familyId;

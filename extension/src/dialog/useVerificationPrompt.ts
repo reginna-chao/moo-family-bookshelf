@@ -43,6 +43,14 @@ export interface VerificationContext {
   retry: (verifySecret: string) => Promise<VerificationAttemptResult>;
   /** Restore the caller's view when the user abandons the prompt. */
   onCancel: () => void;
+  /**
+   * Restore the caller's view when an attempt did not succeed. `retry` often
+   * moves the caller into a progress view ("recovering", "syncing-books", …)
+   * that would hide the still-open prompt; this hook calls back once the
+   * failure is confirmed AND the session is still live, so the restore can
+   * never resurrect a prompt whose context has already been torn down.
+   */
+  onAttemptFailed?: () => void;
 }
 
 export interface UseVerificationPromptResult {
@@ -227,14 +235,36 @@ export function useVerificationPrompt(
       if (!ctx || locked || submittingRef.current) return;
       const generation = generationRef.current;
       updateSubmitting(true);
-      const result = await ctx.retry(secret);
+      // The retry closure runs a whole onboarding flow (lookup + join +
+      // browser.storage writes + book sync), any step of which can reject.
+      // An escaping rejection would skip updateSubmitting(false) and strand
+      // the prompt on 「驗證中…」, so contain it here rather than relying on
+      // every caller's closure being defensive.
+      let result: VerificationAttemptResult;
+      try {
+        result = await ctx.retry(secret);
+      } catch {
+        if (!isMountedRef.current || generationRef.current !== generation) {
+          return;
+        }
+        ctx.onAttemptFailed?.();
+        updateSubmitting(false);
+        clearCountdown();
+        setError("發生錯誤，請稍後再試");
+        return;
+      }
       if (!isMountedRef.current || generationRef.current !== generation) return;
       updateSubmitting(false);
       if (result.ok) {
         // The retry closure owns the success side-effects (navigation, sync).
+        // No onAttemptFailed here: the flow has navigated away, and forcing the
+        // prompt back would render it over an already-completed journey.
         reset();
         return;
       }
+      // The prompt stays open on every failure branch below, so bring the
+      // caller's view back to it before applying the new prompt state.
+      ctx.onAttemptFailed?.();
       if (isVerificationError(result.errorCode)) {
         await applyCode(
           result.errorCode,

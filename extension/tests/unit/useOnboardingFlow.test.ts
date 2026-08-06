@@ -16,21 +16,29 @@ vi.mock("@/crypto/hash", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
 }));
 
-// Mock onboardingFlow module so we can inject recovery-path outcomes
-vi.mock("@/dialog/onboardingFlow", () => ({
-  createNewFamily: vi.fn().mockResolvedValue({
-    familyId: "fam-new",
-    userId: "u",
-    syncCode: "moo-sync-code",
-  }),
-  performJoin: vi.fn().mockResolvedValue({
-    ok: true,
-    familyId: "fam-joined",
-    userId: "u",
-  }),
-  performSoloRecovery: vi.fn().mockResolvedValue({ recovered: true }),
-  tryAutoRecovery: vi.fn().mockResolvedValue({ recovered: false }),
-}));
+// Mock onboardingFlow module so we can inject recovery-path outcomes.
+// CreateFamilyError is re-exported UNMOCKED: useOnboardingFlow narrows the
+// create failure with `instanceof`, so a hand-rolled stand-in would silently
+// drift from the production class (and drop the code/retryAfter fields).
+vi.mock("@/dialog/onboardingFlow", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/dialog/onboardingFlow")>();
+  return {
+    CreateFamilyError: actual.CreateFamilyError,
+    createNewFamily: vi.fn().mockResolvedValue({
+      familyId: "fam-new",
+      userId: "u",
+      syncCode: "moo-sync-code",
+    }),
+    performJoin: vi.fn().mockResolvedValue({
+      ok: true,
+      familyId: "fam-joined",
+      userId: "u",
+    }),
+    performSoloRecovery: vi.fn().mockResolvedValue({ recovered: true }),
+    tryAutoRecovery: vi.fn().mockResolvedValue({ recovered: false }),
+  };
+});
 
 // Mock syncCode for handleJoin path (not exercised here, but required for import graph)
 vi.mock("@/crypto/syncCode", () => ({
@@ -44,11 +52,14 @@ import { useOnboardingFlow } from "@/dialog/useOnboardingFlow";
 import { deriveUserId } from "@/crypto/hash";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import {
+  CreateFamilyError,
+  createNewFamily,
   performJoin,
   performSoloRecovery,
   tryAutoRecovery,
 } from "@/dialog/onboardingFlow";
 import { USER_ID_KEY, FAMILY_ID_KEY, DEFAULT_API_ENDPOINT } from "@/constants";
+import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
@@ -62,6 +73,10 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     joinFamily: vi.fn(),
     setAuthToken: vi.fn(),
     getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
+    // Every verification prompt loads the method before rendering an input.
+    getVerifyMethod: vi
+      .fn()
+      .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -121,6 +136,11 @@ describe("useOnboardingFlow", () => {
     vi.mocked(deriveUserId).mockResolvedValue("a".repeat(64));
     vi.mocked(tryAutoRecovery).mockResolvedValue({ recovered: false });
     vi.mocked(performSoloRecovery).mockResolvedValue({ recovered: true });
+    vi.mocked(createNewFamily).mockResolvedValue({
+      familyId: "fam-new",
+      userId: "u",
+      syncCode: "moo-sync-code",
+    });
   });
 
   afterEach(() => {
@@ -722,6 +742,688 @@ describe("useOnboardingFlow", () => {
         expect(result.current.verify.locked).toBe(true);
         expect(result.current.verify.countdownSeconds).toBeNull();
       });
+    });
+  });
+
+  /**
+   * SEC-1 (lookup side): `POST /api/auth/lookup` no longer answers with the
+   * family data for an account that has verification configured — it returns 200
+   * with `requiresVerification: TRUE` and a withheld payload. Read naively that
+   * looks exactly like "this account has no family", which would drop a user who
+   * HAS one onto the create/join screen and let them fork a second family.
+   */
+  describe("auth-lookup verification gate", () => {
+    /** 200 + withheld payload: the server refuses to say whether a family exists. */
+    const WITHHELD = {
+      data: {
+        existingFamilyId: null,
+        memberCount: 0,
+        requiresVerification: BoolFlag.TRUE,
+      },
+    };
+    const REVEALED_FAMILY = {
+      data: { existingFamilyId: "fam-existing", memberCount: 2 },
+    };
+    const NO_FAMILY = { data: { existingFamilyId: null, memberCount: 0 } };
+
+    describe("handleStart", () => {
+      it("opens the verification prompt instead of the create/join screen", async () => {
+        const lookupUser = vi.fn().mockResolvedValue(WITHHELD);
+        const { result } = renderFlow(
+          createMockApiClient({
+            lookupUser,
+            getVerifyMethod: vi
+              .fn()
+              .mockResolvedValue({ data: { method: "pattern", prompted: 0 } }),
+          }),
+        );
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.active).toBe(true);
+        expect(result.current.verify.method).toBe("pattern");
+        // The first lookup carries no secret — the gate is discovered, not guessed.
+        expect(lookupUser).toHaveBeenCalledWith(expect.any(String), undefined);
+      });
+
+      it("re-runs the lookup with the secret and recovers into the revealed family", async () => {
+        const onFamilyJoined = vi.fn();
+        const lookupUser = vi
+          .fn()
+          .mockResolvedValueOnce(WITHHELD)
+          .mockResolvedValueOnce(REVEALED_FAMILY);
+        vi.mocked(tryAutoRecovery).mockImplementation(async (opts) => {
+          opts.onFamilyJoined(opts.familyId, opts.userId);
+          return { recovered: true };
+        });
+        const { result } = renderFlow(
+          createMockApiClient({ lookupUser }),
+          createMockAutoSetup(),
+          onFamilyJoined,
+        );
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        await act(async () => {
+          await result.current.verify.submit("123456");
+        });
+
+        expect(lookupUser).toHaveBeenNthCalledWith(2, expect.any(String), {
+          verifySecret: "123456",
+        });
+        // The verified secret is carried into the join, not re-prompted.
+        expect(vi.mocked(tryAutoRecovery).mock.calls.at(-1)?.[0]).toMatchObject(
+          {
+            familyId: "fam-existing",
+            verifySecret: "123456",
+          },
+        );
+        expect(onFamilyJoined).toHaveBeenCalledWith(
+          "fam-existing",
+          expect.any(String),
+        );
+        expect(result.current.verify.active).toBe(false);
+        expect(result.current.state).not.toBe("verify-prompt");
+      });
+
+      it("continues into normal onboarding when the verified lookup reveals no family", async () => {
+        const lookupUser = vi
+          .fn()
+          .mockResolvedValueOnce(WITHHELD)
+          .mockResolvedValueOnce(NO_FAMILY);
+        const { result } = renderFlow(createMockApiClient({ lookupUser }));
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        await act(async () => {
+          await result.current.verify.submit("123456");
+        });
+
+        expect(result.current.state).toBe("idle");
+        expect(result.current.verify.active).toBe(false);
+        expect(tryAutoRecovery).not.toHaveBeenCalled();
+      });
+
+      it("keeps a wrong secret's error inside the prompt (never 'no family')", async () => {
+        // The server still withholds the payload — reading that as an empty
+        // lookup is the exact bug onboardingLookup normalizes away.
+        const lookupUser = vi.fn().mockResolvedValue(WITHHELD);
+        const { result } = renderFlow(createMockApiClient({ lookupUser }));
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        await act(async () => {
+          await result.current.verify.submit("000000");
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.state).not.toBe("idle");
+        expect(result.current.verify.active).toBe(true);
+        expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
+        expect(result.current.verify.submitting).toBe(false);
+      });
+
+      it("keeps a 403 VERIFICATION_FAILED envelope inside the prompt", async () => {
+        const lookupUser = vi
+          .fn()
+          .mockResolvedValueOnce(WITHHELD)
+          .mockResolvedValueOnce({
+            error: { code: "VERIFICATION_FAILED", message: "驗證失敗" },
+          });
+        const { result } = renderFlow(createMockApiClient({ lookupUser }));
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        await act(async () => {
+          await result.current.verify.submit("000000");
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
+      });
+
+      it("forwards a 429 lockout's retryAfter from the re-lookup into the prompt", async () => {
+        const lookupUser = vi
+          .fn()
+          .mockResolvedValueOnce(WITHHELD)
+          .mockResolvedValueOnce({
+            error: {
+              code: "VERIFICATION_LOCKED",
+              message: "locked",
+              retryAfter: 60,
+            },
+          });
+        const { result } = renderFlow(createMockApiClient({ lookupUser }));
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        await act(async () => {
+          await result.current.verify.submit("000000");
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.locked).toBe(true);
+        expect(result.current.verify.countdownSeconds).toBe(60);
+      });
+
+      it("opens the prompt already counting down when the FIRST lookup is locked", async () => {
+        const lookupUser = vi.fn().mockResolvedValue({
+          error: {
+            code: "VERIFICATION_LOCKED",
+            message: "locked",
+            retryAfter: 300,
+          },
+        });
+        const { result } = renderFlow(createMockApiClient({ lookupUser }));
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.countdownSeconds).toBe(300);
+      });
+
+      /**
+       * COPY PIN: START_VERIFY_CANCELLED_MESSAGE and its 「重新驗證」 action label
+       * are module-private in src/dialog/useOnboardingFlow.ts. This is the single
+       * place the literals are asserted — a wording change fails HERE.
+       */
+      it("shows the retryable 「重新驗證」 error when the user cancels the challenge", async () => {
+        const lookupUser = vi.fn().mockResolvedValue(WITHHELD);
+        const { result } = renderFlow(createMockApiClient({ lookupUser }));
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        act(() => {
+          result.current.verify.cancel();
+        });
+
+        expect(result.current.state).toBe("error");
+        expect(result.current.errorMessage).toBe(
+          "需要完成驗證才能讀取你的家庭資料，請重試。",
+        );
+        expect(result.current.errorActions).toHaveLength(1);
+        expect(result.current.errorActions[0].label).toBe("重新驗證");
+        expect(result.current.errorActions[0].variant).toBe("primary");
+      });
+
+      it("re-enters the challenge from the 「重新驗證」 action, not the create/join screen", async () => {
+        const lookupUser = vi.fn().mockResolvedValue(WITHHELD);
+        const { result } = renderFlow(createMockApiClient({ lookupUser }));
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        act(() => {
+          result.current.verify.cancel();
+        });
+        expect(result.current.state).toBe("error");
+
+        // The generic 重試 action would land on "create or join a family" — the
+        // very misreading the message warns against.
+        await act(async () => {
+          result.current.errorActions[0].onClick();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        await waitFor(() => {
+          expect(result.current.state).toBe("verify-prompt");
+        });
+
+        expect(result.current.state).not.toBe("idle");
+        expect(result.current.verify.active).toBe(true);
+        expect(lookupUser).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    describe("handleCreate", () => {
+      /** handleCreate needs a captured email, so land in idle via handleStart. */
+      async function driveToIdle(
+        apiClient: ApiClient,
+        onFamilyJoined = vi.fn(),
+      ) {
+        const { result } = renderFlow(
+          apiClient,
+          createMockAutoSetup(),
+          onFamilyJoined,
+        );
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        expect(result.current.state).toBe("idle");
+        return { result, onFamilyJoined };
+      }
+
+      it("recovers into the family the verified lookup reveals instead of creating a second one", async () => {
+        const lookupUser = vi
+          .fn()
+          // handleStart: no gate yet, no family → idle.
+          .mockResolvedValueOnce(NO_FAMILY)
+          // handleCreate: verification was switched on in between.
+          .mockResolvedValueOnce(WITHHELD)
+          // …and the unlocked lookup reveals a family after all.
+          .mockResolvedValueOnce(REVEALED_FAMILY);
+        vi.mocked(tryAutoRecovery).mockImplementation(async (opts) => {
+          opts.onFamilyJoined(opts.familyId, opts.userId);
+          return { recovered: true };
+        });
+        const { result, onFamilyJoined } = await driveToIdle(
+          createMockApiClient({ lookupUser }),
+        );
+
+        await act(async () => {
+          await result.current.handleCreate();
+        });
+        expect(result.current.state).toBe("verify-prompt");
+
+        await act(async () => {
+          await result.current.verify.submit("123456");
+        });
+
+        expect(createNewFamily).not.toHaveBeenCalled();
+        expect(onFamilyJoined).toHaveBeenCalledWith(
+          "fam-existing",
+          expect.any(String),
+        );
+      });
+
+      it("refuses to create a family when the lookup fails for a NON-verification reason", async () => {
+        // A network blip / EMPTY_RESPONSE must not be read as "no family" —
+        // creating here would fork a second family for an existing member.
+        const lookupUser = vi
+          .fn()
+          .mockResolvedValueOnce(NO_FAMILY)
+          .mockResolvedValueOnce({
+            error: { code: "SERVER_ERROR", message: "boom" },
+          });
+        const { result } = await driveToIdle(
+          createMockApiClient({ lookupUser }),
+        );
+
+        await act(async () => {
+          await result.current.handleCreate();
+        });
+
+        expect(createNewFamily).not.toHaveBeenCalled();
+        expect(result.current.state).toBe("error");
+        expect(result.current.errorMessage).toBe("無法驗證帳號，請重試。");
+      });
+
+      it("prompts and retries with the secret when the create itself is refused (403)", async () => {
+        const lookupUser = vi.fn().mockResolvedValue(NO_FAMILY);
+        vi.mocked(createNewFamily).mockRejectedValueOnce(
+          new CreateFamilyError("需要驗證", "VERIFICATION_REQUIRED"),
+        );
+        const { result } = await driveToIdle(
+          createMockApiClient({ lookupUser }),
+        );
+
+        await act(async () => {
+          await result.current.handleCreate();
+        });
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.active).toBe(true);
+
+        await act(async () => {
+          await result.current.verify.submit("123456");
+        });
+
+        expect(vi.mocked(createNewFamily).mock.calls.at(-1)?.[0]).toMatchObject(
+          {
+            verifySecret: "123456",
+          },
+        );
+        expect(result.current.state).toBe("created");
+        expect(result.current.generatedSyncCode).toBe("moo-sync-code");
+        expect(result.current.verify.active).toBe(false);
+      });
+
+      it("forwards a 429 VERIFICATION_LOCKED create refusal's retryAfter into the prompt", async () => {
+        const lookupUser = vi.fn().mockResolvedValue(NO_FAMILY);
+        vi.mocked(createNewFamily).mockRejectedValueOnce(
+          new CreateFamilyError("locked", "VERIFICATION_LOCKED", 150),
+        );
+        const { result } = await driveToIdle(
+          createMockApiClient({ lookupUser }),
+        );
+
+        await act(async () => {
+          await result.current.handleCreate();
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.locked).toBe(true);
+        expect(result.current.verify.countdownSeconds).toBe(150);
+      });
+
+      it("keeps a wrong secret's error in the prompt when the create is refused again", async () => {
+        const lookupUser = vi.fn().mockResolvedValue(NO_FAMILY);
+        vi.mocked(createNewFamily)
+          .mockRejectedValueOnce(
+            new CreateFamilyError("需要驗證", "VERIFICATION_REQUIRED"),
+          )
+          .mockRejectedValueOnce(
+            new CreateFamilyError("驗證失敗", "VERIFICATION_FAILED"),
+          );
+        const { result } = await driveToIdle(
+          createMockApiClient({ lookupUser }),
+        );
+
+        await act(async () => {
+          await result.current.handleCreate();
+        });
+        await act(async () => {
+          await result.current.verify.submit("000000");
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
+        expect(result.current.state).not.toBe("created");
+      });
+
+      /**
+       * COPY PIN: VERIFY_CANCELLED_MESSAGE and its 「重新驗證」 action label are
+       * module-private in src/dialog/useOnboardingFlow.ts. This is the single
+       * place the literals are asserted — a wording change fails HERE.
+       */
+      it("shows the create-cancelled message with a 「重新驗證」 action on cancel", async () => {
+        const lookupUser = vi
+          .fn()
+          .mockResolvedValueOnce(NO_FAMILY)
+          .mockResolvedValue(WITHHELD);
+        const { result } = await driveToIdle(
+          createMockApiClient({ lookupUser }),
+        );
+
+        await act(async () => {
+          await result.current.handleCreate();
+        });
+        act(() => {
+          result.current.verify.cancel();
+        });
+
+        expect(result.current.state).toBe("error");
+        expect(result.current.errorMessage).toBe(
+          "需要完成驗證才能建立家庭書櫃，請重試。",
+        );
+        expect(result.current.errorActions).toHaveLength(1);
+        expect(result.current.errorActions[0].label).toBe("重新驗證");
+        expect(result.current.errorActions[0].variant).toBe("primary");
+      });
+
+      it("re-enters the challenge from the 「重新驗證」 action after a withheld lookup, not the create/join screen", async () => {
+        const lookupUser = vi
+          .fn()
+          .mockResolvedValueOnce(NO_FAMILY)
+          .mockResolvedValue(WITHHELD);
+        const { result } = await driveToIdle(
+          createMockApiClient({ lookupUser }),
+        );
+
+        await act(async () => {
+          await result.current.handleCreate();
+        });
+        act(() => {
+          result.current.verify.cancel();
+        });
+        expect(result.current.state).toBe("error");
+
+        // The generic 重試 action would land on "create or join a family",
+        // inviting a second family — the very fork this message warns against.
+        await act(async () => {
+          result.current.errorActions[0].onClick();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        await waitFor(() => {
+          expect(result.current.state).toBe("verify-prompt");
+        });
+
+        expect(result.current.state).not.toBe("idle");
+        expect(result.current.verify.active).toBe(true);
+        // handleStart + the cancelled handleCreate + the re-run handleCreate.
+        expect(lookupUser).toHaveBeenCalledTimes(3);
+        expect(createNewFamily).not.toHaveBeenCalled();
+      });
+
+      it("re-enters the challenge from the 「重新驗證」 action after a refused create, not the create/join screen", async () => {
+        const lookupUser = vi.fn().mockResolvedValue(NO_FAMILY);
+        // Persistent refusal: the re-run must hit the same gate, not succeed.
+        vi.mocked(createNewFamily).mockRejectedValue(
+          new CreateFamilyError("需要驗證", "VERIFICATION_REQUIRED"),
+        );
+        const { result } = await driveToIdle(
+          createMockApiClient({ lookupUser }),
+        );
+
+        await act(async () => {
+          await result.current.handleCreate();
+        });
+        act(() => {
+          result.current.verify.cancel();
+        });
+        expect(result.current.state).toBe("error");
+        expect(result.current.errorActions[0].label).toBe("重新驗證");
+
+        await act(async () => {
+          result.current.errorActions[0].onClick();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        await waitFor(() => {
+          expect(result.current.state).toBe("verify-prompt");
+        });
+
+        expect(result.current.state).not.toBe("idle");
+        expect(result.current.verify.active).toBe(true);
+        expect(createNewFamily).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+
+  /**
+   * REGRESSION (UI deadlock, had zero coverage): every retry closure runs a whole
+   * onboarding flow, and several of them move the state machine into a progress
+   * view ("recovering") whose full-screen LoadingOverlay covers the prompt. When
+   * the attempt failed, nothing brought the state machine back — one wrong PIN
+   * left the dialog stuck under the overlay until the user reopened it.
+   * `onAttemptFailed` restores "verify-prompt" on every failed attempt.
+   */
+  describe("failed retry restores the prompt (no loading-overlay deadlock)", () => {
+    function apiClientWithFamily(): ApiClient {
+      return createMockApiClient({
+        lookupUser: vi.fn().mockResolvedValue({
+          data: { existingFamilyId: "fam-existing", memberCount: 2 },
+        }),
+      });
+    }
+
+    it("auto-recovery bridge: a wrong secret returns to verify-prompt, not 'recovering'", async () => {
+      vi.mocked(tryAutoRecovery)
+        .mockResolvedValueOnce({
+          recovered: false,
+          errorCode: "VERIFICATION_REQUIRED",
+        })
+        .mockResolvedValueOnce({
+          recovered: false,
+          errorCode: "VERIFICATION_FAILED",
+        });
+      const { result } = renderFlow(apiClientWithFamily());
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      await act(async () => {
+        await result.current.verify.submit("000000");
+      });
+
+      // attemptRecovery set "recovering" on the way in; the failure must undo it.
+      expect(result.current.state).toBe("verify-prompt");
+      expect(result.current.state).not.toBe("recovering");
+      expect(result.current.verify.active).toBe(true);
+      expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
+      expect(result.current.verify.submitting).toBe(false);
+    });
+
+    it("lookup-gate bridge: a join failure after a verified lookup returns to verify-prompt", async () => {
+      const lookupUser = vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            existingFamilyId: null,
+            memberCount: 0,
+            requiresVerification: BoolFlag.TRUE,
+          },
+        })
+        .mockResolvedValueOnce({
+          data: { existingFamilyId: "fam-existing", memberCount: 2 },
+        });
+      vi.mocked(tryAutoRecovery).mockResolvedValue({
+        recovered: false,
+        errorCode: "VERIFICATION_FAILED",
+      });
+      const { result } = renderFlow(createMockApiClient({ lookupUser }));
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      await act(async () => {
+        await result.current.verify.submit("000000");
+      });
+
+      expect(result.current.state).toBe("verify-prompt");
+      expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
+    });
+
+    it("solo-recovery bridge: a wrong secret returns to verify-prompt, not 'recovering'", async () => {
+      vi.mocked(performSoloRecovery).mockResolvedValueOnce({
+        recovered: false,
+      });
+      const { result } = await driveToRecoveryChoice(apiClientWithFamily());
+      await act(async () => {
+        await result.current.handleRecoveryChoiceSkip();
+      });
+      expect(result.current.state).toBe("solo-recovery-confirm");
+
+      vi.mocked(performSoloRecovery)
+        .mockResolvedValueOnce({
+          recovered: false,
+          errorCode: "VERIFICATION_REQUIRED",
+        })
+        .mockResolvedValueOnce({
+          recovered: false,
+          errorCode: "VERIFICATION_FAILED",
+        });
+      await act(async () => {
+        await result.current.handleSoloRecoveryConfirm();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      await act(async () => {
+        await result.current.verify.submit("000000");
+      });
+
+      // This bridge's retry closure calls performSoloRecovery directly and does
+      // not (today) enter a progress view, so the assertion pins the invariant
+      // rather than reproducing the overlay bug — it starts catching a real
+      // deadlock the moment the closure gains one, as attemptRecovery has.
+      expect(result.current.state).toBe("verify-prompt");
+      expect(result.current.state).not.toBe("recovering");
+      expect(result.current.verify.active).toBe(true);
+      expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
+    });
+
+    it("a retry closure that THROWS leaves a usable prompt with a generic error", async () => {
+      vi.mocked(tryAutoRecovery)
+        .mockResolvedValueOnce({
+          recovered: false,
+          errorCode: "VERIFICATION_REQUIRED",
+        })
+        .mockRejectedValueOnce(new Error("storage exploded"));
+      const { result } = renderFlow(apiClientWithFamily());
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      await act(async () => {
+        await result.current.verify.submit("123456");
+      });
+
+      expect(result.current.verify.submitting).toBe(false);
+      expect(result.current.verify.active).toBe(true);
+      expect(result.current.verify.error).toBe("發生錯誤，請稍後再試");
+      expect(result.current.state).toBe("verify-prompt");
+    });
+
+    it("a successful retry navigates away instead of resurrecting the prompt", async () => {
+      const onFamilyJoined = vi.fn();
+      vi.mocked(tryAutoRecovery).mockImplementation(async (opts) => {
+        if (!opts.verifySecret) {
+          return { recovered: false, errorCode: "VERIFICATION_REQUIRED" };
+        }
+        opts.onFamilyJoined(opts.familyId, opts.userId);
+        return { recovered: true };
+      });
+      const { result } = renderFlow(
+        apiClientWithFamily(),
+        createMockAutoSetup(),
+        onFamilyJoined,
+      );
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      await act(async () => {
+        await result.current.verify.submit("123456");
+      });
+
+      expect(onFamilyJoined).toHaveBeenCalledWith(
+        "fam-existing",
+        expect.any(String),
+      );
+      expect(result.current.verify.active).toBe(false);
+      // The success path must NOT force the prompt back over a completed journey.
+      expect(result.current.state).not.toBe("verify-prompt");
+    });
+
+    // performJoin only advances the state machine ("syncing-books") on success,
+    // so this path cannot deadlock today; the case guards the shared bridge
+    // handleJoin was migrated onto against a future progress view.
+    it("manual sync-code join: a wrong secret keeps the prompt open", async () => {
+      vi.mocked(performJoin).mockResolvedValue({
+        ok: false,
+        errorCode: "VERIFICATION_FAILED",
+        errorMessage: "驗證失敗",
+      });
+      const { result } = renderFlow(createMockApiClient());
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      act(() => {
+        result.current.setSyncCodeInput("moo-fam-joined");
+      });
+      await act(async () => {
+        await result.current.handleJoin();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      await act(async () => {
+        await result.current.verify.submit("000000");
+      });
+
+      expect(result.current.state).toBe("verify-prompt");
+      expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
+      expect(result.current.verify.submitting).toBe(false);
     });
   });
 

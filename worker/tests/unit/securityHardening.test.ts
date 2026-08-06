@@ -1,8 +1,21 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app, { isAllowedOrigin } from "../../src/index";
-import { isPublicRoute, isSensitivePublicRoute } from "../../src/utils/routes";
+import {
+  isPublicRoute,
+  isSensitivePublicRoute,
+  sensitiveBucketFor,
+} from "../../src/utils/routes";
+import { rateLimitBucketFor } from "../../src/middleware/rateLimit";
 import { createMockKV } from "../helpers/mockKv";
-import { USER1, USER2, USER4, USER5, OWNER1, makeUserId } from "../helpers/ids";
+import {
+  USER1,
+  USER2,
+  USER3,
+  USER4,
+  USER5,
+  OWNER1,
+  makeUserId,
+} from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -218,6 +231,102 @@ describe("isPublicRoute", () => {
   });
 });
 
+// ===========================================================================
+// Sensitive-tier classification + bucket split
+//
+// Every sensitive route carries the SAME per-minute limit, but `/api/auth/lookup`
+// counts in its OWN bucket so that a verified account's onboarding (two lookups —
+// the no-secret probe, then the retry carrying the secret — plus one create/join)
+// cannot exhaust its own budget. `sensitiveBucketFor` owns the classification and
+// `rateLimitBucketFor` turns it into a counter; both are asserted through the
+// production exports so a renamed prefix or a moved route breaks here.
+// ===========================================================================
+
+const ONBOARDING_BUCKET = "onboarding";
+const LOOKUP_BUCKET = "lookup";
+
+describe("sensitiveBucketFor", () => {
+  it.each([
+    {
+      label: "POST /api/family (create)",
+      method: "POST",
+      path: "/api/family",
+      bucket: ONBOARDING_BUCKET,
+    },
+    {
+      label: "POST /api/family/ (trailing slash)",
+      method: "POST",
+      path: "/api/family/",
+      bucket: ONBOARDING_BUCKET,
+    },
+    {
+      label: "POST /api/family/:id/join",
+      method: "POST",
+      path: "/api/family/abcd-1234/join",
+      bucket: ONBOARDING_BUCKET,
+    },
+    {
+      label: "POST /api/family/:id/join/ (trailing slash)",
+      method: "POST",
+      path: "/api/family/abcd-1234/join/",
+      bucket: ONBOARDING_BUCKET,
+    },
+    {
+      label: "POST /api/auth/lookup",
+      method: "POST",
+      path: "/api/auth/lookup",
+      bucket: LOOKUP_BUCKET,
+    },
+    {
+      label: "POST /api/auth/lookup/ (trailing slash)",
+      method: "POST",
+      path: "/api/auth/lookup/",
+      bucket: LOOKUP_BUCKET,
+    },
+    // Public but NOT sensitive — these keep the looser public tier.
+    {
+      label: "GET /api/user/:id/verify",
+      method: "GET",
+      path: "/api/user/abc123/verify",
+      bucket: null,
+    },
+    {
+      label: "GET /api/public/:shareToken",
+      method: "GET",
+      path: "/api/public/sometoken",
+      bucket: null,
+    },
+    // Standard tier / wrong method.
+    {
+      label: "GET /api/family",
+      method: "GET",
+      path: "/api/family",
+      bucket: null,
+    },
+    {
+      label: "POST /api/auth/refresh",
+      method: "POST",
+      path: "/api/auth/refresh",
+      bucket: null,
+    },
+    {
+      label: "PUT /api/user/:id/books",
+      method: "PUT",
+      path: "/api/user/test/books",
+      bucket: null,
+    },
+  ])("should classify $label as $bucket", ({ method, path, bucket }) => {
+    expect(sensitiveBucketFor(method, path)).toBe(bucket);
+  });
+
+  it("should keep lookup and onboarding in different buckets", () => {
+    // The whole point of the split: one bucket cannot crowd the other out.
+    expect(sensitiveBucketFor("POST", "/api/auth/lookup")).not.toBe(
+      sensitiveBucketFor("POST", "/api/family"),
+    );
+  });
+});
+
 describe("isSensitivePublicRoute", () => {
   it("should match POST /api/family (create)", () => {
     expect(isSensitivePublicRoute("POST", "/api/family")).toBe(true);
@@ -230,16 +339,82 @@ describe("isSensitivePublicRoute", () => {
     );
   });
 
-  it("should NOT match other public routes", () => {
-    expect(isSensitivePublicRoute("POST", "/api/auth/lookup")).toBe(false);
+  it("should match POST /api/auth/lookup (verification-secret oracle)", () => {
+    // Lookup is the cheapest oracle of the three — a pure read with no terminal
+    // 409 in front of it — so it sits on the sensitive tier, in its own bucket.
+    expect(isSensitivePublicRoute("POST", "/api/auth/lookup")).toBe(true);
+    expect(isSensitivePublicRoute("POST", "/api/auth/lookup/")).toBe(true);
+  });
+
+  it("should NOT match public routes outside the sensitive tier", () => {
     expect(isSensitivePublicRoute("GET", "/api/user/abc123/verify")).toBe(
       false,
     );
+    expect(isSensitivePublicRoute("GET", "/api/public/sometoken")).toBe(false);
   });
 
   it("should NOT match standard routes", () => {
     expect(isSensitivePublicRoute("GET", "/api/user/test/books")).toBe(false);
     expect(isSensitivePublicRoute("PUT", "/api/user/test/books")).toBe(false);
+  });
+
+  it("should agree with sensitiveBucketFor on every route it is asked about", () => {
+    const routes: [string, string][] = [
+      ["POST", "/api/family"],
+      ["POST", "/api/family/abcd-1234/join"],
+      ["POST", "/api/auth/lookup"],
+      ["GET", "/api/user/abc123/verify"],
+      ["GET", "/api/public/sometoken"],
+      ["PUT", "/api/user/test/books"],
+    ];
+    for (const [method, path] of routes) {
+      expect(isSensitivePublicRoute(method, path)).toBe(
+        sensitiveBucketFor(method, path) !== null,
+      );
+    }
+  });
+});
+
+describe("rateLimitBucketFor", () => {
+  it("should give lookup and onboarding distinct counters at the SAME limit", () => {
+    const lookup = rateLimitBucketFor("POST", "/api/auth/lookup");
+    const onboarding = rateLimitBucketFor("POST", "/api/family");
+
+    // Splitting the counter must not loosen the tier.
+    expect(lookup.limit).toBe(onboarding.limit);
+    expect(lookup.prefix).not.toBe(onboarding.prefix);
+  });
+
+  it("should give every tier its own counter prefix", () => {
+    const prefixes = [
+      rateLimitBucketFor("POST", "/api/family").prefix,
+      rateLimitBucketFor("POST", "/api/auth/lookup").prefix,
+      rateLimitBucketFor("GET", "/api/user/abc123/verify").prefix,
+      rateLimitBucketFor("GET", "/api/user/test/books").prefix,
+    ];
+    expect(new Set(prefixes).size).toBe(prefixes.length);
+  });
+
+  it("should order the tiers sensitive < public < standard", () => {
+    const sensitive = rateLimitBucketFor("POST", "/api/family").limit;
+    const publicTier = rateLimitBucketFor(
+      "GET",
+      "/api/user/abc123/verify",
+    ).limit;
+    const standard = rateLimitBucketFor("GET", "/api/user/test/books").limit;
+
+    expect(sensitive).toBeLessThan(publicTier);
+    expect(publicTier).toBeLessThan(standard);
+  });
+
+  it("should not let a crafted caller key alias the lookup counter", () => {
+    // Full key is `{prefix}:{ip}:{minuteBucket}`. The only way an onboarding
+    // caller could reach into the nested lookup namespace is a caller key of
+    // exactly "lookup" — and even then the two keys differ in shape.
+    const onboarding = rateLimitBucketFor("POST", "/api/family").prefix;
+    const lookup = rateLimitBucketFor("POST", "/api/auth/lookup").prefix;
+
+    expect(`${onboarding}:lookup:1`).not.toBe(`${lookup}:1.2.3.4:1`);
   });
 });
 
@@ -315,10 +490,26 @@ describe("Request body size limit", () => {
 // B3: Rate Limit Tiers
 // ===========================================================================
 
+/**
+ * Per-minute allowances, read back from the production classifier so a change to
+ * any tier's ceiling reaches these loops instead of leaving them asserting a
+ * stale number. The routes below are the same ones the loops exercise.
+ */
+const SENSITIVE_LIMIT = rateLimitBucketFor("POST", "/api/family").limit;
+const LOOKUP_LIMIT = rateLimitBucketFor("POST", "/api/auth/lookup").limit;
+const PUBLIC_LIMIT = rateLimitBucketFor(
+  "GET",
+  `/api/user/${USER3}/verify`,
+).limit;
+const STANDARD_LIMIT = rateLimitBucketFor("GET", "/api/user/test/books").limit;
+
+/** A public, non-sensitive route: the login-time verification-method probe. */
+const PUBLIC_ROUTE = `/api/user/${USER3}/verify`;
+
 describe("Rate limit tiers", () => {
   it("should rate-limit sensitive route POST /api/family after 3 requests", async () => {
     // Send 3 requests — all should succeed
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < SENSITIVE_LIMIT; i++) {
       const res = await request("POST", "/api/family", {
         body: JSON.stringify({ userId: makeUserId(i) }),
       });
@@ -343,65 +534,135 @@ describe("Rate limit tiers", () => {
   });
 
   it("should rate-limit sensitive route POST /api/family/:id/join after 3 requests", async () => {
-    // Create a family first (uses 1 of the sensitive budget)
+    // Create a family first (uses 1 of the onboarding budget)
     const createRes = await request("POST", "/api/family", {
       body: JSON.stringify({ userId: OWNER1 }),
     });
     const family = (await createRes.json()) as Json;
     const familyId = family.data.familyId;
 
-    // Use up remaining sensitive budget (we already used 1 for create)
-    for (let i = 0; i < 2; i++) {
+    // Use up the remaining onboarding budget (we already used 1 for create)
+    for (let i = 0; i < SENSITIVE_LIMIT - 1; i++) {
       await request("POST", `/api/family/${familyId}/join`, {
         body: JSON.stringify({ userId: makeUserId(100 + i) }),
       });
     }
 
-    // 4th sensitive request should be rate-limited
+    // 4th onboarding request should be rate-limited
     const res = await request("POST", `/api/family/${familyId}/join`, {
       body: JSON.stringify({ userId: USER5 }),
     });
     expect(res.status).toBe(429);
   });
 
-  it("should use separate counters for sensitive, public, and standard routes", async () => {
-    // Exhaust sensitive limit (3 requests)
-    for (let i = 0; i < 3; i++) {
-      await request("POST", "/api/family", {
-        body: JSON.stringify({ userId: makeUserId(i) }),
-      });
-    }
-
-    // Public (non-sensitive) route should still work (separate counter)
-    const lookupRes = await request("POST", "/api/auth/lookup", {
-      body: JSON.stringify({ userId: USER2 }),
-    });
-    expect(lookupRes.status).not.toBe(429);
-
-    // Standard route should still work (separate counter)
-    const res = await request("GET", "/api/user/test/books");
-    expect(res.status).toBe(401); // auth required, not 429
-  });
-
-  it("should rate-limit public (non-sensitive) routes after 10 requests", async () => {
-    // POST /api/auth/lookup is public but not sensitive
-    for (let i = 0; i < 10; i++) {
+  it("should rate-limit sensitive route POST /api/auth/lookup after 3 requests", async () => {
+    // Lookup lets an unauthenticated caller test a verifySecret against someone
+    // else's account, so it sits on the sensitive tier, not the public one.
+    for (let i = 0; i < LOOKUP_LIMIT; i++) {
       const res = await request("POST", "/api/auth/lookup", {
         body: JSON.stringify({ userId: makeUserId(i) }),
       });
       expect(res.status).not.toBe(429);
     }
-    // 11th request should be rate-limited
+
     const res = await request("POST", "/api/auth/lookup", {
       body: JSON.stringify({ userId: USER4 }),
     });
+    expect(res.status).toBe(429);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("RATE_LIMITED");
+  });
+
+  it("should use separate counters for onboarding, lookup, public, and standard routes", async () => {
+    // Exhaust the sensitive ONBOARDING counter (family create / join).
+    for (let i = 0; i < SENSITIVE_LIMIT; i++) {
+      await request("POST", "/api/family", {
+        body: JSON.stringify({ userId: makeUserId(i) }),
+      });
+    }
+    const onboardingBlocked = await request("POST", "/api/family", {
+      body: JSON.stringify({ userId: USER4 }),
+    });
+    expect(onboardingBlocked.status).toBe(429);
+
+    // The sensitive LOOKUP counter is a DIFFERENT key at the same limit, so
+    // onboarding cannot crowd it out.
+    const lookupRes = await request("POST", "/api/auth/lookup", {
+      body: JSON.stringify({ userId: USER2 }),
+    });
+    expect(lookupRes.status).not.toBe(429);
+
+    // Public (non-sensitive) tier — its own counter.
+    const publicRes = await request("GET", PUBLIC_ROUTE);
+    expect(publicRes.status).toBe(200);
+
+    // Standard tier — its own counter.
+    const res = await request("GET", "/api/user/test/books");
+    expect(res.status).toBe(401); // auth required, not 429
+  });
+
+  it("should not let an exhausted lookup counter block family create", async () => {
+    for (let i = 0; i < LOOKUP_LIMIT; i++) {
+      await request("POST", "/api/auth/lookup", {
+        body: JSON.stringify({ userId: makeUserId(i) }),
+      });
+    }
+    const lookupBlocked = await request("POST", "/api/auth/lookup", {
+      body: JSON.stringify({ userId: USER2 }),
+    });
+    expect(lookupBlocked.status).toBe(429);
+
+    // The onboarding budget is untouched — this is the direction that matters:
+    // a client that probed lookup can still complete the create it was probing for.
+    const createRes = await request("POST", "/api/family", {
+      body: JSON.stringify({ userId: USER1 }),
+    });
+    expect(createRes.status).toBe(201);
+  });
+
+  it("should fit one verified account's onboarding inside the split budgets", async () => {
+    // The flow the split exists for: a no-secret lookup probe, the same lookup
+    // carrying the secret, then the create — three sensitive requests from one
+    // IP inside one minute. On a shared 3/min counter this would leave zero
+    // headroom for a mistyped PIN; split, it costs 2 of 3 and 1 of 3.
+    for (let i = 0; i < 2; i++) {
+      const probe = await request("POST", "/api/auth/lookup", {
+        body: JSON.stringify({ userId: USER1 }),
+      });
+      expect(probe.status).toBe(200);
+    }
+
+    const createRes = await request("POST", "/api/family", {
+      body: JSON.stringify({ userId: USER1 }),
+    });
+    expect(createRes.status).toBe(201);
+
+    // Headroom left in BOTH counters for a retry.
+    const retryLookup = await request("POST", "/api/auth/lookup", {
+      body: JSON.stringify({ userId: USER1 }),
+    });
+    expect(retryLookup.status).not.toBe(429);
+    const retryOnboarding = await request("POST", "/api/family", {
+      body: JSON.stringify({ userId: USER2 }),
+    });
+    expect(retryOnboarding.status).not.toBe(429);
+  });
+
+  it("should rate-limit public (non-sensitive) routes after 10 requests", async () => {
+    // GET /api/user/:id/verify is public but not sensitive.
+    for (let i = 0; i < PUBLIC_LIMIT; i++) {
+      const res = await request("GET", PUBLIC_ROUTE);
+      expect(res.status).not.toBe(429);
+    }
+    // The next request should be rate-limited
+    const res = await request("GET", PUBLIC_ROUTE);
     expect(res.status).toBe(429);
   });
 
   it("should allow up to 60 requests on standard routes", async () => {
     // Standard routes need auth token — but we can verify the counter
     // by sending requests that fail auth (401) but still pass rate-limit.
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < STANDARD_LIMIT; i++) {
       const res = await request("GET", "/api/user/test/books");
       expect(res.status).toBe(401); // not 429
     }

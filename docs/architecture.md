@@ -160,12 +160,21 @@
 | `GET`  | `/api/user/:id/books` | 取得個人書單及開放設定 | 本人 |
 | `PUT`  | `/api/user/:id/books` | 更新個人開放設定       | 本人 |
 
+#### 認證 API
+
+| Method | Path                | 說明                                     | 權限                        |
+| ------ | ------------------- | ---------------------------------------- | --------------------------- |
+| `POST` | `/api/auth/lookup`  | 以 userId 查詢所屬家庭（見下方驗證閘門） | 公開（設有驗證者需通過）    |
+| `POST` | `/api/auth/refresh` | 換發 auth token                          | 本人（需有效 Bearer token） |
+
+`/api/auth/lookup` 的請求為 `{ userId, verifySecret? }`，回應 `data` 為 `{ existingFamilyId, memberCount, requiresVerification }`（`requiresVerification` 為 `BoolFlag`，0/1）。帳號設有 PWA 登入驗證但未附 `verifySecret` 時，回傳 **200** 且 `requiresVerification: 1`、不揭露任何家庭資訊（此為告知用途，非錯誤），用戶端據此提示輸入驗證後重送。
+
 #### 家庭群組 API
 
 | Method   | Path                          | 說明                       | 權限                            |
 | -------- | ----------------------------- | -------------------------- | ------------------------------- |
-| `POST`   | `/api/family`                 | 建立新家庭群組，回傳同步碼 | 任何使用者                      |
-| `POST`   | `/api/family/:id/join`        | 以同步碼加入家庭           | 任何使用者                      |
+| `POST`   | `/api/family`                 | 建立新家庭群組，回傳同步碼 | 任何使用者（設有驗證者需通過）  |
+| `POST`   | `/api/family/:id/join`        | 以同步碼加入家庭           | 任何使用者（設有驗證者需通過）  |
 | `DELETE` | `/api/family/:id/member/:uid` | 移除成員或離開家庭         | Owner（移除他人）或本人（離開） |
 | `PUT`    | `/api/family/:id/transfer`    | 轉移 Owner 管理權          | Owner                           |
 | `GET`    | `/api/family/:id/members`     | 取得家庭成員列表           | 家庭成員                        |
@@ -361,25 +370,52 @@ moo-{family_id_short}@{api_host_encoded}
 #### 安全措施
 
 - PIN/Pattern hash 以 SHA-256(salt + secret) 儲存於 `verify:{userId}`（server 端驗證）
-- 連續 5 次驗證失敗 → 鎖定 15 分鐘。失敗次數與鎖定狀態是「以來源 + 目標帳號」為單位計算，記錄在獨立且有 TTL（900 秒）的 `verifyfail:{userId}:{caller}`，不會寫入帳號本身的 `verify:{userId}`。因為加入家庭是公開端點、userId 由 email 推導、familyId 又可從公開的 `/api/auth/lookup` 查到，若把失敗次數記在帳號上，任何第三方都能靠亂送錯誤驗證把別人鎖在 PWA 登入之外（DoS）；改為記在來源後，攻擊者只會鎖住自己
+- **驗證閘門涵蓋三個公開端點**：`POST /api/family`（建立家庭）、`POST /api/family/:id/join`（加入家庭）、`POST /api/auth/lookup`（查詢所屬家庭）。三者共用同一個 `validateVerification`，錯誤碼與鎖定行為完全一致（`400 INVALID_VERIFY_SECRET` / `403 VERIFICATION_REQUIRED` / `403 VERIFICATION_FAILED` / `429 VERIFICATION_LOCKED` / `429 RATE_LIMITED`，兩種 429 皆附 `retryAfter`）。原因是 userId 由 email 加固定鹽推導而來、屬公開可猜的識別碼，而個人設定 `user:{userId}` 在離開家庭後仍會保留（設計如此）：
+  - **建立家庭**若不設閘門，任何知道受害者 Email 的人都能為受害者的 userId 建立家庭並取得有效 auth token，進而讀取其完整書單（含未開放書籍）與修改開放設定，等同帳號接管
+  - **查詢所屬家庭**若不設閘門，familyId（即同步碼本體）會直接外洩，陌生人可用自己的 userId 加入尚未額滿（上限 2 人）的家庭並瀏覽共享書櫃
+  - 閘門位置：建立家庭時排在 `ALREADY_IN_FAMILY` 衝突檢查之後、**任何 KV 寫入與發放 token 之前**（含孤兒 `member:` key 清理），驗證失敗不會留下任何副作用；查詢所屬家庭時則排在讀取家庭歸屬之前，未通過者不會觸發任何家庭查詢
+  - **`ALREADY_IN_FAMILY`（409）排在閘門之前，是刻意保留的極小揭露**：它等於告訴未通過驗證的呼叫方一件布林事實——「這個 Email 對應的帳號目前屬於某個家庭」（不含是哪一個）。之所以不把閘門提前：這個衝突是「便宜且終局」的，任何密鑰都無法讓該請求成功，先驗證只會白白要求使用者輸入 PIN、消耗該帳號的驗證嘗試額度，最後仍然拒絕。建立家庭與加入家庭採同一順序，行為一致。真正有價值的資訊（familyId／同步碼、auth token、成員資料）與所有寫入都仍在閘門之後
+- **`verifySecret` 在 handler 邊界就統一把關**：三個入口都先用 `sanitizeVerifySecret()`（`worker/src/utils/validation.ts`）分類，再交給閘門——「未提供」（欄位缺少、`null`、空字串）走各端點原本的無密鑰行為（lookup 回 `requiresVerification: 1`，create／join 回 `403 VERIFICATION_REQUIRED`）；「有給但格式不對」（非字串，或長度超過 `VERIFY_SECRET_MAX_LENGTH` = 256）一律回 `400 INVALID_VERIFY_SECRET`。理由有二：其一，格式錯誤是「請求本身不合法」，不是「驗證失敗」，因此不該計入任何失敗額度，也不該讓超長字串走到 hash 計算；其二，同一份錯誤輸入以前在 lookup 會被當成「沒帶密鑰」（200）、在 create／join 卻落入 `403 VERIFICATION_REQUIRED`，三個入口對同一種輸入給出不同狀態碼，現已統一
+- **未設定驗證的帳號行為不變（已接受的殘餘風險）**：`verify:{userId}` 不存在或 `method: "none"` 時一律直接放行，上述兩項風險對這些帳號依然成立。本次修正的目標是「有設定驗證的人真的受到保護」，而非強制所有人設定驗證；是否改為強制屬產品決策
+- 連續 5 次驗證失敗 → 鎖定 15 分鐘。失敗次數與鎖定狀態是「以來源 + 目標帳號」為單位計算，記錄在獨立且有 TTL（900 秒）的 `verifyfail:{userId}:{caller}`，不會寫入帳號本身的 `verify:{userId}`。因為建立／加入家庭與 `/api/auth/lookup` 都是公開端點、userId 又由 email 推導（可猜），若把失敗次數記在帳號上，任何第三方都能靠亂送錯誤驗證把別人鎖在 PWA 登入之外（DoS）；改為記在來源後，攻擊者只會鎖住自己。註：`/api/auth/lookup` 現已納入驗證閘門，設有驗證的帳號不再從該端點外洩 familyId，但 userId 本身仍可猜，以受害者為 key 的失敗計數依舊是 DoS 槓桿，因此此設計不變
+- **每個目標帳號另有「驗證嘗試上限」：每小時 10 次（`ratelimit:user:verify:{userId}:{bucket}`）**。這道限制寫在 `validateVerification` 內部，而非各個 handler，因此建立家庭、加入家庭、查詢所屬家庭三個入口一律受同一道約束，未來新增的呼叫端也不可能漏掉。**只有「猜錯的密鑰」才計數，而且額度是在比對「之後」才查看**：先執行 `matchesSecret` 比對，密鑰正確就直接放行——**即使該帳號的額度已被打滿也一樣，且不計數**；只有比對失敗的那條分支才唯讀查看額度（`peekPerUserRateLimit`）並加一（`chargePerUserRateLimit`）。猜錯時若額度已用盡，回傳 `429 RATE_LIMITED`（附 `retryAfter`，取代原本的 `403 VERIFICATION_FAILED`），且不會再寫入已滿的計數器（被拒絕的嘗試不得延長視窗）。因此沒帶密鑰（`VERIFICATION_REQUIRED`）、格式錯誤（`400`，在 handler 就擋下）、未設定驗證的帳號、以及**帳號本人輸入正確密鑰的成功流程**都不消耗額度；已被鎖定的來源仍在比對之前就被擋下（該鎖定以來源為 key，不是針對受害者的槓桿）。這不會放寬防護：攻擊者送出的每一次猜測依定義都是錯的，每小時 10 次失敗後仍然封鎖後續猜測，暴力破解的上限完全不變
+  - **執行順序與代價**（由上而下，先命中者勝）：
+
+    | 情境                 | 結果                      | KV 寫入                    |
+    | -------------------- | ------------------------- | -------------------------- |
+    | 未設定驗證／記錄毀損 | 通過                      | 無                         |
+    | 該來源已鎖定         | 429 VERIFICATION_LOCKED   | 無                         |
+    | 未帶密鑰             | 403 VERIFICATION_REQUIRED | 無                         |
+    | 密鑰正確             | 通過                      | 刪除該來源失敗紀錄（若有） |
+    | 密鑰錯誤，額度尚有   | 403 VERIFICATION_FAILED   | 嘗試計數器 + 失敗紀錄      |
+    | 密鑰錯誤，額度已滿   | 429 RATE_LIMITED          | 僅失敗紀錄                 |
+
+  - **為何需要**：鎖定機制以「來源」為 key（見下一點），攻擊者輪替 IPv6 前綴就能規避，等於沒有全域上限。圖形驗證最短只有 4 個節點、9×8×7×6 = 3,024 種組合，約 605 個前綴（單一 /48 配額內即可湊齊）就能試完整個空間
+  - **殘餘風險（有界，且不再傷及帳號本人）**：這個計數器仍以**受害者的 userId** 為 key，第三方可以連續送出 10 次錯誤密鑰把它打滿。但打滿之後擋下的只有「針對該帳號的後續**猜測**」——帳號本人帶著正確密鑰仍然照常通過（查詢、建立、加入三個入口皆是），因為正確密鑰根本不會被拿去比對額度。也就是說，這個計數器是對付攻擊者的槓桿，不是能把帳號本人關在門外的槓桿。它與「鎖定必須以來源為 key」的原則不衝突：那條原則規範的是**誰會被鎖住**，而不是禁止存在全域嘗試上限
+  - 兩個計數器互相獨立（scope 分別為 `verify` 與 `join`），語意各自清楚；`DEV_MODE=1` 下與其他速率限制一樣停用。注意 `join` 計數器的語意不同：它對**每一次**加入請求計數（`enforcePerUserRateLimit`），因此仍是以受害者為 key、會擋到本人的可用性槓桿
 - **變更驗證方式／密鑰會作廢先前的失敗紀錄**：`PUT /api/user/:id/verify` 會在 `verify:{userId}` 寫入 `secretUpdatedAt`（epoch 毫秒）；`verifyfail:{userId}:{caller}` 則記錄該次連續失敗的起始時間 `startedAt`。驗證時若 `startedAt < secretUpdatedAt`，代表這筆失敗紀錄是針對「已經不存在的舊密鑰」累積的，直接視為作廢：不觸發鎖定、失敗次數不再累加。作廢是每次請求即時重算的記憶體判定，未刪除的殘留紀錄本身即失效；實際清除只發生在「驗證成功」時（刪除該來源自己的那把 key，不做 KV list 掃描），輸入錯誤密鑰時則由新的失敗紀錄整筆覆寫，未帶密鑰或鎖定中則完全不寫入。理由是 Cloudflare KV 對同一個 key 每秒僅允許一次寫入，先刪後寫可能讓剛計數的失敗被靜默丟棄，因此每次請求對 `verifyfail:{userId}:{caller}` 至多一次寫入。因此忘記 PIN 而在手機被鎖定的使用者，只要在桌面 Extension 重設 PIN／圖形，就能立即登入，不必等 15 分鐘。兩個欄位任一缺漏（舊資料）時一律**維持鎖定**，缺值永遠不會解鎖。這不會成為 DoS 手段：`secretUpdatedAt` 只能透過 `PUT /api/user/:id/verify` 更新，該端點需要有效 token 且 `callerId === userId`，只有帳號本人能作廢失敗紀錄，而且只能作廢自己帳號上的
 - 來源（caller key）取自 Cloudflare 的 `cf-connecting-ip`（邊緣設定、無法偽造）。IPv4 直接使用；IPv6 正規化為 /64 前綴後才當 key，因為家用 IPv6 至少配發一個 /64，且 privacy extensions 可讓用戶端隨意更換介面識別碼——若以完整位址為 key，攻擊者每送一次請求就能換到全新的失敗額度與全新的速率限制桶。兩個例外：IPv4-mapped 位址（`::ffff:a.b.c.d`）會收斂成內嵌的 IPv4，與該 IPv4 共用同一個 key；無法解析的值則加上 `raw:` 前綴自成一個命名空間，確保不會與真正的 /64 桶撞在一起。同一套正規化也套用在 per-IP 速率限制上
 - 已接受的殘餘風險（非缺陷，權衡後保留）：
   - **共用對外 IP**：CGNAT、公司／校園 NAT 之後的多個使用者（IPv6 則是同一個 /64 內的裝置）針對「同一個目標帳號」會共用同一份失敗額度，可能被同來源的其他人連帶鎖住 15 分鐘。相對於「任何陌生人都能鎖住任何帳號」，此風險範圍小很多
-  - **跨來源暴力破解不再由鎖定機制擋下**：從「單一來源」發動的暴力破解仍受 per-IP 敏感端點限制（每分鐘 3 次）約束；但攻擊者只要輪替來源前綴，就只剩 per-userId 加入速率限制（每小時 10 次）這一道約束。注意這兩道限制在 `DEV_MODE=1` 的 Worker 上會被停用（見 `worker/DEPLOY.md`），因此 dev worker 不得存放真實資料
+  - **跨來源暴力破解不再由鎖定機制擋下**：從「單一來源」發動的暴力破解仍受 per-IP 敏感端點限制（每分鐘 3 次）約束——**驗證閘門的三個入口（建立／加入／查詢所屬家庭）現已全部列為敏感端點**（`isSensitivePublicRoute()`），因為查詢所屬家庭同樣讓未驗證的呼叫方可以測試密鑰，而且是三者中最便宜的一條（純讀取、前面沒有 409 終局衝突）。分類只看路徑不看 body：速率限制中介層在解析 body 之前就執行，無從得知這次有沒有帶 `verifySecret`，而攻擊者本來就會每次都帶。**敏感端點使用同一個限額（每分鐘 3 次）但分成兩個獨立計數器**：建立／加入家庭記在 `ratelimit:sens:{ip}:{bucket}`，查詢所屬家庭記在 `ratelimit:sens:lookup:{ip}:{bucket}`。原因是一次正常的登入流程本身就會在同一分鐘內用掉 3 次敏感請求（先 lookup 探詢、再 lookup 帶密鑰、最後 create／join），若共用一個計數器，使用者只要 PIN 打錯一次要重試、或家中第二個人在同一個 NAT／IPv6 /64 之後接著設定，就會立刻收到 60 秒的 429。拆開之後這段流程是 lookup 桶 2 次、create／join 桶 1 次，重試不再互相排擠。分桶只改「記在哪個 key」，限額與嚴格程度完全不變（`rateLimitBucketFor()` 於 `worker/src/middleware/rateLimit.ts`）。攻擊者輪替來源前綴後，則由 per-userId 的驗證嘗試上限（每小時 10 次失敗，涵蓋同樣三個入口）接手擋下。注意這些限制在 `DEV_MODE=1` 的 Worker 上會被停用（見 `worker/DEPLOY.md`），因此 dev worker 不得存放真實資料
   - **最壞情況量化（圖形驗證的最短長度不足）**：以每小時 10 次的上限推算——6 位數 PIN（`^\d{6,12}$`，至少 10^6 種組合）需時以「年」為單位，實務上不可行；但圖形驗證目前允許的最短長度只有 4 個不重複節點，組合數僅 9×8×7×6 = **3,024 種**，全部試完約需 302 小時（約兩週），命中機率達 50% 只需約 151 小時（約 6 天）。這是「最短圖形長度」帶來的已知限制，不是實作缺陷；是否提高最短節點數屬產品決策，本次不更動 `isValidPattern`
-  - **per-userId 加入速率限制本身是以受害者的 userId 為 key**：第三方仍可靠打滿該額度讓受害者在該小時內收到 `429 RATE_LIMITED`。這是較輕微的可用性影響（不影響帳號狀態、隨時間自動恢復），列為已知限制，暫不處理
-- OTP 使用後立即刪除（一次性）
+  - **per-userId 速率限制以受害者的 userId 為 key**：`join`（每次加入請求都計數）第三方仍可打滿，讓受害者在該小時內收到 `429 RATE_LIMITED`；這是較輕微的可用性影響（不影響帳號狀態、隨時間自動恢復），列為已知限制。`verify` 嘗試上限則**不再是這種槓桿**：它在密鑰比對之後才查看，正確密鑰一律放行，被打滿只會擋住後續的錯誤猜測
+  - **合法使用者的額度消耗：零**。一次完整登入流程（先 `/api/auth/lookup` 帶密鑰，再 create／join 帶同一組密鑰）雖然會通過閘門兩次，但兩次都比對成功，因此不消耗任何額度；就算此時該帳號的 `verify` 額度已被攻擊者打滿，本人依然通過。每小時 10 次的額度只會被「猜錯」吃掉
+  - **KV 計數器沒有原子性**：所有速率限制（per-IP、per-userId、驗證嘗試上限）都是 KV get-then-put，沒有序列化。同時併發送出的請求會讀到同一個計數值而全部放行，因此爆發流量的超額幅度取決於**攻擊者自己的併發數**，不是固定的 ~2 倍；這些限制只對循序流量成立。要有硬上限必須改用 Durable Objects 或 Cloudflare 原生 rate-limiting binding（見 `docs/project-plan.md` BE-4），屬另案決策
+- OTP 使用後立即刪除（一次性）。唯一例外是 `POST /api/auth/lookup`：該端點以 `consumeOtp: false` 呼叫閘門，比對成功也不刪除 OTP。因為用戶端的流程是「先 lookup 帶密鑰確認歸屬，再 create／join 帶**同一組**密鑰」，若在 lookup 就把一次性 OTP 用掉，第二個請求必然失敗且被計為一次驗證失敗，5 次就把使用者自己鎖住 15 分鐘。不刪除也不會放寬安全性：OTP 仍受自身 300 秒 TTL 約束，且呼叫方本來就已經持有它
 - Token refresh 改為 protected route（需有效 Bearer token），防止 userId + familyId 直接取得新 token
 - 預設不設定；首次 PWA 登入後提醒一次，之後不再提醒
 
 #### KV Key 設計
 
-| Key Pattern                    | Value                                                | TTL    |
-| ------------------------------ | ---------------------------------------------------- | ------ |
-| `verify:{userId}`              | `{ method, hash, salt, prompted, secretUpdatedAt? }` | None   |
-| `verifyfail:{userId}:{caller}` | `{ failCount, lockedUntil, startedAt? }`             | 900 秒 |
-| `otp:{userId}`                 | `{ code, createdAt }`                                | 300 秒 |
+| Key Pattern                               | Value                                                | TTL      |
+| ----------------------------------------- | ---------------------------------------------------- | -------- |
+| `verify:{userId}`                         | `{ method, hash, salt, prompted, secretUpdatedAt? }` | None     |
+| `verifyfail:{userId}:{caller}`            | `{ failCount, lockedUntil, startedAt? }`             | 900 秒   |
+| `otp:{userId}`                            | `{ code, createdAt }`                                | 300 秒   |
+| `ratelimit:user:verify:{userId}:{bucket}` | 該時段內針對此帳號的驗證嘗試次數（字串數字）         | 7,200 秒 |
+| `ratelimit:sens:{ip}:{bucket}`            | 該分鐘內來自此來源的建立／加入家庭次數（上限 3）     | 120 秒   |
+| `ratelimit:sens:lookup:{ip}:{bucket}`     | 該分鐘內來自此來源的查詢所屬家庭次數（上限 3，獨立） | 120 秒   |
 
 #### API 端點
 
@@ -715,7 +751,7 @@ interface PublicShelfSnapshot {
 Client                          Worker
   │                               │
   ├── GET /api/version ──────────►│
-  │◄──── { apiVersion: 1 } ──────│
+  │◄──── { apiVersion: 2 } ──────│
   │                               │
   │  比對 CLIENT_MIN_API_VERSION  │
   │  apiVersion >= min? ──► 正常運作
@@ -750,4 +786,15 @@ Client                          Worker
 2. 發布客戶端更新，使用新格式
 3. 確認所有客戶端已更新後，下一版移除舊格式並遞增 `API_VERSION`
 
-_最後更新：2026-04-08_
+### `API_VERSION = 2`：公開身分端點加上驗證閘門
+
+- **已遞增至 2**，理由對應上表的「變更認證機制」：對**有設定 PWA 登入驗證**的帳號，`POST /api/family`、`POST /api/family/:id/join`、`POST /api/auth/lookup` 現在都要求 `verifySecret`
+- **舊版客戶端的降級行為（請更新擴充功能）**：早於本次變更的 Extension／PWA 不會送出 `verifySecret`，因此在**有設定驗證**的帳號上：
+  - `POST /api/auth/lookup` 會得到 `requiresVerification: 1` 且 `existingFamilyId: null`——舊版程式不認得這個欄位，會把它讀成「沒有家庭」，於是進入建立家庭流程
+  - 接著的 `POST /api/family` 會被閘門擋下，回傳 `403 VERIFICATION_REQUIRED`，舊版 UI 只會顯示一般錯誤
+  - 已經加入家庭、持有有效 auth token 的日常操作**不受影響**（那些端點本來就以 token 驗證）
+  - **解法：更新擴充功能／PWA 至最新版**。未設定驗證的帳號完全不受影響
+- **注意訊號方向**：`/api/version` 只能讓「客戶端偵測伺服器過舊」（server `apiVersion` < 客戶端 `MIN_API_VERSION`），無法反向警示「客戶端過舊」，所以這次遞增救不了舊客戶端，僅是如實記錄契約變更
+- **後續（前端）**：把 Extension 與 PWA 的 `MIN_API_VERSION` 提升為 2，才會在使用者指向**尚未更新的自架 Worker**（仍缺少驗證閘門）時顯示黃色升級提示。此為前端變更，不在本次 worker 修改範圍
+
+_最後更新：2026-08-07_
