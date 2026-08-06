@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Asset-generation scripts run under Node, not in the browser or vitest, so
+    // the base config's vitest / vite ambient types do not apply here. Node's
+    // own types arrive transitively through @resvg/resvg-js, so no explicit
+    // "node" entry is needed — and adding one would fail, since @types/node is
+    // not a direct dependency of this package.
+    "types": []
+  },
+  "include": ["scripts/**/*"]
+}

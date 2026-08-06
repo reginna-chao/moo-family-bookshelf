@@ -116,11 +116,9 @@ describe("Onboarding", () => {
         return Promise.resolve({}) as unknown as void;
       },
     );
-    vi.mocked(chrome.storage.local.set).mockImplementation(
-      (_items: Record<string, unknown>, _callback?: () => void) => {
-        return Promise.resolve();
-      },
-    );
+    vi.mocked(chrome.storage.local.set).mockImplementation(() => {
+      return Promise.resolve();
+    });
   });
 
   afterEach(() => {

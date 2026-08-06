@@ -8,7 +8,10 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        project: ["./tsconfig.json"],
+        // tsconfig.scripts.json is listed alongside the app project so the
+        // Node-side asset-generation scripts are type-aware-lintable too;
+        // without it every file under scripts/ fails to parse.
+        project: ["./tsconfig.json", "./tsconfig.scripts.json"],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -24,6 +27,17 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_" },
       ],
+    },
+  },
+  // Test files opt out of production-hygiene rules, not of correctness rules.
+  // The single relaxation is `no-non-null-assertion`: `!` right after an
+  // explicit truthiness assertion is idiomatic test style. Everything else
+  // (unused vars, irregular whitespace, no-explicit-any, ...) stays enforced in
+  // tests exactly as it is in src/.
+  {
+    files: ["tests/**"],
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "off",
     },
   },
   {

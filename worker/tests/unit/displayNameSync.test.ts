@@ -390,7 +390,8 @@ describe("PUT books uses family displayName over client displayName", () => {
     await kv.delete(kvKeys.family(familyId));
     await kv.delete(kvKeys.member(USER1));
 
-    // Zero-width space embedded in "Alice​" should be stripped by sanitizer
+    // The displayName below embeds a zero-width space (U+200B) after "Alice"
+    // that the sanitizer should strip
     const putRes = await request(
       "PUT",
       `/api/user/${USER1}/books`,

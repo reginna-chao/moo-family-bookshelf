@@ -52,32 +52,6 @@ export async function setAuthState(
 }
 
 /**
- * Remove all auth-related localStorage entries.
- */
-export async function clearAuthState(page: Page): Promise<void> {
-  // Read userId first so we can build namespaced keys
-  const userId = await page.evaluate(
-    (key) => localStorage.getItem(key),
-    USER_ID_KEY,
-  );
-  if (userId) {
-    const keysToRemove = [
-      USER_ID_KEY,
-      namespacedKey(userId, "familyId"),
-      namespacedKey(userId, "encryptionKey"),
-      namespacedKey(userId, "apiHost"),
-      namespacedKey(userId, "authToken"),
-      namespacedKey(userId, "pwaNoticeShown"),
-    ];
-    await page.evaluate((keys) => {
-      for (const k of keys) localStorage.removeItem(k);
-    }, keysToRemove);
-  } else {
-    await page.evaluate((key) => localStorage.removeItem(key), USER_ID_KEY);
-  }
-}
-
-/**
  * Navigate to the PWA and wait for the page to finish its initial render.
  * Waits until React has mounted and the landing page or main nav is visible.
  */

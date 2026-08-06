@@ -52,8 +52,8 @@ function setupStorage(data: Record<string, unknown> = {}) {
       >;
     },
   );
-  vi.mocked(chrome.storage.local.set).mockImplementation(
-    (_items: Record<string, unknown>) => Promise.resolve(),
+  vi.mocked(chrome.storage.local.set).mockImplementation(() =>
+    Promise.resolve(),
   );
   return store;
 }

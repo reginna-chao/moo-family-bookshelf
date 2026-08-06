@@ -486,7 +486,7 @@ describe("PUT /api/family/:id/transfer", () => {
   });
 
   it("should allow old owner to leave after transferring ownership", async () => {
-    const { familyId, token1, token2 } = await createFamilyWithTwoMembers();
+    const { familyId, token1 } = await createFamilyWithTwoMembers();
 
     // Transfer ownership from user1 → user2
     const transferRes = await request(
