@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    // shared/ is browser-targeted library code consumed only by extension/ and
+    // pwa/, both of which compile with DOM. Keep the lib list identical to
+    // theirs so a standalone `tsc --noEmit` here sees the same globals the
+    // consumers do (e.g. `URLSearchParams` in src/config/links.ts).
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,

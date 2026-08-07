@@ -22,6 +22,15 @@ moo-family-bookshelf/
 ├── docs/                        # Project documentation (plans, architecture, privacy)
 │   ├── project-plan.md
 │   └── architecture.md
+├── shared/                      # Cross-app TypeScript library (no build step)
+│   ├── src/
+│   │   ├── config/             # Readmoo host/selector config, report links
+│   │   ├── icons/              # Inline brand SVG paths
+│   │   ├── invite/             # Invite message templates
+│   │   └── personal/           # Personal-shelf save strategy (PUT vs PATCH)
+│   ├── eslint.config.js
+│   ├── tsconfig.json
+│   └── package.json
 ├── extension/                   # Chrome Extension source
 │   ├── src/
 │   │   ├── dialog/              # Dialog UI (React) — injected into Readmoo pages
@@ -58,11 +67,18 @@ moo-family-bookshelf/
 │   └── index.html
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml              # CI: lint + typecheck + test + build
-│       └── cd.yml              # CD: Worker deploy / Pages deploy / Release
+│       └── cicd.yml            # CI (lint/typecheck/test/build) + CD (Worker/PWA/Pages deploy, Release)
 ├── AGENTS.md                    # This file
 └── CLAUDE.md                    # → AGENTS.md
 ```
+
+### The `shared/` package
+
+`moo-family-bookshelf-shared` 是 workspace 內的純 TypeScript 原始碼套件，沒有 build 步驟——`extension/` 與 `pwa/` 都直接以 `moo-family-bookshelf-shared/<entry>` import 原始碼，由各自的 Vite 打包。存放兩端必須完全一致的邏輯（Readmoo 設定、邀請訊息、個人書櫃儲存策略等），避免同一份規則在兩邊各寫一次而漂移。
+
+- **不得依賴任何 runtime 專屬 API。** `shared/` 除了被瀏覽器端 import，也被 `extension/scripts/` 底下以 `tsx` 執行的 Node 腳本 import。`tsconfig.json` 雖含 `DOM` lib（`URLSearchParams` 型別所需），但 `eslint.config.js` 以 `no-restricted-globals` 擋掉 `document` / `window` / `localStorage` / `sessionStorage` / `navigator`，讓這條界線由靜態檢查保證。
+- **CI 覆蓋**：`shared/` 有自己的 `lint` / `typecheck` script，在 CI 的 `extension-check` job 內執行（`shared/**` 已在該 job 的 path filter 內）。新增檔案不需額外設定即被檢查。
+- **測試**：`shared/` 本身沒有 test script，其行為由 `extension/tests/` 與 `pwa/tests/` 涵蓋。
 
 ## Tech Stack
 
@@ -130,9 +146,11 @@ moo-family-bookshelf/
 
 Every push/PR triggers:
 
-- `extension-check`: lint → typecheck → test → build
+- `extension-check`: lint → typecheck → test → build。**也負責 `shared/` 的 lint 與 typecheck**（`shared/**` 已在此 job 的 paths-filter 內；掛在既有 job 可避免動到 `ci-success` 的 `needs` 而讓 gate 靜默放行）
 - `worker-check`: lint → typecheck → test → build
+- `pwa-check`: lint → typecheck → test → build
 - `e2e` (PR to `main` only): build extension + start Miniflare + Playwright E2E
+- `pwa-e2e` (PR to `main` only): PWA Playwright E2E
 
 ### CD (GitHub Actions)
 
