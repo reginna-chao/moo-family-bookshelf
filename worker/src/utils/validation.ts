@@ -59,6 +59,37 @@ export function sanitizeShortString(
   return cleaned;
 }
 
+/**
+ * Upper bound for a `verifySecret` submitted to the verification gate. Every
+ * real secret is far shorter (PIN ≤ 12 digits, pattern ≤ 17 chars, OTP = 6
+ * digits); the bound exists so an oversized string can never reach the hash
+ * step.
+ */
+export const VERIFY_SECRET_MAX_LENGTH = 256;
+
+/**
+ * Normalize a `verifySecret` taken from a request body, following the same
+ * convention as {@link sanitizeDisplayName}:
+ *
+ * - `""`   — no secret supplied (absent, `null`, or an empty string). No attempt
+ *            was made, so the caller must not charge anything for it.
+ * - `null` — present but malformed: not a string, or longer than
+ *            {@link VERIFY_SECRET_MAX_LENGTH}. The caller must answer 400.
+ * - otherwise the secret itself, unmodified (a PIN/pattern/OTP is compared
+ *   byte-for-byte, so trimming or stripping characters here would silently
+ *   change what the user typed).
+ *
+ * Lives at the boundary so all three entry points of the gate (`POST
+ * /api/family`, `POST /api/family/:id/join`, `POST /api/auth/lookup`) classify
+ * the same input identically.
+ */
+export function sanitizeVerifySecret(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string") return null;
+  if (value.length > VERIFY_SECRET_MAX_LENGTH) return null;
+  return value;
+}
+
 export function isValidSha256Hex(value: string): boolean {
   return Sha256HexSchema.safeParse(value).success;
 }

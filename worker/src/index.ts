@@ -128,8 +128,22 @@ app.get("/", (c) => c.json({ status: "ok", service: "moo-family-bookshelf" }));
 /**
  * API version endpoint for client compatibility checks.
  * Bump API_VERSION when making breaking API changes.
+ *
+ * 2 — the verification gate on the public identity endpoints (`POST /api/family`,
+ * `POST /api/family/:id/join`, `POST /api/auth/lookup`). Counts as an
+ * authentication-mechanism change per docs/architecture.md → 何時遞增
+ * API_VERSION: for an account with PWA verification configured, a client that
+ * sends no `verifySecret` now gets 403 on create and a `requiresVerification: 1`
+ * answer with no membership data on lookup.
+ *
+ * Note the signal direction: `/api/version` only lets a client detect a server
+ * that is TOO OLD (server `apiVersion` < the client's `MIN_API_VERSION`). It
+ * cannot warn an outdated client talking to this Worker — that degradation is
+ * covered in the CHANGELOG ("請更新擴充功能"). Raising `MIN_API_VERSION` to 2 in
+ * the Extension/PWA `VersionWarning.tsx` is the follow-up that makes a stale
+ * self-hosted Worker (still missing the gate) visible to its users.
  */
-const API_VERSION = 1;
+const API_VERSION = 2;
 const SERVER_VERSION = "0.1.0";
 
 app.get("/api/version", (c) =>

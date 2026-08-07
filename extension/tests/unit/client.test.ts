@@ -219,6 +219,116 @@ describe("ApiClient", () => {
       );
       expect(result.data).toEqual({ existingFamilyId: null, memberCount: 0 });
     });
+
+    /**
+     * The verification gate is opt-in per request. Self-hosted (BYO) Workers can
+     * lag the Extension by releases, so a lookup WITHOUT a secret must stay
+     * byte-identical to the pre-gate request — an unexpected extra field is what
+     * a strict older backend would reject.
+     */
+    it.each([
+      ["no options argument", undefined],
+      ["an empty options object", {}],
+      ["options without a secret", { verifySecret: undefined }],
+    ])("omits verifySecret from the body given %s", async (_label, opts) => {
+      globalThis.fetch = mockFetchSuccess({
+        existingFamilyId: null,
+        memberCount: 0,
+      });
+      const userId = "a".repeat(64);
+      await client.lookupUser(userId, opts);
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${MOCK_ENDPOINT}/api/auth/lookup`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ userId }),
+        }),
+      );
+    });
+
+    it("includes verifySecret in the body when supplied", async () => {
+      globalThis.fetch = mockFetchSuccess({
+        existingFamilyId: "fam-1",
+        memberCount: 2,
+      });
+      const userId = "a".repeat(64);
+      await client.lookupUser(userId, { verifySecret: "123456" });
+
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
+      );
+      expect(body).toEqual({ userId, verifySecret: "123456" });
+    });
+
+    it("sends an empty-string secret rather than dropping it", async () => {
+      globalThis.fetch = mockFetchSuccess({
+        existingFamilyId: null,
+        memberCount: 0,
+      });
+      const userId = "a".repeat(64);
+      await client.lookupUser(userId, { verifySecret: "" });
+
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
+      );
+      // The server must be the one to reject it (403), so the client cannot
+      // silently downgrade the attempt into an un-authenticated lookup.
+      expect(body).toEqual({ userId, verifySecret: "" });
+    });
+
+    it("surfaces requiresVerification from a withheld 200 payload", async () => {
+      globalThis.fetch = mockFetchSuccess({
+        existingFamilyId: null,
+        memberCount: 0,
+        requiresVerification: BoolFlag.TRUE,
+      });
+      const result = await client.lookupUser("a".repeat(64));
+
+      expect(result.data).toEqual({
+        existingFamilyId: null,
+        memberCount: 0,
+        requiresVerification: BoolFlag.TRUE,
+      });
+      expect(result.error).toBeUndefined();
+    });
+
+    it("surfaces a 429 lockout with its retryAfter through the envelope", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: () =>
+          Promise.resolve({
+            error: {
+              code: "VERIFICATION_LOCKED",
+              message: "locked",
+              retryAfter: 120,
+            },
+          }),
+      });
+      const result = await client.lookupUser("a".repeat(64), {
+        verifySecret: "000000",
+      });
+
+      expect(result.error).toEqual({
+        code: "VERIFICATION_LOCKED",
+        message: "locked",
+        retryAfter: 120,
+      });
+    });
+
+    it("rejects a non-hex userId before issuing a request", async () => {
+      globalThis.fetch = mockFetchSuccess({
+        existingFamilyId: null,
+        memberCount: 0,
+      });
+      await expect(client.lookupUser("invalid-id")).rejects.toThrow(
+        "Invalid userId",
+      );
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
   });
 
   describe("getPersonalBooks", () => {
@@ -415,6 +525,77 @@ describe("ApiClient", () => {
           .body as string,
       );
       expect(body.displayName).toBe("");
+    });
+
+    /** Same BYO-backend contract as lookupUser: no secret ⇒ unchanged body. */
+    it.each([
+      ["no options argument", undefined],
+      ["an empty options object", {}],
+      ["options without a secret", { verifySecret: undefined }],
+    ])("omits verifySecret from the body given %s", async (_label, opts) => {
+      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
+      await client.createFamily("u1", "Alice", opts);
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${MOCK_ENDPOINT}/api/family`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ userId: "u1", displayName: "Alice" }),
+        }),
+      );
+    });
+
+    it("includes verifySecret in the body when supplied", async () => {
+      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
+      await client.createFamily("u1", "Alice", { verifySecret: "123456" });
+
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
+      );
+      expect(body).toEqual({
+        userId: "u1",
+        displayName: "Alice",
+        verifySecret: "123456",
+      });
+    });
+
+    it("surfaces a 403 verification refusal through the envelope", async () => {
+      globalThis.fetch = mockFetchError(
+        "VERIFICATION_REQUIRED",
+        "需要驗證",
+        403,
+      );
+      const result = await client.createFamily("u1", "Alice");
+
+      expect(result.error).toEqual({
+        code: "VERIFICATION_REQUIRED",
+        message: "需要驗證",
+      });
+    });
+
+    it("surfaces a 429 lockout with its retryAfter through the envelope", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: () =>
+          Promise.resolve({
+            error: {
+              code: "VERIFICATION_LOCKED",
+              message: "locked",
+              retryAfter: 90,
+            },
+          }),
+      });
+      const result = await client.createFamily("u1", "Alice", {
+        verifySecret: "000000",
+      });
+
+      expect(result.error).toEqual({
+        code: "VERIFICATION_LOCKED",
+        message: "locked",
+        retryAfter: 90,
+      });
     });
   });
 

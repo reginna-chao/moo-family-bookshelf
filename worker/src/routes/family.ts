@@ -19,6 +19,7 @@ import {
   isValidUserId,
   isValidFamilyId,
   sanitizeDisplayName,
+  sanitizeVerifySecret,
   validateDisplayName,
   sanitizeShortString,
 } from "../utils/validation";
@@ -29,7 +30,11 @@ import {
   getAuthenticatedUserId,
 } from "../middleware/auth";
 import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
-import { validateVerification } from "./verify";
+import {
+  validateVerification,
+  verificationErrorResponse,
+  verifySecretFormatResponse,
+} from "./verify";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 
@@ -53,10 +58,20 @@ const createFamilyRoute = createRoute({
   path: "/",
   tags: ["Family"],
   summary: "Create a new family",
+  description:
+    "Body: `{ userId: string, displayName?: string, verifySecret?: string }`. " +
+    "`verifySecret` is required when the account has PWA login verification " +
+    "(PIN / pattern / OTP) configured — the same gate as `POST /{id}/join`. " +
+    "Accounts with no verification configured are unaffected. A `verifySecret` " +
+    "that is present but malformed (not a string, or longer than 256 " +
+    "characters) is rejected with 400 `INVALID_VERIFY_SECRET` by create, join " +
+    "and `POST /api/auth/lookup` alike.",
   responses: {
     201: jsonRes("Family created successfully"),
     400: jsonRes("Invalid input"),
+    403: jsonRes("Verification required or failed"),
     409: jsonRes("User already in a family"),
+    429: jsonRes("Verification locked or attempt ceiling reached"),
   },
 });
 
@@ -186,7 +201,11 @@ const updateEndpointRoute = createRoute({
 familyRoutes.openapi(createFamilyRoute, async (c) => {
   const familyId = generateFamilyId();
 
-  let body: { userId: string; displayName?: string } | null;
+  let body: {
+    userId: string;
+    displayName?: string;
+    verifySecret?: unknown;
+  } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -206,22 +225,64 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
     return invalidDisplayNameResponse(c);
   }
 
+  // Bound the secret at the boundary, before any lookup: "" means not supplied,
+  // null means present-but-malformed. Same classification in all three entry
+  // points of the gate (see `sanitizeVerifySecret`).
+  const sanitizedSecret = sanitizeVerifySecret(body.verifySecret);
+  if (sanitizedSecret === null) {
+    return verifySecretFormatResponse(c);
+  }
+  const verifySecret = sanitizedSecret === "" ? undefined : sanitizedSecret;
+
   // Prevent duplicate family creation — user must leave existing family first
-  const existingFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
-  if (existingFamilyId) {
-    const oldRaw = await c.env.KV.get<RawFamilyRecord>(
-      kvKeys.family(existingFamilyId),
-      "json",
+  const membership = await classifyMembershipForCreate(c.env.KV, body.userId);
+  if (membership === "in-family") {
+    return jsonError(
+      c,
+      409,
+      "ALREADY_IN_FAMILY",
+      "已有家庭群組，無法再建立新的",
     );
-    if (oldRaw) {
-      return jsonError(
-        c,
-        409,
-        "ALREADY_IN_FAMILY",
-        "已有家庭群組，無法再建立新的",
-      );
-    }
-    // Orphaned member key (family record missing) — clean up and proceed
+  }
+
+  // --- Verification gate ---
+  //
+  // WHY: userId is sha256("moo:" + email) — derived from the user's email, so it
+  // is publicly guessable — while `user:{userId}` (the personal book list,
+  // including books the user never shared) persists across family changes and is
+  // never deleted on leave. Minting an auth token for a userId without any proof
+  // of ownership therefore hands anyone who knows the victim's email full
+  // read/write access to those settings: account takeover. `POST /{id}/join`
+  // already gates on this; create must match.
+  //
+  // Placement: AFTER the ALREADY_IN_FAMILY conflict check and BEFORE any KV
+  // write or token mint — including the orphaned-member-key cleanup below — so a
+  // failed attempt leaves nothing behind.
+  //
+  // The 409 above IS a small disclosure: it tells an unverified caller, as a
+  // boolean, that this email's account currently belongs to some family. Kept
+  // ahead of the gate deliberately, and matching `POST /{id}/join`, which
+  // answers the same conflict the same way: the conflict is cheap and terminal
+  // (no secret can make the request succeed), so gating first would only prompt
+  // the user for a PIN, burn the account's verification attempt ceiling, and
+  // then still refuse. What stays behind the gate is everything of value — the
+  // familyId, the auth token, member data, and any write. Accepted residual
+  // risk, documented in docs/architecture.md.
+  //
+  // Failures are charged to the CALLER's bucket, never to the target account
+  // (see `validateVerification`). Accounts with no verification configured (or
+  // method "none") pass through unchanged.
+  const verification = await validateVerification(
+    c.env,
+    body.userId,
+    verifySecret,
+    { callerKey: getCallerIp(c) },
+  );
+  if (!verification.valid) {
+    return verificationErrorResponse(c, verification.error);
+  }
+
+  if (membership === "orphaned") {
     await c.env.KV.delete(kvKeys.member(body.userId));
   }
 
@@ -266,7 +327,7 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   let body: {
     userId: string;
     displayName?: string;
-    verifySecret?: string;
+    verifySecret?: unknown;
     qrToken?: string;
   } | null;
   try {
@@ -288,6 +349,15 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     return invalidDisplayNameResponse(c);
   }
 
+  // Bound the secret at the boundary, alongside the other format checks and
+  // before the join counter: a malformed body is a request-format error and must
+  // not spend the account's join quota. Same classification as create/lookup.
+  const sanitizedSecret = sanitizeVerifySecret(body.verifySecret);
+  if (sanitizedSecret === null) {
+    return verifySecretFormatResponse(c);
+  }
+  const verifySecret = sanitizedSecret === "" ? undefined : sanitizedSecret;
+
   // Per-userId rate limit: max 10 join attempts per userId per hour across all IPs.
   // Complements the per-IP rate limit; prevents distributed-IP abuse targeting a single user.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
@@ -298,7 +368,11 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  // Check if user already belongs to a different family (before verify to avoid leaking membership info)
+  // Cheap, terminal conflict: the user already belongs to a DIFFERENT family, so
+  // no secret can make this request succeed. Answered before the verification
+  // gate (same ordering as `POST /api/family`) rather than after it, at the cost
+  // of disclosing one boolean — "this userId is in some family" — to an
+  // unverified caller. Everything of value stays behind the gate.
   const existingFamily = await c.env.KV.get(kvKeys.member(body.userId));
   if (existingFamily && existingFamily !== familyId) {
     return jsonError(
@@ -348,31 +422,23 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   // Users with no verification record (method: "none") pass automatically.
   if (!skipVerification) {
     // Failure accounting / lockout is charged to the CALLER (client IP, IPv6
-    // bucketed per /64), never to the target account. This endpoint is public,
-    // body.userId is derived from the user's email with a fixed salt, and the
-    // victim's own familyId is retrievable from the public POST
-    // /api/auth/lookup — so a counter keyed on the victim would let any
-    // stranger lock them out of PWA login on demand (DoS). Membership is NOT a
-    // usable trust signal here for the same reason. Brute force from a SINGLE
-    // source stays bounded by the per-IP sensitive-route limit (3/min); an
-    // attacker who rotates source prefixes is bounded only by the per-userId
-    // join rate limit above (10/hour). Neither bound holds under DEV_MODE=1,
-    // which short-circuits both limits.
+    // bucketed per /64), never to the target account. This endpoint is public
+    // and body.userId is derived from the user's email with a fixed salt, so a
+    // LOCKOUT keyed on the victim would let any stranger lock them out of PWA
+    // login on demand (DoS). Membership is NOT a usable trust signal here for
+    // the same reason. Brute force from a SINGLE source stays bounded by the
+    // per-IP sensitive-route limit (3/min); an attacker rotating source prefixes
+    // is bounded by the per-userId ceilings — the "join" limit above (10/hour)
+    // and the "verify" attempt ceiling inside `validateVerification` (10/hour),
+    // which covers create and lookup too. No bound holds under DEV_MODE=1.
     const verification = await validateVerification(
-      c.env.KV,
+      c.env,
       body.userId,
-      body.verifySecret,
+      verifySecret,
       { callerKey: getCallerIp(c) },
     );
     if (!verification.valid) {
-      const { code, message, status } = verification.error;
-      // retryAfter is only present on VERIFICATION_LOCKED; jsonError omits both
-      // the body field and the Retry-After header when it is undefined.
-      const retryAfter =
-        verification.error.code === "VERIFICATION_LOCKED"
-          ? verification.error.retryAfter
-          : undefined;
-      return jsonError(c, status, code, message, { retryAfter });
+      return verificationErrorResponse(c, verification.error);
     }
   }
 
@@ -992,6 +1058,32 @@ async function cancelPendingBorrowsForMember(
   if (writeOps.length > 0) {
     await Promise.all(writeOps);
   }
+}
+
+/**
+ * Classify a user's current membership state for the family-create flow.
+ *
+ * - `"in-family"` — `member:{userId}` points at a live family record ⇒ creation
+ *   must be rejected with ALREADY_IN_FAMILY.
+ * - `"orphaned"` — the member key points at a family record that no longer
+ *   exists ⇒ the stale key must be deleted before creating.
+ * - `"none"` — no membership key at all.
+ *
+ * Read-only on purpose: the orphan cleanup write is left to the caller so it can
+ * run AFTER the verification gate, keeping failed attempts side-effect free.
+ */
+async function classifyMembershipForCreate(
+  kv: KVNamespace,
+  userId: string,
+): Promise<"in-family" | "orphaned" | "none"> {
+  const existingFamilyId = await kv.get(kvKeys.member(userId));
+  if (!existingFamilyId) return "none";
+
+  const oldRaw = await kv.get<RawFamilyRecord>(
+    kvKeys.family(existingFamilyId),
+    "json",
+  );
+  return oldRaw ? "in-family" : "orphaned";
 }
 
 function generateFamilyId(): string {

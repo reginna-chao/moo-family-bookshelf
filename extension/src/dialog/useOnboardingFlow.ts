@@ -13,11 +13,14 @@ import { readSyncFamilyIdRemnant } from "../storage/familyId";
 import { useAutoSetup } from "./useAutoSetup";
 import type { ErrorAction } from "./OnboardingViews";
 import {
+  CreateFamilyError,
   createNewFamily,
   performJoin,
   performSoloRecovery,
   tryAutoRecovery,
+  type RecoveryResult,
 } from "./onboardingFlow";
+import { lookupFamily } from "./onboardingLookup";
 import {
   isVerificationError,
   useVerificationPrompt,
@@ -44,6 +47,28 @@ const RECOVERY_STATES = new Set<OnboardingState>([
   "recovery-join",
   "solo-recovery-confirm",
 ]);
+
+/** Shown when the user backs out of the verification prompt during create. The
+ *  gate blocked either the lookup (family membership unknown) or the create
+ *  itself, so the normal onboarding screen would invite the user to fork a
+ *  second family instead of finishing the one attempt they started. */
+const VERIFY_CANCELLED_MESSAGE = "需要完成驗證才能建立家庭書櫃，請重試。";
+
+/** Shown when the user backs out of the lookup challenge during start. The
+ *  server withheld the family data, so the normal onboarding screen would
+ *  wrongly tell a user who has a family that they have none. */
+const START_VERIFY_CANCELLED_MESSAGE =
+  "需要完成驗證才能讀取你的家庭資料，請重試。";
+
+/** Outcome of one create-a-family attempt, with the backend refusal as a value. */
+type CreateAttempt =
+  | { ok: true }
+  | {
+      ok: false;
+      errorCode: string;
+      errorMessage: string;
+      retryAfter?: number;
+    };
 
 export interface UseOnboardingFlowOptions {
   apiClient: ApiClient;
@@ -118,6 +143,14 @@ export function useOnboardingFlow(
    *  Lets handleRetry navigate back to recovery-choice after an error that
    *  occurred mid-recovery-flow, even though stateRef is now "error". */
   const recoveryActiveRef = useRef(false);
+  /** Mirrors handleStart. cancelStartVerification must be able to re-run the
+   *  lookup challenge, but it is itself a dependency of handleStart — a ref
+   *  breaks that cycle without duplicating the flow or reordering it. */
+  const handleStartRef = useRef<(() => Promise<void>) | null>(null);
+  /** Mirrors handleCreate for the same reason as handleStartRef:
+   *  cancelCreateVerification must re-run the create flow (which re-opens the
+   *  verification challenge), but it is a dependency of handleCreate. */
+  const handleCreateRef = useRef<(() => Promise<void>) | null>(null);
 
   userEmailRef.current = userEmail;
   userDisplayNameRef.current = userDisplayName;
@@ -165,9 +198,34 @@ export function useOnboardingFlow(
     setErrorActions([]);
   }, [autoSetup]);
 
+  /** Show the generic error view with caller-chosen actions. */
+  const showError = useCallback((message: string, actions: ErrorAction[]) => {
+    setErrorMessage(message);
+    setErrorActions(actions);
+    setState("error");
+  }, []);
+
+  /** Show the generic error view with a single "retry" action. */
+  const showRetryableError = useCallback(
+    (message: string) => {
+      showError(message, [
+        { label: "重試", variant: "primary", onClick: handleRetry },
+      ]);
+    },
+    [handleRetry, showError],
+  );
+
+  /** Hand the user back to the recovery-choice screen, arming handleRetry so a
+   *  later error returns here rather than to the welcome screen. */
+  const backToRecoveryChoice = useCallback(() => {
+    recoveryActiveRef.current = true;
+    setState("recovery-choice");
+  }, []);
+
   /**
-   * Shared bridge for the recovery flows (auto-recovery + solo recovery): if a
-   * failed join carried a verification error code, open the verification prompt
+   * Shared bridge for every flow that can hit the verification gate (start,
+   * create, sync-code join, auto-recovery, solo recovery): if a failed
+   * lookup/join/create carried a verification code, open the verification prompt
    * (state → "verify-prompt") and wire up a retry that re-runs the same flow
    * with the collected secret. Returns true when the prompt took over so the
    * caller can stop; false to fall back to its own error handling.
@@ -191,6 +249,7 @@ export function useOnboardingFlow(
         params.errorCode,
         {
           userId: params.userId,
+          // Pure data transform: `run`'s outcome, shaped for the controller.
           retry: async (secret) => {
             const result = await params.run(secret);
             return {
@@ -200,6 +259,12 @@ export function useOnboardingFlow(
             };
           },
           onCancel: params.onCancel,
+          // `run` may move the flow into a progress state ("recovering",
+          // "syncing-books", …), which would hide the still-open prompt behind
+          // the full-screen loading overlay. The controller calls this back on
+          // every failed attempt — including an unexpected throw — but only
+          // while the prompt session is still live.
+          onAttemptFailed: () => setState("verify-prompt"),
         },
         params.retryAfter,
       );
@@ -207,6 +272,125 @@ export function useOnboardingFlow(
     },
     [verifyBegin],
   );
+
+  /** One attempt at rejoining a discovered family. Records the familyId for the
+   *  recovery views and moves the UI into "recovering" before the request. */
+  const attemptRecovery = useCallback(
+    (params: {
+      familyId: string;
+      userId: string;
+      displayName: string;
+      verifySecret?: string;
+    }): Promise<RecoveryResult> => {
+      recoveryFamilyIdRef.current = params.familyId;
+      setState("recovering");
+      return tryAutoRecovery({
+        familyId: params.familyId,
+        userId: params.userId,
+        displayName: params.displayName,
+        apiClient,
+        autoSetup,
+        onFamilyJoined,
+        verifySecret: params.verifySecret,
+      });
+    },
+    [apiClient, autoSetup, onFamilyJoined],
+  );
+
+  /** One attempt at creating a family. Applies the success side-effects and
+   *  turns the known backend refusals into a value the caller can bridge. */
+  const attemptCreate = useCallback(
+    async (userId: string, verifySecret?: string): Promise<CreateAttempt> => {
+      try {
+        const created = await createNewFamily({
+          userId,
+          displayName: userDisplayNameRef.current,
+          apiClient,
+          verifySecret,
+        });
+        setGeneratedSyncCode(created.syncCode);
+        setCreatedFamilyId(created.familyId);
+        setCreatedUserId(created.userId);
+        setState("created");
+        return { ok: true };
+      } catch (err) {
+        if (err instanceof CreateFamilyError) {
+          return {
+            ok: false,
+            errorCode: err.code,
+            errorMessage: err.message,
+            retryAfter: err.retryAfter,
+          };
+        }
+        // Unexpected failure (network / storage). Reported as a value rather
+        // than rethrown: this also runs inside the verification prompt's retry
+        // closure, where a rejection would leave the prompt stuck submitting.
+        return {
+          ok: false,
+          errorCode: "UNEXPECTED_ERROR",
+          errorMessage: err instanceof Error ? err.message : "發生未知錯誤",
+        };
+      }
+    },
+    [apiClient],
+  );
+
+  /** Resume handleStart once the user cleared the lookup challenge: re-run the
+   *  lookup with the secret, then recover into the family it reveals. */
+  const resumeStartAfterVerification = useCallback(
+    async (params: {
+      userId: string;
+      displayName: string;
+      verifySecret: string;
+    }): Promise<RecoveryResult> => {
+      const lookup = await lookupFamily({
+        apiClient,
+        userId: params.userId,
+        verifySecret: params.verifySecret,
+      });
+      if (!lookup.ok) {
+        return {
+          recovered: false,
+          errorCode: lookup.errorCode,
+          retryAfter: lookup.retryAfter,
+        };
+      }
+      const { existingFamilyId, memberCount } = lookup.data;
+      if (!existingFamilyId || memberCount <= 0) {
+        // Verified, but there is nothing to recover — continue as a new user.
+        setState("idle");
+        return { recovered: true };
+      }
+      return attemptRecovery({
+        familyId: existingFamilyId,
+        userId: params.userId,
+        displayName: params.displayName,
+        verifySecret: params.verifySecret,
+      });
+    },
+    [apiClient, attemptRecovery],
+  );
+
+  /** Cancel handler for the lookup challenge in handleStart. Falls back to the
+   *  recovery-choice screen once a family is known; otherwise the familyId is
+   *  necessarily unknown (the server withheld it), so show an error instead of
+   *  the onboarding screen that claims the user has no family. */
+  const cancelStartVerification = useCallback(() => {
+    if (recoveryFamilyIdRef.current) {
+      backToRecoveryChoice();
+      return;
+    }
+    // The generic 重試 action leads to the "create or join a family" screen —
+    // exactly the misreading this message exists to prevent. Re-run the lookup
+    // challenge instead, which is what 「請重試」 promises here.
+    showError(START_VERIFY_CANCELLED_MESSAGE, [
+      {
+        label: "重新驗證",
+        variant: "primary",
+        onClick: () => void handleStartRef.current?.(),
+      },
+    ]);
+  }, [backToRecoveryChoice, showError]);
 
   const handleStart = useCallback(async () => {
     const result = await autoSetup.scrapeProfile();
@@ -218,58 +402,119 @@ export function useOnboardingFlow(
     // Look up existing family; attempt auto-recovery or show recovery-choice.
     try {
       const userId = await deriveUserId(result.email);
-      const lookupRes = await apiClient.lookupUser(userId);
-      if (!lookupRes.error && lookupRes.data) {
-        const { existingFamilyId, memberCount } = lookupRes.data;
-        if (existingFamilyId && memberCount > 0) {
-          recoveryFamilyIdRef.current = existingFamilyId;
+      const lookup = await lookupFamily({ apiClient, userId });
 
-          // Attempt auto-recovery directly (no key needed anymore)
-          setState("recovering");
-          const recovery = await tryAutoRecovery({
-            familyId: existingFamilyId,
-            userId,
-            displayName: result.displayName,
-            apiClient,
-            autoSetup,
-            onFamilyJoined,
-          });
-          if (recovery.recovered) return;
-          const backToChoice = () => {
-            recoveryActiveRef.current = true;
-            setState("recovery-choice");
-          };
-          // Verification-enabled member on a new device: prompt for the secret
-          // and retry, instead of silently dropping to the generic screen.
-          const handled = await promptRecoveryVerification({
-            errorCode: recovery.errorCode,
-            retryAfter: recovery.retryAfter,
-            userId,
-            run: (verifySecret) =>
-              tryAutoRecovery({
-                familyId: existingFamilyId,
-                userId,
-                displayName: result.displayName,
-                apiClient,
-                autoSetup,
-                onFamilyJoined,
-                verifySecret,
-              }),
-            onCancel: backToChoice,
-          });
-          if (handled) return;
-          // Auto-recovery attempted but failed (e.g. backend join error).
-          // Surface the recovery-choice screen so the user can decide.
-          backToChoice();
-          return;
-        }
+      // Verification-enabled account: the lookup withholds the family data
+      // until the user proves ownership of this (publicly guessable) userId.
+      if (!lookup.ok) {
+        const handled = await promptRecoveryVerification({
+          errorCode: lookup.errorCode,
+          retryAfter: lookup.retryAfter,
+          userId,
+          run: (verifySecret) =>
+            resumeStartAfterVerification({
+              userId,
+              displayName: result.displayName,
+              verifySecret,
+            }),
+          onCancel: cancelStartVerification,
+        });
+        if (handled) return;
+      } else if (lookup.data.existingFamilyId && lookup.data.memberCount > 0) {
+        const { existingFamilyId } = lookup.data;
+        // Attempt auto-recovery directly (no key needed anymore)
+        const recovery = await attemptRecovery({
+          familyId: existingFamilyId,
+          userId,
+          displayName: result.displayName,
+        });
+        if (recovery.recovered) return;
+        // Verification-enabled member on a new device: prompt for the secret
+        // and retry, instead of silently dropping to the generic screen.
+        const handled = await promptRecoveryVerification({
+          errorCode: recovery.errorCode,
+          retryAfter: recovery.retryAfter,
+          userId,
+          run: (verifySecret) =>
+            attemptRecovery({
+              familyId: existingFamilyId,
+              userId,
+              displayName: result.displayName,
+              verifySecret,
+            }),
+          onCancel: backToRecoveryChoice,
+        });
+        if (handled) return;
+        // Auto-recovery attempted but failed (e.g. backend join error).
+        // Surface the recovery-choice screen so the user can decide.
+        backToRecoveryChoice();
+        return;
       }
     } catch {
       // Recovery failed — fall through to normal onboarding
     }
 
     setState("idle");
-  }, [apiClient, autoSetup, onFamilyJoined, promptRecoveryVerification]);
+  }, [
+    apiClient,
+    attemptRecovery,
+    autoSetup,
+    backToRecoveryChoice,
+    cancelStartVerification,
+    promptRecoveryVerification,
+    resumeStartAfterVerification,
+  ]);
+
+  // Published for cancelStartVerification, which is defined (and captured by
+  // handleStart's deps) above. Kept fresh on every render.
+  handleStartRef.current = handleStart;
+
+  /** Resume handleCreate once the user cleared the lookup challenge: re-run the
+   *  lookup with the secret, then recover into the family it reveals — or
+   *  create a new one, carrying the same secret. */
+  const resumeCreateAfterVerification = useCallback(
+    async (userId: string, verifySecret: string): Promise<RecoveryResult> => {
+      const lookup = await lookupFamily({ apiClient, userId, verifySecret });
+      if (!lookup.ok) {
+        return {
+          recovered: false,
+          errorCode: lookup.errorCode,
+          retryAfter: lookup.retryAfter,
+        };
+      }
+      const { existingFamilyId, memberCount } = lookup.data;
+      if (existingFamilyId && memberCount > 0) {
+        return attemptRecovery({
+          familyId: existingFamilyId,
+          userId,
+          displayName: userDisplayNameRef.current,
+          verifySecret,
+        });
+      }
+      const created = await attemptCreate(userId, verifySecret);
+      if (created.ok) return { recovered: true };
+      return {
+        recovered: false,
+        errorCode: created.errorCode,
+        retryAfter: created.retryAfter,
+      };
+    },
+    [apiClient, attemptCreate, attemptRecovery],
+  );
+
+  /** Cancel handler for the verification gate in handleCreate. The generic 重試
+   *  action leads back to the "create or join a family" screen, which invites a
+   *  second family; re-run the create flow instead so the user lands back on the
+   *  challenge that 「請重試」 promises here. */
+  const cancelCreateVerification = useCallback(() => {
+    showError(VERIFY_CANCELLED_MESSAGE, [
+      {
+        label: "重新驗證",
+        variant: "primary",
+        onClick: () => void handleCreateRef.current?.(),
+      },
+    ]);
+  }, [showError]);
 
   const handleCreate = useCallback(async () => {
     const email = userEmailRef.current;
@@ -280,82 +525,90 @@ export function useOnboardingFlow(
 
     try {
       const userId = await deriveUserId(email);
-      const lookupRes = await apiClient.lookupUser(userId);
-      if (lookupRes.error) {
-        setErrorMessage("無法驗證帳號，請重試。");
-        setErrorActions([
-          { label: "重試", variant: "primary", onClick: handleRetry },
-        ]);
-        setState("error");
+      const lookup = await lookupFamily({ apiClient, userId });
+
+      if (!lookup.ok) {
+        // Verification-enabled account: prompt, then resume with the unlocked
+        // lookup (recover into the existing family, or create a new one).
+        const handled = await promptRecoveryVerification({
+          errorCode: lookup.errorCode,
+          retryAfter: lookup.retryAfter,
+          userId,
+          run: (verifySecret) =>
+            resumeCreateAfterVerification(userId, verifySecret),
+          onCancel: cancelCreateVerification,
+        });
+        if (!handled) showRetryableError("無法驗證帳號，請重試。");
         return;
       }
-      const existingFamilyId = lookupRes.data?.existingFamilyId ?? null;
-      const memberCount = lookupRes.data?.memberCount ?? 0;
+
+      const { existingFamilyId, memberCount } = lookup.data;
 
       // User already belongs to a family — attempt recovery.
       if (existingFamilyId && memberCount > 0) {
-        recoveryFamilyIdRef.current = existingFamilyId;
-
-        setState("recovering");
-        const recovery = await tryAutoRecovery({
+        const recovery = await attemptRecovery({
           familyId: existingFamilyId,
           userId,
           displayName: userDisplayNameRef.current,
-          apiClient,
-          autoSetup,
-          onFamilyJoined,
         });
         if (recovery.recovered) return;
-        const backToChoice = () => {
-          recoveryActiveRef.current = true;
-          setState("recovery-choice");
-        };
         const handled = await promptRecoveryVerification({
           errorCode: recovery.errorCode,
           retryAfter: recovery.retryAfter,
           userId,
           run: (verifySecret) =>
-            tryAutoRecovery({
+            attemptRecovery({
               familyId: existingFamilyId,
               userId,
               displayName: userDisplayNameRef.current,
-              apiClient,
-              autoSetup,
-              onFamilyJoined,
               verifySecret,
             }),
-          onCancel: backToChoice,
+          onCancel: backToRecoveryChoice,
         });
         if (handled) return;
         // Auto-recovery failed — let the user choose how to proceed.
-        backToChoice();
+        backToRecoveryChoice();
         return;
       }
 
-      const created = await createNewFamily({
-        userId,
-        displayName: userDisplayNameRef.current,
-        apiClient,
-      });
+      const created = await attemptCreate(userId);
+      if (created.ok) return;
 
-      setGeneratedSyncCode(created.syncCode);
-      setCreatedFamilyId(created.familyId);
-      setCreatedUserId(created.userId);
-      setState("created");
+      // Create refused pending verification (e.g. verification switched on
+      // after the lookup) — prompt and retry the create with the secret.
+      const handled = await promptRecoveryVerification({
+        errorCode: created.errorCode,
+        retryAfter: created.retryAfter,
+        userId,
+        run: async (verifySecret) => {
+          const retry = await attemptCreate(userId, verifySecret);
+          if (retry.ok) return { recovered: true };
+          return {
+            recovered: false,
+            errorCode: retry.errorCode,
+            retryAfter: retry.retryAfter,
+          };
+        },
+        onCancel: cancelCreateVerification,
+      });
+      if (!handled) showRetryableError(created.errorMessage);
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
-      setErrorActions([
-        { label: "重試", variant: "primary", onClick: handleRetry },
-      ]);
-      setState("error");
+      showRetryableError(err instanceof Error ? err.message : "發生未知錯誤");
     }
   }, [
     apiClient,
-    autoSetup,
-    handleRetry,
-    onFamilyJoined,
+    attemptCreate,
+    attemptRecovery,
+    backToRecoveryChoice,
+    cancelCreateVerification,
     promptRecoveryVerification,
+    resumeCreateAfterVerification,
+    showRetryableError,
   ]);
+
+  // Published for cancelCreateVerification, which is defined (and captured by
+  // handleCreate's deps) above. Kept fresh on every render.
+  handleCreateRef.current = handleCreate;
 
   const finishJoin = useCallback(
     async (familyId: string, userId: string) => {
@@ -389,57 +642,45 @@ export function useOnboardingFlow(
       }
 
       // Verification-enabled member reconnecting: prompt for the secret and
-      // retry the same join with it, rather than failing the sync code.
-      if (isVerificationError(result.errorCode)) {
-        setState("verify-prompt");
-        await verifyBegin(
-          result.errorCode,
-          {
+      // retry the same join with it, rather than failing the sync code. Goes
+      // through the shared bridge so the prompt-restore guard applies here too.
+      const handled = await promptRecoveryVerification({
+        errorCode: result.errorCode,
+        retryAfter: result.retryAfter,
+        userId,
+        run: async (verifySecret) => {
+          const retryResult = await performJoin({
+            syncCodeInput: syncCodeInputRef.current,
             userId,
-            retry: async (verifySecret) => {
-              const retryResult = await performJoin({
-                syncCodeInput: syncCodeInputRef.current,
-                userId,
-                displayName: userDisplayNameRef.current,
-                apiClient,
-                verifySecret,
-              });
-              if (retryResult.ok) {
-                await finishJoin(retryResult.familyId, retryResult.userId);
-                return { ok: true };
-              }
-              return {
-                ok: false,
-                errorCode: retryResult.errorCode,
-                retryAfter: retryResult.retryAfter,
-              };
-            },
-            onCancel: () => {
-              setState(recoveryActiveRef.current ? "recovery-join" : "idle");
-            },
-          },
-          result.retryAfter,
-        );
-        return;
-      }
+            displayName: userDisplayNameRef.current,
+            apiClient,
+            verifySecret,
+          });
+          if (!retryResult.ok) {
+            return {
+              recovered: false,
+              errorCode: retryResult.errorCode,
+              retryAfter: retryResult.retryAfter,
+            };
+          }
+          await finishJoin(retryResult.familyId, retryResult.userId);
+          return { recovered: true };
+        },
+        onCancel: () => {
+          setState(recoveryActiveRef.current ? "recovery-join" : "idle");
+        },
+      });
+      if (handled) return;
 
-      setErrorMessage(result.errorMessage);
-      setErrorActions([
-        { label: "重試", variant: "primary", onClick: handleRetry },
-      ]);
-      setState("error");
+      showRetryableError(result.errorMessage);
     } catch (err) {
       if (err instanceof SyncCodeError) {
-        setErrorMessage(`同步碼格式錯誤：${err.message}`);
-      } else {
-        setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
+        showRetryableError(`同步碼格式錯誤：${err.message}`);
+        return;
       }
-      setErrorActions([
-        { label: "重試", variant: "primary", onClick: handleRetry },
-      ]);
-      setState("error");
+      showRetryableError(err instanceof Error ? err.message : "發生未知錯誤");
     }
-  }, [apiClient, handleRetry, finishJoin, verifyBegin]);
+  }, [apiClient, showRetryableError, finishJoin, promptRecoveryVerification]);
 
   const handleContinueAfterCreate = useCallback(async () => {
     setState("syncing-books");
@@ -514,11 +755,7 @@ export function useOnboardingFlow(
     const email = userEmailRef.current;
     const familyId = recoveryFamilyIdRef.current;
     if (!email || !familyId) {
-      setErrorMessage("恢復資料遺失，請重新開始。");
-      setErrorActions([
-        { label: "重試", variant: "primary", onClick: handleRetry },
-      ]);
-      setState("error");
+      showRetryableError("恢復資料遺失，請重新開始。");
       return;
     }
     setState("recovering");
@@ -552,24 +789,16 @@ export function useOnboardingFlow(
         onCancel: () => setState("solo-recovery-confirm"),
       });
       if (handled) return;
-      setErrorMessage("恢復失敗，請重試。");
-      setErrorActions([
-        { label: "重試", variant: "primary", onClick: handleRetry },
-      ]);
-      setState("error");
+      showRetryableError("恢復失敗，請重試。");
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "發生未知錯誤");
-      setErrorActions([
-        { label: "重試", variant: "primary", onClick: handleRetry },
-      ]);
-      setState("error");
+      showRetryableError(err instanceof Error ? err.message : "發生未知錯誤");
     }
   }, [
     apiClient,
     autoSetup,
-    handleRetry,
     onFamilyJoined,
     promptRecoveryVerification,
+    showRetryableError,
   ]);
 
   return {

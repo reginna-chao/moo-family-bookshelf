@@ -41,6 +41,27 @@ export interface ApiResponse<T> {
   };
 }
 
+/**
+ * Resolved `POST /api/auth/lookup` payload.
+ *
+ * Kept in sync with `extension/src/api/client.ts` — `userId` is derived from a
+ * publicly guessable email, so an account with PWA login verification
+ * configured only gets its family data back when the request carries the
+ * matching secret. Until then the server answers HTTP 200 with
+ * `requiresVerification: TRUE` and withholds the data (`existingFamilyId:
+ * null`, `memberCount: 0`) — informational, not an error.
+ */
+export interface LookupResult {
+  existingFamilyId: string | null;
+  memberCount: number;
+  /**
+   * Optional on the wire: Workers predating the verification gate never send
+   * this field, and self-hosted (BYO) backends can lag the client by any
+   * number of releases. Absent means "no verification gate on this account".
+   */
+  requiresVerification?: BoolFlag;
+}
+
 export interface BookEntry {
   bookId: string;
   title: string;
@@ -266,14 +287,27 @@ export class ApiClient {
 
   // --- Auth ---
 
-  /** Look up family membership for a pre-hashed userId. Server never sees the email. */
+  /**
+   * Look up family membership for a pre-hashed userId. Server never sees the email.
+   *
+   * `verifySecret` unlocks the payload for accounts with PWA login verification
+   * configured; without it the response carries `requiresVerification: TRUE`.
+   * A wrong secret is a 403 `VERIFICATION_FAILED` (or 429 `VERIFICATION_LOCKED`
+   * with `error.retryAfter`), never a silent empty result.
+   *
+   * NOTE: unused by the PWA today (login goes through the sync code) — kept in
+   * sync with the Extension client so the two contracts cannot drift.
+   */
   async lookupUser(
     userId: string,
-  ): Promise<
-    ApiResponse<{ existingFamilyId: string | null; memberCount: number }>
-  > {
+    opts?: { verifySecret?: string },
+  ): Promise<ApiResponse<LookupResult>> {
     this.validateHexId(userId, "userId");
-    return this.post("/api/auth/lookup", { userId });
+    const body: Record<string, string> = { userId };
+    if (opts?.verifySecret !== undefined) {
+      body.verifySecret = opts.verifySecret;
+    }
+    return this.post("/api/auth/lookup", body);
   }
 
   // --- Personal Settings ---
