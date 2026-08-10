@@ -1,6 +1,6 @@
 ## Frontend Architecture Rules
 
-Applies to: `extension/src/`, `pwa/src/`
+Applies to: `extension/src/`, `pwa/src/`, `shared/src/`
 
 ### Tech Stack
 
@@ -23,7 +23,21 @@ extension/src/
 ├── background/      # Service Worker
 ├── crypto/          # Hashing utilities (SHA-256)
 └── api/             # API client (configurable endpoint)
+
+shared/src/         # moo-family-bookshelf-shared — consumed by BOTH extension/ and pwa/
+├── config/         # Readmoo host/selector config, report links
+├── icons/          # Inline brand SVG paths
+├── invite/         # Invite message templates
+└── personal/       # Personal-shelf save strategy (PUT vs PATCH)
 ```
+
+### The `shared/` Package
+
+- Source-only package (no build step); `extension/` and `pwa/` import the `.ts` files directly and bundle them with their own Vite config.
+- Put logic here when Extension and PWA must behave identically; drift between two copies is the failure mode it exists to prevent.
+- **Runtime-agnostic.** It is also imported by Node scripts run under `tsx` (`extension/scripts/verify-build.ts`, `verify-selectors.ts`). `tsconfig.json` includes the `DOM` lib (needed for `URLSearchParams` typing), so `no-restricted-globals` in `shared/eslint.config.js` blocks `document` / `window` / `localStorage` / `sessionStorage` / `navigator`. Take such values as parameters from the caller instead.
+- Covered in CI by the `Lint (shared)` / `Typecheck (shared)` steps of the `extension-check` job (`shared/**` is inside that job's path filter). No test script of its own — behaviour is covered by `extension/tests/` and `pwa/tests/`.
+- Commands: `pnpm --filter moo-family-bookshelf-shared lint` / `typecheck`.
 
 ### Coding Conventions
 

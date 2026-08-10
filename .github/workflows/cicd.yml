@@ -48,6 +48,11 @@ jobs:
               - '.github/workflows/cicd.yml'
 
   # ── CI ──────────────────────────────────────────────
+  # This job also gates the `shared/` workspace package (see the Lint/Typecheck
+  # (shared) steps below). shared/ has no job of its own on purpose: the
+  # `extension` path filter already includes `shared/**`, so every shared change
+  # runs this job, and hanging the checks here keeps ci-success's `needs` list —
+  # the single required status check — unchanged.
   extension-check:
     name: Extension — Lint, Typecheck, Test, Build
     needs: changes
@@ -69,6 +74,15 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
+
+      # shared/ is a dependency of the extension build, so check it first —
+      # a broken shared/ fails here instead of surfacing as a confusing
+      # downstream extension error.
+      - name: Lint (shared)
+        run: pnpm --filter moo-family-bookshelf-shared lint
+
+      - name: Typecheck (shared)
+        run: pnpm --filter moo-family-bookshelf-shared typecheck
 
       - name: Lint
         run: pnpm --filter moo-family-bookshelf-extension lint
