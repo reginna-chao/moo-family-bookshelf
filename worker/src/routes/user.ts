@@ -10,7 +10,7 @@ import {
   type BookEntry,
   MAX_FAMILY_PREF_ENTRIES,
 } from "../kv/schema";
-import { writePublicSnapshot } from "./publicShelf";
+import { writePublicSnapshot } from "../services/publicShelf";
 import {
   isValidUserId,
   sanitizeDisplayName,
