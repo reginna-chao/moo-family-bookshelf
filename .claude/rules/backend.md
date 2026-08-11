@@ -28,10 +28,16 @@ worker/src/
 ├── middleware/
 │   ├── auth.ts       # Request authentication
 │   └── rateLimit.ts  # Rate limiting
+├── schemas/
+│   └── common.ts     # Shared Zod schemas (userId/familyId/shareToken/PIN formats + path params)
 ├── kv/
 │   └── schema.ts     # KV key patterns and type definitions
 └── utils/
     ├── crypto.ts     # hashSecret / timingSafeEqual primitives
+    ├── env.ts        # Env bindings type + isDevMode() production-name guard
+    ├── errors.ts     # jsonError() — typed { error: { code, message } } envelope
+    ├── openapi.ts    # OpenAPI route helpers (jsonRes, INVALID_JSON defaultHook)
+    ├── routes.ts     # Route classification (isPublicRoute / sensitiveBucketFor)
     └── validation.ts # Input validation helpers
 ```
 
