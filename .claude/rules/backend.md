@@ -18,10 +18,13 @@ worker/src/
 │   ├── user.ts       # Personal settings API
 │   ├── family.ts     # Family group API
 │   ├── bookshelf.ts  # Family bookshelf aggregation API
+│   ├── borrow.ts     # Family book borrow-request API
+│   ├── publicShelf.ts # Public shelf CRUD + public share-token query
 │   ├── auth.ts       # Auth lookup & token refresh
 │   └── verify.ts     # PWA login verification routes (PIN/pattern/OTP)
 ├── services/
-│   └── verification.ts # Verification gate — shared by family/auth/verify routes
+│   ├── verification.ts # Verification gate — shared by family/auth/verify routes
+│   └── publicShelf.ts  # Public-shelf snapshot writes — shared by user/publicShelf routes
 ├── middleware/
 │   ├── auth.ts       # Request authentication
 │   └── rateLimit.ts  # Rate limiting
@@ -34,9 +37,8 @@ worker/src/
 
 **Layering.** A route module must never import business or security logic from a SIBLING route module — when two or more route modules need the same logic, it belongs in `services/`. That is why the verification gate lives in `services/verification.ts` rather than in `routes/verify.ts`, which now holds only the five `/verify` handlers.
 
-Two honest caveats, so the rule is not read as more than it is:
+One honest caveat, so the rule is not read as more than it is:
 
-- **One known violation remains**: `routes/user.ts` imports `writePublicSnapshot` from `routes/publicShelf.ts`. It is the same defect class, not yet fixed — sinking it to `services/publicShelf.ts` is a separate change with its own test surface. Do not cite it as precedent.
 - **`services/` here is NOT a transport-agnostic layer.** `services/verification.ts` is deliberately HTTP-aware (it imports Hono's `Context` and returns `Response` via `verificationErrorResponse`) so that all three gate entry points emit byte-identical error shapes from one place, and it depends on `middleware/rateLimit.ts` for the shared KV counter primitives. Both are accepted trade-offs — do not "fix" them by re-splitting the gate.
 
 ### API Design
