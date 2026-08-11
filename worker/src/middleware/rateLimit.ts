@@ -224,10 +224,10 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
     // admitted inside one bucket. The limit only bounds sequential traffic.
     // This property is shared by every KV-backed counter in this codebase: this
     // per-IP counter, the per-userId counters below, and the verification
-    // attempt ceiling in `routes/verify.ts` that reuses them. A hard bound needs
-    // serialization the KV API cannot provide — Durable Objects or Cloudflare's
-    // native rate-limiting binding. That is a separate decision, deliberately
-    // not taken here.
+    // attempt ceiling in `services/verification.ts` that reuses them. A hard
+    // bound needs serialization the KV API cannot provide — Durable Objects or
+    // Cloudflare's native rate-limiting binding. That is a separate decision,
+    // deliberately not taken here.
     const current = await c.env.KV.get(key);
     const count = current ? parseInt(current, 10) : 0;
 
@@ -302,8 +302,8 @@ export interface PerUserRateLimitReading {
  * This is the single implementation of the counter key/verdict derivation:
  * {@link consumePerUserRateLimit}, the `Context`-aware
  * {@link enforcePerUserRateLimit} wrapper, and the verification gate
- * (`validateVerification` in `routes/verify.ts`) all go through it, so none of
- * them can drift apart. Pure read — pair it with
+ * (`validateVerification` in `services/verification.ts`) all go through it, so
+ * none of them can drift apart. Pure read — pair it with
  * {@link chargePerUserRateLimit} to actually consume a slot.
  *
  * Does NOT consult DEV_MODE — that gating belongs to the callers, which own the

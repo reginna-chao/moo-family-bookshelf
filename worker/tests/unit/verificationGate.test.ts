@@ -13,7 +13,7 @@ import {
   VERIFY_ATTEMPT_MAX,
   VERIFY_ATTEMPT_SCOPE,
   VERIFY_ATTEMPT_WINDOW_SECONDS,
-} from "../../src/routes/verify";
+} from "../../src/services/verification";
 import {
   normalizeCallerIp,
   peekPerUserRateLimit,

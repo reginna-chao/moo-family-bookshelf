@@ -34,7 +34,7 @@ import {
   validateVerification,
   verificationErrorResponse,
   verifySecretFormatResponse,
-} from "./verify";
+} from "../services/verification";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 
