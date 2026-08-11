@@ -32,11 +32,11 @@ worker/src/
     └── validation.ts # Input validation helpers
 ```
 
-**Layering.** A route module must never import business or security logic from a SIBLING route module — when two or more route modules need the same logic, it belongs in `services/`. That is why the verification gate lives in `services/verification.ts` rather than in `routes/verify.ts`, which now holds only the five `/verify` handlers.
+**Layering.** A route module must never import business or security logic from a SIBLING route module — when two or more route modules need the same logic, it belongs in `services/`. That is why the verification gate lives in `services/verification.ts` rather than in `routes/verify.ts`, which now holds only the five `/verify` handlers. This is machine-enforced: an ESLint `no-restricted-imports` override in `worker/eslint.config.js`, scoped to `src/routes/**/*.ts`, blocks the `./*` and `**/routes/*` import patterns at lint time, so a new sibling import fails CI rather than depending on a reviewer catching it. (Coverage is static forms only — `import`, `import type`, `export … from`; the core rule does not inspect dynamic `import()`. That is a known boundary of the rule implementation, not an accepted usage.)
 
 Two honest caveats, so the rule is not read as more than it is:
 
-- **One known violation remains**: `routes/user.ts` imports `writePublicSnapshot` from `routes/publicShelf.ts`. It is the same defect class, not yet fixed — sinking it to `services/publicShelf.ts` is a separate change with its own test surface. Do not cite it as precedent.
+- **One known violation remains**: `routes/user.ts` imports `writePublicSnapshot` from `routes/publicShelf.ts`. It is the same defect class, not yet fixed — sinking it to `services/publicShelf.ts` is a separate change with its own test surface. Do not cite it as precedent. That single import site carries a targeted `// eslint-disable-next-line no-restricted-imports` so `pnpm lint` stays green while every NEW sibling import is still blocked; the exemption is grandfathered debt, not permission to add more.
 - **`services/` here is NOT a transport-agnostic layer.** `services/verification.ts` is deliberately HTTP-aware (it imports Hono's `Context` and returns `Response` via `verificationErrorResponse`) so that all three gate entry points emit byte-identical error shapes from one place, and it depends on `middleware/rateLimit.ts` for the shared KV counter primitives. Both are accepted trade-offs — do not "fix" them by re-splitting the gate.
 
 ### API Design

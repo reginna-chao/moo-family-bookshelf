@@ -10,6 +10,7 @@ import {
   type BookEntry,
   MAX_FAMILY_PREF_ENTRIES,
 } from "../kv/schema";
+// eslint-disable-next-line no-restricted-imports -- known debt, not precedent: see .claude/rules/backend.md (Layering)
 import { writePublicSnapshot } from "./publicShelf";
 import {
   isValidUserId,
