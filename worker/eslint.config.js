@@ -27,10 +27,9 @@ export default tseslint.config(
   // (`../routes/x`, `../../routes/x`, ...). Imports of ../utils, ../kv,
   // ../middleware, ../services, ... and bare package specifiers are unaffected.
   // `reportUnusedDisableDirectives` is raised to "error" for this scope so a
-  // stale exemption fails lint: if the one grandfathered sibling import in
-  // src/routes/user.ts is removed but its eslint-disable comment is left
-  // behind, CI goes red instead of emitting a warning the lint script (no
-  // --max-warnings 0) would silently pass.
+  // stale exemption fails lint: if an exempted import is later removed but its
+  // eslint-disable comment is left behind, CI goes red instead of emitting a
+  // warning the lint script (no --max-warnings 0) would silently pass.
   {
     files: ["src/routes/**/*.ts"],
     linterOptions: { reportUnusedDisableDirectives: "error" },
