@@ -18,6 +18,8 @@ cd moo-family-bookshelf
 pnpm install
 ```
 
+> **Windows, existing clone**: `.gitattributes` pins the working tree to LF (Prettier's `endOfLine: "lf"` requires it, otherwise `pnpm format:check` fails repo-wide). After pulling it the first time, renormalize your checkout **from the repo root** with `git rm -r --cached . && git reset --hard` — **from a clean tree only**, since `--hard` discards uncommitted changes (untracked files are left alone). Fresh clones need nothing.
+
 ### Environment Variables
 
 `.env.example` contains dev defaults. Copy to `.env` to start developing:
