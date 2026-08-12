@@ -632,14 +632,16 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
     return jsonError(c, 403, "FORBIDDEN", "只能修改自己的顯示名稱");
   }
 
-  let body: { displayName?: unknown } | null;
+  let body: unknown;
   try {
     body = await c.req.json();
   } catch {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
-  if (!body || !("displayName" in body)) {
+  // A truthy primitive body (5, "x", true) survives a falsy check but makes
+  // `in` throw a TypeError, which would surface as 500 instead of a clean 400.
+  if (typeof body !== "object" || body === null || !("displayName" in body)) {
     return jsonError(c, 400, "MISSING_DISPLAY_NAME", "displayName is required");
   }
 
@@ -913,18 +915,22 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
     return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
 
-  let body: { apiEndpoint: string | null } | null;
+  let body: unknown;
   try {
     body = await c.req.json();
   } catch {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
-  if (!body || !("apiEndpoint" in body)) {
+  // A truthy primitive body (5, "x", true) survives a falsy check but makes
+  // `in` throw a TypeError, which would surface as 500 instead of a clean 400.
+  if (typeof body !== "object" || body === null || !("apiEndpoint" in body)) {
     return jsonError(c, 400, "MISSING_FIELDS", "apiEndpoint is required");
   }
 
-  if (typeof body.apiEndpoint === "string" && body.apiEndpoint.length > 2048) {
+  const apiEndpoint: unknown = body.apiEndpoint;
+
+  if (typeof apiEndpoint === "string" && apiEndpoint.length > 2048) {
     return jsonError(
       c,
       400,
@@ -935,8 +941,8 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
 
   let normalizedEndpoint: string | null = null;
 
-  if (body.apiEndpoint !== null) {
-    if (typeof body.apiEndpoint !== "string") {
+  if (apiEndpoint !== null) {
+    if (typeof apiEndpoint !== "string") {
       return jsonError(
         c,
         400,
@@ -947,7 +953,7 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
 
     let url: URL;
     try {
-      url = new URL(body.apiEndpoint);
+      url = new URL(apiEndpoint);
     } catch {
       return jsonError(
         c,
@@ -971,9 +977,29 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
       );
     }
 
-    // Block private/internal IPs (SSRF prevention)
+    // The Worker itself never fetches this URL. The endpoint is redistributed
+    // to every family member, so the threat is a family owner steering OTHER
+    // members' clients at an address inside their own network. Reject the
+    // literal address forms that make that attack cheap. Not a complete
+    // defence, by design: a DNS name that resolves to an internal host is
+    // indistinguishable from a legitimate one here, and IPv4 literals outside
+    // the ranges below (e.g. 100.64.0.0/10 CGNAT / Tailscale, 224.0.0.0/4)
+    // are not classified either. Both stay allowed.
     const hostname = url.hostname;
     if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+      // The WHATWG URL parser keeps the brackets on an IPv6 host ("[::1]"), so
+      // a leading "[" is a reliable marker. All IPv6 literals are rejected
+      // rather than range-classified — that also covers IPv4-mapped forms such
+      // as [::ffff:10.0.0.1], which would otherwise slip past the IPv4 check.
+      if (hostname.startsWith("[")) {
+        return jsonError(
+          c,
+          400,
+          "INVALID_ENDPOINT",
+          "IPv6 literal addresses are not allowed",
+        );
+      }
+
       const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
       if (ipMatch) {
         const [, a, b] = ipMatch.map(Number);
@@ -982,6 +1008,7 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
           (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
           (a === 192 && b === 168) || // 192.168.0.0/16
           (a === 169 && b === 254) || // 169.254.0.0/16 (link-local)
+          a === 127 || // 127.0.0.0/8 (loopback; exact 127.0.0.1 is carved out above)
           a === 0; // 0.0.0.0/8
         if (isPrivate) {
           return jsonError(

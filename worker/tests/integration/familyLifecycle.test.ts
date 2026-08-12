@@ -33,15 +33,28 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-/** Shortcut to send a request with a raw string body (for invalid JSON tests). */
-function rawRequest(method: string, path: string, rawBody: string) {
+/**
+ * Shortcut to send a request with a raw string body.
+ *
+ * Needed wherever `request()` cannot express the payload: it JSON-stringifies
+ * its argument and skips falsy ones entirely, so bodies like `0` or `""` never
+ * reach the handler through it.
+ */
+function rawRequest(
+  method: string,
+  path: string,
+  rawBody: string,
+  authToken?: string,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
   return app.request(
     path,
-    {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: rawBody,
-    },
+    { method, headers, body: rawBody },
     { KV: kv, DEV_MODE: "1" },
   );
 }
@@ -1050,6 +1063,58 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("MISSING_DISPLAY_NAME");
   });
+
+  // Bodies that parse as JSON but are not a plain object. The truthy primitives
+  // are the regression: they survive a bare `!body` check, and
+  // `"displayName" in 5` throws a TypeError — which surfaced as a 500 instead of
+  // a client error. The falsy ones, JSON null and arrays were always handled;
+  // every class is pinned so the row set states the whole rule — any non-object
+  // body is MISSING_DISPLAY_NAME, never a server error.
+  // The identical guard protects PUT /api/family/:id/endpoint; that side is
+  // pinned in tests/unit/familyEndpoint.test.ts (MISSING_FIELD_BODIES). Both
+  // handlers carry their own copy of the guard, so both need their own rows.
+  const NON_OBJECT_BODIES: [label: string, rawBody: string][] = [
+    ["a number body", "5"],
+    ["a string body", '"hello"'],
+    ["a true body", "true"],
+    ["a zero body", "0"],
+    ["a false body", "false"],
+    ["an empty-string body", '""'],
+    ["a JSON null body", "null"],
+    ["an array body", "[]"],
+  ];
+
+  it.each(NON_OBJECT_BODIES)(
+    "should reject %s with 400 MISSING_DISPLAY_NAME",
+    async (_label, rawBody) => {
+      const { familyId, authToken: token1 } = await createFamily(
+        USER1,
+        "Alice",
+      );
+
+      const res = await rawRequest(
+        "PUT",
+        `/api/family/${familyId}/member/${USER1}/displayName`,
+        rawBody,
+        token1,
+      );
+
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("MISSING_DISPLAY_NAME");
+      expect(json.error.message).toBe("displayName is required");
+
+      // A rejected request must not rename the member.
+      const membersRes = await request(
+        "GET",
+        `/api/family/${familyId}/members`,
+        undefined,
+        token1,
+      );
+      const data = ((await membersRes.json()) as Json).data;
+      expect(data.members[0].displayName).toBe("Alice");
+    },
+  );
 
   it("should reject non-string displayName", async () => {
     const { familyId, authToken: token1 } = await createFamily(USER1);
