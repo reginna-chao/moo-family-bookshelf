@@ -16,12 +16,20 @@ import {
   isValidExpiresDays,
 } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
+import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError, type ErrorBody } from "../utils/errors";
 import { UserIdParam, ShelfIdParam, ShareTokenParam } from "../schemas/common";
 import { writePublicSnapshot } from "../services/publicShelf";
 
 // ── Helpers ────────────────────────────────────────────────────
+
+/** Shared per-userId write ceiling for the four public-shelf write handlers. */
+export const PUBLIC_SHELF_WRITE_LIMIT = {
+  scope: "public-shelf",
+  max: 30,
+  windowSec: 3600,
+} as const;
 
 function generateShareToken(): string {
   return crypto.randomUUID().replace(/-/g, "");
@@ -92,6 +100,7 @@ const createPublicShelfRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
     409: jsonRes("Max shelves reached"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -109,6 +118,7 @@ const updatePublicShelfRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
     404: jsonRes("Shelf not found"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -126,6 +136,7 @@ const resetTokenRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
     404: jsonRes("Shelf not found"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -143,6 +154,7 @@ const deletePublicShelfRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
     404: jsonRes("Shelf not found"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -196,6 +208,25 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
 
   const denied = authGuard(c, userId);
   if (denied) return denied;
+
+  // Per-userId write ceiling: 30 public-shelf writes per userId per hour, shared
+  // by create / update / reset-token / delete under one "public-shelf" scope.
+  // Layered on top of the per-IP limit. Honest scope: this BOUNDS THE BURN RATE
+  // of a single account's AUTHENTICATED writes (~120 KV writes/hr incl. both
+  // counters), it does not make the daily 1000-write free tier safe — 30/hr
+  // sustained is still ~2,880 writes/day, and the per-IP middleware's own
+  // counter write lands BEFORE auth, so unauthenticated spam that ignores 429s
+  // still burns ~60 writes/min (free tier drained in ~17 minutes) outside this
+  // ceiling's reach. It turns "one authenticated account drains the quota in ~6
+  // minutes" into "~8 hours", and forces an attacker to onboard a new family
+  // per 30 writes. A hard global bound needs the edge (Cloudflare WAF rate
+  // limiting, see docs/architecture.md and worker/DEPLOY.md) — deliberately not
+  // attempted here.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    ...PUBLIC_SHELF_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   let body: Record<string, unknown>;
   try {
@@ -273,6 +304,14 @@ publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
 
   const denied = authGuard(c, userId);
   if (denied) return denied;
+
+  // Shared "public-shelf" per-userId write ceiling (30/hr across all four write
+  // handlers) — see the create handler for the KV-quota rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    ...PUBLIC_SHELF_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   let body: Record<string, unknown>;
   try {
@@ -356,6 +395,14 @@ publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
   const denied = authGuard(c, userId);
   if (denied) return denied;
 
+  // Shared "public-shelf" per-userId write ceiling (30/hr across all four write
+  // handlers) — see the create handler for the KV-quota rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    ...PUBLIC_SHELF_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
+
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
     return jsonError(c, 404, "SHELF_NOT_FOUND", "Public shelf not found");
@@ -393,6 +440,14 @@ publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
   const denied = authGuard(c, userId);
   if (denied) return denied;
 
+  // Shared "public-shelf" per-userId write ceiling (30/hr across all four write
+  // handlers) — see the create handler for the KV-quota rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    ...PUBLIC_SHELF_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
+
   const found = await findShelf(c.env.KV, userId, shelfId);
   if (!found) {
     return jsonError(c, 404, "SHELF_NOT_FOUND", "Public shelf not found");
@@ -427,6 +482,21 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
     "json",
   );
   if (!snapshot) {
+    return jsonError(
+      c,
+      404,
+      "PUBLIC_SHELF_NOT_FOUND",
+      "Public shelf not found or expired",
+    );
+  }
+
+  // KV TTL is the primary expiry mechanism; this only backstops a TIME-LIMITED
+  // snapshot that outlived its TTL or its shelf (e.g. reset-token's final delete
+  // failed). A permanent shelf (expiresAt === null) has neither TTL nor deadline,
+  // so an orphan of one stays readable forever — known residual risk, tracked
+  // separately. Answers exactly like the missing-snapshot branch so the two cases
+  // are indistinguishable.
+  if (snapshot.expiresAt !== null && snapshot.expiresAt <= Date.now()) {
     return jsonError(
       c,
       404,
