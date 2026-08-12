@@ -42,6 +42,7 @@
 
 - **Mock**: external API calls, `chrome.storage`, `fetch` to Worker.
 - **Do NOT mock**: React hooks, internal utility functions, KV in integration tests (use Miniflare).
+- **KV mock enforces the TTL floor**: `createMockKV()` (`worker/tests/helpers/mockKv.ts`) throws on `expirationTtl < 60` or a non-integer value, mirroring real Cloudflare KV's minimum (stricter on non-integers, which the platform would truncate). A test that genuinely needs a sub-minimum TTL must build its own stub instead of weakening the shared mock — and such a stub is for KV-behaviour tests only; tests exercising production write paths must keep going through `createMockKV()` so the tripwire stays live.
 
 ### Anti-Drift Rules
 
