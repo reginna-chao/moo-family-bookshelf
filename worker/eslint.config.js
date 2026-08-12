@@ -21,9 +21,12 @@ export default tseslint.config(
   // module must never import business or security logic from a SIBLING route
   // module — logic shared by two or more routes belongs in src/services/.
   // Enforcing it here means a new sibling import fails CI instead of relying on
-  // a reviewer noticing it. Note the patterns are gitignore-style, where `*`
-  // spans nested segments, so `./*` also covers a future `./sub/module`;
-  // `**/routes/*` closes the same door reached from any nesting depth
+  // a reviewer noticing it. Note the patterns use gitignore semantics (ESLint
+  // feeds the group to the `ignore` package): a single `*` never crosses `/`,
+  // but a pattern that matches a directory also covers everything beneath it,
+  // so `./*` matches `./sub` and thereby a future nested `./sub/module` too
+  // (verified against the real rule, ESLint 9.39: `./sub/deep/module` is
+  // flagged); `**/routes/*` closes the same door reached from any nesting depth
   // (`../routes/x`, `../../routes/x`, ...). Imports of ../utils, ../kv,
   // ../middleware, ../services, ... and bare package specifiers are unaffected.
   // `reportUnusedDisableDirectives` is raised to "error" for this scope so a
