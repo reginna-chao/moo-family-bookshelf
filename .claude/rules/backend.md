@@ -41,7 +41,7 @@ worker/src/
     └── validation.ts # Input validation helpers
 ```
 
-**Layering.** A route module must never import business or security logic from a SIBLING route module — when two or more route modules need the same logic, it belongs in `services/`. That is why the verification gate lives in `services/verification.ts` rather than in `routes/verify.ts`, which now holds only the five `/verify` handlers.
+**Layering.** A route module must never import business or security logic from a SIBLING route module — when two or more route modules need the same logic, it belongs in `services/`. That is why the verification gate lives in `services/verification.ts` rather than in `routes/verify.ts`, which now holds only the five `/verify` handlers. This is machine-enforced: an ESLint `no-restricted-imports` override in `worker/eslint.config.js`, scoped to `src/routes/**/*.ts`, blocks the `./*` and `**/routes/*` import patterns at lint time, so a new sibling import fails CI rather than depending on a reviewer catching it. (Coverage is static forms only — `import`, `import type`, `export … from`; the core rule does not inspect dynamic `import()`. That is a known boundary of the rule implementation, not an accepted usage.)
 
 One honest caveat, so the rule is not read as more than it is:
 
