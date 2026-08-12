@@ -1,12 +1,17 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
-import { createMockKV } from "../helpers/mockKv";
+import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import {
   BoolFlag,
   kvKeys,
   type UserBooksRecord,
   type PublicShelfSnapshot,
 } from "../../src/kv/schema";
+import {
+  peekPerUserRateLimit,
+  RATE_LIMITED_MESSAGE,
+} from "../../src/middleware/rateLimit";
+import { PUBLIC_SHELF_WRITE_LIMIT } from "../../src/routes/publicShelf";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -490,6 +495,409 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId", () => {
   });
 });
 
+// ── Per-userId public-shelf write ceiling ─────────────────────
+//
+// The four authenticated write handlers (create / update / reset-token /
+// delete) share ONE per-userId counter, so a single account cannot drain the
+// Worker's daily KV write quota by rotating source addresses — reset-token
+// alone costs 4 KV operations per call.
+//
+// These cases run WITHOUT DEV_MODE, which every other case in this file sets:
+// DEV_MODE short-circuits `enforcePerUserRateLimit`, so the ceiling would never
+// fire. Setup that must not spend the budget still goes through the DEV_MODE
+// helpers on purpose.
+
+/**
+ * The very options object the four `enforcePerUserRateLimit` call sites in
+ * `src/routes/publicShelf.ts` spread, imported rather than copied — so the
+ * boundary cases below (last write admitted, next one refused) track any change
+ * to the ceiling instead of silently drifting from it. The counter KEY is
+ * likewise always derived through the production key builder
+ * (`peekPerUserRateLimit`).
+ */
+const {
+  scope: WRITE_SCOPE,
+  max: WRITE_MAX,
+  windowSec: WRITE_WINDOW_SECONDS,
+} = PUBLIC_SHELF_WRITE_LIMIT;
+
+/** Exactly mid-window, so the counter cannot roll over mid-test. */
+const PINNED_WRITE_NOW = Date.parse("2026-01-01T00:30:00.000Z");
+
+describe("Public shelf per-userId write ceiling", () => {
+  /**
+   * Same as {@link request} but WITHOUT `DEV_MODE`, so the live limiters run.
+   */
+  async function prodRequest(
+    method: string,
+    path: string,
+    opts?: { body?: string; token?: string },
+  ): Promise<Response> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (opts?.token) headers["Authorization"] = `Bearer ${opts.token}`;
+    const init: RequestInit = { method, headers };
+    if (opts?.body) init.body = opts.body;
+    return app.request(path, init, { KV: kv });
+  }
+
+  const createBody = (title = "共用額度") =>
+    JSON.stringify({ title, expiresDays: 30 });
+
+  /** `token` is always explicit — an omitted one means "send no credentials". */
+  function createWrite(token: string | undefined, title?: string) {
+    return prodRequest("POST", `/api/user/${USER_ID}/public-shelf`, {
+      body: createBody(title),
+      token,
+    });
+  }
+
+  /** Counter key of the user's CURRENT window, via the production builder. */
+  async function writeCounterKey(userId: string): Promise<string> {
+    const reading = await peekPerUserRateLimit(kv, {
+      userId,
+      scope: WRITE_SCOPE,
+      max: WRITE_MAX,
+      windowSec: WRITE_WINDOW_SECONDS,
+    });
+    return reading.key;
+  }
+
+  /** Writes charged to the account so far, or null if never charged. */
+  async function writesCharged(userId: string): Promise<number | null> {
+    const raw = await kv.get(await writeCounterKey(userId));
+    return raw === null ? null : parseInt(raw, 10);
+  }
+
+  /** Every public-shelf counter key currently in KV, whatever the userId. */
+  async function counterKeys(): Promise<string[]> {
+    const listed = await kv.list();
+    return listed.keys
+      .map((k: { name: string }) => k.name)
+      .filter((name: string) =>
+        name.startsWith(`ratelimit:user:${WRITE_SCOPE}:`),
+      );
+  }
+
+  /** Pre-spend `used` slots — far cheaper than 30 real writes. */
+  async function spendWriteBudget(userId: string, used: number): Promise<void> {
+    await kv.put(await writeCounterKey(userId), String(used), {
+      expirationTtl: WRITE_WINDOW_SECONDS * 2,
+    });
+  }
+
+  /**
+   * The four write endpoints of USER_ID, each acting on an existing shelf.
+   * `token` is a parameter so the same table can drive the ceiling cases and
+   * the auth-ordering cases (no token → 401, someone else's token → 403).
+   */
+  const WRITE_ENDPOINTS: {
+    label: string;
+    call: (shelfId: string, token?: string) => Promise<Response>;
+  }[] = [
+    {
+      label: "POST create",
+      call: (_shelfId, token) => createWrite(token, "另一個書櫃"),
+    },
+    {
+      label: "PUT update",
+      call: (shelfId, token) =>
+        prodRequest("PUT", `/api/user/${USER_ID}/public-shelf/${shelfId}`, {
+          body: JSON.stringify({ title: "新標題" }),
+          token,
+        }),
+    },
+    {
+      label: "POST reset-token",
+      call: (shelfId, token) =>
+        prodRequest(
+          "POST",
+          `/api/user/${USER_ID}/public-shelf/${shelfId}/reset-token`,
+          { token },
+        ),
+    },
+    {
+      label: "DELETE",
+      call: (shelfId, token) =>
+        prodRequest("DELETE", `/api/user/${USER_ID}/public-shelf/${shelfId}`, {
+          token,
+        }),
+    },
+  ];
+
+  /** Seed a user plus one shelf without spending any of the live budget. */
+  async function seedUserWithShelf(): Promise<Json> {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json } = await createShelf(USER_ID, AUTH_TOKEN);
+    return json.data.shelf;
+  }
+
+  beforeEach(() => {
+    // Pin Date (timers stay real) so the 1-hour window cannot roll over between
+    // seeding the counter and the request under test.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(PINNED_WRITE_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("charges one slot per write and keeps the counter self-expiring", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+
+    const res = await createWrite(AUTH_TOKEN);
+
+    expect(res.status).toBe(201);
+    expect(await writesCharged(USER_ID)).toBe(1);
+    // Without a TTL the counter would live in KV forever.
+    expect(getPutTtl(kv, await writeCounterKey(USER_ID))).toBe(
+      WRITE_WINDOW_SECONDS * 2,
+    );
+  });
+
+  it.each(WRITE_ENDPOINTS)(
+    "refuses $label with 429 once the shared window is spent",
+    async ({ call }) => {
+      const shelf = await seedUserWithShelf();
+      await spendWriteBudget(USER_ID, WRITE_MAX);
+
+      const res = await call(shelf.shelfId, AUTH_TOKEN);
+
+      expect(res.status).toBe(429);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("RATE_LIMITED");
+      expect(json.error.message).toBe(RATE_LIMITED_MESSAGE);
+      // The pinned clock sits exactly mid-window, so the back-off hint is half
+      // the window — which also pins the window length end to end.
+      expect(json.error.retryAfter).toBe(WRITE_WINDOW_SECONDS / 2);
+      expect(res.headers.get("Retry-After")).toBe(
+        String(json.error.retryAfter),
+      );
+      // A refused write must not extend the window.
+      expect(await writesCharged(USER_ID)).toBe(WRITE_MAX);
+    },
+  );
+
+  it("admits the last write the window has room for and refuses the next", async () => {
+    const shelf = await seedUserWithShelf();
+    await spendWriteBudget(USER_ID, WRITE_MAX - 1);
+
+    const lastAllowed = await prodRequest(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${shelf.shelfId}`,
+      { body: JSON.stringify({ title: "剛好用完" }), token: AUTH_TOKEN },
+    );
+    expect(lastAllowed.status).toBe(200);
+    expect(await writesCharged(USER_ID)).toBe(WRITE_MAX);
+
+    const overCeiling = await prodRequest(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${shelf.shelfId}`,
+      { body: JSON.stringify({ title: "超過額度" }), token: AUTH_TOKEN },
+    );
+    expect(overCeiling.status).toBe(429);
+  });
+
+  it("counts create, update, reset-token and delete against ONE shared window", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    await spendWriteBudget(USER_ID, WRITE_MAX - 4);
+
+    const created = await createWrite(AUTH_TOKEN);
+    expect(created.status).toBe(201);
+    const shelfId = ((await created.json()) as Json).data.shelf.shelfId;
+
+    const updated = await prodRequest(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}`,
+      { body: JSON.stringify({ title: "改名" }), token: AUTH_TOKEN },
+    );
+    expect(updated.status).toBe(200);
+
+    const reset = await prodRequest(
+      "POST",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}/reset-token`,
+      { token: AUTH_TOKEN },
+    );
+    expect(reset.status).toBe(200);
+
+    const removed = await prodRequest(
+      "DELETE",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}`,
+      { token: AUTH_TOKEN },
+    );
+    expect(removed.status).toBe(204);
+
+    // Four different handlers, one counter.
+    expect(await writesCharged(USER_ID)).toBe(WRITE_MAX);
+
+    // The user now holds zero shelves, so this create is legal on every count
+    // except the shared window — which is exactly what the scope enforces.
+    const refused = await createWrite(AUTH_TOKEN, "超額的新書櫃");
+    expect(refused.status).toBe(429);
+
+    const record = (await kv.get(
+      kvKeys.user(USER_ID),
+      "json",
+    )) as UserBooksRecord;
+    expect(record.publicSharing?.shelves).toHaveLength(0);
+  });
+
+  it("leaves the share token and its snapshot untouched when reset-token is refused", async () => {
+    const shelf = await seedUserWithShelf();
+    const snapshotBefore = await kv.get(kvKeys.publicShelf(shelf.shareToken));
+    await spendWriteBudget(USER_ID, WRITE_MAX);
+
+    const res = await prodRequest(
+      "POST",
+      `/api/user/${USER_ID}/public-shelf/${shelf.shelfId}/reset-token`,
+      { token: AUTH_TOKEN },
+    );
+    expect(res.status).toBe(429);
+
+    const record = (await kv.get(
+      kvKeys.user(USER_ID),
+      "json",
+    )) as UserBooksRecord;
+    expect(record.publicSharing?.shelves[0].shareToken).toBe(shelf.shareToken);
+    expect(await kv.get(kvKeys.publicShelf(shelf.shareToken))).toBe(
+      snapshotBefore,
+    );
+
+    // ...and no snapshot was minted under a fresh token either.
+    const listed = await kv.list();
+    const snapshots = listed.keys.filter((k: { name: string }) =>
+      k.name.startsWith("public:"),
+    );
+    expect(snapshots).toHaveLength(1);
+  });
+
+  it("keeps the shelf when a delete is refused", async () => {
+    const shelf = await seedUserWithShelf();
+    await spendWriteBudget(USER_ID, WRITE_MAX);
+
+    const res = await prodRequest(
+      "DELETE",
+      `/api/user/${USER_ID}/public-shelf/${shelf.shelfId}`,
+      { token: AUTH_TOKEN },
+    );
+    expect(res.status).toBe(429);
+
+    const record = (await kv.get(
+      kvKeys.user(USER_ID),
+      "json",
+    )) as UserBooksRecord;
+    expect(record.publicSharing?.shelves).toHaveLength(1);
+    expect(await kv.get(kvKeys.publicShelf(shelf.shareToken))).not.toBeNull();
+  });
+
+  it("charges a write that is rejected later by validation", async () => {
+    // The ceiling runs before body parsing, so a malformed-body flood costs the
+    // attacker budget just like a valid one.
+    await seedUser(USER_ID, AUTH_TOKEN);
+
+    const res = await prodRequest("POST", `/api/user/${USER_ID}/public-shelf`, {
+      body: JSON.stringify({ title: "", expiresDays: 30 }),
+      token: AUTH_TOKEN,
+    });
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Json).error.code).toBe("INVALID_TITLE");
+    expect(await writesCharged(USER_ID)).toBe(1);
+  });
+
+  it("answers 429 rather than 400 for a malformed body once the window is spent", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    await spendWriteBudget(USER_ID, WRITE_MAX);
+
+    const res = await prodRequest("POST", `/api/user/${USER_ID}/public-shelf`, {
+      body: "{not json}",
+      token: AUTH_TOKEN,
+    });
+
+    expect(res.status).toBe(429);
+  });
+
+  // The ceiling runs AFTER the auth check on purpose: a stranger must not be
+  // able to spend the account owner's write budget.
+
+  it.each(WRITE_ENDPOINTS)(
+    "answers $label with 401 without charging the account",
+    async ({ call }) => {
+      const shelf = await seedUserWithShelf();
+
+      const res = await call(shelf.shelfId);
+
+      expect(res.status).toBe(401);
+      expect(await writesCharged(USER_ID)).toBeNull();
+      expect(await counterKeys()).toHaveLength(0);
+    },
+  );
+
+  it.each(WRITE_ENDPOINTS)(
+    "answers $label with 403 for another user's token without charging the victim",
+    async ({ call }) => {
+      const shelf = await seedUserWithShelf();
+      await seedUser(OTHER_USER_ID, OTHER_AUTH_TOKEN);
+
+      const res = await call(shelf.shelfId, OTHER_AUTH_TOKEN);
+
+      expect(res.status).toBe(403);
+      expect(await writesCharged(USER_ID)).toBeNull();
+      expect(await writesCharged(OTHER_USER_ID)).toBeNull();
+      expect(await counterKeys()).toHaveLength(0);
+    },
+  );
+
+  it("counts each userId independently", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    await seedUser(OTHER_USER_ID, OTHER_AUTH_TOKEN);
+    await spendWriteBudget(USER_ID, WRITE_MAX);
+
+    const blocked = await createWrite(AUTH_TOKEN);
+    expect(blocked.status).toBe(429);
+
+    const allowed = await prodRequest(
+      "POST",
+      `/api/user/${OTHER_USER_ID}/public-shelf`,
+      { body: createBody(), token: OTHER_AUTH_TOKEN },
+    );
+    expect(allowed.status).toBe(201);
+    expect(await writesCharged(OTHER_USER_ID)).toBe(1);
+  });
+
+  it("still serves the read paths when the write window is spent", async () => {
+    const shelf = await seedUserWithShelf();
+    await spendWriteBudget(USER_ID, WRITE_MAX);
+
+    const list = await prodRequest("GET", `/api/user/${USER_ID}/public-shelf`, {
+      token: AUTH_TOKEN,
+    });
+    expect(list.status).toBe(200);
+    expect(((await list.json()) as Json).data.shelves).toHaveLength(1);
+
+    const snapshot = await prodRequest(
+      "GET",
+      `/api/public/${shelf.shareToken}`,
+    );
+    expect(snapshot.status).toBe(200);
+  });
+
+  it("does not apply the write ceiling in dev mode", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    await spendWriteBudget(USER_ID, WRITE_MAX);
+
+    // Same request through the DEV_MODE helper — local wrangler dev and E2E
+    // runs must not be throttled.
+    const { res } = await createShelf(USER_ID, AUTH_TOKEN);
+
+    expect(res.status).toBe(201);
+    // Dev mode neither reads nor charges the counter.
+    expect(await writesCharged(USER_ID)).toBe(WRITE_MAX);
+  });
+});
+
 // ── GET /api/public/:shareToken ───────────────────────────────
 
 describe("GET /api/public/:shareToken", () => {
@@ -535,6 +943,118 @@ describe("GET /api/public/:shareToken", () => {
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_TOKEN");
+  });
+});
+
+// ── GET /api/public/:shareToken — expiry backstop ─────────────
+//
+// KV TTL is the primary expiry mechanism, but a snapshot can outlive its shelf
+// (e.g. reset-token's final delete failed) — and this mock KV never expires a
+// key at all, which is exactly the orphan situation the handler's own
+// `expiresAt` check has to answer for.
+
+describe("GET /api/public/:shareToken — expiry backstop", () => {
+  const SHARE_TOKEN = "abcdef0123456789abcdef0123456789";
+  const UNKNOWN_TOKEN = "0".repeat(32);
+  const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
+  const SNAPSHOT_TITLE = "快過期的書櫃";
+
+  beforeEach(() => {
+    // Pin Date (timers stay real) so "exactly now" is an exact boundary.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(PINNED_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function seedSnapshot(expiresAt: number | null): Promise<void> {
+    const snapshot: PublicShelfSnapshot = {
+      userId: USER_ID,
+      shelfId: "12345678-1234-4123-8123-123456789abc",
+      title: SNAPSHOT_TITLE,
+      books: sampleBooks().filter((b) => b.isShared === BoolFlag.TRUE),
+      createdAt: PINNED_NOW - 86_400_000,
+      expiresAt,
+    };
+    await kv.put(kvKeys.publicShelf(SHARE_TOKEN), JSON.stringify(snapshot));
+  }
+
+  it.each([
+    {
+      label: "expired an hour ago",
+      expiresAt: PINNED_NOW - 3_600_000,
+      status: 404,
+    },
+    { label: "expiring exactly now", expiresAt: PINNED_NOW, status: 404 },
+    {
+      label: "expiring in one millisecond",
+      expiresAt: PINNED_NOW + 1,
+      status: 200,
+    },
+    { label: "permanent (expiresAt null)", expiresAt: null, status: 200 },
+  ])("answers $status for a snapshot $label", async ({ expiresAt, status }) => {
+    await seedSnapshot(expiresAt);
+
+    const res = await request("GET", `/api/public/${SHARE_TOKEN}`);
+
+    expect(res.status).toBe(status);
+  });
+
+  it("answers an expired snapshot exactly like an unknown token", async () => {
+    await seedSnapshot(PINNED_NOW - 1);
+
+    const expired = await request("GET", `/api/public/${SHARE_TOKEN}`);
+    const unknown = await request("GET", `/api/public/${UNKNOWN_TOKEN}`);
+
+    // Indistinguishable: an expired token must not confirm it ever existed.
+    expect(expired.status).toBe(unknown.status);
+    expect(await expired.json()).toEqual(await unknown.json());
+  });
+
+  it("discloses neither title nor books once the snapshot has expired", async () => {
+    await seedSnapshot(PINNED_NOW - 1);
+
+    const res = await request("GET", `/api/public/${SHARE_TOKEN}`);
+
+    expect(res.status).toBe(404);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("PUBLIC_SHELF_NOT_FOUND");
+    expect(json.data).toBeUndefined();
+    const body = JSON.stringify(json);
+    expect(body).not.toContain(SNAPSHOT_TITLE);
+    expect(body).not.toContain("Shared Book");
+  });
+
+  it("refuses the expired snapshot without deleting it (read path stays side-effect free)", async () => {
+    await seedSnapshot(PINNED_NOW - 1);
+
+    const res = await request("GET", `/api/public/${SHARE_TOKEN}`);
+    expect(res.status).toBe(404);
+
+    expect(await kv.get(kvKeys.publicShelf(SHARE_TOKEN))).not.toBeNull();
+  });
+
+  it("stops serving a real shelf once its expiry passes", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN, {
+      expiresDays: 7,
+    });
+    const shareToken = created.data.shelf.shareToken;
+
+    const fresh = await request("GET", `/api/public/${shareToken}`);
+    expect(fresh.status).toBe(200);
+
+    // The mock never expires keys, so the snapshot survives its KV TTL — the
+    // orphan case this backstop exists for.
+    vi.setSystemTime(PINNED_NOW + 8 * 86_400_000);
+
+    const stale = await request("GET", `/api/public/${shareToken}`);
+    expect(stale.status).toBe(404);
+    expect(((await stale.json()) as Json).error.code).toBe(
+      "PUBLIC_SHELF_NOT_FOUND",
+    );
   });
 });
 
