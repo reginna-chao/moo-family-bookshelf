@@ -1070,9 +1070,10 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
   // a client error. The falsy ones, JSON null and arrays were always handled;
   // every class is pinned so the row set states the whole rule — any non-object
   // body is MISSING_DISPLAY_NAME, never a server error.
-  // The identical guard protects PUT /api/family/:id/endpoint; that side is
-  // pinned in tests/unit/familyEndpoint.test.ts (MISSING_FIELD_BODIES). Both
-  // handlers carry their own copy of the guard, so both need their own rows.
+  // The object-shape half of the guard is shared (isJsonObject in
+  // src/utils/validation.ts); each handler keeps its own error code/message, so
+  // both sides still need their own rows. The PUT /api/family/:id/endpoint side
+  // is pinned in tests/unit/familyEndpoint.test.ts (MISSING_FIELD_BODIES).
   const NON_OBJECT_BODIES: [label: string, rawBody: string][] = [
     ["a number body", "5"],
     ["a string body", '"hello"'],

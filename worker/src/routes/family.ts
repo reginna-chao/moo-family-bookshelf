@@ -18,6 +18,7 @@ import {
 import {
   isValidUserId,
   isValidFamilyId,
+  isJsonObject,
   sanitizeDisplayName,
   sanitizeVerifySecret,
   validateDisplayName,
@@ -639,9 +640,7 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
-  // A truthy primitive body (5, "x", true) survives a falsy check but makes
-  // `in` throw a TypeError, which would surface as 500 instead of a clean 400.
-  if (typeof body !== "object" || body === null || !("displayName" in body)) {
+  if (!isJsonObject(body) || !("displayName" in body)) {
     return jsonError(c, 400, "MISSING_DISPLAY_NAME", "displayName is required");
   }
 
@@ -1022,9 +1021,7 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
-  // A truthy primitive body (5, "x", true) survives a falsy check but makes
-  // `in` throw a TypeError, which would surface as 500 instead of a clean 400.
-  if (typeof body !== "object" || body === null || !("apiEndpoint" in body)) {
+  if (!isJsonObject(body) || !("apiEndpoint" in body)) {
     return jsonError(c, 400, "MISSING_FIELDS", "apiEndpoint is required");
   }
 

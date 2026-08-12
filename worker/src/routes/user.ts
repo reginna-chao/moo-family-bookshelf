@@ -13,6 +13,7 @@ import {
 import { writePublicSnapshot } from "../services/publicShelf";
 import {
   isValidUserId,
+  isJsonObject,
   sanitizeDisplayName,
   isValidFamilyPrefRef,
 } from "../utils/validation";
@@ -228,31 +229,27 @@ export function parseFamilyPrefs(
   body: unknown,
   max: number,
 ): ParseFamilyPrefsResult {
-  // Reject any body that is not a non-null plain object (primitives AND arrays).
-  // The handler's falsy-body guard does not catch truthy primitives (e.g. 5,
-  // true, "x"); without this guard `kind in body` throws a TypeError that
-  // surfaces as 500 instead of a clean 400.
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+  // Reject primitives AND arrays before any `kind in body` — see isJsonObject.
+  if (!isJsonObject(body)) {
     return {
       ok: false,
       code: "INVALID_PAYLOAD",
       message: "request body must be a JSON object",
     };
   }
-  const record = body as Record<string, unknown>;
   const prefs: ParsedFamilyPrefs = {};
   let anyPresent = false;
   for (const kind of FAMILY_PREF_KINDS) {
-    if (!(kind in record)) continue;
+    if (!(kind in body)) continue;
     anyPresent = true;
-    if (!Array.isArray(record[kind])) {
+    if (!Array.isArray(body[kind])) {
       return {
         ok: false,
         code: "INVALID_PAYLOAD",
         message: `${kind} must be an array`,
       };
     }
-    const result = parsePrefList(kind, record[kind] as unknown[], max);
+    const result = parsePrefList(kind, body[kind] as unknown[], max);
     if (!result.ok) return result;
     prefs[kind] = result.values;
   }
