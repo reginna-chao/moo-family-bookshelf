@@ -12,14 +12,23 @@ import {
   type PublicShelfSnapshot,
 } from "../kv/schema";
 
+/** Cloudflare KV rejects any `expirationTtl` below 60 seconds. */
+const KV_MIN_TTL_SECONDS = 60;
+
 function sharedBooks(books: BookEntry[]): BookEntry[] {
   return books.filter((b) => b.isShared === BoolFlag.TRUE);
 }
 
+/**
+ * Remaining lifetime in seconds, or `undefined` when the shelf never expires.
+ * Cloudflare KV rejects an `expirationTtl` below `KV_MIN_TTL_SECONDS`, so a
+ * lifetime shorter than that minimum is treated as already expired (0) — the
+ * caller then deletes the snapshot instead of putting one that KV would refuse.
+ */
 function remainingTtlSeconds(expiresAt: number | null): number | undefined {
   if (expiresAt === null) return undefined;
   const remaining = Math.floor((expiresAt - Date.now()) / 1000);
-  return remaining > 0 ? remaining : 0;
+  return remaining >= KV_MIN_TTL_SECONDS ? remaining : 0;
 }
 
 function buildSnapshot(

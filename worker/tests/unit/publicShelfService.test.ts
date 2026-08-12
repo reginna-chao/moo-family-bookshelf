@@ -109,6 +109,12 @@ describe("writePublicSnapshot", () => {
     ["a millisecond in the past", -1],
     ["exactly the current instant", 0],
     ["less than one full second ahead", 999],
+    // 1–59s band: real Cloudflare KV rejects `expirationTtl < 60`, so a
+    // lifetime shorter than that minimum is deliberately treated as already
+    // expired rather than written with a TTL KV would refuse.
+    ["one second ahead — below the KV minimum TTL", 1_000],
+    ["59 seconds ahead — just below the KV minimum TTL", 59_000],
+    ["a millisecond under the 60s KV minimum", 59_999],
   ])(
     "treats an expiry %s as expired and removes the snapshot",
     async (_desc, offsetMs) => {
@@ -147,10 +153,10 @@ describe("writePublicSnapshot", () => {
     expect(getPutTtl(kv, SNAPSHOT_KEY)).toBeUndefined();
   });
 
-  // No case in the 1–59s band on purpose: real Cloudflare KV rejects
-  // `expirationTtl < 60`, which production does not currently clamp
-  // (src/services/publicShelf.ts:19-23). Pinning e.g. `expirationTtl: 59` here
-  // would fossilize that broken contract — tracked separately.
+  // No case in the 1–59s band here by design: Cloudflare KV rejects
+  // `expirationTtl < 60`, so production treats such a lifetime as already
+  // expired and deletes instead of putting. Those band cases are pinned in the
+  // expiry `it.each` above; "one minute ahead" below is the lower valid bound.
   it.each([
     ["seven days ahead", 7 * DAY_MS, 7 * 86_400],
     ["one minute ahead", 60_000, 60],
