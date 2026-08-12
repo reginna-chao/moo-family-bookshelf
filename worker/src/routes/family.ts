@@ -892,6 +892,106 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
   return c.json({ data: record });
 });
 
+/**
+ * Validate the `apiEndpoint` field of PUT /api/family/:id/endpoint and return
+ * the value to persist (`null` clears the endpoint). Pure: no I/O and no
+ * response building — the caller maps a failure onto `jsonError(c, 400, ...)`.
+ */
+function validateApiEndpoint(
+  value: unknown,
+):
+  | { ok: true; normalized: string | null }
+  | { ok: false; code: string; message: string } {
+  if (typeof value === "string" && value.length > 2048) {
+    return {
+      ok: false,
+      code: "INVALID_ENDPOINT",
+      message: "API endpoint URL is too long",
+    };
+  }
+
+  if (value === null) {
+    return { ok: true, normalized: null };
+  }
+
+  if (typeof value !== "string") {
+    return {
+      ok: false,
+      code: "INVALID_ENDPOINT",
+      message: "apiEndpoint must be a string or null",
+    };
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return {
+      ok: false,
+      code: "INVALID_ENDPOINT",
+      message: "apiEndpoint must be a valid URL",
+    };
+  }
+
+  const isLocalhost =
+    url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalhost)) {
+    return {
+      ok: false,
+      code: "INVALID_ENDPOINT",
+      message: "API endpoint must use HTTPS (or HTTP for localhost)",
+    };
+  }
+
+  // The Worker itself never fetches this URL. The endpoint is redistributed
+  // to every family member, so the threat is a family owner steering OTHER
+  // members' clients at an address inside their own network. Reject the
+  // literal address forms that make that attack cheap. Not a complete
+  // defence, by design: a DNS name that resolves to an internal host is
+  // indistinguishable from a legitimate one here, and IPv4 literals outside
+  // the ranges below (e.g. 100.64.0.0/10 CGNAT / Tailscale, 224.0.0.0/4)
+  // are not classified either. Both stay allowed.
+  const hostname = url.hostname;
+  if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+    // The WHATWG URL parser keeps the brackets on an IPv6 host ("[::1]"), so
+    // a leading "[" is a reliable marker. All IPv6 literals are rejected
+    // rather than range-classified — that also covers IPv4-mapped forms such
+    // as [::ffff:10.0.0.1], which would otherwise slip past the IPv4 check.
+    if (hostname.startsWith("[")) {
+      return {
+        ok: false,
+        code: "INVALID_ENDPOINT",
+        message: "IPv6 literal addresses are not allowed",
+      };
+    }
+
+    const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (ipMatch) {
+      const [, a, b] = ipMatch.map(Number);
+      const isPrivate =
+        a === 10 || // 10.0.0.0/8
+        (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+        (a === 192 && b === 168) || // 192.168.0.0/16
+        (a === 169 && b === 254) || // 169.254.0.0/16 (link-local)
+        a === 127 || // 127.0.0.0/8 (loopback; exact 127.0.0.1 is carved out above)
+        a === 0; // 0.0.0.0/8
+      if (isPrivate) {
+        return {
+          ok: false,
+          code: "INVALID_ENDPOINT",
+          message: "Private or internal IP addresses are not allowed",
+        };
+      }
+    }
+  }
+
+  // Normalize: remove trailing slashes
+  return {
+    ok: true,
+    normalized: url.origin + url.pathname.replace(/\/+$/, ""),
+  };
+}
+
 // PUT /api/family/:id/endpoint — update family API endpoint
 familyRoutes.openapi(updateEndpointRoute, async (c) => {
   const familyId = c.req.param("id");
@@ -930,100 +1030,11 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
 
   const apiEndpoint: unknown = body.apiEndpoint;
 
-  if (typeof apiEndpoint === "string" && apiEndpoint.length > 2048) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_ENDPOINT",
-      "API endpoint URL is too long",
-    );
+  const result = validateApiEndpoint(apiEndpoint);
+  if (!result.ok) {
+    return jsonError(c, 400, result.code, result.message);
   }
-
-  let normalizedEndpoint: string | null = null;
-
-  if (apiEndpoint !== null) {
-    if (typeof apiEndpoint !== "string") {
-      return jsonError(
-        c,
-        400,
-        "INVALID_ENDPOINT",
-        "apiEndpoint must be a string or null",
-      );
-    }
-
-    let url: URL;
-    try {
-      url = new URL(apiEndpoint);
-    } catch {
-      return jsonError(
-        c,
-        400,
-        "INVALID_ENDPOINT",
-        "apiEndpoint must be a valid URL",
-      );
-    }
-
-    const isLocalhost =
-      url.hostname === "localhost" || url.hostname === "127.0.0.1";
-    if (
-      url.protocol !== "https:" &&
-      !(url.protocol === "http:" && isLocalhost)
-    ) {
-      return jsonError(
-        c,
-        400,
-        "INVALID_ENDPOINT",
-        "API endpoint must use HTTPS (or HTTP for localhost)",
-      );
-    }
-
-    // The Worker itself never fetches this URL. The endpoint is redistributed
-    // to every family member, so the threat is a family owner steering OTHER
-    // members' clients at an address inside their own network. Reject the
-    // literal address forms that make that attack cheap. Not a complete
-    // defence, by design: a DNS name that resolves to an internal host is
-    // indistinguishable from a legitimate one here, and IPv4 literals outside
-    // the ranges below (e.g. 100.64.0.0/10 CGNAT / Tailscale, 224.0.0.0/4)
-    // are not classified either. Both stay allowed.
-    const hostname = url.hostname;
-    if (hostname !== "localhost" && hostname !== "127.0.0.1") {
-      // The WHATWG URL parser keeps the brackets on an IPv6 host ("[::1]"), so
-      // a leading "[" is a reliable marker. All IPv6 literals are rejected
-      // rather than range-classified — that also covers IPv4-mapped forms such
-      // as [::ffff:10.0.0.1], which would otherwise slip past the IPv4 check.
-      if (hostname.startsWith("[")) {
-        return jsonError(
-          c,
-          400,
-          "INVALID_ENDPOINT",
-          "IPv6 literal addresses are not allowed",
-        );
-      }
-
-      const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-      if (ipMatch) {
-        const [, a, b] = ipMatch.map(Number);
-        const isPrivate =
-          a === 10 || // 10.0.0.0/8
-          (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
-          (a === 192 && b === 168) || // 192.168.0.0/16
-          (a === 169 && b === 254) || // 169.254.0.0/16 (link-local)
-          a === 127 || // 127.0.0.0/8 (loopback; exact 127.0.0.1 is carved out above)
-          a === 0; // 0.0.0.0/8
-        if (isPrivate) {
-          return jsonError(
-            c,
-            400,
-            "INVALID_ENDPOINT",
-            "Private or internal IP addresses are not allowed",
-          );
-        }
-      }
-    }
-
-    // Normalize: remove trailing slashes
-    normalizedEndpoint = url.origin + url.pathname.replace(/\/+$/, "");
-  }
+  const normalizedEndpoint = result.normalized;
 
   const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),
