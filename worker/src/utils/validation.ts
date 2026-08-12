@@ -90,6 +90,19 @@ export function sanitizeVerifySecret(value: unknown): string | null {
   return value;
 }
 
+/**
+ * Narrow a `JSON.parse`-produced value to a keyed record.
+ *
+ * `JSON.parse` yields only objects, arrays, and primitives, so rejecting
+ * `null`, arrays, and non-objects leaves exactly the plain-object case. Use it
+ * before any `key in body` check at a handler boundary: `in` throws a
+ * TypeError on a truthy primitive (`5`, `"x"`, `true`), which would surface as
+ * a 500 instead of a clean 400.
+ */
+export function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function isValidSha256Hex(value: string): boolean {
   return Sha256HexSchema.safeParse(value).success;
 }
