@@ -99,7 +99,7 @@ moo-family-bookshelf/
 - Build for dev worker (extension + PWA): `pnpm build:dev`
 - Build (Firefox, test/dev): `pnpm build:firefox:dev` — compiles in dev mode then transforms to Firefox; load `extension/dist-firefox-direct/manifest.json` via `about:debugging`
 - Type check: `pnpm typecheck`
-- Lint/format: `pnpm lint` / `pnpm format`
+- Lint/format: `pnpm lint` / `pnpm format` — lint runs ESLint with `--max-warnings 0`, so warnings fail CI, not just errors
 - Tests (extension): `pnpm test`
 - Tests (extension, specific): `pnpm test -- tests/unit/crypto`
 - Tests (worker): `cd worker && pnpm test`
