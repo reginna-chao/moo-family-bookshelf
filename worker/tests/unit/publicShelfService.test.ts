@@ -8,8 +8,8 @@
  * which the HTTP suites cannot observe.
  *
  * Expiry here is decided by the PRODUCTION code's `Date.now()` comparison, not
- * by the KV mock: `createMockKV` only RECORDS `expirationTtl`, it never expires
- * anything.
+ * by the KV mock: `createMockKV` VALIDATES the 60s floor on `expirationTtl`
+ * but never expires anything it accepted.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { writePublicSnapshot } from "../../src/services/publicShelf";
