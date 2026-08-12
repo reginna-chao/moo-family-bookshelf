@@ -59,7 +59,7 @@ cd extension
 pnpm dev                  # Dev server (API points to localhost:8787)
 pnpm build                # Production build (API points to prod Worker)
 pnpm typecheck            # Type check
-pnpm lint                 # ESLint + Prettier
+pnpm lint                 # ESLint with --max-warnings 0 (warnings fail CI)
 pnpm test                 # Unit + component tests
 pnpm build:firefox        # Build both Firefox variants (dist-firefox-amo/ + dist-firefox-direct/)
 pnpm build:updates-json   # Generate the Firefox self-distribution updates.json
@@ -255,7 +255,7 @@ chore: update dependencies
 
 Every push/PR triggers:
 
-- ESLint + Prettier formatting
+- ESLint (`--max-warnings 0` — warnings fail CI)
 - TypeScript type checking
 - Unit + component tests
 - E2E tests (on PR to `main`)

@@ -93,5 +93,5 @@ One honest caveat, so the rule is not read as more than it is:
 - `pnpm dev` — `wrangler dev` (local dev with Miniflare)
 - `pnpm build` — `wrangler deploy --dry-run`
 - `pnpm typecheck` — `tsc --noEmit`
-- `pnpm lint` — ESLint
+- `pnpm lint` — ESLint with `--max-warnings 0` (warnings fail)
 - `pnpm test` — Vitest + Miniflare
