@@ -70,6 +70,6 @@ Open Dialog → has family_id in chrome.storage?
 - `pnpm build` — production build
 - `pnpm build:firefox:dev` — dev-mode Firefox build → load `dist-firefox-direct/manifest.json` via about:debugging
 - `pnpm typecheck` — `tsc --noEmit`
-- `pnpm lint` — ESLint + Prettier
+- `pnpm lint` — ESLint with `--max-warnings 0` (warnings fail; Prettier runs separately via `pnpm format`)
 - `pnpm test` — Vitest (unit + component)
 - `pnpm test:e2e` — Playwright E2E

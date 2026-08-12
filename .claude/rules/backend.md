@@ -41,7 +41,7 @@ worker/src/
     └── validation.ts # Input validation helpers
 ```
 
-**Layering.** A route module must never import business or security logic from a SIBLING route module — when two or more route modules need the same logic, it belongs in `services/`. That is why the verification gate lives in `services/verification.ts` rather than in `routes/verify.ts`, which now holds only the five `/verify` handlers.
+**Layering.** A route module must never import business or security logic from a SIBLING route module — when two or more route modules need the same logic, it belongs in `services/`. That is why the verification gate lives in `services/verification.ts` rather than in `routes/verify.ts`, which now holds only the five `/verify` handlers. This is machine-enforced: an ESLint `no-restricted-imports` override in `worker/eslint.config.js`, scoped to `src/routes/**/*.ts`, blocks the `./*` and `**/routes/*` import patterns at lint time, so a new sibling import fails CI rather than depending on a reviewer catching it. (Coverage is static forms only — `import`, `import type`, `export … from`; the core rule does not inspect dynamic `import()`. That is a known boundary of the rule implementation, not an accepted usage.)
 
 One honest caveat, so the rule is not read as more than it is:
 
@@ -80,6 +80,8 @@ One honest caveat, so the rule is not read as more than it is:
 | `ratelimit:sens:{ip}:{bucket}`              | Per-IP counter, sensitive tier — family create / join (3/min)                                                              | 120s                                      |
 | `ratelimit:sens:lookup:{ip}:{bucket}`       | Per-IP counter, sensitive tier — `POST /api/auth/lookup` (3/min, isolated from create / join)                              | 120s                                      |
 
+Platform constraint: Cloudflare KV rejects any `expirationTtl` below 60 seconds ("Invalid expiration_ttl, must be at least 60"). Fixed TTLs in this table already satisfy that. Any DYNAMICALLY computed TTL (today only the `public:{share_token}` snapshot in `services/publicShelf.ts`, see `KV_MIN_TTL_SECONDS`) must treat a remaining lifetime under 60s as already expired — delete the key instead of putting with a sub-minimum TTL, which would throw and surface as a 500.
+
 ### Coding Conventions
 
 - No `any` type. Strict TypeScript.
@@ -93,5 +95,5 @@ One honest caveat, so the rule is not read as more than it is:
 - `pnpm dev` — `wrangler dev` (local dev with Miniflare)
 - `pnpm build` — `wrangler deploy --dry-run`
 - `pnpm typecheck` — `tsc --noEmit`
-- `pnpm lint` — ESLint
+- `pnpm lint` — ESLint with `--max-warnings 0` (warnings fail)
 - `pnpm test` — Vitest + Miniflare
