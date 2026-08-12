@@ -239,6 +239,15 @@ const NORMALIZED_ENDPOINTS: [input: string, stored: string][] = [
   ["http://localhost:8787", "http://localhost:8787"],
   ["http://LOCALHOST:8787", "http://localhost:8787"],
   ["http://127.0.0.1", "http://127.0.0.1"],
+  // Both loopback carve-outs are matched on `hostname`, which excludes the
+  // port — so the usual `wrangler dev` address stays acceptable over http even
+  // though all of 127.0.0.0/8 is otherwise blocked.
+  ["http://127.0.0.1:8787", "http://127.0.0.1:8787"],
+  // All of 127.0.0.0/8 is blocked as loopback; the exact string "127.0.0.1" is
+  // carved out ahead of that check, so the canonical dotted form still
+  // round-trips. This row is what pins the carve-out itself — the alternate
+  // spellings below only reach it after the URL parser rewrites them.
+  ["https://127.0.0.1", "https://127.0.0.1"],
   ["https://localhost", "https://localhost"],
   ["https://LOCALHOST", "https://localhost"],
   // Alternate IPv4 spellings of 127.0.0.1 are normalized by the URL parser
@@ -450,6 +459,19 @@ describe("PUT /api/family/:id/endpoint request validation", () => {
     ["a JSON null body", "null"],
     ["an array body", "[]"],
     ["an unrelated key", '{"endpoint":"https://example.com"}'],
+    // Primitive JSON bodies. The truthy ones are the regression: they survive a
+    // bare `!body` check, and `"apiEndpoint" in 5` throws a TypeError — which
+    // surfaced as a 500 instead of a client error. The falsy ones were always
+    // handled; both classes are pinned so the row set states the whole rule —
+    // any non-object body is MISSING_FIELDS, never a server error.
+    // The identical guard protects PUT /:id/member/:uid/displayName; that side
+    // is pinned in tests/integration/familyLifecycle.test.ts.
+    ["a number body", "5"],
+    ["a string body", '"hello"'],
+    ["a true body", "true"],
+    ["a zero body", "0"],
+    ["a false body", "false"],
+    ["an empty-string body", '""'],
   ];
 
   it.each(MISSING_FIELD_BODIES)(
@@ -521,6 +543,19 @@ describe("PUT /api/family/:id/endpoint request validation", () => {
     await expectNoStoredEndpoint(familyId);
   });
 
+  it("should return 400 too-long for an over-length string that is not a URL", async () => {
+    const { familyId, authToken } = await createFamily(USER1);
+
+    // Not parseable as a URL at all: pins that the 2048 check runs BEFORE
+    // `new URL()`, so this is "too long" and never "must be a valid URL".
+    const res = await putEndpoint(familyId, "a".repeat(2049), authToken);
+
+    expect(res.status).toBe(400);
+    const json = await readJson(res);
+    expect(json.error!.message).toBe("API endpoint URL is too long");
+    await expectNoStoredEndpoint(familyId);
+  });
+
   const UNPARSEABLE_URLS: [label: string, value: string][] = [
     ["an empty string", ""],
     ["a blank string", " "],
@@ -547,7 +582,7 @@ describe("PUT /api/family/:id/endpoint request validation", () => {
 });
 
 // ===========================================================================
-// Protocol + host rules (SSRF boundary)
+// Protocol + host rules (client-redirect hardening)
 // ===========================================================================
 
 const REJECTED_PROTOCOLS: [label: string, value: string][] = [
@@ -557,6 +592,13 @@ const REJECTED_PROTOCOLS: [label: string, value: string][] = [
   ["websocket", "ws://api.example.com"],
   ["javascript", "javascript:alert(1)"],
   ["file", "file:///etc/passwd"],
+  // The protocol rule runs BEFORE any host classification, and the http
+  // carve-out is an exact-string match on localhost / 127.0.0.1. So these two
+  // loopback-ish hosts are answered with the protocol message, not with the
+  // IPv6 or private-IP message — pinned because the ordering decides which
+  // message a client sees.
+  ["http on an IPv6 loopback literal", "http://[::1]:8787"],
+  ["http on a non-.1 loopback address", "http://127.0.0.2"],
 ];
 
 const BLOCKED_HOSTS: [label: string, value: string][] = [
@@ -568,10 +610,35 @@ const BLOCKED_HOSTS: [label: string, value: string][] = [
   ["169.254/16 link-local", "https://169.254.169.254"],
   ["0/8 unspecified", "https://0.0.0.0"],
   ["0/8 other", "https://0.1.2.3"],
+  // The whole loopback /8 is blocked, not just the .1 host: only the exact
+  // string 127.0.0.1 is carved out ahead of this check.
+  ["127/8 second address", "https://127.0.0.2"],
+  ["127/8 end", "https://127.255.255.255"],
   // Alternate spellings the URL parser resolves back into a blocked range
   // before the host rules run.
   ["hex form of 10.0.0.1", "https://0x0a000001"],
   ["trailing-dot form of 10.0.0.1", "https://10.0.0.1."],
+];
+
+/**
+ * Every IPv6 literal is rejected, with no range classification at all: private,
+ * link-local, IPv4-mapped and PUBLIC literals alike. That is the product
+ * decision — a family endpoint is expected to be a hostname — so the public
+ * entry below is a deliberate case, not an over-block to be "fixed".
+ */
+const BLOCKED_IPV6_HOSTS: [label: string, value: string][] = [
+  ["the loopback literal", "https://[::1]"],
+  ["the unspecified address", "https://[::]"],
+  ["a unique-local fd00::/8 address", "https://[fd00::1]"],
+  ["a link-local fe80::/10 address", "https://[fe80::1]"],
+  // The URL parser rewrites the embedded IPv4 into hex ("[::ffff:a00:1]"), so
+  // the dotted-quad check never sees 10.0.0.1 — only the bracket rule stops it.
+  ["an IPv4-mapped private address", "https://[::ffff:10.0.0.1]"],
+  // Same rewrite ("[::ffff:7f00:1]") means the loopback carve-out — an exact
+  // string match on "127.0.0.1" — never applies to the mapped form. Pinned so
+  // the carve-out cannot be loosened into one that leaks IPv6 literals through.
+  ["an IPv4-mapped loopback address", "https://[::ffff:127.0.0.1]"],
+  ["a public documentation address", "https://[2001:db8::1]"],
 ];
 
 /** Public addresses that sit just outside each blocked range. */
@@ -582,6 +649,8 @@ const ALLOWED_NEIGHBOUR_HOSTS: [label: string, value: string][] = [
   ["just above 172.16/12", "https://172.32.0.1"],
   ["just above 192.168/16", "https://192.169.0.1"],
   ["just below 169.254/16", "https://169.253.0.1"],
+  ["just below 127/8", "https://126.255.255.255"],
+  ["just above 127/8", "https://128.0.0.1"],
   ["a public address", "https://1.2.3.4"],
 ];
 
@@ -646,6 +715,27 @@ describe("PUT /api/family/:id/endpoint private-host rules", () => {
       "https://good.example.com",
     );
   });
+});
+
+describe("PUT /api/family/:id/endpoint IPv6 host rules", () => {
+  it.each(BLOCKED_IPV6_HOSTS)(
+    "should return 400 INVALID_ENDPOINT for %s",
+    async (_label, value) => {
+      const { familyId, authToken } = await createFamily(USER1);
+
+      const res = await putEndpoint(familyId, value, authToken);
+
+      expect(res.status).toBe(400);
+      const json = await readJson(res);
+      expect(json.error!.code).toBe("INVALID_ENDPOINT");
+      // A distinct message from the IPv4 rule: IPv6 is refused wholesale, so
+      // "private or internal" would misdescribe a rejected public literal.
+      expect(json.error!.message).toBe(
+        "IPv6 literal addresses are not allowed",
+      );
+      await expectNoStoredEndpoint(familyId);
+    },
+  );
 });
 
 // ===========================================================================
