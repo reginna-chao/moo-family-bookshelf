@@ -11,6 +11,7 @@
     "build:dev": "wrangler deploy --dry-run --outdir=dist",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ tests/ --max-warnings 0",
+    "lint:fix": "eslint src/ tests/ --fix",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

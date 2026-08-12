@@ -22,6 +22,9 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // Severity is written here rather than left to the CLI's --max-warnings 0,
+      // so IDEs render it red exactly as the CI gate treats it.
+      "react-hooks/exhaustive-deps": "error",
       "@typescript-eslint/no-explicit-any": "error",
     },
   },

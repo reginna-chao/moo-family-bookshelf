@@ -1,0 +1,2 @@
+# .prettierrc pins endOfLine: "lf", so check out text files as LF on every OS — a CRLF working tree fails `pnpm format:check` repo-wide on Windows.
+* text=auto eol=lf
