@@ -30,7 +30,7 @@ import {
   deleteAuthToken,
   getAuthenticatedUserId,
 } from "../middleware/auth";
-import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
+import { getCallerIp } from "../middleware/rateLimit";
 import {
   validateVerification,
   verificationErrorResponse,
@@ -351,23 +351,14 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   }
 
   // Bound the secret at the boundary, alongside the other format checks and
-  // before the join counter: a malformed body is a request-format error and must
-  // not spend the account's join quota. Same classification as create/lookup.
+  // before the verification gate: a malformed body is a request-format error and
+  // must not reach hashSecret nor be charged against the verify attempt ceiling.
+  // Same classification as create/lookup.
   const sanitizedSecret = sanitizeVerifySecret(body.verifySecret);
   if (sanitizedSecret === null) {
     return verifySecretFormatResponse(c);
   }
   const verifySecret = sanitizedSecret === "" ? undefined : sanitizedSecret;
-
-  // Per-userId rate limit: max 10 join attempts per userId per hour across all IPs.
-  // Complements the per-IP rate limit; prevents distributed-IP abuse targeting a single user.
-  const rateLimitResponse = await enforcePerUserRateLimit(c, {
-    userId: body.userId,
-    scope: "join",
-    max: 10,
-    windowSec: 3600,
-  });
-  if (rateLimitResponse) return rateLimitResponse;
 
   // Cheap, terminal conflict: the user already belongs to a DIFFERENT family, so
   // no secret can make this request succeed. Answered before the verification
@@ -429,9 +420,12 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     // login on demand (DoS). Membership is NOT a usable trust signal here for
     // the same reason. Brute force from a SINGLE source stays bounded by the
     // per-IP sensitive-route limit (3/min); an attacker rotating source prefixes
-    // is bounded by the per-userId ceilings — the "join" limit above (10/hour)
-    // and the "verify" attempt ceiling inside `validateVerification` (10/hour),
-    // which covers create and lookup too. No bound holds under DEV_MODE=1.
+    // is bounded by the "verify" attempt ceiling inside `validateVerification`
+    // (10/hour, keyed on userId, shared with create and lookup). Unlike the
+    // former standalone per-userId "join" counter — now removed — that ceiling is
+    // charge-on-failure (the secret is compared first, only wrong guesses are
+    // charged), so it never blocks the owner's own correct-secret reconnect.
+    // No bound holds under DEV_MODE=1.
     const verification = await validateVerification(
       c.env,
       body.userId,
