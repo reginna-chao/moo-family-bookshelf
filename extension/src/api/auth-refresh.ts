@@ -188,9 +188,12 @@ export async function doRefreshToken(
       return { refreshed: true };
     }
 
-    // Rate-limited by the worker (429, fired BEFORE the verification gate). Set a
-    // cooldown so subsequent dialog opens stop burning the shared quota, and do
-    // NOT prompt verification — the user would verify and still fail.
+    // Rate-limited by the worker. A no-secret recovery can only hit the per-IP
+    // sensitive tier's 429 (the verify attempt ceiling charges wrong guesses
+    // only, and never fires without a secret). Set a cooldown so subsequent
+    // dialog opens stop burning the shared quota, and do NOT prompt
+    // verification — a verified retry from the same IP would still be blocked
+    // by the same per-IP window.
     if (recovery.errorCode === "RATE_LIMITED") {
       const cooldownUntil = await setRecoveryCooldown(recovery.retryAfter);
       return { refreshed: false, rateLimited: true, cooldownUntil };

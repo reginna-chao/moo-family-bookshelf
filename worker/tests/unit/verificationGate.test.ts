@@ -30,12 +30,14 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
 // (PIN / pattern / OTP) configured. Three entry points share one gate:
 //
 //   POST /api/family          — create (403 without a valid secret)
-//   POST /api/family/:id/join — join   (already covered in verifyRoutes.test.ts)
+//   POST /api/family/:id/join — join   (gate semantics in verifyRoutes.test.ts;
+//                                       per-userId flood resistance below)
 //   POST /api/auth/lookup     — lookup (200 + requiresVerification, no data)
 //
 // Accounts with no verification record, or `method: "none"`, are unaffected.
 // This suite covers create + lookup, the OTP consumption contract between them,
-// the `verifySecret` format bound, and the per-userId attempt ceiling.
+// the `verifySecret` format bound, the per-userId attempt ceiling, and join's
+// victim-facing flood resistance (no per-userId counter can block the owner).
 // ===========================================================================
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
