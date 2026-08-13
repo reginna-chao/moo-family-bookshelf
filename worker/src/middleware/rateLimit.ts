@@ -361,9 +361,9 @@ export async function chargePerUserRateLimit(
  * request is admitted. A rejected request does not extend the window.
  *
  * The single-shot form used by every caller that charges EVERY request (the
- * join / user / borrow limits via {@link enforcePerUserRateLimit}). Callers that
- * charge only some outcomes use {@link peekPerUserRateLimit} +
- * {@link chargePerUserRateLimit} directly.
+ * join / user / borrow / bookshelf / public-shelf limits via
+ * {@link enforcePerUserRateLimit}). Callers that charge only some outcomes use
+ * {@link peekPerUserRateLimit} + {@link chargePerUserRateLimit} directly.
  */
 export async function consumePerUserRateLimit(
   kv: KVNamespace,

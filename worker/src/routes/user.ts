@@ -420,9 +420,9 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     return jsonError(c, 403, "FORBIDDEN", "Cannot modify another user's data");
   }
 
-  // Per-userId write rate limit: max 30 saves per userId per hour.
-  // Layered on top of per-IP rate limit; prevents compromised-account abuse
-  // from draining the daily 1000 KV write quota.
+  // Per-userId write rate limit: max 30 saves per userId per hour. Layered on
+  // top of the per-IP limit; slows compromised-account abuse of the daily 1000
+  // KV write quota (bounds the burn rate; cannot fully prevent exhaustion).
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId: authUserId,
     scope: "put-books",
