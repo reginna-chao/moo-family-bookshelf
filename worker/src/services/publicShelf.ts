@@ -7,13 +7,11 @@
 import {
   kvKeys,
   BoolFlag,
+  KV_MIN_TTL_SECONDS,
   type BookEntry,
   type PublicShelf,
   type PublicShelfSnapshot,
 } from "../kv/schema";
-
-/** Cloudflare KV rejects any `expirationTtl` below 60 seconds. */
-const KV_MIN_TTL_SECONDS = 60;
 
 function sharedBooks(books: BookEntry[]): BookEntry[] {
   return books.filter((b) => b.isShared === BoolFlag.TRUE);
