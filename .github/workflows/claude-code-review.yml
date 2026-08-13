@@ -10,12 +10,12 @@ on:
     # claude.yml). Tradeoff: a pushed CRITICAL fix is no longer auto-verified;
     # the author asks @claude to re-check (and can target the exact thread).
     types: [opened, ready_for_review, reopened]
-    # Only trigger on code-directory changes; skip docs/config-only changes to save quota
-    paths:
-      - "extension/src/**"
-      - "pwa/src/**"
-      - "worker/src/**"
-      - "shared/**"
+    # No paths filter — every PR gets an auto-review. The old filter only
+    # allowed extension/src, pwa/src, worker/src and shared, so it silently
+    # skipped far more than docs: tests/, .github/, manifest.json, wrangler.toml
+    # and dependency bumps (a hono security bump and a Firefox manifest fix both
+    # went un-reviewed). Docs-only PRs were reviewed anyway by tagging @claude
+    # (claude.yml), so the filter saved little quota and only added manual steps.
 
 # Cancel a still-in-progress review when the same PR re-triggers within a short
 # window (ready_for_review / reopened firing again, e.g. draft↔ready flips or
@@ -28,7 +28,12 @@ concurrency:
 jobs:
   claude-review:
     # Skip draft PRs; the real review happens on `ready_for_review`.
-    if: github.event.pull_request.draft == false
+    # Skip fork PRs: a `pull_request` run from a fork receives no secrets and a
+    # read-only token, so the review can never post — it would only fail and
+    # leave a red X on an outside contributor's PR.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
 
     # Optional: Filter by PR author
     # if: |
