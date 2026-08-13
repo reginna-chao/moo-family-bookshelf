@@ -101,7 +101,7 @@ jobs:
             root. Read them if helpful, but if any file is unavailable, proceed using
             the diff alone — never get blocked on reading a file.
 
-            Review ONLY the actual diff of this PR, across five dimensions:
+            Review ONLY the actual diff of this PR, across six dimensions:
 
             1. Design: single responsibility, clear layering, depend on abstractions;
                flag god functions (> ~40 lines) and mixed concerns.
@@ -115,6 +115,14 @@ jobs:
                .claude/rules/security-ux-invariants.md.
             5. Testability: side effects isolated and injectable, pure logic separated
                from I/O, and matching tests per .claude/rules/test.md coverage targets.
+            6. Docs / config-only diffs (no source files): verify factual
+               accuracy against the code being described (file paths, API
+               routes, KV key patterns), stale cross-references, and the
+               繁體中文 requirement in .claude/rules/global.md. For CI /
+               workflow diffs, also check trigger semantics, permission scope,
+               and secret exposure. A docs/config diff with none of these
+               problems is still a ✅ — do not reach into the five code
+               dimensions to manufacture a finding.
 
             SEVERITY POLICY — align with the local Fix Cycle in
             .claude/rules/global.md (CRITICAL=must-fix / WARNING=use-judgment /

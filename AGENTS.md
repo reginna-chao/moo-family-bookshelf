@@ -67,7 +67,9 @@ moo-family-bookshelf/
 │   └── index.html
 ├── .github/
 │   └── workflows/
-│       └── cicd.yml            # CI (lint/typecheck/test/build) + CD (Worker/PWA/Pages deploy, Release)
+│       ├── cicd.yml            # CI (lint/typecheck/test/build) + CD (Worker/PWA/Pages deploy, Release)
+│       ├── claude-code-review.yml # Claude 自動審查：每個 PR 開啟/ready/reopen 時觸發
+│       └── claude.yml          # @claude 手動觸發：留言/issue 中 tag 後複審與問答
 ├── AGENTS.md                    # This file
 └── CLAUDE.md                    # → AGENTS.md
 ```
@@ -151,6 +153,11 @@ Every push/PR triggers:
 - `pwa-check`: lint → typecheck → test → build
 - `e2e` (PR to `main` only): build extension + start Miniflare + Playwright E2E
 - `pwa-e2e` (PR to `main` only): PWA Playwright E2E
+
+### Claude Review (GitHub Actions)
+
+- `claude-code-review.yml`：每個 PR（`opened` / `ready_for_review` / `reopened`，非 draft、非 fork）自動觸發 Claude 審查，**無 paths 過濾**——文件與設定變更也會被審（六個維度，第六維度專審 docs/config diff）。模型使用 `opus` 家族別名（永遠解析為最新一代 Opus），實際 model id 由 workflow 在執行後回填到審查留言 footer。審查 bot 只能留言：`--disallowedTools` 封鎖 `gh pr review` / `gh pr merge` / `gh pr close` 與 Write / Edit，approve 與合併一律由人類決定。
+- `claude.yml`：在 PR / Issue 留言（含 inline review comment 回覆）tag `@claude` 觸發，用於修正後複審與問答；同樣以 `--model opus` 跑最新一代 Opus。程式碼建議直接寫在留言內——job 為 `contents: read`，不會 commit/push。
 
 ### CD (GitHub Actions)
 
