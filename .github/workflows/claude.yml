@@ -30,10 +30,18 @@ jobs:
         (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
       )
     runs-on: ubuntu-latest
+    # claude-code-action creates and updates a tracking comment while it works.
+    # pull-requests: write covers BOTH PR paths — a PR comment posted through the
+    # issues API is governed by the pull-requests scope, and an inline
+    # review-comment reply goes through the pulls API. issues: write is needed
+    # because this workflow also triggers on real `issues` events (opened /
+    # assigned). Without these, @claude runs but cannot post anything.
+    # `contents` stays read DELIBERATELY: paired with the --append-system-prompt
+    # below, Claude writes proposed code inside the comment and never pushes.
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: read # deliberately read-only — see note above
+      pull-requests: write
+      issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:

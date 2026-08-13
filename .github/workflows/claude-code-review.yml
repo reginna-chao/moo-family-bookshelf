@@ -64,16 +64,27 @@ jobs:
           # Cost control + tool permissions.
           # Lesson learned: a narrow per-command Bash(...) allowlist makes Claude hit
           # a denial whenever it reaches for a command not on the list
-          # (git log / cat / sed / gh pr review / TodoWrite planning...), and each
+          # (git log / cat / sed / TodoWrite planning...), and each
           # denial burns a turn until the run ends in error_max_turns.
           # Fix: allow the whole Bash tool + common read/planning tools to cover all
-          # review-time exploration, while deliberately NOT allowing Write / Edit /
-          # Task — Claude still cannot modify files, so the safety boundary holds
-          # (the job is contents: read anyway).
+          # review-time exploration. Note the allowlist is NOT the safety boundary:
+          # with Bash fully open, files can still be changed locally via sed -i or
+          # shell redirection, so "Write/Edit not allowed" proves nothing by itself.
+          # The boundary is layered, and only the first layer is hard:
+          #   (a) contents: read — the job's token cannot push or merge, so
+          #       `gh pr merge` fails at the API no matter how it is spelled.
+          #       This is the only hard stop.
+          #   (b) --disallowedTools below — blocks the obvious PR-mutating gh
+          #       commands (review / merge / close) plus Write / Edit. A guardrail,
+          #       NOT a boundary: the token still holds pull-requests: write, and
+          #       prefix rules match command strings, so approve / close stay
+          #       reachable via `gh api` or curl.
+          #   (c) the prompt's explicit "comment only — never approve or merge" rule.
           claude_args: |
             --model ${{ env.CLAUDE_MODEL }}
             --max-turns 35
             --allowedTools "Bash,Read,Glob,Grep,TodoWrite,mcp__github_inline_comment__create_inline_comment"
+            --disallowedTools "Bash(gh pr review:*),Bash(gh pr merge:*),Bash(gh pr close:*),Write,Edit"
 
           prompt: |
             REPO: ${{ github.repository }}
@@ -116,15 +127,15 @@ jobs:
               skippable. Do not open one inline thread per nitpick.
 
             VERDICT — open the summary with exactly one of these lines:
-            - ✅ APPROVE — no CRITICAL findings. Say so plainly and STOP. Do not
-              hunt for polish and do not manufacture NITPICKs to fill space; a
-              clean PR earns a short approval, not a long list.
-            - 🛑 REQUEST CHANGES — one or more CRITICAL findings; list each with
+            - ✅ 無 CRITICAL 問題 — no CRITICAL findings. Say so plainly and STOP.
+              Do not hunt for polish and do not manufacture NITPICKs to fill
+              space; a clean PR earns a short verdict, not a long list.
+            - 🛑 有 CRITICAL 問題 — one or more CRITICAL findings; list each with
               file:line and a concrete fix.
 
             Do not flag formatting that ESLint/Prettier already handle. If you
-            find nothing significant, give ✅ APPROVE and stop — never invent
-            findings to justify the run. When a human later asks you to
+            find nothing significant, give ✅ 無 CRITICAL 問題 and stop — never
+            invent findings to justify the run. When a human later asks you to
             re-review after fixes, focus only on whether the prior CRITICAL items
             are resolved; do not generate a fresh batch of NITPICKs.
 
@@ -133,6 +144,9 @@ jobs:
             Use `mcp__github_inline_comment__create_inline_comment` (with
             `confirmed: true`) to flag specific lines in the diff.
             Only post GitHub comments — do not submit the review as a chat message.
+            你只負責留下留言，絕對不要執行 `gh pr review`、`gh pr merge`、
+            `gh pr close` 等任何會改變 PR 狀態的指令；approve、合併與關閉
+            一律由人類決定。
 
             At the very end of the top-level summary comment, append these two lines
             exactly (substitute N with the total number of tool calls you made):
