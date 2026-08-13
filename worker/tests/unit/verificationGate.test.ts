@@ -1201,11 +1201,11 @@ describe("Per-userId verification attempt ceiling", () => {
     expect(other.status).toBe(200);
   });
 
-  it("should not spend the join quota on a malformed verifySecret", async () => {
+  it("should not spend the attempt ceiling on a malformed verifySecret", async () => {
     await seedFamily([OWNER_ID]);
 
-    // More malformed bodies than the join ceiling allows requests. If the
-    // format check ran after the counter, the legitimate join below would be
+    // More malformed bodies than the attempt ceiling allows wrong guesses. If
+    // the format check ran after the counter, the legitimate join below would be
     // rate-limited instead of admitted.
     for (let i = 0; i < 11; i++) {
       const res = await joinFamily(USER_ID, {

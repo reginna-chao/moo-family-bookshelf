@@ -630,7 +630,7 @@ describe("doRefreshToken", () => {
    * Reauth-pending latch (skip guard): a verification prompt raised by an
    * earlier 401 wave sets `isReauthPending() === true`. On the dialog's second
    * data wave the refresh POST still runs, but silent join-recovery must be
-   * suppressed — otherwise it would re-burn a join-quota unit and re-fire
+   * suppressed — otherwise it would re-spend the per-IP join budget and re-fire
    * onReauthRequired, wiping the user's in-progress pattern/PIN input.
    */
   describe("reauth-pending latch", () => {

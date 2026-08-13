@@ -69,8 +69,9 @@ interface RefreshDeps {
   /**
    * Returns true when a re-verification prompt is already pending from an
    * earlier 401 wave. When latched, silent join-recovery is skipped so the
-   * dialog's second data wave does not re-burn join quota or re-initialize the
-   * verification prompt (which would wipe in-progress pattern/PIN input).
+   * dialog's second data wave does not re-spend the join rate-limit budget nor
+   * re-initialize the verification prompt (which would wipe in-progress
+   * pattern/PIN input).
    */
   isReauthPending: () => boolean;
 }
@@ -113,9 +114,10 @@ export interface RefreshOutcome {
  *  - family-gone codes   → clear local family data + FAMILY_REMOVED.
  *  - anything else        → leave data intact so a later request can retry.
  *
- * The recovery join is quota-sensitive (worker rate-limits it per-userId/per-IP),
- * so an active cooldown suppresses the auto-join entirely — but never a manual,
- * user-initiated join (onboarding / re-verify), which live outside this module.
+ * The recovery join is quota-sensitive (the worker rate-limits it per-IP on the
+ * sensitive tier — 3/min), so an active cooldown suppresses the auto-join
+ * entirely — but never a manual, user-initiated join (onboarding / re-verify),
+ * which live outside this module.
  */
 export async function doRefreshToken(
   deps: RefreshDeps,
@@ -164,7 +166,7 @@ export async function doRefreshToken(
     // earlier 401 wave. The refresh POST above still ran (a token fixed in
     // storage by another tab/context is picked up at the top of this function
     // and can recover without a join), but silent join-recovery must NOT fire a
-    // second time — it would re-burn a join-quota unit and re-fire
+    // second time — it would re-spend the per-IP join budget and re-fire
     // onReauthRequired, wiping the user's in-progress pattern/PIN input.
     if (deps.isReauthPending()) {
       return { refreshed: false };
