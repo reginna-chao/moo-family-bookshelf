@@ -17,7 +17,10 @@ on:
       - "worker/src/**"
       - "shared/**"
 
-# Cancel the previous in-progress review when the same PR is pushed again, to avoid duplicate spend
+# Cancel a still-in-progress review when the same PR re-triggers within a short
+# window (ready_for_review / reopened firing again, e.g. draft↔ready flips or
+# close→reopen). Pushes never re-trigger this workflow — `synchronize` is
+# deliberately not listened to (see the `on:` comment above).
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -35,8 +38,11 @@ jobs:
 
     runs-on: ubuntu-latest
     env:
-      CLAUDE_MODEL: "claude-opus-4-8"
-      CLAUDE_MODEL_LABEL: "Opus 4.8"
+      # Family alias — resolves to the latest Opus generation at run time, so the
+      # repo never sits pinned on a retired snapshot. The resolved model id is
+      # read from the execution log after the run and patched into the review
+      # comment (see the "Fill in model footer" step below).
+      CLAUDE_MODEL: "opus"
     permissions:
       contents: read
       pull-requests: write # official default is read; raised to write so the review can post inline comments
@@ -132,7 +138,79 @@ jobs:
             exactly (substitute N with the total number of tool calls you made):
 
             🔧 本次審查使用工具呼叫次數：N
-            🤖 Generated with [Claude Code](https://claude.com/claude-code) (${{ env.CLAUDE_MODEL_LABEL }})
+            <!-- MODEL_FOOTER -->
 
+            The second line is a literal HTML comment marker. Output
+            <!-- MODEL_FOOTER --> exactly as written — do NOT rewrite, translate,
+            or drop it. The workflow replaces it with the actual model info after
+            the run.
 
             Write all review content in Traditional Chinese (繁體中文).
+
+      - name: Fill in model footer
+        # Replaces the <!-- MODEL_FOOTER --> marker in the review summary comment
+        # with the model id the run actually resolved to (read from the execution
+        # log), so the footer always shows the real Opus version behind the alias.
+        # Cosmetic backfill: a failure here (gh 5xx, rate limit, jq surprise) must
+        # not turn an already-posted successful review red.
+        continue-on-error: true
+        if: steps.claude-review.outputs.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXEC_FILE: ${{ steps.claude-review.outputs.execution_file }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          MARKER='<!-- MODEL_FOOTER -->'
+
+          # ---- 1. Resolve the model id actually used ----
+          MODEL_ID="unknown"
+          if [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ]; then
+            # TODO(first-run): debug dump to confirm the execution log's JSON
+            # shape. The extraction below tries both known candidate paths — a
+            # nested .message.model (assistant entries, preferred: always the
+            # concrete resolved id) and a top-level .model (system/init entry).
+            # startswith("claude-") skips an echoed alias ("opus") and the
+            # "<synthetic>" model on synthetic entries. After the first
+            # successful run, check which path matched, trim the dead path, and
+            # delete this debug block.
+            echo "::group::execution_file debug — first 3 entries (type + keys)"
+            jq -c 'if type == "array"
+                   then .[:3] | map({type: (.type? // null), keys: (keys? // [])})
+                   else {type: type, keys: (keys? // [])} end' "$EXEC_FILE" || true
+            echo "::endgroup::"
+
+            MODEL_ID=$(jq -r '
+              [ .[]?
+                | (.message?.model? // .model?)
+                | select(type == "string" and startswith("claude-"))
+              ] | first // "unknown"' "$EXEC_FILE") || MODEL_ID="unknown"
+          else
+            echo "execution_file missing or not set; using model id 'unknown'"
+          fi
+          echo "Resolved model id: $MODEL_ID"
+
+          # ---- 2. Find the PR comment carrying the marker ----
+          # Bot-authored comments only: a human quoting the marker in discussion
+          # must never become the patch target. (.body // "") guards null bodies.
+          COMMENT_ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --paginate \
+            --jq ".[] | select(.user.type == \"Bot\") | select((.body // \"\") | contains(\"$MARKER\")) | .id" \
+            | tail -n 1)
+          if [ -z "$COMMENT_ID" ]; then
+            echo "No PR comment contains $MARKER; nothing to update."
+            exit 0
+          fi
+
+          # ---- 3. Swap the marker for the footer line ----
+          # The body must travel via files (-F body=@file), never shell string
+          # interpolation — review bodies contain backticks and code fences.
+          gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq .body > "$RUNNER_TEMP/body_old.md"
+          jq -Rrs --arg marker "$MARKER" \
+                  --arg repl "🤖 Generated with Claude Code — 模型：\`$MODEL_ID\`" \
+                  'split($marker) | join($repl) | rtrimstr("\n")' \
+                  "$RUNNER_TEMP/body_old.md" > "$RUNNER_TEMP/body_new.md"
+          gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" \
+            -F body=@"$RUNNER_TEMP/body_new.md" > /dev/null
+          echo "Comment $COMMENT_ID updated with model id: $MODEL_ID"

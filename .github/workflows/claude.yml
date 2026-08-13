@@ -61,7 +61,10 @@ jobs:
           # via --append-system-prompt so the comment-driven task itself is untouched.
           # (No literal backticks in the value — they would be shell-interpreted when the
           # action forwards claude_args; the intent is spelled out in words instead.)
+          # --model opus: family alias, so @claude follow-ups run on the same (latest)
+          # Opus generation as the main review in claude-code-review.yml.
           claude_args: >-
+            --model opus
             --append-system-prompt "When you propose a code change in a GitHub PR or
             issue comment, write the actual suggested code directly in the comment inside
             a fenced Markdown code block (triple-backtick with a language tag), and note
