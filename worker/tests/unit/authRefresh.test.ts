@@ -273,12 +273,9 @@ describe("POST /api/auth/refresh", () => {
 
   it("should generate new token when no existing auth record", async () => {
     const token = "f".repeat(64);
-    // Seed member with token but create a second user with only member mapping
+    // Deliberate asymmetric seed: token:{token} authenticates the request, but
+    // auth:{userId} is absent, so getOrGenerateAuthToken must mint a fresh token.
     await kv.put(`token:${token}`, VALID_USER_ID);
-    await kv.put(
-      `auth:${VALID_USER_ID}`,
-      JSON.stringify({ token, createdAt: "2026-01-01T00:00:00Z" }),
-    );
     await kv.put(`member:${VALID_USER_ID}`, VALID_FAMILY_ID);
 
     const res = await request("POST", "/api/auth/refresh", {
@@ -292,6 +289,7 @@ describe("POST /api/auth/refresh", () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.token).toMatch(/^[a-f0-9]{64}$/);
+    expect(json.data.token).not.toBe(token);
     expect(json.data.expiresAt).toBeTypeOf("number");
   });
 
