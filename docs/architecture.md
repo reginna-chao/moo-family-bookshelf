@@ -447,23 +447,26 @@ moo-{family_id_short}@{api_host_encoded}
 
 #### KV Key 設計
 
-| Key Pattern                               | Value                                                | TTL      |
-| ----------------------------------------- | ---------------------------------------------------- | -------- |
-| `verify:{userId}`                         | `{ method, hash, salt, prompted, secretUpdatedAt? }` | None     |
-| `verifyfail:{userId}:{caller}`            | `{ failCount, lockedUntil, startedAt? }`             | 900 秒   |
-| `otp:{userId}`                            | `{ code, createdAt }`                                | 300 秒   |
-| `ratelimit:user:verify:{userId}:{bucket}` | 該時段內針對此帳號的驗證嘗試次數（字串數字）         | 7,200 秒 |
-| `ratelimit:sens:{ip}:{bucket}`            | 該分鐘內來自此來源的建立／加入家庭次數（上限 3）     | 120 秒   |
-| `ratelimit:sens:lookup:{ip}:{bucket}`     | 該分鐘內來自此來源的查詢所屬家庭次數（上限 3，獨立） | 120 秒   |
+| Key Pattern                                     | Value                                                                                 | TTL      |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------- | -------- |
+| `verify:{userId}`                               | `{ method, hash, salt, prompted, secretUpdatedAt? }`                                  | None     |
+| `verifyfail:{userId}:{caller}`                  | `{ failCount, lockedUntil, startedAt? }`                                              | 900 秒   |
+| `otp:{userId}`                                  | `{ code, createdAt }`                                                                 | 300 秒   |
+| `qr:{token}`                                    | `{ userId }`（一次性 QR Token，加入家庭時比對成功即刪除）                             | 300 秒   |
+| `ratelimit:user:verify:{userId}:{bucket}`       | 該時段內針對此帳號的驗證嘗試次數（字串數字）                                          | 7,200 秒 |
+| `ratelimit:user:verify-write:{userId}:{bucket}` | 該時段內此帳號的驗證設定寫入次數（上限 30，PUT verify／OTP／prompted／qr-token 合計） | 7,200 秒 |
+| `ratelimit:sens:{ip}:{bucket}`                  | 該分鐘內來自此來源的建立／加入家庭次數（上限 3）                                      | 120 秒   |
+| `ratelimit:sens:lookup:{ip}:{bucket}`           | 該分鐘內來自此來源的查詢所屬家庭次數（上限 3，獨立）                                  | 120 秒   |
 
 #### API 端點
 
-| Method | Path                            | 說明                        | 權限 |
-| ------ | ------------------------------- | --------------------------- | ---- |
-| `GET`  | `/api/user/:id/verify`          | 查詢驗證方式（不回傳 hash） | 公開 |
-| `PUT`  | `/api/user/:id/verify`          | 設定/變更驗證方式           | 本人 |
-| `POST` | `/api/user/:id/verify/otp`      | 產生一次性驗證碼            | 本人 |
-| `POST` | `/api/user/:id/verify/prompted` | 標記已提醒                  | 公開 |
+| Method | Path                            | 說明                                                              | 權限 |
+| ------ | ------------------------------- | ----------------------------------------------------------------- | ---- |
+| `GET`  | `/api/user/:id/verify`          | 查詢驗證方式（不回傳 hash）                                       | 公開 |
+| `PUT`  | `/api/user/:id/verify`          | 設定/變更驗證方式                                                 | 本人 |
+| `POST` | `/api/user/:id/verify/otp`      | 產生一次性驗證碼                                                  | 本人 |
+| `POST` | `/api/user/:id/verify/prompted` | 標記已提醒                                                        | 本人 |
+| `POST` | `/api/user/:id/qr-token`        | 產生一次性 QR Token（PWA 掃碼加入家庭時可略過驗證，300 秒後失效） | 本人 |
 
 ### chrome.storage.sync 多裝置同步
 
