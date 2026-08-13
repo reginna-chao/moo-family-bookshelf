@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
+import { seedAuthToken } from "../helpers/auth";
 import {
   BoolFlag,
   kvKeys,
@@ -81,11 +82,7 @@ async function seedUser(userId: string, token: string) {
     lastUpdated: new Date().toISOString(),
   };
   await kv.put(kvKeys.user(userId), JSON.stringify(record));
-  await kv.put(`token:${token}`, userId);
-  await kv.put(
-    `auth:${userId}`,
-    JSON.stringify({ token, createdAt: new Date().toISOString() }),
-  );
+  await seedAuthToken(kv, userId, { token });
 }
 
 async function seedMember(userId: string, familyId: string) {
@@ -229,14 +226,7 @@ describe("POST /api/user/:id/public-shelf", () => {
   });
 
   it("returns 400 when user has no books record", async () => {
-    await kv.put(`token:${AUTH_TOKEN}`, USER_ID);
-    await kv.put(
-      `auth:${USER_ID}`,
-      JSON.stringify({
-        token: AUTH_TOKEN,
-        createdAt: new Date().toISOString(),
-      }),
-    );
+    await seedAuthToken(kv, USER_ID, { token: AUTH_TOKEN });
 
     const { res, json } = await createShelf(USER_ID, AUTH_TOKEN);
 

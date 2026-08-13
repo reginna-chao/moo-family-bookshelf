@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
+import { seedAuthToken } from "../helpers/auth";
 import {
   kvKeys,
   VERIFY_MAX_FAILURES,
@@ -40,16 +41,6 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-async function seedAuthToken(userId: string): Promise<string> {
-  const token = userId.slice(0, 32).repeat(2);
-  await kv.put(kvKeys.authToken(token), userId);
-  await kv.put(
-    kvKeys.auth(userId),
-    JSON.stringify({ token, createdAt: new Date().toISOString() }),
-  );
-  return token;
-}
-
 /**
  * Seed a family whose members are `userIds` (first entry is the owner), plus the
  * `member:{userId}` reverse-lookup keys so each listed user counts as an
@@ -75,7 +66,7 @@ function seedFamily(userId: string, familyId: string) {
 
 /** Set a PIN for `userId` through the real verify route (hash + salt included). */
 async function setPin(userId: string, pin: string) {
-  const token = await seedAuthToken(userId);
+  const token = await seedAuthToken(kv, userId);
   const res = await request("PUT", `/api/user/${userId}/verify`, {
     body: JSON.stringify({ method: "pin", secret: pin }),
     headers: { Authorization: `Bearer ${token}` },
@@ -207,7 +198,7 @@ describe("GET /api/user/:id/verify", () => {
 
 describe("PUT /api/user/:id/verify", () => {
   it("should set PIN verification", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pin", secret: "123456" }),
@@ -227,7 +218,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should set pattern verification", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pattern", secret: "0,1,2,5,8" }),
@@ -240,7 +231,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should set code verification (no secret needed)", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "code" }),
@@ -253,7 +244,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should set to none (disable verification)", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "none" }),
@@ -266,7 +257,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should reject invalid PIN (too short)", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pin", secret: "12345" }),
@@ -279,7 +270,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should reject invalid PIN (non-numeric)", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pin", secret: "abcdef" }),
@@ -290,7 +281,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should reject pattern with fewer than 4 nodes", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pattern", secret: "0,1,2" }),
@@ -301,7 +292,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should reject pattern with duplicate nodes", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pattern", secret: "0,1,1,2" }),
@@ -312,7 +303,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should reject pattern with invalid node index", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pattern", secret: "0,1,2,9" }),
@@ -323,7 +314,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should reject invalid method", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "fingerprint" }),
@@ -343,7 +334,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should return 401 when trying to set another user's verification", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${OTHER_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pin", secret: "123456" }),
@@ -354,7 +345,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should preserve prompted flag when not explicitly set", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     // First set prompted
     const existing: VerifyRecord = {
@@ -377,7 +368,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should set prompted flag when explicitly provided", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "none", prompted: 1 }),
@@ -390,7 +381,7 @@ describe("PUT /api/user/:id/verify", () => {
   });
 
   it("should store only account fields, never failure accounting", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
     const before = Date.now();
 
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
@@ -421,7 +412,7 @@ describe("PUT /api/user/:id/verify", () => {
 
 describe("POST /api/user/:id/verify/otp", () => {
   it("should generate a 6-digit OTP code", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     // Set method to 'code'
     const record: VerifyRecord = {
@@ -445,7 +436,7 @@ describe("POST /api/user/:id/verify/otp", () => {
   });
 
   it("should return 400 if method is not 'code'", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const record: VerifyRecord = {
       method: "pin",
@@ -471,7 +462,7 @@ describe("POST /api/user/:id/verify/otp", () => {
   });
 
   it("should store OTP in KV", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const record: VerifyRecord = {
       method: "code",
@@ -496,7 +487,7 @@ describe("POST /api/user/:id/verify/otp", () => {
 
 describe("POST /api/user/:id/verify/prompted", () => {
   it("should mark user as prompted with valid auth", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const res = await request(
       "POST",
@@ -514,7 +505,7 @@ describe("POST /api/user/:id/verify/prompted", () => {
   });
 
   it("should preserve existing method when marking prompted", async () => {
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
 
     const record: VerifyRecord = {
       method: "pin",
@@ -604,7 +595,7 @@ describe("Verification in join flow", () => {
   it("should allow join with correct pattern", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const ownerToken = await seedAuthToken(VALID_USER_ID);
+    const ownerToken = await seedAuthToken(kv, VALID_USER_ID);
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pattern", secret: "0,1,2,5,8" }),
       headers: { Authorization: `Bearer ${ownerToken}` },
@@ -618,7 +609,7 @@ describe("Verification in join flow", () => {
   it("should allow join with correct OTP", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const ownerToken = await seedAuthToken(VALID_USER_ID);
+    const ownerToken = await seedAuthToken(kv, VALID_USER_ID);
 
     // Set method to code
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
@@ -646,7 +637,7 @@ describe("Verification in join flow", () => {
   it("should delete OTP after successful use", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const ownerToken = await seedAuthToken(VALID_USER_ID);
+    const ownerToken = await seedAuthToken(kv, VALID_USER_ID);
 
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "code" }),
@@ -922,7 +913,7 @@ describe("Verification failure accounting in join flow (caller-scoped)", () => {
   it("should not expose retryAfter when verification fails", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const ownerToken = await seedAuthToken(VALID_USER_ID);
+    const ownerToken = await seedAuthToken(kv, VALID_USER_ID);
     await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pin", secret: "123456" }),
       headers: { Authorization: `Bearer ${ownerToken}` },
@@ -1214,7 +1205,7 @@ describe("Verification failure streak voiding after a secret change", () => {
     // `POST /verify/prompted` rewrites the account record but changes no secret,
     // so it must not hand out a lockout reset.
     vi.setSystemTime(T1);
-    const token = await seedAuthToken(VALID_USER_ID);
+    const token = await seedAuthToken(kv, VALID_USER_ID);
     const prompted = await request(
       "POST",
       `/api/user/${VALID_USER_ID}/verify/prompted`,
@@ -1238,7 +1229,7 @@ describe("Verification failure streak voiding after a secret change", () => {
 
     // The attacker holds a valid token — for their OWN account only.
     vi.setSystemTime(T1);
-    const attackerToken = await seedAuthToken(OTHER_USER_ID);
+    const attackerToken = await seedAuthToken(kv, OTHER_USER_ID);
     const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
       body: JSON.stringify({ method: "pin", secret: NEW_PIN }),
       headers: {
