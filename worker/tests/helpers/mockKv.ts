@@ -25,11 +25,12 @@
 /**
  * Cloudflare KV rejects any `expirationTtl` below 60 seconds.
  *
- * Deliberately duplicated from `src/services/publicShelf.ts` (which keeps its
- * own copy for the production TTL arithmetic) rather than imported: this helper
- * models the PLATFORM's constraint and must stay an independent oracle. Sharing
- * one constant would let a wrong value in production silently redefine what the
- * test infrastructure accepts, so the check would pass by construction.
+ * Deliberately duplicated from `src/kv/schema.ts` (whose exported
+ * `KV_MIN_TTL_SECONDS` production shares between `services/publicShelf.ts` and
+ * `middleware/rateLimit.ts` for its TTL arithmetic) rather than imported: this
+ * helper models the PLATFORM's constraint and must stay an independent oracle.
+ * Sharing one constant would let a wrong value in production silently redefine
+ * what the test infrastructure accepts, so the check would pass by construction.
  */
 const KV_MIN_TTL_SECONDS = 60;
 

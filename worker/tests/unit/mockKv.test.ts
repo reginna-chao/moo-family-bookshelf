@@ -4,7 +4,8 @@
  * The mock is test INFRASTRUCTURE, but it is also the only place the whole
  * worker suite can catch a TTL that real Cloudflare KV would refuse: KV rejects
  * any `expirationTtl` below 60 seconds, and production computes some TTLs
- * dynamically (see `src/services/publicShelf.ts`). If the mock accepted such a
+ * dynamically (the `public:{shareToken}` snapshot in `src/services/publicShelf.ts`
+ * and the per-userId counter in `src/middleware/rateLimit.ts`). If the mock accepted such a
  * value, a regression there would pass every unit test and only surface against
  * the real platform. These tests pin that guard — including which of its two
  * rejection reasons fires, since only the sub-60 floor mirrors the platform

@@ -12,6 +12,9 @@
  *   public:{shareToken} → PublicShelfSnapshot (plaintext public bookshelf, optional TTL)
  */
 
+/** Cloudflare KV rejects any `expirationTtl` below 60 seconds. */
+export const KV_MIN_TTL_SECONDS = 60;
+
 export enum BoolFlag {
   FALSE = 0,
   TRUE = 1,
