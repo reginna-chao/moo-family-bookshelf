@@ -290,6 +290,15 @@ Family membership is the gate for all features. Without a family, only onboardin
 - Run `pnpm lint` and `pnpm test` before pushing. CI will block merges with failures.
 - Branch fresh from `origin/main` (unless continuing an existing branch) and name it `<type>/<short-kebab-slug>` — a conventional type + concise task slug (e.g. `fix/dropdown-scroll-dismiss`), never an opaque auto-generated name. Before the first commit, confirm `git log origin/main..HEAD` holds only your own work so an unrelated branch/worktree's commits don't leak into the PR. Full detail: `.claude/rules/global.md` → "Branch & Worktree Hygiene".
 
+### Replying to the review bot
+
+`claude-code-review.yml` auto-reviews a PR on open / ready_for_review / reopen only — it deliberately does NOT listen to `synchronize`, so **a push never re-triggers a review**. Re-review is human-triggered by tagging `@claude`, which `claude.yml` picks up from the PR comment box or an inline review-comment reply.
+
+- **Always reply** to a review, listing each finding and how it was handled (fixed → commit sha / accepted as residual risk / declined with reason). Reply in 繁體中文, like every other bot-facing message.
+- **Tagging `@claude` re-runs the review workflow** (one Actions run + token spend). It only fires from a human account — `claude.yml` guards on `sender.type != 'Bot'`, so a bot's own comment can never wake it, while a reply posted through the user's `gh` account does.
+- **Ask the user before adding `@claude`** — never tag on your own initiative. Recommend it after CRITICAL / WARNING fixes where a re-check has value; say it is likely unnecessary for comment-only or NITPICK-only changes. The user decides.
+- Editing an existing comment triggers nothing (`issue_comment: [created]` only) — a re-review needs a NEW comment.
+
 ## Documentation
 
 - Project docs: `docs/` (architecture, plan, privacy policy).

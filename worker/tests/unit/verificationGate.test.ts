@@ -31,12 +31,14 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
 // (PIN / pattern / OTP) configured. Three entry points share one gate:
 //
 //   POST /api/family          — create (403 without a valid secret)
-//   POST /api/family/:id/join — join   (already covered in verifyRoutes.test.ts)
+//   POST /api/family/:id/join — join   (gate semantics in verifyRoutes.test.ts;
+//                                       per-userId flood resistance below)
 //   POST /api/auth/lookup     — lookup (200 + requiresVerification, no data)
 //
 // Accounts with no verification record, or `method: "none"`, are unaffected.
 // This suite covers create + lookup, the OTP consumption contract between them,
-// the `verifySecret` format bound, and the per-userId attempt ceiling.
+// the `verifySecret` format bound, the per-userId attempt ceiling, and join's
+// victim-facing flood resistance (no per-userId counter can block the owner).
 // ===========================================================================
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1190,11 +1192,11 @@ describe("Per-userId verification attempt ceiling", () => {
     expect(other.status).toBe(200);
   });
 
-  it("should not spend the join quota on a malformed verifySecret", async () => {
+  it("should not spend the attempt ceiling on a malformed verifySecret", async () => {
     await seedFamily([OWNER_ID]);
 
-    // More malformed bodies than the join ceiling allows requests. If the
-    // format check ran after the counter, the legitimate join below would be
+    // More malformed bodies than the attempt ceiling allows wrong guesses. If
+    // the format check ran after the counter, the legitimate join below would be
     // rate-limited instead of admitted.
     for (let i = 0; i < 11; i++) {
       const res = await joinFamily(USER_ID, {
@@ -1226,5 +1228,81 @@ describe("Per-userId verification attempt ceiling", () => {
     }
 
     expect(await attemptsCharged(USER_ID)).toBeNull();
+  });
+});
+
+// ===========================================================================
+// POST /api/family/:id/join — victim-facing per-userId flood resistance
+//
+// Regression guard for the REMOVAL of the standalone per-userId "join" counter
+// (scope "join", 10/hour, charge-EVERY-request, keyed on the caller-supplied
+// body.userId). Because it charged on every join regardless of whether the
+// caller proved ownership, a third party who knows a victim's email-derived,
+// publicly guessable userId could fire ~10 unauthenticated joins from rotating
+// source addresses to fill `ratelimit:user:join:{victim}` — and thereby make the
+// victim's OWN correct-secret reconnect return 429 RATE_LIMITED before any
+// verification, locking the owner out of the only token-minting reconnect path
+// (security-UX Invariant 2). The join endpoint's sole surviving per-userId brake
+// is now the shared "verify" attempt ceiling inside `validateVerification`, which
+// is charge-on-FAILURE: a correct secret is compared first and never measured
+// against it, so the owner can always get back in.
+//
+// Runs WITHOUT DEV_MODE so any surviving per-userId brake is live, and uses a
+// DISTINCT source IP per request so the per-IP sensitive tier (3/min) never
+// trips — the whole point is that a 429 here could ONLY come from a per-userId
+// ceiling (10/hour, summed across all IPs), which no longer exists. No-secret
+// requests are the sharpest probe: they never charged the "verify" ceiling (only
+// wrong guesses do) yet DID charge the removed "join" counter, so they isolate
+// exactly the counter under test.
+// ===========================================================================
+
+describe("POST /api/family/:id/join per-userId flood resistance", () => {
+  /** Distinct TEST-NET-2 source, one per request, so the per-IP tier never trips. */
+  function distinctSourceIp(n: number): string {
+    return `198.51.100.${n}`;
+  }
+
+  // Comfortably past the removed "join" counter's old ceiling (10/hour): after
+  // this many charge-every-request hits it would have been fully spent, so the
+  // reconnect that follows is exactly the request the old code refused.
+  const FLOOD_SIZE = 12;
+
+  it("should not lock a member out of their own correct-secret reconnect when a distributed flood targets their userId", async () => {
+    // Victim is an existing member reconnecting from a new device — the exact
+    // token-minting path Invariant 2 protects. A real PIN is set so the victim's
+    // own correct secret genuinely matches at the gate.
+    await seedFamily([OWNER_ID, USER_ID]);
+    await setPin(USER_ID, CORRECT_PIN);
+
+    // A distributed attacker fires far more no-secret joins on the victim's
+    // userId than the removed counter's old ceiling, each from a fresh source.
+    // Every one is a plain 403 VERIFICATION_REQUIRED — none is ever converted
+    // into a 429 by a surviving per-userId join ceiling (this doubles as the
+    // "no-secret joins are never per-userId rate-limited" assertion).
+    for (let i = 1; i <= FLOOD_SIZE; i++) {
+      const flood = await joinFamily(USER_ID, {
+        callerIp: distinctSourceIp(i),
+        devMode: false,
+      });
+      expect(flood.status).toBe(403);
+      const floodJson = (await flood.json()) as Json;
+      expect(floodJson.error.code).toBe("VERIFICATION_REQUIRED");
+    }
+
+    // The victim's OWN reconnect with the correct PIN, from yet another fresh
+    // source. Against the OLD code (per-userId "join" counter present) the flood
+    // had filled `ratelimit:user:join:{victim}`, so this same request returned
+    // 429 RATE_LIMITED before the gate. It must now mint a token instead.
+    const reconnect = await joinFamily(USER_ID, {
+      verifySecret: CORRECT_PIN,
+      callerIp: distinctSourceIp(FLOOD_SIZE + 1),
+      devMode: false,
+    });
+
+    expect(reconnect.status).toBe(200);
+    const json = (await reconnect.json()) as Json;
+    expect(json.error).toBeUndefined();
+    expect(json.data.authToken).toMatch(/^[a-f0-9]{64}$/);
+    expect(json.data.familyId).toBe(FAMILY_ID);
   });
 });

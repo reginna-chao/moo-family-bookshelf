@@ -275,7 +275,8 @@ export function useVerificationPrompt(
         return;
       }
       if (result.errorCode === "RATE_LIMITED") {
-        // Server join quota exhausted (429). Keep the prompt open so the user
+        // Server rate limit hit (429) — per-IP sensitive tier, or the verify
+        // attempt ceiling on a wrong secret. Keep the prompt open so the user
         // can retry once the window clears, with a specific message.
         setError(rateLimitedMessage(null));
         syncCountdown(result.retryAfter);

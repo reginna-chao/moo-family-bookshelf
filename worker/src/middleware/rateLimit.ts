@@ -268,7 +268,7 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
 /** Options shared by the per-userId counter and its Hono wrapper. */
 export interface PerUserRateLimitOptions {
   userId: string;
-  /** Counter namespace, e.g. "join" or "verify". Keeps counters independent. */
+  /** Counter namespace, e.g. "verify" or "put-books". Keeps counters independent. */
   scope: string;
   max: number;
   /** Window length in seconds. MUST be > 0 — a non-positive window makes the
@@ -371,7 +371,7 @@ export async function chargePerUserRateLimit(
  * request is admitted. A rejected request does not extend the window.
  *
  * The single-shot form used by every caller that charges EVERY request (the
- * join / user / borrow / bookshelf / public-shelf / verify-write limits via
+ * user / borrow / bookshelf / public-shelf / verify-write limits via
  * {@link enforcePerUserRateLimit}). Callers that charge only some outcomes use
  * {@link peekPerUserRateLimit} + {@link chargePerUserRateLimit} directly.
  */
