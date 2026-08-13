@@ -15,12 +15,20 @@ import {
   isValidPattern,
 } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
+import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { hashSecret } from "../utils/crypto";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
 
 export const verifyRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
+
+/** Shared per-userId write ceiling for the four verify-domain write handlers. */
+export const VERIFY_WRITE_LIMIT = {
+  scope: "verify-write",
+  max: 30,
+  windowSec: 3600,
+} as const;
 
 /** Generate a random hex salt (16 bytes = 32 hex chars). */
 function generateSalt(): string {
@@ -95,6 +103,7 @@ const putVerifyRoute = createRoute({
     200: jsonRes("Updated verification settings"),
     400: jsonRes("Invalid request"),
     401: jsonRes("Unauthorized"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -109,6 +118,30 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
   if (!callerId || callerId !== userId) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
+
+  // Per-userId write ceiling: 30 verify-domain writes per userId per hour, shared
+  // by PUT verify / OTP / prompted / qr-token under one "verify-write" scope.
+  // Layered on top of the per-IP limit. Honest scope: this BOUNDS THE BURN RATE
+  // of a single AUTHENTICATED account's KV writes (~60 writes/hr = 30 handler
+  // writes + 30 counter writes; ~90/hr once the per-IP counter is counted too),
+  // it does NOT make the daily 1000-write free tier safe by itself — 30/hr
+  // sustained is still ~1,440 KV writes/day from one account, and the per-IP
+  // middleware's own counter write lands BEFORE auth, so spam that ignores 429s
+  // still burns writes outside this ceiling's reach. Since userId is not a
+  // credential, a self-minted account could otherwise drain the daily quota in
+  // minutes; this turns that into hours and forces an attacker to onboard a new
+  // account per 30 writes. A hard global bound needs the edge (Cloudflare WAF
+  // rate limiting, see docs/architecture.md and worker/DEPLOY.md).
+  //
+  // The scope is deliberately DISTINCT from the verification gate's "verify"
+  // wrong-guess attempt ceiling (`VERIFY_ATTEMPT_SCOPE`, 10/hr, in
+  // `services/verification.ts`): sharing one counter would let an attacker's
+  // wrong guesses crowd out the owner's own settings operations, and vice versa.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    ...VERIFY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   let body: { method: string; secret?: string; prompted?: number } | null;
   try {
@@ -194,6 +227,7 @@ const postVerifyOtpRoute = createRoute({
     200: jsonRes("Generated OTP code"),
     400: jsonRes("Invalid request"),
     401: jsonRes("Unauthorized"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -208,6 +242,14 @@ verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
   if (!callerId || callerId !== userId) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
+
+  // Shared "verify-write" per-userId write ceiling (30/hr across the four verify
+  // write handlers) — see the PUT /{id}/verify handler for rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    ...VERIFY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   // Verify user has 'code' method set
   const verifyRecord = await c.env.KV.get<VerifyRecord>(
@@ -251,6 +293,7 @@ const postVerifyPromptedRoute = createRoute({
     200: jsonRes("Prompted status updated"),
     400: jsonRes("Invalid user ID"),
     401: jsonRes("Unauthorized"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -265,6 +308,14 @@ verifyRoutes.openapi(postVerifyPromptedRoute, async (c) => {
   if (!callerId || callerId !== userId) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
+
+  // Shared "verify-write" per-userId write ceiling (30/hr across the four verify
+  // write handlers) — see the PUT /{id}/verify handler for rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    ...VERIFY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   const existing = await c.env.KV.get<VerifyRecord>(
     kvKeys.verify(userId),
@@ -301,6 +352,7 @@ const postQrTokenRoute = createRoute({
     400: jsonRes("Invalid user ID"),
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -319,6 +371,14 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
   if (callerId !== userId) {
     return jsonError(c, 403, "FORBIDDEN", "只能為自己產生 QR Token");
   }
+
+  // Shared "verify-write" per-userId write ceiling (30/hr across the four verify
+  // write handlers) — see the PUT /{id}/verify handler for rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    ...VERIFY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   const token = generateQrToken();
   const record: QrTokenRecord = { userId };

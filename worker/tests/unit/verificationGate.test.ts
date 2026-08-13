@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { ALICE, BOB } from "../helpers/ids";
+import { seedAuthToken } from "../helpers/auth";
 import {
   kvKeys,
   BoolFlag,
@@ -154,16 +155,6 @@ const GATE_ENDPOINTS: {
 
 // --- Seeding -------------------------------------------------------------
 
-async function seedAuthToken(userId: string): Promise<string> {
-  const token = userId.slice(0, 32).repeat(2);
-  await kv.put(kvKeys.authToken(token), userId);
-  await kv.put(
-    kvKeys.auth(userId),
-    JSON.stringify({ token, createdAt: new Date().toISOString() }),
-  );
-  return token;
-}
-
 /** Seed a family whose members are `userIds` (the first entry is the owner). */
 async function seedFamily(userIds: string[]): Promise<void> {
   await Promise.all(
@@ -218,7 +209,7 @@ async function seedCorruptedVerification(userId: string): Promise<void> {
 
 /** Set a real PIN through the production route, so hash + salt are genuine. */
 async function setPin(userId: string, pin: string): Promise<void> {
-  const token = await seedAuthToken(userId);
+  const token = await seedAuthToken(kv, userId);
   const res = await apiRequest("PUT", `/api/user/${userId}/verify`, {
     body: { method: "pin", secret: pin },
     headers: { Authorization: `Bearer ${token}` },
@@ -228,7 +219,7 @@ async function setPin(userId: string, pin: string): Promise<void> {
 
 /** Switch `userId` to the OTP method and push a fresh code; returns the code. */
 async function issueOtp(userId: string): Promise<string> {
-  const token = await seedAuthToken(userId);
+  const token = await seedAuthToken(kv, userId);
   const set = await apiRequest("PUT", `/api/user/${userId}/verify`, {
     body: { method: "code" },
     headers: { Authorization: `Bearer ${token}` },

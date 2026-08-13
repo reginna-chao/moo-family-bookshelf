@@ -371,7 +371,7 @@ export async function chargePerUserRateLimit(
  * request is admitted. A rejected request does not extend the window.
  *
  * The single-shot form used by every caller that charges EVERY request (the
- * user / borrow / bookshelf / public-shelf limits via
+ * user / borrow / bookshelf / public-shelf / verify-write limits via
  * {@link enforcePerUserRateLimit}). Callers that charge only some outcomes use
  * {@link peekPerUserRateLimit} + {@link chargePerUserRateLimit} directly.
  */

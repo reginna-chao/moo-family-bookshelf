@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
+import { seedAuthToken } from "../helpers/auth";
 import { TOKEN_TTL_SECONDS } from "../../src/kv/schema";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,11 +33,10 @@ function request(
 async function seedMember(userId: string, familyId: string, oldToken?: string) {
   await kv.put(`member:${userId}`, familyId);
   if (oldToken) {
-    await kv.put(`token:${oldToken}`, userId);
-    await kv.put(
-      `auth:${userId}`,
-      JSON.stringify({ token: oldToken, createdAt: "2026-01-01T00:00:00Z" }),
-    );
+    await seedAuthToken(kv, userId, {
+      token: oldToken,
+      createdAt: "2026-01-01T00:00:00Z",
+    });
   }
 }
 
@@ -210,11 +210,10 @@ describe("POST /api/auth/refresh", () => {
 
   it("should succeed without familyId (v1.2.0: familyId is optional)", async () => {
     const token = "e".repeat(64);
-    await kv.put(`token:${token}`, VALID_USER_ID);
-    await kv.put(
-      `auth:${VALID_USER_ID}`,
-      JSON.stringify({ token, createdAt: "2026-01-01T00:00:00Z" }),
-    );
+    await seedAuthToken(kv, VALID_USER_ID, {
+      token,
+      createdAt: "2026-01-01T00:00:00Z",
+    });
 
     const res = await request("POST", "/api/auth/refresh", {
       body: JSON.stringify({ userId: VALID_USER_ID }),
@@ -274,11 +273,10 @@ describe("POST /api/auth/refresh", () => {
   it("should generate new token when no existing auth record", async () => {
     const token = "f".repeat(64);
     // Seed member with token but create a second user with only member mapping
-    await kv.put(`token:${token}`, VALID_USER_ID);
-    await kv.put(
-      `auth:${VALID_USER_ID}`,
-      JSON.stringify({ token, createdAt: "2026-01-01T00:00:00Z" }),
-    );
+    await seedAuthToken(kv, VALID_USER_ID, {
+      token,
+      createdAt: "2026-01-01T00:00:00Z",
+    });
     await kv.put(`member:${VALID_USER_ID}`, VALID_FAMILY_ID);
 
     const res = await request("POST", "/api/auth/refresh", {
