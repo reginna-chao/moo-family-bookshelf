@@ -758,8 +758,8 @@ interface PublicShelfSnapshot {
 - **使用前提**：曾加入過家庭以完成書單同步即可（不要求目前處於家庭中）；token refresh 邏輯需支援無家庭狀態
 - **預設關閉**：公開分享預設不啟用，使用者需手動開啟
 - **快照同步**：`PUT /api/user/:id/books` 時自動更新所有 active shelves 的 `public:{token}` 快照
-- **過期管理**：7 / 30 / 60 / 90 天 / 永久（預設 30 天），透過 KV TTL 自動清理。建立時 `expiresAt = createdAt + expiresDays`；更新 `expiresDays` 時重算為 `更新時間 + expiresDays`（從更新時起算）
-- **重設網址**：產生新 UUID token，舊 token 立即失效；shelfId 維持不變（區隔內部識別與對外連結）
+- **過期管理**：7 / 30 / 60 / 90 天 / 永久（預設 30 天），透過 KV TTL 自動清理。建立時 `expiresAt = createdAt + expiresDays`；更新 `expiresDays` 時重算為 `更新時間 + expiresDays`（從更新時起算）。讀取端另有兩道保險：設有到期日的快照即使因異常未被 TTL 清除，逾期讀取一律回 404；永久快照（無 TTL 可依靠）則在讀取時比對擁有者記錄中該書櫃的現行 token 與「仍為永久」設定，比對不符（token 已輪換、書櫃已刪、帳號已刪、已改設到期日）即回 404 —— 孤兒快照因此不可讀。此檢查不會刪除或改寫任何書櫃資料（僅多一次 `user:{userId}` 讀取；設有到期日的快照不付這筆成本；請求管線的 per-IP 限流計數器本就每請求固定寫一筆，不因此改變）。KV 為最終一致，重設網址後尚未取得新記錄的節點，最多約 60 秒內可能仍對新連結回 404（fail-closed，自癒）
+- **重設網址**：產生新 UUID token，舊 token 立即失效；shelfId 維持不變（區隔內部識別與對外連結）。即使最後清理舊快照的刪除步驟異常失敗，舊 token 也會因讀取端比對不符而讀不到
 - **關閉公開分享**：刪除 `public:{token}` + 移除 user record 中的 shelf 元素
 - **購買連結**：書籍連結至 `https://readmoo.com/book/{bookId}`（另開分頁），不提供借閱
 - **share_token**：UUID 32 碼（無連字號），高熵防猜測
