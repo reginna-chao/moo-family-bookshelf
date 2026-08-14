@@ -1530,7 +1530,7 @@ describe("ApiClient", () => {
      * returned a VERIFICATION_* code), the client latches so a second 401 wave —
      * e.g. the dialog's second concurrent data fetch — does NOT fire silent
      * join-recovery again. This keeps a single dialog open to at most one
-     * join-quota unit and stops the in-progress verification prompt from being
+     * rate-limit unit and stops the in-progress verification prompt from being
      * re-initialized (which would wipe the user's pattern/PIN input). The latch
      * releases only on a fresh non-null token or an explicit clearReauthPending().
      */

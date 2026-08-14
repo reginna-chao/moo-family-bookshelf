@@ -116,7 +116,7 @@ export class ApiClient {
   /**
    * Latch: set true once a re-verification prompt has been raised (see
    * `doRefreshToken`). While latched, further 401 waves skip silent
-   * join-recovery so a single dialog open burns at most one join-quota unit and
+   * join-recovery so a single dialog open spends at most one rate-limit unit and
    * the in-progress verification prompt is never re-initialized. Cleared when a
    * non-null token is set, or explicitly via `clearReauthPending`.
    */
