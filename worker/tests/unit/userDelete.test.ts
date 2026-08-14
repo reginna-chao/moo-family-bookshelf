@@ -3,6 +3,7 @@ import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { kvKeys } from "../../src/kv/schema";
 import { OWNER1, USER1, USER2, NOBODY } from "../helpers/ids";
+import { seedAuthToken } from "../helpers/auth";
 
 /** A valid 64-hex id for the "not in any family" solo-user scenario. */
 const SOLO_USER = "5".repeat(64);
@@ -111,11 +112,7 @@ describe("DELETE /api/user/:id", () => {
 
     // Manually set up a user with auth token but no family
     const tokenHex = "a".repeat(64);
-    await kv.put(
-      kvKeys.auth(SOLO_USER),
-      JSON.stringify({ token: tokenHex, createdAt: new Date().toISOString() }),
-    );
-    await kv.put(kvKeys.authToken(tokenHex), SOLO_USER);
+    await seedAuthToken(kv, SOLO_USER, { token: tokenHex });
     await kv.put(
       kvKeys.user(SOLO_USER),
       JSON.stringify({
@@ -206,11 +203,7 @@ describe("DELETE /api/user/:id", () => {
     // Re-get token for owner1 (joining user2 doesn't invalidate owner1's token)
     // Actually owner1's token is still valid. Let's get it fresh.
     const tokenHex = "b".repeat(64);
-    await kv.put(
-      kvKeys.auth(OWNER1),
-      JSON.stringify({ token: tokenHex, createdAt: new Date().toISOString() }),
-    );
-    await kv.put(kvKeys.authToken(tokenHex), OWNER1);
+    await seedAuthToken(kv, OWNER1, { token: tokenHex });
 
     const res = await request(
       "DELETE",

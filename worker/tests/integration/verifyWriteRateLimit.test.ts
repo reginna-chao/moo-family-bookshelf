@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { ALICE, BOB } from "../helpers/ids";
+import { seedAuthToken as seedAuthTokenPair, tokenFor } from "../helpers/auth";
 import {
   BoolFlag,
   kvKeys,
@@ -121,21 +122,12 @@ function devRequest(
 
 // --- Seeding -------------------------------------------------------------
 
-/** Deterministic 64-hex auth token for a userId, same shape as a real one. */
-function tokenFor(userId: string): string {
-  return userId.slice(0, 32).repeat(2);
-}
-
 const AUTH_TOKEN = tokenFor(USER_ID);
 const OTHER_AUTH_TOKEN = tokenFor(OTHER_USER_ID);
 
+/** kv-bound wrapper over the shared pair seeder (this suite's `kv` is module-level). */
 async function seedAuthToken(userId: string): Promise<void> {
-  const token = tokenFor(userId);
-  await kv.put(kvKeys.authToken(token), userId);
-  await kv.put(
-    kvKeys.auth(userId),
-    JSON.stringify({ token, createdAt: new Date().toISOString() }),
-  );
+  await seedAuthTokenPair(kv, userId);
 }
 
 /** Verify record with no usable secret — enough to reach a handler's happy path. */
