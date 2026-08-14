@@ -20,11 +20,16 @@ vi.mock("@/crypto/hash", () => ({
 // CreateFamilyError is re-exported UNMOCKED: useOnboardingFlow narrows the
 // create failure with `instanceof`, so a hand-rolled stand-in would silently
 // drift from the production class (and drop the code/retryAfter fields).
+// restoreApiEndpoint is re-exported UNMOCKED for the same reason in reverse:
+// the endpoint rollback below is asserted through its OBSERVABLE effect on the
+// client, so the real implementation has to run — a stub would let the rollback
+// rot while the tests stayed green.
 vi.mock("@/dialog/onboardingFlow", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/dialog/onboardingFlow")>();
   return {
     CreateFamilyError: actual.CreateFamilyError,
+    restoreApiEndpoint: actual.restoreApiEndpoint,
     createNewFamily: vi.fn().mockResolvedValue({
       familyId: "fam-new",
       userId: "u",
@@ -57,14 +62,28 @@ import {
   performJoin,
   performSoloRecovery,
   tryAutoRecovery,
+  type PerformJoinResult,
 } from "@/dialog/onboardingFlow";
-import { USER_ID_KEY, FAMILY_ID_KEY, DEFAULT_API_ENDPOINT } from "@/constants";
-import { BoolFlag } from "@/api/client";
+import {
+  USER_ID_KEY,
+  FAMILY_ID_KEY,
+  API_ENDPOINT_KEY,
+  DEFAULT_API_ENDPOINT,
+} from "@/constants";
+import { BoolFlag, validateEndpointUrl } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
 
+/** Endpoint every mock client starts on — the "before the attempt" address. */
+const ORIGINAL_ENDPOINT = "https://test.workers.dev";
+
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
+  // Stateful like the real client: setEndpoint runs the PRODUCTION validator and
+  // is what getEndpoint reports back afterwards. handleJoin's endpoint rollback
+  // is only observable through that pairing — a getEndpoint stub frozen on one
+  // value would make every rollback assertion below pass vacuously.
+  let endpoint = ORIGINAL_ENDPOINT;
   return {
     lookupUser: vi.fn().mockResolvedValue({
       data: { existingFamilyId: null, memberCount: 0 },
@@ -72,7 +91,10 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     createFamily: vi.fn(),
     joinFamily: vi.fn(),
     setAuthToken: vi.fn(),
-    getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
+    getEndpoint: vi.fn(() => endpoint),
+    setEndpoint: vi.fn((url: string) => {
+      endpoint = validateEndpointUrl(url);
+    }),
     // Every verification prompt loads the method before rendering an input.
     getVerifyMethod: vi
       .fn()
@@ -1424,6 +1446,413 @@ describe("useOnboardingFlow", () => {
       expect(result.current.state).toBe("verify-prompt");
       expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
       expect(result.current.verify.submitting).toBe(false);
+    });
+  });
+
+  /**
+   * A sync code whose `@host` the endpoint validator refuses aborts inside
+   * performJoin with `INVALID_ENDPOINT` (nothing persisted, no join attempted).
+   * The hook must surface that as an ordinary retryable error — it is NOT a
+   * verification challenge, so it must not open the PIN prompt, and it must not
+   * be swallowed into a state where the user believes the join succeeded.
+   */
+  describe("handleJoin with a refused @host endpoint", () => {
+    // Mirrors the production copy thrown in src/dialog/onboardingFlow.ts;
+    // the literal itself is pinned against production in
+    // tests/unit/onboardingFlow.test.ts → "aborts the join with INVALID_ENDPOINT".
+    const INVALID_ENDPOINT_MESSAGE =
+      "此同步碼的伺服器位址無效或不安全，無法加入";
+
+    async function joinWithRefusedEndpoint() {
+      // Mirrors production: setEndpoint throws BEFORE assigning, so performJoin
+      // returns the refusal without ever moving the client.
+      vi.mocked(performJoin).mockResolvedValue({
+        ok: false,
+        errorCode: "INVALID_ENDPOINT",
+        errorMessage: INVALID_ENDPOINT_MESSAGE,
+      });
+      const apiClient = createMockApiClient();
+      const { result } = renderFlow(apiClient);
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      act(() => {
+        result.current.setSyncCodeInput(
+          "moo-fam-joined@https://real.example@evil.com",
+        );
+      });
+      await act(async () => {
+        await result.current.handleJoin();
+      });
+      return { result, apiClient };
+    }
+
+    it("shows the refusal as a retryable error, not a verification prompt", async () => {
+      const { result } = await joinWithRefusedEndpoint();
+
+      expect(result.current.state).toBe("error");
+      expect(result.current.errorMessage).toBe(INVALID_ENDPOINT_MESSAGE);
+      expect(result.current.verify.active).toBe(false);
+    });
+
+    it("offers 重試 so the user can correct the sync code", async () => {
+      const { result } = await joinWithRefusedEndpoint();
+
+      expect(result.current.errorActions.map((a) => a.label)).toContain("重試");
+    });
+
+    it("leaves the client on the endpoint it was already using", async () => {
+      const { apiClient } = await joinWithRefusedEndpoint();
+
+      expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
+    });
+
+    it("never reports the family as joined", async () => {
+      const onFamilyJoined = vi.fn();
+      vi.mocked(performJoin).mockResolvedValue({
+        ok: false,
+        errorCode: "INVALID_ENDPOINT",
+        errorMessage: INVALID_ENDPOINT_MESSAGE,
+      });
+      const { result } = renderFlow(
+        createMockApiClient(),
+        createMockAutoSetup(),
+        onFamilyJoined,
+      );
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      act(() => {
+        result.current.setSyncCodeInput("moo-fam-joined@my-worker.example.com");
+      });
+      await act(async () => {
+        await result.current.handleJoin();
+      });
+
+      expect(onFamilyJoined).not.toHaveBeenCalled();
+      expect(result.current.state).toBe("error");
+    });
+  });
+
+  /**
+   * ENDPOINT LIFETIME of ONE join attempt — the security contract of this round.
+   *
+   * A sync code's `@host` must be applied to the in-memory client for the join
+   * request to reach that server. But a server that REFUSED the join has proven
+   * nothing, and an applied endpoint outlives the attempt: it would still be in
+   * force when the user gives up and presses 建立家庭, shipping the userId, the
+   * display name, the token that create issues and the whole personal book list
+   * — unshared books included — to that same server, which would then be baked
+   * into the sync code handed to the rest of the family.
+   *
+   * | exit from the attempt                      | in-memory endpoint |
+   * | ------------------------------------------ | ------------------ |
+   * | `@host` rejected by the validator          | never applied      |
+   * | join succeeds (first try or verify retry)  | stays adopted      |
+   * | join refused for a NON-verification reason | RESTORED           |
+   * | join refused pending verification          | stays adopted      |
+   * | user cancels the verification prompt       | RESTORED           |
+   * | performJoin / deriveUserId throws          | RESTORED           |
+   * | join succeeded, then the book sync throws  | stays adopted      |
+   *
+   * Storage is the other half of the contract and belongs to performJoin (it
+   * persists ONLY after the backend accepts) — pinned in
+   * tests/unit/onboardingFlow.test.ts. What this hook owns is the in-memory
+   * column, so that is what these cases assert.
+   */
+  describe("handleJoin endpoint lifetime (@host adoption and rollback)", () => {
+    /** A legitimate self-hosted family server. */
+    const FAMILY_ENDPOINT = "https://family.example";
+    /** A server whose only job is to be reached by a client it should not steer. */
+    const ATTACKER_ENDPOINT = "https://attacker.example";
+
+    /**
+     * Stand-in for production performJoin's in-memory adoption: it applies the
+     * `@host` to the client BEFORE the request and, on failure, deliberately
+     * leaves it applied — releasing it is handleJoin's job, which is exactly
+     * what these cases exercise. That production behaviour is pinned in
+     * tests/unit/onboardingFlow.test.ts → "adopts, persists, and broadcasts the
+     * endpoint when decoded.apiHost is set" / "keeps the adopted endpoint in
+     * memory when the backend refuses the join".
+     */
+    function mockJoinAdopting(
+      endpoint: string,
+      outcome: (opts: Parameters<typeof performJoin>[0]) => PerformJoinResult,
+    ): void {
+      vi.mocked(performJoin).mockImplementation(async (opts) => {
+        opts.apiClient.setEndpoint(endpoint);
+        return outcome(opts);
+      });
+    }
+
+    /** Land in idle (email captured), paste an `@host` code, press 加入. */
+    async function joinWithHostCode(params: {
+      endpoint: string;
+      apiClient?: ApiClient;
+      autoSetup?: ReturnType<typeof useAutoSetup>;
+    }) {
+      const apiClient = params.apiClient ?? createMockApiClient();
+      const autoSetup = params.autoSetup ?? createMockAutoSetup();
+      const onFamilyJoined = vi.fn();
+      const { result } = renderFlow(apiClient, autoSetup, onFamilyJoined);
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      expect(result.current.state).toBe("idle");
+      act(() => {
+        result.current.setSyncCodeInput(`moo-fam-joined@${params.endpoint}`);
+      });
+      await act(async () => {
+        await result.current.handleJoin();
+      });
+      return { result, apiClient, onFamilyJoined };
+    }
+
+    it("keeps the adopted endpoint after a successful join", async () => {
+      mockJoinAdopting(FAMILY_ENDPOINT, (opts) => ({
+        ok: true,
+        familyId: "fam-joined",
+        userId: opts.userId,
+      }));
+
+      const { apiClient, onFamilyJoined } = await joinWithHostCode({
+        endpoint: FAMILY_ENDPOINT,
+      });
+
+      expect(onFamilyJoined).toHaveBeenCalledWith(
+        "fam-joined",
+        expect.any(String),
+      );
+      expect(apiClient.getEndpoint()).toBe(FAMILY_ENDPOINT);
+    });
+
+    // Every terminal backend refusal ends the attempt, so every one of them
+    // must hand the endpoint back — not just the "family missing" shape.
+    const terminalRefusals: Array<[string, string]> = [
+      ["FAMILY_NOT_FOUND", "找不到這個家庭"],
+      ["RATE_LIMITED", "請求過於頻繁，請稍後再試"],
+      ["SERVER_ERROR", "伺服器發生錯誤"],
+    ];
+
+    it.each(terminalRefusals)(
+      "restores the previous endpoint when the join is refused with %s",
+      async (errorCode, errorMessage) => {
+        mockJoinAdopting(ATTACKER_ENDPOINT, () => ({
+          ok: false,
+          errorCode,
+          errorMessage,
+        }));
+
+        const { result, apiClient } = await joinWithHostCode({
+          endpoint: ATTACKER_ENDPOINT,
+        });
+
+        expect(result.current.state).toBe("error");
+        expect(result.current.errorMessage).toBe(errorMessage);
+        expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
+      },
+    );
+
+    it("rolls the endpoint back in memory only, writing nothing to storage", async () => {
+      mockJoinAdopting(ATTACKER_ENDPOINT, () => ({
+        ok: false,
+        errorCode: "FAMILY_NOT_FOUND",
+        errorMessage: "找不到這個家庭",
+      }));
+
+      await joinWithHostCode({ endpoint: ATTACKER_ENDPOINT });
+
+      // An abandoned attempt persisted nothing, so the rollback has nothing
+      // durable to undo — and must not invent a write of its own.
+      expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+        expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
+      );
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "SET_API_ENDPOINT" }),
+      );
+    });
+
+    /**
+     * THE attack this rollback closes. The sync code's server deliberately fails
+     * the join; the victim gives up and presses 建立家庭. Without the rollback
+     * that create — userId, display name, the auth token that server issues and
+     * the whole personal book list — would go to the attacker's host, which
+     * would then be baked into the sync code shared with the family.
+     */
+    it("sends the next 建立家庭 to the original endpoint, not the refused host", async () => {
+      let endpointAtCreate: string | null = null;
+      vi.mocked(createNewFamily).mockImplementation(async (opts) => {
+        endpointAtCreate = opts.apiClient.getEndpoint();
+        return {
+          familyId: "fam-new",
+          userId: opts.userId,
+          syncCode: "moo-sync-code",
+        };
+      });
+      mockJoinAdopting(ATTACKER_ENDPOINT, () => ({
+        ok: false,
+        errorCode: "FAMILY_NOT_FOUND",
+        errorMessage: "找不到這個家庭",
+      }));
+
+      const { result, apiClient } = await joinWithHostCode({
+        endpoint: ATTACKER_ENDPOINT,
+      });
+      expect(result.current.state).toBe("error");
+
+      act(() => {
+        result.current.handleRetry();
+      });
+      await act(async () => {
+        await result.current.handleCreate();
+      });
+
+      expect(createNewFamily).toHaveBeenCalled();
+      expect(endpointAtCreate).toBe(ORIGINAL_ENDPOINT);
+      expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
+    });
+
+    /**
+     * DELIBERATE exception to the rollback: a verification challenge is a
+     * CONTINUATION of the same attempt, not its end. The prompt asks that
+     * family's own server for the account's verification method and then retries
+     * the join against it, so releasing the endpoint here would send both to the
+     * wrong host.
+     */
+    it("keeps the adopted endpoint while a verification challenge is open", async () => {
+      const endpointsSeenByVerifyMethod: string[] = [];
+      // Self-reference is safe: the callback only runs once the prompt opens.
+      const apiClient: ApiClient = createMockApiClient({
+        getVerifyMethod: vi.fn().mockImplementation(async () => {
+          endpointsSeenByVerifyMethod.push(apiClient.getEndpoint());
+          return { data: { method: "pin", prompted: 0 } };
+        }),
+      });
+      mockJoinAdopting(FAMILY_ENDPOINT, () => ({
+        ok: false,
+        errorCode: "VERIFICATION_REQUIRED",
+        errorMessage: "需要驗證",
+      }));
+
+      const { result } = await joinWithHostCode({
+        endpoint: FAMILY_ENDPOINT,
+        apiClient,
+      });
+
+      expect(result.current.state).toBe("verify-prompt");
+      expect(apiClient.getEndpoint()).toBe(FAMILY_ENDPOINT);
+      // The method lookup itself has to reach the family's server.
+      expect(endpointsSeenByVerifyMethod).toEqual([FAMILY_ENDPOINT]);
+    });
+
+    it("keeps the adopted endpoint when the verifySecret retry completes the join", async () => {
+      mockJoinAdopting(FAMILY_ENDPOINT, (opts) =>
+        opts.verifySecret
+          ? { ok: true, familyId: "fam-joined", userId: opts.userId }
+          : {
+              ok: false,
+              errorCode: "VERIFICATION_REQUIRED",
+              errorMessage: "需要驗證",
+            },
+      );
+
+      const { result, apiClient, onFamilyJoined } = await joinWithHostCode({
+        endpoint: FAMILY_ENDPOINT,
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      await act(async () => {
+        await result.current.verify.submit("123456");
+      });
+
+      expect(onFamilyJoined).toHaveBeenCalledWith(
+        "fam-joined",
+        expect.any(String),
+      );
+      expect(apiClient.getEndpoint()).toBe(FAMILY_ENDPOINT);
+    });
+
+    it("restores the previous endpoint when the user cancels the challenge", async () => {
+      mockJoinAdopting(ATTACKER_ENDPOINT, () => ({
+        ok: false,
+        errorCode: "VERIFICATION_REQUIRED",
+        errorMessage: "需要驗證",
+      }));
+
+      const { result, apiClient } = await joinWithHostCode({
+        endpoint: ATTACKER_ENDPOINT,
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      act(() => {
+        result.current.verify.cancel();
+      });
+
+      // Back on an actionable screen — and back on the trusted endpoint.
+      expect(result.current.state).toBe("idle");
+      expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
+    });
+
+    it("restores the previous endpoint when performJoin throws", async () => {
+      vi.mocked(performJoin).mockImplementation(async (opts) => {
+        opts.apiClient.setEndpoint(ATTACKER_ENDPOINT);
+        throw new Error("network down");
+      });
+
+      const { result, apiClient } = await joinWithHostCode({
+        endpoint: ATTACKER_ENDPOINT,
+      });
+
+      expect(result.current.state).toBe("error");
+      expect(result.current.errorMessage).toBe("network down");
+      expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
+    });
+
+    it("leaves the client on its own endpoint when deriveUserId throws before any adoption", async () => {
+      const apiClient = createMockApiClient();
+      const { result } = renderFlow(apiClient);
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      // Only the join attempt's derive fails; handleStart already used its own.
+      vi.mocked(deriveUserId).mockRejectedValueOnce(new Error("hash failed"));
+
+      act(() => {
+        result.current.setSyncCodeInput(`moo-fam-joined@${ATTACKER_ENDPOINT}`);
+      });
+      await act(async () => {
+        await result.current.handleJoin();
+      });
+
+      expect(performJoin).not.toHaveBeenCalled();
+      expect(result.current.state).toBe("error");
+      expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
+    });
+
+    it("keeps the adopted endpoint when the post-join book sync throws", async () => {
+      // The backend already accepted the join, so performJoin has persisted this
+      // endpoint. A best-effort sync failure afterwards must not roll back a
+      // membership that exists — the client would then be on a different
+      // endpoint from the one in storage.
+      mockJoinAdopting(FAMILY_ENDPOINT, (opts) => ({
+        ok: true,
+        familyId: "fam-joined",
+        userId: opts.userId,
+      }));
+      const autoSetup = createMockAutoSetup({
+        syncBooks: vi.fn().mockRejectedValue(new Error("sync exploded")),
+      });
+
+      const { result, apiClient } = await joinWithHostCode({
+        endpoint: FAMILY_ENDPOINT,
+        autoSetup,
+      });
+
+      expect(result.current.state).toBe("error");
+      expect(apiClient.getEndpoint()).toBe(FAMILY_ENDPOINT);
     });
   });
 

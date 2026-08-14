@@ -1,4 +1,5 @@
 import React from "react";
+import { SyncCodeHostNote } from "./SyncCodeHostNote";
 
 const ERROR_MESSAGE_ID = "onboarding-error-view-message";
 
@@ -172,6 +173,7 @@ export function IdleView({
           className="moo-form-input moo-form-input--block moo-onboarding-view__input"
         />
       </div>
+      <SyncCodeHostNote syncCode={syncCodeInput} />
       <button onClick={onJoin} disabled={joinDisabled} className={joinClass}>
         {state === "joining" ? "加入中..." : "加入家庭公開書櫃"}
       </button>

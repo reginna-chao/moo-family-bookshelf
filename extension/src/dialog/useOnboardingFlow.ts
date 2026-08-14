@@ -17,6 +17,7 @@ import {
   createNewFamily,
   performJoin,
   performSoloRecovery,
+  restoreApiEndpoint,
   tryAutoRecovery,
   type RecoveryResult,
 } from "./onboardingFlow";
@@ -627,6 +628,22 @@ export function useOnboardingFlow(
     setErrorMessage("");
     setErrorActions([]);
 
+    // This scope owns the sync code's `@host` for the whole attempt. performJoin
+    // applies it (the join must go there) and persists it only once a join
+    // succeeds; it deliberately leaves it applied on failure, because the
+    // verification challenge below is a continuation of the same attempt — it
+    // queries that server for the account's verification method and retries the
+    // join against it. Every exit that ends the attempt WITHOUT a join hands the
+    // endpoint back: otherwise a code whose server answered "no" would keep
+    // steering this client, and the 建立家庭 the user reaches for next would ship
+    // the userId, the token it issues and the whole book list there.
+    const endpointBeforeAttempt = apiClient.getEndpoint();
+    let joined = false;
+    const abandonAttempt = () => {
+      if (joined) return;
+      restoreApiEndpoint(apiClient, endpointBeforeAttempt);
+    };
+
     try {
       const userId = await deriveUserId(email);
       const result = await performJoin({
@@ -637,6 +654,7 @@ export function useOnboardingFlow(
       });
 
       if (result.ok) {
+        joined = true;
         await finishJoin(result.familyId, result.userId);
         return;
       }
@@ -663,17 +681,25 @@ export function useOnboardingFlow(
               retryAfter: retryResult.retryAfter,
             };
           }
+          joined = true;
           await finishJoin(retryResult.familyId, retryResult.userId);
           return { recovered: true };
         },
         onCancel: () => {
+          // Walking away from the challenge ends the attempt — give the
+          // endpoint back before the user is on an actionable screen again.
+          abandonAttempt();
           setState(recoveryActiveRef.current ? "recovery-join" : "idle");
         },
       });
+      // The prompt now owns the attempt: it either joins (persisting the
+      // endpoint), or ends via onCancel above.
       if (handled) return;
 
+      abandonAttempt();
       showRetryableError(result.errorMessage);
     } catch (err) {
+      abandonAttempt();
       if (err instanceof SyncCodeError) {
         showRetryableError(`同步碼格式錯誤：${err.message}`);
         return;

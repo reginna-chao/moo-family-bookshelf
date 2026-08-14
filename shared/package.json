@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./api/*": "./src/api/*",
     "./config/*": "./src/config/*",
     "./icons/*": "./src/icons/*",
     "./invite/*": "./src/invite/*",

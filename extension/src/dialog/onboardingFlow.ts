@@ -25,6 +25,7 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   FAMILY_ID_KEY,
 } from "../constants";
+import { persistAcceptedFamilyEndpoint } from "../storage/familyEndpointChoice";
 import type { useAutoSetup } from "./useAutoSetup";
 
 /**
@@ -348,9 +349,48 @@ export interface PerformJoinFailure {
 export type PerformJoinResult = PerformJoinSuccess | PerformJoinFailure;
 
 /**
+ * Put the client back on `endpoint` after a join attempt ended without a join.
+ *
+ * Storage is deliberately untouched: performJoin persists a sync code's `@host`
+ * only once the backend has accepted the join, so an abandoned attempt has
+ * nothing durable to undo — only the in-memory client to hand back.
+ */
+export function restoreApiEndpoint(
+  apiClient: ApiClient,
+  endpoint: string,
+): void {
+  try {
+    apiClient.setEndpoint(endpoint);
+  } catch (err) {
+    // `endpoint` came from getEndpoint(), so it already passed validation.
+    // Guarded anyway: this runs on error paths, where a throw would replace the
+    // failure the caller is in the middle of reporting.
+    console.warn("[Onboarding] Failed to restore previous API endpoint", err);
+  }
+}
+
+/**
  * Decode a sync code, join the family on the backend, and persist the
  * resulting credentials. Returns a discriminated result so the caller can
  * map failures to UI state without catching exceptions for known errors.
+ *
+ * ENDPOINT LIFETIME. The sync code's `@host` is applied to the in-memory client
+ * (the join request has to go there) but is PERSISTED only after the backend
+ * accepts the join. A host whose server refuses has proven nothing, and a
+ * persisted endpoint outlives the attempt: it would still be in force when the
+ * user gives up and presses 建立家庭, shipping the userId, display name, the
+ * token that create issues and the entire personal book list — unshared books
+ * included — to that same server, which would then be baked into the sync code
+ * handed to the rest of the family.
+ *
+ * On failure the `@host` stays applied IN MEMORY, because a verification
+ * challenge is a continuation of this attempt, not its end: the prompt asks
+ * that same server for the account's verification method and then retries the
+ * join against it. Releasing it is therefore the caller's job — see
+ * `restoreApiEndpoint` in useOnboardingFlow.handleJoin, which hands the
+ * endpoint back on every exit that ends the attempt without a join. Nothing is
+ * written to storage until a join succeeds, so an abandoned attempt cannot
+ * survive a reload either way.
  */
 export async function performJoin(opts: {
   syncCodeInput: string;
@@ -361,15 +401,30 @@ export async function performJoin(opts: {
   verifySecret?: string;
 }): Promise<PerformJoinResult> {
   const decoded = decodeSyncCode(opts.syncCodeInput);
+  /** The validated/normalised `@host`, or null when the code carries none. */
+  let adoptedEndpoint: string | null = null;
 
   if (decoded.apiHost) {
-    opts.apiClient.setEndpoint(decoded.apiHost);
-    void Promise.resolve(
-      browser.runtime.sendMessage({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: decoded.apiHost,
-      }),
-    ).catch(() => {});
+    // setEndpoint validates the @host with the same rules the settings/confirm
+    // paths use — it now rejects embedded credentials and unsafe schemes, so a
+    // sync code carrying `https://real.example@evil.com` throws here. Abort the
+    // join with a clear message rather than letting it bubble up as a raw
+    // English error; nothing is persisted and no join is attempted, and the
+    // client stays on its previous endpoint (setEndpoint throws before it
+    // assigns).
+    try {
+      opts.apiClient.setEndpoint(decoded.apiHost);
+    } catch (err) {
+      // Log the reason: the UI copy is deliberately generic, so without this
+      // the only record of WHY a join was refused is gone.
+      console.warn("[Onboarding] Sync code endpoint rejected", err);
+      return {
+        ok: false,
+        errorCode: "INVALID_ENDPOINT",
+        errorMessage: "此同步碼的伺服器位址無效或不安全，無法加入",
+      };
+    }
+    adoptedEndpoint = opts.apiClient.getEndpoint();
   }
 
   const response = await opts.apiClient.joinFamily(
@@ -387,6 +442,18 @@ export async function performJoin(opts: {
       errorMessage: response.error.message,
       retryAfter: response.error.retryAfter,
     };
+  }
+
+  // Joined: only now has this endpoint earned the right to stick. Persisted
+  // through the same helper the settings path uses — a direct storage.local
+  // write (authoritative) plus a best-effort SET_API_ENDPOINT message, because
+  // on Firefox's sleeping background event page the message alone can be
+  // dropped, which used to leave the member silently back on the default
+  // endpoint. The helper also clears any stale "declined family endpoint"
+  // marker, which is right here: joining through an @host sync code IS an
+  // explicit choice of that endpoint.
+  if (adoptedEndpoint !== null) {
+    await persistAcceptedFamilyEndpoint(adoptedEndpoint);
   }
 
   const joinData = response.data;

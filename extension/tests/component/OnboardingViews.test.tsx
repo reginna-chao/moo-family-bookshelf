@@ -7,7 +7,14 @@ import {
   IdleView,
 } from "@/dialog/OnboardingViews";
 
-vi.mock("@/crypto/syncCode", () => ({
+/**
+ * Only `decodeSyncCode` is stubbed — CreatedView's rendering of a generated code
+ * is what these tests drive. The rest of the module stays real, notably
+ * `parseSyncCodeApiHost`, which IdleView's SyncCodeHostNote calls on every
+ * keystroke; stubbing the whole module would make the note untestable here.
+ */
+vi.mock("@/crypto/syncCode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/crypto/syncCode")>()),
   decodeSyncCode: vi.fn().mockReturnValue({
     familyId: "abc123",
   }),
@@ -478,6 +485,117 @@ describe("IdleView", () => {
 
     const input = screen.getByPlaceholderText("輸入家庭同步碼");
     expect(input).toHaveAttribute("type", "text");
+  });
+
+  /**
+   * Joining via an `@host` sync code silently repoints the client at someone
+   * else's server, so the host is surfaced BEFORE the user presses join.
+   */
+  describe("custom-server note", () => {
+    it("names the host while a sync code carrying @host is typed", () => {
+      render(
+        <IdleView
+          {...defaultProps}
+          syncCodeInput="moo-ab12-cd34@https://custom.example.com"
+        />,
+      );
+
+      const note = screen.getByTestId("sync-code-host-note");
+      expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+      // The canonical endpoint, scheme included — it must match what the join
+      // path would actually adopt, not the raw text the sharer typed.
+      expect(note).toHaveTextContent("https://custom.example.com");
+    });
+
+    it("shows the canonical endpoint, not the raw @host segment", () => {
+      render(
+        <IdleView
+          {...defaultProps}
+          syncCodeInput="moo-ab12-cd34@https://CUSTOM.Example.COM:443/api"
+        />,
+      );
+
+      const note = screen.getByTestId("sync-code-host-note");
+      // Lower-cased, default port dropped, path kept.
+      expect(note).toHaveTextContent("https://custom.example.com/api");
+      expect(note.textContent).not.toContain("CUSTOM.Example.COM");
+      expect(note.textContent).not.toContain(":443");
+    });
+
+    it.each([
+      ["the input is empty", ""],
+      ["the code carries no @host", "moo-ab12-cd34"],
+      ["the code is still being typed", "moo-ab12"],
+      ["the @ has no host after it yet", "moo-ab12-cd34@"],
+    ])("shows no note when %s", (_label, syncCodeInput) => {
+      render(<IdleView {...defaultProps} syncCodeInput={syncCodeInput} />);
+
+      expect(
+        screen.queryByTestId("sync-code-host-note"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("sync-code-host-note-invalid"),
+      ).not.toBeInTheDocument();
+    });
+
+    /**
+     * A `@host` the join path would refuse must NOT get the reassuring
+     * "will connect to …" line — that would lend a spoofed address legitimacy
+     * on the very screen where the user decides to join.
+     */
+    it("warns instead of naming the host when the @host would be refused", () => {
+      render(
+        <IdleView
+          {...defaultProps}
+          syncCodeInput="moo-ab12-cd34@https://real.example@evil.com"
+        />,
+      );
+
+      const warning = screen.getByTestId("sync-code-host-note-invalid");
+      expect(warning).toHaveAttribute("role", "alert");
+      expect(warning).toHaveTextContent(
+        "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認",
+      );
+      expect(
+        screen.queryByTestId("sync-code-host-note"),
+      ).not.toBeInTheDocument();
+      expect(warning.textContent).not.toContain("real.example");
+    });
+
+    it.each([
+      // Bare hosts were ALWAYS refused at adoption (`new URL()` needs a scheme);
+      // the note now says so instead of presenting one as a trusted server.
+      ["a bare host with no scheme", "moo-ab12-cd34@my-worker.example.com"],
+      ["plain HTTP on a public host", "moo-ab12-cd34@http://evil.example.com"],
+      ["a non-HTTP scheme", "moo-ab12-cd34@ftp://files.example.com"],
+    ])("warns about %s", (_label, syncCodeInput) => {
+      render(<IdleView {...defaultProps} syncCodeInput={syncCodeInput} />);
+
+      expect(
+        screen.getByTestId("sync-code-host-note-invalid"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("sync-code-host-note"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("still lets the user press join — the note is advisory, not a block", () => {
+      const onJoin = vi.fn();
+      render(
+        <IdleView
+          {...defaultProps}
+          onJoin={onJoin}
+          syncCodeInput="moo-ab12-cd34@my-worker.example.com"
+        />,
+      );
+
+      const joinBtn = screen.getByRole("button", {
+        name: "加入家庭公開書櫃",
+      });
+      expect(joinBtn).toBeEnabled();
+      fireEvent.click(joinBtn);
+      expect(onJoin).toHaveBeenCalledOnce();
+    });
   });
 });
 

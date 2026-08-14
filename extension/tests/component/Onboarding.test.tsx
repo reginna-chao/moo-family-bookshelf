@@ -17,7 +17,12 @@ import {
 import { Onboarding, OnboardingProps } from "@/dialog/Onboarding";
 import { BoolFlag, type ApiClient } from "@/api/client";
 import { scrapeUserEmail } from "@/content/scraper";
-import { PERSONAL_BOOKS_CACHE_KEY, FAMILY_ID_KEY } from "@/constants";
+import {
+  API_ENDPOINT_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
+  FAMILY_ID_KEY,
+  PERSONAL_BOOKS_CACHE_KEY,
+} from "@/constants";
 import { verificationLockedMessage } from "@/dialog/verificationMessages";
 
 import { webcrypto } from "node:crypto";
@@ -46,6 +51,9 @@ vi.mock("@/content/scraper", () => ({
 }));
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
+  // Mirrors the real client: setEndpoint is what getEndpoint reports back, so
+  // the join path persists the endpoint it just switched to.
+  let endpoint = "https://test.workers.dev";
   return {
     lookupUser: vi
       .fn()
@@ -72,8 +80,10 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     getVerifyMethod: vi
       .fn()
       .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
-    getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
-    setEndpoint: vi.fn(),
+    getEndpoint: vi.fn(() => endpoint),
+    setEndpoint: vi.fn((url: string) => {
+      endpoint = url;
+    }),
     setAuthToken: vi.fn(),
     updateFamilyEndpoint: vi.fn().mockResolvedValue({ data: { ok: true } }),
     ...overrides,
@@ -573,7 +583,13 @@ describe("Onboarding", () => {
   });
 
   describe("handleJoin with custom API endpoint", () => {
-    it("sends SET_API_ENDPOINT message when sync code contains @host", async () => {
+    /**
+     * An `@host` sync code is an explicit choice of that server, so joining
+     * persists it directly to storage.local (authoritative — Firefox's sleeping
+     * background page can drop the message) AND still broadcasts
+     * SET_API_ENDPOINT so the rest of the extension follows.
+     */
+    it("persists and broadcasts the endpoint when the sync code contains @host", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
         joinFamily: vi.fn().mockResolvedValue({
@@ -610,6 +626,10 @@ describe("Onboarding", () => {
       });
 
       await waitFor(() => {
+        // The direct storage write is what makes the choice stick.
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          [API_ENDPOINT_KEY]: "https://custom.api.dev",
+        });
         // Verify SET_API_ENDPOINT was sent to chrome.runtime
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -622,6 +642,73 @@ describe("Onboarding", () => {
           "https://custom.api.dev",
         );
       });
+      // Pasting an @host code is an explicit acceptance, so any earlier refusal
+      // of that endpoint is dropped.
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+        DECLINED_FAMILY_ENDPOINT_KEY,
+      ]);
+    });
+
+    /**
+     * The refusal is the whole attack: a server that FAILS the join has proven
+     * nothing, yet an adopted endpoint outlives the attempt. Left in force it
+     * would still be the address when the user gives up and presses 建立家庭 —
+     * shipping the userId, the token that create issues and the entire personal
+     * book list (unshared books included) to that host, which would then be
+     * baked into the sync code handed to the rest of the family.
+     */
+    it("hands the endpoint back and persists nothing when the @host server refuses the join", async () => {
+      const onFamilyJoined = vi.fn();
+      const mockApi = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "FAMILY_NOT_FOUND", message: "找不到這個家庭" },
+        }),
+      });
+
+      renderOnboarding({ onFamilyJoined, apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
+        target: { value: "moo-abcd-efgh@https://attacker.example" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
+        for (let i = 0; i < 10; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
+      });
+
+      // The refusal reaches the user…
+      await waitFor(() => {
+        expect(screen.getByText("找不到這個家庭")).toBeInTheDocument();
+      });
+      expect(onFamilyJoined).not.toHaveBeenCalled();
+
+      // …the endpoint was adopted for the request, then handed back.
+      expect(mockApi.setEndpoint).toHaveBeenCalledWith(
+        "https://attacker.example",
+      );
+      expect(mockApi.getEndpoint()).toBe("https://test.workers.dev");
+
+      // Nothing durable was written, so a reload lands on the same endpoint.
+      expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+        expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
+      );
+      expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
+        DECLINED_FAMILY_ENDPOINT_KEY,
+      ]);
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "SET_API_ENDPOINT" }),
+      );
     });
   });
 

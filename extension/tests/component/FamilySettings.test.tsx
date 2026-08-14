@@ -4,13 +4,19 @@ import {
   fireEvent,
   waitFor,
   act,
+  within,
 } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { FamilySettings, FamilySettingsProps } from "@/dialog/FamilySettings";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
-import type { ApiClient } from "@/api/client";
-import { DISPLAY_NAME_KEY } from "@/constants";
+import { validateEndpointUrl, type ApiClient } from "@/api/client";
+import {
+  API_ENDPOINT_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
+  DEFAULT_API_ENDPOINT,
+  DISPLAY_NAME_KEY,
+} from "@/constants";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
@@ -40,7 +46,12 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
       .fn()
       .mockResolvedValue({ data: { familyId: "fam-123", members: [] } }),
     deleteAccount: vi.fn().mockResolvedValue({ data: { ok: true } }),
-    getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
+    // Default endpoint + a family record with no apiEndpoint = nothing to
+    // confirm, so useEndpointSwitch stays silent and the endpoint-switch panel
+    // does not render into tests that are about something else. Tests that
+    // exercise the panel override this pair explicitly (see "family endpoint
+    // switch confirmation").
+    getEndpoint: vi.fn().mockReturnValue(DEFAULT_API_ENDPOINT),
     setEndpoint: vi.fn(),
     updateFamilyEndpoint: vi
       .fn()
@@ -75,19 +86,29 @@ function renderFamilySettings(props: Partial<FamilySettingsProps> = {}) {
   );
 }
 
+/**
+ * Stub `chrome.storage.local.get` so every read resolves with the display name
+ * plus whatever `extra` entries the test needs (e.g. a recorded endpoint-switch
+ * refusal). Returning the same record for any key set is enough here: callers
+ * pick the keys they asked for out of it.
+ */
+function mockStorageGet(extra: Record<string, unknown> = {}) {
+  vi.mocked(chrome.storage.local.get).mockImplementation(
+    (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+      const result = { [DISPLAY_NAME_KEY]: "小明", ...extra };
+      if (typeof callback === "function") {
+        callback(result);
+      }
+      return Promise.resolve(result) as unknown as void;
+    },
+  );
+}
+
 describe("FamilySettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Return an encryption key and display name from storage
-    vi.mocked(chrome.storage.local.get).mockImplementation(
-      (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
-        const result = { [DISPLAY_NAME_KEY]: "小明" };
-        if (typeof callback === "function") {
-          callback(result);
-        }
-        return Promise.resolve(result) as unknown as void;
-      },
-    );
+    mockStorageGet();
     vi.mocked(chrome.storage.local.set).mockResolvedValue();
     vi.mocked(chrome.storage.sync.set).mockResolvedValue();
   });
@@ -978,6 +999,483 @@ describe("FamilySettings", () => {
         expect(
           screen.queryByText("確定要移除帳戶嗎？"),
         ).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  /**
+   * The family record's `apiEndpoint` is chosen by the family OWNER and pushed
+   * to every member, so adopting it silently would let the owner redirect
+   * another member's auth token and full book list (unshared books included) to
+   * a host of their choosing. The Settings tab asks first — the security
+   * contract lives in src/dialog/useEndpointSwitch.ts.
+   */
+  describe("family endpoint switch confirmation", () => {
+    const CURRENT_ENDPOINT = "https://current.example";
+    const FAMILY_ENDPOINT = "https://family.example";
+
+    /** Members response carrying the family record's advertised endpoint. */
+    function membersWithEndpoint(apiEndpoint: string | null) {
+      return vi.fn().mockResolvedValue({
+        data: {
+          familyId: "fam-123",
+          ownerId: "user-abc12345",
+          members: [{ userId: "user-abc12345", displayName: "小明" }],
+          maxMembers: 6,
+          createdAt: "2026-01-01",
+          apiEndpoint,
+        },
+      });
+    }
+
+    /**
+     * The mock client is STATEFUL, like the real `ApiClient`: `setEndpoint`
+     * moves what `getEndpoint` reports, through the production validator so the
+     * stored value is canonical.
+     *
+     * This matters because `useEndpointSwitch` re-reads `getEndpoint()` after a
+     * successful switch to decide what the sync code advertises. A frozen
+     * `getEndpoint` would keep answering with the pre-switch endpoint and hide
+     * exactly the drift the "sync code follows the adopted endpoint" block
+     * exists to catch.
+     *
+     * `opts.setEndpoint` overrides the whole behaviour (used to simulate a
+     * client that refuses the target), and then nothing moves.
+     */
+    function renderWithEndpoints(opts: {
+      current: string;
+      family: string | null;
+      setEndpoint?: (url: string) => void;
+    }): ApiClient {
+      let endpoint = opts.current;
+      const apiClient = createMockApiClient({
+        getEndpoint: vi.fn(() => endpoint),
+        setEndpoint: vi.fn((url: string) => {
+          if (opts.setEndpoint) {
+            opts.setEndpoint(url);
+            return;
+          }
+          endpoint = validateEndpointUrl(url);
+        }),
+        getFamilyMembers: membersWithEndpoint(opts.family),
+      });
+      renderFamilySettings({ apiClient });
+      return apiClient;
+    }
+
+    it("asks before adopting the endpoint the family record advertises", async () => {
+      renderWithEndpoints({
+        current: CURRENT_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+      });
+
+      const panel = await screen.findByTestId("endpoint-switch");
+
+      // It interrupts the Settings tab with a security decision, so it is
+      // announced to assistive tech the moment it appears.
+      expect(panel).toHaveAttribute("role", "alert");
+      expect(
+        within(panel).getByText("⚠️ 家庭 API 端點已變更"),
+      ).toBeInTheDocument();
+      expect(within(panel).getByText("目前連線")).toBeInTheDocument();
+      expect(within(panel).getByText(CURRENT_ENDPOINT)).toBeInTheDocument();
+      expect(within(panel).getByText("將切換至")).toBeInTheDocument();
+      expect(within(panel).getByText(FAMILY_ENDPOINT)).toBeInTheDocument();
+      expect(
+        within(panel).getByText(
+          "切換後，你的認證資訊與完整書單（包含未開放的書籍）都會傳送到新的伺服器。請確認你信任這個位址再切換。",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(panel).getByText(
+          "選擇「暫不切換」後會保持目前的連線，除非家庭端點再次變更，否則不會再詢問。",
+        ),
+      ).toBeInTheDocument();
+      // Keeping the current endpoint is the safe choice, so it comes first.
+      expect(
+        within(panel)
+          .getAllByRole("button")
+          .map((btn) => btn.textContent),
+      ).toEqual(["暫不切換", "確認切換"]);
+    });
+
+    it("labels a revert to the official default endpoint", async () => {
+      renderWithEndpoints({ current: CURRENT_ENDPOINT, family: null });
+
+      const panel = await screen.findByTestId("endpoint-switch");
+
+      expect(
+        within(panel).getByText("將切換至（官方預設端點）"),
+      ).toBeInTheDocument();
+      expect(within(panel).queryByText("將切換至")).not.toBeInTheDocument();
+      expect(within(panel).getByText(DEFAULT_API_ENDPOINT)).toBeInTheDocument();
+    });
+
+    it("asks nothing when the family endpoint is already in effect", async () => {
+      renderWithEndpoints({
+        current: FAMILY_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
+      });
+
+      // The panel is mounted unconditionally, so "nothing to say" must render
+      // as nothing at all — neither the question nor a failure notice.
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("endpoint-switch-error"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("asks nothing while the member list is still loading", async () => {
+      let resolveMembers: (value: unknown) => void = () => {};
+      const apiClient = createMockApiClient({
+        getEndpoint: vi.fn().mockReturnValue(CURRENT_ENDPOINT),
+        getFamilyMembers: vi.fn().mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              resolveMembers = resolve;
+            }),
+        ),
+      });
+      renderFamilySettings({ apiClient });
+
+      await act(async () => {});
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+
+      await act(async () => {
+        resolveMembers({
+          data: {
+            familyId: "fam-123",
+            ownerId: "user-abc12345",
+            members: [{ userId: "user-abc12345", displayName: "小明" }],
+            maxMembers: 6,
+            createdAt: "2026-01-01",
+            apiEndpoint: FAMILY_ENDPOINT,
+          },
+        });
+      });
+
+      expect(await screen.findByTestId("endpoint-switch")).toBeInTheDocument();
+    });
+
+    it("confirm switches the client, persists the endpoint, and closes the panel", async () => {
+      const apiClient = renderWithEndpoints({
+        current: CURRENT_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+      });
+
+      const panel = await screen.findByTestId("endpoint-switch");
+      fireEvent.click(within(panel).getByText("確認切換"));
+
+      expect(apiClient.setEndpoint).toHaveBeenCalledWith(FAMILY_ENDPOINT);
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          [API_ENDPOINT_KEY]: FAMILY_ENDPOINT,
+        });
+      });
+      await waitFor(() => {
+        expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+          DECLINED_FAMILY_ENDPOINT_KEY,
+        ]);
+      });
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "SET_API_ENDPOINT",
+        apiEndpoint: FAMILY_ENDPOINT,
+      });
+      // Accepting must never leave a refusal behind.
+      expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          [DECLINED_FAMILY_ENDPOINT_KEY]: expect.anything(),
+        }),
+      );
+    });
+
+    it("decline records the refusal and leaves the endpoint untouched", async () => {
+      const apiClient = renderWithEndpoints({
+        current: CURRENT_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+      });
+
+      const panel = await screen.findByTestId("endpoint-switch");
+      fireEvent.click(within(panel).getByText("暫不切換"));
+
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+      expect(apiClient.setEndpoint).not.toHaveBeenCalled();
+
+      await waitFor(() => {
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          [DECLINED_FAMILY_ENDPOINT_KEY]: { value: FAMILY_ENDPOINT },
+        });
+      });
+      expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+        expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
+      );
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "SET_API_ENDPOINT" }),
+      );
+    });
+
+    it("does not ask again for an endpoint the user already declined", async () => {
+      mockStorageGet({
+        [DECLINED_FAMILY_ENDPOINT_KEY]: { value: FAMILY_ENDPOINT },
+      });
+
+      renderWithEndpoints({
+        current: CURRENT_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
+      });
+
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+    });
+
+    it("asks again once the family record moves to a different endpoint", async () => {
+      mockStorageGet({
+        [DECLINED_FAMILY_ENDPOINT_KEY]: { value: "https://declined.example" },
+      });
+
+      renderWithEndpoints({
+        current: CURRENT_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+      });
+
+      const panel = await screen.findByTestId("endpoint-switch");
+      expect(within(panel).getByText(FAMILY_ENDPOINT)).toBeInTheDocument();
+    });
+
+    it("keeps the current endpoint when the client rejects the family endpoint", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const apiClient = renderWithEndpoints({
+        current: CURRENT_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+        setEndpoint: () => {
+          throw new Error("Unsafe API endpoint scheme");
+        },
+      });
+
+      const panel = await screen.findByTestId("endpoint-switch");
+      fireEvent.click(within(panel).getByText("確認切換"));
+
+      expect(apiClient.setEndpoint).toHaveBeenCalledWith(FAMILY_ENDPOINT);
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+
+      // A panel that just closes reads as "switched successfully", so the
+      // refusal is stated instead — text asserted on the rendered production
+      // output (src/dialog/EndpointSwitchPanel.tsx), never a copy of it.
+      const notice = await screen.findByTestId("endpoint-switch-error");
+      expect(notice).toHaveAttribute("role", "alert");
+      expect(
+        within(notice).getByText(
+          "此位址無法使用（需為 HTTPS，或本機／私人網路的 HTTP），已略過此次切換。",
+        ),
+      ).toBeInTheDocument();
+
+      // Nothing changed, and the unusable value is filed as declined so a
+      // broken record cannot re-open the panel on every members refresh.
+      await waitFor(() => {
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          [DECLINED_FAMILY_ENDPOINT_KEY]: { value: FAMILY_ENDPOINT },
+        });
+      });
+      expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+        expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
+      );
+      expect(warn).toHaveBeenCalled();
+
+      warn.mockRestore();
+    });
+
+    it("dismisses the failure notice with 「知道了」 and leaves the question closed", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      renderWithEndpoints({
+        current: CURRENT_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+        setEndpoint: () => {
+          throw new Error("Unsafe API endpoint scheme");
+        },
+      });
+
+      const panel = await screen.findByTestId("endpoint-switch");
+      fireEvent.click(within(panel).getByText("確認切換"));
+
+      const notice = await screen.findByTestId("endpoint-switch-error");
+      fireEvent.click(within(notice).getByText("知道了"));
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("endpoint-switch-error"),
+        ).not.toBeInTheDocument();
+      });
+      // Acknowledging is not a retry: the refused value stays declined, so the
+      // confirmation panel must not reappear behind the dismissed notice.
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+
+      warn.mockRestore();
+    });
+
+    /**
+     * The sync code is what this member hands to the next person (and re-scans
+     * onto their own phone), so its `@host` must describe the endpoint THIS
+     * device has actually ADOPTED — never the family record's advertised value.
+     *
+     * Building it from the record would mean a member who DECLINED a switch
+     * still distributes the endpoint they refused: the invitee lands on the
+     * untrusted host while the decliner never does, so the refusal protects
+     * only the person who made it.
+     */
+    describe("sync code follows the adopted endpoint", () => {
+      /** Read the rendered sync code once the members request has settled. */
+      async function readSyncCode(): Promise<string> {
+        await waitFor(() => {
+          expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
+        });
+        return screen.getByTestId("sync-code").textContent ?? "";
+      }
+
+      it("carries no @host while this device is on the official default", async () => {
+        renderWithEndpoints({
+          current: DEFAULT_API_ENDPOINT,
+          family: null,
+        });
+
+        expect(await readSyncCode()).toBe("moo-fam-123");
+      });
+
+      it("carries the @host when owner and member are already aligned on a custom endpoint", async () => {
+        renderWithEndpoints({
+          current: FAMILY_ENDPOINT,
+          family: FAMILY_ENDPOINT,
+        });
+
+        expect(await readSyncCode()).toBe(`moo-fam-123@${FAMILY_ENDPOINT}`);
+        // Aligned already, so there was nothing to confirm.
+        expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+      });
+
+      it("keeps the code @host-free after declining a switch to a custom endpoint", async () => {
+        renderWithEndpoints({
+          current: DEFAULT_API_ENDPOINT,
+          family: FAMILY_ENDPOINT,
+        });
+
+        const panel = await screen.findByTestId("endpoint-switch");
+        expect(screen.getByTestId("sync-code")).toHaveTextContent(
+          "moo-fam-123",
+        );
+
+        fireEvent.click(within(panel).getByText("暫不切換"));
+
+        // The refused endpoint must not travel out in the invite.
+        const code = await readSyncCode();
+        expect(code).toBe("moo-fam-123");
+        expect(code).not.toContain(FAMILY_ENDPOINT);
+      });
+
+      it("keeps the custom @host after declining a revert to the official default", async () => {
+        renderWithEndpoints({
+          current: CURRENT_ENDPOINT,
+          family: null,
+        });
+
+        const panel = await screen.findByTestId("endpoint-switch");
+        fireEvent.click(within(panel).getByText("暫不切換"));
+
+        // This device stays on its custom endpoint, so an invite that dropped
+        // the @host would send the invitee to the wrong (default) server.
+        expect(await readSyncCode()).toBe(`moo-fam-123@${CURRENT_ENDPOINT}`);
+      });
+
+      it("adds the new @host as soon as a switch is confirmed, with no reopen", async () => {
+        renderWithEndpoints({
+          current: DEFAULT_API_ENDPOINT,
+          family: FAMILY_ENDPOINT,
+        });
+
+        const panel = await screen.findByTestId("endpoint-switch");
+        expect(screen.getByTestId("sync-code")).toHaveTextContent(
+          "moo-fam-123",
+        );
+
+        fireEvent.click(within(panel).getByText("確認切換"));
+
+        // Same mount: `apiClient.setEndpoint` alone would not re-render, so the
+        // code would otherwise stay stale until the dialog was reopened.
+        await waitFor(() => {
+          expect(screen.getByTestId("sync-code")).toHaveTextContent(
+            `moo-fam-123@${FAMILY_ENDPOINT}`,
+          );
+        });
+      });
+
+      it("drops the @host as soon as a revert to the official default is confirmed", async () => {
+        renderWithEndpoints({
+          current: CURRENT_ENDPOINT,
+          family: null,
+        });
+
+        const panel = await screen.findByTestId("endpoint-switch");
+        expect(screen.getByTestId("sync-code")).toHaveTextContent(
+          `moo-fam-123@${CURRENT_ENDPOINT}`,
+        );
+
+        fireEvent.click(within(panel).getByText("確認切換"));
+
+        await waitFor(() => {
+          expect(screen.getByTestId("sync-code").textContent).toBe(
+            "moo-fam-123",
+          );
+        });
+      });
+
+      it("keeps the current @host when a confirmed switch is refused by URL validation", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        renderWithEndpoints({
+          current: CURRENT_ENDPOINT,
+          family: FAMILY_ENDPOINT,
+          setEndpoint: () => {
+            throw new Error("Unsafe API endpoint scheme");
+          },
+        });
+
+        const panel = await screen.findByTestId("endpoint-switch");
+        fireEvent.click(within(panel).getByText("確認切換"));
+
+        await screen.findByTestId("endpoint-switch-error");
+        // Nothing switched, so nothing about the shared code may change.
+        expect(screen.getByTestId("sync-code").textContent).toBe(
+          `moo-fam-123@${CURRENT_ENDPOINT}`,
+        );
+
+        warn.mockRestore();
+      });
+
+      it("copies the adopted-endpoint code, not the family record's", async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.assign(navigator, { clipboard: { writeText } });
+
+        renderWithEndpoints({
+          current: DEFAULT_API_ENDPOINT,
+          family: FAMILY_ENDPOINT,
+        });
+
+        const panel = await screen.findByTestId("endpoint-switch");
+        fireEvent.click(within(panel).getByText("暫不切換"));
+        await readSyncCode();
+
+        fireEvent.click(screen.getByText("複製同步碼"));
+
+        await waitFor(() => expect(writeText).toHaveBeenCalled());
+        const copied = writeText.mock.calls[0][0] as string;
+        expect(copied).toContain("moo-fam-123");
+        expect(copied).not.toContain(FAMILY_ENDPOINT);
       });
     });
   });

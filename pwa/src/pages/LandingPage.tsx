@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
+import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
+import {
+  decodeSyncCode,
+  parseSyncCodeApiHost,
+  SyncCodeError,
+} from "@/crypto/syncCode";
 import { deriveUserId } from "@/crypto/hash";
 import { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/client";
@@ -16,6 +21,7 @@ import type { RetryErrorCode } from "@/utils/retryMessage";
 import { PinInput } from "@/components/PinInput";
 import { PatternLock } from "@/components/PatternLock";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { SyncCodeHostNote } from "@/components/SyncCodeHostNote";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
@@ -39,6 +45,21 @@ interface PendingAuth {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_ENV = getAppEnv();
+
+/** Shown when a sync code's `@host` is one the API client refuses to adopt. */
+const UNSAFE_API_HOST_ERROR = "此同步碼的伺服器位址無效或不安全，無法加入。";
+
+/**
+ * True when a sync code's `@host` would be REFUSED by `validateEndpointUrl`.
+ *
+ * Every path that would talk to that host must check first: the join client is
+ * built from this value, so an unchecked reject means the PWA has already sent
+ * a verify-method probe (and then an auth token) to an address the security
+ * rules exist to keep it away from. Never adopt, never persist.
+ */
+function isUnsafeApiHost(apiHost: string | undefined): boolean {
+  return classifySyncCodeApiHost(apiHost).kind === "invalid";
+}
 
 export function LandingPage({
   onAuth,
@@ -148,6 +169,13 @@ export function LandingPage({
       return;
     }
 
+    // Refuse an unsafe `@host` before anything reaches it — the verify-method
+    // probe below already goes to that server.
+    if (isUnsafeApiHost(decoded.apiHost)) {
+      setSyncCodeError(UNSAFE_API_HOST_ERROR);
+      return;
+    }
+
     // Validate email
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
@@ -198,6 +226,16 @@ export function LandingPage({
     verifySecret?: string,
     tokenFromQr?: string,
   ) {
+    // Single choke point for every join path (form, verification prompt, QR):
+    // an address the client would refuse never gets a request, a token, or a
+    // localStorage entry.
+    if (isUnsafeApiHost(apiHost)) {
+      setPendingAuth(null);
+      setGeneralError(UNSAFE_API_HOST_ERROR);
+      setIsSubmitting(false);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const joinClient = getJoinClient(apiHost);
@@ -306,6 +344,13 @@ export function LandingPage({
       return;
     }
 
+    // A QR / invite host was never typed by this user, so it gets the same
+    // refusal as a pasted one — before the verify-method probe below.
+    if (isUnsafeApiHost(decoded.apiHost)) {
+      setGeneralError(UNSAFE_API_HOST_ERROR);
+      return;
+    }
+
     setIsSubmitting(true);
 
     // When qrToken is available, skip the verification check and join directly
@@ -359,6 +404,12 @@ export function LandingPage({
   if (pendingAuth) {
     return (
       <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
+        {/* QR / invite arrivals never see the form, so this is their only
+            chance to learn which server they are about to authenticate to. */}
+        <SyncCodeHostNote
+          result={classifySyncCodeApiHost(pendingAuth.apiHost)}
+          className="mb-4 w-full max-w-xs"
+        />
         {pendingAuth.verifyMethod === "pin" && (
           <PinInput
             mode="verify"
@@ -487,6 +538,9 @@ export function LandingPage({
             </p>
           )}
         </div>
+
+        {/* Covers both the typed code and an invite link's pre-filled one. */}
+        <SyncCodeHostNote result={parseSyncCodeApiHost(syncCodeInput)} />
 
         <div>
           <label

@@ -25,6 +25,7 @@ extension/src/
 └── api/             # API client (configurable endpoint)
 
 shared/src/         # moo-family-bookshelf-shared — consumed by BOTH extension/ and pwa/
+├── api/            # Endpoint URL validation + sync-code @host classification
 ├── config/         # Readmoo host/selector config, report links
 ├── icons/          # Inline brand SVG paths
 ├── invite/         # Invite message templates

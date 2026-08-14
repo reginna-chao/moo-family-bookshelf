@@ -4,28 +4,16 @@
  */
 
 import browser from "webextension-polyfill";
+import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import { DEFAULT_API_ENDPOINT, TOKEN_EXPIRES_AT_KEY } from "../constants";
 
-/** Hostname patterns allowed over plain HTTP (dev / LAN self-hosting). */
-const PRIVATE_HOST_RE =
-  /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|.*\.local)$/;
-
-/** Validate API endpoint URL: must be HTTPS, or HTTP on a private/LAN host. */
-export function validateEndpointUrl(raw: string): string {
-  const url = raw.replace(/\/+$/, "");
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === "https:") return url;
-    if (parsed.protocol === "http:" && PRIVATE_HOST_RE.test(parsed.hostname)) {
-      return url;
-    }
-  } catch {
-    throw new Error(`Invalid API endpoint URL: ${raw}`);
-  }
-  throw new Error(
-    `Unsafe API endpoint scheme — only HTTPS or private-network HTTP is allowed: ${raw}`,
-  );
-}
+/**
+ * Endpoint validation lives in `shared/` so the PWA enforces byte-identical
+ * rules. Re-exported here because every existing importer reaches for it via
+ * the API client — new code outside `api/` should import the shared module
+ * directly rather than routing through this file.
+ */
+export { validateEndpointUrl };
 
 import type {
   ApiResponse,

@@ -10,6 +10,8 @@ import { useAutoSyncInterval } from "./useAutoSyncInterval";
 import { AutoSyncIntervalSelector } from "./AutoSyncIntervalSelector";
 import { DisplayNameEditor } from "./DisplayNameEditor";
 import { MemberList } from "./MemberList";
+import { EndpointSwitchPanel } from "./EndpointSwitchPanel";
+import { useEndpointSwitch } from "./useEndpointSwitch";
 import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "../constants";
 import {
   buildSyncCodeInviteMessage,
@@ -151,40 +153,24 @@ export function FamilySettings({
     })();
   }, [syncArchived]);
 
-  useEffect(() => {
-    let apiHost: string | undefined;
-    if (familyEndpoint) {
-      apiHost = familyEndpoint;
-    } else {
-      const isCustom = apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
-      apiHost = isCustom ? apiClient.getEndpoint() : undefined;
-    }
-    const code = encodeSyncCode({ familyId, apiHost });
-    setSyncCode(code);
-  }, [familyId, apiClient, familyEndpoint]);
+  // The family record's apiEndpoint is owner-controlled and pushed to every
+  // member, so it is never adopted silently — the user confirms each switch.
+  const endpointSwitch = useEndpointSwitch({
+    apiClient,
+    familyEndpoint,
+    membersReady: membersState === "ready",
+  });
+  const { adoptedEndpoint } = endpointSwitch;
 
-  // Sync API endpoint from family record (when members data refreshes)
+  // Build the sync code / invite / QR from the endpoint THIS device has ADOPTED,
+  // never from the family record's value: a member who declined a switch must
+  // not distribute (or re-scan into a second device) the endpoint they refused.
+  // adoptedEndpoint is state, so a confirmed switch refreshes the code in place.
   useEffect(() => {
-    if (membersState !== "ready") return;
-    const currentEndpoint = apiClient.getEndpoint();
-    if (familyEndpoint && familyEndpoint !== currentEndpoint) {
-      apiClient.setEndpoint(familyEndpoint);
-      void Promise.resolve(
-        browser.runtime.sendMessage({
-          type: "SET_API_ENDPOINT",
-          apiEndpoint: familyEndpoint,
-        }),
-      ).catch(() => {});
-    } else if (!familyEndpoint && currentEndpoint !== DEFAULT_API_ENDPOINT) {
-      apiClient.setEndpoint(DEFAULT_API_ENDPOINT);
-      void Promise.resolve(
-        browser.runtime.sendMessage({
-          type: "SET_API_ENDPOINT",
-          apiEndpoint: null,
-        }),
-      ).catch(() => {});
-    }
-  }, [membersState, familyEndpoint, apiClient]);
+    const apiHost =
+      adoptedEndpoint === DEFAULT_API_ENDPOINT ? undefined : adoptedEndpoint;
+    setSyncCode(encodeSyncCode({ familyId, apiHost }));
+  }, [familyId, adoptedEndpoint]);
 
   const handleCopy = async () => {
     if (!syncCode) return;
@@ -263,6 +249,13 @@ export function FamilySettings({
 
   return (
     <div>
+      <EndpointSwitchPanel
+        pending={endpointSwitch.pending}
+        confirmError={endpointSwitch.confirmError}
+        onConfirm={endpointSwitch.confirm}
+        onDecline={endpointSwitch.decline}
+        onDismissConfirmError={endpointSwitch.dismissConfirmError}
+      />
       <button
         onClick={() => setPersonalOpen(!personalOpen)}
         aria-expanded={personalOpen}

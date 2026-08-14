@@ -23,16 +23,17 @@ import {
   stubPatternGridRect,
 } from "./helpers/patternGrid";
 
-// Mock sync-code helpers (userId hashing stays real — see beforeAll)
-vi.mock("@/crypto/syncCode", () => ({
+/**
+ * Only `decodeSyncCode` is stubbed — these tests drive the flow by dictating
+ * what a pasted code decodes to. Everything else in the module stays REAL,
+ * including `parseSyncCodeApiHost`: it feeds the `@host` disclosure note that
+ * LandingPage renders on every keystroke, so replacing it would leave the note
+ * (and the copy it carries) unverified — and a factory that simply forgets it
+ * makes the whole page throw on render.
+ */
+vi.mock("@/crypto/syncCode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/crypto/syncCode")>()),
   decodeSyncCode: vi.fn(),
-  encodeSyncCode: vi.fn(),
-  SyncCodeError: class SyncCodeError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = "SyncCodeError";
-    }
-  },
 }));
 
 const { mockJoinFamily, mockGetVerifyMethod } = vi.hoisted(() => ({
