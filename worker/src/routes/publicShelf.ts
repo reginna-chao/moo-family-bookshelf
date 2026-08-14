@@ -68,6 +68,33 @@ async function findShelf(
   return { record, shelves, idx };
 }
 
+/**
+ * Is a PERMANENT snapshot (`expiresAt === null`) still backed by its shelf?
+ *
+ * Live means the owner's user record still exists, still lists `shelfId`, and
+ * that shelf still points at THIS share token AND is itself still permanent.
+ * A missing record (account deleted), a missing shelf (shelf deleted), a
+ * rotated token (reset-token) or a shelf since converted to time-limited
+ * therefore all read as not-live.
+ *
+ * The last case is the drift the `expiresAt === null` half exists for: the
+ * update handler rewrote the record to time-limited but its snapshot rewrite
+ * failed, so the SAME token still holds the old permanent snapshot with no TTL.
+ * It must die rather than outlive the setting it contradicts. When that rewrite
+ * succeeded the stored snapshot carries a non-null `expiresAt`, guard 2 owns it
+ * and this helper never runs. Read-only by design — see the call site.
+ */
+async function isPermanentSnapshotLive(
+  kv: KVNamespace,
+  snapshot: PublicShelfSnapshot,
+  shareToken: string,
+): Promise<boolean> {
+  const found = await findShelf(kv, snapshot.userId, snapshot.shelfId);
+  if (!found) return false;
+  const shelf = found.shelves[found.idx];
+  return shelf.shareToken === shareToken && shelf.expiresAt === null;
+}
+
 // ── Route definitions (authenticated) ────────────────────────
 
 const getPublicShelvesRoute = createRoute({
@@ -413,7 +440,13 @@ publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
   const newToken = generateShareToken();
   const shelf = { ...shelves[idx], shareToken: newToken };
 
-  // Write new snapshot first to avoid 404 window
+  // Snapshot before record: a reader who fetches the shelf list after the record
+  // update below always finds the new token's snapshot already in place, so this
+  // order still closes the 404 window for them. It no longer closes it fully for
+  // a PERMANENT shelf — the liveness guard revalidates the new token against the
+  // owner's record, so that record write must ALSO have propagated to the
+  // viewer's colo; until then the new token 404s for up to ~60s (fail-closed and
+  // self-healing, see the read handler).
   await writePublicSnapshot(c.env.KV, userId, shelf, record.books);
 
   shelves[idx] = shelf;
@@ -490,12 +523,24 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
     );
   }
 
-  // KV TTL is the primary expiry mechanism; this only backstops a TIME-LIMITED
-  // snapshot that outlived its TTL or its shelf (e.g. reset-token's final delete
-  // failed). A permanent shelf (expiresAt === null) has neither TTL nor deadline,
-  // so an orphan of one stays readable forever — known residual risk, tracked
-  // separately. Answers exactly like the missing-snapshot branch so the two cases
-  // are indistinguishable.
+  // Three layered guards, split by whether the shelf has a deadline:
+  //   1. KV TTL — primary expiry for a TIME-LIMITED snapshot.
+  //   2. expiresAt backstop (below) — a time-limited snapshot that outlived its
+  //      TTL or its shelf (e.g. reset-token's final delete failed).
+  //   3. Liveness check (below) — a PERMANENT snapshot (expiresAt === null) has
+  //      neither TTL nor deadline, so it is instead validated against the owner's
+  //      record. Covers reset-token / delete orphans, orphans left behind by
+  //      account deletion (which only removes tokens still listed on the record),
+  //      and a shelf since converted to time-limited whose stale permanent
+  //      snapshot lingered under the same token.
+  // Cost: permanent-shelf reads pay ONE extra KV read; time-limited reads pay
+  // nothing new (they are already double-covered by 1+2 and must not pay it).
+  // The public per-IP tier (10/min) caps ONE source only — it does not bound
+  // distributed load, which needs the edge (Cloudflare WAF). And the extra read
+  // is reachable only while holding a VALID permanent token: a well-formed but
+  // unknown token stops at the miss above, still costing the first read.
+  // Every branch answers exactly like the missing-snapshot branch above, so an
+  // orphan is indistinguishable from a token that never existed.
   if (snapshot.expiresAt !== null && snapshot.expiresAt <= Date.now()) {
     return jsonError(
       c,
@@ -503,6 +548,37 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
       "PUBLIC_SHELF_NOT_FOUND",
       "Public shelf not found or expired",
     );
+  }
+
+  if (snapshot.expiresAt === null) {
+    // Strictly side-effect-free: a dead orphan is NOT deleted here — the HANDLER
+    // performs no KV writes, so a stranger can never choose a key to be written or
+    // deleted (the request pipeline's per-IP rate counter is the only fixed write
+    // per request). The orphan stays as unreadable dead data and is never
+    // reclaimed (account deletion only clears tokens still on the record); its
+    // volume is bounded by how often cleanup writes fail — each failure surfaces
+    // to the owner as a 5xx — not by MAX_PUBLIC_SHELVES, which bounds LIVE
+    // shelves only.
+    //
+    // Known limitation, stated honestly: KV is eventually consistent and this is
+    // the FIRST read of `user:{userId}` on the public path, so every permanent
+    // read warms that record in the viewer's colo (default 60s read cache). After
+    // reset-token — or delete-then-recreate — a colo holding the stale record
+    // will 404 the NEW token for up to ~60s. Fail-closed and self-healing;
+    // accepted as the cost of validating a permanent snapshot against its owner.
+    const isLive = await isPermanentSnapshotLive(
+      c.env.KV,
+      snapshot,
+      shareToken,
+    );
+    if (!isLive) {
+      return jsonError(
+        c,
+        404,
+        "PUBLIC_SHELF_NOT_FOUND",
+        "Public shelf not found or expired",
+      );
+    }
   }
 
   return c.json({
