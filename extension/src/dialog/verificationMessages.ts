@@ -16,8 +16,10 @@ export function formatWaitDuration(totalSeconds: number): string {
 }
 
 /**
- * Join-quota exhausted (429 RATE_LIMITED). Pass null when the backend did not
- * send `retryAfter` — the message then stays static ("請稍後再試").
+ * Rate-limited (429 RATE_LIMITED) — from the per-IP sensitive tier or the
+ * verify attempt ceiling; the standalone per-userId join quota no longer
+ * exists. Pass null when the backend did not send `retryAfter` — the message
+ * then stays static ("請稍後再試").
  */
 export function rateLimitedMessage(countdownSeconds: number | null): string {
   if (countdownSeconds === null) return "嘗試次數過多，請稍後再試";

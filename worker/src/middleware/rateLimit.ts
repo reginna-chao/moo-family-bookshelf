@@ -1,5 +1,6 @@
 import type { Context, TypedResponse } from "hono";
 import { createMiddleware } from "hono/factory";
+import { KV_MIN_TTL_SECONDS } from "../kv/schema";
 import { type Env, isDevMode } from "../utils/env";
 import { isPublicRoute, sensitiveBucketFor } from "../utils/routes";
 import { jsonError, type ErrorBody } from "../utils/errors";
@@ -267,9 +268,11 @@ export const rateLimit = createMiddleware<{ Bindings: Env }>(
 /** Options shared by the per-userId counter and its Hono wrapper. */
 export interface PerUserRateLimitOptions {
   userId: string;
-  /** Counter namespace, e.g. "join" or "verify". Keeps counters independent. */
+  /** Counter namespace, e.g. "verify" or "put-books". Keeps counters independent. */
   scope: string;
   max: number;
+  /** Window length in seconds. MUST be > 0 — a non-positive window makes the
+   *  bucket index (and `retryAfter`) degenerate in {@link peekPerUserRateLimit}. */
   windowSec: number;
 }
 
@@ -292,7 +295,8 @@ export interface PerUserRateLimitReading {
   key: string;
   /** Count observed at read time. */
   count: number;
-  /** Window length in seconds; determines the counter TTL on write. */
+  /** Window length in seconds; determines the counter TTL on write (clamped up
+   *  to the KV 60s floor in {@link chargePerUserRateLimit}). */
   windowSec: number;
 }
 
@@ -337,8 +341,14 @@ export async function peekPerUserRateLimit(
  * Charge one slot against the window described by `reading`.
  *
  * Side effect: writes `ratelimit:user:{scope}:{userId}:{bucket}` (TTL = 2
- * windows). Call it only for a reading whose verdict was `limited: false` — a
- * rejected request must not extend the window.
+ * windows, clamped up to the KV 60s floor). Call it only for a reading whose
+ * verdict was `limited: false` — a rejected request must not extend the window.
+ *
+ * The clamp is defensive: every caller today passes `windowSec >= 60`, but a
+ * future window under 30s would derive a TTL real KV rejects, turning an
+ * admitted request into a 500 — and inside `chargeWrongGuess`'s `Promise.all`
+ * (`services/verification.ts`) that throw would silently stop the verification
+ * attempt ceiling from counting.
  *
  * Known limitation: KV get-then-put is not atomic, and the read happened in
  * {@link peekPerUserRateLimit}. Requests fired in parallel all observe the same
@@ -352,7 +362,7 @@ export async function chargePerUserRateLimit(
   reading: PerUserRateLimitReading,
 ): Promise<void> {
   await kv.put(reading.key, String(reading.count + 1), {
-    expirationTtl: reading.windowSec * 2,
+    expirationTtl: Math.max(KV_MIN_TTL_SECONDS, reading.windowSec * 2),
   });
 }
 
@@ -361,7 +371,7 @@ export async function chargePerUserRateLimit(
  * request is admitted. A rejected request does not extend the window.
  *
  * The single-shot form used by every caller that charges EVERY request (the
- * join / user / borrow / bookshelf / public-shelf limits via
+ * user / borrow / bookshelf / public-shelf / verify-write limits via
  * {@link enforcePerUserRateLimit}). Callers that charge only some outcomes use
  * {@link peekPerUserRateLimit} + {@link chargePerUserRateLimit} directly.
  */

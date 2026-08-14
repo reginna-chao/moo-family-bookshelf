@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ApiClient, BoolFlag, validateEndpointUrl } from "@/api/client";
+import {
+  ApiClient,
+  ApiError,
+  AUTH_REFRESH_RATE_LIMITED,
+  BoolFlag,
+  validateEndpointUrl,
+} from "@/api/client";
 import {
   USER_ID_KEY,
   FAMILY_ID_KEY,
@@ -53,6 +59,16 @@ function mockFetchError(code: string, message: string, status = 400) {
 
 function mockFetchNetworkError(message = "Failed to fetch") {
   return vi.fn().mockRejectedValue(new Error(message));
+}
+
+/** The rejection reason, typed — `rejects.toThrow` cannot inspect fields. */
+async function captureRejection(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (e) {
+    return e;
+  }
+  throw new Error("expected the promise to reject, but it resolved");
 }
 
 describe("ApiClient", () => {
@@ -1591,13 +1607,17 @@ describe("ApiClient", () => {
         );
       }
 
-      it("returns a localized RATE_LIMITED envelope instead of the raw 401", async () => {
+      it("returns a localized AUTH_REFRESH_RATE_LIMITED envelope instead of the raw 401", async () => {
         globalThis.fetch = mockRateLimitedRecovery(120);
         seedMembership();
 
         const result = await client.getPersonalBooks("u1");
 
-        expect(result.error?.code).toBe("RATE_LIMITED");
+        // Client-synthesized code, deliberately distinct from the server's
+        // RATE_LIMITED: the UI recognizes it and shows this bespoke copy
+        // verbatim instead of the generic back-off sentence.
+        expect(result.error?.code).toBe(AUTH_REFRESH_RATE_LIMITED);
+        expect(result.error?.code).not.toBe("RATE_LIMITED");
         // Localized (not the raw English 401 message) — contains Chinese and the
         // stable "稍後" substring; an approximate wait is appended when known.
         expect(result.error?.message).toMatch(/[一-鿿]/);
@@ -1609,16 +1629,16 @@ describe("ApiClient", () => {
         ).toHaveBeenCalledTimes(3);
       });
 
-      it("still returns a localized RATE_LIMITED envelope when the 429 omits retryAfter", async () => {
+      it("still returns a localized AUTH_REFRESH_RATE_LIMITED envelope when the 429 omits retryAfter", async () => {
         globalThis.fetch = mockRateLimitedRecovery();
         seedMembership();
 
         const result = await client.getPersonalBooks("u1");
 
         // A default cooldown is applied, so the envelope is still the localized
-        // RATE_LIMITED copy; assert only the stable base substring (don't pin the
-        // exact minute figure the fallback produces).
-        expect(result.error?.code).toBe("RATE_LIMITED");
+        // recovery-throttle copy; assert only the stable base substring (don't
+        // pin the exact minute figure the fallback produces).
+        expect(result.error?.code).toBe(AUTH_REFRESH_RATE_LIMITED);
         expect(result.error?.message).toContain("稍後");
       });
 
@@ -1633,13 +1653,33 @@ describe("ApiClient", () => {
 
         const result = await client.getPersonalBooks("u1");
 
-        expect(result.error?.code).toBe("RATE_LIMITED");
+        expect(result.error?.code).toBe(AUTH_REFRESH_RATE_LIMITED);
         expect(onReauthRequired).not.toHaveBeenCalled();
         expect(onFamilyRemoved).not.toHaveBeenCalled();
         // Family data must survive a rate-limited recovery (Invariant 2).
         expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
           FAMILY_ID_KEY,
         ]);
+      });
+
+      /**
+       * The envelope carries no `synthesized` field of its own — the marker is a
+       * module-private Symbol, unreachable from a test and unforgeable by a
+       * response body. Provenance only becomes observable once `unwrap` turns
+       * the envelope into an `ApiError`, and that flag is what the public-shelf
+       * dialog requires before rendering this bespoke copy verbatim.
+       */
+      it("marks the thrown error as client-synthesized so the UI may render its copy verbatim", async () => {
+        globalThis.fetch = mockRateLimitedRecovery(120);
+        seedMembership();
+
+        const err = await captureRejection(client.listPublicShelves("u1"));
+
+        expect(err).toBeInstanceOf(ApiError);
+        expect(err).toMatchObject({
+          code: AUTH_REFRESH_RATE_LIMITED,
+          synthesized: true,
+        });
       });
     });
 
@@ -1648,7 +1688,7 @@ describe("ApiClient", () => {
      * returned a VERIFICATION_* code), the client latches so a second 401 wave —
      * e.g. the dialog's second concurrent data fetch — does NOT fire silent
      * join-recovery again. This keeps a single dialog open to at most one
-     * join-quota unit and stops the in-progress verification prompt from being
+     * rate-limit unit and stops the in-progress verification prompt from being
      * re-initialized (which would wipe the user's pattern/PIN input). The latch
      * releases only on a fresh non-null token or an explicit clearReauthPending().
      */

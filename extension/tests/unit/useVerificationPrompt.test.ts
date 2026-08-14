@@ -286,8 +286,9 @@ describe("useVerificationPrompt", () => {
       await result.current.submit("123456");
     });
 
-    // 429 join quota exhausted: the prompt stays open so the user can retry once
-    // the window clears, with a message distinct from the generic error.
+    // 429 rate limited (per-IP sensitive tier, or the verify attempt ceiling):
+    // the prompt stays open so the user can retry once the window clears, with
+    // a message distinct from the generic error.
     expect(result.current.active).toBe(true);
     expect(result.current.error).toContain("嘗試次數過多");
     expect(result.current.locked).toBe(false);

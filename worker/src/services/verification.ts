@@ -346,10 +346,15 @@ async function chargeWrongGuess(
  * What that buys them is only "no further GUESSING against this account until
  * the window rolls" — it does NOT keep the owner out, because a correct secret
  * is never measured against the ceiling. The counter is therefore a lever
- * against attackers, not against the account it protects. Same shape as the
- * join endpoint's `"join"` counter, and it does not contradict the caller-scoped
- * lockout rule: that rule governs who gets *locked*, not whether a global
- * attempt ceiling may exist.
+ * against attackers, not against the account it protects. This is exactly
+ * because it is charge-on-failure: a charge-EVERY-request counter keyed on the
+ * target userId WOULD be owner-facing, since a third party could exhaust it with
+ * requests that never even carry a secret. The join endpoint used to have such a
+ * standalone per-userId counter (scope `"join"`); it was removed precisely
+ * because it was charge-every-request (owner-facing) and redundant with this
+ * ceiling, which now stands as the sole per-userId brake protecting join. This
+ * ceiling does not contradict the caller-scoped lockout rule: that rule governs
+ * who gets *locked*, not whether a global attempt ceiling may exist.
  *
  * Order of evaluation, and what each outcome costs (first match wins):
  *

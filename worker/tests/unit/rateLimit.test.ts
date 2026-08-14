@@ -152,6 +152,22 @@ describe("enforcePerUserRateLimit", () => {
     expect(keys).toHaveLength(1);
     expect(getPutTtl(kv, keys[0].name)).toBe(opts.windowSec * 2);
   });
+
+  it("should clamp the counter TTL up to the KV 60s floor for sub-30s windows", async () => {
+    // windowSec * 2 is 20s here — below the floor real Cloudflare KV enforces.
+    // Unclamped, the mock KV rejects that put, the charge throws, and an
+    // admitted request turns into a 500; so the 200 below is part of the pin.
+    const opts = { userId: "u1", scope: "test", max: 5, windowSec: 10 };
+
+    const res = await callHelper(opts);
+    expect(res.status).toBe(200);
+
+    const { keys } = await kv.list();
+    expect(keys).toHaveLength(1);
+    // Literal 60 rather than the production constant: this assertion stays an
+    // independent oracle for the platform floor instead of a tautology.
+    expect(getPutTtl(kv, keys[0].name)).toBe(60);
+  });
 });
 
 // ===========================================================================

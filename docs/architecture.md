@@ -431,14 +431,14 @@ moo-{family_id_short}@{api_host_encoded}
 
   - **為何需要**：鎖定機制以「來源」為 key（見下一點），攻擊者輪替 IPv6 前綴就能規避，等於沒有全域上限。圖形驗證最短只有 4 個節點、9×8×7×6 = 3,024 種組合，約 605 個前綴（單一 /48 配額內即可湊齊）就能試完整個空間
   - **殘餘風險（有界，且不再傷及帳號本人）**：這個計數器仍以**受害者的 userId** 為 key，第三方可以連續送出 10 次錯誤密鑰把它打滿。但打滿之後擋下的只有「針對該帳號的後續**猜測**」——帳號本人帶著正確密鑰仍然照常通過（查詢、建立、加入三個入口皆是），因為正確密鑰根本不會被拿去比對額度。也就是說，這個計數器是對付攻擊者的槓桿，不是能把帳號本人關在門外的槓桿。它與「鎖定必須以來源為 key」的原則不衝突：那條原則規範的是**誰會被鎖住**，而不是禁止存在全域嘗試上限
-  - 兩個計數器互相獨立（scope 分別為 `verify` 與 `join`），語意各自清楚；`DEV_MODE=1` 下與其他速率限制一樣停用。注意 `join` 計數器的語意不同：它對**每一次**加入請求計數（`enforcePerUserRateLimit`），因此仍是以受害者為 key、會擋到本人的可用性槓桿
+  - 這個計數器的 scope 為 `verify`，與其他 scope 的 per-userId 計數器（`put-books`、`family-prefs`、`public-shelf`、`borrow-*` 等）命名空間各自獨立、語意清楚；`DEV_MODE=1` 下與其他速率限制一樣停用。三個閘門入口（建立／加入／查詢所屬家庭）在此 gate 內共用這同一道 `verify` 上限，加入端點不再另設獨立的 per-userId 計數器（詳見下方已知限制）
 - **變更驗證方式／密鑰會作廢先前的失敗紀錄**：`PUT /api/user/:id/verify` 會在 `verify:{userId}` 寫入 `secretUpdatedAt`（epoch 毫秒）；`verifyfail:{userId}:{caller}` 則記錄該次連續失敗的起始時間 `startedAt`。驗證時若 `startedAt < secretUpdatedAt`，代表這筆失敗紀錄是針對「已經不存在的舊密鑰」累積的，直接視為作廢：不觸發鎖定、失敗次數不再累加。作廢是每次請求即時重算的記憶體判定，未刪除的殘留紀錄本身即失效；實際清除只發生在「驗證成功」時（刪除該來源自己的那把 key，不做 KV list 掃描），輸入錯誤密鑰時則由新的失敗紀錄整筆覆寫，未帶密鑰或鎖定中則完全不寫入。理由是 Cloudflare KV 對同一個 key 每秒僅允許一次寫入，先刪後寫可能讓剛計數的失敗被靜默丟棄，因此每次請求對 `verifyfail:{userId}:{caller}` 至多一次寫入。因此忘記 PIN 而在手機被鎖定的使用者，只要在桌面 Extension 重設 PIN／圖形，就能立即登入，不必等 15 分鐘。兩個欄位任一缺漏（舊資料）時一律**維持鎖定**，缺值永遠不會解鎖。這不會成為 DoS 手段：`secretUpdatedAt` 只能透過 `PUT /api/user/:id/verify` 更新，該端點需要有效 token 且 `callerId === userId`，只有帳號本人能作廢失敗紀錄，而且只能作廢自己帳號上的
 - 來源（caller key）取自 Cloudflare 的 `cf-connecting-ip`（邊緣設定、無法偽造）。IPv4 直接使用；IPv6 正規化為 /64 前綴後才當 key，因為家用 IPv6 至少配發一個 /64，且 privacy extensions 可讓用戶端隨意更換介面識別碼——若以完整位址為 key，攻擊者每送一次請求就能換到全新的失敗額度與全新的速率限制桶。兩個例外：IPv4-mapped 位址（`::ffff:a.b.c.d`）會收斂成內嵌的 IPv4，與該 IPv4 共用同一個 key；無法解析的值則加上 `raw:` 前綴自成一個命名空間，確保不會與真正的 /64 桶撞在一起。同一套正規化也套用在 per-IP 速率限制上
 - 已接受的殘餘風險（非缺陷，權衡後保留）：
   - **共用對外 IP**：CGNAT、公司／校園 NAT 之後的多個使用者（IPv6 則是同一個 /64 內的裝置）針對「同一個目標帳號」會共用同一份失敗額度，可能被同來源的其他人連帶鎖住 15 分鐘。相對於「任何陌生人都能鎖住任何帳號」，此風險範圍小很多
   - **跨來源暴力破解不再由鎖定機制擋下**：從「單一來源」發動的暴力破解仍受 per-IP 敏感端點限制（每分鐘 3 次）約束——**驗證閘門的三個入口（建立／加入／查詢所屬家庭）現已全部列為敏感端點**（`isSensitivePublicRoute()`），因為查詢所屬家庭同樣讓未驗證的呼叫方可以測試密鑰，而且是三者中最便宜的一條（純讀取、前面沒有 409 終局衝突）。分類只看路徑不看 body：速率限制中介層在解析 body 之前就執行，無從得知這次有沒有帶 `verifySecret`，而攻擊者本來就會每次都帶。**敏感端點使用同一個限額（每分鐘 3 次）但分成兩個獨立計數器**：建立／加入家庭記在 `ratelimit:sens:{ip}:{bucket}`，查詢所屬家庭記在 `ratelimit:sens:lookup:{ip}:{bucket}`。原因是一次正常的登入流程本身就會在同一分鐘內用掉 3 次敏感請求（先 lookup 探詢、再 lookup 帶密鑰、最後 create／join），若共用一個計數器，使用者只要 PIN 打錯一次要重試、或家中第二個人在同一個 NAT／IPv6 /64 之後接著設定，就會立刻收到 60 秒的 429。拆開之後這段流程是 lookup 桶 2 次、create／join 桶 1 次，重試不再互相排擠。分桶只改「記在哪個 key」，限額與嚴格程度完全不變（`rateLimitBucketFor()` 於 `worker/src/middleware/rateLimit.ts`）。攻擊者輪替來源前綴後，則由 per-userId 的驗證嘗試上限（每小時 10 次失敗，涵蓋同樣三個入口）接手擋下。注意這些限制在 `DEV_MODE=1` 的 Worker 上會被停用（見 `worker/DEPLOY.md`），因此 dev worker 不得存放真實資料
   - **最壞情況量化（圖形驗證的最短長度不足）**：以每小時 10 次的上限推算——6 位數 PIN（`^\d{6,12}$`，至少 10^6 種組合）需時以「年」為單位，實務上不可行；但圖形驗證目前允許的最短長度只有 4 個不重複節點，組合數僅 9×8×7×6 = **3,024 種**，全部試完約需 302 小時（約兩週），命中機率達 50% 只需約 151 小時（約 6 天）。這是「最短圖形長度」帶來的已知限制，不是實作缺陷；是否提高最短節點數屬產品決策，本次不更動 `isValidPattern`
-  - **per-userId 速率限制以受害者的 userId 為 key**：`join`（每次加入請求都計數）第三方仍可打滿，讓受害者在該小時內收到 `429 RATE_LIMITED`；這是較輕微的可用性影響（不影響帳號狀態、隨時間自動恢復），列為已知限制。`verify` 嘗試上限則**不再是這種槓桿**：它在密鑰比對之後才查看，正確密鑰一律放行，被打滿只會擋住後續的錯誤猜測
+  - **per-userId 速率限制以受害者的 userId 為 key**：加入家庭端點過去另設一個 `join` scope 的 per-userId 計數器，對**每一次**加入請求計數（不論呼叫方是否證明擁有該帳號），第三方只要知道受害者的 userId 就能打滿，讓受害者本人在該小時內重連時直接收到 `429 RATE_LIMITED`——由於加入是既有成員唯一的發 token 重連路徑，這等同把本人鎖在門外，違反 Auth Token 不變式。此「對每次請求計數」的計數器已**移除**。加入端點現在唯一的 per-userId 煞車是 `verify` 嘗試上限，它是「猜錯才計數」：在密鑰比對之後才查看，正確密鑰一律放行（帳號本人永遠通過，即使額度已被攻擊者打滿），被打滿只會擋住後續的錯誤**猜測**，因此不再是傷及帳號本人的可用性槓桿
   - **合法使用者的額度消耗：零**。一次完整登入流程（先 `/api/auth/lookup` 帶密鑰，再 create／join 帶同一組密鑰）雖然會通過閘門兩次，但兩次都比對成功，因此不消耗任何額度；就算此時該帳號的 `verify` 額度已被攻擊者打滿，本人依然通過。每小時 10 次的額度只會被「猜錯」吃掉
   - **KV 計數器沒有原子性**：所有速率限制（per-IP、per-userId、驗證嘗試上限）都是 KV get-then-put，沒有序列化。同時併發送出的請求會讀到同一個計數值而全部放行，因此爆發流量的超額幅度取決於**攻擊者自己的併發數**，不是固定的 ~2 倍；這些限制只對循序流量成立。要有硬上限必須改用 Durable Objects 或 Cloudflare 原生 rate-limiting binding（見 `docs/project-plan.md` BE-4），屬另案決策
 - OTP 使用後立即刪除（一次性）。唯一例外是 `POST /api/auth/lookup`：該端點以 `consumeOtp: false` 呼叫閘門，比對成功也不刪除 OTP。因為用戶端的流程是「先 lookup 帶密鑰確認歸屬，再 create／join 帶**同一組**密鑰」，若在 lookup 就把一次性 OTP 用掉，第二個請求必然失敗且被計為一次驗證失敗，5 次就把使用者自己鎖住 15 分鐘。不刪除也不會放寬安全性：OTP 仍受自身 300 秒 TTL 約束，且呼叫方本來就已經持有它
@@ -447,23 +447,26 @@ moo-{family_id_short}@{api_host_encoded}
 
 #### KV Key 設計
 
-| Key Pattern                               | Value                                                | TTL      |
-| ----------------------------------------- | ---------------------------------------------------- | -------- |
-| `verify:{userId}`                         | `{ method, hash, salt, prompted, secretUpdatedAt? }` | None     |
-| `verifyfail:{userId}:{caller}`            | `{ failCount, lockedUntil, startedAt? }`             | 900 秒   |
-| `otp:{userId}`                            | `{ code, createdAt }`                                | 300 秒   |
-| `ratelimit:user:verify:{userId}:{bucket}` | 該時段內針對此帳號的驗證嘗試次數（字串數字）         | 7,200 秒 |
-| `ratelimit:sens:{ip}:{bucket}`            | 該分鐘內來自此來源的建立／加入家庭次數（上限 3）     | 120 秒   |
-| `ratelimit:sens:lookup:{ip}:{bucket}`     | 該分鐘內來自此來源的查詢所屬家庭次數（上限 3，獨立） | 120 秒   |
+| Key Pattern                                     | Value                                                                                 | TTL      |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------- | -------- |
+| `verify:{userId}`                               | `{ method, hash, salt, prompted, secretUpdatedAt? }`                                  | None     |
+| `verifyfail:{userId}:{caller}`                  | `{ failCount, lockedUntil, startedAt? }`                                              | 900 秒   |
+| `otp:{userId}`                                  | `{ code, createdAt }`                                                                 | 300 秒   |
+| `qr:{token}`                                    | `{ userId }`（一次性 QR Token，加入家庭時比對成功即刪除）                             | 300 秒   |
+| `ratelimit:user:verify:{userId}:{bucket}`       | 該時段內針對此帳號的驗證嘗試次數（字串數字）                                          | 7,200 秒 |
+| `ratelimit:user:verify-write:{userId}:{bucket}` | 該時段內此帳號的驗證設定寫入次數（上限 30，PUT verify／OTP／prompted／qr-token 合計） | 7,200 秒 |
+| `ratelimit:sens:{ip}:{bucket}`                  | 該分鐘內來自此來源的建立／加入家庭次數（上限 3）                                      | 120 秒   |
+| `ratelimit:sens:lookup:{ip}:{bucket}`           | 該分鐘內來自此來源的查詢所屬家庭次數（上限 3，獨立）                                  | 120 秒   |
 
 #### API 端點
 
-| Method | Path                            | 說明                        | 權限 |
-| ------ | ------------------------------- | --------------------------- | ---- |
-| `GET`  | `/api/user/:id/verify`          | 查詢驗證方式（不回傳 hash） | 公開 |
-| `PUT`  | `/api/user/:id/verify`          | 設定/變更驗證方式           | 本人 |
-| `POST` | `/api/user/:id/verify/otp`      | 產生一次性驗證碼            | 本人 |
-| `POST` | `/api/user/:id/verify/prompted` | 標記已提醒                  | 公開 |
+| Method | Path                            | 說明                                                              | 權限 |
+| ------ | ------------------------------- | ----------------------------------------------------------------- | ---- |
+| `GET`  | `/api/user/:id/verify`          | 查詢驗證方式（不回傳 hash）                                       | 公開 |
+| `PUT`  | `/api/user/:id/verify`          | 設定/變更驗證方式                                                 | 本人 |
+| `POST` | `/api/user/:id/verify/otp`      | 產生一次性驗證碼                                                  | 本人 |
+| `POST` | `/api/user/:id/verify/prompted` | 標記已提醒                                                        | 本人 |
+| `POST` | `/api/user/:id/qr-token`        | 產生一次性 QR Token（PWA 掃碼加入家庭時可略過驗證，300 秒後失效） | 本人 |
 
 ### chrome.storage.sync 多裝置同步
 
@@ -785,8 +788,8 @@ interface PublicShelfSnapshot {
 - **使用前提**：曾加入過家庭以完成書單同步即可（不要求目前處於家庭中）；token refresh 邏輯需支援無家庭狀態
 - **預設關閉**：公開分享預設不啟用，使用者需手動開啟
 - **快照同步**：`PUT /api/user/:id/books` 時自動更新所有 active shelves 的 `public:{token}` 快照
-- **過期管理**：7 / 30 / 60 / 90 天 / 永久（預設 30 天），透過 KV TTL 自動清理。建立時 `expiresAt = createdAt + expiresDays`；更新 `expiresDays` 時重算為 `更新時間 + expiresDays`（從更新時起算）
-- **重設網址**：產生新 UUID token，舊 token 立即失效；shelfId 維持不變（區隔內部識別與對外連結）
+- **過期管理**：7 / 30 / 60 / 90 天 / 永久（預設 30 天），透過 KV TTL 自動清理。建立時 `expiresAt = createdAt + expiresDays`；更新 `expiresDays` 時重算為 `更新時間 + expiresDays`（從更新時起算）。讀取端另有兩道保險：設有到期日的快照即使因異常未被 TTL 清除，逾期讀取一律回 404；永久快照（無 TTL 可依靠）則在讀取時比對擁有者記錄中該書櫃的現行 token 與「仍為永久」設定，比對不符（token 已輪換、書櫃已刪、帳號已刪、已改設到期日）即回 404 —— 孤兒快照因此不可讀。此檢查不會刪除或改寫任何書櫃資料（僅多一次 `user:{userId}` 讀取；設有到期日的快照不付這筆成本；請求管線的 per-IP 限流計數器本就每請求固定寫一筆，不因此改變）。KV 為最終一致，重設網址後尚未取得新記錄的節點，最多約 60 秒內可能仍對新連結回 404（fail-closed，自癒）
+- **重設網址**：產生新 UUID token，舊 token 立即失效；shelfId 維持不變（區隔內部識別與對外連結）。即使最後清理舊快照的刪除步驟異常失敗，舊 token 也會因讀取端比對不符而讀不到
 - **關閉公開分享**：刪除 `public:{token}` + 移除 user record 中的 shelf 元素
 - **購買連結**：書籍連結至 `https://readmoo.com/book/{bookId}`（另開分頁），不提供借閱
 - **share_token**：UUID 32 碼（無連字號），高熵防猜測

@@ -1,16 +1,10 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  type RefObject,
-} from "react";
+import { useState, useEffect, useRef, type RefObject } from "react";
 import { X, Copy, RefreshCw, Trash2 } from "lucide-react";
 import type { ApiClient } from "../api/client";
-import type { PublicShelf } from "../api/types";
 import { useIsMobile } from "../hooks/useIsMobile";
-import { useDebouncedCallback } from "../hooks/useDebouncedCallback";
 import { useTimedFlag } from "../hooks/useTimedFlag";
+import { usePublicShelfActions } from "./usePublicShelfActions";
+import { UNSAVED_NOTICE } from "./publicShareMessages";
 
 export interface PublicShareDialogProps {
   userId: string;
@@ -20,8 +14,6 @@ export interface PublicShareDialogProps {
   pwaOrigin?: string;
   onClose: () => void;
 }
-
-type ViewState = "loading" | "empty" | "active" | "error";
 
 const EXPIRES_OPTIONS: Array<{ label: string; value: number | null }> = [
   { label: "7 天", value: 7 },
@@ -96,12 +88,23 @@ export function PublicShareDialog({
   pwaOrigin,
   onClose,
 }: PublicShareDialogProps) {
-  const [viewState, setViewState] = useState<ViewState>("loading");
-  const [shelf, setShelf] = useState<PublicShelf | null>(null);
-  const [title, setTitle] = useState("");
-  const [expiresDays, setExpiresDays] = useState<number | null>(30);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [saving, setSaving] = useState(false);
+  const {
+    viewState,
+    shelf,
+    title,
+    expiresDays,
+    errorMsg,
+    saving,
+    hasUnsavedChanges,
+    setTitle,
+    setExpiresDays,
+    handleCreate,
+    handleTitleChange,
+    handleExpiresDaysChange,
+    handleResetToken,
+    handleDelete,
+    handleRetrySave,
+  } = usePublicShelfActions({ userId, apiClient, defaultDisplayName });
   const [copied, markCopied] = useTimedFlag(2000);
   const [confirm, setConfirm] = useState<"reset" | "delete" | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -125,119 +128,11 @@ export function PublicShareDialog({
     };
   }, []);
 
-  const syncTitle = useDebouncedCallback(
-    (shelfId: string, newTitle: string) => {
-      void (async () => {
-        try {
-          const { shelf: updated } = await apiClient.updatePublicShelf(
-            userId,
-            shelfId,
-            { title: newTitle },
-          );
-          setShelf(updated);
-        } catch {
-          /* title sync failure is non-critical */
-        }
-      })();
-    },
-    1000,
-  );
-
-  const loadShelves = useCallback(async () => {
-    setViewState("loading");
-    try {
-      const { shelves } = await apiClient.listPublicShelves(userId);
-      if (shelves.length > 0) {
-        setShelf(shelves[0]);
-        setTitle(shelves[0].title);
-        setExpiresDays(shelves[0].expiresDays);
-        setViewState("active");
-      } else {
-        setTitle(`${defaultDisplayName} 的公開書櫃`);
-        setViewState("empty");
-      }
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "載入失敗");
-      setViewState("error");
-    }
-  }, [userId, apiClient, defaultDisplayName]);
-
-  useEffect(() => {
-    void loadShelves();
-  }, [loadShelves]);
-
-  const handleCreate = async () => {
-    setSaving(true);
-    setErrorMsg("");
-    try {
-      const { shelf: created } = await apiClient.createPublicShelf(userId, {
-        title,
-        expiresDays,
-      });
-      setShelf(created);
-      setTitle(created.title);
-      setExpiresDays(created.expiresDays);
-      setViewState("active");
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "建立失敗");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleTitleChange = (newTitle: string) => {
-    setTitle(newTitle);
-    if (!shelf) return;
-    syncTitle(shelf.shelfId, newTitle);
-  };
-
-  const handleExpiresDaysChange = async (value: number | null) => {
-    setExpiresDays(value);
-    if (!shelf) return;
-    try {
-      const { shelf: updated } = await apiClient.updatePublicShelf(
-        userId,
-        shelf.shelfId,
-        { expiresDays: value },
-      );
-      setShelf(updated);
-    } catch {
-      /* non-critical */
-    }
-  };
-
-  const handleResetToken = async () => {
-    if (!shelf) return;
+  /** Dismiss the confirm box first, then run the action it was guarding. */
+  const handleConfirmAction = () => {
+    const action = confirm === "reset" ? handleResetToken : handleDelete;
     setConfirm(null);
-    setSaving(true);
-    try {
-      const { shelf: updated } = await apiClient.resetPublicShelfToken(
-        userId,
-        shelf.shelfId,
-      );
-      setShelf(updated);
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "重設失敗");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!shelf) return;
-    setConfirm(null);
-    setSaving(true);
-    try {
-      await apiClient.deletePublicShelf(userId, shelf.shelfId);
-      setShelf(null);
-      setTitle(`${defaultDisplayName} 的公開書櫃`);
-      setExpiresDays(30);
-      setViewState("empty");
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "關閉失敗");
-    } finally {
-      setSaving(false);
-    }
+    void action();
   };
 
   const handleCopy = async () => {
@@ -274,18 +169,29 @@ export function PublicShareDialog({
           </button>
         </div>
 
-        {errorMsg && (
+        {/* A failed title / expiry write leaves the field diverged from the
+            server, so the notice stays until a retry reconciles it. */}
+        {(errorMsg || hasUnsavedChanges) && (
           <div role="alert" className="moo-public-share__error">
-            {errorMsg}
+            {errorMsg || UNSAVED_NOTICE}
+            {hasUnsavedChanges && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  onClick={() => void handleRetrySave()}
+                  disabled={saving}
+                  className="moo-button moo-button--ghost moo-button--sm"
+                >
+                  重試儲存
+                </button>
+              </>
+            )}
           </div>
         )}
 
         {viewState === "loading" && (
           <p className="moo-public-share__muted">載入中...</p>
-        )}
-
-        {viewState === "error" && !errorMsg && (
-          <p className="moo-public-share__muted">載入失敗</p>
         )}
 
         {viewState === "empty" && (
@@ -312,9 +218,7 @@ export function PublicShareDialog({
             onCopy={handleCopy}
             onResetToken={() => setConfirm("reset")}
             onDelete={() => setConfirm("delete")}
-            onConfirmAction={
-              confirm === "reset" ? handleResetToken : handleDelete
-            }
+            onConfirmAction={handleConfirmAction}
             onCancelConfirm={() => setConfirm(null)}
           />
         )}

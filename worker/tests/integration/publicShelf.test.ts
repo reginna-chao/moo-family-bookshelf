@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
+import { seedAuthToken } from "../helpers/auth";
 import {
   BoolFlag,
   kvKeys,
+  type PublicShelf,
   type UserBooksRecord,
   type PublicShelfSnapshot,
 } from "../../src/kv/schema";
@@ -81,11 +83,32 @@ async function seedUser(userId: string, token: string) {
     lastUpdated: new Date().toISOString(),
   };
   await kv.put(kvKeys.user(userId), JSON.stringify(record));
-  await kv.put(`token:${token}`, userId);
-  await kv.put(
-    `auth:${userId}`,
-    JSON.stringify({ token, createdAt: new Date().toISOString() }),
-  );
+  await seedAuthToken(kv, userId, { token });
+}
+
+/**
+ * Seed `user:{userId}` listing exactly `shelves`, with no auth token — for the
+ * suites that only exercise the public read path.
+ *
+ * Omit `shelves` entirely to seed a record with NO `publicSharing` block (the
+ * shape every account carries before it ever creates a public shelf); pass `[]`
+ * for a record whose shelves were all removed.
+ *
+ * Needed because a PERMANENT snapshot (`expiresAt: null`) is served only while
+ * this record still lists its shelf under the SAME share token — see the
+ * liveness suite below. A hand-seeded snapshot with no matching record here is
+ * an orphan and answers 404.
+ */
+async function seedUserWithShelves(userId: string, shelves?: PublicShelf[]) {
+  const record: UserBooksRecord = {
+    schemaVersion: 1,
+    userId,
+    displayName: "Test User",
+    books: sampleBooks(),
+    lastUpdated: new Date().toISOString(),
+    publicSharing: shelves ? { shelves } : undefined,
+  };
+  await kv.put(kvKeys.user(userId), JSON.stringify(record));
 }
 
 async function seedMember(userId: string, familyId: string) {
@@ -229,14 +252,7 @@ describe("POST /api/user/:id/public-shelf", () => {
   });
 
   it("returns 400 when user has no books record", async () => {
-    await kv.put(`token:${AUTH_TOKEN}`, USER_ID);
-    await kv.put(
-      `auth:${USER_ID}`,
-      JSON.stringify({
-        token: AUTH_TOKEN,
-        createdAt: new Date().toISOString(),
-      }),
-    );
+    await seedAuthToken(kv, USER_ID, { token: AUTH_TOKEN });
 
     const { res, json } = await createShelf(USER_ID, AUTH_TOKEN);
 
@@ -956,6 +972,7 @@ describe("GET /api/public/:shareToken", () => {
 describe("GET /api/public/:shareToken — expiry backstop", () => {
   const SHARE_TOKEN = "abcdef0123456789abcdef0123456789";
   const UNKNOWN_TOKEN = "0".repeat(32);
+  const SHELF_ID = "12345678-1234-4123-8123-123456789abc";
   const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
   const SNAPSHOT_TITLE = "快過期的書櫃";
 
@@ -969,16 +986,33 @@ describe("GET /api/public/:shareToken — expiry backstop", () => {
     vi.useRealTimers();
   });
 
+  /**
+   * Seed a snapshot AND the live shelf backing it, so every row below isolates
+   * the `expiresAt` boundary: with a live shelf, a 404 can only come from the
+   * deadline, never from the permanent-shelf liveness guard (which would 404 a
+   * permanent snapshot whose shelf is gone — see the suite after this one).
+   */
   async function seedSnapshot(expiresAt: number | null): Promise<void> {
     const snapshot: PublicShelfSnapshot = {
       userId: USER_ID,
-      shelfId: "12345678-1234-4123-8123-123456789abc",
+      shelfId: SHELF_ID,
       title: SNAPSHOT_TITLE,
       books: sampleBooks().filter((b) => b.isShared === BoolFlag.TRUE),
       createdAt: PINNED_NOW - 86_400_000,
       expiresAt,
     };
     await kv.put(kvKeys.publicShelf(SHARE_TOKEN), JSON.stringify(snapshot));
+    await seedUserWithShelves(USER_ID, [
+      {
+        shelfId: SHELF_ID,
+        shareToken: SHARE_TOKEN,
+        title: SNAPSHOT_TITLE,
+        expiresDays: expiresAt === null ? null : 7,
+        createdAt: PINNED_NOW - 86_400_000,
+        expiresAt,
+        selectionMode: "all-shared",
+      },
+    ]);
   }
 
   it.each([
@@ -1055,6 +1089,322 @@ describe("GET /api/public/:shareToken — expiry backstop", () => {
     expect(((await stale.json()) as Json).error.code).toBe(
       "PUBLIC_SHELF_NOT_FOUND",
     );
+  });
+});
+
+// ── GET /api/public/:shareToken — permanent shelf liveness ────
+//
+// A PERMANENT snapshot (`expiresAt: null`) carries neither a KV TTL nor a
+// deadline, so nothing else can ever retire it: if its share token is rotated,
+// its shelf deleted, or the whole account removed while the `public:` key
+// survives (a failed cleanup write), the snapshot would stay publicly readable
+// forever. The handler therefore validates such a snapshot against the owner's
+// record on read, and answers exactly like a token that never existed.
+
+describe("GET /api/public/:shareToken — permanent shelf liveness", () => {
+  const PERM_TOKEN = "1a2b3c4d5e6f70819a2b3c4d5e6f7081";
+  const ROTATED_TOKEN = "99887766554433221100ffeeddccbbaa";
+  const TIMED_TOKEN = "0f1e2d3c4b5a69780f1e2d3c4b5a6978";
+  const UNKNOWN_TOKEN = "0".repeat(32);
+  const SHELF_ID = "12345678-1234-4123-8123-123456789abc";
+  const OTHER_SHELF_ID = "abcdef01-2345-4678-89ab-cdef01234567";
+  const SNAPSHOT_TITLE = "永久公開書櫃";
+  const CREATED_AT = Date.parse("2026-02-01T00:00:00.000Z");
+  const DAY_MS = 86_400_000;
+
+  /** Keys touched by KV, recorded per operation. */
+  interface KvOpLog {
+    getKeys: () => string[];
+    putKeys: () => string[];
+    deleteKeys: () => string[];
+  }
+
+  /**
+   * Start recording KV operations WITHOUT changing behaviour — the spies call
+   * straight through to `createMockKV()`, so production writes still meet its
+   * TTL floor. Call it AFTER seeding so only the request under test is counted.
+   *
+   * Scope of the `putKeys()` / `deleteKeys()` assertions below: they pin the
+   * HANDLER only. Every request here goes through {@link request}, which sends
+   * `DEV_MODE`, and the per-IP `rateLimit` middleware short-circuits in dev mode
+   * — so its one counter `put` per request (the pipeline's only fixed write) is
+   * absent by construction and is NOT what these assertions prove.
+   */
+  function watchKvOps(): KvOpLog {
+    const gets = vi.spyOn(kv, "get");
+    const puts = vi.spyOn(kv, "put");
+    const deletes = vi.spyOn(kv, "delete");
+    const keysOf = (spy: { mock: { calls: unknown[][] } }): string[] =>
+      spy.mock.calls.map((call) => String(call[0]));
+    return {
+      getKeys: () => keysOf(gets),
+      putKeys: () => keysOf(puts),
+      deleteKeys: () => keysOf(deletes),
+    };
+  }
+
+  async function seedSnapshot(
+    shareToken: string,
+    expiresAt: number | null,
+  ): Promise<void> {
+    const snapshot: PublicShelfSnapshot = {
+      userId: USER_ID,
+      shelfId: SHELF_ID,
+      title: SNAPSHOT_TITLE,
+      books: sampleBooks().filter((b) => b.isShared === BoolFlag.TRUE),
+      createdAt: CREATED_AT,
+      expiresAt,
+    };
+    await kv.put(kvKeys.publicShelf(shareToken), JSON.stringify(snapshot));
+  }
+
+  /** A permanent shelf entry as the owner's record would list it. */
+  function shelfEntry(shelfId: string, shareToken: string): PublicShelf {
+    return {
+      shelfId,
+      shareToken,
+      title: SNAPSHOT_TITLE,
+      expiresDays: null,
+      createdAt: CREATED_AT,
+      expiresAt: null,
+      selectionMode: "all-shared",
+    };
+  }
+
+  /**
+   * The SAME shelf after the owner converted it to time-limited: identical
+   * shelfId and share token, only a deadline added. The deadline is in the
+   * FUTURE on purpose — this shelf is perfectly alive, so a 404 can only come
+   * from the permanent snapshot contradicting the record, never from expiry.
+   */
+  function convertedShelfEntry(
+    shelfId: string,
+    shareToken: string,
+  ): PublicShelf {
+    return {
+      ...shelfEntry(shelfId, shareToken),
+      expiresDays: 7,
+      expiresAt: Date.now() + 7 * DAY_MS,
+    };
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Every way a permanent snapshot can outlive the shelf it belongs to. The
+   * snapshot itself is identical in all of them — only the owner's record
+   * differs, which is exactly what the guard reads.
+   */
+  const ORPHAN_CASES: { label: string; seedRecord: () => Promise<void> }[] = [
+    {
+      label: "the owner's account was deleted",
+      seedRecord: () => Promise.resolve(),
+    },
+    {
+      label: "the record no longer lists any shelf",
+      seedRecord: () => seedUserWithShelves(USER_ID, []),
+    },
+    {
+      label: "the record has no publicSharing block at all",
+      seedRecord: () => seedUserWithShelves(USER_ID),
+    },
+    {
+      label: "the shelf now points at a rotated token",
+      seedRecord: () =>
+        seedUserWithShelves(USER_ID, [shelfEntry(SHELF_ID, ROTATED_TOKEN)]),
+    },
+    {
+      label: "only a different shelf carries the token",
+      seedRecord: () =>
+        seedUserWithShelves(USER_ID, [shelfEntry(OTHER_SHELF_ID, PERM_TOKEN)]),
+    },
+    {
+      // The one orphan the record still points straight at: same shelfId, same
+      // token, but the shelf is no longer permanent. Reached when the update
+      // handler rewrote the record to time-limited and its snapshot rewrite
+      // failed, leaving a TTL-less permanent snapshot under the live token —
+      // which would otherwise outlive, and contradict, the owner's own setting.
+      label: "the shelf was converted to time-limited",
+      seedRecord: () =>
+        seedUserWithShelves(USER_ID, [
+          convertedShelfEntry(SHELF_ID, PERM_TOKEN),
+        ]),
+    },
+  ];
+
+  it.each(ORPHAN_CASES)(
+    "answers a permanent orphan exactly like an unknown token when $label",
+    async ({ seedRecord }) => {
+      await seedSnapshot(PERM_TOKEN, null);
+      await seedRecord();
+      const ops = watchKvOps();
+
+      const orphan = await request("GET", `/api/public/${PERM_TOKEN}`);
+      const unknown = await request("GET", `/api/public/${UNKNOWN_TOKEN}`);
+
+      // Byte-identical, not merely "both 404": an orphan must not confirm that
+      // the token ever existed.
+      expect(orphan.status).toBe(404);
+      expect(orphan.status).toBe(unknown.status);
+      expect(orphan.headers.get("content-type")).toBe(
+        unknown.headers.get("content-type"),
+      );
+      const body = await orphan.text();
+      expect(body).toBe(await unknown.text());
+      expect(JSON.parse(body).error.code).toBe("PUBLIC_SHELF_NOT_FOUND");
+      expect(body).not.toContain(SNAPSHOT_TITLE);
+      expect(body).not.toContain("Shared Book");
+
+      // Read path stays side-effect free: a stranger must never be able to
+      // drive a KV write, so the dead snapshot is refused, not cleaned up.
+      // (Handler scope only — see `watchKvOps`.)
+      expect(ops.putKeys()).toEqual([]);
+      expect(ops.deleteKeys()).toEqual([]);
+      expect(await kv.get(kvKeys.publicShelf(PERM_TOKEN))).not.toBeNull();
+    },
+  );
+
+  it("serves a permanent shelf its owner's record still lists", async () => {
+    await seedSnapshot(PERM_TOKEN, null);
+    await seedUserWithShelves(USER_ID, [shelfEntry(SHELF_ID, PERM_TOKEN)]);
+
+    const res = await request("GET", `/api/public/${PERM_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.title).toBe(SNAPSHOT_TITLE);
+    expect(json.data.books.map((b: Json) => b.bookId)).toEqual([
+      "book1",
+      "book3",
+    ]);
+    expect(json.data.createdAt).toBe(CREATED_AT);
+    expect(json.data.expiresAt).toBeNull();
+  });
+
+  it("keeps serving a permanent shelf created through the API", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN, {
+      expiresDays: null,
+    });
+
+    const res = await request(
+      "GET",
+      `/api/public/${created.data.shelf.shareToken}`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Json).data.expiresAt).toBeNull();
+  });
+
+  it("refuses a permanent snapshot that reset-token failed to delete", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN, {
+      expiresDays: null,
+    });
+    const { shelfId, shareToken: oldToken } = created.data.shelf;
+    const orphanedSnapshot = (await kv.get(
+      kvKeys.publicShelf(oldToken),
+    )) as string;
+
+    const reset = await request(
+      "POST",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}/reset-token`,
+      { token: AUTH_TOKEN },
+    );
+    const newToken = ((await reset.json()) as Json).data.shelf.shareToken;
+
+    // The rotation's final `delete` is the last of four KV ops and can fail:
+    // put the old snapshot back to stand in for that partial cleanup.
+    await kv.put(kvKeys.publicShelf(oldToken), orphanedSnapshot);
+
+    const rotated = await request("GET", `/api/public/${newToken}`);
+    expect(rotated.status).toBe(200);
+
+    const revoked = await request("GET", `/api/public/${oldToken}`);
+    expect(revoked.status).toBe(404);
+    expect(((await revoked.json()) as Json).error.code).toBe(
+      "PUBLIC_SHELF_NOT_FOUND",
+    );
+  });
+
+  it("keeps serving a permanent shelf successfully converted to time-limited", async () => {
+    // The counterpart of the drift row above: when the update handler's
+    // snapshot rewrite SUCCEEDS, the stored snapshot carries the new deadline,
+    // so the liveness guard is out of the picture and the conversion is
+    // invisible to readers. Driven through the API, not hand-seeded, so a
+    // handler that stopped rewriting the snapshot fails here.
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN, {
+      expiresDays: null,
+    });
+    const { shelfId, shareToken } = created.data.shelf;
+
+    const converted = await request(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}`,
+      { body: JSON.stringify({ expiresDays: 7 }), token: AUTH_TOKEN },
+    );
+    expect(converted.status).toBe(200);
+
+    const snapshot = (await kv.get(
+      kvKeys.publicShelf(shareToken),
+      "json",
+    )) as PublicShelfSnapshot;
+    expect(snapshot.expiresAt).not.toBeNull();
+
+    const ops = watchKvOps();
+    const res = await request("GET", `/api/public/${shareToken}`);
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.title).toBe("我的公開書櫃");
+    expect(json.data.expiresAt).toBe(snapshot.expiresAt);
+    // No owner-record read: guard 2 owns a snapshot that has a deadline.
+    expect(ops.getKeys()).toEqual([kvKeys.publicShelf(shareToken)]);
+  });
+
+  it("reads only the snapshot for a time-limited shelf", async () => {
+    // The record is seeded and LIVE on purpose: an unconditional liveness check
+    // would still answer 200 here, so only the read count catches it.
+    await seedSnapshot(TIMED_TOKEN, Date.now() + DAY_MS);
+    await seedUserWithShelves(USER_ID, [shelfEntry(SHELF_ID, TIMED_TOKEN)]);
+    const ops = watchKvOps();
+
+    const res = await request("GET", `/api/public/${TIMED_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    // KV TTL + the expiresAt backstop already cover a time-limited snapshot; it
+    // must not pay for a third guard on every public read.
+    expect(ops.getKeys()).toEqual([kvKeys.publicShelf(TIMED_TOKEN)]);
+  });
+
+  it("pays exactly one extra read for a permanent shelf", async () => {
+    await seedSnapshot(PERM_TOKEN, null);
+    await seedUserWithShelves(USER_ID, [shelfEntry(SHELF_ID, PERM_TOKEN)]);
+    const ops = watchKvOps();
+
+    const res = await request("GET", `/api/public/${PERM_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    expect(ops.getKeys()).toEqual([
+      kvKeys.publicShelf(PERM_TOKEN),
+      kvKeys.user(USER_ID),
+    ]);
+    expect(ops.putKeys()).toEqual([]);
+    expect(ops.deleteKeys()).toEqual([]);
+  });
+
+  it("still serves a time-limited orphan until its deadline passes", async () => {
+    // Documented scope limit, pinned so it stays a decision rather than drift:
+    // the guard is permanent-only, so a time-limited snapshot whose shelf is
+    // already gone keeps serving until KV TTL / expiresAt retires it.
+    await seedSnapshot(TIMED_TOKEN, Date.now() + DAY_MS);
+
+    const res = await request("GET", `/api/public/${TIMED_TOKEN}`);
+
+    expect(res.status).toBe(200);
   });
 });
 

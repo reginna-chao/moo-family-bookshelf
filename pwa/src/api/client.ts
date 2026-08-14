@@ -30,6 +30,91 @@ export interface ApiResponse<T> {
 }
 
 /**
+ * Thrown by the client's `unwrap` helpers when an envelope carries `error`.
+ *
+ * Kept in sync with `extension/src/api/types.ts`. Keeps the machine-readable
+ * `code` and the rate-limit wait reachable by callers — a plain `Error` forced
+ * the UI to show (or string-parse) the raw `"CODE: message"` text, which is how
+ * `retryAfter` used to get dropped on the floor. `message` keeps that exact
+ * shape for backward compatibility.
+ */
+export class ApiError extends Error {
+  readonly code: string;
+  /**
+   * The message exactly as the envelope carried it, without the `"CODE: "`
+   * prefix `message` prepends. Codes whose server copy is already user-facing
+   * render this instead of string-parsing `message`.
+   */
+  readonly rawMessage: string;
+  /** Seconds to wait before retrying; only sent on 429 responses. */
+  readonly retryAfter?: number;
+  /**
+   * True only when the client built the envelope itself instead of parsing it
+   * out of a response — the guard any UI must pass before rendering
+   * `rawMessage` verbatim, so a self-hosted (BYO) or hostile backend cannot get
+   * arbitrary text painted into the UI by claiming a client-only error code.
+   *
+   * Always `false` here today: the PWA has no envelope-synthesizing path (the
+   * Extension's auth-recovery throttle is the only one). The field exists so
+   * the two kept-in-sync classes cannot drift, and so a future PWA synthesis
+   * site inherits the check instead of re-inventing it.
+   *
+   * Deliberately a plain `boolean` rather than `BoolFlag` — this is in-memory
+   * provenance, never an API payload or KV field, and keeping it outside the
+   * wire-serializable vocabulary is the whole point.
+   */
+  readonly synthesized: boolean;
+
+  constructor(
+    code: string,
+    message: string,
+    retryAfter?: number,
+    synthesized = false,
+  ) {
+    super(`${code}: ${message}`);
+    this.name = "ApiError";
+    this.code = code;
+    this.rawMessage = message;
+    this.synthesized = synthesized;
+    // Validated at the boundary: a self-hosted (BYO) backend can send anything,
+    // and a NaN / negative / fractional wait would surface as「NaN 秒」in the
+    // back-off copy. Anything unusable is dropped so the UI falls back to its
+    // static wording.
+    this.retryAfter =
+      typeof retryAfter === "number" &&
+      Number.isFinite(retryAfter) &&
+      retryAfter >= 0
+        ? Math.floor(retryAfter)
+        : undefined;
+  }
+}
+
+/**
+ * The one status this API answers with no body (RFC 9110 §15.3.5):
+ * `DELETE /api/user/:id/public-shelf/:shelfId`.
+ *
+ * Kept to exactly this status. 205 is never returned by the API, and widening
+ * the allowance only buys a rogue backend a way to have an empty body read as
+ * a confirmed success; 304 is `!response.ok`, so it already belongs to the
+ * error path rather than here.
+ */
+const NO_CONTENT_STATUS = 204;
+
+/**
+ * Read the `{ data, error }` envelope out of a response.
+ *
+ * A bodyless success is still a success: `response.json()` throws a SyntaxError
+ * on an empty body, which the caller cannot tell apart from a genuine network
+ * failure — that is how a refused revocation used to read as "deleted". A 204
+ * resolves to an empty envelope instead; every other response is parsed exactly
+ * as before (a malformed one still throws, as it should).
+ */
+async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
+  if (response.status === NO_CONTENT_STATUS) return {};
+  return (await response.json()) as ApiResponse<T>;
+}
+
+/**
  * Resolved `POST /api/auth/lookup` payload.
  *
  * Kept in sync with `extension/src/api/client.ts` — `userId` is derived from a
@@ -262,15 +347,32 @@ export class ApiClient {
     });
   }
 
-  /** Unwrap an envelope response or throw an Error built from `error`. */
+  /** Unwrap an envelope response or throw an `ApiError` built from `error`. */
   private unwrap<T>(res: ApiResponse<T>): T {
-    if (res.error) {
-      throw new Error(`${res.error.code}: ${res.error.message}`);
-    }
+    this.throwOnError(res);
     if (res.data === undefined) {
-      throw new Error("EMPTY_RESPONSE: response body missing data");
+      throw new ApiError("EMPTY_RESPONSE", "response body missing data");
     }
     return res.data;
+  }
+
+  /**
+   * `unwrap` for endpoints whose success carries no payload (HTTP 204).
+   * Only the `error` branch throws — demanding `data` here would turn every
+   * successful 204 into a bogus EMPTY_RESPONSE failure.
+   */
+  private unwrapVoid(res: ApiResponse<unknown>): void {
+    this.throwOnError(res);
+  }
+
+  private throwOnError(res: ApiResponse<unknown>): void {
+    if (res.error) {
+      throw new ApiError(
+        res.error.code,
+        res.error.message,
+        res.error.retryAfter,
+      );
+    }
   }
 
   // --- Auth ---
@@ -547,9 +649,15 @@ export class ApiClient {
     return this.unwrap(res);
   }
 
+  /**
+   * Revoke a public shelf. Throws `ApiError` when the server refused — the
+   * caller MUST NOT report the link as closed on a rejected request (the
+   * snapshot stays readable until this succeeds).
+   */
   async deletePublicShelf(userId: string, shelfId: string): Promise<void> {
     this.validateHexId(userId, "userId");
-    await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
+    const res = await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
+    this.unwrapVoid(res);
   }
 
   async getPublicShelf(shareToken: string): Promise<PublicShelfData> {
@@ -619,7 +727,7 @@ export class ApiClient {
 
     try {
       const response = await fetch(url, { ...init, headers });
-      const json = (await response.json()) as ApiResponse<T>;
+      const json = await readEnvelope<T>(response);
 
       // On 401, try to refresh token once
       if (response.status === 401 && !isRetry && this.tokenRefresher) {
