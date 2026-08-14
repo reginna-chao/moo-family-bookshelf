@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { X, Copy, RefreshCw, Trash2 } from "lucide-react";
-import type { ApiClient, PublicShelf } from "@/api/client";
-import { useDebouncedCallback } from "@/hooks/useDebouncedCallback";
+import type { ApiClient } from "@/api/client";
 import { useTimedFlag } from "@/hooks/useTimedFlag";
+import { usePublicShelfActions } from "@/hooks/usePublicShelfActions";
+import { UNSAVED_NOTICE } from "@/utils/publicShareMessages";
 
 export interface PublicShareDialogProps {
   userId: string;
@@ -10,8 +11,6 @@ export interface PublicShareDialogProps {
   defaultDisplayName: string;
   onClose: () => void;
 }
-
-type ViewState = "loading" | "empty" | "active" | "error";
 
 const EXPIRES_OPTIONS: Array<{ label: string; value: number | null }> = [
   { label: "7 天", value: 7 },
@@ -27,128 +26,31 @@ export function PublicShareDialog({
   defaultDisplayName,
   onClose,
 }: PublicShareDialogProps) {
-  const [viewState, setViewState] = useState<ViewState>("loading");
-  const [shelf, setShelf] = useState<PublicShelf | null>(null);
-  const [title, setTitle] = useState("");
-  const [expiresDays, setExpiresDays] = useState<number | null>(30);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [saving, setSaving] = useState(false);
+  const {
+    viewState,
+    shelf,
+    title,
+    expiresDays,
+    errorMsg,
+    saving,
+    hasUnsavedChanges,
+    setTitle,
+    setExpiresDays,
+    handleCreate,
+    handleTitleChange,
+    handleExpiresDaysChange,
+    handleResetToken,
+    handleDelete,
+    handleRetrySave,
+  } = usePublicShelfActions({ userId, apiClient, defaultDisplayName });
   const [copied, markCopied] = useTimedFlag(2000);
   const [confirm, setConfirm] = useState<"reset" | "delete" | null>(null);
 
-  const syncTitle = useDebouncedCallback(
-    (shelfId: string, newTitle: string) => {
-      void (async () => {
-        try {
-          const { shelf: updated } = await apiClient.updatePublicShelf(
-            userId,
-            shelfId,
-            { title: newTitle },
-          );
-          setShelf(updated);
-        } catch {
-          /* title sync failure is non-critical */
-        }
-      })();
-    },
-    1000,
-  );
-
-  const loadShelves = useCallback(async () => {
-    setViewState("loading");
-    try {
-      const { shelves } = await apiClient.listPublicShelves(userId);
-      if (shelves.length > 0) {
-        setShelf(shelves[0]);
-        setTitle(shelves[0].title);
-        setExpiresDays(shelves[0].expiresDays);
-        setViewState("active");
-      } else {
-        setTitle(`${defaultDisplayName} 的公開書櫃`);
-        setViewState("empty");
-      }
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "載入失敗");
-      setViewState("error");
-    }
-  }, [userId, apiClient, defaultDisplayName]);
-
-  useEffect(() => {
-    void loadShelves();
-  }, [loadShelves]);
-
-  const handleCreate = async () => {
-    setSaving(true);
-    setErrorMsg("");
-    try {
-      const { shelf: created } = await apiClient.createPublicShelf(userId, {
-        title,
-        expiresDays,
-      });
-      setShelf(created);
-      setTitle(created.title);
-      setExpiresDays(created.expiresDays);
-      setViewState("active");
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "建立失敗");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleTitleChange = (newTitle: string) => {
-    setTitle(newTitle);
-    if (!shelf) return;
-    syncTitle(shelf.shelfId, newTitle);
-  };
-
-  const handleExpiresDaysChange = async (value: number | null) => {
-    setExpiresDays(value);
-    if (!shelf) return;
-    try {
-      const { shelf: updated } = await apiClient.updatePublicShelf(
-        userId,
-        shelf.shelfId,
-        { expiresDays: value },
-      );
-      setShelf(updated);
-    } catch {
-      /* non-critical */
-    }
-  };
-
-  const handleResetToken = async () => {
-    if (!shelf) return;
+  /** Dismiss the confirm box first, then run the action it was guarding. */
+  const handleConfirmAction = () => {
+    const action = confirm === "reset" ? handleResetToken : handleDelete;
     setConfirm(null);
-    setSaving(true);
-    try {
-      const { shelf: updated } = await apiClient.resetPublicShelfToken(
-        userId,
-        shelf.shelfId,
-      );
-      setShelf(updated);
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "重設失敗");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!shelf) return;
-    setConfirm(null);
-    setSaving(true);
-    try {
-      await apiClient.deletePublicShelf(userId, shelf.shelfId);
-      setShelf(null);
-      setTitle(`${defaultDisplayName} 的公開書櫃`);
-      setExpiresDays(30);
-      setViewState("empty");
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "關閉失敗");
-    } finally {
-      setSaving(false);
-    }
+    void action();
   };
 
   const handleCopy = async () => {
@@ -183,20 +85,29 @@ export function PublicShareDialog({
         </div>
 
         <div className="p-4 flex flex-col gap-3">
-          {errorMsg && (
+          {/* A failed title / expiry write leaves the field diverged from the
+              server, so the notice stays until a retry reconciles it. */}
+          {(errorMsg || hasUnsavedChanges) && (
             <div
               role="alert"
-              className="bg-red-50 text-red-600 text-sm px-3 py-2 rounded-lg"
+              className="bg-red-50 text-red-600 text-sm px-3 py-2 rounded-lg flex items-center justify-between gap-2"
             >
-              {errorMsg}
+              <span>{errorMsg || UNSAVED_NOTICE}</span>
+              {hasUnsavedChanges && (
+                <button
+                  type="button"
+                  onClick={() => void handleRetrySave()}
+                  disabled={saving}
+                  className="shrink-0 px-2 py-1 border border-red-300 rounded-md text-xs font-medium disabled:opacity-50"
+                >
+                  重試儲存
+                </button>
+              )}
             </div>
           )}
 
           {viewState === "loading" && (
             <p className="text-center text-gray-400 py-4">載入中...</p>
-          )}
-          {viewState === "error" && !errorMsg && (
-            <p className="text-center text-gray-400 py-4">載入失敗</p>
           )}
 
           {viewState === "empty" && (
@@ -223,9 +134,7 @@ export function PublicShareDialog({
               onCopy={handleCopy}
               onResetToken={() => setConfirm("reset")}
               onDelete={() => setConfirm("delete")}
-              onConfirmAction={
-                confirm === "reset" ? handleResetToken : handleDelete
-              }
+              onConfirmAction={handleConfirmAction}
               onCancelConfirm={() => setConfirm(null)}
             />
           )}
