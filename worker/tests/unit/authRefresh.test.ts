@@ -290,6 +290,12 @@ describe("POST /api/auth/refresh", () => {
     expect(json.data.token).toMatch(/^[a-f0-9]{64}$/);
     expect(json.data.token).not.toBe(token);
     expect(json.data.expiresAt).toBeTypeOf("number");
+
+    // The mint must persist both directions, or the new token would not
+    // authenticate the next request.
+    const authRecord = (await kv.get(`auth:${VALID_USER_ID}`, "json")) as Json;
+    expect(authRecord.token).toBe(json.data.token);
+    expect(await kv.get(`token:${json.data.token}`)).toBe(VALID_USER_ID);
   });
 
   it("should return same token on consecutive refreshes with same auth", async () => {
