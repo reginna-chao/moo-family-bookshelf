@@ -28,6 +28,7 @@ export function validateEndpointUrl(raw: string): string {
 }
 
 import type {
+  ApiErrorPayload,
   ApiResponse,
   BorrowRequest,
   CreateBorrowPayload,
@@ -41,7 +42,13 @@ import type {
   VerifyInfo,
   VersionInfo,
 } from "./types";
-import { BorrowStatus, type VerifyMethod, type BoolFlag } from "./types";
+import {
+  ApiError,
+  AUTH_REFRESH_RATE_LIMITED,
+  BorrowStatus,
+  type VerifyMethod,
+  type BoolFlag,
+} from "./types";
 import {
   doRefreshToken,
   type ReauthInfo,
@@ -49,8 +56,15 @@ import {
 } from "./auth-refresh";
 
 // Re-export all types so existing imports from "./client" continue to work
-export { BoolFlag, BorrowStatus, PERSONAL_BOOKS_SCHEMA_VERSION } from "./types";
+export {
+  ApiError,
+  AUTH_REFRESH_RATE_LIMITED,
+  BoolFlag,
+  BorrowStatus,
+  PERSONAL_BOOKS_SCHEMA_VERSION,
+} from "./types";
 export type {
+  ApiErrorPayload,
   ApiResponse,
   BookEntry,
   BorrowRequest,
@@ -93,6 +107,59 @@ export interface LookupResult {
 
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
+/**
+ * The one status this API answers with no body (RFC 9110 §15.3.5):
+ * `DELETE /api/user/:id/public-shelf/:shelfId`.
+ *
+ * Kept to exactly this status. 205 is never returned by the API, and widening
+ * the allowance only buys a rogue backend a way to have an empty body read as
+ * a confirmed success; 304 is `!response.ok`, so it already belongs to the
+ * error path rather than here.
+ */
+const NO_CONTENT_STATUS = 204;
+
+/**
+ * Read the `{ data, error }` envelope out of a response.
+ *
+ * A bodyless success is still a success: `response.json()` throws a SyntaxError
+ * on an empty body, which the caller cannot tell apart from a genuine network
+ * failure — that is how a refused revocation used to read as "deleted". A 204
+ * resolves to an empty envelope instead; every other response is parsed exactly
+ * as before (a malformed one still throws, as it should).
+ */
+async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
+  if (response.status === NO_CONTENT_STATUS) return {};
+  return (await response.json()) as ApiResponse<T>;
+}
+
+/**
+ * Provenance marker for an error envelope this client built itself.
+ *
+ * `JSON.parse` can never produce a symbol-keyed property, so no response body —
+ * not even from a self-hosted (BYO) or hostile backend — can forge it. That is
+ * what turns "client-synthesized" from a comment into a checkable fact: the UI
+ * renders an error's raw message verbatim only for a marked payload.
+ */
+const CLIENT_SYNTHESIZED = Symbol("client-synthesized error payload");
+
+interface SynthesizedErrorPayload extends ApiErrorPayload {
+  [CLIENT_SYNTHESIZED]: true;
+}
+
+/** Build an error payload that is provably not server-supplied. */
+function synthesizeError(
+  code: string,
+  message: string,
+): SynthesizedErrorPayload {
+  return { code, message, [CLIENT_SYNTHESIZED]: true };
+}
+
+/** True only for payloads built by `synthesizeError` above. */
+function isClientSynthesized(payload: ApiErrorPayload): boolean {
+  const marked: Partial<SynthesizedErrorPayload> = payload;
+  return marked[CLIENT_SYNTHESIZED] === true;
+}
 
 /**
  * Build the user-facing message shown when auto-recovery was rate-limited.
@@ -222,15 +289,33 @@ export class ApiClient {
     });
   }
 
-  /** Unwrap an envelope response or throw an Error built from `error`. */
+  /** Unwrap an envelope response or throw an `ApiError` built from `error`. */
   private unwrap<T>(res: ApiResponse<T>): T {
-    if (res.error) {
-      throw new Error(`${res.error.code}: ${res.error.message}`);
-    }
+    this.throwOnError(res);
     if (res.data === undefined) {
-      throw new Error("EMPTY_RESPONSE: response body missing data");
+      throw new ApiError("EMPTY_RESPONSE", "response body missing data");
     }
     return res.data;
+  }
+
+  /**
+   * `unwrap` for endpoints whose success carries no payload (HTTP 204).
+   * Only the `error` branch throws — demanding `data` here would turn every
+   * successful 204 into a bogus EMPTY_RESPONSE failure.
+   */
+  private unwrapVoid(res: ApiResponse<unknown>): void {
+    this.throwOnError(res);
+  }
+
+  private throwOnError(res: ApiResponse<unknown>): void {
+    if (res.error) {
+      throw new ApiError(
+        res.error.code,
+        res.error.message,
+        res.error.retryAfter,
+        isClientSynthesized(res.error),
+      );
+    }
   }
 
   // --- Auth ---
@@ -515,8 +600,14 @@ export class ApiClient {
     return this.unwrap(res);
   }
 
+  /**
+   * Revoke a public shelf. Throws `ApiError` when the server refused — the
+   * caller MUST NOT report the link as closed on a rejected request (the
+   * snapshot stays readable until this succeeds).
+   */
   async deletePublicShelf(userId: string, shelfId: string): Promise<void> {
-    await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
+    const res = await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
+    this.unwrapVoid(res);
   }
 
   // --- Internal ---
@@ -564,7 +655,7 @@ export class ApiClient {
 
     try {
       const response = await fetch(url, { ...init, headers });
-      const json = (await response.json()) as ApiResponse<T>;
+      const json = await readEnvelope<T>(response);
 
       // Intercept 401 — attempt automatic token refresh
       if (response.status === 401 && !skipRefresh) {
@@ -576,13 +667,17 @@ export class ApiClient {
           return this.doRequest<T>(url, init, true);
         }
         // Rate-limited recovery (fresh 429 or active cooldown) — surface a
-        // friendly localized message instead of the raw English 401.
+        // friendly localized message instead of the raw English 401. The code is
+        // distinct from the server's RATE_LIMITED so the UI can recognize this
+        // bespoke copy and show it verbatim rather than replacing it with the
+        // generic back-off sentence. `synthesizeError` stamps the unforgeable
+        // marker that authorizes that verbatim rendering.
         if (outcome.rateLimited) {
           return {
-            error: {
-              code: "RATE_LIMITED",
-              message: buildRateLimitMessage(outcome.cooldownUntil),
-            },
+            error: synthesizeError(
+              AUTH_REFRESH_RATE_LIMITED,
+              buildRateLimitMessage(outcome.cooldownUntil),
+            ),
           };
         }
         // Refresh failed — return the original 401 error
