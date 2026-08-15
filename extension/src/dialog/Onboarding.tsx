@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from "react";
+import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { ApiClient } from "../api/client";
-import { DISPLAY_NAME_KEY } from "../constants";
+import { DEFAULT_API_ENDPOINT, DISPLAY_NAME_KEY } from "../constants";
 import { safeStorageGet } from "../storage/safeStorage";
 import { LoadingOverlay } from "./LoadingOverlay";
+import { SyncCodeHostNote } from "./SyncCodeHostNote";
 import { useAutoSetup } from "./useAutoSetup";
 import {
   WelcomeView,
@@ -142,17 +144,33 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       );
     }
     if (effectiveState === "verify-prompt") {
+      // The challenge replaces the join screen, taking its host disclosure with
+      // it — exactly when the user is asked to hand a PIN/pattern to a server.
+      // The verdict comes from the endpoint the client has ACTUALLY adopted,
+      // never from input text: a sync-code join has already applied its `@host`
+      // by now (performJoin leaves it applied so the challenge talks to that
+      // server), while a create/lookup challenge is still on the official
+      // default — nothing to disclose, hence `undefined` for it.
+      const adopted = apiClient.getEndpoint();
       return (
-        <VerificationPrompt
-          method={flow.verify.method}
-          methodError={flow.verify.methodError}
-          error={flow.verify.error}
-          locked={flow.verify.locked}
-          submitting={flow.verify.submitting}
-          countdownSeconds={flow.verify.countdownSeconds}
-          onSubmit={(secret) => void flow.verify.submit(secret)}
-          onCancel={flow.verify.cancel}
-        />
+        <>
+          <SyncCodeHostNote
+            result={classifySyncCodeApiHost(
+              adopted === DEFAULT_API_ENDPOINT ? undefined : adopted,
+            )}
+            className="moo-sync-host-note--verify"
+          />
+          <VerificationPrompt
+            method={flow.verify.method}
+            methodError={flow.verify.methodError}
+            error={flow.verify.error}
+            locked={flow.verify.locked}
+            submitting={flow.verify.submitting}
+            countdownSeconds={flow.verify.countdownSeconds}
+            onSubmit={(secret) => void flow.verify.submit(secret)}
+            onCancel={flow.verify.cancel}
+          />
+        </>
       );
     }
     return (

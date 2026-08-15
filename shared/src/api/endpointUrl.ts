@@ -26,7 +26,11 @@ const PRIVATE_HOST_RE =
  *   - The return value is normalized to `origin + pathname` with trailing
  *     slashes stripped. This folds an IDN host to punycode and collapses
  *     cosmetic differences (case, default port, trailing slash) so the
- *     stored/compared value is canonical.
+ *     stored/compared value is canonical. It also DROPS any `?query` and
+ *     `#fragment` — a silent behaviour change from the older
+ *     `raw.replace(/\/+$/, "")`, and a security improvement: a tail like
+ *     `https://evil.com/#@real.example` can no longer make the stored and
+ *     displayed endpoint read as a host the client will never call.
  *
  * Throws on any unparseable, credential-bearing, or unsafe-scheme URL — every
  * caller already handles the throw.
@@ -51,6 +55,15 @@ const PRIVATE_HOST_RE =
  *     `https://real.example@evil.com` is STORED as `https://evil.com`. That is
  *     harmless there precisely because what it keeps is the honest host, which
  *     is then what this module sees and what the switch confirmation shows.
+ *
+ * One consequence worth naming, because it looks like a bug from the UI:
+ * everything this module allows beyond the Worker's set (the whole private
+ * range, over either scheme) can be ADOPTED by a client but can never be
+ * STORED on the family record — the Worker answers 400. A LAN-self-hosted
+ * family therefore sits permanently in the "record carries no endpoint"
+ * state, which useEndpointSwitch reads as the revert-to-default direction
+ * and offers to every member exactly once. Declining is remembered, so it
+ * is one prompt per device, not a loop — but it is not a misconfiguration.
  *
  * Do not "fix" one side into the other: widening the Worker to match this module
  * re-opens owner-controlled redirection into a member's LAN, and narrowing this

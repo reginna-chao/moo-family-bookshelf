@@ -1,6 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
+import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { SyncCodeHostNote } from "@/dialog/SyncCodeHostNote";
+import {
+  parseSyncCodeApiHost,
+  type SyncCodeApiHostResult,
+} from "@/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
 
 /**
@@ -18,8 +23,13 @@ import { validateEndpointUrl } from "@/api/client";
  *      spoofed address is worse than no copy at all.
  *   3. Nothing at all for a default-endpoint (or still-being-typed) code.
  *
- * `parseSyncCodeApiHost` stays real here — mocking it would leave the mapping
- * from parse result to rendered copy (the whole component) unverified.
+ * The component is PRESENTATIONAL — the verdict arrives as a prop, which is what
+ * lets one component serve both the join screens (verdict from the typed code)
+ * and the verification challenge (verdict from the endpoint the client has
+ * ALREADY adopted, where no sync code is on display at all). Most cases below
+ * still drive it through the real `parseSyncCodeApiHost`: mocking the parse
+ * would leave the mapping from verdict to rendered copy — the whole component —
+ * unverified.
  */
 describe("SyncCodeHostNote", () => {
   describe("no custom host", () => {
@@ -30,7 +40,9 @@ describe("SyncCodeHostNote", () => {
       ["the @ has no host after it yet", "moo-ab12-cd34@"],
       ["the prefix is wrong", "foo-ab12-cd34@https://custom.example.com"],
     ])("renders nothing when %s", (_label, syncCode) => {
-      const { container } = render(<SyncCodeHostNote syncCode={syncCode} />);
+      const { container } = render(
+        <SyncCodeHostNote result={parseSyncCodeApiHost(syncCode)} />,
+      );
 
       expect(container).toBeEmptyDOMElement();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -40,7 +52,11 @@ describe("SyncCodeHostNote", () => {
   describe("an @host that would be adopted", () => {
     it("names the server the code connects to", () => {
       render(
-        <SyncCodeHostNote syncCode="moo-ab12-cd34@https://custom.example.com" />,
+        <SyncCodeHostNote
+          result={parseSyncCodeApiHost(
+            "moo-ab12-cd34@https://custom.example.com",
+          )}
+        />,
       );
 
       const note = screen.getByTestId("sync-code-host-note");
@@ -90,7 +106,11 @@ describe("SyncCodeHostNote", () => {
         "http://localhost:8787",
       ],
     ])("normalizes %s", (_label, endpoint, expectedEndpoint) => {
-      render(<SyncCodeHostNote syncCode={`moo-ab12-cd34@${endpoint}`} />);
+      render(
+        <SyncCodeHostNote
+          result={parseSyncCodeApiHost(`moo-ab12-cd34@${endpoint}`)}
+        />,
+      );
 
       const rendered =
         screen.getByTestId("sync-code-host-note").textContent ?? "";
@@ -102,7 +122,9 @@ describe("SyncCodeHostNote", () => {
 
     it("shows the punycode spelling instead of the unicode homograph", () => {
       render(
-        <SyncCodeHostNote syncCode="moo-ab12-cd34@https://пример.example" />,
+        <SyncCodeHostNote
+          result={parseSyncCodeApiHost("moo-ab12-cd34@https://пример.example")}
+        />,
       );
 
       const note = screen.getByTestId("sync-code-host-note");
@@ -117,14 +139,18 @@ describe("SyncCodeHostNote", () => {
      */
     it("renders a plain-HTTP LAN endpoint differently from its HTTPS namesake", () => {
       const { unmount } = render(
-        <SyncCodeHostNote syncCode="moo-ab12-cd34@http://nas.local:8787" />,
+        <SyncCodeHostNote
+          result={parseSyncCodeApiHost("moo-ab12-cd34@http://nas.local:8787")}
+        />,
       );
       const plain = screen.getByTestId("sync-code-host-note").textContent ?? "";
       expect(plain).toContain("http://nas.local:8787");
       unmount();
 
       render(
-        <SyncCodeHostNote syncCode="moo-ab12-cd34@https://nas.local:8787" />,
+        <SyncCodeHostNote
+          result={parseSyncCodeApiHost("moo-ab12-cd34@https://nas.local:8787")}
+        />,
       );
       const secure =
         screen.getByTestId("sync-code-host-note").textContent ?? "";
@@ -135,14 +161,22 @@ describe("SyncCodeHostNote", () => {
 
     it("distinguishes two sub-path endpoints sharing one host", () => {
       const { unmount } = render(
-        <SyncCodeHostNote syncCode="moo-ab12-cd34@https://shared.example.com/family-a" />,
+        <SyncCodeHostNote
+          result={parseSyncCodeApiHost(
+            "moo-ab12-cd34@https://shared.example.com/family-a",
+          )}
+        />,
       );
       const first = screen.getByTestId("sync-code-host-note").textContent ?? "";
       expect(first).toContain("https://shared.example.com/family-a");
       unmount();
 
       render(
-        <SyncCodeHostNote syncCode="moo-ab12-cd34@https://shared.example.com/family-b" />,
+        <SyncCodeHostNote
+          result={parseSyncCodeApiHost(
+            "moo-ab12-cd34@https://shared.example.com/family-b",
+          )}
+        />,
       );
       const second =
         screen.getByTestId("sync-code-host-note").textContent ?? "";
@@ -155,7 +189,11 @@ describe("SyncCodeHostNote", () => {
   describe("an @host that would be refused", () => {
     it("warns instead of naming the server", () => {
       render(
-        <SyncCodeHostNote syncCode="moo-ab12-cd34@https://real.example@evil.com" />,
+        <SyncCodeHostNote
+          result={parseSyncCodeApiHost(
+            "moo-ab12-cd34@https://real.example@evil.com",
+          )}
+        />,
       );
 
       const warning = screen.getByTestId("sync-code-host-note-invalid");
@@ -183,7 +221,11 @@ describe("SyncCodeHostNote", () => {
       ["a javascript: URL", "javascript:alert(1)"],
       ["a bare host with no scheme", "my-worker.example.com"],
     ])("warns about %s", (_label, host) => {
-      render(<SyncCodeHostNote syncCode={`moo-ab12-cd34@${host}`} />);
+      render(
+        <SyncCodeHostNote
+          result={parseSyncCodeApiHost(`moo-ab12-cd34@${host}`)}
+        />,
+      );
 
       expect(
         screen.getByTestId("sync-code-host-note-invalid"),
@@ -192,5 +234,113 @@ describe("SyncCodeHostNote", () => {
         screen.queryByTestId("sync-code-host-note"),
       ).not.toBeInTheDocument();
     });
+  });
+
+  /**
+   * The verification challenge is the one screen with no sync code on it: the
+   * user typed the code on the PREVIOUS screen, the client has already adopted
+   * its `@host`, and now a PIN/pattern is about to be handed to that server. So
+   * the caller classifies the ADOPTED endpoint instead of parsing text —
+   * see dialog/Onboarding.tsx's verify-prompt branch.
+   */
+  describe("a verdict classified from an adopted endpoint (no sync code)", () => {
+    it("names the endpoint the client has already adopted", () => {
+      render(
+        <SyncCodeHostNote
+          result={classifySyncCodeApiHost("https://nas.example.com/moo/")}
+        />,
+      );
+
+      const note = screen.getByTestId("sync-code-host-note");
+      expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+      // Canonical, exactly as the ApiClient stores it — trailing slash gone.
+      expect(note).toHaveTextContent(
+        validateEndpointUrl("https://nas.example.com/moo/"),
+      );
+    });
+
+    /**
+     * A create/lookup-triggered challenge is still on the official default, and
+     * the caller passes `undefined` for it. Silence is the whole point: a note
+     * on every challenge would train the user to ignore it.
+     */
+    it("renders nothing when the caller supplies no endpoint", () => {
+      const { container } = render(
+        <SyncCodeHostNote result={classifySyncCodeApiHost(undefined)} />,
+      );
+
+      expect(container).toBeEmptyDOMElement();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("warns without echoing an adopted endpoint that would be refused", () => {
+      render(
+        <SyncCodeHostNote
+          result={classifySyncCodeApiHost("https://real.example@evil.com")}
+        />,
+      );
+
+      const warning = screen.getByTestId("sync-code-host-note-invalid");
+      expect(warning).toHaveAttribute("role", "alert");
+      expect(warning.textContent).not.toContain("real.example");
+      expect(warning.textContent).not.toContain("evil.com");
+      expect(
+        screen.queryByTestId("sync-code-host-note"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * `className` carries LAYOUT only — the caller decides spacing, the component
+   * keeps its own palette/size classes. The verification challenge is the reason
+   * the prop exists: the note sits outside `.moo-onboarding-view` there and has
+   * to supply that view's gutter itself.
+   */
+  describe("extra layout classes", () => {
+    /** The modifier Onboarding.tsx actually passes on the verify screen. */
+    const LAYOUT_CLASS = "moo-sync-host-note--verify";
+
+    function classesOf(
+      result: SyncCodeApiHostResult,
+      className?: string,
+    ): string[] {
+      const { container, unmount } = render(
+        <SyncCodeHostNote result={result} className={className} />,
+      );
+      const classes = Array.from(
+        container.firstElementChild?.classList ?? [],
+      ) as string[];
+      unmount();
+      return classes;
+    }
+
+    const variants: Array<[string, SyncCodeApiHostResult]> = [
+      ["valid", { kind: "valid", endpoint: "https://a.example" }],
+      ["invalid", { kind: "invalid" }],
+    ];
+
+    it.each(variants)(
+      "appends the layout class to the %s variant without dropping its own",
+      (_label, result) => {
+        const bare = classesOf(result);
+        const withLayout = classesOf(result, LAYOUT_CLASS);
+
+        expect(bare).not.toContain(LAYOUT_CLASS);
+        expect(withLayout).toEqual(expect.arrayContaining(bare));
+        expect(withLayout).toContain(LAYOUT_CLASS);
+        expect(withLayout).toHaveLength(bare.length + 1);
+      },
+    );
+
+    it.each(variants)(
+      "renders the %s variant unchanged when no className is given",
+      (_label, result) => {
+        // No stray trailing space / empty class token from the default "".
+        const bare = classesOf(result);
+
+        expect(bare.length).toBeGreaterThan(0);
+        expect(bare).not.toContain("");
+      },
+    );
   });
 });

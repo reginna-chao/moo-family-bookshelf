@@ -4066,3 +4066,10 @@
   border-color: var(--moo-warn-border);
   font-weight: 600;
 }
+
+/* On the verification challenge the note sits OUTSIDE .moo-onboarding-view (it
+   precedes the whole panel), so it has to supply that view's 24px gutter
+   itself; the panel's own top padding then provides the gap below it. */
+.moo-sync-host-note--verify {
+  margin: 24px 24px 0 24px;
+}

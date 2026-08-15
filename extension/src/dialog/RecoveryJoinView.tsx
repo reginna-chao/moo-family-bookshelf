@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import { parseSyncCodeApiHost } from "../crypto/syncCode";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
 
 export interface RecoveryJoinViewProps {
@@ -52,7 +53,7 @@ export function RecoveryJoinView({
           {showInput ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>
       </div>
-      <SyncCodeHostNote syncCode={syncCodeInput} />
+      <SyncCodeHostNote result={parseSyncCodeApiHost(syncCodeInput)} />
       <button
         type="button"
         onClick={onJoin}

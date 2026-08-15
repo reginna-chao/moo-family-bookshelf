@@ -96,9 +96,11 @@ export async function saveDeclinedFamilyEndpoint(
  *
  * The direct storage write is authoritative; the background message that
  * follows is a best-effort secondary so the change also travels the path the
- * rest of the extension uses. A background failure (asleep, or its stricter
- * HTTP-host validation rejecting a LAN endpoint the ApiClient allows) leaves
- * the already-written local value intact.
+ * rest of the extension uses. A background failure (asleep, or an unexpected
+ * storage error) leaves the already-written local value intact. Its validation
+ * is no longer a second source of divergence: handleSetApiEndpoint now runs the
+ * same shared `validateEndpointUrl` as the ApiClient, so a LAN endpoint this
+ * function accepts is one the background accepts too.
  *
  * Also used by the sync-code join path (dialog/onboardingFlow.ts): pasting a
  * code that carries an `@host` is an explicit acceptance of that endpoint, so

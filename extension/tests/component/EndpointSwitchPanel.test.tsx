@@ -91,6 +91,42 @@ describe("EndpointSwitchPanel", () => {
       expect(screen.getByText(FAMILY_ENDPOINT)).toBeInTheDocument();
     });
 
+    /**
+     * The title is DIRECTION-aware, and both literals live only here.
+     * 「已變更」 holds solely for the adopt direction: the revert direction also
+     * fires when the family record NEVER carried an endpoint — a LAN
+     * self-hoster's record cannot hold one at all, because the Worker rejects
+     * private addresses (see shared/src/api/endpointUrl.ts) — so telling those
+     * members something changed would be a claim about an event that never
+     * happened. A refused target is still the adopt direction: the record does
+     * name an endpoint, it is just one this client will not take.
+     */
+    it.each([
+      [
+        "adopting a custom endpoint",
+        customSwitch,
+        "⚠️ 家庭 API 端點已變更",
+        "⚠️ 家庭未指定 API 端點",
+      ],
+      [
+        "reverting to the official default",
+        revertSwitch,
+        "⚠️ 家庭未指定 API 端點",
+        "⚠️ 家庭 API 端點已變更",
+      ],
+      [
+        "a custom endpoint the validator refuses",
+        refusedSwitch,
+        "⚠️ 家庭 API 端點已變更",
+        "⚠️ 家庭未指定 API 端點",
+      ],
+    ])("titles the panel for %s", (_label, pending, title, otherTitle) => {
+      renderPanel({ pending });
+
+      expect(screen.getByText(title)).toBeInTheDocument();
+      expect(screen.queryByText(otherTitle)).not.toBeInTheDocument();
+    });
+
     it("labels a custom target plainly", () => {
       renderPanel({ pending: customSwitch });
 

@@ -1,9 +1,9 @@
 /**
- * Surfaces the `@host` a pasted sync code carries, so joining a self-hosted
- * backend is visible before the user commits to it. Display only — joining is
- * still the user-initiated action it always was.
+ * Surfaces the `@host` a sync code carries, so joining a self-hosted backend is
+ * visible before the user commits to it. Display only — joining is still the
+ * user-initiated action it always was.
  *
- * Three outcomes (see `parseSyncCodeApiHost`):
+ * Three outcomes (see `SyncCodeApiHostResult`):
  *   - default / not-yet-valid sync code → renders nothing.
  *   - a `@host` that WOULD be adopted   → shows the canonical endpoint the
  *     client would actually call (`origin + pathname`), so a homograph shows as
@@ -11,25 +11,38 @@
  *     visibly different from its HTTPS namesake.
  *   - a `@host` that would be REJECTED on adoption → shows a warning instead of
  *     the reassuring line, so a spoofed address is never lent legitimacy.
+ *
+ * Presentational only, like its PWA twin (pwa/src/components/SyncCodeHostNote):
+ * the caller decides where the verdict comes from — the typed sync code on the
+ * join screens, the endpoint the client has ALREADY adopted on the verification
+ * challenge, which is the one screen where no sync code is on display yet the
+ * user is about to hand a secret to that server.
  */
 
-import { parseSyncCodeApiHost } from "../crypto/syncCode";
+import type { SyncCodeApiHostResult } from "../crypto/syncCode";
 
 export interface SyncCodeHostNoteProps {
-  /** Raw sync-code input, exactly as typed/pasted. */
-  syncCode: string;
+  /** Verdict from `parseSyncCodeApiHost` / `classifySyncCodeApiHost`. */
+  result: SyncCodeApiHostResult;
+  /** Extra layout classes (spacing only); palette and size stay fixed. */
+  className?: string;
 }
 
-export function SyncCodeHostNote({ syncCode }: SyncCodeHostNoteProps) {
-  const result = parseSyncCodeApiHost(syncCode);
+const BASE_CLASS = "moo-sync-host-note";
 
+export function SyncCodeHostNote({
+  result,
+  className = "",
+}: SyncCodeHostNoteProps) {
   if (result.kind === "none") return null;
+
+  const classes = className ? `${BASE_CLASS} ${className}` : BASE_CLASS;
 
   if (result.kind === "invalid") {
     return (
       <p
         role="alert"
-        className="moo-sync-host-note moo-sync-host-note--invalid"
+        className={`${classes} moo-sync-host-note--invalid`}
         data-testid="sync-code-host-note-invalid"
       >
         ⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認
@@ -38,7 +51,7 @@ export function SyncCodeHostNote({ syncCode }: SyncCodeHostNoteProps) {
   }
 
   return (
-    <p className="moo-sync-host-note" data-testid="sync-code-host-note">
+    <p className={classes} data-testid="sync-code-host-note">
       此同步碼將連線至自訂伺服器：
       <span className="moo-sync-host-note__host">{result.endpoint}</span>
     </p>

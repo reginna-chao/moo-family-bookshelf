@@ -23,6 +23,20 @@ function buildTargetLabel(pending: PendingEndpointSwitch): string {
   return "將切換至";
 }
 
+/**
+ * Panel title. 「已變更」 only holds for the adopt-a-custom-endpoint direction:
+ * the revert direction also fires when the family record NEVER carried an
+ * endpoint — a LAN self-hoster's record cannot hold one at all (the Worker
+ * rejects private addresses, see shared/src/api/endpointUrl.ts), so every
+ * member would be told something changed when nothing ever did. State the
+ * record's condition instead, which is true whether the owner cleared it or it
+ * was never populated.
+ */
+function buildTitle(pending: PendingEndpointSwitch): string {
+  if (pending.isDefaultTarget) return "⚠️ 家庭未指定 API 端點";
+  return "⚠️ 家庭 API 端點已變更";
+}
+
 export interface EndpointSwitchPanelProps {
   /** The switch awaiting a decision; `null` when there is nothing to ask. */
   pending: PendingEndpointSwitch | null;
@@ -68,6 +82,7 @@ export function EndpointSwitchPanel({
   if (!pending) return null;
 
   const targetLabel = buildTargetLabel(pending);
+  const title = buildTitle(pending);
 
   return (
     <div
@@ -75,7 +90,7 @@ export function EndpointSwitchPanel({
       className="moo-endpoint-switch"
       data-testid="endpoint-switch"
     >
-      <div className="moo-endpoint-switch__title">⚠️ 家庭 API 端點已變更</div>
+      <div className="moo-endpoint-switch__title">{title}</div>
       <div className="moo-endpoint-switch__label">目前連線</div>
       <div className="moo-endpoint-switch__endpoint">{pending.current}</div>
       <div className="moo-endpoint-switch__label">{targetLabel}</div>
