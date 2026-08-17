@@ -9,6 +9,7 @@
  *   verifyfail:{userId}:{callerKey} → VerifyFailRecord (per-caller failure accounting, TTL 900s)
  *   borrow:{requestId} → BorrowRequest (JSON)
  *   borrows:family:{familyId} → string[] (requestId index)
+ *   publicshelves:{userId} → PublicShelvesRecord (public-shelf pointer list, persistent)
  *   public:{shareToken} → PublicShelfSnapshot (plaintext public bookshelf, optional TTL)
  */
 
@@ -56,6 +57,7 @@ export const kvKeys = {
   qrToken: (token: string) => `qr:${token}`,
   borrow: (requestId: string) => `borrow:${requestId}`,
   borrowsByFamily: (familyId: string) => `borrows:family:${familyId}`,
+  publicShelves: (userId: string) => `publicshelves:${userId}`,
   publicShelf: (token: string) => `public:${token}`,
 } as const;
 
@@ -152,6 +154,26 @@ export interface PublicShelf {
   selectionMode: SelectionMode;
 }
 
+/**
+ * `publicshelves:{userId}` — the single source of truth for a user's public
+ * shelves (and therefore for every live share token).
+ *
+ * Split out of `user:{userId}` on purpose: that record is a read-modify-write
+ * blob with no CAS, and the books hot path (`PUT`/`PATCH /api/user/:id/books`)
+ * rewrites it wholesale. With the shelf list living inside it, a books sync
+ * carrying a stale read (KV cross-colo reads can lag ~60s) could roll a
+ * revoked share token back to life and re-publish a snapshot the owner had
+ * just deleted. Only the four public-shelf write handlers write THIS key, so
+ * no books/family-prefs save can ever roll it back.
+ *
+ * Lazy migration: absent key ⇒ fall back to the legacy
+ * `UserBooksRecord.publicSharing` field; the next public-shelf write handler
+ * call creates it. See `resolvePublicShelves` in `services/publicShelf.ts`.
+ */
+export interface PublicShelvesRecord {
+  shelves: PublicShelf[];
+}
+
 export interface PublicShelfSnapshot {
   userId: string;
   shelfId: string;
@@ -169,6 +191,18 @@ export interface UserBooksRecord {
   displayName: string;
   books: BookEntry[];
   lastUpdated: string;
+  /**
+   * LEGACY location of the public-shelf list, superseded by
+   * `publicshelves:{userId}` (`PublicShelvesRecord`).
+   *
+   * Retained ONLY as the lazy-migration read fallback, consulted when the
+   * pointer key does not exist. No code writes it anymore: the public-shelf
+   * handlers write the pointer key instead, and the PUT books handler drops
+   * this field from the rebuilt record once the pointer key exists (PATCH
+   * likewise strips it from the carried-over record). An un-migrated user
+   * keeps it until their first public-shelf write, after which it is inert —
+   * a non-null pointer record always wins, even when its `shelves` is empty.
+   */
   publicSharing?: { shelves: PublicShelf[] };
   /**
    * Per-viewer private family-shelf preferences (v1.5.0+).

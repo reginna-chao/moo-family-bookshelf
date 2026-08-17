@@ -7,10 +7,14 @@ import {
   normalizeFamilyRecord,
   type UserBooksRecord,
   type PublicShelf,
+  type PublicShelvesRecord,
   type BookEntry,
   MAX_FAMILY_PREF_ENTRIES,
 } from "../kv/schema";
-import { writePublicSnapshot } from "../services/publicShelf";
+import {
+  writePublicSnapshot,
+  resolvePublicShelves,
+} from "../services/publicShelf";
 import {
   isValidUserId,
   isJsonObject,
@@ -23,6 +27,14 @@ import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
 
+/**
+ * Refresh the `public:{shareToken}` snapshot of every shelf in `shelves`.
+ *
+ * The shelf list is passed in explicitly and must come from
+ * `resolvePublicShelves` — the authority is `publicshelves:{userId}`, which
+ * this module only ever READS. Rebuilding it from the user record here would
+ * reopen the lost-update hole the pointer key exists to close.
+ */
 async function updateAllPublicSnapshots(
   kv: KVNamespace,
   userId: string,
@@ -470,11 +482,16 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     };
   }
 
-  // Read user record + family membership in parallel (independent reads).
-  const [existing, memberFamilyId] = await Promise.all([
+  // Read user record + family membership + public-shelf pointer in parallel
+  // (independent reads). The pointer key is READ-ONLY here: this path must
+  // never write it, which is what keeps a stale-read books save from rolling a
+  // revoked share token back to life.
+  const [existing, memberFamilyId, publicShelvesPointer] = await Promise.all([
     c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json"),
     c.env.KV.get(kvKeys.member(userId)),
+    c.env.KV.get<PublicShelvesRecord>(kvKeys.publicShelves(userId), "json"),
   ]);
+  const publicShelves = resolvePublicShelves(publicShelvesPointer, existing);
 
   // Resolve displayName: family record is authoritative when the user is in a family
   // (even an empty value, which represents a deliberate clear). Only fall back to the
@@ -495,15 +512,27 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     displayName: serverDisplayName,
     books: parsedBooks.books,
     lastUpdated: new Date().toISOString(),
-    publicSharing: existing?.publicSharing,
     familyShelfPrefs: parsedPrefs ?? existing?.familyShelfPrefs,
   };
 
+  // Legacy `publicSharing` field: carried over only while the pointer key does
+  // not exist yet (an un-migrated user's links still resolve through it, so
+  // dropping it here would revoke them). Once migrated, the field is omitted
+  // and evaporates on this save — no reader consults it anymore.
+  if (publicShelves.source !== "pointer" && existing?.publicSharing) {
+    record.publicSharing = existing.publicSharing;
+  }
+
   await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
 
-  // Update public shelf snapshots for all active shelves
-  const shelves = record.publicSharing?.shelves ?? [];
-  await updateAllPublicSnapshots(c.env.KV, userId, shelves, record.books);
+  // Refresh the snapshots of the RESOLVED shelves (pointer key first), never of
+  // whatever shelf list this record happens to carry.
+  await updateAllPublicSnapshots(
+    c.env.KV,
+    userId,
+    publicShelves.shelves,
+    record.books,
+  );
 
   return c.json({ data: record });
 });
@@ -579,10 +608,15 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
     return jsonError(c, 400, nameCheck.code, nameCheck.message);
   }
 
-  // Read existing record + family membership in parallel
-  const [existing, memberFamilyId] = await Promise.all([
+  // Read existing record + family membership + public-shelf pointer in
+  // parallel. The pointer read is only NEEDED after the no-op short-circuit
+  // below, but it stays in this batch on purpose: deferring it would cost the
+  // normal path an extra sequential round-trip, and the waste on a no-op PATCH
+  // is one small parallel read. Like PUT, this path never WRITES the pointer.
+  const [existing, memberFamilyId, publicShelvesPointer] = await Promise.all([
     c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json"),
     c.env.KV.get(kvKeys.member(userId)),
+    c.env.KV.get<PublicShelvesRecord>(kvKeys.publicShelves(userId), "json"),
   ]);
 
   if (!existing) {
@@ -617,18 +651,31 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
         )
       : existing.displayName;
 
+  // Strip the legacy `publicSharing` field out of the carried-over record and
+  // put it back only while the pointer key does not exist yet — same rule as
+  // PUT: an un-migrated user still resolves their links through it, a migrated
+  // user has no reader left that would consult it.
+  const publicShelves = resolvePublicShelves(publicShelvesPointer, existing);
+  const { publicSharing: legacyPublicSharing, ...carried } = existing;
   const record: UserBooksRecord = {
-    ...existing,
+    ...carried,
     books: updatedBooks,
     displayName,
     lastUpdated: new Date().toISOString(),
   };
+  if (publicShelves.source !== "pointer" && legacyPublicSharing) {
+    record.publicSharing = legacyPublicSharing;
+  }
 
   await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
 
-  // Update public shelf snapshots for all active shelves
-  const shelves = record.publicSharing?.shelves ?? [];
-  await updateAllPublicSnapshots(c.env.KV, userId, shelves, record.books);
+  // Refresh the snapshots of the RESOLVED shelves (pointer key first).
+  await updateAllPublicSnapshots(
+    c.env.KV,
+    userId,
+    publicShelves.shelves,
+    record.books,
+  );
 
   return c.json({ data: { ok: true, applied } });
 });
@@ -715,10 +762,15 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
   // Per-field merge semantics: a field present in the body full-replaces that
   // list; an absent field preserves its existing KV value (protecting live
   // v1.5.0 clients that only send `hidden`). All other record fields — books,
-  // displayName, publicSharing, schemaVersion, lastUpdated — are preserved
-  // untouched, and no public snapshot is written (this is a private per-viewer
-  // preference). Cross-device concurrent edits carry a lost-update risk,
-  // acceptable for the single-user scenario.
+  // displayName, schemaVersion, lastUpdated — are preserved untouched, and no
+  // public snapshot is written (this is a private per-viewer preference).
+  // Cross-device concurrent edits carry a lost-update risk, acceptable for the
+  // single-user scenario.
+  //
+  // The `...existing` spread below may also carry the LEGACY `publicSharing`
+  // field. That is inert once `publicshelves:{userId}` exists — no reader
+  // consults the field then — so this path deliberately pays no pointer read:
+  // it writes no snapshots and cannot revive a revoked share token.
   const existingPrefs = existing.familyShelfPrefs;
   const merged = {
     hidden: parsed.prefs.hidden ?? existingPrefs?.hidden ?? [],
@@ -808,17 +860,22 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     }
   }
 
-  // Collect public shelf tokens for cleanup
-  const userRecord = await c.env.KV.get<UserBooksRecord>(
-    kvKeys.user(userId),
-    "json",
-  );
-  const publicTokens =
-    userRecord?.publicSharing?.shelves?.map((s) => s.shareToken) ?? [];
+  // Collect public shelf tokens for cleanup from the RESOLVED shelf list, so a
+  // migrated account's snapshots are found via the pointer key and an
+  // un-migrated one's via the legacy record field.
+  const [publicShelvesPointer, userRecord] = await Promise.all([
+    c.env.KV.get<PublicShelvesRecord>(kvKeys.publicShelves(userId), "json"),
+    c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json"),
+  ]);
+  const publicTokens = resolvePublicShelves(
+    publicShelvesPointer,
+    userRecord,
+  ).shelves.map((s) => s.shareToken);
 
   // Delete all user data in parallel
   await Promise.all([
     c.env.KV.delete(kvKeys.user(userId)),
+    c.env.KV.delete(kvKeys.publicShelves(userId)),
     c.env.KV.delete(kvKeys.member(userId)),
     deleteAuthToken(c.env.KV, userId),
     ...publicTokens.map((token) => c.env.KV.delete(kvKeys.publicShelf(token))),
