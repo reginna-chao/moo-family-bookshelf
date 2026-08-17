@@ -30,6 +30,10 @@ jobs:
         (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
       )
     runs-on: ubuntu-latest
+    # Same brake as claude-code-review.yml: without it this job inherits
+    # GitHub's 6-hour default. @claude follow-ups run the same model with the
+    # same cost profile, so the ceiling belongs on both entry points.
+    timeout-minutes: 20
     # claude-code-action creates and updates a tracking comment while it works.
     # pull-requests: write covers BOTH PR paths — a PR comment posted through the
     # issues API is governed by the pull-requests scope, and an inline
