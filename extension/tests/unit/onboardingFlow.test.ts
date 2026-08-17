@@ -20,21 +20,28 @@ vi.mock("@/crypto/syncCode", () => ({
 import {
   performJoin,
   performSoloRecovery,
+  restoreApiEndpoint,
   tryAutoRecovery,
   createNewFamily,
 } from "@/dialog/onboardingFlow";
 import { decodeSyncCode } from "@/crypto/syncCode";
+import { validateEndpointUrl } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
 import {
-  DEFAULT_API_ENDPOINT,
-  USER_ID_KEY,
+  API_ENDPOINT_KEY,
   AUTH_TOKEN_KEY,
-  TOKEN_EXPIRES_AT_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
+  DEFAULT_API_ENDPOINT,
   FAMILY_ID_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  USER_ID_KEY,
 } from "@/constants";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
+  // Mirrors the real client: setEndpoint is what getEndpoint reports back, so
+  // callers that persist `getEndpoint()` after a switch see the new value.
+  let endpoint = DEFAULT_API_ENDPOINT;
   return {
     joinFamily: vi.fn().mockResolvedValue({
       data: { authToken: "tok", expiresAt: 9999999999 },
@@ -51,8 +58,10 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     setAuthToken: vi.fn(),
     // Default endpoint so createNewFamily does NOT take the custom-endpoint path.
-    getEndpoint: vi.fn().mockReturnValue(DEFAULT_API_ENDPOINT),
-    setEndpoint: vi.fn(),
+    getEndpoint: vi.fn(() => endpoint),
+    setEndpoint: vi.fn((url: string) => {
+      endpoint = url;
+    }),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -399,7 +408,14 @@ describe("performJoin", () => {
     });
   });
 
-  it("updates api endpoint and sends SET_API_ENDPOINT when decoded.apiHost is set", async () => {
+  /**
+   * Pasting an `@host` sync code IS an explicit choice of that endpoint, so the
+   * join path persists it through the same helper the Settings confirmation
+   * uses: a DIRECT storage.local write (authoritative — a sleeping Firefox
+   * background page can drop the message) plus a best-effort SET_API_ENDPOINT
+   * message. It also clears any stale "declined family endpoint" marker.
+   */
+  it("adopts, persists, and broadcasts the endpoint when decoded.apiHost is set", async () => {
     vi.mocked(decodeSyncCode).mockReturnValue({
       familyId: "fam-join-1",
       apiHost: "https://custom.example.com",
@@ -417,11 +433,310 @@ describe("performJoin", () => {
     expect(apiClient.setEndpoint).toHaveBeenCalledWith(
       "https://custom.example.com",
     );
+    // The stored value is the client's normalised endpoint, not the raw segment.
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({
+      [API_ENDPOINT_KEY]: "https://custom.example.com",
+    });
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+      DECLINED_FAMILY_ENDPOINT_KEY,
+    ]);
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "SET_API_ENDPOINT",
         apiEndpoint: "https://custom.example.com",
       }),
+    );
+  });
+
+  it("leaves the endpoint alone when the sync code carries no @host", async () => {
+    vi.mocked(decodeSyncCode).mockReturnValue({ familyId: "fam-join-1" });
+
+    const apiClient = createMockApiClient();
+
+    await performJoin({
+      syncCodeInput: "moo-fam-join-1",
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+    });
+
+    expect(apiClient.setEndpoint).not.toHaveBeenCalled();
+    expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+      expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
+    );
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "SET_API_ENDPOINT" }),
+    );
+  });
+
+  /**
+   * A sync code's `@host` is attacker-supplied text: whoever shares the code
+   * chooses where the joiner's auth token and full book list are sent. It is
+   * adopted through `setEndpoint`, i.e. the production `validateEndpointUrl`
+   * allowlist — which now also refuses embedded credentials, so
+   * `https://real.example@evil.com` (reads as real.example, fetches evil.com)
+   * throws instead of being adopted.
+   *
+   * When it throws, the join must ABORT: no endpoint stored, no join request,
+   * no credentials persisted, and the client left on the endpoint it already
+   * trusted. `PerformJoinFailure` carries a Chinese message so the UI never
+   * surfaces the raw English `Error`.
+   */
+  describe("an @host the endpoint validator refuses", () => {
+    /**
+     * The refusal path logs the underlying reason. Silenced here so the suite
+     * stays readable, and restored after each test so no other file inherits a
+     * muted console.
+     */
+    let warn: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warn.mockRestore();
+    });
+
+    /**
+     * Mock client whose `setEndpoint` runs the REAL validator, so these tests
+     * fail if the production allowlist ever stops rejecting these URLs.
+     */
+    function createValidatingApiClient(): ApiClient {
+      let endpoint = DEFAULT_API_ENDPOINT;
+      return createMockApiClient({
+        getEndpoint: vi.fn(() => endpoint),
+        setEndpoint: vi.fn((url: string) => {
+          endpoint = validateEndpointUrl(url);
+        }),
+      });
+    }
+
+    const refusedHosts: Array<[string, string]> = [
+      ["a userinfo masquerade", "https://real.example@evil.com"],
+      ["embedded user:password credentials", "https://user:pass@evil.com"],
+      ["plain HTTP on a public host", "http://evil.example.com"],
+      ["a non-HTTP scheme", "ftp://files.example.com"],
+      // App-generated codes always carry a full URL; a scheme-less host was
+      // never adoptable (`new URL()` throws), so aborting is not a regression.
+      ["a bare host with no scheme", "my-worker.example.com"],
+    ];
+
+    it.each(refusedHosts)(
+      "aborts the join with INVALID_ENDPOINT for %s",
+      async (_label, apiHost) => {
+        vi.mocked(decodeSyncCode).mockReturnValue({
+          familyId: "fam-join-1",
+          apiHost,
+        });
+        const apiClient = createValidatingApiClient();
+
+        const result = await performJoin({
+          syncCodeInput: `moo-fam-join-1@${apiHost}`,
+          userId: "user-x",
+          displayName: "Name",
+          apiClient,
+        });
+
+        expect(result).toEqual({
+          ok: false,
+          errorCode: "INVALID_ENDPOINT",
+          errorMessage: "此同步碼的伺服器位址無效或不安全，無法加入",
+        });
+      },
+    );
+
+    it.each(refusedHosts)(
+      "persists nothing and never contacts the backend for %s",
+      async (_label, apiHost) => {
+        vi.mocked(decodeSyncCode).mockReturnValue({
+          familyId: "fam-join-1",
+          apiHost,
+        });
+        const apiClient = createValidatingApiClient();
+
+        await performJoin({
+          syncCodeInput: `moo-fam-join-1@${apiHost}`,
+          userId: "user-x",
+          displayName: "Name",
+          apiClient,
+        });
+
+        expect(apiClient.joinFamily).not.toHaveBeenCalled();
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(chrome.storage.local.remove).not.toHaveBeenCalled();
+        expect(chrome.storage.sync.set).not.toHaveBeenCalled();
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+      },
+    );
+
+    it("leaves the client on the endpoint it was already using", async () => {
+      vi.mocked(decodeSyncCode).mockReturnValue({
+        familyId: "fam-join-1",
+        apiHost: "https://real.example@evil.com",
+      });
+      const apiClient = createValidatingApiClient();
+
+      await performJoin({
+        syncCodeInput: "moo-fam-join-1@https://real.example@evil.com",
+        userId: "user-x",
+        displayName: "Name",
+        apiClient,
+      });
+
+      // setEndpoint throws BEFORE assigning, so the previous endpoint stands.
+      expect(apiClient.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+    });
+
+    /**
+     * The user-facing copy is deliberately generic ("無效或不安全"), so without
+     * this log the reason a join was refused is unrecoverable — a self-hoster
+     * debugging "why won't my family's code work?" has nothing to go on.
+     */
+    it.each(refusedHosts)(
+      "logs why the join was refused for %s",
+      async (_label, apiHost) => {
+        vi.mocked(decodeSyncCode).mockReturnValue({
+          familyId: "fam-join-1",
+          apiHost,
+        });
+
+        await performJoin({
+          syncCodeInput: `moo-fam-join-1@${apiHost}`,
+          userId: "user-x",
+          displayName: "Name",
+          apiClient: createValidatingApiClient(),
+        });
+
+        expect(warn).toHaveBeenCalledWith(
+          "[Onboarding] Sync code endpoint rejected",
+          expect.any(Error),
+        );
+      },
+    );
+
+    it("logs nothing when the @host is acceptable", async () => {
+      vi.mocked(decodeSyncCode).mockReturnValue({
+        familyId: "fam-join-1",
+        apiHost: "https://custom.example.com",
+      });
+
+      await performJoin({
+        syncCodeInput: "moo-fam-join-1@https://custom.example.com",
+        userId: "user-x",
+        displayName: "Name",
+        apiClient: createValidatingApiClient(),
+      });
+
+      expect(warn).not.toHaveBeenCalledWith(
+        "[Onboarding] Sync code endpoint rejected",
+        expect.anything(),
+      );
+    });
+
+    it("adopts the NORMALIZED URL when the @host is acceptable", async () => {
+      vi.mocked(decodeSyncCode).mockReturnValue({
+        familyId: "fam-join-1",
+        apiHost: "https://CUSTOM.Example.COM:443/api/",
+      });
+      const apiClient = createValidatingApiClient();
+
+      const result = await performJoin({
+        syncCodeInput: "moo-fam-join-1@https://CUSTOM.Example.COM:443/api/",
+        userId: "user-x",
+        displayName: "Name",
+        apiClient,
+      });
+
+      expect(result).toEqual({
+        ok: true,
+        familyId: "fam-join-1",
+        userId: "user-x",
+      });
+      // Stored in the same canonical form the endpoint-switch path persists, so
+      // the two cannot later disagree about "the same" endpoint.
+      expect(apiClient.getEndpoint()).toBe("https://custom.example.com/api");
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [API_ENDPOINT_KEY]: "https://custom.example.com/api",
+      });
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "SET_API_ENDPOINT",
+          apiEndpoint: "https://custom.example.com/api",
+        }),
+      );
+    });
+  });
+
+  /**
+   * ENDPOINT LIFETIME, backend-refusal half. The `@host` is applied in memory
+   * (the join request has to go there) but is PERSISTED only once the backend
+   * accepts: a host whose server said "no" has proven nothing, and a persisted
+   * endpoint outlives the attempt — it would still be in force when the user
+   * gives up and presses 建立家庭, shipping the userId, the token create issues
+   * and the whole book list there.
+   *
+   * The in-memory endpoint deliberately STAYS adopted here, because a
+   * verification challenge is a continuation of the same attempt (it queries
+   * that same server for the account's method). Handing it back is the caller's
+   * job — pinned in tests/unit/useOnboardingFlow.test.ts → "handleJoin endpoint
+   * lifetime (@host adoption and rollback)".
+   */
+  describe("a backend that refuses the join", () => {
+    const REFUSED_HOST = "https://attacker.example";
+
+    async function joinRefusedBy(errorCode: string): Promise<ApiClient> {
+      vi.mocked(decodeSyncCode).mockReturnValue({
+        familyId: "fam-join-1",
+        apiHost: REFUSED_HOST,
+      });
+      const apiClient = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: errorCode, message: "拒絕" },
+        }),
+      });
+
+      await performJoin({
+        syncCodeInput: `moo-fam-join-1@${REFUSED_HOST}`,
+        userId: "user-x",
+        displayName: "Name",
+        apiClient,
+      });
+      return apiClient;
+    }
+
+    const refusals = [
+      ["a terminal refusal", "FAMILY_NOT_FOUND"],
+      ["a verification challenge", "VERIFICATION_REQUIRED"],
+      ["a rate limit", "RATE_LIMITED"],
+    ] as const;
+
+    it.each(refusals)(
+      "persists no endpoint after %s",
+      async (_label, errorCode) => {
+        await joinRefusedBy(errorCode);
+
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+          expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
+        );
+        // The declined marker is dropped only by an ACCEPTED switch; a refused
+        // join must not silently clear the user's earlier refusal either.
+        expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
+          DECLINED_FAMILY_ENDPOINT_KEY,
+        ]);
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+          expect.objectContaining({ type: "SET_API_ENDPOINT" }),
+        );
+      },
+    );
+
+    it.each(refusals)(
+      "leaves the @host applied in memory after %s, for the caller to release",
+      async (_label, errorCode) => {
+        const apiClient = await joinRefusedBy(errorCode);
+
+        expect(apiClient.getEndpoint()).toBe(REFUSED_HOST);
+      },
     );
   });
 
@@ -449,6 +764,65 @@ describe("performJoin", () => {
         familyId: "fam-join-1",
       }),
     );
+  });
+});
+
+/**
+ * `restoreApiEndpoint` hands the in-memory client back to the endpoint an
+ * abandoned join attempt started from. It touches the client ONLY: performJoin
+ * persists a sync code's `@host` after the backend accepts, so an attempt that
+ * ended without a join has nothing durable to undo.
+ *
+ * It runs on error paths, where a throw would replace the failure the caller is
+ * in the middle of reporting — so a refusing setEndpoint must be swallowed and
+ * logged, never propagated.
+ */
+describe("restoreApiEndpoint", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("puts the client back on the given endpoint", () => {
+    const apiClient = createMockApiClient();
+    apiClient.setEndpoint("https://attacker.example");
+
+    restoreApiEndpoint(apiClient, DEFAULT_API_ENDPOINT);
+
+    expect(apiClient.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+  });
+
+  it("writes nothing to storage and sends no message", () => {
+    const apiClient = createMockApiClient();
+
+    restoreApiEndpoint(apiClient, DEFAULT_API_ENDPOINT);
+
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    expect(chrome.storage.local.remove).not.toHaveBeenCalled();
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("swallows and logs a setEndpoint that throws, instead of masking the caller's failure", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const boom = new Error("endpoint rejected");
+    const apiClient = createMockApiClient({
+      setEndpoint: vi.fn(() => {
+        throw boom;
+      }),
+    });
+
+    expect(() =>
+      restoreApiEndpoint(apiClient, "https://unreachable.example"),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(
+      "[Onboarding] Failed to restore previous API endpoint",
+      boom,
+    );
+
+    warn.mockRestore();
   });
 });
 

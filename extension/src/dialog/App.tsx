@@ -8,8 +8,13 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   FAMILY_ID_KEY,
   HAS_COMPLETED_INITIAL_SETUP_KEY,
+  DEFAULT_API_ENDPOINT,
 } from "../constants";
 import { readFamilyId } from "../storage/familyId";
+import {
+  readStoredApiEndpoint,
+  resetFamilyEndpointChoice,
+} from "../storage/familyEndpointChoice";
 import { safeStorageGet } from "../storage/safeStorage";
 import { Onboarding } from "./Onboarding";
 import { PersonalShelf } from "./PersonalShelf";
@@ -97,29 +102,23 @@ export function App({
       return;
     }
 
-    // Load familyId, userId, and custom API endpoint on mount.
-    // familyId + userId come from DIRECT storage reads (reliable in Firefox,
-    // where the non-persistent background event page sleeps and its message
-    // round-trips fail). The API endpoint still goes through the background
-    // message, but its result is decoupled so a rejected/undefined response
-    // falls back to the default endpoint instead of forcing onboarding.
+    // Load familyId, userId, and the accepted API endpoint on mount — all three
+    // from DIRECT storage reads. Message round-trips are unreliable in Firefox,
+    // whose non-persistent background event page sleeps; the endpoint used to
+    // go through GET_API_ENDPOINT and silently fall back to the default, which
+    // booted the dialog on the wrong backend for a member who had accepted a
+    // custom one.
     let cancelled = false;
     void (async () => {
       try {
-        const [familyId, storageResult, apiResult] = await Promise.all([
+        const [familyId, storageResult, storedEndpoint] = await Promise.all([
           readFamilyId(),
           browser.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY]),
-          Promise.resolve(
-            browser.runtime.sendMessage({
-              type: "GET_API_ENDPOINT",
-            }) as Promise<{ apiEndpoint?: string } | undefined>,
-          ).catch(() => undefined),
+          readStoredApiEndpoint(),
         ]);
         if (cancelled) return;
 
-        if (apiResult?.apiEndpoint) {
-          apiClientRef.current.setEndpoint(apiResult.apiEndpoint);
-        }
+        applyStoredEndpoint(apiClientRef.current, storedEndpoint);
         if (storageResult[AUTH_TOKEN_KEY]) {
           apiClientRef.current.setAuthToken(
             storageResult[AUTH_TOKEN_KEY] as string,
@@ -177,6 +176,16 @@ export function App({
       AUTH_TOKEN_KEY,
       TOKEN_EXPIRES_AT_KEY,
     ]);
+    // The API endpoint is a FAMILY-scoped setting — the owner picks it, every
+    // member adopts it — so it must not outlive the membership. Reset the stored
+    // choice AND the live client: a family-less client still pointed at the old
+    // family's server would send the next create/join (userId, display name, the
+    // token that server issues, the whole personal book list) there, and would
+    // bake that host into the sync code it then hands out. Account deletion
+    // reaches this same handler after a storage.local.clear(), where the storage
+    // half is simply a no-op.
+    void resetFamilyEndpointChoice();
+    apiClientRef.current.setEndpoint(DEFAULT_API_ENDPOINT);
     void (async () => {
       try {
         await browser.storage.sync.remove(FAMILY_ID_KEY);
@@ -438,6 +447,23 @@ function MainContent({
       <DialogFooter />
     </div>
   );
+}
+
+/**
+ * Point the client at the endpoint the user has accepted, if any.
+ *
+ * A stored value the client refuses (hand-edited storage, or written by an
+ * older build with looser rules) must not derail the whole boot read into the
+ * catch below — that would drop a member with a family into onboarding. Degrade
+ * to the default endpoint instead.
+ */
+function applyStoredEndpoint(client: ApiClient, endpoint: string | null): void {
+  if (endpoint === null) return;
+  try {
+    client.setEndpoint(endpoint);
+  } catch (err) {
+    console.warn("[App] Ignoring unusable stored API endpoint", err);
+  }
 }
 
 /** Class for a tab panel; only the active panel is displayed. */

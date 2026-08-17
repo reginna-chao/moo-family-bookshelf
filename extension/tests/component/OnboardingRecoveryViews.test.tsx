@@ -213,6 +213,84 @@ describe("RecoveryJoinView", () => {
     expect(screen.getByPlaceholderText("輸入家庭同步碼")).toBeDisabled();
     expect(screen.getByRole("button", { name: "返回" })).toBeDisabled();
   });
+
+  // The recovery path accepts the same @host codes as onboarding, so it names
+  // the server the code points at before the user rejoins.
+  it("names the host while a sync code carrying @host is typed", () => {
+    render(
+      <RecoveryJoinView
+        {...defaultProps}
+        syncCodeInput="moo-ab12-cd34@https://custom.example.com"
+      />,
+    );
+
+    const note = screen.getByTestId("sync-code-host-note");
+    expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+    // The canonical endpoint — what the join path would actually adopt.
+    expect(note).toHaveTextContent("https://custom.example.com");
+  });
+
+  it("shows the canonical endpoint, not the raw @host segment", () => {
+    render(
+      <RecoveryJoinView
+        {...defaultProps}
+        syncCodeInput="moo-ab12-cd34@https://CUSTOM.Example.COM:443/api"
+      />,
+    );
+
+    const note = screen.getByTestId("sync-code-host-note");
+    expect(note).toHaveTextContent("https://custom.example.com/api");
+    expect(note.textContent).not.toContain("CUSTOM.Example.COM");
+    expect(note.textContent).not.toContain(":443");
+  });
+
+  it("shows no host note for a default-endpoint sync code", () => {
+    render(
+      <RecoveryJoinView {...defaultProps} syncCodeInput="moo-ab12-cd34" />,
+    );
+
+    expect(screen.queryByTestId("sync-code-host-note")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sync-code-host-note-invalid"),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * Recovery is the screen a user reaches when something already went wrong, so
+   * a spoofed `@host` must be called out here too rather than presented as the
+   * server they are about to hand their book list to.
+   */
+  it("warns instead of naming the host when the @host would be refused", () => {
+    render(
+      <RecoveryJoinView
+        {...defaultProps}
+        syncCodeInput="moo-ab12-cd34@https://real.example@evil.com"
+      />,
+    );
+
+    const warning = screen.getByTestId("sync-code-host-note-invalid");
+    expect(warning).toHaveAttribute("role", "alert");
+    expect(warning).toHaveTextContent(
+      "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認",
+    );
+    expect(screen.queryByTestId("sync-code-host-note")).not.toBeInTheDocument();
+    expect(warning.textContent).not.toContain("real.example");
+  });
+
+  it.each([
+    // Bare hosts were ALWAYS refused at adoption (`new URL()` needs a scheme).
+    ["a bare host with no scheme", "moo-ab12-cd34@my-worker.example.com"],
+    ["plain HTTP on a public host", "moo-ab12-cd34@http://evil.example.com"],
+  ])("warns about %s", (_label, syncCodeInput) => {
+    render(
+      <RecoveryJoinView {...defaultProps} syncCodeInput={syncCodeInput} />,
+    );
+
+    expect(
+      screen.getByTestId("sync-code-host-note-invalid"),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("sync-code-host-note")).not.toBeInTheDocument();
+  });
 });
 
 describe("SoloRecoveryConfirmView", () => {

@@ -6,6 +6,13 @@
  *   moo-{familyId}@{host}   (custom API endpoint)
  */
 
+import {
+  classifySyncCodeApiHost,
+  type SyncCodeApiHostResult,
+} from "moo-family-bookshelf-shared/api/syncCodeHost";
+
+export type { SyncCodeApiHostResult };
+
 export interface SyncCodeData {
   familyId: string;
   apiHost?: string;
@@ -62,6 +69,26 @@ export function decodeSyncCode(code: string): SyncCodeData {
   }
 
   return { familyId, apiHost };
+}
+
+/**
+ * Best-effort inspection of the `@host` segment for DISPLAY purposes (telling
+ * the user which server a pasted sync code will connect to before they join).
+ *
+ * Never throws: partial / malformed input while the user is still typing yields
+ * `{ kind: "none" }`. Use `decodeSyncCode` when the failure matters. The
+ * verdict itself comes from the shared classifier, which runs the same
+ * validation the join path adopts — so the note reflects what would actually be
+ * adopted, not the raw string, and cannot drift from the PWA's note.
+ */
+export function parseSyncCodeApiHost(code: string): SyncCodeApiHostResult {
+  let apiHost: string | undefined;
+  try {
+    apiHost = decodeSyncCode(code).apiHost;
+  } catch {
+    return { kind: "none" };
+  }
+  return classifySyncCodeApiHost(apiHost);
 }
 
 export class SyncCodeError extends Error {

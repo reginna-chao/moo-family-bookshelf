@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { decodeSyncCode, encodeSyncCode } from "@/crypto/syncCode";
 import { PAGE_HASHES } from "@/routes";
 
@@ -38,11 +39,26 @@ export function namespacedKey(userId: string, suffix: string): string {
   return `moo:${userId}:${suffix}`;
 }
 
+/**
+ * Canonical, adoptable form of an API host, or `null` when the client refuses
+ * it. Same verdict the join paths use, so neither storage nor the in-memory
+ * session can hold an endpoint the ApiClient would reject.
+ */
+function safeApiHost(apiHost: string | undefined): string | null {
+  const result = classifySyncCodeApiHost(apiHost);
+  return result.kind === "valid" ? result.endpoint : null;
+}
+
 function saveToStorage(data: AuthState): void {
   localStorage.setItem(USER_ID_KEY, data.userId);
   localStorage.setItem(namespacedKey(data.userId, "familyId"), data.familyId);
-  if (data.apiHost) {
-    localStorage.setItem(namespacedKey(data.userId, "apiHost"), data.apiHost);
+  // Last line of defence for "never persist a refused host": the join paths
+  // already stop one, and what does get written is the canonical form, so the
+  // remembered sync code rebuilt from it carries the same value the Extension
+  // would store.
+  const apiHost = safeApiHost(data.apiHost);
+  if (apiHost) {
+    localStorage.setItem(namespacedKey(data.userId, "apiHost"), apiHost);
   } else {
     localStorage.removeItem(namespacedKey(data.userId, "apiHost"));
   }
@@ -61,10 +77,20 @@ function loadFromStorage(): AuthState | null {
   if (!userId) return null;
 
   const familyId = localStorage.getItem(namespacedKey(userId, "familyId"));
-  const apiHost = localStorage.getItem(namespacedKey(userId, "apiHost"));
+  const storedApiHost =
+    localStorage.getItem(namespacedKey(userId, "apiHost")) || "";
   const authToken = localStorage.getItem(namespacedKey(userId, "authToken"));
 
   if (!familyId) {
+    return null;
+  }
+
+  // A stored endpoint the client now refuses (written by a build predating the
+  // credentials check) must not be restored: `new ApiClient(apiHost)` throws,
+  // which would take the whole app down rather than just the session. Drop the
+  // session instead and let the user re-enter a sync code.
+  const apiHost = safeApiHost(storedApiHost);
+  if (storedApiHost && apiHost === null) {
     return null;
   }
 
@@ -242,8 +268,30 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const login = useCallback((data: AuthState): void => {
-    saveToStorage(data);
-    setAuth(data);
+    const apiHost = safeApiHost(data.apiHost);
+
+    // Fail closed, exactly like loadFromStorage. saveToStorage refuses an
+    // unusable host on its own, but setAuth used to keep the raw one — a
+    // half-state where App's `new ApiClient(auth.apiHost)` throws (white screen)
+    // and, after a reload, the session silently comes back against the DEFAULT
+    // endpoint. Neither is a session worth starting.
+    if (data.apiHost && apiHost === null) {
+      console.warn(
+        "[useAuth] Refusing to start a session on an unusable endpoint",
+      );
+      return;
+    }
+
+    // Store the CANONICAL host in React state too, so `auth.apiHost` cannot
+    // differ from the persisted value across a reload.
+    const session: AuthState = { ...data };
+    if (apiHost === null) {
+      delete session.apiHost;
+    } else {
+      session.apiHost = apiHost;
+    }
+    saveToStorage(session);
+    setAuth(session);
   }, []);
 
   const logout = useCallback((): void => {

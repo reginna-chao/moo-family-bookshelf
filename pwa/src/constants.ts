@@ -6,9 +6,23 @@
  * VITE_PWA_API_ENDPOINT is set via root .env files
  */
 
-export const DEFAULT_API_ENDPOINT: string =
+import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
+
+/**
+ * Canonicalised at definition so it lives in the same comparison space as
+ * `ApiClient.getEndpoint()` — `VersionWarning` compares the two directly, and a
+ * build-time env value with a trailing slash would otherwise read as a
+ * self-hosted endpoint.
+ *
+ * A build whose env value FAILS validation throws here, at module load. That is
+ * deliberate: `new ApiClient()` already threw on such a value, so the build was
+ * dead either way — failing at the definition names the culprit instead of
+ * surfacing as a mystery error deep in the first request.
+ */
+export const DEFAULT_API_ENDPOINT: string = validateEndpointUrl(
   import.meta.env.VITE_PWA_API_ENDPOINT ||
-  "https://moo-family-bookshelf.rcwork.workers.dev";
+    "https://moo-family-bookshelf.rcwork.workers.dev",
+);
 
 /**
  * Build PWA invite URL with sync code in the fragment (never sent to server).

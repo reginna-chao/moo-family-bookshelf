@@ -15,9 +15,15 @@ import {
   onTestFinished,
 } from "vitest";
 import { Onboarding, OnboardingProps } from "@/dialog/Onboarding";
-import { BoolFlag, type ApiClient } from "@/api/client";
+import { BoolFlag, validateEndpointUrl, type ApiClient } from "@/api/client";
 import { scrapeUserEmail } from "@/content/scraper";
-import { PERSONAL_BOOKS_CACHE_KEY, FAMILY_ID_KEY } from "@/constants";
+import {
+  API_ENDPOINT_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
+  DEFAULT_API_ENDPOINT,
+  FAMILY_ID_KEY,
+  PERSONAL_BOOKS_CACHE_KEY,
+} from "@/constants";
 import { verificationLockedMessage } from "@/dialog/verificationMessages";
 
 import { webcrypto } from "node:crypto";
@@ -45,7 +51,14 @@ vi.mock("@/content/scraper", () => ({
   scrapeBooks: vi.fn().mockResolvedValue([]),
 }));
 
-function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
+function createMockApiClient(
+  overrides: Partial<ApiClient> = {},
+  initialEndpoint = "https://test.workers.dev",
+): ApiClient {
+  // Mirrors the real client: setEndpoint canonicalizes through the same shared
+  // validator and is what getEndpoint reports back, so the join path persists —
+  // and the verification screen discloses — exactly what production would.
+  let endpoint = validateEndpointUrl(initialEndpoint);
   return {
     lookupUser: vi
       .fn()
@@ -72,8 +85,10 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     getVerifyMethod: vi
       .fn()
       .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
-    getEndpoint: vi.fn().mockReturnValue("https://test.workers.dev"),
-    setEndpoint: vi.fn(),
+    getEndpoint: vi.fn(() => endpoint),
+    setEndpoint: vi.fn((url: string) => {
+      endpoint = validateEndpointUrl(url);
+    }),
     setAuthToken: vi.fn(),
     updateFamilyEndpoint: vi.fn().mockResolvedValue({ data: { ok: true } }),
     ...overrides,
@@ -573,7 +588,13 @@ describe("Onboarding", () => {
   });
 
   describe("handleJoin with custom API endpoint", () => {
-    it("sends SET_API_ENDPOINT message when sync code contains @host", async () => {
+    /**
+     * An `@host` sync code is an explicit choice of that server, so joining
+     * persists it directly to storage.local (authoritative — Firefox's sleeping
+     * background page can drop the message) AND still broadcasts
+     * SET_API_ENDPOINT so the rest of the extension follows.
+     */
+    it("persists and broadcasts the endpoint when the sync code contains @host", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
         joinFamily: vi.fn().mockResolvedValue({
@@ -610,6 +631,10 @@ describe("Onboarding", () => {
       });
 
       await waitFor(() => {
+        // The direct storage write is what makes the choice stick.
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          [API_ENDPOINT_KEY]: "https://custom.api.dev",
+        });
         // Verify SET_API_ENDPOINT was sent to chrome.runtime
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -622,6 +647,73 @@ describe("Onboarding", () => {
           "https://custom.api.dev",
         );
       });
+      // Pasting an @host code is an explicit acceptance, so any earlier refusal
+      // of that endpoint is dropped.
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+        DECLINED_FAMILY_ENDPOINT_KEY,
+      ]);
+    });
+
+    /**
+     * The refusal is the whole attack: a server that FAILS the join has proven
+     * nothing, yet an adopted endpoint outlives the attempt. Left in force it
+     * would still be the address when the user gives up and presses 建立家庭 —
+     * shipping the userId, the token that create issues and the entire personal
+     * book list (unshared books included) to that host, which would then be
+     * baked into the sync code handed to the rest of the family.
+     */
+    it("hands the endpoint back and persists nothing when the @host server refuses the join", async () => {
+      const onFamilyJoined = vi.fn();
+      const mockApi = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "FAMILY_NOT_FOUND", message: "找不到這個家庭" },
+        }),
+      });
+
+      renderOnboarding({ onFamilyJoined, apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
+        target: { value: "moo-abcd-efgh@https://attacker.example" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
+        for (let i = 0; i < 10; i++) {
+          vi.advanceTimersByTime(500);
+          await flushMicrotasks();
+        }
+      });
+
+      // The refusal reaches the user…
+      await waitFor(() => {
+        expect(screen.getByText("找不到這個家庭")).toBeInTheDocument();
+      });
+      expect(onFamilyJoined).not.toHaveBeenCalled();
+
+      // …the endpoint was adopted for the request, then handed back.
+      expect(mockApi.setEndpoint).toHaveBeenCalledWith(
+        "https://attacker.example",
+      );
+      expect(mockApi.getEndpoint()).toBe("https://test.workers.dev");
+
+      // Nothing durable was written, so a reload lands on the same endpoint.
+      expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+        expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
+      );
+      expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
+        DECLINED_FAMILY_ENDPOINT_KEY,
+      ]);
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "SET_API_ENDPOINT" }),
+      );
     });
   });
 
@@ -1283,6 +1375,155 @@ describe("Onboarding", () => {
       expect(
         screen.queryByText(verificationLockedMessage(null)),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The verification challenge REPLACES the join screen, taking that screen's
+   * `@host` disclosure with it — precisely when the user is asked to hand a
+   * PIN/pattern to whichever server the sync code named. So the challenge
+   * carries its own note, and its verdict comes from the endpoint the client has
+   * ACTUALLY adopted (never from input text): a sync-code join has already
+   * applied its `@host` by the time the challenge opens, while a create/lookup
+   * challenge is still on the official default and must stay silent.
+   */
+  describe("verification challenge endpoint disclosure", () => {
+    /** A self-hosted family server, written the way a sync code would carry it. */
+    const SELF_HOSTED = "https://nas.example.com/moo/";
+
+    /** Land in idle, paste `syncCode`, press 加入 — the join is refused. */
+    async function joinInto(syncCode: string, mockApi: ApiClient) {
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(
+          screen.getByPlaceholderText("輸入家庭同步碼"),
+        ).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByPlaceholderText("輸入家庭同步碼"), {
+        target: { value: syncCode },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("加入家庭公開書櫃"));
+        await flushMicrotasks();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("需要驗證")).toBeInTheDocument();
+      });
+    }
+
+    it("names the sync code's server above the challenge", async () => {
+      const mockApi = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "VERIFICATION_REQUIRED", message: "verification" },
+        }),
+      });
+
+      await joinInto(`moo-abcd-efgh@${SELF_HOSTED}`, mockApi);
+
+      const note = screen.getByTestId("sync-code-host-note");
+      expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+      // The canonical address the client actually adopted — not the raw `@host`
+      // text, so a trailing slash / uppercase host / IDN cannot make the
+      // disclosure read as a different server from the one being talked to.
+      expect(mockApi.getEndpoint()).toBe(validateEndpointUrl(SELF_HOSTED));
+      expect(note).toHaveTextContent(mockApi.getEndpoint());
+    });
+
+    /**
+     * A create/lookup-triggered challenge never left the official endpoint, so
+     * there is nothing to disclose. Silence matters: a note on EVERY challenge
+     * would train the user to ignore the one that means something.
+     */
+    it("stays silent when the challenge arrives on the official default endpoint", async () => {
+      const mockApi = createMockApiClient(
+        {
+          lookupUser: vi.fn().mockResolvedValue({
+            data: {
+              existingFamilyId: null,
+              memberCount: 0,
+              requiresVerification: BoolFlag.TRUE,
+            },
+          }),
+        },
+        DEFAULT_API_ENDPOINT,
+      );
+
+      renderOnboarding({ apiClient: mockApi });
+
+      // The lookup inside handleStart is what raises this challenge.
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByText("需要驗證")).toBeInTheDocument();
+      });
+      expect(mockApi.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+      expect(
+        screen.queryByTestId("sync-code-host-note"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("sync-code-host-note-invalid"),
+      ).not.toBeInTheDocument();
+      // Nothing else on the challenge announces itself, so an alert here could
+      // only be the note.
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    /**
+     * Defence in depth: `ApiClient.setEndpoint` validates, so `getEndpoint()`
+     * cannot normally return an address the client would refuse. Pinned anyway —
+     * whatever put it there, the note must warn rather than lend a refused host
+     * the legitimacy of the reassuring line.
+     */
+    it("warns instead of naming an adopted endpoint the validator would refuse", async () => {
+      const mockApi = createMockApiClient({
+        getEndpoint: vi.fn(() => "https://real.example@evil.com"),
+        lookupUser: vi.fn().mockResolvedValue({
+          data: {
+            existingFamilyId: null,
+            memberCount: 0,
+            requiresVerification: BoolFlag.TRUE,
+          },
+        }),
+      });
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByText("需要驗證")).toBeInTheDocument();
+      });
+      const warning = screen.getByTestId("sync-code-host-note-invalid");
+      expect(warning).toHaveAttribute("role", "alert");
+      expect(
+        screen.queryByTestId("sync-code-host-note"),
+      ).not.toBeInTheDocument();
+      // Neither the masqueraded name nor the host the browser would reach.
+      expect(warning.textContent).not.toContain("real.example");
+      expect(warning.textContent).not.toContain("evil.com");
+    });
+
+    it("keeps the challenge itself intact alongside the note", async () => {
+      const mockApi = createMockApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: "VERIFICATION_REQUIRED", message: "verification" },
+        }),
+      });
+
+      await joinInto(`moo-abcd-efgh@${SELF_HOSTED}`, mockApi);
+
+      // The disclosure is added ABOVE the prompt, not in place of it.
+      expect(screen.getByTestId("sync-code-host-note")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText("請輸入 PIN 碼")).toBeInTheDocument();
+      });
+      expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
     });
   });
 

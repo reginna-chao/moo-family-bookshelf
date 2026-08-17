@@ -11,6 +11,7 @@
  */
 
 import browser from "webextension-polyfill";
+import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import { BoolFlag } from "../api/client";
 import { normalizeSortMode } from "../dialog/sortBooks";
 import { readFamilyId } from "../storage/familyId";
@@ -258,20 +259,23 @@ async function handleSetApiEndpoint(
     return { ok: 1 };
   }
   if (typeof endpoint === "string") {
-    // Validate URL before storing
+    // One rule set for the whole extension: the shared validator the ApiClient
+    // and the Dialog already use. A local copy here was a third opinion on what
+    // a safe endpoint is — a stricter one, which rejected the private/LAN
+    // addresses the rest of the client happily adopts, so a self-hoster's
+    // background copy silently drifted from the authoritative storage write.
+    let normalized: string;
     try {
-      const parsed = new URL(endpoint);
-      const isHttps = parsed.protocol === "https:";
-      const isLocalHttp =
-        parsed.protocol === "http:" &&
-        (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
-      if (!isHttps && !isLocalHttp) {
-        return { ok: 0, error: "Invalid protocol" };
-      }
-    } catch {
-      return { ok: 0, error: "Invalid URL" };
+      normalized = validateEndpointUrl(endpoint);
+    } catch (err) {
+      return {
+        ok: 0,
+        error: err instanceof Error ? err.message : "Invalid API endpoint",
+      };
     }
-    await browser.storage.local.set({ [API_ENDPOINT_KEY]: endpoint });
+    // Store the canonical form, not the raw string, so this path and the
+    // Dialog's direct write cannot leave two spellings of the same endpoint.
+    await browser.storage.local.set({ [API_ENDPOINT_KEY]: normalized });
     return { ok: 1 };
   }
   return { ok: 0, error: "Invalid endpoint value" };

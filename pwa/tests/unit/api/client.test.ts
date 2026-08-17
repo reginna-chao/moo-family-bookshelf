@@ -42,6 +42,13 @@ describe("ApiClient", () => {
     });
   });
 
+  /**
+   * `validateEndpointUrl` now lives in `shared/` so the PWA and the Extension
+   * enforce byte-identical rules — the PWA adopts a sync code's `@host` too, so
+   * a weaker copy here would undo the whole check. These tests pin the PWA's
+   * side of that contract: what it accepts, what it refuses, and the exact
+   * canonical string it hands to the ApiClient.
+   */
   describe("validateEndpointUrl", () => {
     it.each([
       ["https://api.example.com", "https://api.example.com"],
@@ -64,6 +71,116 @@ describe("ApiClient", () => {
       "",
     ])("rejects %s", (input) => {
       expect(() => validateEndpointUrl(input)).toThrow();
+    });
+
+    /**
+     * `https://real.example@evil.com` is fetched from evil.com while the string
+     * READS as real.example — everything before the `@` is userinfo. A sync
+     * code is shared as plain text, so this is the cheapest way to make a
+     * member's auth token and full book list go somewhere they never agreed to.
+     */
+    it.each([
+      ["a bare userinfo masquerade", "https://real.example@evil.com"],
+      ["user:password credentials", "https://user:pass@evil.com"],
+      ["an empty password", "https://user:@evil.com"],
+      ["an empty username with a password", "https://:pass@evil.com"],
+      [
+        "credentials on an otherwise private host",
+        "https://user:pass@localhost:8787",
+      ],
+    ])("rejects %s", (_label, input) => {
+      expect(() => validateEndpointUrl(input)).toThrow();
+    });
+
+    it("names credentials as the reason, so the refusal is debuggable", () => {
+      expect(() =>
+        validateEndpointUrl("https://real.example@evil.com"),
+      ).toThrow(/credentials/i);
+    });
+
+    /**
+     * The return value is what gets stored, compared against the family
+     * record's endpoint, and shown in the `@host` disclosure note. Two
+     * spellings of one endpoint must therefore collapse to one string, or the
+     * PWA and the Extension will disagree about whether they are "the same"
+     * server.
+     */
+    it.each([
+      [
+        "a trailing slash",
+        "https://api.example.com/",
+        "https://api.example.com",
+      ],
+      [
+        "repeated trailing slashes",
+        "https://api.example.com///",
+        "https://api.example.com",
+      ],
+      [
+        "an upper-case host",
+        "https://API.Example.COM",
+        "https://api.example.com",
+      ],
+      [
+        "an explicit default port",
+        "https://api.example.com:443",
+        "https://api.example.com",
+      ],
+      [
+        "a non-default port, kept",
+        "https://api.example.com:8443",
+        "https://api.example.com:8443",
+      ],
+      [
+        "a sub-path, kept",
+        "https://api.example.com/moo",
+        "https://api.example.com/moo",
+      ],
+      [
+        "a sub-path with a trailing slash",
+        "https://api.example.com/moo/",
+        "https://api.example.com/moo",
+      ],
+      [
+        "an IDN host, folded to punycode",
+        "https://пример.example",
+        "https://xn--e1afmkfd.example",
+      ],
+      [
+        "a query string and fragment, both dropped",
+        "https://api.example.com/moo?a=1#frag",
+        "https://api.example.com/moo",
+      ],
+    ])("canonicalizes %s", (_label, input, expected) => {
+      expect(validateEndpointUrl(input)).toBe(expected);
+    });
+
+    it("is idempotent — canonicalizing a canonical value changes nothing", () => {
+      const once = validateEndpointUrl("https://API.Example.COM:443/moo/");
+      expect(validateEndpointUrl(once)).toBe(once);
+    });
+
+    it("is what the ApiClient actually stores", () => {
+      const c = new ApiClient("https://API.Example.COM:443/moo/");
+
+      // The client must not keep a spelling of its own: everything that later
+      // compares endpoints (family-record switch, sync code) assumes this.
+      expect(c.getEndpoint()).toBe(
+        validateEndpointUrl("https://API.Example.COM:443/moo/"),
+      );
+      expect(c.getEndpoint()).toBe("https://api.example.com/moo");
+    });
+
+    it("refuses a credential-bearing endpoint at ApiClient construction", () => {
+      expect(() => new ApiClient("https://real.example@evil.com")).toThrow();
+    });
+
+    it("refuses a credential-bearing endpoint at setEndpoint, leaving the old one in place", () => {
+      const c = new ApiClient("https://api.example.com");
+
+      expect(() => c.setEndpoint("https://real.example@evil.com")).toThrow();
+      // Throws before assigning, so the endpoint already trusted still stands.
+      expect(c.getEndpoint()).toBe("https://api.example.com");
     });
   });
 

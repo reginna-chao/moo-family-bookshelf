@@ -105,6 +105,14 @@ describe("ApiClient", () => {
     });
   });
 
+  /**
+   * The endpoint validator is the single gate between an attacker-supplied URL
+   * (family record `apiEndpoint`, sync-code `@host`, settings input) and where
+   * this device sends its auth token and full book list. Two duties:
+   *   1. refuse unsafe values (scheme allowlist + no embedded credentials);
+   *   2. return a CANONICAL string, so what gets stored / compared / displayed
+   *      is exactly the origin the browser would resolve.
+   */
   describe("validateEndpointUrl", () => {
     it.each([
       ["https://api.example.com", "https://api.example.com"],
@@ -127,6 +135,116 @@ describe("ApiClient", () => {
       "",
     ])("rejects %s", (input) => {
       expect(() => validateEndpointUrl(input)).toThrow();
+    });
+
+    /**
+     * `https://real.example@evil.com` is a URL whose userinfo LOOKS like the
+     * host: the browser fetches evil.com while the stored/displayed string reads
+     * as real.example. There is no legitimate use for credentials in an API
+     * endpoint, so the whole shape is refused rather than stripped.
+     */
+    describe("embedded credentials", () => {
+      it.each([
+        ["a host-shaped username", "https://real.example@evil.com"],
+        ["a user:password pair", "https://user:pass@evil.com"],
+        ["a password with no username", "https://:pass@evil.com"],
+        ["credentials on a private-LAN HTTP URL", "http://user@192.168.1.5:87"],
+      ])("rejects %s", (_label, input) => {
+        expect(() => validateEndpointUrl(input)).toThrow(/credentials/i);
+      });
+
+      it("does not fall back to the real host it would have connected to", () => {
+        // Returning "https://evil.com" would be honest but would silently
+        // ACCEPT a URL the user believes points at real.example.
+        expect(() =>
+          validateEndpointUrl("https://real.example@evil.com"),
+        ).toThrow();
+      });
+    });
+
+    /**
+     * Canonicalisation matters beyond tidiness: the same endpoint spelled two
+     * ways must compare equal (endpoint-switch prompts, declined-value markers),
+     * and the displayed host must be the resolved one.
+     */
+    describe("canonical form", () => {
+      it.each([
+        [
+          "lowercases the host",
+          "https://API.Example.COM",
+          "https://api.example.com",
+        ],
+        [
+          "converts an IDN host to punycode",
+          "https://пример.example",
+          "https://xn--e1afmkfd.example",
+        ],
+        [
+          "leaves an already-punycode host alone",
+          "https://xn--e1afmkfd.example",
+          "https://xn--e1afmkfd.example",
+        ],
+        [
+          "drops the default HTTPS port",
+          "https://api.example.com:443",
+          "https://api.example.com",
+        ],
+        [
+          "drops the default HTTP port",
+          "http://localhost:80",
+          "http://localhost",
+        ],
+        [
+          "keeps a non-default port",
+          "https://api.example.com:8443",
+          "https://api.example.com:8443",
+        ],
+        [
+          "preserves a base path",
+          "https://api.example.com/base",
+          "https://api.example.com/base",
+        ],
+        [
+          "strips a trailing slash from a base path",
+          "https://api.example.com/base/",
+          "https://api.example.com/base",
+        ],
+        [
+          "strips repeated trailing slashes",
+          "https://api.example.com/base///",
+          "https://api.example.com/base",
+        ],
+        [
+          "strips repeated trailing slashes from the root",
+          "https://api.example.com///",
+          "https://api.example.com",
+        ],
+        [
+          "drops query and fragment",
+          "https://api.example.com/base?token=x#frag",
+          "https://api.example.com/base",
+        ],
+      ])("%s", (_label, input, expected) => {
+        expect(validateEndpointUrl(input)).toBe(expected);
+      });
+
+      it("is idempotent — re-validating a canonical value returns it unchanged", () => {
+        const once = validateEndpointUrl("https://API.Example.COM:443/base/");
+        expect(once).toBe("https://api.example.com/base");
+        expect(validateEndpointUrl(once)).toBe(once);
+      });
+    });
+
+    it("setEndpoint stores the canonical form, not the caller's spelling", () => {
+      const c = new ApiClient(MOCK_ENDPOINT);
+      c.setEndpoint("https://API.Example.COM:443/base/");
+      expect(c.getEndpoint()).toBe("https://api.example.com/base");
+    });
+
+    it("setEndpoint rejects a credential-bearing URL and keeps the previous endpoint", () => {
+      const c = new ApiClient(MOCK_ENDPOINT);
+      expect(() => c.setEndpoint("https://real.example@evil.com")).toThrow();
+      expect(c.getEndpoint()).toBe(MOCK_ENDPOINT);
     });
   });
 

@@ -24,6 +24,7 @@ moo-family-bookshelf/
 │   └── architecture.md
 ├── shared/                      # Cross-app TypeScript library (no build step)
 │   ├── src/
+│   │   ├── api/                # Endpoint URL validation + sync-code @host classification
 │   │   ├── config/             # Readmoo host/selector config, report links
 │   │   ├── icons/              # Inline brand SVG paths
 │   │   ├── invite/             # Invite message templates
@@ -76,7 +77,7 @@ moo-family-bookshelf/
 
 ### The `shared/` package
 
-`moo-family-bookshelf-shared` 是 workspace 內的純 TypeScript 原始碼套件，沒有 build 步驟——`extension/` 與 `pwa/` 都直接以 `moo-family-bookshelf-shared/<entry>` import 原始碼，由各自的 Vite 打包。存放兩端必須完全一致的邏輯（Readmoo 設定、邀請訊息、個人書櫃儲存策略等），避免同一份規則在兩邊各寫一次而漂移。
+`moo-family-bookshelf-shared` 是 workspace 內的純 TypeScript 原始碼套件，沒有 build 步驟——`extension/` 與 `pwa/` 都直接以 `moo-family-bookshelf-shared/<entry>` import 原始碼，由各自的 Vite 打包。存放兩端必須完全一致的邏輯（Readmoo 設定、邀請訊息、個人書櫃儲存策略、API 端點位址驗證與同步碼 `@host` 分類等），避免同一份規則在兩邊各寫一次而漂移。
 
 - **不得依賴任何 runtime 專屬 API。** `shared/` 除了被瀏覽器端 import，也被 `extension/scripts/` 底下以 `tsx` 執行的 Node 腳本 import。`tsconfig.json` 雖含 `DOM` lib（`URLSearchParams` 型別所需），但 `eslint.config.js` 以 `no-restricted-globals` 擋掉 `document` / `window` / `localStorage` / `sessionStorage` / `navigator`，讓這條界線由靜態檢查保證。
 - **CI 覆蓋**：`shared/` 有自己的 `lint` / `typecheck` script，在 CI 的 `extension-check` job 內執行（`shared/**` 已在該 job 的 path filter 內）。新增檔案不需額外設定即被檢查。

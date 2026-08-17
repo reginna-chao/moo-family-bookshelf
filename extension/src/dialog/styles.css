@@ -3943,3 +3943,133 @@
   padding: 0 20px;
   height: 44px;
 }
+
+/* ── EndpointSwitchPanel ──────────────────────────────────────────────── */
+
+/* Amber confirmation shown at the top of the Settings tab when the family
+   record's API endpoint differs from the one this client uses. Deliberately
+   mirrors .moo-member-list__confirm--warn (amber fill + monospace endpoint
+   box) so both endpoint warnings read as the same family of UI. */
+.moo-endpoint-switch {
+  background: var(--moo-warn-bg);
+  border: 1px solid var(--moo-warn-border-soft);
+  border-radius: var(--moo-global-border-radius);
+  padding: 12px;
+  margin-bottom: 20px;
+}
+
+.moo-endpoint-switch__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moo-warn-text);
+  margin-bottom: 8px;
+}
+
+.moo-endpoint-switch__label {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  margin-bottom: 4px;
+}
+
+/* Same treatment as .moo-member-list__endpoint: a raw URL is read character by
+   character, so it gets a monospace box that can wrap anywhere. */
+.moo-endpoint-switch__endpoint {
+  padding: 6px;
+  background: var(--moo-surface-subtle);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-all;
+  margin-bottom: 8px;
+}
+
+/* Refused target: the address is withheld, so the box carries warning copy
+   instead of a URL — drop the monospace and make it read as a warning. */
+.moo-endpoint-switch__endpoint--invalid {
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--moo-warn-text);
+  border: 1px solid var(--moo-warn-border);
+}
+
+.moo-endpoint-switch__body {
+  font-size: 13px;
+  color: var(--moo-warn-text);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.moo-endpoint-switch__row {
+  display: flex;
+  gap: 8px;
+}
+
+.moo-endpoint-switch__decline {
+  flex: 1;
+}
+
+.moo-endpoint-switch__confirm {
+  flex: 1;
+}
+
+.moo-endpoint-switch__hint {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  line-height: 1.6;
+  margin-top: 8px;
+}
+
+/* Error variant, shown in place of the panel when the confirmed endpoint is
+   refused by the client's URL validation: nothing switched, so it stays a
+   compact one-line notice in the same amber box instead of a second panel. */
+.moo-endpoint-switch--error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moo-endpoint-switch__error-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--moo-warn-text);
+  line-height: 1.6;
+}
+
+.moo-endpoint-switch__error-dismiss {
+  flex-shrink: 0;
+}
+
+/* ── SyncCodeHostNote ─────────────────────────────────────────────────── */
+
+/* Shared by IdleView and RecoveryJoinView (one class, not a per-view pair, so
+   the two join screens cannot drift): shows the @host a pasted sync code will
+   connect to. Same amber palette as the endpoint-switch panel above. */
+.moo-sync-host-note {
+  background: var(--moo-warn-bg);
+  border: 1px solid var(--moo-warn-border-soft);
+  border-radius: var(--moo-global-border-radius);
+  padding: 8px 10px;
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--moo-warn-text);
+  word-break: break-all;
+}
+
+.moo-sync-host-note__host {
+  font-family: monospace;
+}
+
+/* Invalid/unsafe @host: same amber family, but a full-strength border + bold
+   text so it reads as a warning rather than the reassuring default note. */
+.moo-sync-host-note--invalid {
+  border-color: var(--moo-warn-border);
+  font-weight: 600;
+}
+
+/* On the verification challenge the note sits OUTSIDE .moo-onboarding-view (it
+   precedes the whole panel), so it has to supply that view's 24px gutter
+   itself; the panel's own top padding then provides the gap below it. */
+.moo-sync-host-note--verify {
+  margin: 24px 24px 0 24px;
+}

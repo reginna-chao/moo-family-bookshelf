@@ -12,19 +12,20 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { webcrypto } from "node:crypto";
 import { LandingPage } from "@/pages/LandingPage";
 
-// Mock crypto modules
-vi.mock("@/crypto/syncCode", () => ({
+/**
+ * Only `decodeSyncCode` is stubbed — these tests drive the flow by dictating
+ * what a pasted code decodes to. Everything else in the module stays REAL,
+ * including `parseSyncCodeApiHost`: it feeds the `@host` disclosure note that
+ * LandingPage renders on every keystroke, so replacing it would leave the note
+ * (and the copy it carries) unverified — and a factory that simply forgets it
+ * makes the whole page throw on render.
+ *
+ * `classifySyncCodeApiHost` (imported by LandingPage straight from `shared/`)
+ * is never mocked, so the endpoint-refusal guards run the production rules.
+ */
+vi.mock("@/crypto/syncCode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/crypto/syncCode")>()),
   decodeSyncCode: vi.fn(),
-  encodeSyncCode: vi.fn((data: { familyId: string; apiHost?: string }) => {
-    const base = `moo-${data.familyId}`;
-    return data.apiHost ? `${base}@${data.apiHost}` : base;
-  }),
-  SyncCodeError: class SyncCodeError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = "SyncCodeError";
-    }
-  },
 }));
 
 // Mock ApiClient constructor so joinFamily and getVerifyMethod can be controlled
@@ -51,6 +52,14 @@ beforeAll(() => {
 });
 
 const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
+
+/**
+ * A self-hosted endpoint the client will ACCEPT. Fixtures carry full URLs
+ * because that is what an app-generated sync code contains — a bare host has
+ * never been adoptable (`new URL()` needs a scheme).
+ */
+const CUSTOM_ENDPOINT = "https://custom.api.com";
+const QR_ENDPOINT = "https://qr.host.com";
 
 function fillInput(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), {
@@ -241,13 +250,13 @@ describe("LandingPage", () => {
     it("should call onAuth with correct AuthState (userId hashed client-side)", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",
-        apiHost: "custom.api.com",
+        apiHost: CUSTOM_ENDPOINT,
       });
 
       render(
         <LandingPage
           onAuth={mockOnAuth}
-          initialSyncCode="moo-fam1-key1@custom.api.com"
+          initialSyncCode={`moo-fam1-key1@${CUSTOM_ENDPOINT}`}
         />,
       );
 
@@ -258,7 +267,7 @@ describe("LandingPage", () => {
         expect(mockOnAuth).toHaveBeenCalledWith({
           userId: expect.stringMatching(/^[a-f0-9]{64}$/),
           familyId: "fam-1",
-          apiHost: "custom.api.com",
+          apiHost: CUSTOM_ENDPOINT,
           authToken: "tok-123",
         });
       });
@@ -435,13 +444,13 @@ describe("LandingPage", () => {
     it("should pre-fill sync code from REMEMBERED_LOGOUT_KEY on mount", () => {
       localStorage.setItem(
         "moo:rememberedLogout",
-        "moo-fam1-key1@custom.host.com",
+        `moo-fam1-key1@${CUSTOM_ENDPOINT}`,
       );
 
       render(<LandingPage onAuth={mockOnAuth} />);
 
       const syncCodeInput = screen.getByLabelText("同步碼") as HTMLInputElement;
-      expect(syncCodeInput.value).toBe("moo-fam1-key1@custom.host.com");
+      expect(syncCodeInput.value).toBe(`moo-fam1-key1@${CUSTOM_ENDPOINT}`);
       expect(localStorage.getItem("moo:rememberedLogout")).toBeNull();
     });
 
@@ -686,7 +695,7 @@ describe("LandingPage", () => {
     it("should auto-join when qrUserId is provided and no verification needed", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-qr",
-        apiHost: "qr.host.com",
+        apiHost: QR_ENDPOINT,
       });
       mockGetVerifyMethod.mockResolvedValue({
         data: { method: "none", prompted: 1 },
@@ -695,7 +704,7 @@ describe("LandingPage", () => {
       render(
         <LandingPage
           onAuth={mockOnAuth}
-          initialSyncCode="moo-famqr-keyqr@qr.host.com"
+          initialSyncCode={`moo-famqr-keyqr@${QR_ENDPOINT}`}
           qrUserId="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
         />,
       );
@@ -710,7 +719,7 @@ describe("LandingPage", () => {
           userId:
             "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
           familyId: "fam-qr",
-          apiHost: "qr.host.com",
+          apiHost: QR_ENDPOINT,
           authToken: "tok-123",
         });
       });
@@ -773,6 +782,324 @@ describe("LandingPage", () => {
       // Should show the normal form
       expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
       expect(mockGetVerifyMethod).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * A sync code's `@host` decides where this device sends its auth token and,
+   * from that point on, its entire book list. The verdict comes from the real
+   * `classifySyncCodeApiHost` (never mocked here), i.e. the same rules
+   * `new ApiClient(...)` enforces.
+   *
+   * Both entry points must refuse BEFORE the first request: each one fires a
+   * `getVerifyMethod` probe at the sync code's server before any join happens,
+   * so "the join failed" is far too late — the address has already been
+   * contacted, and with it the fact that this userId exists.
+   */
+  describe("a sync code whose @host would be refused", () => {
+    /** Mirrors src/pages/LandingPage.tsx `UNSAFE_API_HOST_ERROR`. */
+    const ABORT_MESSAGE = "此同步碼的伺服器位址無效或不安全，無法加入。";
+
+    const REFUSED: Array<[string, string]> = [
+      ["a userinfo masquerade", "https://real.example@evil.com"],
+      ["embedded user:password credentials", "https://user:pass@evil.com"],
+      ["plain HTTP on a public host", "http://evil.example.com"],
+      ["a non-HTTP scheme", "ftp://files.example.com"],
+      // `new URL()` cannot parse a scheme-less host, so this was never
+      // adoptable; the PWA now says so instead of failing obscurely later.
+      ["a bare host with no scheme", "custom.api.com"],
+    ];
+
+    describe("typed into the form", () => {
+      it.each(REFUSED)(
+        "aborts with a plain reason for %s",
+        async (_label, apiHost) => {
+          mockDecodeSyncCode.mockReturnValue({ familyId: "fam-1", apiHost });
+
+          render(<LandingPage onAuth={mockOnAuth} />);
+          fillInput("同步碼", `moo-fam1-key1@${apiHost}`);
+          fillInput("讀墨帳號 Email", "user@example.com");
+          submitForm();
+
+          await waitFor(() => {
+            expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
+          });
+          expect(mockOnAuth).not.toHaveBeenCalled();
+        },
+      );
+
+      it.each(REFUSED)(
+        "contacts nothing at all for %s",
+        async (_label, apiHost) => {
+          mockDecodeSyncCode.mockReturnValue({ familyId: "fam-1", apiHost });
+
+          render(<LandingPage onAuth={mockOnAuth} />);
+          fillInput("同步碼", `moo-fam1-key1@${apiHost}`);
+          fillInput("讀墨帳號 Email", "user@example.com");
+          submitForm();
+
+          await waitFor(() => {
+            expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
+          });
+          // The probe is the first thing that would reach the refused server.
+          expect(mockGetVerifyMethod).not.toHaveBeenCalled();
+          expect(mockJoinFamily).not.toHaveBeenCalled();
+        },
+      );
+
+      it("refuses before the email is even validated", async () => {
+        mockDecodeSyncCode.mockReturnValue({
+          familyId: "fam-1",
+          apiHost: "https://real.example@evil.com",
+        });
+
+        render(<LandingPage onAuth={mockOnAuth} />);
+        fillInput("同步碼", "moo-fam1-key1@https://real.example@evil.com");
+        // Email deliberately left blank.
+        submitForm();
+
+        await waitFor(() => {
+          expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
+        });
+        // An unusable address is not a "fill in your email" situation.
+        expect(screen.queryByText("請輸入 Email。")).not.toBeInTheDocument();
+      });
+
+      it("leaves the form usable so the code can be corrected", async () => {
+        mockDecodeSyncCode.mockReturnValue({
+          familyId: "fam-1",
+          apiHost: "http://evil.example.com",
+        });
+
+        render(<LandingPage onAuth={mockOnAuth} />);
+        fillInput("同步碼", "moo-fam1-key1@http://evil.example.com");
+        fillInput("讀墨帳號 Email", "user@example.com");
+        submitForm();
+
+        await waitFor(() => {
+          expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
+        });
+        const button = screen.getByRole("button", { name: "開始使用" });
+        expect(button).not.toBeDisabled();
+
+        // Typing again clears the refusal, as with any other sync-code error.
+        fillInput("同步碼", "moo-fam1-key1");
+        expect(screen.queryByText(ABORT_MESSAGE)).not.toBeInTheDocument();
+      });
+
+      it("lets an acceptable @host through, so the guard is not a blanket block", async () => {
+        mockDecodeSyncCode.mockReturnValue({
+          familyId: "fam-1",
+          apiHost: CUSTOM_ENDPOINT,
+        });
+
+        render(<LandingPage onAuth={mockOnAuth} />);
+        fillInput("同步碼", `moo-fam1-key1@${CUSTOM_ENDPOINT}`);
+        fillInput("讀墨帳號 Email", "user@example.com");
+        submitForm();
+
+        await waitFor(() => expect(mockOnAuth).toHaveBeenCalled());
+        expect(screen.queryByText(ABORT_MESSAGE)).not.toBeInTheDocument();
+        expect(mockGetVerifyMethod).toHaveBeenCalled();
+      });
+    });
+
+    describe("arriving by QR code", () => {
+      const QR_USER_ID = "a".repeat(64);
+
+      it.each(REFUSED)(
+        "aborts before probing the server for %s",
+        async (_label, apiHost) => {
+          mockDecodeSyncCode.mockReturnValue({ familyId: "fam-qr", apiHost });
+
+          render(
+            <LandingPage
+              onAuth={mockOnAuth}
+              initialSyncCode={`moo-famqr-keyqr@${apiHost}`}
+              qrUserId={QR_USER_ID}
+            />,
+          );
+
+          await waitFor(() => {
+            expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
+          });
+          // A QR arrival never typed this host, so nothing may be assumed about
+          // it — and the probe would confirm to that server that this userId
+          // exists before the user has agreed to anything.
+          expect(mockGetVerifyMethod).not.toHaveBeenCalled();
+          expect(mockJoinFamily).not.toHaveBeenCalled();
+          expect(mockOnAuth).not.toHaveBeenCalled();
+        },
+      );
+
+      it("aborts even when the QR carries a token that would skip verification", async () => {
+        mockDecodeSyncCode.mockReturnValue({
+          familyId: "fam-qr",
+          apiHost: "https://real.example@evil.com",
+        });
+
+        render(
+          <LandingPage
+            onAuth={mockOnAuth}
+            initialSyncCode="moo-famqr-keyqr@https://real.example@evil.com"
+            qrUserId={QR_USER_ID}
+            qrToken="qr-token-123"
+          />,
+        );
+
+        await waitFor(() => {
+          expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
+        });
+        // The token path calls completeJoin directly, so the guard has to sit
+        // ahead of that branch too, not only ahead of the probe.
+        expect(mockJoinFamily).not.toHaveBeenCalled();
+        expect(mockOnAuth).not.toHaveBeenCalled();
+      });
+
+      it("keeps the form reachable so the user can enter a code by hand", async () => {
+        mockDecodeSyncCode.mockReturnValue({
+          familyId: "fam-qr",
+          apiHost: "http://evil.example.com",
+        });
+
+        render(
+          <LandingPage
+            onAuth={mockOnAuth}
+            initialSyncCode="moo-famqr-keyqr@http://evil.example.com"
+            qrUserId={QR_USER_ID}
+          />,
+        );
+
+        await waitFor(() => {
+          expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
+        });
+        expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
+        expect(
+          screen.getByRole("button", { name: "開始使用" }),
+        ).not.toBeDisabled();
+      });
+    });
+  });
+
+  /**
+   * Disclosure, not blocking: an acceptable `@host` is still someone else's
+   * server. The user is told which one BEFORE authenticating, at BOTH points
+   * where that decision is still theirs to make.
+   */
+  describe("custom-server disclosure", () => {
+    const QR_USER_ID = "b".repeat(64);
+
+    describe("on the entry form", () => {
+      it("names the endpoint while a code carrying @host is typed", () => {
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", `moo-fam1-key1@${CUSTOM_ENDPOINT}`);
+
+        const note = screen.getByTestId("sync-code-host-note");
+        expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+        expect(note).toHaveTextContent(CUSTOM_ENDPOINT);
+      });
+
+      it("shows the canonical endpoint, not the raw text", () => {
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", "moo-fam1-key1@https://CUSTOM.Api.com:443/v1/");
+
+        const note = screen.getByTestId("sync-code-host-note");
+        expect(note).toHaveTextContent("https://custom.api.com/v1");
+        expect(note.textContent).not.toContain("CUSTOM.Api.com");
+      });
+
+      it("warns instead of naming a server for an @host that would be refused", () => {
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", "moo-fam1-key1@https://real.example@evil.com");
+
+        const warning = screen.getByTestId("sync-code-host-note-invalid");
+        expect(warning).toHaveAttribute("role", "alert");
+        expect(warning).toHaveTextContent(
+          "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認",
+        );
+        expect(
+          screen.queryByTestId("sync-code-host-note"),
+        ).not.toBeInTheDocument();
+        // Neither the masqueraded name nor the host really reached.
+        expect(warning.textContent).not.toContain("real.example");
+        expect(warning.textContent).not.toContain("evil.com");
+      });
+
+      it.each([
+        ["nothing has been typed", ""],
+        ["the code carries no @host", "moo-fam1-key1"],
+        ["the code is still being typed", "moo-fam1"],
+      ])("says nothing when %s", (_label, value) => {
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", value);
+
+        expect(
+          screen.queryByTestId("sync-code-host-note"),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByTestId("sync-code-host-note-invalid"),
+        ).not.toBeInTheDocument();
+      });
+    });
+
+    /**
+     * A QR / invite arrival is auto-advanced past the form, so the verification
+     * screen is the ONLY place they can learn which server they are about to
+     * authenticate to. Without a note here, entering a PIN would hand the
+     * secret to an undisclosed host.
+     */
+    describe("above the verification screen", () => {
+      async function renderQrArrival(apiHost?: string) {
+        mockDecodeSyncCode.mockReturnValue({ familyId: "fam-qr", apiHost });
+        mockGetVerifyMethod.mockResolvedValue({
+          data: { method: "pin", prompted: 1 },
+        });
+
+        render(
+          <LandingPage
+            onAuth={mockOnAuth}
+            initialSyncCode={
+              apiHost ? `moo-famqr-keyqr@${apiHost}` : "moo-famqr-keyqr"
+            }
+            qrUserId={QR_USER_ID}
+          />,
+        );
+
+        await waitFor(() => {
+          expect(screen.getByText("請輸入 PIN 碼")).toBeInTheDocument();
+        });
+      }
+
+      it("names the endpoint above the PIN prompt", async () => {
+        await renderQrArrival(QR_ENDPOINT);
+
+        const note = screen.getByTestId("sync-code-host-note");
+        expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+        expect(note).toHaveTextContent(QR_ENDPOINT);
+      });
+
+      it("says nothing when the QR points at the official default", async () => {
+        await renderQrArrival(undefined);
+
+        expect(
+          screen.queryByTestId("sync-code-host-note"),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByTestId("sync-code-host-note-invalid"),
+        ).not.toBeInTheDocument();
+      });
+
+      it("shows the canonical endpoint, matching what the client will call", async () => {
+        await renderQrArrival("https://QR.Host.com:443/api/");
+
+        expect(screen.getByTestId("sync-code-host-note")).toHaveTextContent(
+          "https://qr.host.com/api",
+        );
+      });
     });
   });
 });

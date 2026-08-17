@@ -6,9 +6,23 @@
  * VITE_EXTENSION_API_ENDPOINT / VITE_EXTENSION_PWA_URL are set via root .env files
  */
 
-export const DEFAULT_API_ENDPOINT: string =
+import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
+
+/**
+ * Canonicalised at definition so it lives in the same comparison space as
+ * `ApiClient.getEndpoint()` — otherwise a build-time env value with a trailing
+ * slash or an uppercase host would make "already on the default endpoint" read
+ * as a pending switch.
+ *
+ * A build whose env value FAILS validation throws here, at module load. That is
+ * deliberate: `new ApiClient()` already threw on such a value, so the build was
+ * dead either way — failing at the definition names the culprit instead of
+ * surfacing as a mystery error deep in the first request.
+ */
+export const DEFAULT_API_ENDPOINT: string = validateEndpointUrl(
   import.meta.env?.VITE_EXTENSION_API_ENDPOINT ||
-  "https://moo-family-bookshelf-dev.rcwork.workers.dev";
+    "https://moo-family-bookshelf-dev.rcwork.workers.dev",
+);
 
 export const DEFAULT_PWA_URL: string =
   import.meta.env?.VITE_EXTENSION_PWA_URL ||
@@ -36,6 +50,18 @@ export const USER_EMAIL_KEY = "moo:userEmail";
 
 // Config
 export const API_ENDPOINT_KEY = "moo:apiEndpoint";
+/**
+ * The family API endpoint the user last refused to switch to. storage.local
+ * only (never sync) — like API_ENDPOINT_KEY this is a per-device decision.
+ *
+ * Value shape: `{ value: string | null }`, where `value` is the refused target
+ * endpoint URL, or `null` for the "revert to the official default" direction.
+ * The wrapper object is what keeps "declined the official default" (`value:
+ * null`) distinguishable from "no decision recorded" (key absent). The switch
+ * prompt reappears only when the family record moves to a value DIFFERENT from
+ * the one stored here — see storage/familyEndpointChoice.ts.
+ */
+export const DECLINED_FAMILY_ENDPOINT_KEY = "moo:declinedFamilyEndpoint";
 export const HAS_COMPLETED_INITIAL_SETUP_KEY = "moo:hasCompletedInitialSetup";
 
 // Sync

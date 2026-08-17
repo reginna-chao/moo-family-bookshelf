@@ -13,6 +13,9 @@ import {
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
   FAMILY_ID_KEY,
+  API_ENDPOINT_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
+  DEFAULT_API_ENDPOINT,
 } from "@/constants";
 import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
 
@@ -86,6 +89,12 @@ function setupChromeMessages(options: {
   familyId?: string | null;
   userId?: string | null;
   authToken?: string | null;
+  /**
+   * Accepted API endpoint. Seeded into storage.local — App boot reads it with a
+   * DIRECT `readStoredApiEndpoint()` and no longer sends GET_API_ENDPOINT (that
+   * message round-trip is unreliable on Firefox's sleeping background event
+   * page; the handler itself is covered in tests/unit/background.test.ts).
+   */
   apiEndpoint?: string | null;
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -94,9 +103,6 @@ function setupChromeMessages(options: {
       const msg = message as { type: string };
       if (msg.type === "GET_FAMILY_ID") {
         return Promise.resolve({ familyId: options.familyId ?? null });
-      }
-      if (msg.type === "GET_API_ENDPOINT") {
-        return Promise.resolve({ apiEndpoint: options.apiEndpoint ?? null });
       }
       if (msg.type === "CLEAR_FAMILY_ID") {
         return Promise.resolve(undefined);
@@ -109,6 +115,7 @@ function setupChromeMessages(options: {
   if (options.userId) localStore[USER_ID_KEY] = options.userId;
   if (options.authToken) localStore[AUTH_TOKEN_KEY] = options.authToken;
   if (options.familyId) localStore[FAMILY_ID_KEY] = options.familyId;
+  if (options.apiEndpoint) localStore[API_ENDPOINT_KEY] = options.apiEndpoint;
 
   const syncStore: Record<string, unknown> = {};
   if (options.familyId) syncStore[FAMILY_ID_KEY] = options.familyId;
@@ -121,6 +128,31 @@ function setupChromeMessages(options: {
     Promise.resolve(
       pickKeys(syncStore, keys),
     )) as typeof chrome.storage.sync.get);
+}
+
+/**
+ * Capture the ApiClient instance App creates in its `useRef`, so a test can
+ * assert on the client state App put it in (e.g. which endpoint it boots on).
+ * Must be called BEFORE `render`; call `restore()` when done.
+ */
+async function captureApiClients(): Promise<{
+  instances: ApiClient[];
+  restore: () => void;
+}> {
+  const instances: ApiClient[] = [];
+  const OrigConstructor = ApiClient;
+  const spy = vi
+    .spyOn(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (await import("@/api/client")) as any,
+      "ApiClient",
+    )
+    .mockImplementation((...args: unknown[]) => {
+      const instance = new OrigConstructor(...(args as [string?]));
+      instances.push(instance);
+      return instance;
+    });
+  return { instances, restore: () => spy.mockRestore() };
 }
 
 describe("App", () => {
@@ -348,19 +380,7 @@ describe("App", () => {
 
   it("resets to onboarding when apiClient.onFamilyRemoved is called", async () => {
     // Capture the ApiClient instance created by App's useRef
-    const instances: ApiClient[] = [];
-    const OrigConstructor = ApiClient;
-    const constructorSpy = vi
-      .spyOn(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (await import("@/api/client")) as any,
-        "ApiClient",
-      )
-      .mockImplementation((...args: unknown[]) => {
-        const instance = new OrigConstructor(...(args as [string?]));
-        instances.push(instance);
-        return instance;
-      });
+    const { instances, restore } = await captureApiClients();
 
     setupChromeMessages({
       familyId: "fam-1",
@@ -386,10 +406,11 @@ describe("App", () => {
       expect(screen.getByTestId("onboarding")).toBeInTheDocument();
     });
 
-    constructorSpy.mockRestore();
+    restore();
   });
 
-  it("applies custom API endpoint from GET_API_ENDPOINT", async () => {
+  it("boots on the accepted API endpoint read directly from storage", async () => {
+    const { instances, restore } = await captureApiClients();
     setupChromeMessages({
       familyId: "fam-1",
       userId: "user-1",
@@ -401,11 +422,58 @@ describe("App", () => {
       expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
     });
 
-    // The component should have called sendMessage with GET_API_ENDPOINT
-    // (promise-based browser.runtime.sendMessage — no Chrome callback arg).
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+    await waitFor(() => {
+      expect(instances[0].getEndpoint()).toBe("https://custom.workers.dev");
+    });
+    // Read DIRECTLY from storage, never via the background: Firefox's sleeping
+    // event page can drop the round-trip, which silently booted a member who
+    // had accepted a custom endpoint onto the official default instead.
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({
       type: "GET_API_ENDPOINT",
     });
+
+    restore();
+  });
+
+  it("boots on the official default when this device has accepted no endpoint", async () => {
+    const { instances, restore } = await captureApiClients();
+    setupChromeMessages({ familyId: "fam-1", userId: "user-1" });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+    });
+
+    // "Nothing stored" must leave the client alone rather than be pushed
+    // through setEndpoint as a blank value.
+    expect(instances[0].getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+
+    restore();
+  });
+
+  it("boots on the default endpoint when the stored endpoint is unusable", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { instances, restore } = await captureApiClients();
+    // Plain HTTP on a public host — ApiClient.setEndpoint refuses it. A member
+    // who has a family must still reach the main view rather than be dropped
+    // into onboarding by the throw.
+    setupChromeMessages({
+      familyId: "fam-1",
+      userId: "user-1",
+      apiEndpoint: "http://evil.example.com",
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("onboarding")).not.toBeInTheDocument();
+    expect(instances[0].getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+    expect(warn).toHaveBeenCalled();
+
+    restore();
+    warn.mockRestore();
   });
 
   // A dead token that can only be recovered by re-supplying the PWA-login
@@ -414,19 +482,7 @@ describe("App", () => {
   // top of the still-mounted main view.
   describe("re-verification overlay", () => {
     async function renderWithCapturedClient() {
-      const instances: ApiClient[] = [];
-      const OrigConstructor = ApiClient;
-      const constructorSpy = vi
-        .spyOn(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (await import("@/api/client")) as any,
-          "ApiClient",
-        )
-        .mockImplementation((...args: unknown[]) => {
-          const instance = new OrigConstructor(...(args as [string?]));
-          instances.push(instance);
-          return instance;
-        });
+      const { instances, restore } = await captureApiClients();
 
       setupChromeMessages({
         familyId: "fam-1",
@@ -441,11 +497,11 @@ describe("App", () => {
       vi.spyOn(apiClient, "getVerifyMethod").mockResolvedValue({
         data: { method: "pin", prompted: 0 },
       } as never);
-      return { apiClient, constructorSpy };
+      return { apiClient, restore };
     }
 
     it("shows the verification prompt over the still-mounted main view on the reauth signal", async () => {
-      const { apiClient, constructorSpy } = await renderWithCapturedClient();
+      const { apiClient, restore } = await renderWithCapturedClient();
       expect(apiClient.onReauthRequired).not.toBeNull();
 
       await act(async () => {
@@ -460,11 +516,11 @@ describe("App", () => {
       expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
       expect(screen.queryByTestId("onboarding")).not.toBeInTheDocument();
 
-      constructorSpy.mockRestore();
+      restore();
     });
 
     it("dismisses the overlay on cancel and leaves the main view intact", async () => {
-      const { apiClient, constructorSpy } = await renderWithCapturedClient();
+      const { apiClient, restore } = await renderWithCapturedClient();
 
       await act(async () => {
         apiClient.onReauthRequired!();
@@ -481,7 +537,7 @@ describe("App", () => {
       // Main view was never unmounted.
       expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
 
-      constructorSpy.mockRestore();
+      restore();
     });
   });
 
@@ -548,25 +604,40 @@ describe("App", () => {
       });
     });
 
-    it("a rejected GET_API_ENDPOINT does not block the main view", async () => {
-      // Only GET_API_ENDPOINT rejects; storage still has familyId+userId.
-      vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_API_ENDPOINT") {
-            return Promise.reject(new Error("background asleep"));
-          }
-          return Promise.resolve(undefined);
-        },
-      );
-      seedStorage({ familyId: "fam-ff", userId: "user-ff", authToken: "tok" });
+    // The endpoint read is best-effort (safeStorageGet). A failure there must
+    // degrade to the official default, never take the whole boot read down with
+    // it — that would drop a member who HAS a family into onboarding.
+    it("a failing endpoint read does not block the main view", async () => {
+      const localStore: Record<string, unknown> = {
+        [USER_ID_KEY]: "user-ff",
+        [AUTH_TOKEN_KEY]: "tok",
+        [FAMILY_ID_KEY]: "fam-ff",
+        [API_ENDPOINT_KEY]: "https://custom.workers.dev",
+      };
+      // Only the endpoint read rejects; the familyId/userId reads still resolve.
+      vi.mocked(chrome.storage.local.get).mockImplementation(((
+        keys: unknown,
+      ) =>
+        Array.isArray(keys) && keys.includes(API_ENDPOINT_KEY)
+          ? Promise.reject(new Error("storage unavailable"))
+          : Promise.resolve(
+              pickKeys(localStore, keys),
+            )) as typeof chrome.storage.local.get);
+      vi.mocked(chrome.storage.sync.get).mockImplementation(((keys: unknown) =>
+        Promise.resolve(
+          pickKeys({ [FAMILY_ID_KEY]: "fam-ff" }, keys),
+        )) as typeof chrome.storage.sync.get);
 
+      const { instances, restore } = await captureApiClients();
       render(<App />);
 
       await waitFor(() => {
         expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
       });
       expect(screen.queryByTestId("onboarding")).not.toBeInTheDocument();
+      expect(instances[0].getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+
+      restore();
     });
   });
 
@@ -579,15 +650,12 @@ describe("App", () => {
       authToken: "tok",
     });
     // The CLEAR_FAMILY_ID message rejects (Firefox sleeping background). The
-    // GET_* messages used at mount must still resolve so the main view renders.
+    // mount gate reads storage directly, so the main view still renders.
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(
       (message: unknown) => {
         const msg = message as { type: string };
         if (msg.type === "CLEAR_FAMILY_ID") {
           return Promise.reject(new Error("background asleep"));
-        }
-        if (msg.type === "GET_API_ENDPOINT") {
-          return Promise.resolve({ apiEndpoint: null });
         }
         return Promise.resolve(undefined);
       },
@@ -613,6 +681,75 @@ describe("App", () => {
         TOKEN_EXPIRES_AT_KEY,
       ]),
     );
+  });
+
+  /**
+   * The API endpoint is a FAMILY-scoped setting — the owner picks it and every
+   * member adopts it — so it must not outlive the membership. A family-less
+   * client still pointed at the former family's server would send the next
+   * create/join there (userId, display name, the token that server issues, the
+   * whole personal book list) and bake that host into the sync code it hands
+   * out next.
+   */
+  describe("handleLeaveFamily endpoint reset", () => {
+    async function leaveFromCustomEndpoint() {
+      const { instances, restore } = await captureApiClients();
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+        apiEndpoint: "https://custom.workers.dev",
+      });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(instances[0].getEndpoint()).toBe("https://custom.workers.dev");
+      });
+
+      fireEvent.click(screen.getByText("設定"));
+      fireEvent.click(screen.getByText("Mock Leave"));
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+      });
+
+      return { apiClient: instances[0], restore };
+    }
+
+    it("puts the live client back on the official default", async () => {
+      const { apiClient, restore } = await leaveFromCustomEndpoint();
+
+      expect(apiClient.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+
+      restore();
+    });
+
+    it("removes the stored endpoint and the declined marker", async () => {
+      const { restore } = await leaveFromCustomEndpoint();
+
+      await waitFor(() => {
+        expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            API_ENDPOINT_KEY,
+            DECLINED_FAMILY_ENDPOINT_KEY,
+          ]),
+        );
+      });
+
+      restore();
+    });
+
+    it("tells the background to revert as well", async () => {
+      const { restore } = await leaveFromCustomEndpoint();
+
+      await waitFor(() => {
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+          type: "SET_API_ENDPOINT",
+          apiEndpoint: null,
+        });
+      });
+
+      restore();
+    });
   });
 
   describe("lazy-mount tab panels", () => {
