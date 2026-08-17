@@ -164,7 +164,9 @@ export interface PublicShelf {
  * carrying a stale read (KV cross-colo reads can lag ~60s) could roll a
  * revoked share token back to life and re-publish a snapshot the owner had
  * just deleted. Only the four public-shelf write handlers write THIS key, so
- * no books/family-prefs save can ever roll it back.
+ * no books/family-prefs save can ever roll it back. (Account deletion in
+ * `routes/user.ts` additionally `delete`s it as part of whole-account
+ * teardown — a wipe, not a list write.)
  *
  * Lazy migration: absent key ⇒ fall back to the legacy
  * `UserBooksRecord.publicSharing` field; the next public-shelf write handler
