@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { seedAuthToken } from "../helpers/auth";
+import { watchKvOps } from "../helpers/kvOps";
 import {
   BoolFlag,
   kvKeys,
   type PublicShelf,
   type UserBooksRecord,
   type PublicShelfSnapshot,
+  type PublicShelvesRecord,
 } from "../../src/kv/schema";
 import {
   peekPerUserRateLimit,
@@ -87,17 +89,22 @@ async function seedUser(userId: string, token: string) {
 }
 
 /**
- * Seed `user:{userId}` listing exactly `shelves`, with no auth token — for the
- * suites that only exercise the public read path.
+ * Seed the LEGACY shelf list — `user:{userId}.publicSharing` — with no auth
+ * token, for the suites that only exercise the public read path.
+ *
+ * No `publicshelves:{userId}` pointer key is written, so every case seeded this
+ * way pins the UN-MIGRATED owner: the read paths must fall back to this field
+ * (`resolvePublicShelves`) and keep such an owner's existing public links
+ * working until their first public-shelf write migrates them.
  *
  * Omit `shelves` entirely to seed a record with NO `publicSharing` block (the
  * shape every account carries before it ever creates a public shelf); pass `[]`
  * for a record whose shelves were all removed.
  *
- * Needed because a PERMANENT snapshot (`expiresAt: null`) is served only while
- * this record still lists its shelf under the SAME share token — see the
- * liveness suite below. A hand-seeded snapshot with no matching record here is
- * an orphan and answers 404.
+ * Needed because a snapshot is served only while the owner's shelf list still
+ * carries its shelfId under the SAME share token, with a deadline the snapshot
+ * does not OUTLIVE — see the liveness suite below. A hand-seeded snapshot with
+ * no matching shelf list is an orphan and answers 404.
  */
 async function seedUserWithShelves(userId: string, shelves?: PublicShelf[]) {
   const record: UserBooksRecord = {
@@ -109,6 +116,22 @@ async function seedUserWithShelves(userId: string, shelves?: PublicShelf[]) {
     publicSharing: shelves ? { shelves } : undefined,
   };
   await kv.put(kvKeys.user(userId), JSON.stringify(record));
+}
+
+/**
+ * The shelves the AUTHORITATIVE `publicshelves:{userId}` pointer key lists, or
+ * `null` when the user has never been migrated to it.
+ *
+ * Since the lost-update fix, this key — not `user:{userId}` — is what the four
+ * public-shelf write handlers write and what every reader resolves first, so
+ * assertions about "the shelf list after a write handler ran" belong here.
+ */
+async function pointerShelves(userId: string): Promise<PublicShelf[] | null> {
+  const pointer = await kv.get<PublicShelvesRecord>(
+    kvKeys.publicShelves(userId),
+    "json",
+  );
+  return pointer ? pointer.shelves : null;
 }
 
 async function seedMember(userId: string, familyId: string) {
@@ -469,11 +492,12 @@ describe("POST reset-token", () => {
 // ── DELETE /api/user/:id/public-shelf/:shelfId ────────────────
 
 describe("DELETE /api/user/:id/public-shelf/:shelfId", () => {
-  it("removes shelf from user record and deletes snapshot", async () => {
+  it("empties the pointer key and deletes the snapshot without touching user:{id}", async () => {
     await seedUser(USER_ID, AUTH_TOKEN);
     const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
     const shelfId = created.data.shelf.shelfId;
     const shareToken = created.data.shelf.shareToken;
+    const recordBefore = await kv.get(kvKeys.user(USER_ID));
 
     const res = await request(
       "DELETE",
@@ -485,11 +509,13 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId", () => {
 
     expect(res.status).toBe(204);
 
-    const record = (await kv.get(
-      kvKeys.user(USER_ID),
-      "json",
-    )) as UserBooksRecord;
-    expect(record.publicSharing?.shelves).toHaveLength(0);
+    // An EMPTY pointer list is the "migrated, no shelves" state — it outranks
+    // any legacy field, which is what stops a later books save from re-listing
+    // the deleted shelf.
+    expect(await pointerShelves(USER_ID)).toEqual([]);
+
+    // The books record is not a shelf-list writer anymore: byte-unchanged.
+    expect(await kv.get(kvKeys.user(USER_ID))).toBe(recordBefore);
 
     const snapshot = await kv.get(kvKeys.publicShelf(shareToken));
     expect(snapshot).toBeNull();
@@ -753,11 +779,7 @@ describe("Public shelf per-userId write ceiling", () => {
     const refused = await createWrite(AUTH_TOKEN, "超額的新書櫃");
     expect(refused.status).toBe(429);
 
-    const record = (await kv.get(
-      kvKeys.user(USER_ID),
-      "json",
-    )) as UserBooksRecord;
-    expect(record.publicSharing?.shelves).toHaveLength(0);
+    expect(await pointerShelves(USER_ID)).toEqual([]);
   });
 
   it("leaves the share token and its snapshot untouched when reset-token is refused", async () => {
@@ -772,11 +794,8 @@ describe("Public shelf per-userId write ceiling", () => {
     );
     expect(res.status).toBe(429);
 
-    const record = (await kv.get(
-      kvKeys.user(USER_ID),
-      "json",
-    )) as UserBooksRecord;
-    expect(record.publicSharing?.shelves[0].shareToken).toBe(shelf.shareToken);
+    const shelves = await pointerShelves(USER_ID);
+    expect(shelves?.[0].shareToken).toBe(shelf.shareToken);
     expect(await kv.get(kvKeys.publicShelf(shelf.shareToken))).toBe(
       snapshotBefore,
     );
@@ -800,11 +819,7 @@ describe("Public shelf per-userId write ceiling", () => {
     );
     expect(res.status).toBe(429);
 
-    const record = (await kv.get(
-      kvKeys.user(USER_ID),
-      "json",
-    )) as UserBooksRecord;
-    expect(record.publicSharing?.shelves).toHaveLength(1);
+    expect(await pointerShelves(USER_ID)).toHaveLength(1);
     expect(await kv.get(kvKeys.publicShelf(shelf.shareToken))).not.toBeNull();
   });
 
@@ -1092,16 +1107,24 @@ describe("GET /api/public/:shareToken — expiry backstop", () => {
   });
 });
 
-// ── GET /api/public/:shareToken — permanent shelf liveness ────
+// ── GET /api/public/:shareToken — snapshot liveness (legacy owner) ────
 //
-// A PERMANENT snapshot (`expiresAt: null`) carries neither a KV TTL nor a
-// deadline, so nothing else can ever retire it: if its share token is rotated,
+// A snapshot can outlive the shelf it belongs to: its share token is rotated,
 // its shelf deleted, or the whole account removed while the `public:` key
-// survives (a failed cleanup write), the snapshot would stay publicly readable
-// forever. The handler therefore validates such a snapshot against the owner's
-// record on read, and answers exactly like a token that never existed.
+// survives a failed cleanup write. For a PERMANENT snapshot (`expiresAt: null`)
+// nothing else can ever retire it — no KV TTL, no deadline — so it would stay
+// publicly readable forever. The handler therefore validates EVERY surviving
+// snapshot against the owner's CURRENT shelf list on read (since the pointer-key
+// fix; it used to skip time-limited ones) and answers exactly like a token that
+// never existed.
+//
+// Every case in this suite seeds the shelf list through the LEGACY
+// `user:{userId}.publicSharing` field and writes NO pointer key, so the whole
+// describe doubles as the un-migrated owner's coverage: their links must keep
+// resolving through the fallback, at the documented cost of one extra
+// `user:{userId}` read per hit.
 
-describe("GET /api/public/:shareToken — permanent shelf liveness", () => {
+describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () => {
   const PERM_TOKEN = "1a2b3c4d5e6f70819a2b3c4d5e6f7081";
   const ROTATED_TOKEN = "99887766554433221100ffeeddccbbaa";
   const TIMED_TOKEN = "0f1e2d3c4b5a69780f1e2d3c4b5a6978";
@@ -1111,37 +1134,6 @@ describe("GET /api/public/:shareToken — permanent shelf liveness", () => {
   const SNAPSHOT_TITLE = "永久公開書櫃";
   const CREATED_AT = Date.parse("2026-02-01T00:00:00.000Z");
   const DAY_MS = 86_400_000;
-
-  /** Keys touched by KV, recorded per operation. */
-  interface KvOpLog {
-    getKeys: () => string[];
-    putKeys: () => string[];
-    deleteKeys: () => string[];
-  }
-
-  /**
-   * Start recording KV operations WITHOUT changing behaviour — the spies call
-   * straight through to `createMockKV()`, so production writes still meet its
-   * TTL floor. Call it AFTER seeding so only the request under test is counted.
-   *
-   * Scope of the `putKeys()` / `deleteKeys()` assertions below: they pin the
-   * HANDLER only. Every request here goes through {@link request}, which sends
-   * `DEV_MODE`, and the per-IP `rateLimit` middleware short-circuits in dev mode
-   * — so its one counter `put` per request (the pipeline's only fixed write) is
-   * absent by construction and is NOT what these assertions prove.
-   */
-  function watchKvOps(): KvOpLog {
-    const gets = vi.spyOn(kv, "get");
-    const puts = vi.spyOn(kv, "put");
-    const deletes = vi.spyOn(kv, "delete");
-    const keysOf = (spy: { mock: { calls: unknown[][] } }): string[] =>
-      spy.mock.calls.map((call) => String(call[0]));
-    return {
-      getKeys: () => keysOf(gets),
-      putKeys: () => keysOf(puts),
-      deleteKeys: () => keysOf(deletes),
-    };
-  }
 
   async function seedSnapshot(
     shareToken: string,
@@ -1186,6 +1178,22 @@ describe("GET /api/public/:shareToken — permanent shelf liveness", () => {
       expiresDays: 7,
       expiresAt: Date.now() + 7 * DAY_MS,
     };
+  }
+
+  /**
+   * A time-limited shelf whose deadline the CALLER pins, so the shelf entry and
+   * the snapshot it backs can carry the byte-same `expiresAt`. The guard is
+   * MONOTONIC rather than strict: an equal — or earlier — snapshot deadline is
+   * live, while one that OUTLIVES the shelf answers 404, which is what the
+   * "converted to time-limited" orphan row (permanent snapshot, time-limited
+   * shelf) relies on. The four-way table lives in `publicShelfPointer.test.ts`.
+   */
+  function timedShelfEntry(
+    shelfId: string,
+    shareToken: string,
+    expiresAt: number,
+  ): PublicShelf {
+    return { ...shelfEntry(shelfId, shareToken), expiresDays: 7, expiresAt };
   }
 
   afterEach(() => {
@@ -1239,7 +1247,7 @@ describe("GET /api/public/:shareToken — permanent shelf liveness", () => {
     async ({ seedRecord }) => {
       await seedSnapshot(PERM_TOKEN, null);
       await seedRecord();
-      const ops = watchKvOps();
+      const ops = watchKvOps(kv);
 
       const orphan = await request("GET", `/api/public/${PERM_TOKEN}`);
       const unknown = await request("GET", `/api/public/${UNKNOWN_TOKEN}`);
@@ -1354,57 +1362,76 @@ describe("GET /api/public/:shareToken — permanent shelf liveness", () => {
     )) as PublicShelfSnapshot;
     expect(snapshot.expiresAt).not.toBeNull();
 
-    const ops = watchKvOps();
+    const ops = watchKvOps(kv);
     const res = await request("GET", `/api/public/${shareToken}`);
 
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.title).toBe("我的公開書櫃");
     expect(json.data.expiresAt).toBe(snapshot.expiresAt);
-    // No owner-record read: guard 2 owns a snapshot that has a deadline.
-    expect(ops.getKeys()).toEqual([kvKeys.publicShelf(shareToken)]);
+    // This owner IS migrated (the create handler wrote the pointer key), so the
+    // liveness guard resolves the shelf list from `publicshelves:{id}` alone and
+    // never falls back to the books record — the guard now runs for a
+    // time-limited snapshot too, and this is what it costs.
+    expect(ops.getKeys()).toEqual([
+      kvKeys.publicShelf(shareToken),
+      kvKeys.publicShelves(USER_ID),
+    ]);
   });
 
-  it("reads only the snapshot for a time-limited shelf", async () => {
-    // The record is seeded and LIVE on purpose: an unconditional liveness check
-    // would still answer 200 here, so only the read count catches it.
-    await seedSnapshot(TIMED_TOKEN, Date.now() + DAY_MS);
-    await seedUserWithShelves(USER_ID, [shelfEntry(SHELF_ID, TIMED_TOKEN)]);
-    const ops = watchKvOps();
+  it("validates a time-limited snapshot against an un-migrated owner's legacy list", async () => {
+    // The old guard skipped time-limited snapshots entirely; it now validates
+    // every surviving one. The shelf list is seeded and LIVE, so the answer is
+    // still 200 — only the read trail shows the guard ran.
+    const expiresAt = Date.now() + 7 * DAY_MS;
+    await seedSnapshot(TIMED_TOKEN, expiresAt);
+    await seedUserWithShelves(USER_ID, [
+      timedShelfEntry(SHELF_ID, TIMED_TOKEN, expiresAt),
+    ]);
+    const ops = watchKvOps(kv);
 
     const res = await request("GET", `/api/public/${TIMED_TOKEN}`);
 
     expect(res.status).toBe(200);
-    // KV TTL + the expiresAt backstop already cover a time-limited snapshot; it
-    // must not pay for a third guard on every public read.
-    expect(ops.getKeys()).toEqual([kvKeys.publicShelf(TIMED_TOKEN)]);
+    // Pointer key first, `user:{id}` only because this owner has not migrated —
+    // that second read disappears on their first public-shelf write.
+    expect(ops.getKeys()).toEqual([
+      kvKeys.publicShelf(TIMED_TOKEN),
+      kvKeys.publicShelves(USER_ID),
+      kvKeys.user(USER_ID),
+    ]);
   });
 
-  it("pays exactly one extra read for a permanent shelf", async () => {
+  it("pays exactly two extra reads for an un-migrated owner's permanent shelf", async () => {
     await seedSnapshot(PERM_TOKEN, null);
     await seedUserWithShelves(USER_ID, [shelfEntry(SHELF_ID, PERM_TOKEN)]);
-    const ops = watchKvOps();
+    const ops = watchKvOps(kv);
 
     const res = await request("GET", `/api/public/${PERM_TOKEN}`);
 
     expect(res.status).toBe(200);
     expect(ops.getKeys()).toEqual([
       kvKeys.publicShelf(PERM_TOKEN),
+      kvKeys.publicShelves(USER_ID),
       kvKeys.user(USER_ID),
     ]);
     expect(ops.putKeys()).toEqual([]);
     expect(ops.deleteKeys()).toEqual([]);
   });
 
-  it("still serves a time-limited orphan until its deadline passes", async () => {
-    // Documented scope limit, pinned so it stays a decision rather than drift:
-    // the guard is permanent-only, so a time-limited snapshot whose shelf is
-    // already gone keeps serving until KV TTL / expiresAt retires it.
+  it("refuses a time-limited orphan whose shelf is gone, which the permanent-only guard used to serve", async () => {
+    // Behaviour change pinned deliberately: this snapshot has a live deadline
+    // and no shelf list backing it at all. The old permanent-only guard admitted
+    // it until KV TTL / expiresAt eventually retired it; the guard now covers
+    // every snapshot, so it is dead on arrival.
     await seedSnapshot(TIMED_TOKEN, Date.now() + DAY_MS);
 
     const res = await request("GET", `/api/public/${TIMED_TOKEN}`);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as Json).error.code).toBe(
+      "PUBLIC_SHELF_NOT_FOUND",
+    );
   });
 });
 
@@ -1450,9 +1477,9 @@ describe("PUT /api/user/:id/books side-effect", () => {
     expect(snapshotBookIds).toEqual(["book2", "book3"]);
   });
 
-  it("preserves publicSharing field when not in body", async () => {
+  it("keeps the shelf list in the pointer key and writes no shelf list into the record", async () => {
     await seedUser(USER_ID, AUTH_TOKEN);
-    await createShelf(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
 
     const res = await request("PUT", `/api/user/${USER_ID}/books`, {
       body: JSON.stringify({
@@ -1466,11 +1493,19 @@ describe("PUT /api/user/:id/books side-effect", () => {
 
     expect(res.status).toBe(200);
 
+    // The shelf survives the save — but in `publicshelves:{id}`, the key this
+    // handler only ever READS.
+    const shelves = await pointerShelves(USER_ID);
+    expect(shelves).toHaveLength(1);
+    expect(shelves?.[0].shareToken).toBe(created.data.shelf.shareToken);
+
+    // The rebuilt record carries no shelf list at all: a migrated user has no
+    // reader left for the legacy field, so it must not be re-written here.
     const record = (await kv.get(
       kvKeys.user(USER_ID),
       "json",
     )) as UserBooksRecord;
-    expect(record.publicSharing?.shelves).toHaveLength(1);
+    expect(record.publicSharing).toBeUndefined();
   });
 });
 
@@ -1521,9 +1556,9 @@ describe("PATCH /api/user/:id/books side-effect", () => {
     ]);
   });
 
-  it("preserves publicSharing field after PATCH", async () => {
+  it("keeps the shelf list in the pointer key and strips it from the carried record", async () => {
     await seedUser(USER_ID, AUTH_TOKEN);
-    await createShelf(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
 
     const res = await request("PATCH", `/api/user/${USER_ID}/books`, {
       body: JSON.stringify({
@@ -1534,11 +1569,15 @@ describe("PATCH /api/user/:id/books side-effect", () => {
 
     expect(res.status).toBe(200);
 
+    const shelves = await pointerShelves(USER_ID);
+    expect(shelves).toHaveLength(1);
+    expect(shelves?.[0].shareToken).toBe(created.data.shelf.shareToken);
+
     const record = (await kv.get(
       kvKeys.user(USER_ID),
       "json",
     )) as UserBooksRecord;
-    expect(record.publicSharing?.shelves).toHaveLength(1);
+    expect(record.publicSharing).toBeUndefined();
   });
 });
 

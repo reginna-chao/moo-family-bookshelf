@@ -195,6 +195,7 @@
 | `user:{user_id}`                | 個人書單 + 開放設定（JSON）                                 | 歸屬個人，不隨家庭變動                                                                                        |
 | `family:{family_id}`            | `{ owner_id, members[], max_members, created_at }`          | 記錄家庭組成 + 管理者                                                                                         |
 | `member:{user_id}`              | 所屬 family_id                                              | 反向查詢用                                                                                                    |
+| `publicshelves:{user_id}`       | `{ shelves: PublicShelf[] }`                                | 公開書櫃清單（現行連結的唯一來源；僅公開書櫃的四個寫入端點會寫入）                                            |
 | `public:{share_token}`          | `{ userId, shelfId, title, books[], createdAt, expiresAt }` | 公開書櫃明文快照（v1.2.0）                                                                                    |
 | `verify:{user_id}`              | `{ method, hash, salt, prompted, secretUpdatedAt? }`        | PWA 登入驗證設定（`secretUpdatedAt` 為驗證方式／密鑰最後變更時間，epoch 毫秒）                                |
 | `verifyfail:{user_id}:{caller}` | `{ failCount, lockedUntil, startedAt? }`                    | 依「來源 + 目標帳號」計算的驗證失敗次數（TTL 900 秒）；`startedAt` 為該次失敗連續累計的起始時間（epoch 毫秒） |
@@ -733,7 +734,7 @@ export const reportLinks = [
 ┌─────────────────────────────┐
 │  Cloudflare Workers          │
 │                             │
-│  user:{id}.publicSharing    │
+│  publicshelves:{id}          │
 │    ↳ shelves[] (max 1)      │
 │  public:{token} → 明文快照   │
 │  (KV TTL 管理過期)           │
@@ -754,11 +755,16 @@ export const reportLinks = [
 ### 資料模型
 
 ```typescript
-// user:{userId} 擴充欄位
+// publicshelves:{userId} — 公開書櫃清單（現行連結的唯一來源）
+interface PublicShelvesRecord {
+  shelves: PublicShelf[]; // v1.2.0 強制 length <= 1
+}
+
+// user:{userId} 的 publicSharing 為舊版位置，僅供尚未搬遷者讀取時 fallback
 interface UserBooksRecord {
   // ... 既有欄位
   publicSharing?: {
-    shelves: PublicShelf[]; // v1.2.0 強制 length <= 1
+    shelves: PublicShelf[];
   };
 }
 
@@ -791,9 +797,10 @@ interface PublicShelfSnapshot {
 - **使用前提**：曾加入過家庭以完成書單同步即可（不要求目前處於家庭中）；token refresh 邏輯需支援無家庭狀態
 - **預設關閉**：公開分享預設不啟用，使用者需手動開啟
 - **快照同步**：`PUT /api/user/:id/books` 時自動更新所有 active shelves 的 `public:{token}` 快照
-- **過期管理**：7 / 30 / 60 / 90 天 / 永久（預設 30 天），透過 KV TTL 自動清理。建立時 `expiresAt = createdAt + expiresDays`；更新 `expiresDays` 時重算為 `更新時間 + expiresDays`（從更新時起算）。讀取端另有兩道保險：設有到期日的快照即使因異常未被 TTL 清除，逾期讀取一律回 404；永久快照（無 TTL 可依靠）則在讀取時比對擁有者記錄中該書櫃的現行 token 與「仍為永久」設定，比對不符（token 已輪換、書櫃已刪、帳號已刪、已改設到期日）即回 404 —— 孤兒快照因此不可讀。此檢查不會刪除或改寫任何書櫃資料（僅多一次 `user:{userId}` 讀取；設有到期日的快照不付這筆成本；請求管線的 per-IP 限流計數器本就每請求固定寫一筆，不因此改變）。KV 為最終一致，重設網址後尚未取得新記錄的節點，最多約 60 秒內可能仍對新連結回 404（fail-closed，自癒）
+- **清單來源獨立**：公開書櫃清單存放於 `publicshelves:{userId}`，只有公開書櫃的四個寫入端點（建立／更新／重設網址／刪除）會寫入；書單儲存（`PUT`/`PATCH /books`）與家庭偏好設定只讀不寫。原因：`user:{userId}` 是整份覆寫且無 CAS 的記錄，而 KV 跨節點讀取最多可能延遲約 60 秒，清單若放在其中，另一台裝置的書單同步就可能把已撤銷的連結寫回、並重新產生剛被刪除的快照。搬遷採懶惰式：`publicshelves:{userId}` 不存在時讀取端 fallback 到舊欄位 `user:{userId}.publicSharing`，並由下一次公開書櫃寫入動作建立新 key（非空與空清單皆以新 key 為準）；搬遷後舊欄位在下次書單儲存時自然消失
+- **過期管理**：7 / 30 / 60 / 90 天 / 永久（預設 30 天），透過 KV TTL 自動清理。建立時 `expiresAt = createdAt + expiresDays`；更新 `expiresDays` 時重算為 `更新時間 + expiresDays`（從更新時起算）。讀取端另有兩道保險：設有到期日的快照即使因異常未被 TTL 清除，逾期讀取一律回 404；接著**所有快照**（不分是否永久）都會比對 `publicshelves:{userId}` 中該書櫃的現行 token 與到期時間：token 不符（已輪換、書櫃已刪、帳號已刪、或被延遲的書單同步「復活」）即回 404；到期時間則採單向比對——快照比書櫃現行設定**更晚**到期（含書櫃已改為有到期日、快照卻仍為永久）視為失效回 404，**更早**到期則仍可讀，並於快照自身的到期時間失效（使用者剛延長期限、而快照是以尚未更新的清單寫成時，延長不會反而讓連結先斷）—— 孤兒與被復活的快照因此皆不可讀。此檢查不會刪除或改寫任何書櫃資料（每次有效讀取多一次 `publicshelves:{userId}` 讀取；尚未搬遷者才會再多讀一次完整的 `user:{userId}` 書單記錄；請求管線的 per-IP 限流計數器本就每請求固定寫一筆，不因此改變）。KV 為最終一致，重設網址後尚未取得新清單的節點，最多約 60 秒內可能仍對新連結回 404（fail-closed，自癒；此窗口現在也適用於有到期日的書櫃）
 - **重設網址**：產生新 UUID token，舊 token 立即失效；shelfId 維持不變（區隔內部識別與對外連結）。即使最後清理舊快照的刪除步驟異常失敗，舊 token 也會因讀取端比對不符而讀不到
-- **關閉公開分享**：刪除 `public:{token}` + 移除 user record 中的 shelf 元素
+- **關閉公開分享**：刪除 `public:{token}` + 從 `publicshelves:{userId}` 移除該 shelf 元素
 - **購買連結**：書籍連結至 `https://readmoo.com/book/{bookId}`（另開分頁），不提供借閱
 - **share_token**：UUID 32 碼（無連字號），高熵防猜測
 - **PWA 路由**：v1.2.0 採混合路由（公開頁面 path-based，其餘 hash routing）

@@ -49,13 +49,16 @@
 
 ### 要備份
 
-| Key Pattern           | 內容型態                    | 備份理由                           |
-| --------------------- | --------------------------- | ---------------------------------- |
-| `user:{userId}`       | 明文 JSON（書櫃與分享設定） | 核心資料：書櫃與分享設定           |
-| `family:{familyId}`   | 明文 JSON                   | 家庭群組（成員 UUID 列表，非 PII） |
-| `member:{userId}`     | 明文字串（familyId）        | 反向查找，restore 必需             |
-| `verify:{userId}`     | 明文 JSON（雜湊 + salt）    | PWA 登入驗證設定；雜湊過的非 PII   |
-| `public:{shareToken}` | 明文 JSON                   | 用戶主動建立的公開書櫃             |
+| Key Pattern              | 內容型態                    | 備份理由                                                       |
+| ------------------------ | --------------------------- | -------------------------------------------------------------- |
+| `user:{userId}`          | 明文 JSON（書櫃與分享設定） | 核心資料：書櫃與分享設定                                       |
+| `family:{familyId}`      | 明文 JSON                   | 家庭群組（成員 UUID 列表，非 PII）                             |
+| `member:{userId}`        | 明文字串（familyId）        | 反向查找，restore 必需                                         |
+| `verify:{userId}`        | 明文 JSON（雜湊 + salt）    | PWA 登入驗證設定；雜湊過的非 PII                               |
+| `publicshelves:{userId}` | 明文 JSON（公開書櫃清單）   | 現行公開連結的唯一來源；與 `user:*` 必須同進同出（見下方註記） |
+| `public:{shareToken}`    | 明文 JSON                   | 用戶主動建立的公開書櫃                                         |
+
+> ⚠️ **`publicshelves:*` 不可漏備**：公開書櫃清單已從 `user:{userId}` 拆出獨立存放（見 `docs/architecture.md`），讀取端會以它判定連結是否仍有效。若只還原 `user:*` 而不還原 `publicshelves:*`，所有已搬遷用戶會退回舊欄位 fallback，等同讓「已撤銷的公開連結」全部復活——正是這個 key 當初被拆出來要防止的事故類型。
 
 ### 不備份
 
