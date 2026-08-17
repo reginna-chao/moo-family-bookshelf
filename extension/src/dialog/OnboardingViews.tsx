@@ -1,6 +1,6 @@
 import React from "react";
-import { parseSyncCodeApiHost } from "../crypto/syncCode";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
+import { useSyncCodeHostVerdict } from "./useSyncCodeHostVerdict";
 
 const ERROR_MESSAGE_ID = "onboarding-error-view-message";
 
@@ -142,6 +142,12 @@ export function IdleView({
   onCreate,
   onJoin,
 }: IdleViewProps) {
+  const hostVerdict = useSyncCodeHostVerdict(syncCodeInput);
+  const handleJoin = () => {
+    // Pressing join ends the editing session, so the warning must not wait.
+    hostVerdict.settleNow();
+    onJoin();
+  };
   const createClass = isProcessing
     ? "moo-button moo-button--block moo-onboarding-view__create moo-onboarding-view__create--busy"
     : "moo-button moo-button--block moo-onboarding-view__create";
@@ -170,12 +176,18 @@ export function IdleView({
           placeholder="輸入家庭同步碼"
           value={syncCodeInput}
           onChange={(e) => onSetSyncCodeInput(e.target.value)}
+          onPaste={hostVerdict.settleOnNextChange}
+          onBlur={hostVerdict.settleNow}
           disabled={isProcessing}
           className="moo-form-input moo-form-input--block moo-onboarding-view__input"
         />
       </div>
-      <SyncCodeHostNote result={parseSyncCodeApiHost(syncCodeInput)} />
-      <button onClick={onJoin} disabled={joinDisabled} className={joinClass}>
+      <SyncCodeHostNote result={hostVerdict.result} />
+      <button
+        onClick={handleJoin}
+        disabled={joinDisabled}
+        className={joinClass}
+      >
         {state === "joining" ? "加入中..." : "加入家庭公開書櫃"}
       </button>
       <p className="moo-onboarding-view__note moo-onboarding-view__note--lh">

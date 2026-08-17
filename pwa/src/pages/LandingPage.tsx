@@ -1,11 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
-import {
-  decodeSyncCode,
-  parseSyncCodeApiHost,
-  SyncCodeError,
-} from "@/crypto/syncCode";
+import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 import { deriveUserId } from "@/crypto/hash";
 import { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/client";
@@ -13,6 +9,7 @@ import type { AuthState } from "@/hooks/useAuth";
 import { REMEMBERED_LOGOUT_KEY, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import { getAppEnv } from "@/utils/appEnv";
 import { useRetryCountdown } from "@/hooks/useRetryCountdown";
+import { useSyncCodeHostVerdict } from "@/hooks/useSyncCodeHostVerdict";
 import {
   buildRetryMessage,
   buildStaticRetryMessage,
@@ -68,7 +65,14 @@ export function LandingPage({
   qrToken = "",
   externalError = "",
 }: LandingPageProps) {
-  const [syncCodeInput, setSyncCodeInput] = useState("");
+  // Seeded from the prop so an invite-link / QR prefill is already in the field
+  // at FIRST render: the verdict hook counts a never-typed value as settled, so
+  // its `@host` note lands at once instead of waiting out the settle delay. The
+  // effect below still covers a later `initialSyncCode` change.
+  const [syncCodeInput, setSyncCodeInput] = useState(initialSyncCode);
+  // Holds the `@host` warning back until the typed code settles, so it cannot
+  // flash on every intermediate keystroke.
+  const hostVerdict = useSyncCodeHostVerdict(syncCodeInput);
   const [showCode, setShowCode] = useState(false);
   const [email, setEmail] = useState("");
   const [rememberSyncCode, setRememberSyncCode] = useState(() => {
@@ -143,6 +147,8 @@ export function LandingPage({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Submitting ends the editing session, so the warning must not wait.
+    hostVerdict.settleNow();
     if (retryBlocked) return;
     setSyncCodeError("");
     setEmailError("");
@@ -518,6 +524,8 @@ export function LandingPage({
                 setSyncCodeInput(e.target.value);
                 if (syncCodeError) setSyncCodeError("");
               }}
+              onPaste={hostVerdict.settleOnNextChange}
+              onBlur={hostVerdict.settleNow}
               placeholder="moo-xxxxxxxx-xxxxxxxxxxxx"
               aria-invalid={!!syncCodeError || undefined}
               aria-describedby={syncCodeError ? "sync-code-error" : undefined}
@@ -540,7 +548,7 @@ export function LandingPage({
         </div>
 
         {/* Covers both the typed code and an invite link's pre-filled one. */}
-        <SyncCodeHostNote result={parseSyncCodeApiHost(syncCodeInput)} />
+        <SyncCodeHostNote result={hostVerdict.result} />
 
         <div>
           <label

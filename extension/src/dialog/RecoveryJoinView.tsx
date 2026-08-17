@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { parseSyncCodeApiHost } from "../crypto/syncCode";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
+import { useSyncCodeHostVerdict } from "./useSyncCodeHostVerdict";
 
 export interface RecoveryJoinViewProps {
   syncCodeInput: string;
@@ -19,6 +19,12 @@ export function RecoveryJoinView({
   onBack,
 }: RecoveryJoinViewProps): React.JSX.Element {
   const [showInput, setShowInput] = useState(false);
+  const hostVerdict = useSyncCodeHostVerdict(syncCodeInput);
+  const handleJoin = () => {
+    // Pressing join ends the editing session, so the warning must not wait.
+    hostVerdict.settleNow();
+    onJoin();
+  };
   const disableJoin = !syncCodeInput.trim() || isProcessing;
   const submitClass = disableJoin
     ? "moo-button moo-button--block moo-recovery-join__submit moo-recovery-join__submit--disabled"
@@ -41,6 +47,8 @@ export function RecoveryJoinView({
           aria-label="家庭同步碼"
           value={syncCodeInput}
           onChange={(e) => onSetSyncCodeInput(e.target.value)}
+          onPaste={hostVerdict.settleOnNextChange}
+          onBlur={hostVerdict.settleNow}
           disabled={isProcessing}
           className="moo-form-input moo-form-input--block moo-recovery-join__input"
         />
@@ -53,10 +61,10 @@ export function RecoveryJoinView({
           {showInput ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>
       </div>
-      <SyncCodeHostNote result={parseSyncCodeApiHost(syncCodeInput)} />
+      <SyncCodeHostNote result={hostVerdict.result} />
       <button
         type="button"
-        onClick={onJoin}
+        onClick={handleJoin}
         disabled={disableJoin}
         className={submitClass}
       >
