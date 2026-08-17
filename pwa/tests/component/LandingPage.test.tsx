@@ -8,9 +8,24 @@ import {
   beforeAll,
 } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { webcrypto } from "node:crypto";
+import { SYNC_CODE_HOST_SETTLE_DELAY_MS } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { LandingPage } from "@/pages/LandingPage";
+import {
+  HALF_TYPED_PREFIXES,
+  LAN_CODE,
+  LAN_ENDPOINT,
+  SPOOFED_CODE,
+  TRUSTED_CODE,
+  TRUSTED_ENDPOINT,
+} from "../helpers/syncCodeHostFixtures";
 
 /**
  * Only `decodeSyncCode` is stubbed — these tests drive the flow by dictating
@@ -1014,6 +1029,11 @@ describe("LandingPage", () => {
         render(<LandingPage onAuth={mockOnAuth} />);
 
         fillInput("同步碼", "moo-fam1-key1@https://real.example@evil.com");
+        // The warning is held back until the value settles, so that a half-typed
+        // `@host` cannot flash it on every keystroke. Leaving the field is one of
+        // the settle triggers, and it keeps this test about the COPY rather than
+        // about the timer — the timing itself has its own block below.
+        fireEvent.blur(screen.getByLabelText("同步碼"));
 
         const warning = screen.getByTestId("sync-code-host-note-invalid");
         expect(warning).toHaveAttribute("role", "alert");
@@ -1043,6 +1063,187 @@ describe("LandingPage", () => {
         expect(
           screen.queryByTestId("sync-code-host-note-invalid"),
         ).not.toBeInTheDocument();
+      });
+    });
+
+    /**
+     * WHEN the warning may appear, as opposed to what it says.
+     *
+     * The warning used to be live, so it flashed through nearly every keystroke
+     * of a half-typed `@host` — and a warning that cries wolf during normal
+     * typing is one the user is trained to dismiss. That is fatal here: it is
+     * the last human-facing defence against a userinfo-spoofed endpoint, which
+     * would ship the auth token and the whole book list to the attacker. So it
+     * is DELAYED until the value settles, and never suppressed.
+     *
+     * Kept symmetric with the Extension's copy in
+     * extension/tests/component/OnboardingViews.test.tsx — the policy lives in
+     * `shared/` exactly so the two cannot drift.
+     */
+    describe("timing of the warning", () => {
+      function expectNoNote() {
+        expect(
+          screen.queryByTestId("sync-code-host-note"),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByTestId("sync-code-host-note-invalid"),
+        ).not.toBeInTheDocument();
+      }
+
+      function expectWarning() {
+        const warning = screen.getByTestId("sync-code-host-note-invalid");
+        expect(warning).toHaveAttribute("role", "alert");
+        expect(warning).toHaveTextContent(
+          "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認",
+        );
+      }
+
+      function advanceSettleDelay() {
+        act(() => {
+          vi.advanceTimersByTime(SYNC_CODE_HOST_SETTLE_DELAY_MS);
+        });
+      }
+
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("shows no warning while a legitimate LAN @host is typed one character at a time", () => {
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        for (const prefix of HALF_TYPED_PREFIXES) {
+          fillInput("同步碼", prefix);
+          expectNoNote();
+        }
+
+        // Anchor against a vacuous pass: the same field DOES speak once the
+        // value is a complete, adoptable endpoint, so the silence above is the
+        // delay doing its job — not a note that never renders at all.
+        fillInput("同步碼", LAN_CODE);
+        expect(screen.getByTestId("sync-code-host-note")).toBeInTheDocument();
+      });
+
+      it("names the endpoint with no delay once the typed @host becomes adoptable", () => {
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", LAN_CODE);
+
+        // `valid` is positive information about the CURRENT value, so it is
+        // never held back — no timer advance here on purpose.
+        expect(screen.getByTestId("sync-code-host-note")).toHaveTextContent(
+          LAN_ENDPOINT,
+        );
+      });
+
+      it("warns once the typed @host has held still for the settle delay", () => {
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", SPOOFED_CODE);
+        expectNoNote();
+
+        advanceSettleDelay();
+
+        expectWarning();
+      });
+
+      it("warns as soon as a pasted code lands, without waiting for the delay", () => {
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        // onPaste fires BEFORE the input value updates, so the trigger has to
+        // arm the NEXT value rather than settle the (still empty) current one.
+        fireEvent.paste(screen.getByLabelText("同步碼"));
+        fillInput("同步碼", SPOOFED_CODE);
+
+        expectWarning();
+      });
+
+      it("warns on blur, without waiting for the delay", () => {
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", SPOOFED_CODE);
+        expectNoNote();
+
+        fireEvent.blur(screen.getByLabelText("同步碼"));
+
+        expectWarning();
+      });
+
+      it("warns when the form is submitted, without waiting for the delay", () => {
+        // Submitting also refuses the join outright (isUnsafeApiHost), which is
+        // the separate fail-closed guard; the note must not lag behind it.
+        mockDecodeSyncCode.mockReturnValue({
+          familyId: "fam-1",
+          apiHost: "https://api.moofamily.app@evil.com",
+        });
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", SPOOFED_CODE);
+        expectNoNote();
+
+        submitForm();
+
+        expectWarning();
+        expect(mockJoinFamily).not.toHaveBeenCalled();
+      });
+
+      it("warns immediately for an invite-link prefill present at first render", () => {
+        // Trigger 4: a code the user never typed has no typing to flicker
+        // through, so it is settled from the very first render. The field is
+        // seeded straight from the prop for exactly this reason, which is what
+        // makes the PWA warn at the same moment as the Extension — an
+        // invite-link arrival is the one path where the user sees the address
+        // before they ever touch the keyboard, so a delay here would be a
+        // warning that arrives after the decision.
+        render(
+          <LandingPage onAuth={mockOnAuth} initialSyncCode={SPOOFED_CODE} />,
+        );
+
+        expectWarning();
+        // No timer was ever armed, so the warning cannot be an artefact of one.
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      /**
+       * The hazard this whole mechanism has to avoid creating. If the delay were
+       * ever implemented by KEEPING the last rendered note, appending
+       * `@evil.com` to a host the user already saw named would leave a
+       * reassuring "will connect to api.moofamily.app" standing over a spoofed
+       * address — lending the spoof exactly the legitimacy the warning denies.
+       */
+      it("drops the previously named host the instant the value turns invalid", () => {
+        const { container } = render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", TRUSTED_CODE);
+        expect(screen.getByTestId("sync-code-host-note")).toHaveTextContent(
+          TRUSTED_ENDPOINT,
+        );
+
+        fillInput("同步碼", SPOOFED_CODE);
+
+        // Before the delay elapses: nothing at all on screen…
+        expectNoNote();
+        // …and specifically not the host that was legitimate a keystroke ago.
+        // (An <input> value never lands in textContent, so this reads the note.)
+        expect(container.textContent).not.toContain(TRUSTED_ENDPOINT);
+
+        advanceSettleDelay();
+
+        expectWarning();
+      });
+
+      it("leaves no settle timer pending after the page unmounts", () => {
+        const { unmount } = render(<LandingPage onAuth={mockOnAuth} />);
+
+        fillInput("同步碼", SPOOFED_CODE);
+        expect(vi.getTimerCount()).toBe(1);
+
+        unmount();
+
+        expect(vi.getTimerCount()).toBe(0);
       });
     });
 

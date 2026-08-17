@@ -1,10 +1,20 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { SYNC_CODE_HOST_SETTLE_DELAY_MS } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import {
   RecoveryChoiceView,
   RecoveryJoinView,
   SoloRecoveryConfirmView,
 } from "@/dialog/OnboardingRecoveryViews";
+import {
+  HALF_TYPED_PREFIXES,
+  LAN_CODE,
+  LAN_ENDPOINT,
+  SPOOFED_CODE,
+  TRUSTED_CODE,
+  TRUSTED_ENDPOINT,
+} from "../helpers/syncCodeHostFixtures";
 
 describe("RecoveryChoiceView", () => {
   const defaultProps = {
@@ -290,6 +300,194 @@ describe("RecoveryJoinView", () => {
       screen.getByTestId("sync-code-host-note-invalid"),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("sync-code-host-note")).not.toBeInTheDocument();
+  });
+
+  /**
+   * WHEN the warning may appear, as opposed to what it says. The recovery join
+   * screen runs the same delayed-disclosure hook as onboarding, so it gets the
+   * same coverage: the warning may be held back until the value settles, never
+   * suppressed, and never replaced by a note that contradicts the field.
+   *
+   * Mirrors the IdleView block in
+   * extension/tests/component/OnboardingViews.test.tsx.
+   */
+  describe("custom-server note timing", () => {
+    /**
+     * RecoveryJoinView is controlled by dialog/Onboarding.tsx, so a stateful
+     * wrapper is what lets these tests drive the real input → onChange → prop
+     * round trip (and with it the onPaste / onBlur handlers).
+     */
+    function ControlledRecoveryJoinView({
+      initialSyncCode = "",
+      onJoin = () => {},
+    }: {
+      initialSyncCode?: string;
+      onJoin?: () => void;
+    }) {
+      const [syncCodeInput, setSyncCodeInput] = useState(initialSyncCode);
+      return (
+        <RecoveryJoinView
+          syncCodeInput={syncCodeInput}
+          isProcessing={false}
+          onSetSyncCodeInput={setSyncCodeInput}
+          onJoin={onJoin}
+          onBack={() => {}}
+        />
+      );
+    }
+
+    function syncCodeField(): HTMLElement {
+      return screen.getByPlaceholderText("輸入家庭同步碼");
+    }
+
+    function typeCode(value: string): void {
+      fireEvent.change(syncCodeField(), { target: { value } });
+    }
+
+    function expectNoNote(): void {
+      expect(
+        screen.queryByTestId("sync-code-host-note"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("sync-code-host-note-invalid"),
+      ).not.toBeInTheDocument();
+    }
+
+    function expectWarning(): void {
+      const warning = screen.getByTestId("sync-code-host-note-invalid");
+      expect(warning).toHaveAttribute("role", "alert");
+      expect(warning).toHaveTextContent(
+        "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認",
+      );
+    }
+
+    function advanceSettleDelay(): void {
+      act(() => {
+        vi.advanceTimersByTime(SYNC_CODE_HOST_SETTLE_DELAY_MS);
+      });
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("shows no warning while a legitimate LAN @host is typed one character at a time", () => {
+      render(<ControlledRecoveryJoinView />);
+
+      for (const prefix of HALF_TYPED_PREFIXES) {
+        typeCode(prefix);
+        expectNoNote();
+      }
+
+      // Anchor against a vacuous pass: the same field DOES speak once the value
+      // is a complete, adoptable endpoint, so the silence above is the delay
+      // doing its job — not a note that never renders at all.
+      typeCode(LAN_CODE);
+      expect(screen.getByTestId("sync-code-host-note")).toBeInTheDocument();
+    });
+
+    it("names the endpoint with no delay once the typed @host becomes adoptable", () => {
+      render(<ControlledRecoveryJoinView />);
+
+      typeCode(LAN_CODE);
+
+      // `valid` describes the CURRENT value, so it is never held back.
+      expect(screen.getByTestId("sync-code-host-note")).toHaveTextContent(
+        LAN_ENDPOINT,
+      );
+    });
+
+    it("warns once the typed @host has held still for the settle delay", () => {
+      render(<ControlledRecoveryJoinView />);
+
+      typeCode(SPOOFED_CODE);
+      expectNoNote();
+
+      advanceSettleDelay();
+
+      expectWarning();
+    });
+
+    it("warns as soon as a pasted code lands, without waiting for the delay", () => {
+      render(<ControlledRecoveryJoinView />);
+
+      fireEvent.paste(syncCodeField());
+      typeCode(SPOOFED_CODE);
+
+      expectWarning();
+    });
+
+    it("warns on blur, without waiting for the delay", () => {
+      render(<ControlledRecoveryJoinView />);
+
+      typeCode(SPOOFED_CODE);
+      expectNoNote();
+
+      fireEvent.blur(syncCodeField());
+
+      expectWarning();
+    });
+
+    it("warns when join is pressed, without waiting for the delay", () => {
+      const onJoin = vi.fn();
+      render(<ControlledRecoveryJoinView onJoin={onJoin} />);
+
+      typeCode(SPOOFED_CODE);
+      expectNoNote();
+
+      fireEvent.click(screen.getByRole("button", { name: "加入並還原書架" }));
+
+      expectWarning();
+      expect(onJoin).toHaveBeenCalledOnce();
+    });
+
+    it("warns immediately for an invite-link prefill present at first render", () => {
+      // Trigger 4: a code the user never typed is settled from the first render.
+      render(
+        <RecoveryJoinView {...defaultProps} syncCodeInput={SPOOFED_CODE} />,
+      );
+
+      expectWarning();
+    });
+
+    /**
+     * Appending `@evil.com` to a host the user already saw named must remove
+     * that name at once. A note kept alive across the change would lend the
+     * spoofed address the legitimacy of the host it replaced.
+     */
+    it("drops the previously named host the instant the value turns invalid", () => {
+      const { container } = render(
+        <ControlledRecoveryJoinView initialSyncCode={TRUSTED_CODE} />,
+      );
+      expect(screen.getByTestId("sync-code-host-note")).toHaveTextContent(
+        TRUSTED_ENDPOINT,
+      );
+
+      typeCode(SPOOFED_CODE);
+
+      expectNoNote();
+      // An <input> value never lands in textContent, so this reads the note.
+      expect(container.textContent).not.toContain(TRUSTED_ENDPOINT);
+
+      advanceSettleDelay();
+
+      expectWarning();
+    });
+
+    it("leaves no settle timer pending after the view unmounts", () => {
+      const { unmount } = render(<ControlledRecoveryJoinView />);
+
+      typeCode(SPOOFED_CODE);
+      expect(vi.getTimerCount()).toBe(1);
+
+      unmount();
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });
 
