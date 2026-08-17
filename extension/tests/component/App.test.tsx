@@ -4,10 +4,11 @@ import {
   fireEvent,
   waitFor,
   act,
+  within,
 } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { App } from "@/dialog/App";
-import { ApiClient } from "@/api/client";
+import { ApiClient, validateEndpointUrl } from "@/api/client";
 import {
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
@@ -481,13 +482,20 @@ describe("App", () => {
   // App mounts useReauth and renders VerificationPrompt in a modal OVERLAY on
   // top of the still-mounted main view.
   describe("re-verification overlay", () => {
-    async function renderWithCapturedClient() {
+    /**
+     * Boot App into the main view with a live ApiClient captured.
+     * `apiEndpoint` (optional) is seeded into storage the way an accepted
+     * endpoint switch would be, so the client adopts it through the real
+     * production path rather than a hand-set field.
+     */
+    async function renderWithCapturedClient(apiEndpoint?: string) {
       const { instances, restore } = await captureApiClients();
 
       setupChromeMessages({
         familyId: "fam-1",
         userId: "user-1",
         authToken: "tok",
+        apiEndpoint,
       });
       render(<App />);
       await waitFor(() => {
@@ -498,6 +506,17 @@ describe("App", () => {
         data: { method: "pin", prompted: 0 },
       } as never);
       return { apiClient, restore };
+    }
+
+    /** Fire the client's reauth signal and wait for the modal to open. */
+    async function openReauthModal(apiClient: ApiClient): Promise<HTMLElement> {
+      await act(async () => {
+        apiClient.onReauthRequired!();
+      });
+      await waitFor(() => {
+        expect(screen.getByText("需要驗證")).toBeInTheDocument();
+      });
+      return screen.getByRole("dialog");
     }
 
     it("shows the verification prompt over the still-mounted main view on the reauth signal", async () => {
@@ -538,6 +557,116 @@ describe("App", () => {
       expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
 
       restore();
+    });
+
+    /**
+     * Every screen that asks for a PIN / pattern owes the user the name of the
+     * server that secret is about to be sent to. This modal is the last one that
+     * lacked it, and it is the hardest to reason about from the UI alone: unlike
+     * the onboarding challenge, it can surface days after the join, with no sync
+     * code and no endpoint anywhere on screen.
+     *
+     * The verdict comes from the endpoint the client has ACTUALLY adopted, and
+     * the copy is the `verify` variant — there is no sync code here to point at.
+     */
+    describe("endpoint disclosure above the challenge", () => {
+      /** A self-hosted family server, written the way a sync code carries it. */
+      const SELF_HOSTED = "https://nas.example.com/moo/";
+
+      it("names the self-hosted server the secret will be sent to", async () => {
+        const { apiClient, restore } =
+          await renderWithCapturedClient(SELF_HOSTED);
+
+        const modal = await openReauthModal(apiClient);
+
+        const note = within(modal).getByTestId("sync-code-host-note");
+        expect(note).toHaveTextContent("將連線至自訂伺服器：");
+        // No sync code is on this screen, so the join lead-in's "此同步碼" would
+        // point at something that is not there. Its absence is the only thing
+        // pinning the verify copy — the join copy contains it as a substring.
+        expect(note.textContent).not.toContain("此同步碼");
+        // The CANONICAL endpoint the client will actually call (trailing slash
+        // gone), derived from production rather than hard-coded, so a change to
+        // the normalization rules cannot leave the disclosure describing a
+        // different server from the one being talked to.
+        expect(apiClient.getEndpoint()).toBe(validateEndpointUrl(SELF_HOSTED));
+        expect(note).toHaveTextContent(apiClient.getEndpoint());
+
+        restore();
+      });
+
+      /**
+       * Silence on the official Worker is the point, not an oversight: a banner
+       * on EVERY re-auth would train the user to click past the one time it
+       * means something.
+       */
+      it("stays silent when the client is on the official default endpoint", async () => {
+        const { apiClient, restore } = await renderWithCapturedClient();
+
+        const modal = await openReauthModal(apiClient);
+
+        expect(apiClient.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+        expect(
+          within(modal).queryByTestId("sync-code-host-note"),
+        ).not.toBeInTheDocument();
+        expect(
+          within(modal).queryByTestId("sync-code-host-note-invalid"),
+        ).not.toBeInTheDocument();
+        // Nothing else in this modal announces itself, so an alert inside it
+        // could only be the note.
+        expect(within(modal).queryByRole("alert")).not.toBeInTheDocument();
+
+        restore();
+      });
+
+      /**
+       * Defence in depth: `setEndpoint` validates, so a refused address cannot
+       * normally reach `getEndpoint()`. Pinned anyway — whatever put it there,
+       * the modal must warn rather than lend a refused host the legitimacy of
+       * the reassuring line.
+       */
+      it("warns instead of naming an adopted endpoint the validator would refuse", async () => {
+        const { apiClient, restore } = await renderWithCapturedClient();
+        const endpointSpy = vi
+          .spyOn(apiClient, "getEndpoint")
+          .mockReturnValue("https://real.example@evil.com");
+
+        const modal = await openReauthModal(apiClient);
+
+        const warning = within(modal).getByTestId(
+          "sync-code-host-note-invalid",
+        );
+        expect(warning).toHaveAttribute("role", "alert");
+        expect(
+          within(modal).queryByTestId("sync-code-host-note"),
+        ).not.toBeInTheDocument();
+        // Neither the masqueraded name nor the host the browser would reach.
+        expect(warning.textContent).not.toContain("real.example");
+        expect(warning.textContent).not.toContain("evil.com");
+
+        endpointSpy.mockRestore();
+        restore();
+      });
+
+      it("adds the disclosure above the challenge instead of replacing it", async () => {
+        const { apiClient, restore } =
+          await renderWithCapturedClient(SELF_HOSTED);
+
+        const modal = await openReauthModal(apiClient);
+
+        expect(
+          within(modal).getByTestId("sync-code-host-note"),
+        ).toBeInTheDocument();
+        // The challenge itself is still there and still usable.
+        await waitFor(() => {
+          expect(within(modal).getByText("請輸入 PIN 碼")).toBeInTheDocument();
+        });
+        expect(
+          within(modal).getByRole("button", { name: "返回" }),
+        ).toBeInTheDocument();
+
+        restore();
+      });
     });
   });
 

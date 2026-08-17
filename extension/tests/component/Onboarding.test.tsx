@@ -1386,6 +1386,9 @@ describe("Onboarding", () => {
    * ACTUALLY adopted (never from input text): a sync-code join has already
    * applied its `@host` by the time the challenge opens, while a create/lookup
    * challenge is still on the official default and must stay silent.
+   *
+   * The copy follows the same boundary — no sync code is visible here, so the
+   * note drops the join screens' "此同步碼" lead-in (`variant="verify"`).
    */
   describe("verification challenge endpoint disclosure", () => {
     /** A self-hosted family server, written the way a sync code would carry it. */
@@ -1427,7 +1430,13 @@ describe("Onboarding", () => {
       await joinInto(`moo-abcd-efgh@${SELF_HOSTED}`, mockApi);
 
       const note = screen.getByTestId("sync-code-host-note");
-      expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+      expect(note).toHaveTextContent("將連線至自訂伺服器：");
+      // No sync code is on THIS screen — it was typed on the previous one — so
+      // the join lead-in's "此同步碼" would point the user at something that is
+      // not there. Its absence is the only thing pinning `variant="verify"`:
+      // the join copy contains the verify copy as a substring, so the positive
+      // assertion above passes either way.
+      expect(note.textContent).not.toContain("此同步碼");
       // The canonical address the client actually adopted — not the raw `@host`
       // text, so a trailing slash / uppercase host / IDN cannot make the
       // disclosure read as a different server from the one being talked to.
