@@ -42,6 +42,17 @@ jobs:
     #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
 
     runs-on: ubuntu-latest
+    # The cost brake with teeth. Neither this workflow nor claude.yml used to set
+    # one, so both inherited GitHub's 6-hour default. --max-turns is not a
+    # substitute: its post-hoc comparison in the action fires only after the work
+    # is already paid for (its SDK-side error_max_turns cut-off is a separate
+    # mode — see the note on claude_args below). What a job timeout caps is
+    # WALL CLOCK, not tokens: it stops new work, it never refunds an in-flight
+    # request. At the observed burn rate (#119: $2.63 for 5m13s) a 20-minute
+    # runaway still costs ~$10 — bounded at ~4x a normal review, not zero, and
+    # per run, not per day. 20 minutes is ~4x the 5m25s job (checkout + setup +
+    # review) that a 20-file / +2454-line PR took, so it bites only on a runaway.
+    timeout-minutes: 20
     env:
       # Family alias — resolves to the latest Opus generation at run time, so the
       # repo never sits pinned on a retired snapshot. The resolved model id is
@@ -66,7 +77,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-          # Cost control + tool permissions.
+          # Tool permissions — nothing in here caps cost (see the --max-turns
+          # note below, and timeout-minutes above).
           # Lesson learned: a narrow per-command Bash(...) allowlist makes Claude hit
           # a denial whenever it reaches for a command not on the list
           # (git log / cat / sed / TodoWrite planning...), and each
@@ -85,9 +97,24 @@ jobs:
           #       prefix rules match command strings, so approve / close stay
           #       reachable via `gh api` or curl.
           #   (c) the prompt's explicit "comment only — never approve or merge" rule.
+          #
+          # --max-turns is not the cost lever it looks like; it has TWO modes.
+          # (a) SDK-side (passed through as maxTurns): a real-time cut-off that
+          #     ends the run as error_max_turns with NO review posted, every turn
+          #     up to it still billed — the failure mode at the top of this block.
+          # (b) Action-side: a post-hoc count comparison. PR #119 logged
+          #     maxTurns: 35 / num_turns: 37 / is_error: false — the run completed
+          #     and had already posted before the action compared and failed the
+          #     job, buying only a red X on already-successful work.
+          # So 100 is not a spend cap but a backstop against a pathological loop
+          # spinning fast enough to stay under the job clock — NOT a PR-size knob,
+          # so resist re-tuning per PR. Turn count is a poor size proxy anyway:
+          # recent reviews took 16 / 20 / 21 / 31 / 37 turns on comparable PRs, so
+          # 35 was approached repeatedly with ~4 turns of headroom, not breached by
+          # a freak one-off.
           claude_args: |
             --model ${{ env.CLAUDE_MODEL }}
-            --max-turns 35
+            --max-turns 100
             --allowedTools "Bash,Read,Glob,Grep,TodoWrite,mcp__github_inline_comment__create_inline_comment"
             --disallowedTools "Bash(gh pr review:*),Bash(gh pr merge:*),Bash(gh pr close:*),Write,Edit"
 
@@ -180,8 +207,18 @@ jobs:
         # log), so the footer always shows the real Opus version behind the alias.
         # Cosmetic backfill: a failure here (gh 5xx, rate limit, jq surprise) must
         # not turn an already-posted successful review red.
+        #
+        # Deliberately runs even when the review step went red: an overrun posts
+        # the review in full and only then fails, so gating on success dropped the
+        # footer exactly when it was still needed (PR #119 kept a raw
+        # <!-- MODEL_FOOTER --> marker for this reason). The condition MUST contain
+        # a status check function — GitHub implicitly ANDs success() onto any if:
+        # that lacks one, so merely loosening the `conclusion` comparison would
+        # still skip the step. !cancelled() (house style, see cicd.yml) rather than
+        # always(), so a cancelled workflow stays cancelled; execution_file is the
+        # real precondition, and the script below no-ops when no marker is found.
         continue-on-error: true
-        if: steps.claude-review.outputs.conclusion == 'success'
+        if: ${{ !cancelled() && steps.claude-review.outputs.execution_file != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EXEC_FILE: ${{ steps.claude-review.outputs.execution_file }}
