@@ -4073,3 +4073,13 @@
 .moo-sync-host-note--verify {
   margin: 24px 24px 0 24px;
 }
+
+/* Same note on the re-auth modal, which needs its OWN modifier: --verify's 24px
+   side gutters would stack on top of .moo-modal's own 20px padding (44px), and
+   .moo-modal .moo-onboarding-view zeroes the panel padding, so no gutter is owed
+   here at all. Only the gap below is pinned — explicitly, so the modal keeps its
+   spacing if the base margin ever changes. 12px is a floor: the challenge
+   heading's own top margin collapses over it. */
+.moo-sync-host-note--reauth {
+  margin-bottom: 12px;
+}

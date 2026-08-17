@@ -1,9 +1,36 @@
 import { describe, it, expect } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
-import { SyncCodeHostNote } from "@/components/SyncCodeHostNote";
-import { parseSyncCodeApiHost } from "@/crypto/syncCode";
+import {
+  SyncCodeHostNote,
+  type SyncCodeHostNoteProps,
+} from "@/components/SyncCodeHostNote";
+import {
+  parseSyncCodeApiHost,
+  type SyncCodeApiHostResult,
+} from "@/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
+
+/**
+ * Production copy, pinned here because `VALID_LEAD_IN` is module-private. The
+ * Extension twin renders the SAME two strings — extension/tests/component/
+ * SyncCodeHostNote.test.tsx pins its own copy of this pair, and the two MUST
+ * stay byte-identical: a family whose members use both apps would otherwise be
+ * told about the same server in two different words.
+ *
+ * Hoisting this copy into `moo-family-bookshelf-shared` WOULD be possible — the
+ * PWA already imports that package from both src and tests — and would make the
+ * two apps structurally incapable of disagreeing. It is deliberately NOT done:
+ * each side pins its OWN package's production literal, so a reworded string is
+ * still caught by that app's own test. The price of the choice, stated plainly:
+ * nothing FAILS when the Extension's copy and the PWA's copy drift apart,
+ * because each suite stays green against its own string. Only code review
+ * catches cross-app drift.
+ */
+const JOIN_LEAD_IN = "此同步碼將連線至自訂伺服器：";
+const VERIFY_LEAD_IN = "將連線至自訂伺服器：";
+/** Shared by both variants — deliberately, see the variant block below. */
+const INVALID_WARNING = "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認";
 
 /**
  * PWA twin of the Extension's `SyncCodeHostNote`. It is the only thing telling
@@ -24,6 +51,8 @@ import { validateEndpointUrl } from "@/api/client";
  *
  * Presentational: the verdict is a prop, which is what lets one component serve
  * both the typed-code form and the verification screen a QR arrival lands on.
+ * `variant` follows that same split and changes nothing but the valid branch's
+ * lead-in — see "the valid-branch lead-in per variant" below.
  */
 describe("SyncCodeHostNote", () => {
   it("renders nothing when the code carries no custom host", () => {
@@ -44,7 +73,7 @@ describe("SyncCodeHostNote", () => {
       );
 
       const note = screen.getByTestId("sync-code-host-note");
-      expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+      expect(note).toHaveTextContent(JOIN_LEAD_IN);
       expect(note).toHaveTextContent("https://custom.example.com");
       // Informational, not an interruption — only the warning owns role=alert.
       expect(note).not.toHaveAttribute("role", "alert");
@@ -95,14 +124,82 @@ describe("SyncCodeHostNote", () => {
       const warning = screen.getByTestId("sync-code-host-note-invalid");
       // A security refusal the user must notice before pressing join.
       expect(warning).toHaveAttribute("role", "alert");
-      expect(warning).toHaveTextContent(
-        "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認",
-      );
+      expect(warning).toHaveTextContent(INVALID_WARNING);
 
       expect(
         screen.queryByTestId("sync-code-host-note"),
       ).not.toBeInTheDocument();
       expect(screen.queryByText(/此同步碼將連線至自訂伺服器/)).toBeNull();
+    });
+  });
+
+  /**
+   * The lead-in is the ONLY thing `variant` touches, and the boundary is what
+   * the user can actually see on the screen the note sits on:
+   *
+   *   - a sync code is on display (the landing form) → name it, "此同步碼…";
+   *   - none is (the verification screen a QR / invite arrival lands on, where
+   *     the code was never typed) → drop the mention.
+   *
+   * `join` is the DEFAULT so the form's call site needs no prop at all — that
+   * default is what this block pins. The invalid branch is deliberately
+   * variant-independent: the warning is about the sync code that carried the bad
+   * host, and it must read identically wherever it appears.
+   *
+   * The Extension twin pins the identical set — extension/tests/component/
+   * SyncCodeHostNote.test.tsx, "the valid-branch lead-in per variant". Keep the
+   * two in step.
+   */
+  describe("the valid-branch lead-in per variant", () => {
+    const VALID: SyncCodeApiHostResult = {
+      kind: "valid",
+      endpoint: "https://nas.example.com/moo",
+    };
+    const INVALID: SyncCodeApiHostResult = { kind: "invalid" };
+
+    /** Full rendered text of one note, mounted and torn down in isolation. */
+    function textOf(
+      result: SyncCodeApiHostResult,
+      variant?: SyncCodeHostNoteProps["variant"],
+    ): string {
+      const { container, unmount } = render(
+        <SyncCodeHostNote result={result} variant={variant} />,
+      );
+      const text = (container.textContent ?? "").trim();
+      unmount();
+      return text;
+    }
+
+    it.each([
+      ["join", "join" as const, JOIN_LEAD_IN],
+      ["verify", "verify" as const, VERIFY_LEAD_IN],
+    ])("names the server with the %s lead-in", (_label, variant, leadIn) => {
+      // Exact equality, not `toContain`: the join copy CONTAINS the verify copy,
+      // so a substring assertion cannot tell the two variants apart.
+      expect(textOf(VALID, variant)).toBe(`${leadIn}${VALID.endpoint}`);
+    });
+
+    it("drops the sync-code mention on the verify variant", () => {
+      expect(textOf(VALID, "verify")).not.toContain("此同步碼");
+      expect(textOf(VALID, "join")).toContain("此同步碼");
+    });
+
+    it("defaults to the join lead-in when no variant is given", () => {
+      expect(textOf(VALID)).toBe(textOf(VALID, "join"));
+      expect(textOf(VALID)).toContain(JOIN_LEAD_IN);
+    });
+
+    /**
+     * A decision, not an omission: the warning names the sync code because that
+     * is what carried the refused host, and a caller asking for `verify` copy
+     * must not get a softened version of a security refusal.
+     */
+    it("warns identically on both variants", () => {
+      const onJoin = textOf(INVALID, "join");
+
+      expect(textOf(INVALID, "verify")).toBe(onJoin);
+      expect(textOf(INVALID)).toBe(onJoin);
+      expect(onJoin).toBe(INVALID_WARNING);
     });
   });
 

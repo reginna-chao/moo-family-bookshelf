@@ -408,6 +408,7 @@ export function LandingPage({
             chance to learn which server they are about to authenticate to. */}
         <SyncCodeHostNote
           result={classifySyncCodeApiHost(pendingAuth.apiHost)}
+          variant="verify"
           className="mb-4 w-full max-w-xs"
         />
         {pendingAuth.verifyMethod === "pin" && (

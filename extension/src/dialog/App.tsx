@@ -24,7 +24,7 @@ import { BorrowTab } from "./BorrowTab";
 import { DialogFooter } from "./DialogFooter";
 import { useTokenRefresh } from "./useTokenRefresh";
 import { useReauth } from "./useReauth";
-import { VerificationPrompt } from "./VerificationPrompt";
+import { ReauthModal } from "./ReauthModal";
 import { isExtensionContextValid } from "../utils/extensionContext";
 import { FamilyDataProvider, useFamilyData } from "./FamilyDataContext";
 import { VersionWarning } from "./VersionWarning";
@@ -242,25 +242,7 @@ export function App({
         />
       </FamilyDataProvider>
       {reauth.active && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="需要驗證"
-          className="moo-modal-overlay"
-        >
-          <div className="moo-modal">
-            <VerificationPrompt
-              method={reauth.method}
-              methodError={reauth.methodError}
-              error={reauth.error}
-              locked={reauth.locked}
-              submitting={reauth.submitting}
-              countdownSeconds={reauth.countdownSeconds}
-              onSubmit={(secret) => void reauth.submit(secret)}
-              onCancel={reauth.cancel}
-            />
-          </div>
-        </div>
+        <ReauthModal apiClient={apiClientRef.current} reauth={reauth} />
       )}
     </>
   );

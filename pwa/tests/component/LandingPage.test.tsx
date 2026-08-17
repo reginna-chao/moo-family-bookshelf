@@ -1051,6 +1051,9 @@ describe("LandingPage", () => {
      * screen is the ONLY place they can learn which server they are about to
      * authenticate to. Without a note here, entering a PIN would hand the
      * secret to an undisclosed host.
+     *
+     * The copy follows what the user can see: no sync code is on this screen,
+     * so the note drops the form's "此同步碼" lead-in (`variant="verify"`).
      */
     describe("above the verification screen", () => {
       async function renderQrArrival(apiHost?: string) {
@@ -1078,7 +1081,12 @@ describe("LandingPage", () => {
         await renderQrArrival(QR_ENDPOINT);
 
         const note = screen.getByTestId("sync-code-host-note");
-        expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+        expect(note).toHaveTextContent("將連線至自訂伺服器：");
+        // A QR / invite arrival never saw a sync code, so the form's "此同步碼"
+        // lead-in would point at something that is not on screen. Its absence is
+        // the only thing pinning `variant="verify"`: the join copy CONTAINS the
+        // verify copy, so the positive assertion above passes either way.
+        expect(note.textContent).not.toContain("此同步碼");
         expect(note).toHaveTextContent(QR_ENDPOINT);
       });
 

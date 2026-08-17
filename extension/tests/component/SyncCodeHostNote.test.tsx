@@ -1,12 +1,26 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
-import { SyncCodeHostNote } from "@/dialog/SyncCodeHostNote";
+import {
+  SyncCodeHostNote,
+  type SyncCodeHostNoteProps,
+} from "@/dialog/SyncCodeHostNote";
 import {
   parseSyncCodeApiHost,
   type SyncCodeApiHostResult,
 } from "@/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
+
+/**
+ * Production copy, pinned here because `VALID_LEAD_IN` is module-private. The
+ * PWA twin renders the SAME two strings — pwa/tests/component/SyncCodeHostNote
+ * .test.tsx pins its own copy of this pair, and the two MUST stay byte-identical
+ * so the two apps never describe the same server differently.
+ */
+const JOIN_LEAD_IN = "此同步碼將連線至自訂伺服器：";
+const VERIFY_LEAD_IN = "將連線至自訂伺服器：";
+/** Shared by both variants — deliberately, see the variant block below. */
+const INVALID_WARNING = "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認";
 
 /**
  * SyncCodeHostNote is the ONLY thing standing between a pasted `@host` sync code
@@ -25,11 +39,19 @@ import { validateEndpointUrl } from "@/api/client";
  *
  * The component is PRESENTATIONAL — the verdict arrives as a prop, which is what
  * lets one component serve both the join screens (verdict from the typed code)
- * and the verification challenge (verdict from the endpoint the client has
- * ALREADY adopted, where no sync code is on display at all). Most cases below
- * still drive it through the real `parseSyncCodeApiHost`: mocking the parse
- * would leave the mapping from verdict to rendered copy — the whole component —
+ * and the two secret-collecting screens: the onboarding verification challenge
+ * and the re-auth modal, whose verdict is the endpoint the client has ALREADY
+ * adopted and where no sync code is on display at all. Most cases below still
+ * drive it through the real `parseSyncCodeApiHost`: mocking the parse would
+ * leave the mapping from verdict to rendered copy — the whole component —
  * unverified.
+ *
+ * `variant` follows exactly that boundary and changes NOTHING else: whether a
+ * sync code is visible on the screen decides whether the valid branch's lead-in
+ * names one (`join`, the default, so the three join call sites need no prop) or
+ * drops the mention (`verify`). The invalid branch's warning is shared by both
+ * variants by decision, not omission — see "the valid-branch lead-in per
+ * variant" below.
  */
 describe("SyncCodeHostNote", () => {
   describe("no custom host", () => {
@@ -60,7 +82,7 @@ describe("SyncCodeHostNote", () => {
       );
 
       const note = screen.getByTestId("sync-code-host-note");
-      expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+      expect(note).toHaveTextContent(JOIN_LEAD_IN);
       expect(note).toHaveTextContent("https://custom.example.com");
       // Informational, not an interruption — the warning variant owns role=alert.
       expect(note).not.toHaveAttribute("role", "alert");
@@ -199,9 +221,7 @@ describe("SyncCodeHostNote", () => {
       const warning = screen.getByTestId("sync-code-host-note-invalid");
       // A security refusal the user must notice before pressing join.
       expect(warning).toHaveAttribute("role", "alert");
-      expect(warning).toHaveTextContent(
-        "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認",
-      );
+      expect(warning).toHaveTextContent(INVALID_WARNING);
 
       // The reassuring line must not appear alongside it.
       expect(
@@ -237,22 +257,28 @@ describe("SyncCodeHostNote", () => {
   });
 
   /**
-   * The verification challenge is the one screen with no sync code on it: the
-   * user typed the code on the PREVIOUS screen, the client has already adopted
-   * its `@host`, and now a PIN/pattern is about to be handed to that server. So
-   * the caller classifies the ADOPTED endpoint instead of parsing text —
-   * see dialog/Onboarding.tsx's verify-prompt branch.
+   * The secret-collecting screens have no sync code on them: the user typed the
+   * code on a PREVIOUS screen (onboarding's verification challenge) or days
+   * earlier (the re-auth modal), the client has already adopted its `@host`, and
+   * now a PIN/pattern is about to be handed to that server. So the caller
+   * classifies the ADOPTED endpoint instead of parsing text, and asks for the
+   * `verify` copy — see dialog/Onboarding.tsx's verify-prompt branch and
+   * dialog/ReauthModal.tsx.
    */
   describe("a verdict classified from an adopted endpoint (no sync code)", () => {
     it("names the endpoint the client has already adopted", () => {
       render(
         <SyncCodeHostNote
           result={classifySyncCodeApiHost("https://nas.example.com/moo/")}
+          variant="verify"
         />,
       );
 
       const note = screen.getByTestId("sync-code-host-note");
-      expect(note).toHaveTextContent("此同步碼將連線至自訂伺服器：");
+      expect(note).toHaveTextContent(VERIFY_LEAD_IN);
+      // Nothing on this screen is a sync code, so claiming one would send the
+      // user looking for something that is not there.
+      expect(note.textContent).not.toContain("此同步碼");
       // Canonical, exactly as the ApiClient stores it — trailing slash gone.
       expect(note).toHaveTextContent(
         validateEndpointUrl("https://nas.example.com/moo/"),
@@ -260,13 +286,17 @@ describe("SyncCodeHostNote", () => {
     });
 
     /**
-     * A create/lookup-triggered challenge is still on the official default, and
-     * the caller passes `undefined` for it. Silence is the whole point: a note
-     * on every challenge would train the user to ignore it.
+     * A create/lookup-triggered challenge — and every re-auth on the official
+     * Worker — is still on the default endpoint, and the caller passes
+     * `undefined` for it. Silence is the whole point: a note on every challenge
+     * would train the user to ignore it.
      */
     it("renders nothing when the caller supplies no endpoint", () => {
       const { container } = render(
-        <SyncCodeHostNote result={classifySyncCodeApiHost(undefined)} />,
+        <SyncCodeHostNote
+          result={classifySyncCodeApiHost(undefined)}
+          variant="verify"
+        />,
       );
 
       expect(container).toBeEmptyDOMElement();
@@ -277,6 +307,7 @@ describe("SyncCodeHostNote", () => {
       render(
         <SyncCodeHostNote
           result={classifySyncCodeApiHost("https://real.example@evil.com")}
+          variant="verify"
         />,
       );
 
@@ -291,14 +322,93 @@ describe("SyncCodeHostNote", () => {
   });
 
   /**
+   * The lead-in is the ONLY thing `variant` touches, and the boundary is what
+   * the user can actually see on the screen the note sits on:
+   *
+   *   - a sync code is on display (the join screens) → name it, "此同步碼…";
+   *   - none is (the verification challenge, the re-auth modal) → drop the
+   *     mention, because there is no code on screen for the user to look at.
+   *
+   * `join` is the DEFAULT so the three join call sites keep working with no prop
+   * at all — that default is what this block pins. The invalid branch is
+   * deliberately variant-independent: the warning is about the sync code that
+   * carried the bad host, and it must read identically wherever it appears.
+   */
+  describe("the valid-branch lead-in per variant", () => {
+    const VALID: SyncCodeApiHostResult = {
+      kind: "valid",
+      endpoint: "https://nas.example.com/moo",
+    };
+    const INVALID: SyncCodeApiHostResult = { kind: "invalid" };
+
+    /** Full rendered text of one note, mounted and torn down in isolation. */
+    function textOf(
+      result: SyncCodeApiHostResult,
+      variant?: SyncCodeHostNoteProps["variant"],
+    ): string {
+      const { container, unmount } = render(
+        <SyncCodeHostNote result={result} variant={variant} />,
+      );
+      const text = (container.textContent ?? "").trim();
+      unmount();
+      return text;
+    }
+
+    it.each([
+      ["join", "join" as const, JOIN_LEAD_IN],
+      ["verify", "verify" as const, VERIFY_LEAD_IN],
+    ])("names the server with the %s lead-in", (_label, variant, leadIn) => {
+      // Exact equality, not `toContain`: the join copy CONTAINS the verify copy,
+      // so a substring assertion cannot tell the two variants apart.
+      expect(textOf(VALID, variant)).toBe(`${leadIn}${VALID.endpoint}`);
+    });
+
+    it("drops the sync-code mention on the verify variant", () => {
+      expect(textOf(VALID, "verify")).not.toContain("此同步碼");
+      expect(textOf(VALID, "join")).toContain("此同步碼");
+    });
+
+    /**
+     * Exactly three call sites mount the note WITHOUT a variant: the Extension's
+     * idle join screen (dialog/OnboardingViews.tsx, IdleView), its recovery join
+     * view (dialog/RecoveryJoinView.tsx) and the PWA's sync-code form
+     * (pwa/src/pages/LandingPage.tsx). They read correctly only because the
+     * default is `join`, so flipping that default would silently reword those
+     * three screens.
+     */
+    it("defaults to the join lead-in when no variant is given", () => {
+      expect(textOf(VALID)).toBe(textOf(VALID, "join"));
+      expect(textOf(VALID)).toContain(JOIN_LEAD_IN);
+    });
+
+    /**
+     * A decision, not an omission: the warning names the sync code because that
+     * is what carried the refused host, and a caller asking for `verify` copy
+     * must not get a softened version of a security refusal.
+     */
+    it("warns identically on both variants", () => {
+      const onJoin = textOf(INVALID, "join");
+
+      expect(textOf(INVALID, "verify")).toBe(onJoin);
+      expect(textOf(INVALID)).toBe(onJoin);
+      expect(onJoin).toBe(INVALID_WARNING);
+    });
+  });
+
+  /**
    * `className` carries LAYOUT only — the caller decides spacing, the component
-   * keeps its own palette/size classes. The verification challenge is the reason
-   * the prop exists: the note sits outside `.moo-onboarding-view` there and has
-   * to supply that view's gutter itself.
+   * keeps its own palette/size classes. The secret-collecting screens are the
+   * reason the prop exists: on both of them the note sits outside the container
+   * that would otherwise supply the gutter (`.moo-onboarding-view` on the
+   * challenge, `.moo-modal`'s padding flow on the re-auth modal), so each passes
+   * its own spacing modifier.
    */
   describe("extra layout classes", () => {
-    /** The modifier Onboarding.tsx actually passes on the verify screen. */
-    const LAYOUT_CLASS = "moo-sync-host-note--verify";
+    /** The modifiers the two production call sites actually pass. */
+    const LAYOUT_CLASSES = [
+      ["the onboarding challenge", "moo-sync-host-note--verify"],
+      ["the re-auth modal", "moo-sync-host-note--reauth"],
+    ] as const;
 
     function classesOf(
       result: SyncCodeApiHostResult,
@@ -319,15 +429,28 @@ describe("SyncCodeHostNote", () => {
       ["invalid", { kind: "invalid" }],
     ];
 
-    it.each(variants)(
-      "appends the layout class to the %s variant without dropping its own",
-      (_label, result) => {
-        const bare = classesOf(result);
-        const withLayout = classesOf(result, LAYOUT_CLASS);
+    const layoutCases: Array<[string, string, string, SyncCodeApiHostResult]> =
+      LAYOUT_CLASSES.flatMap(([site, layoutClass]) =>
+        variants.map(
+          ([label, result]) =>
+            [label, site, layoutClass, result] as [
+              string,
+              string,
+              string,
+              SyncCodeApiHostResult,
+            ],
+        ),
+      );
 
-        expect(bare).not.toContain(LAYOUT_CLASS);
+    it.each(layoutCases)(
+      "keeps the %s variant's own classes while adding %s's layout class",
+      (_label, _site, layoutClass, result) => {
+        const bare = classesOf(result);
+        const withLayout = classesOf(result, layoutClass);
+
+        expect(bare).not.toContain(layoutClass);
         expect(withLayout).toEqual(expect.arrayContaining(bare));
-        expect(withLayout).toContain(LAYOUT_CLASS);
+        expect(withLayout).toContain(layoutClass);
         expect(withLayout).toHaveLength(bare.length + 1);
       },
     );

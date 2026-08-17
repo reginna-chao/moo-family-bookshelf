@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { ApiClient } from "../api/client";
-import { DEFAULT_API_ENDPOINT, DISPLAY_NAME_KEY } from "../constants";
+import { DISPLAY_NAME_KEY } from "../constants";
 import { safeStorageGet } from "../storage/safeStorage";
+import { classifyAdoptedEndpoint } from "./adoptedEndpoint";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
 import { useAutoSetup } from "./useAutoSetup";
@@ -146,18 +146,16 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
     if (effectiveState === "verify-prompt") {
       // The challenge replaces the join screen, taking its host disclosure with
       // it — exactly when the user is asked to hand a PIN/pattern to a server.
-      // The verdict comes from the endpoint the client has ACTUALLY adopted,
-      // never from input text: a sync-code join has already applied its `@host`
-      // by now (performJoin leaves it applied so the challenge talks to that
+      // By this point a sync-code join has already applied its `@host` to the
+      // client (performJoin leaves it applied so the challenge talks to that
       // server), while a create/lookup challenge is still on the official
-      // default — nothing to disclose, hence `undefined` for it.
-      const adopted = apiClient.getEndpoint();
+      // default — so the adopted endpoint is the accurate answer for both. See
+      // adoptedEndpoint.ts for why the typed sync code is never the source.
       return (
         <>
           <SyncCodeHostNote
-            result={classifySyncCodeApiHost(
-              adopted === DEFAULT_API_ENDPOINT ? undefined : adopted,
-            )}
+            result={classifyAdoptedEndpoint(apiClient)}
+            variant="verify"
             className="moo-sync-host-note--verify"
           />
           <VerificationPrompt

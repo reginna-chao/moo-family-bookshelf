@@ -8,13 +8,24 @@
  * typed sync code on the form, `pendingAuth.apiHost` on the verification
  * screen), which is what lets one component cover both the code-entry path and
  * the invite-link / QR path where the user never typed the host.
+ *
+ * `variant` follows the same boundary, and ONLY changes the valid branch's
+ * lead-in: a sync code is on screen → "此同步碼…" (`join`, the default); none is
+ * → drop it (`verify`), which is the case on the verification screen a QR /
+ * invite arrival lands on. The invalid branch's warning is deliberately
+ * variant-independent — it is about the sync code that carried the bad host.
  */
 
 import type { SyncCodeApiHostResult } from "@/crypto/syncCode";
 
+/** Which screen the note sits on. Keep in sync with the Extension twin. */
+type SyncCodeHostNoteVariant = "join" | "verify";
+
 export interface SyncCodeHostNoteProps {
   /** Verdict from `parseSyncCodeApiHost` / `classifySyncCodeApiHost`. */
   result: SyncCodeApiHostResult;
+  /** 決定 valid 分支的引導語；join 提「此同步碼」，verify 不提（畫面上沒有同步碼）。 */
+  variant?: SyncCodeHostNoteVariant;
   /** Extra layout classes (spacing only); colour and size are fixed. */
   className?: string;
 }
@@ -22,8 +33,15 @@ export interface SyncCodeHostNoteProps {
 const BASE_CLASS =
   "rounded-md border bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 break-all";
 
+/** Valid-branch lead-in. Must stay byte-identical to the Extension twin's copy. */
+const VALID_LEAD_IN: Record<SyncCodeHostNoteVariant, string> = {
+  join: "此同步碼將連線至自訂伺服器：",
+  verify: "將連線至自訂伺服器：",
+};
+
 export function SyncCodeHostNote({
   result,
+  variant = "join",
   className = "",
 }: SyncCodeHostNoteProps) {
   if (result.kind === "none") return null;
@@ -47,7 +65,7 @@ export function SyncCodeHostNote({
       data-testid="sync-code-host-note"
       className={`${classes} border-amber-200`}
     >
-      此同步碼將連線至自訂伺服器：
+      {VALID_LEAD_IN[variant]}
       <span className="font-mono">{result.endpoint}</span>
     </p>
   );
