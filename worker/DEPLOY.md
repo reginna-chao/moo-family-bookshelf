@@ -192,7 +192,7 @@ Worker 內建 OpenAPI 文件與 Swagger UI，**僅在 dev 環境開啟**，produ
 > `worker/src/middleware/rateLimit.ts` 會在 `isDevMode` 為真時直接短路，等同關閉：
 >
 > - **per-IP 速率限制**（一般 60／公開 10／敏感端點 3 次每分鐘）
-> - **per-userId 速率限制**（例如加入家庭每小時 10 次）
+> - **per-userId 速率限制**（例如家庭網域寫入合計每帳號每小時 30 次、公開書櫃寫入合計每帳號每小時 30 次）
 >
 > 這代表 PWA 登入驗證（PIN／圖形／驗證碼）少了暴力破解的煞車；再加上 dev 模式下 CORS 放寬、`/api/_docs` 對外開放，**開啟 `DEV_MODE=1` 的 Worker 絕對不能存放真實家庭資料**，請只用在測試用的 KV Namespace。
 
