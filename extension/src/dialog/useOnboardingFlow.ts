@@ -11,6 +11,9 @@ import { SyncCodeError, encodeSyncCode } from "../crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { readSyncFamilyIdRemnant } from "../storage/familyId";
 import { useAutoSetup } from "./useAutoSetup";
+// Type-only, and must stay so: OnboardingViews re-exports IdleView, which
+// type-imports OnboardingState from this module. A value import here would
+// close that loop into a runtime cycle.
 import type { ErrorAction } from "./OnboardingViews";
 import {
   CreateFamilyError,

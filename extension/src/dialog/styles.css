@@ -3413,8 +3413,9 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   Batch 4: Onboarding, OnboardingViews, RecoveryChoiceView, RecoveryJoinView,
-   SoloRecoveryConfirmView, VerificationSettings, PatternLock, PinInput
+   Batch 4: Onboarding, OnboardingViews, IdleView, RecoveryChoiceView,
+   RecoveryJoinView, SoloRecoveryConfirmView, VerificationSettings, PatternLock,
+   PinInput
    ═══════════════════════════════════════════════════════════════════════ */
 
 /* ── Onboarding (relative container hosting the LoadingOverlay) ────────── */
