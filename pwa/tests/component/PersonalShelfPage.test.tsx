@@ -64,6 +64,12 @@ function createProps() {
   };
 }
 
+interface RenderOptions {
+  displayName?: string;
+  /** Forwarded to PersonalShelfPage so pagination tests can use tiny pages. */
+  pageSize?: number;
+}
+
 async function renderWithBooks(
   books: Array<{
     bookId: string;
@@ -71,12 +77,12 @@ async function renderWithBooks(
     author: string;
     isShared: BoolFlag;
   }>,
-  displayName = "TestUser",
+  { displayName = "TestUser", pageSize }: RenderOptions = {},
 ) {
   mockGetPersonalBooks.mockResolvedValue({
     data: makePersonalBooks(displayName, books),
   });
-  render(<PersonalShelfPage {...createProps()} />);
+  render(<PersonalShelfPage {...createProps()} pageSize={pageSize} />);
   await waitFor(() => {
     expect(screen.getByText(books[0].title)).toBeInTheDocument();
   });
@@ -682,16 +688,21 @@ describe("PersonalShelfPage", () => {
       }));
     }
 
+    // Inject a small pageSize so the same pagination logic is exercised with
+    // far fewer rendered book rows, keeping these tests fast and non-flaky.
+    const PAGE_SIZE = 10;
+
     it("shows Load More button when books exceed pageSize", async () => {
-      await renderWithBooks(makeManyBooks(250));
+      await renderWithBooks(makeManyBooks(25), { pageSize: PAGE_SIZE });
 
       expect(
-        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+        screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }),
       ).toBeInTheDocument();
     });
 
     it("does not show Load More button when books fit in pageSize", async () => {
-      await renderWithBooks(makeManyBooks(80));
+      // Fewer than pageSize → everything fits on one page → no Load More button.
+      await renderWithBooks(makeManyBooks(8), { pageSize: PAGE_SIZE });
 
       expect(
         screen.queryByRole("button", { name: /載入更多/ }),
@@ -699,23 +710,25 @@ describe("PersonalShelfPage", () => {
     });
 
     it("click Load More appends pageSize to visible count", async () => {
-      await renderWithBooks(makeManyBooks(250));
+      // More than 2 × pageSize so a tail remains after one click and the
+      // button must still be there showing the incremented count.
+      await renderWithBooks(makeManyBooks(25), { pageSize: PAGE_SIZE });
 
       fireEvent.click(
-        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+        screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }),
       );
 
       await waitFor(() => {
         expect(
           screen.getByRole("button", {
-            name: /載入更多.*已顯示 200.*共 250 本/,
+            name: /載入更多.*已顯示 20.*共 25 本/,
           }),
         ).toBeInTheDocument();
       });
     });
 
     it("hides Load More button when status filter narrows the view", async () => {
-      await renderWithBooks(makeManyBooks(250));
+      await renderWithBooks(makeManyBooks(25), { pageSize: PAGE_SIZE });
 
       fireEvent.click(screen.getByRole("button", { name: "已開放" }));
 

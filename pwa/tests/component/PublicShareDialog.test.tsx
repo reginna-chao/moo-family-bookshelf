@@ -44,6 +44,30 @@ function renderDialog(apiClient: ApiClient) {
   );
 }
 
+/**
+ * Render, then settle the initial load — and hand back the 標題 input.
+ *
+ * `findByLabelText` alone is not a readiness signal: DOM presence != effects
+ * flushed. It waits with the act environment disabled and ends on a bare
+ * `setTimeout(0)`, so React may still owe the passive effect that publishes the
+ * active shelfId; a write fired in that window is silently dropped by the
+ * hook's shelfId guard. Only `act` guarantees pending effects flush on exit.
+ * Call it BEFORE any `vi.useFakeTimers()` — it awaits real microtasks.
+ */
+async function renderSettledDialog(apiClient: ApiClient): Promise<HTMLElement> {
+  await act(async () => {
+    renderDialog(apiClient);
+  });
+  // getBy, not findBy: a load that failed to settle must fail loudly right here.
+  // The 標題 label exists in the create view too, so pin the ACTIVE view — a
+  // caller passing `{ shelves: [] }` must fail here, not silently drive the
+  // create form.
+  expect(
+    screen.getByRole("button", { name: "關閉公開分享" }),
+  ).toBeInTheDocument();
+  return screen.getByLabelText("標題");
+}
+
 /** Promise the test resolves by hand, to hold a write "in flight". */
 function createDeferred<T>() {
   let settle: (value: T) => void = () => {};
@@ -79,7 +103,7 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
     // The security-critical assertion: the snapshot is still being served, so a
     // refused DELETE must not let the UI claim the link is closed.
     it("keeps the active shelf on screen when the server refuses the revocation", async () => {
-      renderDialog(
+      await renderSettledDialog(
         makeActiveApiClient({
           deletePublicShelf: vi
             .fn()
@@ -88,7 +112,6 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
             ),
         }),
       );
-      await screen.findByLabelText("標題");
 
       await confirmAction("關閉公開分享");
 
@@ -113,12 +136,11 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
       "reports a $code refusal in 繁體中文 and keeps the link live",
       async ({ code, detail }) => {
         const error = new ApiError(code, detail);
-        renderDialog(
+        await renderSettledDialog(
           makeActiveApiClient({
             deletePublicShelf: vi.fn().mockRejectedValue(error),
           }),
         );
-        await screen.findByLabelText("標題");
 
         await confirmAction("關閉公開分享");
 
@@ -137,8 +159,7 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
 
     it("returns to the empty state only after the server confirms the revocation", async () => {
       const apiClient = makeActiveApiClient();
-      renderDialog(apiClient);
-      await screen.findByLabelText("標題");
+      await renderSettledDialog(apiClient);
 
       await confirmAction("關閉公開分享");
 
@@ -159,12 +180,11 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
   describe("title / expiry writes", () => {
     it("keeps the typed title and offers 重試儲存 when the write is refused", async () => {
       const error = new ApiError("RATE_LIMITED", "too many requests", 90);
-      renderDialog(
+      const input = await renderSettledDialog(
         makeActiveApiClient({
           updatePublicShelf: vi.fn().mockRejectedValue(error),
         }),
       );
-      const input = await screen.findByLabelText("標題");
 
       vi.useFakeTimers();
       fireEvent.change(input, { target: { value: "新標題" } });
@@ -187,8 +207,7 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
       const apiClient = makeActiveApiClient({
         updatePublicShelf: vi.fn().mockReturnValue(deferred.promise),
       });
-      renderDialog(apiClient);
-      const input = await screen.findByLabelText("標題");
+      const input = await renderSettledDialog(apiClient);
 
       vi.useFakeTimers();
       fireEvent.change(input, { target: { value: "新標題" } });
@@ -219,8 +238,9 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
           new ApiError("RATE_LIMITED", "too many requests", 45),
         )
         .mockResolvedValue({ shelf: { ...SHELF, title: "新標題" } });
-      renderDialog(makeActiveApiClient({ updatePublicShelf }));
-      const input = await screen.findByLabelText("標題");
+      const input = await renderSettledDialog(
+        makeActiveApiClient({ updatePublicShelf }),
+      );
 
       vi.useFakeTimers();
       fireEvent.change(input, { target: { value: "新標題" } });
@@ -249,8 +269,7 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
           new ApiError("RATE_LIMITED", "too many requests", 45),
         )
         .mockResolvedValue({ shelf: { ...SHELF, expiresDays: 7 } });
-      renderDialog(makeActiveApiClient({ updatePublicShelf }));
-      await screen.findByLabelText("標題");
+      await renderSettledDialog(makeActiveApiClient({ updatePublicShelf }));
 
       await act(async () => {
         fireEvent.change(screen.getByRole("combobox"), {
@@ -278,8 +297,7 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
 
     it("rejects a blank title client-side, without spending an API call", async () => {
       const apiClient = makeActiveApiClient();
-      renderDialog(apiClient);
-      const input = await screen.findByLabelText("標題");
+      const input = await renderSettledDialog(apiClient);
 
       vi.useFakeTimers();
       fireEvent.change(input, { target: { value: "   " } });
@@ -306,6 +324,8 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
       const apiClient = {
         listPublicShelves: vi.fn().mockRejectedValue(error),
       } as unknown as ApiClient;
+      // Not `renderSettledDialog`: the error view renders no 標題 input, and
+      // this test only observes the load's outcome — it never interacts after.
       renderDialog(apiClient);
 
       const alert = await screen.findByRole("alert");
@@ -340,12 +360,11 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
 
     it("reports a refused token reset in 繁體中文 and keeps the current link", async () => {
       const error = new ApiError("KV_WRITE_FAILED", "internal server error");
-      renderDialog(
+      await renderSettledDialog(
         makeActiveApiClient({
           resetPublicShelfToken: vi.fn().mockRejectedValue(error),
         }),
       );
-      await screen.findByLabelText("標題");
 
       await confirmAction("重設網址");
 
@@ -382,14 +401,13 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
     });
 
     it("swaps in the new link after a confirmed token reset", async () => {
-      renderDialog(
+      await renderSettledDialog(
         makeActiveApiClient({
           resetPublicShelfToken: vi
             .fn()
             .mockResolvedValue({ shelf: { ...SHELF, shareToken: "tok-new" } }),
         }),
       );
-      await screen.findByLabelText("標題");
 
       await confirmAction("重設網址");
 

@@ -62,14 +62,22 @@ function createProps() {
   };
 }
 
-function renderWithProvider(props: ReturnType<typeof createProps>) {
+interface RenderOptions {
+  /** Forwarded to FamilyShelfPage so pagination tests can use tiny pages. */
+  pageSize?: number;
+}
+
+function renderWithProvider(
+  props: ReturnType<typeof createProps>,
+  { pageSize }: RenderOptions = {},
+) {
   return render(
     <FamilyDataProvider
       familyId={props.familyId}
       userId={props.userId}
       apiClient={props.apiClient}
     >
-      <FamilyShelfPage userId={props.userId} />
+      <FamilyShelfPage userId={props.userId} pageSize={pageSize} />
     </FamilyDataProvider>,
   );
 }
@@ -734,22 +742,27 @@ describe("FamilyShelfPage", () => {
       });
     }
 
+    // Inject a small pageSize so the same pagination logic is exercised with
+    // far fewer rendered book cards, keeping these tests fast and non-flaky.
+    const PAGE_SIZE = 10;
+
     it("shows Load More button when shared books exceed pageSize", async () => {
-      setupShelf(250);
-      renderWithProvider(defaultProps);
+      setupShelf(25);
+      renderWithProvider(defaultProps, { pageSize: PAGE_SIZE });
 
       await waitFor(() => {
         expect(screen.getByText("共享書 1")).toBeInTheDocument();
       });
 
       expect(
-        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+        screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }),
       ).toBeInTheDocument();
     });
 
     it("does not show Load More button when books fit in pageSize", async () => {
-      setupShelf(80);
-      renderWithProvider(defaultProps);
+      // Fewer than pageSize → everything fits on one page → no Load More button.
+      setupShelf(8);
+      renderWithProvider(defaultProps, { pageSize: PAGE_SIZE });
 
       await waitFor(() => {
         expect(screen.getByText("共享書 1")).toBeInTheDocument();
@@ -761,29 +774,31 @@ describe("FamilyShelfPage", () => {
     });
 
     it("click Load More appends pageSize to visible count", async () => {
-      setupShelf(250);
-      renderWithProvider(defaultProps);
+      // More than 2 × pageSize so a tail remains after one click and the
+      // button must still be there showing the incremented count.
+      setupShelf(25);
+      renderWithProvider(defaultProps, { pageSize: PAGE_SIZE });
 
       await waitFor(() => {
         expect(screen.getByText("共享書 1")).toBeInTheDocument();
       });
 
       fireEvent.click(
-        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+        screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }),
       );
 
       await waitFor(() => {
         expect(
           screen.getByRole("button", {
-            name: /載入更多.*已顯示 200.*共 250 本/,
+            name: /載入更多.*已顯示 20.*共 25 本/,
           }),
         ).toBeInTheDocument();
       });
     });
 
     it("hides Load More button when search narrows the view", async () => {
-      setupShelf(250);
-      renderWithProvider(defaultProps);
+      setupShelf(25);
+      renderWithProvider(defaultProps, { pageSize: PAGE_SIZE });
 
       await waitFor(() => {
         expect(screen.getByText("共享書 1")).toBeInTheDocument();

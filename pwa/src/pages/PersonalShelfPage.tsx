@@ -21,6 +21,8 @@ import { BookSortDropdown } from "@/components/BookSortDropdown";
 interface PersonalShelfPageProps {
   userId: string;
   apiClient: ApiClient;
+  /** Items shown per page in the personal shelf list. Injectable for tests; production uses the default. */
+  pageSize?: number;
 }
 
 /** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
@@ -32,6 +34,7 @@ type StatusFilter = "all" | "shared" | "not-shared";
 export function PersonalShelfPage({
   userId,
   apiClient,
+  pageSize,
 }: PersonalShelfPageProps) {
   const [books, setBooks] = useState<BookEntry[]>([]);
   const [displayName, setDisplayName] = useState("");
@@ -293,6 +296,7 @@ export function PersonalShelfPage({
   } = useLoadMore({
     items: sortedBooks,
     narrowingActive,
+    pageSize,
   });
 
   const handleSelectAll = useCallback(() => {

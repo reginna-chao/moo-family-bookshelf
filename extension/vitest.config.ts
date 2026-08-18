@@ -18,8 +18,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
-    // Coverage instrumentation slows the heavy 250-row rendering tests past the
-    // 5s default; 30s gives margin (slowest measured ~23s) so CI stays stable.
+    // CI runs `test:coverage`; jsdom + v8 instrumentation on shared runners can
+    // push a slow suite past Vitest's 5s default, and the content-script
+    // teardown/hover tests budget 10s wall-clock polls against this value.
+    // Pagination suites inject a small pageSize (see each `Load More (Wave G)`
+    // describe), so no component test renders more than ~20 rows.
     testTimeout: 30000,
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/unit/**/*.test.ts", "tests/component/**/*.test.tsx"],

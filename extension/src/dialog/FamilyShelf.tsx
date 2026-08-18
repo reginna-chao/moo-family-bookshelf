@@ -19,6 +19,8 @@ import { FamilyShelfToolbar } from "./FamilyShelfToolbar";
 
 export interface FamilyShelfProps {
   userId: string;
+  /** Items shown per page in the family shelf list. Injectable for tests; production uses the default. */
+  pageSize?: number;
 }
 
 /** Subtle, non-blocking banner shown when a prefs flush fails; auto-clears on next success. */
@@ -30,7 +32,7 @@ function PrefsSyncFailedNotice() {
   );
 }
 
-export function FamilyShelf({ userId }: FamilyShelfProps) {
+export function FamilyShelf({ userId, pageSize }: FamilyShelfProps) {
   const {
     bookshelfMembers: members,
     bookshelfState: state,
@@ -96,6 +98,7 @@ export function FamilyShelf({ userId }: FamilyShelfProps) {
   } = useLoadMore({
     items: sortedBooks,
     narrowingActive,
+    pageSize,
   });
 
   const handleMemberFilterChange = useCallback(
