@@ -77,7 +77,7 @@ const CUSTOM_ENDPOINT = "https://custom.api.com";
 const QR_ENDPOINT = "https://qr.host.com";
 
 /**
- * Mirrors src/pages/LandingPage.tsx `UNSAFE_API_HOST_ERROR`. Asserted against
+ * Mirrors src/utils/apiHostGuard.ts `UNSAFE_API_HOST_ERROR`. Asserted against
  * the page's own rendering of it, so a copy change here fails loudly rather
  * than leaving a stale duplicate green.
  */
