@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  act,
+  waitFor,
+} from "@testing-library/react";
 import type { PublicShelfUpdate } from "moo-family-bookshelf-shared/publicShelf/diff";
 import { PublicShareDialog } from "@/dialog/PublicShareDialog";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -89,6 +95,30 @@ function renderDialog(apiClient: ApiClient) {
   );
 }
 
+/**
+ * Render, then settle the initial load — and hand back the 標題 input.
+ *
+ * `findByLabelText` alone is not a readiness signal: DOM presence != effects
+ * flushed. It waits with the act environment disabled and ends on a bare
+ * `setTimeout(0)`, so React may still owe the passive effect that publishes the
+ * active shelfId; a write fired in that window is silently dropped by the
+ * hook's shelfId guard. Only `act` guarantees pending effects flush on exit.
+ * Call it BEFORE any `vi.useFakeTimers()` — it awaits real microtasks.
+ */
+async function renderSettledDialog(apiClient: ApiClient): Promise<HTMLElement> {
+  await act(async () => {
+    renderDialog(apiClient);
+  });
+  // getBy, not findBy: a load that failed to settle must fail loudly right here.
+  // The 標題 label exists in the create view too, so pin the ACTIVE view — a
+  // caller passing `{ shelves: [] }` must fail here, not silently drive the
+  // create form.
+  expect(
+    screen.getByRole("button", { name: "關閉公開分享" }),
+  ).toBeInTheDocument();
+  return screen.getByLabelText("標題");
+}
+
 /** Neither the unsaved notice nor its retry affordance is on screen. */
 function expectNoUnsavedNotice() {
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -128,8 +158,7 @@ describe("PublicShareDialog · concurrent title / expiry writes", () => {
   // report a title edit that is still waiting out its debounce as unsaved.
   it("stays quiet when an expiry write completes while a title edit is still queued", async () => {
     const server = createShelfServer();
-    renderDialog(makeActiveApiClient(server));
-    const input = await screen.findByLabelText("標題");
+    const input = await renderSettledDialog(makeActiveApiClient(server));
 
     vi.useFakeTimers();
     // A title edit is now sitting in the debounce queue...
@@ -168,8 +197,7 @@ describe("PublicShareDialog · concurrent title / expiry writes", () => {
   // write would only paint a red SHELF_NOT_FOUND over a successful action.
   it("drops a queued title write when the shelf was revoked during the debounce", async () => {
     const apiClient = makeActiveApiClient();
-    renderDialog(apiClient);
-    const input = await screen.findByLabelText("標題");
+    const input = await renderSettledDialog(apiClient);
 
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "新標題" } });
@@ -190,8 +218,7 @@ describe("PublicShareDialog · concurrent title / expiry writes", () => {
   // still addressed to a live resource and must go through.
   it("still fires a queued title write after a token reset, which keeps the shelfId", async () => {
     const server = createShelfServer();
-    renderDialog(makeActiveApiClient(server));
-    const input = await screen.findByLabelText("標題");
+    const input = await renderSettledDialog(makeActiveApiClient(server));
 
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "新標題" } });
@@ -221,17 +248,22 @@ describe("PublicShareDialog · concurrent title / expiry writes", () => {
       .fn()
       .mockReturnValueOnce(earlier.promise)
       .mockReturnValueOnce(later.promise);
-    renderDialog(makeActiveApiClient({ updatePublicShelf }));
-    await screen.findByLabelText("標題");
+    await renderSettledDialog(makeActiveApiClient({ updatePublicShelf }));
 
+    // Real timers here. The issue order is already synchronous today —
+    // `runUpdate` reaches `updatePublicShelf` with no preceding `await` — so
+    // these waits pin it on an observable instead of on that internal fact,
+    // keeping "earlier" / "later" well-defined if a future refactor inserts an
+    // await before the request.
     const select = screen.getByRole("combobox");
     await act(async () => {
       fireEvent.change(select, { target: { value: "7" } });
     });
+    await waitFor(() => expect(updatePublicShelf).toHaveBeenCalledTimes(1));
     await act(async () => {
       fireEvent.change(select, { target: { value: "60" } });
     });
-    expect(updatePublicShelf).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(updatePublicShelf).toHaveBeenCalledTimes(2));
 
     // The later-issued write answers first...
     await act(async () => {
@@ -279,8 +311,7 @@ describe("PublicShareDialog · failures of writes that lost their turn", () => {
     const apiClient = makeActiveApiClient({
       updatePublicShelf: vi.fn().mockReturnValue(inFlight.promise),
     });
-    renderDialog(apiClient);
-    await screen.findByLabelText("標題");
+    await renderSettledDialog(apiClient);
 
     // An expiry write is on the wire...
     await act(async () => {
@@ -314,8 +345,9 @@ describe("PublicShareDialog · failures of writes that lost their turn", () => {
       .fn()
       .mockReturnValueOnce(superseded.promise)
       .mockReturnValueOnce(newer.promise);
-    renderDialog(makeActiveApiClient({ updatePublicShelf }));
-    const input = await screen.findByLabelText("標題");
+    const input = await renderSettledDialog(
+      makeActiveApiClient({ updatePublicShelf }),
+    );
 
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "新標題" } });
@@ -371,8 +403,7 @@ describe("PublicShareDialog · writes with nothing to say are skipped", () => {
 
   it("spends no request when the title is typed back to the stored value before the debounce fires", async () => {
     const apiClient = makeActiveApiClient();
-    renderDialog(apiClient);
-    const input = await screen.findByLabelText("標題");
+    const input = await renderSettledDialog(apiClient);
 
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "新標題" } });
@@ -394,8 +425,7 @@ describe("PublicShareDialog · writes with nothing to say are skipped", () => {
   // stops it from becoming a PUT that restarts the shelf's expiry clock.
   it("spends no request when the expiry selection resolves to the value already stored", async () => {
     const apiClient = makeActiveApiClient();
-    renderDialog(apiClient);
-    await screen.findByLabelText("標題");
+    await renderSettledDialog(apiClient);
 
     await act(async () => {
       fireEvent.change(screen.getByRole("combobox"), {
@@ -426,8 +456,9 @@ describe("PublicShareDialog · server-sanitized titles", () => {
     const updatePublicShelf = vi
       .fn()
       .mockResolvedValue({ shelf: { ...SHELF, title: "書櫃" } });
-    renderDialog(makeActiveApiClient({ updatePublicShelf }));
-    const input = await screen.findByLabelText("標題");
+    const input = await renderSettledDialog(
+      makeActiveApiClient({ updatePublicShelf }),
+    );
 
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: `書櫃${ZWSP}` } });
@@ -446,8 +477,9 @@ describe("PublicShareDialog · server-sanitized titles", () => {
   it("leaves the field alone when the user typed again while the write was in flight", async () => {
     const deferred = createDeferred<{ shelf: PublicShelf }>();
     const updatePublicShelf = vi.fn().mockReturnValue(deferred.promise);
-    renderDialog(makeActiveApiClient({ updatePublicShelf }));
-    const input = await screen.findByLabelText("標題");
+    const input = await renderSettledDialog(
+      makeActiveApiClient({ updatePublicShelf }),
+    );
 
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: `書櫃${ZWSP}` } });

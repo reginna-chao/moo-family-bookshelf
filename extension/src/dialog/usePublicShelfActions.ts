@@ -79,6 +79,11 @@ export function usePublicShelfActions({
 
   /** shelfId the UI is bound to right now; null once the shelf is revoked. */
   const activeShelfIdRef = useRef<string | null>(null);
+  // Published on COMMIT, deliberately: the guard then means "the UI is bound
+  // to this shelfId". Cost: a write issued between that commit and this
+  // passive flush is dropped silently — sub-frame, unreachable by a real
+  // interaction, so accepted rather than fixed. Do NOT assign the ref during
+  // render: a discarded concurrent render would leave an uncommitted shelfId.
   useEffect(() => {
     activeShelfIdRef.current = shelf?.shelfId ?? null;
   }, [shelf]);
