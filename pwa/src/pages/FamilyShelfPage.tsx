@@ -22,9 +22,11 @@ import {
 
 export interface FamilyShelfPageProps {
   userId: string;
+  /** Items shown per page in the family shelf list. Injectable for tests; production uses the default. */
+  pageSize?: number;
 }
 
-export function FamilyShelfPage({ userId }: FamilyShelfPageProps) {
+export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
   const {
     bookshelfMembers: members,
     bookshelfState: state,
@@ -130,6 +132,7 @@ export function FamilyShelfPage({ userId }: FamilyShelfPageProps) {
   } = useLoadMore({
     items: sortedBooks,
     narrowingActive,
+    pageSize,
   });
 
   const handleMemberFilterChange = useCallback(

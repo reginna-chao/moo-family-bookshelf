@@ -864,12 +864,7 @@ describe("FamilyShelf", () => {
     });
   });
 
-  // v1.5.0 reshape: BookCards now mount an always-visible action row (heart +
-  // overflow menu) for every card. These tests render 250 cards and load more
-  // up to 200, which under parallel-suite contention far exceeds the 5s default
-  // timeout. A generous block-level timeout keeps them stable without weakening
-  // any assertion.
-  describe("Load More (Wave G)", { timeout: 60000 }, () => {
+  describe("Load More (Wave G)", () => {
     function makeManyBooks(count: number) {
       return Array.from({ length: count }, (_, i) => ({
         bookId: `b${i + 1}`,
@@ -904,10 +899,16 @@ describe("FamilyShelf", () => {
       });
     }
 
+    // Inject a small pageSize so the same pagination logic is exercised with
+    // far fewer rendered BookCards, keeping these tests fast and non-flaky.
+    // (v1.5.0 reshape gave every card an always-visible action row — heart +
+    // overflow menu — which made 100–200 rendered cards the dominant cost.)
+    const PAGE_SIZE = 10;
+
     it("shows Load More button when shared books exceed pageSize", async () => {
       renderWithProvider(
-        <FamilyShelf userId="user-1" />,
-        setupShelfWithBooks(250),
+        <FamilyShelf userId="user-1" pageSize={PAGE_SIZE} />,
+        setupShelfWithBooks(25),
       );
 
       await waitFor(() => {
@@ -915,14 +916,15 @@ describe("FamilyShelf", () => {
       });
 
       expect(
-        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+        screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }),
       ).toBeInTheDocument();
     });
 
     it("does not show Load More button when books fit in pageSize", async () => {
+      // Fewer than pageSize → everything fits on one page → no Load More button.
       renderWithProvider(
-        <FamilyShelf userId="user-1" />,
-        setupShelfWithBooks(80),
+        <FamilyShelf userId="user-1" pageSize={PAGE_SIZE} />,
+        setupShelfWithBooks(8),
       );
 
       await waitFor(() => {
@@ -935,9 +937,11 @@ describe("FamilyShelf", () => {
     });
 
     it("click Load More appends pageSize to visible count", async () => {
+      // More than 2 × pageSize so a tail remains after one click and the
+      // button must still be there showing the incremented count.
       renderWithProvider(
-        <FamilyShelf userId="user-1" />,
-        setupShelfWithBooks(250),
+        <FamilyShelf userId="user-1" pageSize={PAGE_SIZE} />,
+        setupShelfWithBooks(25),
       );
 
       await waitFor(() => {
@@ -945,13 +949,13 @@ describe("FamilyShelf", () => {
       });
 
       fireEvent.click(
-        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 250 本/ }),
+        screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 25 本/ }),
       );
 
       await waitFor(() => {
         expect(
           screen.getByRole("button", {
-            name: /載入更多.*已顯示 200.*共 250 本/,
+            name: /載入更多.*已顯示 20.*共 25 本/,
           }),
         ).toBeInTheDocument();
       });
@@ -973,8 +977,8 @@ describe("FamilyShelf", () => {
 
       try {
         renderWithProvider(
-          <FamilyShelf userId="user-1" />,
-          setupShelfWithBooks(250),
+          <FamilyShelf userId="user-1" pageSize={PAGE_SIZE} />,
+          setupShelfWithBooks(25),
         );
 
         await waitFor(() => {
@@ -1008,13 +1012,13 @@ describe("FamilyShelf", () => {
               {
                 userId: "user-2",
                 displayName: "Alice",
-                books: makeManyBooks(250),
+                books: makeManyBooks(25),
                 lastUpdated: "2024-01-01",
               },
               {
                 userId: "user-3",
                 displayName: "Bob",
-                books: makeManyBooks(80).map((b, i) => ({
+                books: makeManyBooks(8).map((b, i) => ({
                   ...b,
                   bookId: `bob-${i}`,
                 })),
@@ -1025,20 +1029,23 @@ describe("FamilyShelf", () => {
         }),
       });
 
-      renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
+      renderWithProvider(
+        <FamilyShelf userId="user-1" pageSize={PAGE_SIZE} />,
+        apiClient,
+      );
 
       await waitFor(() => {
         expect(screen.getByText("共享書 1")).toBeInTheDocument();
       });
 
-      // Load more — 100 → 200 visible
+      // Load more — 10 → 20 visible
       fireEvent.click(
-        screen.getByRole("button", { name: /載入更多.*已顯示 100.*共 330 本/ }),
+        screen.getByRole("button", { name: /載入更多.*已顯示 10.*共 33 本/ }),
       );
       await waitFor(() => {
         expect(
           screen.getByRole("button", {
-            name: /載入更多.*已顯示 200.*共 330 本/,
+            name: /載入更多.*已顯示 20.*共 33 本/,
           }),
         ).toBeInTheDocument();
       });
@@ -1046,11 +1053,12 @@ describe("FamilyShelf", () => {
       // Switch member dropdown — should reset visibleCount
       selectMemberFilter(/Alice/);
 
-      // Alice has 250 books → after reset, visible = 100
+      // Alice has 25 books → after reset, visible = 10 (not the 20 carried
+      // over from before the switch)
       await waitFor(() => {
         expect(
           screen.getByRole("button", {
-            name: /載入更多.*已顯示 100.*共 250 本/,
+            name: /載入更多.*已顯示 10.*共 25 本/,
           }),
         ).toBeInTheDocument();
       });
