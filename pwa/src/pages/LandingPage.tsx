@@ -19,6 +19,7 @@ import { PinInput } from "@/components/PinInput";
 import { PatternLock } from "@/components/PatternLock";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { SyncCodeHostNote } from "@/components/SyncCodeHostNote";
+import { CustomHostConsent } from "@/components/CustomHostConsent";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
@@ -39,6 +40,32 @@ interface PendingAuth {
   apiHost?: string;
   verifyMethod: VerifyMethod;
 }
+
+/**
+ * A QR arrival parked at the custom-host consent gate — everything the join
+ * needs, held until the user has seen the address and agreed to it.
+ */
+interface PendingHostConsent {
+  familyId: string;
+  userId: string;
+  /** Always set: consent only exists because the sync code carried an `@host`. */
+  apiHost: string;
+  /** Short-lived QR token; empty string when the QR carried none. */
+  qrToken: string;
+}
+
+/**
+ * Which entry point started the join that is currently in flight; `null` when
+ * nothing is running.
+ *
+ * The origin is a FIELD of the submitting state, never a second flag beside it:
+ * every exit that leaves the user on this page (failure, hand-off to the
+ * verification prompt) clears both in one assignment, error paths included —
+ * only the success exit skips it, because it unmounts the page. A separate
+ * `qrJoinBusy` boolean would stay latched after a failed QR join and turn the
+ * user's next MANUAL submit into a QR busy screen.
+ */
+type JoinOrigin = "form" | "qr";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_ENV = getAppEnv();
@@ -112,12 +139,19 @@ export function LandingPage({
   const [syncCodeError, setSyncCodeError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [generalError, setGeneralError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [joinOrigin, setJoinOrigin] = useState<JoinOrigin | null>(null);
+  /** Derived: "something is in flight" has exactly one owner, `joinOrigin`. */
+  const isSubmitting = joinOrigin !== null;
 
   // Verification state
   const [pendingAuth, setPendingAuth] = useState<PendingAuth | null>(null);
   const [verifyError, setVerifyError] = useState("");
   const [codeInput, setCodeInput] = useState("");
+
+  // Custom-host consent state (QR arrivals whose sync code carries an `@host`)
+  const [hostConsent, setHostConsent] = useState<PendingHostConsent | null>(
+    null,
+  );
 
   // Back-off state (429): the code drives the copy, the countdown the seconds.
   const [retryCode, setRetryCode] = useState<RetryErrorCode | null>(null);
@@ -196,7 +230,7 @@ export function LandingPage({
     // Persist remember preference
     localStorage.setItem(REMEMBER_SYNC_CODE_KEY, rememberSyncCode ? "1" : "0");
 
-    setIsSubmitting(true);
+    setJoinOrigin("form");
 
     try {
       const userId = await deriveUserId(trimmedEmail);
@@ -213,7 +247,7 @@ export function LandingPage({
           apiHost: decoded.apiHost,
           verifyMethod: method,
         });
-        setIsSubmitting(false);
+        setJoinOrigin(null);
         return;
       }
 
@@ -221,7 +255,7 @@ export function LandingPage({
       await completeJoin(decoded.familyId, userId, decoded.apiHost);
     } catch {
       setGeneralError("處理失敗，請重試。");
-      setIsSubmitting(false);
+      setJoinOrigin(null);
     }
   }
 
@@ -238,11 +272,14 @@ export function LandingPage({
     if (isUnsafeApiHost(apiHost)) {
       setPendingAuth(null);
       setGeneralError(UNSAFE_API_HOST_ERROR);
-      setIsSubmitting(false);
+      setJoinOrigin(null);
       return;
     }
 
-    setIsSubmitting(true);
+    // An attempt already in flight keeps the origin it started with (the QR
+    // path sets "qr" before calling in); a fresh entry from the verification
+    // prompt is user-driven, so it counts as form-shaped.
+    setJoinOrigin((prev) => prev ?? "form");
     try {
       const joinClient = getJoinClient(apiHost);
       const joinRes = await joinClient.joinFamily(familyId, userId, {
@@ -273,7 +310,7 @@ export function LandingPage({
               if (code === "VERIFICATION_FAILED") {
                 setVerifyError("QR 驗證碼已過期，請手動驗證。");
               }
-              setIsSubmitting(false);
+              setJoinOrigin(null);
               return;
             }
           }
@@ -298,10 +335,13 @@ export function LandingPage({
         } else {
           setGeneralError(joinRes.error.message || "加入家庭失敗，請重試。");
         }
-        setIsSubmitting(false);
+        setJoinOrigin(null);
         return;
       }
 
+      // Deliberately no `setJoinOrigin(null)` on this exit: the parent swaps
+      // this page out on `onAuth`, and "still working" is the honest screen
+      // until it does. Every exit that stays on this page clears the origin.
       setPendingAuth(null);
       onAuth({
         userId,
@@ -311,7 +351,7 @@ export function LandingPage({
       });
     } catch {
       setGeneralError("處理失敗，請重試。");
-      setIsSubmitting(false);
+      setJoinOrigin(null);
     }
   }
 
@@ -333,10 +373,90 @@ export function LandingPage({
     setCodeInput("");
   }
 
+  /**
+   * Runs a QR arrival's join, picking the exit that fits the credentials it
+   * carries. Shared by the default-endpoint fast path and the custom-host
+   * consent handler so the branch logic exists exactly once — the two differ
+   * only in WHEN they may start, never in what they do.
+   *
+   * With a qrToken, verification is skipped and the token is sent straight to
+   * the join. If the server rejects it (expired/invalid) it answers
+   * VERIFICATION_REQUIRED/FAILED and `completeJoin` falls back to the normal
+   * verification UI.
+   */
+  function startQrJoin(
+    familyId: string,
+    userId: string,
+    apiHost: string | undefined,
+    tokenFromQr: string,
+  ) {
+    setJoinOrigin("qr");
+
+    if (tokenFromQr) {
+      void completeJoin(
+        familyId,
+        userId,
+        apiHost,
+        undefined,
+        tokenFromQr,
+      ).catch(() => {
+        setGeneralError("處理失敗，請重試。");
+        setJoinOrigin(null);
+      });
+      return;
+    }
+
+    // The probe is the first request to reach this host, so it gets the same
+    // refusal `completeJoin` applies — the guard is this function's own
+    // invariant, not a promise its callers happen to keep.
+    if (isUnsafeApiHost(apiHost)) {
+      setGeneralError(UNSAFE_API_HOST_ERROR);
+      setJoinOrigin(null);
+      return;
+    }
+    const joinClient = getJoinClient(apiHost);
+    void joinClient
+      .getVerifyMethod(userId)
+      .then((verifyRes) => {
+        const method: VerifyMethod = verifyRes.data?.method ?? "none";
+
+        if (method !== "none") {
+          setPendingAuth({ userId, familyId, apiHost, verifyMethod: method });
+          setJoinOrigin(null);
+          return;
+        }
+
+        // No verification needed — join directly
+        void completeJoin(familyId, userId, apiHost);
+      })
+      .catch(() => {
+        setGeneralError("處理失敗，請重試。");
+        setJoinOrigin(null);
+      });
+  }
+
+  function handleHostConsentConfirm() {
+    if (!hostConsent) return;
+    setHostConsent(null);
+    startQrJoin(
+      hostConsent.familyId,
+      hostConsent.userId,
+      hostConsent.apiHost,
+      hostConsent.qrToken,
+    );
+  }
+
+  /**
+   * Drop back to the manual form. The sync code stays pre-filled (its own
+   * `SyncCodeHostNote` keeps the address on screen), so the user can edit it or
+   * simply walk away — the same shape as the invalid-host refusal. `qrTriggered`
+   * is already latched, so the effect cannot re-fire behind this decision.
+   */
+  function handleHostConsentCancel() {
+    setHostConsent(null);
+  }
+
   // Auto-trigger login when QR code provides both sync code and userId.
-  // When a qrToken is present, skip verification and join directly with the token.
-  // If the token is invalid/expired, the server returns VERIFICATION_REQUIRED/FAILED
-  // and we fall back to showing the normal verification UI.
   const qrTriggered = useRef(false);
   useEffect(() => {
     if (!qrUserId || !initialSyncCode || qrTriggered.current) return;
@@ -357,47 +477,25 @@ export function LandingPage({
       return;
     }
 
-    setIsSubmitting(true);
-
-    // When qrToken is available, skip the verification check and join directly
-    if (qrToken) {
-      void completeJoin(
-        decoded.familyId,
-        qrUserId,
-        decoded.apiHost,
-        undefined,
+    // Past that refusal, a present `@host` is exactly the `valid` case: a
+    // usable address the user has still never seen. Disclose it and hold EVERY
+    // request behind the answer — the verify-method probe alone would hand this
+    // server the arriving device's IP / UA, which is precisely what an
+    // unconsented address must not get.
+    const { apiHost } = decoded;
+    if (apiHost) {
+      setHostConsent({
+        familyId: decoded.familyId,
+        userId: qrUserId,
+        apiHost,
         qrToken,
-      ).catch(() => {
-        setGeneralError("處理失敗，請重試。");
-        setIsSubmitting(false);
       });
       return;
     }
 
-    const joinClient = getJoinClient(decoded.apiHost);
-    void joinClient
-      .getVerifyMethod(qrUserId)
-      .then((verifyRes) => {
-        const method: VerifyMethod = verifyRes.data?.method ?? "none";
-
-        if (method !== "none") {
-          setPendingAuth({
-            userId: qrUserId,
-            familyId: decoded.familyId,
-            apiHost: decoded.apiHost,
-            verifyMethod: method,
-          });
-          setIsSubmitting(false);
-          return;
-        }
-
-        // No verification needed — join directly
-        void completeJoin(decoded.familyId, qrUserId, decoded.apiHost);
-      })
-      .catch(() => {
-        setGeneralError("處理失敗，請重試。");
-        setIsSubmitting(false);
-      });
+    // No `@host` — the official default endpoint. Nothing to disclose, so the
+    // main onboarding path stays zero-interaction.
+    startQrJoin(decoded.familyId, qrUserId, undefined, qrToken);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qrUserId, initialSyncCode, qrToken]);
 
@@ -405,6 +503,19 @@ export function LandingPage({
   // countdown. `generalError` is last so non-verification failures (a 429 with
   // no retryAfter, NOT_FOUND, …) stay visible while the challenge UI is open.
   const promptError = retryMessage || verifyError || generalError;
+
+  // Ordered ahead of the verification screen on purpose: consent is what
+  // unblocks the request that could produce a challenge, so the two can never
+  // legitimately be pending at once.
+  if (hostConsent) {
+    return (
+      <CustomHostConsent
+        result={classifySyncCodeApiHost(hostConsent.apiHost)}
+        onConfirm={handleHostConsentConfirm}
+        onCancel={handleHostConsentCancel}
+      />
+    );
+  }
 
   // Show verification UI
   if (pendingAuth) {
@@ -474,6 +585,22 @@ export function LandingPage({
             </button>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // A QR arrival is auto-advanced past the form, so while its join runs there is
+  // no submit button to carry a "處理中..." label — showing the form here would
+  // ask a user who just scanned (or just pressed 確認並加入) to type an email.
+  // The whole screen becomes the progress indicator instead. Ordered AFTER
+  // `pendingAuth` on purpose: a challenge raised mid-join must stay on screen.
+  if (joinOrigin === "qr") {
+    return (
+      <div
+        data-testid="qr-join-busy"
+        className="max-w-md mx-auto min-h-screen flex items-center justify-center"
+      >
+        <p className="text-gray-500">處理中...</p>
       </div>
     );
   }
