@@ -30,7 +30,7 @@ import {
   deleteAuthToken,
   getAuthenticatedUserId,
 } from "../middleware/auth";
-import { getCallerIp } from "../middleware/rateLimit";
+import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
 import {
   validateVerification,
   verificationErrorResponse,
@@ -42,6 +42,13 @@ import { jsonError } from "../utils/errors";
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
 
 export const familyRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
+
+/** Shared per-userId write ceiling for the five family-domain write handlers. */
+export const FAMILY_WRITE_LIMIT = {
+  scope: "family-write",
+  max: 30,
+  windowSec: 3600,
+} as const;
 
 function invalidDisplayNameResponse(c: Context<{ Bindings: Env }>) {
   return jsonError(
@@ -108,6 +115,7 @@ const removeMemberRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
     404: jsonRes("Family or member not found"),
+    429: jsonRes("Rate limited"),
     500: jsonRes("Borrow cleanup failed"),
   },
 });
@@ -142,6 +150,7 @@ const updateDisplayNameRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
     404: jsonRes("Family or member not found"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -159,6 +168,7 @@ const updateMemberSettingsRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
     404: jsonRes("Family or member not found"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -176,6 +186,7 @@ const transferOwnershipRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Not the owner"),
     404: jsonRes("Family not found"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -193,6 +204,7 @@ const updateEndpointRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Not the owner"),
     404: jsonRes("Family not found"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -498,6 +510,43 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
+  // Per-userId write ceiling: 30 family-domain writes per userId per hour,
+  // shared by remove-member / displayName / member-settings / transfer /
+  // endpoint under one "family-write" scope. Layered on top of the per-IP limit.
+  //
+  // Charged to the AUTHENTICATED caller, never to the `:uid` path param: a
+  // counter keyed on someone else's id is a victim-facing DoS lever — the same
+  // defect that got join's standalone per-userId counter removed. Create and
+  // join stay out of this ceiling entirely; they are public sensitive-tier
+  // routes bounded by the per-IP counter (3/min) plus the verification gate's
+  // charge-on-failure attempt ceiling.
+  //
+  // Honest scope: this BOUNDS THE REQUEST RATE of a single authenticated
+  // account's family-domain writes (30 admitted sequential requests + 30
+  // counter writes per hour; parallel bursts overshoot by the caller's
+  // concurrency — the counter is get-then-put, see middleware/rateLimit.ts).
+  // It does NOT bound KV writes 1:1 — one admitted DELETE member fans out to
+  // the family record put, the member key delete, both auth-token deletes, and
+  // ONE put per cancelled PENDING borrow — and it does not make the daily
+  // 1000-write free tier safe by itself. The per-IP middleware's own counter
+  // write also lands BEFORE auth, so spam that ignores 429s still burns writes
+  // outside this ceiling's reach. A hard global bound needs the edge
+  // (Cloudflare WAF rate limiting, see docs/architecture.md and
+  // worker/DEPLOY.md).
+  //
+  // Placement rule, uniform across all five handlers: the charge sits AFTER
+  // every zero-I/O guard (path-format validation, the 401, and displayName's
+  // pure self-only 403) and BEFORE the first KV read or body parse. A
+  // permission check that needs a KV read therefore lands AFTER the charge —
+  // that is why a non-owner's transfer / endpoint attempt spends its own slot
+  // (pinned by the "charges the shared window even when the handler then
+  // rejects" test). Same shape as user.ts / publicShelf.ts / verify.ts.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId: callerId,
+    ...FAMILY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
+
   const raw = await c.env.KV.get<RawFamilyRecord>(
     kvKeys.family(familyId),
     "json",
@@ -627,6 +676,14 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
     return jsonError(c, 403, "FORBIDDEN", "只能修改自己的顯示名稱");
   }
 
+  // Shared "family-write" per-userId write ceiling (30/hr across the five family
+  // write handlers) — see the DELETE member handler for rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId: callerId,
+    ...FAMILY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
+
   let body: unknown;
   try {
     body = await c.req.json();
@@ -697,6 +754,14 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
   if (!callerId) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
+
+  // Shared "family-write" per-userId write ceiling (30/hr across the five family
+  // write handlers) — see the DELETE member handler for rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId: callerId,
+    ...FAMILY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   let body: { canLend?: unknown; readmooName?: unknown } | null;
   try {
@@ -832,6 +897,14 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
   if (!callerUserId) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
+
+  // Shared "family-write" per-userId write ceiling (30/hr across the five family
+  // write handlers) — see the DELETE member handler for rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId: callerUserId,
+    ...FAMILY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   let body: {
     newOwnerId: string;
@@ -1002,6 +1075,14 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
   if (!callerId) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
+
+  // Shared "family-write" per-userId write ceiling (30/hr across the five family
+  // write handlers) — see the DELETE member handler for rationale.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId: callerId,
+    ...FAMILY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   const memberFamily = await c.env.KV.get(kvKeys.member(callerId));
   if (memberFamily !== familyId) {
