@@ -155,7 +155,12 @@ describe("SettingsPage", () => {
         expect.stringContaining("moo-fam1-key1"),
       );
     });
-    expect(screen.getByRole("button", { name: "已複製" })).toBeInTheDocument();
+    // `handleCopy` awaits clipboard.writeText, so `setCopied(true)` commits a
+    // microtask after the click — the waitFor above only proves writeText was
+    // CALLED. This must stay findBy*: an eventual-state assertion, not getBy*.
+    expect(
+      await screen.findByRole("button", { name: "已複製" }),
+    ).toBeInTheDocument();
   });
 
   // --- Members ---
