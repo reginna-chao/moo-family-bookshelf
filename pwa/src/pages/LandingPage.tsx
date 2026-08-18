@@ -8,8 +8,11 @@ import type { VerifyMethod } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
 import { REMEMBERED_LOGOUT_KEY, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import { getAppEnv } from "@/utils/appEnv";
+import { isUnsafeApiHost, UNSAFE_API_HOST_ERROR } from "@/utils/apiHostGuard";
 import { useRetryCountdown } from "@/hooks/useRetryCountdown";
 import { useSyncCodeHostVerdict } from "@/hooks/useSyncCodeHostVerdict";
+import { useQrJoin } from "@/hooks/useQrJoin";
+import type { JoinOrigin, PendingAuth } from "@/hooks/joinState";
 import {
   buildRetryMessage,
   buildStaticRetryMessage,
@@ -33,57 +36,8 @@ interface LandingPageProps {
   externalError?: string;
 }
 
-/** Pending auth data waiting for verification completion. */
-interface PendingAuth {
-  userId: string;
-  familyId: string;
-  apiHost?: string;
-  verifyMethod: VerifyMethod;
-}
-
-/**
- * A QR arrival parked at the custom-host consent gate — everything the join
- * needs, held until the user has seen the address and agreed to it.
- */
-interface PendingHostConsent {
-  familyId: string;
-  userId: string;
-  /** Always set: consent only exists because the sync code carried an `@host`. */
-  apiHost: string;
-  /** Short-lived QR token; empty string when the QR carried none. */
-  qrToken: string;
-}
-
-/**
- * Which entry point started the join that is currently in flight; `null` when
- * nothing is running.
- *
- * The origin is a FIELD of the submitting state, never a second flag beside it:
- * every exit that leaves the user on this page (failure, hand-off to the
- * verification prompt) clears both in one assignment, error paths included —
- * only the success exit skips it, because it unmounts the page. A separate
- * `qrJoinBusy` boolean would stay latched after a failed QR join and turn the
- * user's next MANUAL submit into a QR busy screen.
- */
-type JoinOrigin = "form" | "qr";
-
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_ENV = getAppEnv();
-
-/** Shown when a sync code's `@host` is one the API client refuses to adopt. */
-const UNSAFE_API_HOST_ERROR = "此同步碼的伺服器位址無效或不安全，無法加入。";
-
-/**
- * True when a sync code's `@host` would be REFUSED by `validateEndpointUrl`.
- *
- * Every path that would talk to that host must check first: the join client is
- * built from this value, so an unchecked reject means the PWA has already sent
- * a verify-method probe (and then an auth token) to an address the security
- * rules exist to keep it away from. Never adopt, never persist.
- */
-function isUnsafeApiHost(apiHost: string | undefined): boolean {
-  return classifySyncCodeApiHost(apiHost).kind === "invalid";
-}
 
 export function LandingPage({
   onAuth,
@@ -147,11 +101,6 @@ export function LandingPage({
   const [pendingAuth, setPendingAuth] = useState<PendingAuth | null>(null);
   const [verifyError, setVerifyError] = useState("");
   const [codeInput, setCodeInput] = useState("");
-
-  // Custom-host consent state (QR arrivals whose sync code carries an `@host`)
-  const [hostConsent, setHostConsent] = useState<PendingHostConsent | null>(
-    null,
-  );
 
   // Back-off state (429): the code drives the copy, the countdown the seconds.
   const [retryCode, setRetryCode] = useState<RetryErrorCode | null>(null);
@@ -373,126 +322,20 @@ export function LandingPage({
     setCodeInput("");
   }
 
-  /**
-   * Runs a QR arrival's join, picking the exit that fits the credentials it
-   * carries. Shared by the default-endpoint fast path and the custom-host
-   * consent handler so the branch logic exists exactly once — the two differ
-   * only in WHEN they may start, never in what they do.
-   *
-   * With a qrToken, verification is skipped and the token is sent straight to
-   * the join. If the server rejects it (expired/invalid) it answers
-   * VERIFICATION_REQUIRED/FAILED and `completeJoin` falls back to the normal
-   * verification UI.
-   */
-  function startQrJoin(
-    familyId: string,
-    userId: string,
-    apiHost: string | undefined,
-    tokenFromQr: string,
-  ) {
-    setJoinOrigin("qr");
-
-    if (tokenFromQr) {
-      // No `.catch` on purpose: `completeJoin` wraps its whole body in
-      // try/catch and reports failures itself, so it never rejects — a handler
-      // here would be dead code, and both call sites in this function stay
-      // identical about that.
-      void completeJoin(familyId, userId, apiHost, undefined, tokenFromQr);
-      return;
-    }
-
-    // The probe is the first request to reach this host, so it gets the same
-    // refusal `completeJoin` applies — the guard is this function's own
-    // invariant, not a promise its callers happen to keep.
-    if (isUnsafeApiHost(apiHost)) {
-      setGeneralError(UNSAFE_API_HOST_ERROR);
-      setJoinOrigin(null);
-      return;
-    }
-    const joinClient = getJoinClient(apiHost);
-    void joinClient
-      .getVerifyMethod(userId)
-      .then((verifyRes) => {
-        const method: VerifyMethod = verifyRes.data?.method ?? "none";
-
-        if (method !== "none") {
-          setPendingAuth({ userId, familyId, apiHost, verifyMethod: method });
-          setJoinOrigin(null);
-          return;
-        }
-
-        // No verification needed — join directly
-        void completeJoin(familyId, userId, apiHost);
-      })
-      .catch(() => {
-        setGeneralError("處理失敗，請重試。");
-        setJoinOrigin(null);
-      });
-  }
-
-  function handleHostConsentConfirm() {
-    if (!hostConsent) return;
-    setHostConsent(null);
-    startQrJoin(
-      hostConsent.familyId,
-      hostConsent.userId,
-      hostConsent.apiHost,
-      hostConsent.qrToken,
-    );
-  }
-
-  /**
-   * Drop back to the manual form. The sync code stays pre-filled (its own
-   * `SyncCodeHostNote` keeps the address on screen), so the user can edit it or
-   * simply walk away — the same shape as the invalid-host refusal. `qrTriggered`
-   * is already latched, so the effect cannot re-fire behind this decision.
-   */
-  function handleHostConsentCancel() {
-    setHostConsent(null);
-  }
-
-  // Auto-trigger login when QR code provides both sync code and userId.
-  const qrTriggered = useRef(false);
-  useEffect(() => {
-    if (!qrUserId || !initialSyncCode || qrTriggered.current) return;
-    qrTriggered.current = true;
-
-    let decoded;
-    try {
-      decoded = decodeSyncCode(initialSyncCode);
-    } catch {
-      setGeneralError("QR Code 同步碼解析失敗，請手動輸入。");
-      return;
-    }
-
-    // A QR / invite host was never typed by this user, so it gets the same
-    // refusal as a pasted one — before the verify-method probe below.
-    if (isUnsafeApiHost(decoded.apiHost)) {
-      setGeneralError(UNSAFE_API_HOST_ERROR);
-      return;
-    }
-
-    // Past that refusal, a present `@host` is exactly the `valid` case: a
-    // usable address the user has still never seen. Disclose it and hold EVERY
-    // request behind the answer — the verify-method probe alone would hand this
-    // server the arriving device's IP / UA, which is precisely what an
-    // unconsented address must not get.
-    const { apiHost } = decoded;
-    if (apiHost) {
-      setHostConsent({
-        familyId: decoded.familyId,
-        userId: qrUserId,
-        apiHost,
-        qrToken,
-      });
-      return;
-    }
-
-    // No `@host` — the official default endpoint. Nothing to disclose, so the
-    // main onboarding path stays zero-interaction.
-    startQrJoin(decoded.familyId, qrUserId, undefined, qrToken);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qrUserId, initialSyncCode, qrToken]);
+  // The QR arrival's own machinery: consent gate + one-shot auto-trigger. It
+  // keeps its distance from the state the form path shares (`joinOrigin`,
+  // `pendingAuth`, `generalError`), which is why the raw setters go in.
+  const { hostConsent, handleHostConsentConfirm, handleHostConsentCancel } =
+    useQrJoin({
+      qrUserId,
+      initialSyncCode,
+      qrToken,
+      completeJoin,
+      getJoinClient,
+      setJoinOrigin,
+      setGeneralError,
+      setPendingAuth,
+    });
 
   // Back-off copy wins over the per-attempt error: it carries the live
   // countdown. `generalError` is last so non-verification failures (a 429 with
