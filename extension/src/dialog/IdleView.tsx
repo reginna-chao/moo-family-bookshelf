@@ -1,8 +1,9 @@
 import React from "react";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
+// Type-only: keeps the runtime module graph a single edge (OnboardingViews →
+// IdleView) despite useOnboardingFlow's type dependency on OnboardingViews.
+import type { OnboardingState } from "./useOnboardingFlow";
 import { useSyncCodeHostVerdict } from "./useSyncCodeHostVerdict";
-
-type OnboardingState = string;
 
 export interface IdleViewProps {
   state: OnboardingState;
@@ -20,7 +21,7 @@ export function IdleView({
   onSetSyncCodeInput,
   onCreate,
   onJoin,
-}: IdleViewProps) {
+}: IdleViewProps): React.JSX.Element {
   const hostVerdict = useSyncCodeHostVerdict(syncCodeInput);
   const handleJoin = () => {
     // Pressing join ends the editing session, so the warning must not wait.

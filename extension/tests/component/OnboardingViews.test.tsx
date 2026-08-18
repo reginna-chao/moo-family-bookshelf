@@ -7,6 +7,7 @@ import {
   CreatedView,
   ErrorView,
   IdleView,
+  type IdleViewProps,
 } from "@/dialog/OnboardingViews";
 import {
   HALF_TYPED_PREFIXES,
@@ -354,8 +355,8 @@ describe("ErrorView", () => {
 });
 
 describe("IdleView", () => {
-  const defaultProps = {
-    state: "idle" as string,
+  const defaultProps: IdleViewProps = {
+    state: "idle",
     syncCodeInput: "",
     isProcessing: false,
     onSetSyncCodeInput: vi.fn(),
@@ -818,8 +819,8 @@ describe("onboarding-view wrapper class", () => {
   // centering media query both target the `moo-onboarding-view` wrapper. These
   // assertions pin the class onto the rendered root so the CSS selectors keep
   // matching real DOM (jsdom cannot verify the padding itself).
-  const idleProps = {
-    state: "idle" as string,
+  const idleProps: IdleViewProps = {
+    state: "idle",
     syncCodeInput: "",
     isProcessing: false,
     onSetSyncCodeInput: vi.fn(),
