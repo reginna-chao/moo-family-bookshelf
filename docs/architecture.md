@@ -533,9 +533,10 @@ PWA **不會**自動套用家庭記錄的端點，也沒有這個確認面板—
 同步碼的 `@host` 是另一條「別人給你的位址」通道，因此 Extension 與 PWA 共用同一套規則：
 
 - **驗證邏輯只有一份**：`shared/src/api/endpointUrl.ts` 的 `validateEndpointUrl()` 同時被 Extension 與 PWA 的 API client 使用（各自 re-export），規則為「一律允許 HTTPS；HTTP 僅限 localhost／私有網段／`.local`；一律拒絕網址內嵌帳密（`https://real.example@evil.com` 這種會讓顯示字串與實際連線主機不一致的形式）」，回傳值正規化為 `origin + pathname`（去除結尾斜線、IDN 轉 punycode、收斂大小寫與預設埠）。兩端不得各留一份實作——規則不一致等於防護沒做。顯示側的分類同樣只有一份：`shared/src/api/syncCodeHost.ts` 的 `classifySyncCodeApiHost()` 把同一份驗證結果轉成三種可直接渲染的狀態（沒有自訂位址／可揭露的正規化位址／應顯示警告），因此同一組同步碼在 Extension 與 PWA 上看到的說明必然一致。
-- **加入前先揭露**：兩端的加入畫面都會顯示同步碼將連往的位址，且顯示的是**正規化後的 `origin + pathname`**（不是單純的 host），所以 `http://` 的區網位址與同名的 `https://` 位址在畫面上分得出來，homograph 網域也會以 `xn--…` 現形。PWA 的驗證畫面（PIN／圖形／驗證碼）同樣會顯示，因為 QR Code／邀請連結進來的使用者從沒看過輸入表單。
+- **加入前先揭露**：兩端的加入畫面都會顯示同步碼將連往的位址，且顯示的是**正規化後的 `origin + pathname`**（不是單純的 host），所以 `http://` 的區網位址與同名的 `https://` 位址在畫面上分得出來，homograph 網域也會以 `xn--…` 現形。PWA 的驗證畫面（PIN／圖形／驗證碼）同樣會顯示，因為 QR Code／邀請連結進來的使用者從沒看過輸入表單；QR Code 自動加入還有兩條連驗證畫面都不會經過的零互動出口，另由下方「QR Code 自動加入的確認閘門」補上揭露。
 - **驗不過就不揭露、也不連線**：位址無法通過驗證時，畫面顯示警告而非那句令人安心的「將連線至自訂伺服器」，加入動作直接中止並回報錯誤——不會發出任何請求到該位址（PWA 連查詢驗證方式的探詢請求都不會送出），也不會寫入本機設定。
 - **警告等輸入靜止才顯示，正面揭露不延遲**：手打 `@host` 的過程中幾乎每個中間狀態都驗不過（`…@http://192.168.`；只是「幾乎」——URL 解析器會展開簡寫 IPv4，再多打一個字元的 `…@http://192.168.1` 會解析成主機 `192.168.0.1`，落在放行的私有網段內，反而驗得過），若每一次按鍵都閃一次警告，使用者很快就學會忽略它——而這正是對抗偽造位址的最後一道人工防線。因此**只有 `invalid` 的警告會等目前的值「靜止」才顯示**，`valid` 那句「將連線至自訂伺服器」是對當前值的正面資訊，一律即時。靜止有四個觸發點，任一成立即可：值維持不變達 `SYNC_CODE_HOST_SETTLE_DELAY_MS`（600 ms，定義於 `shared/src/api/syncCodeHost.ts`，是任何輸入方式都繞不過的安全網）、貼上、離開欄位或按下加入／送出、以及**首次渲染時就非空的值**（邀請連結／QR Code 帶進來，使用者從沒打過字，沒有可閃爍的輸入過程）。**不變量：等待期間該處一律什麼都不顯示（`kind: "none"`），絕不沿用上一次的判定**——把先前的「將連線至 api.example」留在畫面上，等於在使用者剛把 `@evil.com` 接到後面的那一刻替偽造位址背書；我們只延後警告，永遠不顯示與當前輸入矛盾的內容。可顯示什麼的政策（`displayedSyncCodeApiHost()`）與延遲常數同樣只有一份放在 `shared/`，兩端各自的 `useSyncCodeHostVerdict` hook 只負責觸發時機；兩份 hook 的一致性不靠註解自律，而是由 parity 測試（`extension/tests/unit/useSyncCodeHostVerdict.parity.test.ts` 與 PWA 對應的一份，兩個套件各有一份，只動單邊的 PR 也跑得到）把兩個檔案讀進來、正規化 import 路徑與空白後逐字比對，任一側新增、移除或改寫觸發點都會讓測試變紅。不過這道保護只涵蓋 hook 的檔案級一致性，不涵蓋呼叫端：觸發點 4（首次渲染就非空的值）有一半取決於呼叫端是否把值帶進第一次渲染（PWA 是 `pwa/src/pages/LandingPage.tsx` 的 `useState(initialSyncCode)`，Extension 是由上層以 prop 傳入），單邊在這裡改壞時 parity 測試仍會是綠的。因此 Extension 與 PWA「同時示警」在 hook 層有測試釘住，呼叫端那一段則仍要靠審查把關。
+- **QR Code 自動加入的確認閘門**：PWA 的 QR Code 自動加入原有兩條零互動出口——帶 QR 權杖時直接加入、以及帳號沒設驗證時探詢完直接加入——兩條都會在使用者毫無察覺的情況下採用同步碼帶來的位址並寫進本機。因此同步碼帶有 `@host` 時，PWA 會先停在確認畫面（`pwa/src/components/CustomHostConsent.tsx`，位址一律交給同一個 `SyncCodeHostNote` 呈現，與表單、驗證畫面同一份文案與同一份分類結果），使用者按下「確認並加入」之後才接上原本的出口邏輯。**確認之前不會發出任何請求**——連查詢驗證方式的探詢都不送，因為那個請求本身就會把裝置的 IP／UA 交給尚未經過同意的位址。按「取消」則落回手動輸入表單（同步碼已預填，表單上的揭露照常顯示），不寫入任何本機設定，語意與上一條的拒絕路徑一致。沒有 `@host` 的同步碼（官方預設端點）維持零互動，這是 PWA 的主要入門路徑；位址驗不過時仍走上一條的拒絕路徑，不會進到確認畫面——確認畫面只出現在「有效但陌生」的位址上，不替一個驗不過的位址提供任何「同意」的機會。同意結果**刻意不做持久化**（PWA 沒有 Extension `moo:declinedFamilyEndpoint` 的等價機制），每一次 QR Code 進來都重新詢問。
 - **加入成功才保存**：`@host` 會立刻套用到記憶體中的用戶端（加入請求本來就得送往該處），但**唯有後端接受加入之後才寫入本機**。同步碼過期／輸入錯誤、或該伺服器刻意回覆「找不到家庭」時，用戶端還原成這次嘗試之前的端點，本機則自始沒有被寫入——一個什麼都沒證明的位址若留在裝置上，使用者接著按「建立家庭」就會把登入憑證與完整書單送往該處，並把它烙進之後發出的同步碼。唯一的例外是驗證挑戰：它是同一次嘗試的延續（要向同一台伺服器問驗證方式再重試），因此端點保留到該次嘗試真正結束（加入成功、失敗或使用者放棄）為止。
 - **本機既有值也會複檢**：PWA 從 `localStorage` 還原工作階段時會重新驗證存下來的 `apiHost`；舊版存下、如今已不被接受的位址會被視為沒有工作階段（要求重新輸入同步碼），而不是讓 `new ApiClient()` 拋錯把整個 App 打掛。
 - **預設端點同樣走驗證**：`DEFAULT_API_ENDPOINT`（兩端的 `constants.ts`）在定義時就套用 `validateEndpointUrl()`，讓它與 `ApiClient.getEndpoint()` 落在同一個比較空間；建置時給了無效的環境變數會在載入當下直接拋錯，而不是等到第一次請求才以難以歸因的形式爆開。
@@ -580,13 +581,18 @@ PWA 無法爬取讀墨頁面，因此無法自動取得 email。提供兩種認�
 ```
 Extension 設定頁 → 「連結手機」按鈕
        ↓
-  產生 QR Code，內容為 PWA URL + query params：
-  https://pwa.example.com/?code=moo-{familyId}&uid={userId}[@host]
+  產生 QR Code，內容為 PWA URL，認證資料一律放在 fragment（#）：
+  https://pwa.example.com/#code={syncCode}&uid={userId}[&qrt={qrToken}]
+  syncCode 即 moo-{familyId}，自訂端點時為 moo-{familyId}@{host}
+  （各參數值以 encodeURIComponent 編碼，故 @ 會以 %40 出現）
        ↓
   手機掃碼 → PWA 自動解析 → 儲存至 localStorage → 完成
 ```
 
-- 零手動輸入，UX 最佳
+- 參數只有三個（`extension/src/constants.ts` 的 `buildPwaUrl()` 組裝、`pwa/src/hooks/useAuth.ts` 的 `tryParseQrParams()` 解析）：`code`（同步碼；`@host` 是**同步碼本身的一部分**，不是獨立參數）、`uid`（Extension 已算好的 userId）、`qrt`（一次性 QR 權杖，可選；有效時可略過 PIN／圖形／驗證碼挑戰）
+- **用 fragment 而不是 query string 是刻意的**：`#` 之後的內容不會送到伺服器，同步碼與 userId 因此不會進入伺服器 access log 與 referrer header。寫成 query param 會讓這個保證整個失效
+- 零手動輸入、UX 最佳——**前提是同步碼指向官方預設端點**（沒有 `@host`），這也是絕大多數使用者走的路徑
+- 同步碼帶自訂 `@host` 時多一次確認：PWA 會先停在確認畫面揭露該伺服器位址，按下「確認並加入」之後才接回上述自動流程（按「取消」則落回手動輸入表單）。詳見上方〈同步碼位址的驗證與揭露〉的「QR Code 自動加入的確認閘門」
 - QR Code 包含 userId，不需額外步驟
 
 #### 備用入口：手動輸入

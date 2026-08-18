@@ -76,6 +76,13 @@ const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
 const CUSTOM_ENDPOINT = "https://custom.api.com";
 const QR_ENDPOINT = "https://qr.host.com";
 
+/**
+ * Mirrors src/pages/LandingPage.tsx `UNSAFE_API_HOST_ERROR`. Asserted against
+ * the page's own rendering of it, so a copy change here fails loudly rather
+ * than leaving a stale duplicate green.
+ */
+const ABORT_MESSAGE = "此同步碼的伺服器位址無效或不安全，無法加入。";
+
 function fillInput(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), {
     target: { value },
@@ -87,6 +94,20 @@ function submitForm() {
     .getByRole("button", { name: /開始使用|處理中/ })
     .closest("form")!;
   fireEvent.submit(form);
+}
+
+/**
+ * Drain the microtask queue so any request the page started has reached its
+ * mock before a "nothing was called" assertion runs. Without this, a probe
+ * hidden behind an `await` would slip through the gap between the screen
+ * appearing and the assertion — the exact regression those tests guard.
+ */
+async function flushPendingRequests() {
+  for (let i = 0; i < 3; i++) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
 }
 
 describe("LandingPage", () => {
@@ -707,7 +728,46 @@ describe("LandingPage", () => {
   });
 
   describe("QR code auto-login flow", () => {
-    it("should auto-join when qrUserId is provided and no verification needed", async () => {
+    /** A 64-hex userId, already hashed by the Extension that made the QR. */
+    const QR_USER_ID = "abcdef0123456789".repeat(4);
+
+    it("should auto-join with no interaction when the QR carries no custom host", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-qr",
+      });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "none", prompted: 1 },
+      });
+
+      render(
+        <LandingPage
+          onAuth={mockOnAuth}
+          initialSyncCode="moo-famqr-keyqr"
+          qrUserId={QR_USER_ID}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockJoinFamily).toHaveBeenCalledWith(
+          "fam-qr",
+          QR_USER_ID,
+          expect.objectContaining({ verifySecret: undefined }),
+        );
+        expect(mockOnAuth).toHaveBeenCalledWith({
+          userId: QR_USER_ID,
+          familyId: "fam-qr",
+          apiHost: undefined,
+          authToken: "tok-123",
+        });
+      });
+      // The default endpoint is the main onboarding path: nothing to disclose,
+      // so nothing may interrupt it.
+      expect(
+        screen.queryByTestId("custom-host-consent"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("should auto-join to a custom host once its address has been confirmed", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-qr",
         apiHost: QR_ENDPOINT,
@@ -720,19 +780,22 @@ describe("LandingPage", () => {
         <LandingPage
           onAuth={mockOnAuth}
           initialSyncCode={`moo-famqr-keyqr@${QR_ENDPOINT}`}
-          qrUserId="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+          qrUserId={QR_USER_ID}
         />,
+      );
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "確認並加入" }),
       );
 
       await waitFor(() => {
         expect(mockJoinFamily).toHaveBeenCalledWith(
           "fam-qr",
-          "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+          QR_USER_ID,
           expect.objectContaining({ verifySecret: undefined }),
         );
         expect(mockOnAuth).toHaveBeenCalledWith({
-          userId:
-            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+          userId: QR_USER_ID,
           familyId: "fam-qr",
           apiHost: QR_ENDPOINT,
           authToken: "tok-123",
@@ -752,7 +815,7 @@ describe("LandingPage", () => {
         <LandingPage
           onAuth={mockOnAuth}
           initialSyncCode="moo-famqr-keyqr"
-          qrUserId="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+          qrUserId={QR_USER_ID}
         />,
       );
 
@@ -773,7 +836,7 @@ describe("LandingPage", () => {
         <LandingPage
           onAuth={mockOnAuth}
           initialSyncCode="bad-code"
-          qrUserId="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+          qrUserId={QR_USER_ID}
         />,
       );
 
@@ -787,12 +850,7 @@ describe("LandingPage", () => {
     });
 
     it("should not auto-trigger when only qrUserId is provided without initialSyncCode", () => {
-      render(
-        <LandingPage
-          onAuth={mockOnAuth}
-          qrUserId="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-        />,
-      );
+      render(<LandingPage onAuth={mockOnAuth} qrUserId={QR_USER_ID} />);
 
       // Should show the normal form
       expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
@@ -812,9 +870,6 @@ describe("LandingPage", () => {
    * contacted, and with it the fact that this userId exists.
    */
   describe("a sync code whose @host would be refused", () => {
-    /** Mirrors src/pages/LandingPage.tsx `UNSAFE_API_HOST_ERROR`. */
-    const ABORT_MESSAGE = "此同步碼的伺服器位址無效或不安全，無法加入。";
-
     const REFUSED: Array<[string, string]> = [
       ["a userinfo masquerade", "https://real.example@evil.com"],
       ["embedded user:password credentials", "https://user:pass@evil.com"],
@@ -1257,6 +1312,13 @@ describe("LandingPage", () => {
      * so the note drops the form's "此同步碼" lead-in (`variant="verify"`).
      */
     describe("above the verification screen", () => {
+      /**
+       * Drive a QR arrival all the way to the PIN prompt. A code carrying an
+       * `@host` is parked at the consent gate first, so the helper answers it —
+       * the note under test here is the one the CHALLENGE screen carries, which
+       * has to stand on its own: the gate's copy is long gone by the time the
+       * PIN is typed.
+       */
       async function renderQrArrival(apiHost?: string) {
         mockDecodeSyncCode.mockReturnValue({ familyId: "fam-qr", apiHost });
         mockGetVerifyMethod.mockResolvedValue({
@@ -1272,6 +1334,12 @@ describe("LandingPage", () => {
             qrUserId={QR_USER_ID}
           />,
         );
+
+        if (apiHost) {
+          fireEvent.click(
+            await screen.findByRole("button", { name: "確認並加入" }),
+          );
+        }
 
         await waitFor(() => {
           expect(screen.getByText("請輸入 PIN 碼")).toBeInTheDocument();
@@ -1310,5 +1378,462 @@ describe("LandingPage", () => {
         );
       });
     });
+  });
+
+  /**
+   * Disclosure is not enough on the QR path: that path is auto-advanced past
+   * the form and has two ZERO-INTERACTION exits (a valid QR token, or an
+   * account with no verification configured), so a scanned code could adopt —
+   * and persist — somebody else's server with nothing ever on screen.
+   *
+   * So consent is taken BEFORE the first request, not before the join. The
+   * `getVerifyMethod` probe alone already tells that server this userId exists,
+   * from this device's IP and UA; "we only asked it a question" is not a
+   * meaningful distinction to a host the user never agreed to.
+   *
+   * The verdict still comes from the real `classifySyncCodeApiHost`, so what
+   * the gate shows is the canonical address the client would actually call.
+   */
+  describe("consent before adopting a QR invite's custom server", () => {
+    const QR_USER_ID = "c".repeat(64);
+    const QR_TOKEN = "qr-token-123";
+    const QR_SYNC_CODE = `moo-famqr-keyqr@${QR_ENDPOINT}`;
+
+    /**
+     * Mount the page as a QR arrival whose sync code carries `apiHost`.
+     *
+     * `rerenderWith` replays a parent re-render: a FRESH element (an identical
+     * one would be allowed to bail out of rendering entirely) carrying the same
+     * prop values, except for whatever the caller overrides.
+     */
+    function renderQrArrival(apiHost: string | undefined, qrToken = "") {
+      mockDecodeSyncCode.mockReturnValue({ familyId: "fam-qr", apiHost });
+
+      const props = {
+        onAuth: mockOnAuth,
+        initialSyncCode: apiHost
+          ? `moo-famqr-keyqr@${apiHost}`
+          : "moo-famqr-keyqr",
+        qrUserId: QR_USER_ID,
+        qrToken,
+      };
+      const { rerender } = render(<LandingPage {...props} />);
+
+      return {
+        rerenderWith: (overrides: { qrToken?: string } = {}) =>
+          rerender(<LandingPage {...props} {...overrides} />),
+      };
+    }
+
+    const consentScreen = () => screen.findByTestId("custom-host-consent");
+    const confirmButton = () =>
+      screen.findByRole("button", { name: "確認並加入" });
+
+    /** Every exit the QR path has when it is NOT held back. */
+    const ZERO_INTERACTION_EXITS: Array<[string, string]> = [
+      ["the QR carries a token that skips verification", QR_TOKEN],
+      ["the account has no verification configured", ""],
+    ];
+
+    describe("holding the join until the address has been seen", () => {
+      it.each(ZERO_INTERACTION_EXITS)(
+        "asks first when %s",
+        async (_label, qrToken) => {
+          mockGetVerifyMethod.mockResolvedValue({
+            data: { method: "none", prompted: 1 },
+          });
+
+          renderQrArrival(QR_ENDPOINT, qrToken);
+
+          expect(await consentScreen()).toBeInTheDocument();
+          await flushPendingRequests();
+          // The probe is the FIRST thing that would reach the undisclosed
+          // server, so it is the one that proves the gate sits early enough.
+          expect(mockGetVerifyMethod).not.toHaveBeenCalled();
+          expect(mockJoinFamily).not.toHaveBeenCalled();
+          expect(mockOnAuth).not.toHaveBeenCalled();
+        },
+      );
+
+      it("names the canonical address the client would call, not the raw text", async () => {
+        renderQrArrival("https://QR.Host.com:443/api/");
+        await consentScreen();
+
+        // Same canonical value the verification screen shows for this host —
+        // the disclosure must not drift from where the request would go.
+        const note = screen.getByTestId("sync-code-host-note");
+        expect(note).toHaveTextContent("將連線至自訂伺服器：");
+        // Same reason as the verification screen above: nothing on this gate
+        // puts a sync code on screen, so it asks for `variant="verify"` and
+        // drops the "此同步碼" lead-in. Only that ABSENCE pins the variant —
+        // the join copy contains the verify copy.
+        expect(note.textContent).not.toContain("此同步碼");
+        expect(note).toHaveTextContent("https://qr.host.com/api");
+        expect(note.textContent).not.toContain("QR.Host.com");
+      });
+
+      it("never appears for the official default endpoint", async () => {
+        mockGetVerifyMethod.mockResolvedValue({
+          data: { method: "none", prompted: 1 },
+        });
+
+        renderQrArrival(undefined, QR_TOKEN);
+
+        await waitFor(() => expect(mockOnAuth).toHaveBeenCalled());
+        expect(
+          screen.queryByTestId("custom-host-consent"),
+        ).not.toBeInTheDocument();
+      });
+
+      it("offers no consent for an @host that would be refused", async () => {
+        renderQrArrival("https://real.example@evil.com", QR_TOKEN);
+
+        await waitFor(() => {
+          expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
+        });
+        await flushPendingRequests();
+        // Deliberate: an address that fails validation is refused outright, so
+        // there is nothing to agree to. Offering a button would let a user
+        // wave through exactly what the check exists to stop.
+        expect(
+          screen.queryByTestId("custom-host-consent"),
+        ).not.toBeInTheDocument();
+        expect(mockGetVerifyMethod).not.toHaveBeenCalled();
+        expect(mockJoinFamily).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("once the user has agreed to the address", () => {
+      it("sends the QR token to that server and completes the join", async () => {
+        renderQrArrival(QR_ENDPOINT, QR_TOKEN);
+
+        fireEvent.click(await confirmButton());
+
+        await waitFor(() => {
+          expect(mockOnAuth).toHaveBeenCalledWith({
+            userId: QR_USER_ID,
+            familyId: "fam-qr",
+            apiHost: QR_ENDPOINT,
+            authToken: "tok-123",
+          });
+        });
+        // The token exit is preserved, not downgraded to a manual challenge.
+        expect(mockJoinFamily).toHaveBeenCalledWith(
+          "fam-qr",
+          QR_USER_ID,
+          expect.objectContaining({ qrToken: QR_TOKEN }),
+        );
+        // And the join is the ONLY request. Without this, "token still goes
+        // straight to the join" is indistinguishable from "probe first, then
+        // join": the latter would spend an extra round trip telling this
+        // server that this userId exists.
+        expect(mockGetVerifyMethod).not.toHaveBeenCalled();
+      });
+
+      it("probes for a verification method and joins when none is configured", async () => {
+        mockGetVerifyMethod.mockResolvedValue({
+          data: { method: "none", prompted: 1 },
+        });
+
+        renderQrArrival(QR_ENDPOINT);
+
+        fireEvent.click(await confirmButton());
+
+        await waitFor(() => {
+          expect(mockOnAuth).toHaveBeenCalledWith({
+            userId: QR_USER_ID,
+            familyId: "fam-qr",
+            apiHost: QR_ENDPOINT,
+            authToken: "tok-123",
+          });
+        });
+        expect(mockGetVerifyMethod).toHaveBeenCalledWith(QR_USER_ID);
+        expect(mockJoinFamily).toHaveBeenCalledWith(
+          "fam-qr",
+          QR_USER_ID,
+          expect.objectContaining({
+            verifySecret: undefined,
+            qrToken: undefined,
+          }),
+        );
+      });
+
+      it("opens the challenge instead of joining when verification is configured", async () => {
+        mockGetVerifyMethod.mockResolvedValue({
+          data: { method: "pin", prompted: 1 },
+        });
+
+        renderQrArrival(QR_ENDPOINT);
+
+        fireEvent.click(await confirmButton());
+
+        await waitFor(() => {
+          expect(screen.getByText("請輸入 PIN 碼")).toBeInTheDocument();
+        });
+        expect(mockJoinFamily).not.toHaveBeenCalled();
+        expect(mockOnAuth).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("when the user declines", () => {
+      it("falls back to the form with the code still pre-filled", async () => {
+        renderQrArrival(QR_ENDPOINT, QR_TOKEN);
+
+        fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+
+        await waitFor(() => {
+          expect(
+            screen.queryByTestId("custom-host-consent"),
+          ).not.toBeInTheDocument();
+        });
+        const syncCodeInput = screen.getByLabelText(
+          "同步碼",
+        ) as HTMLInputElement;
+        expect(syncCodeInput.value).toBe(QR_SYNC_CODE);
+        // Nothing is stuck in-flight: the join never started, so the form is
+        // usable rather than sitting disabled behind a phantom submission.
+        expect(
+          screen.getByRole("button", { name: "開始使用" }),
+        ).not.toBeDisabled();
+        // The address stays on screen via the form's own note, so declining is
+        // not the same as losing the information.
+        expect(screen.getByTestId("sync-code-host-note")).toHaveTextContent(
+          QR_ENDPOINT,
+        );
+      });
+
+      it("has still contacted nothing", async () => {
+        renderQrArrival(QR_ENDPOINT, QR_TOKEN);
+
+        fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+
+        await waitFor(() => {
+          expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
+        });
+        await flushPendingRequests();
+        expect(mockGetVerifyMethod).not.toHaveBeenCalled();
+        expect(mockJoinFamily).not.toHaveBeenCalled();
+        expect(mockOnAuth).not.toHaveBeenCalled();
+      });
+
+      it("lands on the form, never on a progress screen", async () => {
+        renderQrArrival(QR_ENDPOINT, QR_TOKEN);
+
+        fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+
+        await waitFor(() => {
+          expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
+        });
+        // Refusing is not "working on it": no join was started, so the QR
+        // progress screen must not appear on this exit.
+        expect(screen.queryByTestId("qr-join-busy")).not.toBeInTheDocument();
+      });
+
+      /**
+       * A refusal has to survive the page re-rendering. The auto-join trigger
+       * is latched in a ref, so no later render may put the gate back up — let
+       * alone start, behind the user's back, the requests they just declined.
+       */
+      it.each([
+        // Same values: the everyday parent re-render.
+        ["nothing has changed", {}],
+        // A changed dependency is what actually re-enters the effect, so this
+        // is the case where the latch is the only thing holding the refusal.
+        ["the QR token has been refreshed", { qrToken: "qr-token-456" }],
+      ])(
+        "stays declined when the page re-renders and %s",
+        async (_label, overrides) => {
+          const { rerenderWith } = renderQrArrival(QR_ENDPOINT, QR_TOKEN);
+
+          fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+          await waitFor(() => {
+            expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
+          });
+
+          rerenderWith(overrides);
+          await flushPendingRequests();
+
+          expect(
+            screen.queryByTestId("custom-host-consent"),
+          ).not.toBeInTheDocument();
+          expect(screen.getByLabelText("同步碼")).toBeInTheDocument();
+          expect(mockGetVerifyMethod).not.toHaveBeenCalled();
+          expect(mockJoinFamily).not.toHaveBeenCalled();
+          expect(mockOnAuth).not.toHaveBeenCalled();
+        },
+      );
+    });
+  });
+
+  /**
+   * A QR arrival is auto-advanced past the form, so while its join runs there
+   * is no submit button left to carry a "處理中..." label — and showing the
+   * form would ask someone who just scanned (or just pressed 確認並加入) to
+   * type an email. The whole screen becomes the progress indicator instead.
+   *
+   * The screen belongs to THAT join and only to it: a flag that stayed latched
+   * after a failed QR join would hijack the user's next manual submit, which is
+   * why the page tracks WHICH entry point is in flight rather than a second
+   * boolean beside it.
+   */
+  describe("progress screen while a QR join runs", () => {
+    const QR_USER_ID = "d".repeat(64);
+    const QR_TOKEN = "qr-token-123";
+
+    type JoinResult = { data: { ok: boolean; authToken: string } };
+
+    /** A join held open, so the mid-flight screen can be inspected. */
+    function deferredJoin() {
+      let settle!: (value: JoinResult) => void;
+      const pending = new Promise<JoinResult>((resolve) => {
+        settle = resolve;
+      });
+      return {
+        pending,
+        finish: () => settle({ data: { ok: true, authToken: "tok-123" } }),
+      };
+    }
+
+    function renderQrArrival(apiHost: string | undefined, qrToken = "") {
+      mockDecodeSyncCode.mockReturnValue({ familyId: "fam-qr", apiHost });
+
+      render(
+        <LandingPage
+          onAuth={mockOnAuth}
+          initialSyncCode={
+            apiHost ? `moo-famqr-keyqr@${apiHost}` : "moo-famqr-keyqr"
+          }
+          qrUserId={QR_USER_ID}
+          qrToken={qrToken}
+        />,
+      );
+    }
+
+    it("takes over the screen between 確認並加入 and the join finishing", async () => {
+      const { pending, finish } = deferredJoin();
+      mockJoinFamily.mockReturnValue(pending);
+
+      renderQrArrival(QR_ENDPOINT, QR_TOKEN);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "確認並加入" }),
+      );
+
+      expect(await screen.findByTestId("qr-join-busy")).toHaveTextContent(
+        "處理中...",
+      );
+      // The form is gone, not merely disabled: this user has already answered
+      // the only question the QR path asks them.
+      expect(screen.queryByLabelText("同步碼")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("讀墨帳號 Email")).not.toBeInTheDocument();
+
+      finish();
+      await waitFor(() => expect(mockOnAuth).toHaveBeenCalled());
+    });
+
+    /**
+     * The verification screen is ordered ahead of this one on purpose: a
+     * challenge raised while the QR join is in flight has to reach the user,
+     * or the join sits behind a progress screen nobody can answer.
+     */
+    it("yields to a challenge raised mid-join", async () => {
+      // Server rejects the QR token, so the join falls back to verification.
+      mockJoinFamily.mockResolvedValue({
+        error: {
+          code: "VERIFICATION_REQUIRED",
+          message: "Verification required",
+        },
+      });
+      mockGetVerifyMethod.mockResolvedValue({
+        data: { method: "pin", prompted: 1 },
+      });
+
+      renderQrArrival(QR_ENDPOINT, QR_TOKEN);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "確認並加入" }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("請輸入 PIN 碼")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("qr-join-busy")).not.toBeInTheDocument();
+      expect(mockOnAuth).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The failure mode this whole shape exists to prevent: after a QR join
+     * fails, the next attempt is the USER's own form submit, and it must be
+     * reported on their submit button — not as a QR screen that swallows the
+     * form they are typing into.
+     */
+    it("does not carry over into a manual submit after a failed QR join", async () => {
+      mockJoinFamily.mockResolvedValueOnce({
+        error: { code: "NOT_FOUND", message: "Family not found" },
+      });
+
+      renderQrArrival(QR_ENDPOINT, QR_TOKEN);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "確認並加入" }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Family not found")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("qr-join-busy")).not.toBeInTheDocument();
+
+      const { pending, finish } = deferredJoin();
+      mockJoinFamily.mockReturnValue(pending);
+
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: "處理中..." }),
+        ).toBeDisabled();
+      });
+      expect(screen.queryByTestId("qr-join-busy")).not.toBeInTheDocument();
+
+      finish();
+      await waitFor(() => expect(mockOnAuth).toHaveBeenCalled());
+    });
+
+    /**
+     * The default endpoint has nothing to disclose, so it keeps both halves of
+     * its promise: the screen changes, the interaction count does not. Neither
+     * case below fires a single event.
+     */
+    it.each([
+      ["the QR carries a token that skips verification", QR_TOKEN],
+      ["the account has no verification configured", ""],
+    ])(
+      "stands in for the form when %s, with no click at all",
+      async (_label, qrToken) => {
+        const { pending, finish } = deferredJoin();
+        mockJoinFamily.mockReturnValue(pending);
+        mockGetVerifyMethod.mockResolvedValue({
+          data: { method: "none", prompted: 1 },
+        });
+
+        renderQrArrival(undefined, qrToken);
+
+        expect(await screen.findByTestId("qr-join-busy")).toHaveTextContent(
+          "處理中...",
+        );
+        expect(screen.queryByLabelText("同步碼")).not.toBeInTheDocument();
+        expect(
+          screen.queryByTestId("custom-host-consent"),
+        ).not.toBeInTheDocument();
+
+        finish();
+        await waitFor(() =>
+          expect(mockOnAuth).toHaveBeenCalledWith({
+            userId: QR_USER_ID,
+            familyId: "fam-qr",
+            apiHost: undefined,
+            authToken: "tok-123",
+          }),
+        );
+      },
+    );
   });
 });
