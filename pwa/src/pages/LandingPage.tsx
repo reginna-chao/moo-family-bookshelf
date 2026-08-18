@@ -393,16 +393,11 @@ export function LandingPage({
     setJoinOrigin("qr");
 
     if (tokenFromQr) {
-      void completeJoin(
-        familyId,
-        userId,
-        apiHost,
-        undefined,
-        tokenFromQr,
-      ).catch(() => {
-        setGeneralError("處理失敗，請重試。");
-        setJoinOrigin(null);
-      });
+      // No `.catch` on purpose: `completeJoin` wraps its whole body in
+      // try/catch and reports failures itself, so it never rejects — a handler
+      // here would be dead code, and both call sites in this function stay
+      // identical about that.
+      void completeJoin(familyId, userId, apiHost, undefined, tokenFromQr);
       return;
     }
 
