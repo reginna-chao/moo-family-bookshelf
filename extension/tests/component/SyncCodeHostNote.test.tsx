@@ -370,8 +370,8 @@ describe("SyncCodeHostNote", () => {
 
     /**
      * Exactly three call sites mount the note WITHOUT a variant: the Extension's
-     * idle join screen (dialog/OnboardingViews.tsx, IdleView), its recovery join
-     * view (dialog/RecoveryJoinView.tsx) and the PWA's sync-code form
+     * idle join screen (dialog/IdleView.tsx), its recovery join view
+     * (dialog/RecoveryJoinView.tsx) and the PWA's sync-code form
      * (pwa/src/pages/LandingPage.tsx). They read correctly only because the
      * default is `join`, so flipping that default would silently reword those
      * three screens.
