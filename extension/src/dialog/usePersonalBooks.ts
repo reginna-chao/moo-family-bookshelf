@@ -84,6 +84,14 @@ export function usePersonalBooks({
   const [errorMessage, setErrorMessage] = useState("");
   const [dirtyBookIds, setDirtyBookIds] = useState<Set<string>>(new Set());
   const isDirty = dirtyBookIds.size > 0;
+  /** Pending "saved" → "ready" reset; cleared on unmount and before rescheduling. */
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   const markDirty = useCallback((bookId: string) => {
     setDirtyBookIds((prev) => {
@@ -206,7 +214,8 @@ export function usePersonalBooks({
     // Nothing changed → treat as an instant no-op save (UI guards this too).
     if (dirtyBookIds.size === 0) {
       setStatus("saved");
-      setTimeout(() => setStatus("ready"), 1500);
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setStatus("ready"), 1500);
       return;
     }
 
@@ -258,7 +267,8 @@ export function usePersonalBooks({
       });
       clearDirty();
       setStatus("saved");
-      setTimeout(() => setStatus("ready"), 1500);
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setStatus("ready"), 1500);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setStatus("error");

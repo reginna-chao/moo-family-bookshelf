@@ -137,31 +137,41 @@ describe("PersonalShelfPage", () => {
   });
 
   it("clicking retry button re-fetches data", async () => {
-    mockGetPersonalBooks.mockRejectedValueOnce(new Error("Network error"));
-    render(<PersonalShelfPage {...defaultProps} />);
+    // Both outcomes are queued BEFORE the render: the mount fetch takes the
+    // rejection, the retry takes the success. Swapping the success in after
+    // render would silently assume the mount fetch had already consumed the
+    // rejection — an effect-published fact that a DOM waiter cannot prove.
+    mockGetPersonalBooks
+      .mockRejectedValueOnce(new Error("Network error"))
+      .mockResolvedValue({
+        data: makePersonalBooks("TestUser", [
+          {
+            bookId: "b1",
+            title: "書籍一",
+            author: "作者A",
+            isShared: BoolFlag.TRUE,
+          },
+        ]),
+      });
 
-    await waitFor(() => {
-      expect(screen.getByText("重試")).toBeInTheDocument();
+    // act is the readiness barrier: on exit the mount fetch's rejection has
+    // been committed, so the error view is really on screen.
+    await act(async () => {
+      render(<PersonalShelfPage {...defaultProps} />);
+    });
+    // getBy, not findBy: a mount that failed to settle must fail loudly here,
+    // not silently leave the click below with nothing to press.
+    expect(screen.getByText("重試")).toBeInTheDocument();
+
+    // Drain the retry inside act — the click starts an async load whose commit
+    // must land before the assertions below.
+    await act(async () => {
+      fireEvent.click(screen.getByText("重試"));
     });
 
-    // Set up success response for retry
-    mockGetPersonalBooks.mockResolvedValue({
-      data: makePersonalBooks("TestUser", [
-        {
-          bookId: "b1",
-          title: "書籍一",
-          author: "作者A",
-          isShared: BoolFlag.TRUE,
-        },
-      ]),
-    });
-
-    fireEvent.click(screen.getByText("重試"));
-
-    await waitFor(() => {
-      expect(screen.getByText("書籍一")).toBeInTheDocument();
-    });
+    // Sequence on the production-observable call count, then on what it rendered.
     expect(mockGetPersonalBooks).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("書籍一")).toBeInTheDocument();
   });
 
   it("shows empty state when books array is empty", async () => {

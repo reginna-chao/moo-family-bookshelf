@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 
 // usePersonalBooks no longer scrapes on its own (the self-contained display
@@ -590,16 +590,16 @@ describe("usePersonalBooks — dirty Set", () => {
     });
     expect(result.current.dirtyBookIds.size).toBe(2);
 
-    // Fire handleSave; do NOT wrap in act(async), because the production code
-    // schedules a 1500ms setTimeout for the "saved → ready" cleanup, and
-    // act(async) waits for all pending React work to settle which would
-    // hold us up for the timer. We instead poll the externally observable
-    // state (dirtyBookIds cleared) via waitFor — that's the spec under test.
-    void result.current.handleSave();
-
-    await waitFor(() => {
-      expect(result.current.dirtyBookIds.size).toBe(0);
+    // Same barrier as every other handleSave site in this file. act(async)
+    // flushes microtasks and pending effects; it never awaited the 1500ms
+    // "saved → ready" setTimeout production schedules, so there is nothing to
+    // be held up by — and that timer is now cleared on unmount as well
+    // (src/dialog/usePersonalBooks.ts), so it cannot outlive the test either.
+    await act(async () => {
+      await result.current.handleSave();
     });
+
+    expect(result.current.dirtyBookIds.size).toBe(0);
     expect(result.current.isDirty).toBe(false);
   });
 
@@ -825,5 +825,36 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
     expect(result.current.status).toBe("error");
     expect(result.current.errorMessage).toBe("patch failed");
     expect(result.current.dirtyBookIds.has("b1")).toBe(true);
+  });
+});
+
+describe("usePersonalBooks — unmount cleanup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupStorage();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("clears the pending saved→ready timer on unmount", async () => {
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+    const { result, unmount } = renderUsePersonalBooks();
+    await waitForReady(result);
+
+    // A clean-state save takes the no-op branch: arms the timer, no network.
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    expect(result.current.status).toBe("saved");
+
+    // Ignore anything cleared before unmount (first arm clears no prior timer).
+    clearSpy.mockClear();
+    unmount();
+
+    // Unmount cleanup must clear the armed reset timer, or the deferred
+    // setStatus("ready") lands on an unmounted component.
+    expect(clearSpy).toHaveBeenCalled();
   });
 });
