@@ -327,6 +327,7 @@ All development and design go through a **single skill entry: `/develop`**. It t
 │   ├── frontend.md     # Extension + PWA (React/TS) conventions
 │   ├── backend.md      # Worker (Hono/KV) conventions
 │   ├── test.md         # test framework, locations, coverage
+│   ├── change-triage.md # 主動提出修改建議前先套用此分級
 │   └── security-ux-invariants.md
 ├── agents/         # role agents (invisible in the slash menu)
 │   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md
