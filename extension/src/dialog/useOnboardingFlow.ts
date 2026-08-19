@@ -64,6 +64,12 @@ const VERIFY_CANCELLED_MESSAGE = "需要完成驗證才能建立家庭書櫃，�
 const START_VERIFY_CANCELLED_MESSAGE =
   "需要完成驗證才能讀取你的家庭資料，請重試。";
 
+/** Shown when a verified join is refused because the family is gone for this
+ *  user (deleted / full / removed by the owner) and the backend sent no message
+ *  of its own. The server normally explains the exact reason — this is the
+ *  fallback for an older or self-hosted backend that does not. */
+const FAMILY_GONE_FALLBACK_MESSAGE = "無法加入此家庭，請聯繫家庭管理者確認。";
+
 /** Outcome of one create-a-family attempt, with the backend refusal as a value. */
 type CreateAttempt =
   | { ok: true }
@@ -243,9 +249,18 @@ export function useOnboardingFlow(
       run: (verifySecret: string) => Promise<{
         recovered: boolean;
         errorCode?: string;
+        errorMessage?: string;
         retryAfter?: number;
       }>;
       onCancel: () => void;
+      /**
+       * End the attempt when the verified join is refused for good (family
+       * deleted / full / removed by the owner). Defaults to the retryable error
+       * view carrying `message`; a caller holding attempt-scoped state — the
+       * `@host` handleJoin adopts from the sync code — passes its own so that
+       * state is released before the user is on an actionable screen again.
+       */
+      onFamilyGone?: (message: string) => void;
     }): Promise<boolean> => {
       if (!isVerificationError(params.errorCode)) return false;
       setState("verify-prompt");
@@ -259,10 +274,18 @@ export function useOnboardingFlow(
             return {
               ok: result.recovered,
               errorCode: result.errorCode,
+              errorMessage: result.errorMessage,
               retryAfter: result.retryAfter,
             };
           },
           onCancel: params.onCancel,
+          // Nothing local to clear — onboarding persists a family only once a
+          // join succeeds — so this branch only has to end the attempt and say
+          // why, in the server's own words when it sent them.
+          onFamilyGone: (_errorCode, errorMessage) => {
+            const message = errorMessage ?? FAMILY_GONE_FALLBACK_MESSAGE;
+            (params.onFamilyGone ?? showRetryableError)(message);
+          },
           // `run` may move the flow into a progress state ("recovering",
           // "syncing-books", …), which would hide the still-open prompt behind
           // the full-screen loading overlay. The controller calls this back on
@@ -274,7 +297,7 @@ export function useOnboardingFlow(
       );
       return true;
     },
-    [verifyBegin],
+    [verifyBegin, showRetryableError],
   );
 
   /** One attempt at rejoining a discovered family. Records the familyId for the
@@ -681,6 +704,7 @@ export function useOnboardingFlow(
             return {
               recovered: false,
               errorCode: retryResult.errorCode,
+              errorMessage: retryResult.errorMessage,
               retryAfter: retryResult.retryAfter,
             };
           }
@@ -693,6 +717,13 @@ export function useOnboardingFlow(
           // endpoint back before the user is on an actionable screen again.
           abandonAttempt();
           setState(recoveryActiveRef.current ? "recovery-join" : "idle");
+        },
+        // A verified join the family refuses for good also ends the attempt, so
+        // the sync code's `@host` must be handed back here too — otherwise the
+        // rejected server would still be in force when the user presses 建立家庭.
+        onFamilyGone: (message) => {
+          abandonAttempt();
+          showRetryableError(message);
         },
       });
       // The prompt now owns the attempt: it either joins (persisting the

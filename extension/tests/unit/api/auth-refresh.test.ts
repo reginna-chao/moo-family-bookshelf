@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { doRefreshToken } from "@/api/auth-refresh";
+import {
+  clearFamilyStorageAndBroadcast,
+  doRefreshToken,
+  isFamilyGoneError,
+} from "@/api/auth-refresh";
 import type { ApiResponse } from "@/api/types";
 import {
   USER_ID_KEY,
@@ -766,6 +770,128 @@ describe("doRefreshToken", () => {
       expect(joinWasRequested(deps.request)).toBe(true);
       expect(deps.onReauthRequired).toHaveBeenCalledTimes(1);
       expect(familyWasCleared()).toBe(false);
+    });
+  });
+});
+
+/**
+ * `isFamilyGoneError` is the SINGLE definition of "the join target is gone for
+ * this user". The underlying code set stays module-private, so the dialog's
+ * re-verification flow (`dialog/useVerificationPrompt.ts`, reached from
+ * `dialog/useReauth.ts`) classifies through this predicate rather than keeping a
+ * second copy — the drift a second copy invites is what the export prevents.
+ *
+ * The distinction it draws is load-bearing: a family-gone code means NO secret
+ * can make the join succeed (stop retrying, drop the local family binding),
+ * while a verification / rate-limit code means the opposite (keep the data,
+ * let the user try again — security-ux Invariant 2).
+ */
+describe("isFamilyGoneError", () => {
+  it.each([
+    ["FAMILY_NOT_FOUND", true],
+    ["FAMILY_FULL", true],
+    ["MEMBER_REMOVED", true],
+    ["VERIFICATION_REQUIRED", false],
+    ["VERIFICATION_FAILED", false],
+    ["VERIFICATION_LOCKED", false],
+    ["RATE_LIMITED", false],
+    ["SERVER_ERROR", false],
+    ["", false],
+    [undefined, false],
+  ])("returns %s → %s", (code, expected) => {
+    expect(isFamilyGoneError(code as string | undefined)).toBe(expected);
+  });
+});
+
+/**
+ * `clearFamilyStorageAndBroadcast` is the shared teardown for "this user has no
+ * family any more". Two callers reach it: the silent recovery path in this
+ * module, and the dialog's re-verification join (`dialog/useReauth.ts`), which
+ * only learns of an owner-initiated removal AFTER the user supplied a correct
+ * secret (the server's verification gate answers before its kicked-tombstone
+ * check). Both must tear down identically, so the behaviour is pinned here once.
+ *
+ * It deliberately does NOT invoke `onFamilyRemoved` — reacting in the UI is the
+ * caller's business and the two callers do it at different moments.
+ */
+describe("clearFamilyStorageAndBroadcast", () => {
+  beforeEach(async () => {
+    await chrome.storage.local.clear();
+    await chrome.storage.sync.clear();
+    await chrome.storage.local.set({
+      [USER_ID_KEY]: "u1",
+      [FAMILY_ID_KEY]: "fam-1",
+      [AUTH_TOKEN_KEY]: "old-token",
+    });
+    await chrome.storage.sync.set({ [FAMILY_ID_KEY]: "fam-1" });
+    // Seeding calls are wiped so the assertions only observe production's.
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    // The store behind the setup mock is module-scoped: clear it while the
+    // store-backed implementations are still installed.
+    await chrome.storage.local.clear();
+    await chrome.storage.sync.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("drops the familyId from BOTH storage areas", async () => {
+    await clearFamilyStorageAndBroadcast();
+
+    const local = await chrome.storage.local.get(FAMILY_ID_KEY);
+    expect(local[FAMILY_ID_KEY]).toBeUndefined();
+    // A synced familyId left behind would let another device hand the local one
+    // back and resume exactly the rejoin loop the removal exists to stop.
+    const synced = await chrome.storage.sync.get(FAMILY_ID_KEY);
+    expect(synced[FAMILY_ID_KEY]).toBeUndefined();
+  });
+
+  it("leaves the rest of the record alone (userId, auth token)", async () => {
+    await clearFamilyStorageAndBroadcast();
+
+    // Only the family binding is this helper's business; what else to tear down
+    // is the caller's decision (Invariant 5 — personal data outlives a family).
+    const local = await chrome.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY]);
+    expect(local[USER_ID_KEY]).toBe("u1");
+    expect(local[AUTH_TOKEN_KEY]).toBe("old-token");
+  });
+
+  it("broadcasts FAMILY_REMOVED so other contexts fall back to onboarding", async () => {
+    await clearFamilyStorageAndBroadcast();
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "FAMILY_REMOVED",
+    });
+  });
+
+  it("still resolves and clears when no listener answers the broadcast", async () => {
+    // webextension-polyfill REJECTS when nothing is listening; a synchronous
+    // try/catch cannot catch that, so the teardown must swallow it explicitly.
+    vi.mocked(chrome.runtime.sendMessage).mockRejectedValueOnce(
+      new Error(
+        "Could not establish connection. Receiving end does not exist.",
+      ),
+    );
+
+    await expect(clearFamilyStorageAndBroadcast()).resolves.toBeUndefined();
+
+    const local = await chrome.storage.local.get(FAMILY_ID_KEY);
+    expect(local[FAMILY_ID_KEY]).toBeUndefined();
+  });
+
+  it("still clears locally and broadcasts when sync storage is unavailable", async () => {
+    vi.mocked(chrome.storage.sync.remove).mockRejectedValueOnce(
+      new Error("sync unavailable"),
+    );
+
+    await expect(clearFamilyStorageAndBroadcast()).resolves.toBeUndefined();
+
+    // Local removal is authoritative and independent of the sync outcome.
+    const local = await chrome.storage.local.get(FAMILY_ID_KEY);
+    expect(local[FAMILY_ID_KEY]).toBeUndefined();
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "FAMILY_REMOVED",
     });
   });
 });

@@ -50,12 +50,33 @@ const VERIFICATION_ERROR_CODES = new Set([
  * Only these justify clearing the local family data — anything else
  * (network/transient/verification) must not silently drop the user's data
  * (security-ux Invariant 2).
+ *
+ * The set stays private; everyone classifies through `isFamilyGoneError` below,
+ * so there is exactly one definition of "gone" in the codebase.
  */
 const FAMILY_GONE_ERROR_CODES = new Set([
   "FAMILY_NOT_FOUND",
   "FAMILY_FULL",
   "MEMBER_REMOVED",
 ]);
+
+/**
+ * True when a join errorCode means the join target is gone for THIS user, so no
+ * retry can succeed — not even one carrying a correct verification secret.
+ *
+ * Exported because the dialog's re-verification flow runs its own join
+ * (`dialog/useReauth.ts`) and must reach the identical verdict: without it, a
+ * removed member who types the correct PIN only ever sees a retryable error and
+ * loops until the server's kicked tombstone expires. The dependency direction is
+ * dialog → api, which is the allowed one.
+ *
+ * Returns a type predicate so callers that need the narrowed `string` (e.g. to
+ * forward the code onward) get it from here rather than re-checking `undefined`
+ * themselves — that second check would be a duplicate of this contract.
+ */
+export function isFamilyGoneError(code: string | undefined): code is string {
+  return code !== undefined && FAMILY_GONE_ERROR_CODES.has(code);
+}
 
 /**
  * What blocked the silent recovery, handed to `onReauthRequired` so the prompt
@@ -228,7 +249,7 @@ export async function doRefreshToken(
     }
 
     // Family genuinely gone — clear local family data and notify.
-    if (recovery.errorCode && FAMILY_GONE_ERROR_CODES.has(recovery.errorCode)) {
+    if (isFamilyGoneError(recovery.errorCode)) {
       await clearFamilyAndNotify(deps);
       return { refreshed: false };
     }
@@ -281,8 +302,17 @@ async function clearRecoveryCooldown(): Promise<void> {
   await browser.storage.local.remove(RECOVERY_COOLDOWN_UNTIL_KEY);
 }
 
-/** Clear local + synced family data and broadcast FAMILY_REMOVED. */
-async function clearFamilyAndNotify(deps: RefreshDeps): Promise<void> {
+/**
+ * Clear local + synced family data and broadcast FAMILY_REMOVED.
+ *
+ * Exported for the dialog's re-verification flow (`dialog/useReauth.ts`), whose
+ * own join can be refused with a family-gone code after the silent recovery was
+ * blocked by the verification gate: it needs byte-identical teardown, and a
+ * second copy of these three steps is exactly how the two paths would drift.
+ * Deliberately does NOT invoke `onFamilyRemoved` — reacting in the UI is the
+ * caller's business, and the two callers do it at different moments.
+ */
+export async function clearFamilyStorageAndBroadcast(): Promise<void> {
   await browser.storage.local.remove([FAMILY_ID_KEY]);
   try {
     await browser.storage.sync.remove([FAMILY_ID_KEY]);
@@ -294,6 +324,11 @@ async function clearFamilyAndNotify(deps: RefreshDeps): Promise<void> {
   ).catch(() => {
     // Message may fail if no listener is active
   });
+}
+
+/** Clear the family data, then hand the refresh caller its notification. */
+async function clearFamilyAndNotify(deps: RefreshDeps): Promise<void> {
+  await clearFamilyStorageAndBroadcast();
   deps.onFamilyRemoved?.();
 }
 

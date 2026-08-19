@@ -1450,6 +1450,121 @@ describe("useOnboardingFlow", () => {
   });
 
   /**
+   * TERMINAL refusal after a CORRECT secret. The worker only answers a join with
+   * a family-gone code (owner removed this member / family deleted / no seat
+   * left) once its verification gate has passed, so the verdict always lands on
+   * the retry the user typed a VALID PIN into. Re-offering the prompt would loop
+   * them on "right secret → error" until the kicked tombstone expires (6h); the
+   * flow must end the attempt and say why instead.
+   */
+  describe("family gone after a verified retry", () => {
+    /** The worker's own wording for the refusal — quoted, never re-invented. */
+    const SERVER_MESSAGE = "你已被家庭管理者移出，無法重新加入";
+    const GONE_CODES = ["MEMBER_REMOVED", "FAMILY_NOT_FOUND", "FAMILY_FULL"];
+
+    /** performJoin: challenge the secret-less call, refuse the verified retry. */
+    function mockJoinRefusedAfterChallenge(errorCode: string): void {
+      vi.mocked(performJoin).mockImplementation(async (opts) =>
+        opts.verifySecret
+          ? { ok: false, errorCode, errorMessage: SERVER_MESSAGE }
+          : {
+              ok: false,
+              errorCode: "VERIFICATION_REQUIRED",
+              errorMessage: "需要驗證",
+            },
+      );
+    }
+
+    it.each(GONE_CODES)(
+      "manual join: %s closes the prompt and surfaces the server's own message",
+      async (errorCode) => {
+        mockJoinRefusedAfterChallenge(errorCode);
+        const onFamilyJoined = vi.fn();
+        const autoSetup = createMockAutoSetup();
+        const { result } = renderFlow(
+          createMockApiClient(),
+          autoSetup,
+          onFamilyJoined,
+        );
+
+        await act(async () => {
+          await result.current.handleStart();
+        });
+        act(() => {
+          result.current.setSyncCodeInput("moo-fam-joined");
+        });
+        await act(async () => {
+          await result.current.handleJoin();
+        });
+        expect(result.current.state).toBe("verify-prompt");
+
+        await act(async () => {
+          await result.current.verify.submit("123456");
+        });
+
+        // The attempt is over: no prompt to retype into, and the reason is the
+        // backend's, so a self-hosted family can explain its own policy.
+        expect(result.current.verify.active).toBe(false);
+        expect(result.current.state).toBe("error");
+        expect(result.current.state).not.toBe("verify-prompt");
+        expect(result.current.errorMessage).toBe(SERVER_MESSAGE);
+        expect(result.current.errorActions.map((a) => a.label)).toContain(
+          "重試",
+        );
+        // Nothing was joined, so nothing may be persisted or synced.
+        expect(onFamilyJoined).not.toHaveBeenCalled();
+        expect(autoSetup.syncBooks).not.toHaveBeenCalled();
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+          expect.objectContaining({ [FAMILY_ID_KEY]: expect.anything() }),
+        );
+      },
+    );
+
+    /**
+     * COPY PIN: FAMILY_GONE_FALLBACK_MESSAGE is module-private in
+     * src/dialog/useOnboardingFlow.ts. This is the single place the literal is
+     * asserted — a wording change fails HERE.
+     *
+     * The recovery bridges reach it structurally: `RecoveryResult` carries no
+     * `errorMessage`, so an auto-recovery refusal never has server wording to
+     * quote and the client must supply its own.
+     */
+    it("auto-recovery: falls back to the client's own explanation when no message is carried", async () => {
+      vi.mocked(tryAutoRecovery).mockImplementation(async (opts) =>
+        opts.verifySecret
+          ? { recovered: false, errorCode: "MEMBER_REMOVED" }
+          : { recovered: false, errorCode: "VERIFICATION_REQUIRED" },
+      );
+      const { result } = renderFlow(
+        createMockApiClient({
+          lookupUser: vi.fn().mockResolvedValue({
+            data: { existingFamilyId: "fam-existing", memberCount: 2 },
+          }),
+        }),
+      );
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+
+      await act(async () => {
+        await result.current.verify.submit("123456");
+      });
+
+      expect(result.current.verify.active).toBe(false);
+      expect(result.current.state).toBe("error");
+      expect(result.current.errorMessage).toBe(
+        "無法加入此家庭，請聯繫家庭管理者確認。",
+      );
+      // attemptRecovery set "recovering" on the way in and the prompt-restore
+      // hook must NOT drag the user back onto a flow that just ended.
+      expect(result.current.state).not.toBe("recovering");
+      expect(result.current.state).not.toBe("verify-prompt");
+    });
+  });
+
+  /**
    * A sync code whose `@host` the endpoint validator refuses aborts inside
    * performJoin with `INVALID_ENDPOINT` (nothing persisted, no join attempted).
    * The hook must surface that as an ordinary retryable error — it is NOT a
@@ -1554,6 +1669,7 @@ describe("useOnboardingFlow", () => {
    * | join refused for a NON-verification reason | RESTORED           |
    * | join refused pending verification          | stays adopted      |
    * | user cancels the verification prompt       | RESTORED           |
+   * | verified retry refused as family-gone      | RESTORED           |
    * | performJoin / deriveUserId throws          | RESTORED           |
    * | join succeeded, then the book sync throws  | stays adopted      |
    *
@@ -1793,6 +1909,88 @@ describe("useOnboardingFlow", () => {
 
       // Back on an actionable screen — and back on the trusted endpoint.
       expect(result.current.state).toBe("idle");
+      expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
+    });
+
+    /**
+     * The other way a challenge can end WITHOUT a join: the secret was right and
+     * the family still said no for good (owner removed this member / family
+     * deleted / full). The attempt is over exactly as on cancel, so the `@host`
+     * must be handed back here too — otherwise the refusing server would still
+     * be steering the client when the user reaches for 建立家庭 next.
+     */
+    it("restores the previous endpoint when the verified retry is refused for good", async () => {
+      mockJoinAdopting(ATTACKER_ENDPOINT, (opts) =>
+        opts.verifySecret
+          ? {
+              ok: false,
+              errorCode: "MEMBER_REMOVED",
+              errorMessage: "你已被家庭管理者移出，無法重新加入",
+            }
+          : {
+              ok: false,
+              errorCode: "VERIFICATION_REQUIRED",
+              errorMessage: "需要驗證",
+            },
+      );
+
+      const { result, apiClient, onFamilyJoined } = await joinWithHostCode({
+        endpoint: ATTACKER_ENDPOINT,
+      });
+      expect(result.current.state).toBe("verify-prompt");
+      // The challenge itself still runs against the family's own server.
+      expect(apiClient.getEndpoint()).toBe(ATTACKER_ENDPOINT);
+
+      await act(async () => {
+        await result.current.verify.submit("123456");
+      });
+
+      expect(result.current.state).toBe("error");
+      expect(onFamilyJoined).not.toHaveBeenCalled();
+      expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
+    });
+
+    it("sends the next 建立家庭 to the original endpoint after a family-gone refusal", async () => {
+      let endpointAtCreate: string | null = null;
+      vi.mocked(createNewFamily).mockImplementation(async (opts) => {
+        endpointAtCreate = opts.apiClient.getEndpoint();
+        return {
+          familyId: "fam-new",
+          userId: opts.userId,
+          syncCode: "moo-sync-code",
+        };
+      });
+      mockJoinAdopting(ATTACKER_ENDPOINT, (opts) =>
+        opts.verifySecret
+          ? {
+              ok: false,
+              errorCode: "MEMBER_REMOVED",
+              errorMessage: "你已被家庭管理者移出，無法重新加入",
+            }
+          : {
+              ok: false,
+              errorCode: "VERIFICATION_REQUIRED",
+              errorMessage: "需要驗證",
+            },
+      );
+
+      const { result, apiClient } = await joinWithHostCode({
+        endpoint: ATTACKER_ENDPOINT,
+      });
+      await act(async () => {
+        await result.current.verify.submit("123456");
+      });
+      expect(result.current.state).toBe("error");
+
+      act(() => {
+        result.current.handleRetry();
+      });
+      await act(async () => {
+        await result.current.handleCreate();
+      });
+
+      expect(createNewFamily).toHaveBeenCalled();
+      expect(endpointAtCreate).toBe(ORIGINAL_ENDPOINT);
       expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
     });
 
