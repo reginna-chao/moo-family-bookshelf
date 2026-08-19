@@ -10,6 +10,7 @@ import {
   useAuth,
   REMEMBER_SYNC_CODE_KEY,
   REMEMBERED_LOGOUT_KEY,
+  type AuthState,
 } from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
 import { LandingPage } from "./pages/LandingPage";
@@ -24,6 +25,11 @@ import { VerifySetupPrompt } from "./components/VerifySetupPrompt";
 import { FamilyDataProvider, useFamilyData } from "./hooks/useFamilyData";
 import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
+import {
+  clearRecoveryCooldown,
+  getActiveRecoveryCooldown,
+  setRecoveryCooldown,
+} from "./utils/recoveryCooldown";
 import { encodeSyncCode } from "@/crypto/syncCode";
 
 type Page = "family-shelf" | "personal-shelf" | "borrow" | "settings";
@@ -65,6 +71,52 @@ const NAV_ITEMS: NavItem[] = [
 
 const PUBLIC_PATH_RE = /^\/public\/([a-f0-9]{32})\/?$/;
 
+/**
+ * Recovery-join failures that make the stored session genuinely unrecoverable,
+ * mapped to the copy LandingPage shows after the logout. Mirrors the branch map
+ * in `extension/src/api/auth-refresh.ts`: a code NOT classified as terminal or
+ * verification keeps the session, so a transient failure never silently drops
+ * the user's data (security-ux Invariant 2).
+ *
+ * A `Map` because `code` is backend-controlled — an object lookup would resolve
+ * `"__proto__"` through the prototype chain. Server-supplied `message` text is
+ * never rendered.
+ */
+const TERMINAL_RECOVERY_ERRORS: ReadonlyMap<string, string> = new Map([
+  ["FAMILY_FULL", "家庭成員已達上限（每個家庭最多 2 位成員）"],
+  ["FAMILY_NOT_FOUND", "找不到這個家庭，家庭可能已被解散"],
+  ["ALREADY_IN_FAMILY", "此帳號已加入其他家庭，請先離開原本的家庭"],
+]);
+
+/**
+ * Recovery-join failures that need the member's PWA-login secret. The recovery
+ * join sends none, so REQUIRED is the realistic one; the other two are parity
+ * with `VERIFICATION_ERROR_CODES` in `extension/src/api/auth-refresh.ts`.
+ */
+const VERIFICATION_ERROR_CODES = new Set([
+  "VERIFICATION_REQUIRED",
+  "VERIFICATION_FAILED",
+  "VERIFICATION_LOCKED",
+]);
+
+/**
+ * Preserve the sync code so LandingPage can pre-fill it and open the
+ * verification UI after the logout. Respects the "remember sync code"
+ * preference; best-effort, a refused localStorage only costs the pre-fill.
+ */
+function rememberSyncCodeForRelogin(auth: AuthState): void {
+  if (!auth.familyId) return;
+  try {
+    if (localStorage.getItem(REMEMBER_SYNC_CODE_KEY) === "0") return;
+    localStorage.setItem(
+      REMEMBERED_LOGOUT_KEY,
+      encodeSyncCode({ familyId: auth.familyId, apiHost: auth.apiHost }),
+    );
+  } catch {
+    /* best-effort */
+  }
+}
+
 export default function App() {
   // Path-based route: /public/{shareToken} bypasses all auth/hash routing
   const publicMatch = window.location.pathname.match(PUBLIC_PATH_RE);
@@ -88,7 +140,8 @@ function AuthenticatedApp() {
   const [currentPage, setCurrentPage] = useState<Page>(
     () => pageFromHash() ?? "family-shelf",
   );
-  const [familyFullError, setFamilyFullError] = useState("");
+  /** Terminal recovery-join failure copy, handed to LandingPage after a logout. */
+  const [landingError, setLandingError] = useState("");
   const [verifySetupDone, setVerifySetupDone] = useState(false);
 
   // Sync page state with hash
@@ -128,6 +181,12 @@ function AuthenticatedApp() {
   const acquireNewToken = useCallback(async (): Promise<string | null> => {
     const current = authRef.current;
     if (!current) return null;
+    // The recovery join spends the worker's per-IP sensitive tier (3/min) and
+    // every page-level 401 retries through this refresher, so an active
+    // cooldown must not re-spend it. Manual joins live on LandingPage, outside
+    // this gate.
+    if (getActiveRecoveryCooldown() !== undefined) return null;
+
     const tempClient = new ApiClient(current.apiHost);
     // Refresh endpoint is protected — include current token for authentication
     if (current.authToken) {
@@ -139,30 +198,29 @@ function AuthenticatedApp() {
       {},
     );
     if (res.error) {
-      if (res.error.code === "FAMILY_FULL") {
-        setFamilyFullError("家庭成員已達上限（每個家庭最多 2 位成員）");
-      } else if (
-        res.error.code === "VERIFICATION_REQUIRED" &&
-        current.familyId
-      ) {
-        // Preserve sync code so LandingPage can pre-fill and show verification UI.
-        // Respect the user's "remember sync code" preference.
-        if (localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0") {
-          try {
-            const code = encodeSyncCode({
-              familyId: current.familyId,
-              apiHost: current.apiHost,
-            });
-            localStorage.setItem(REMEMBERED_LOGOUT_KEY, code);
-          } catch {
-            /* best-effort */
-          }
-        }
+      const { code, retryAfter } = res.error;
+      const terminalMessage = TERMINAL_RECOVERY_ERRORS.get(code);
+      if (terminalMessage) {
+        setLandingError(terminalMessage);
+        logout();
+        return null;
       }
-      logout();
+      if (VERIFICATION_ERROR_CODES.has(code)) {
+        rememberSyncCodeForRelogin(current);
+        logout();
+        return null;
+      }
+      // Everything below KEEPS the session (Invariant 2): a 429 spent by a
+      // shared-NAT neighbour, a dropped connection or an unknown code is not a
+      // reason to drop the user's data. Only the quota failure earns a
+      // cooldown — a failed connection cost the worker nothing.
+      if (code === "RATE_LIMITED") {
+        setRecoveryCooldown(retryAfter);
+      }
       return null;
     }
     if (res.data?.authToken) {
+      clearRecoveryCooldown();
       login({ ...current, authToken: res.data.authToken });
       return res.data.authToken;
     }
@@ -201,13 +259,17 @@ function AuthenticatedApp() {
     return (
       <LandingPage
         onAuth={(data) => {
-          setFamilyFullError("");
+          setLandingError("");
+          // A successful manual join proves the credentials work, so a leftover
+          // cooldown must not throttle the next silent refresh (mirrors
+          // `extension/src/dialog/useReauth.ts`).
+          clearRecoveryCooldown();
           login(data);
         }}
         initialSyncCode={initialSyncCode}
         qrUserId={qrUserId}
         qrToken={qrToken}
-        externalError={familyFullError}
+        externalError={landingError}
       />
     );
   }
