@@ -88,6 +88,35 @@ describe("publicShelfErrorMessage", () => {
     },
   );
 
+  /**
+   * `error.code` is backend-controlled — it is a bare cast of backend JSON, and
+   * BYO self-hosted backends are in the threat model — so the lookup must never
+   * resolve a key through `Object.prototype`. The table used to be an object
+   * literal, where `code="__proto__"` returned `Object.prototype`: truthy, so it
+   * slipped past `?? fallback`. On the save path that interpolated into the copy
+   * as「[object Object]」; on the four direct paths the object went straight into
+   * JSX as a React child, which React rejects outright — a Dialog render crash.
+   * `"toString"` likewise returned a function. The `Map` has no inherited keys,
+   * so every one of these is simply an unmapped code.
+   */
+  it.each([
+    ["__proto__"],
+    ["toString"],
+    ["constructor"],
+    ["valueOf"],
+    ["hasOwnProperty"],
+  ])(
+    "falls back for the prototype-chain key %s instead of resolving it through Object.prototype",
+    (code) => {
+      expect(
+        publicShelfErrorMessage(
+          new ApiError(code, "english server text"),
+          "關閉失敗",
+        ),
+      ).toBe("關閉失敗");
+    },
+  );
+
   it("never leaks the raw server English into the returned copy", () => {
     const message = publicShelfErrorMessage(
       new ApiError("KV_WRITE_FAILED", "internal server error"),
@@ -126,6 +155,16 @@ describe("publicShelfSaveErrorMessage", () => {
   it("uses the 儲存失敗 fallback for an unmapped code", () => {
     expect(
       publicShelfSaveErrorMessage(new ApiError("KV_WRITE_FAILED", "boom")),
+    ).toBe("儲存失敗（變更尚未儲存）");
+  });
+
+  // Pins the interpolation path described by the prototype-chain block above:
+  // the old object-literal table rendered「[object Object]（變更尚未儲存）」here.
+  it("uses the 儲存失敗 fallback for __proto__ instead of interpolating Object.prototype", () => {
+    expect(
+      publicShelfSaveErrorMessage(
+        new ApiError("__proto__", "english server text"),
+      ),
     ).toBe("儲存失敗（變更尚未儲存）");
   });
 
