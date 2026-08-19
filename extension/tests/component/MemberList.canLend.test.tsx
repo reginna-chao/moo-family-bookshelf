@@ -1,7 +1,8 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { MemberList, MemberListProps } from "@/dialog/MemberList";
-import { type ApiClient, BoolFlag } from "@/api/client";
+import { rateLimitedMessage } from "@/dialog/verificationMessages";
+import { ApiError, type ApiClient, BoolFlag } from "@/api/client";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
@@ -191,6 +192,75 @@ describe("MemberList canLend toggle", () => {
 
     await waitFor(() => {
       expect(screen.getByText("更新失敗")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * `updateMemberSettings` THROWS an `ApiError` instead of returning an
+   * envelope, so this call site reads the 429 off the thrown error. The copy is
+   * asserted against the production builder, whose literals are pinned in
+   * tests/unit/dialog/verificationMessages.test.ts.
+   */
+  describe("rate-limited toggle", () => {
+    function renderWithRejection(err: unknown) {
+      const onMembersChanged = vi.fn();
+      renderMemberList({
+        apiClient: createMockApiClient({
+          updateMemberSettings: vi.fn().mockRejectedValue(err),
+        }),
+        onMembersChanged,
+        members: [
+          { userId: "user-owner123", displayName: "Owner" },
+          {
+            userId: "user-member456",
+            displayName: "Bob",
+            canLend: BoolFlag.TRUE,
+          },
+        ],
+      });
+      fireEvent.click(
+        screen.getByRole("switch", { name: /允許 Bob 借出書籍/ }),
+      );
+      return onMembersChanged;
+    }
+
+    it("shows the localized countdown copy when the toggle is rate limited", async () => {
+      const onMembersChanged = renderWithRejection(
+        new ApiError("RATE_LIMITED", "Too many requests", 60),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(rateLimitedMessage(60))).toBeInTheDocument();
+      });
+      // Neither the server English nor ApiError's "CODE: message" text.
+      expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
+      expect(onMembersChanged).not.toHaveBeenCalled();
+    });
+
+    it("shows the static back-off copy when the 429 carried no retryAfter", async () => {
+      renderWithRejection(new ApiError("RATE_LIMITED", "Too many requests"));
+
+      await waitFor(() => {
+        expect(screen.getByText(rateLimitedMessage(null))).toBeInTheDocument();
+      });
+    });
+
+    it("keeps the thrown message for a non-429 ApiError", async () => {
+      const err = new ApiError("FORBIDDEN", "not the owner");
+      renderWithRejection(err);
+
+      // Unchanged behaviour: only RATE_LIMITED is rewritten.
+      await waitFor(() => {
+        expect(screen.getByText(err.message)).toBeInTheDocument();
+      });
+    });
+
+    it("falls back to 更新失敗 for a rejection that is not an Error", async () => {
+      renderWithRejection("boom");
+
+      await waitFor(() => {
+        expect(screen.getByText("更新失敗")).toBeInTheDocument();
+      });
     });
   });
 });

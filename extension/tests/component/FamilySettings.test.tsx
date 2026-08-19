@@ -11,6 +11,7 @@ import React from "react";
 import { FamilySettings, FamilySettingsProps } from "@/dialog/FamilySettings";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { validateEndpointUrl, type ApiClient } from "@/api/client";
+import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import {
   API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
@@ -867,6 +868,64 @@ describe("FamilySettings", () => {
 
       await waitFor(() => {
         expect(screen.getByText("發生未知錯誤")).toBeInTheDocument();
+      });
+    });
+
+    /**
+     * The Worker rate-limits `DELETE /api/family/:id/member/:uid` (429
+     * RATE_LIMITED, optional `retryAfter`). Its `message` is English, so the
+     * leave path renders the localized back-off copy instead — asserted against
+     * the production builder, whose literals are pinned in
+     * tests/unit/dialog/verificationMessages.test.ts.
+     */
+    it("shows the localized back-off copy when leaving is rate limited", async () => {
+      const apiClient = createMockApiClient({
+        leaveFamily: vi.fn().mockResolvedValue({
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many requests",
+            retryAfter: 90,
+          },
+        }),
+      });
+      const onLeave = vi.fn();
+      renderFamilySettings({ apiClient, onLeave });
+
+      fireEvent.click(screen.getByText("離開家庭"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定離開")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("確定離開"));
+
+      await waitFor(() => {
+        expect(screen.getByText(rateLimitedMessage(90))).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Too many requests")).not.toBeInTheDocument();
+      // A refused leave must not look like it succeeded.
+      expect(onLeave).not.toHaveBeenCalled();
+      expect(screen.getByText("離開家庭")).toBeInTheDocument();
+    });
+
+    it("shows the static back-off copy when the 429 carried no retryAfter", async () => {
+      const apiClient = createMockApiClient({
+        leaveFamily: vi.fn().mockResolvedValue({
+          error: { code: "RATE_LIMITED", message: "Too many requests" },
+        }),
+      });
+      renderFamilySettings({ apiClient });
+
+      fireEvent.click(screen.getByText("離開家庭"));
+
+      await waitFor(() => {
+        expect(screen.getByText("確定離開")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("確定離開"));
+
+      await waitFor(() => {
+        expect(screen.getByText(rateLimitedMessage(null))).toBeInTheDocument();
       });
     });
 

@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemberList, type MemberListProps } from "@/dialog/MemberList";
-import { BoolFlag, type ApiClient, type FamilyMember } from "@/api/client";
+import { rateLimitedMessage } from "@/dialog/verificationMessages";
+import {
+  ApiError,
+  BoolFlag,
+  type ApiClient,
+  type FamilyMember,
+} from "@/api/client";
 
 const OWNER_ID = "user-owner123";
 const MEMBER_A = "user-membA456";
@@ -185,6 +191,65 @@ describe("MemberList readmooName section (extension)", () => {
     const updateMemberSettings = vi
       .fn()
       .mockRejectedValue(new Error("刪除失敗"));
+    renderMemberList({
+      apiClient: createMockApiClient({ updateMemberSettings }),
+      members: [
+        { userId: OWNER_ID, displayName: "Owner" },
+        {
+          userId: MEMBER_A,
+          displayName: "Alice",
+          canLend: BoolFlag.TRUE,
+          readmooName: "alice@readmoo",
+        },
+        { userId: MEMBER_B, displayName: "Bob", canLend: BoolFlag.TRUE },
+      ],
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /刪除 Alice 的讀墨名稱/ }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("刪除失敗")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * Same thrown-`ApiError` path as the canLend toggle: a 429 renders the
+   * localized back-off copy instead of the server's English, and the 刪除失敗
+   * fallback stays for everything else. Literals are pinned in
+   * tests/unit/dialog/verificationMessages.test.ts.
+   */
+  it("shows the localized back-off copy when 刪除 is rate limited", async () => {
+    const updateMemberSettings = vi
+      .fn()
+      .mockRejectedValue(new ApiError("RATE_LIMITED", "Too many requests", 45));
+    renderMemberList({
+      apiClient: createMockApiClient({ updateMemberSettings }),
+      members: [
+        { userId: OWNER_ID, displayName: "Owner" },
+        {
+          userId: MEMBER_A,
+          displayName: "Alice",
+          canLend: BoolFlag.TRUE,
+          readmooName: "alice@readmoo",
+        },
+        { userId: MEMBER_B, displayName: "Bob", canLend: BoolFlag.TRUE },
+      ],
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /刪除 Alice 的讀墨名稱/ }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(rateLimitedMessage(45))).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to 刪除失敗 for a rejection that is not an Error", async () => {
+    const updateMemberSettings = vi.fn().mockRejectedValue("boom");
     renderMemberList({
       apiClient: createMockApiClient({ updateMemberSettings }),
       members: [

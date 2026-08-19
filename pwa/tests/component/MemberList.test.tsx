@@ -2,7 +2,11 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemberList } from "@/components/MemberList";
-import { BoolFlag, type ApiClient } from "@/api/client";
+import { ApiError, BoolFlag, type ApiClient } from "@/api/client";
+import {
+  buildRetryMessage,
+  buildStaticRetryMessage,
+} from "@/utils/retryMessage";
 
 const mockRemoveMember = vi.fn();
 const mockTransferOwnership = vi.fn();
@@ -183,6 +187,162 @@ describe("MemberList", () => {
       screen.queryByRole("button", { name: "確定" }),
     ).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "移除" })).toHaveLength(2);
+  });
+
+  /**
+   * The Worker rate-limits the family write endpoints (429 RATE_LIMITED, with
+   * an optional `retryAfter`). Its `message` is English, so every write path
+   * here renders the localized back-off copy instead — asserted against the
+   * production builders, whose literals are pinned in
+   * pwa/tests/unit/retryMessage.test.ts.
+   *
+   * Two shapes reach the component: `updateMemberSettings` THROWS an `ApiError`
+   * (the client unwraps its envelope), while `removeMember` /
+   * `transferOwnership` RESOLVE an envelope the component reads `res.error` off.
+   */
+  describe("rate-limited family writes", () => {
+    // Local client per test: the module-level `mockApiClient` is shared across
+    // the whole file, and these cases assert on call counts.
+    function createApiClient(overrides: Partial<ApiClient>): ApiClient {
+      return {
+        removeMember: vi.fn().mockResolvedValue({ data: { ok: true } }),
+        transferOwnership: vi.fn().mockResolvedValue({ data: { ok: true } }),
+        updateMemberSettings: vi.fn().mockResolvedValue({ userId: USER_ID }),
+        ...overrides,
+      } as unknown as ApiClient;
+    }
+
+    function renderAsOwner(overrides: Partial<ApiClient>) {
+      const onMembersChanged = vi.fn();
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          apiClient={createApiClient(overrides)}
+          onMembersChanged={onMembersChanged}
+        />,
+      );
+      return onMembersChanged;
+    }
+
+    function toggleCanLendFor(label: string) {
+      fireEvent.click(
+        screen.getByRole("switch", { name: `允許 ${label} 借出書籍` }),
+      );
+    }
+
+    it("shows the localized countdown copy when the canLend toggle is rate limited", async () => {
+      const onMembersChanged = renderAsOwner({
+        updateMemberSettings: vi
+          .fn()
+          .mockRejectedValue(
+            new ApiError("RATE_LIMITED", "Too many requests", 60),
+          ),
+      });
+
+      toggleCanLendFor("小明");
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildRetryMessage("RATE_LIMITED", 60)),
+        ).toBeInTheDocument();
+      });
+      // Neither the server's English text nor ApiError's "CODE: message" shape.
+      expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/RATE_LIMITED/)).not.toBeInTheDocument();
+      // A refused write must not look like it succeeded.
+      expect(onMembersChanged).not.toHaveBeenCalled();
+    });
+
+    it("shows the static back-off copy when the toggle 429 carried no retryAfter", async () => {
+      renderAsOwner({
+        updateMemberSettings: vi
+          .fn()
+          .mockRejectedValue(new ApiError("RATE_LIMITED", "Too many requests")),
+      });
+
+      toggleCanLendFor("小明");
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildStaticRetryMessage("RATE_LIMITED")),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
+    });
+
+    it("keeps the thrown message for a non-429 ApiError", async () => {
+      // Unchanged behaviour: only RATE_LIMITED is rewritten, so every other
+      // code still renders ApiError's own "CODE: message" text.
+      const err = new ApiError("FORBIDDEN", "not the owner");
+      const onMembersChanged = renderAsOwner({
+        updateMemberSettings: vi.fn().mockRejectedValue(err),
+      });
+
+      toggleCanLendFor("小明");
+
+      await waitFor(() => {
+        expect(screen.getByText(err.message)).toBeInTheDocument();
+      });
+      expect(onMembersChanged).not.toHaveBeenCalled();
+    });
+
+    it("falls back to 更新失敗 when the toggle rejects with a non-Error", async () => {
+      renderAsOwner({
+        updateMemberSettings: vi.fn().mockRejectedValue("boom"),
+      });
+
+      toggleCanLendFor("小明");
+
+      await waitFor(() => {
+        expect(screen.getByText("更新失敗")).toBeInTheDocument();
+      });
+    });
+
+    it("shows the localized countdown copy when removeMember is rate limited", async () => {
+      const onMembersChanged = renderAsOwner({
+        removeMember: vi.fn().mockResolvedValue({
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many requests",
+            retryAfter: 90,
+          },
+        }),
+      });
+
+      fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "確定" }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildRetryMessage("RATE_LIMITED", 90)),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
+      // A refused removal keeps the confirm open and skips the list refresh.
+      expect(screen.getByRole("button", { name: "確定" })).toBeInTheDocument();
+      expect(onMembersChanged).not.toHaveBeenCalled();
+    });
+
+    it("shows the static back-off copy when transferOwnership is rate limited without a retryAfter", async () => {
+      const onMembersChanged = renderAsOwner({
+        transferOwnership: vi.fn().mockResolvedValue({
+          error: { code: "RATE_LIMITED", message: "Too many requests" },
+        }),
+      });
+
+      fireEvent.click(screen.getAllByRole("button", { name: "轉移管理權" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "確定" }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildStaticRetryMessage("RATE_LIMITED")),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
+      expect(onMembersChanged).not.toHaveBeenCalled();
+    });
   });
 
   describe("readmooName section (read-only on PWA)", () => {

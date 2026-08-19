@@ -1,6 +1,7 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useDisplayName } from "@/dialog/useDisplayName";
+import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import type { ApiClient } from "@/api/client";
 import { DISPLAY_NAME_KEY } from "@/constants";
 
@@ -164,6 +165,64 @@ describe("useDisplayName", () => {
     expect(result.current.nameSaveError).toBe("名稱過長");
     expect(chrome.storage.local.set).not.toHaveBeenCalledWith({
       [DISPLAY_NAME_KEY]: "大明",
+    });
+  });
+
+  /**
+   * The Worker rate-limits the family write endpoints (429 RATE_LIMITED, with
+   * an optional `retryAfter`). Its `message` is English, so this path shows the
+   * localized back-off copy instead — asserted against the production builder
+   * (`rateLimitedMessage`), whose literals are pinned in
+   * tests/unit/dialog/verificationMessages.test.ts.
+   */
+  describe("rate-limited save", () => {
+    async function saveWith(error: Record<string, unknown>) {
+      const apiClient = createMockApiClient({
+        updateDisplayName: vi.fn().mockResolvedValue({ error }),
+      });
+      const { result } = renderHook(() =>
+        useDisplayName({ apiClient, familyId: "fam-1", userId: "user-123" }),
+      );
+
+      await waitFor(() => expect(result.current.displayName).toBe("小明"));
+
+      act(() => {
+        result.current.setDisplayName("大明");
+      });
+
+      await act(async () => {
+        await result.current.handleSaveDisplayName();
+      });
+
+      return result;
+    }
+
+    it("shows the localized countdown copy when the save is rate limited", async () => {
+      const result = await saveWith({
+        code: "RATE_LIMITED",
+        message: "Too many requests",
+        retryAfter: 120,
+      });
+
+      expect(result.current.nameSaveState).toBe("error");
+      expect(result.current.nameSaveError).toBe(rateLimitedMessage(120));
+      // The server's English must never reach the user.
+      expect(result.current.nameSaveError).not.toContain("Too many requests");
+      // A rejected save must not be mistaken for a successful one.
+      expect(result.current.savedDisplayName).toBe("小明");
+      expect(chrome.storage.local.set).not.toHaveBeenCalledWith({
+        [DISPLAY_NAME_KEY]: "大明",
+      });
+    });
+
+    it("shows the static back-off copy when the backend sent no retryAfter", async () => {
+      const result = await saveWith({
+        code: "RATE_LIMITED",
+        message: "Too many requests",
+      });
+
+      expect(result.current.nameSaveState).toBe("error");
+      expect(result.current.nameSaveError).toBe(rateLimitedMessage(null));
     });
   });
 

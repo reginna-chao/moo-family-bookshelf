@@ -21,6 +21,7 @@ import { QrCodeLink } from "./QrCodeLink";
 import { InviteQrCode } from "./InviteQrCode";
 import { VerificationSettings } from "./VerificationSettings";
 import { useFamilyData } from "./FamilyDataContext";
+import { rateLimitedEnvelopeMessage } from "./verificationMessages";
 import { getReportLinks } from "moo-family-bookshelf-shared/config/links";
 
 const reportLinks = getReportLinks({ appVersion: __APP_VERSION__ });
@@ -200,10 +201,13 @@ export function FamilySettings({
     try {
       const response = await apiClient.leaveFamily(familyId, userId);
       if (response.error) {
+        // 429 shows the localized back-off copy (with the wait when the server
+        // sent one) instead of the server's English message.
         const msg =
           response.error.code === "OWNER_CANNOT_LEAVE"
             ? "管理者必須先轉移管理權才能離開家庭"
-            : response.error.message;
+            : (rateLimitedEnvelopeMessage(response.error) ??
+              response.error.message);
         setLeaveError(msg);
         setLeaveState("idle");
         return;

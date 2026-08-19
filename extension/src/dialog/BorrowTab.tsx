@@ -21,6 +21,7 @@ import {
 } from "../content/readmoo-lend";
 import { ReadmooMemberPicker } from "./ReadmooMemberPicker";
 import { ManualLendDialog } from "./ManualLendDialog";
+import { memberSettingsErrorMessage } from "./memberSettingsMessages";
 import { useManualLendNotice } from "./useManualLendNotice";
 
 export interface BorrowTabProps {
@@ -236,7 +237,9 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
         setPicker(null);
         resolve(member);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "儲存失敗";
+        // Same rate-limited PATCH as MemberList's toggles — a 429 here must
+        // show the localized back-off copy, not the raw "CODE: message".
+        const msg = memberSettingsErrorMessage(err, "儲存失敗");
         setPicker((prev) =>
           prev ? { ...prev, saving: false, errorMessage: msg } : prev,
         );

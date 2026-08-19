@@ -3,6 +3,7 @@ import browser from "webextension-polyfill";
 import { ApiClient } from "../api/client";
 import { DISPLAY_NAME_KEY } from "../constants";
 import { safeStorageGet } from "../storage/safeStorage";
+import { rateLimitedEnvelopeMessage } from "./verificationMessages";
 
 type NameSaveState = "idle" | "saving" | "saved" | "error";
 
@@ -102,7 +103,11 @@ export function useDisplayName(
           trimmed,
         );
         if (response.error) {
-          setNameSaveError(response.error.message);
+          // 429 shows the localized back-off copy instead of server English.
+          setNameSaveError(
+            rateLimitedEnvelopeMessage(response.error) ??
+              response.error.message,
+          );
           setNameSaveState("error");
           return false;
         }

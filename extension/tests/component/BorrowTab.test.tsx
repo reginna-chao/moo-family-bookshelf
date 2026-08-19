@@ -45,7 +45,9 @@ vi.mock("@/content/readmoo-lend", async () => {
 
 import { BorrowTab } from "@/dialog/BorrowTab";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
+import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import {
+  ApiError,
   BoolFlag,
   type ApiClient,
   type BorrowRequest,
@@ -720,6 +722,126 @@ describe("BorrowTab", () => {
       expect(updateMemberSettings).not.toHaveBeenCalled();
       expect(updateBorrowStatus).not.toHaveBeenCalled();
       expect(mockCloseLendDialog).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * The picker's confirm PATCHes the same rate-limited member-settings
+     * endpoint as MemberList's toggles, so its inline error goes through
+     * `memberSettingsErrorMessage` too. Copy is asserted against the production
+     * builder, whose literals are pinned in
+     * tests/unit/dialog/verificationMessages.test.ts.
+     */
+    describe("picker save failure", () => {
+      /**
+       * Drive the flow to the picker and confirm "Bob", with the PATCH
+       * rejecting. The approve promise is deliberately left pending (the picker
+       * stays open for retry) — nothing is scheduled, so there is nothing to
+       * clean up.
+       */
+      async function pickWithRejection(err: unknown) {
+        const updateMemberSettings = vi.fn().mockRejectedValue(err);
+        const updateBorrowStatus = vi.fn();
+        const apiClient = createMockApiClient({
+          // Borrower has no readmooName + two Readmoo options → picker path.
+          getFamilyMembers: vi.fn().mockResolvedValue({
+            data: {
+              familyId: "fam-1",
+              ownerId: OWNER_ID,
+              members: [
+                {
+                  userId: OWNER_ID,
+                  displayName: "Owner",
+                  canLend: BoolFlag.TRUE,
+                },
+                {
+                  userId: BORROWER_ID,
+                  displayName: "Alice",
+                  canLend: BoolFlag.TRUE,
+                },
+              ],
+            },
+          }),
+          listBorrowRequests: vi
+            .fn()
+            .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
+          updateBorrowStatus,
+          updateMemberSettings,
+        });
+        mockOpenLendDialogForBook.mockResolvedValue({
+          lendDialog: document.createElement("div"),
+          detailModal: document.createElement("div"),
+          members: [
+            { name: "Alice", avatar: "" },
+            { name: "Bob", avatar: "" },
+          ],
+          previousQuery: "",
+        });
+
+        renderBorrowTab(apiClient, { userId: OWNER_ID });
+
+        await waitFor(() => {
+          expect(screen.getByText("同意借閱")).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByText("同意借閱"));
+
+        await waitFor(() => {
+          expect(
+            screen.getByText(/請選擇「Alice」對應的讀墨家庭成員/),
+          ).toBeInTheDocument();
+        });
+        // `act` (not waitFor) is the readiness signal here: the rejected PATCH
+        // settles in a microtask, and only act guarantees the resulting error
+        // state is committed before the assertions run.
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: /Bob/ }));
+        });
+
+        return { updateBorrowStatus, updateMemberSettings };
+      }
+
+      it("shows the localized back-off copy when the picker PATCH is rate limited", async () => {
+        const { updateBorrowStatus } = await pickWithRejection(
+          new ApiError("RATE_LIMITED", "Too many requests", 45),
+        );
+
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          rateLimitedMessage(45),
+        );
+        // Neither the server English nor ApiError's "CODE: message" shape.
+        expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/RATE_LIMITED:/)).not.toBeInTheDocument();
+        // The picker stays open so the user can retry, and the refused PATCH
+        // must not let the request slide into LENT.
+        expect(
+          screen.getByText(/請選擇「Alice」對應的讀墨家庭成員/),
+        ).toBeInTheDocument();
+        expect(updateBorrowStatus).not.toHaveBeenCalled();
+      });
+
+      it("shows the static back-off copy when the picker 429 carried no retryAfter", async () => {
+        await pickWithRejection(
+          new ApiError("RATE_LIMITED", "Too many requests"),
+        );
+
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          rateLimitedMessage(null),
+        );
+        expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
+      });
+
+      it("keeps the thrown message for a non-429 picker failure", async () => {
+        // Unchanged behaviour: only RATE_LIMITED is rewritten.
+        const err = new ApiError("FORBIDDEN", "not the owner");
+        await pickWithRejection(err);
+
+        expect(screen.getByRole("alert")).toHaveTextContent(err.message);
+      });
+
+      it("falls back to 儲存失敗 for a rejection that is not an Error", async () => {
+        await pickWithRejection("boom");
+
+        expect(screen.getByRole("alert")).toHaveTextContent("儲存失敗");
+      });
     });
   });
 
