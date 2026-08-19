@@ -806,6 +806,45 @@ describe("ApiClient", () => {
     });
   });
 
+  /**
+   * The un-kick call is what makes an owner's removal reversible: it lifts the
+   * server's `kicked:` tombstone so the removed member's sync code works again.
+   * It must hit the `kicked` collection — `/member/` is the REMOVAL endpoint, so
+   * a wrong path here would be a destructive no-op the UI still calls success.
+   */
+  describe("unkickMember", () => {
+    it("sends DELETE to /api/family/:id/kicked/:targetUserId", async () => {
+      globalThis.fetch = mockFetchSuccess({ cleared: BoolFlag.TRUE });
+      await client.unkickMember("fam-1", "target-u");
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${MOCK_ENDPOINT}/api/family/fam-1/kicked/target-u`,
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+
+    it("returns the cleared flag from the response envelope", async () => {
+      globalThis.fetch = mockFetchSuccess({ cleared: BoolFlag.TRUE });
+
+      const result = await client.unkickMember("fam-1", "target-u");
+
+      expect(result.data).toEqual({ cleared: BoolFlag.TRUE });
+      expect(result.error).toBeUndefined();
+    });
+
+    it("surfaces an owner-only refusal through the error envelope", async () => {
+      globalThis.fetch = mockFetchError("NOT_OWNER", "只有管理者可以操作", 403);
+
+      const result = await client.unkickMember("fam-1", "target-u");
+
+      expect(result.error).toEqual({
+        code: "NOT_OWNER",
+        message: "只有管理者可以操作",
+      });
+      expect(result.data).toBeUndefined();
+    });
+  });
+
   describe("transferOwnership", () => {
     it("sends PUT to /api/family/:id/transfer", async () => {
       globalThis.fetch = mockFetchSuccess({ ok: true });

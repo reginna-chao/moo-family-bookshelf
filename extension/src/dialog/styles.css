@@ -3022,6 +3022,45 @@
   padding: 8px 14px;
 }
 
+/* ── UnkickNotice ─────────────────────────────────────────────────────────
+   Post-removal offer to lift the rejoin block. Amber (informational), not the
+   red .moo-member-list__confirm treatment: nothing here destroys anything —
+   the action only re-opens the sync code for the member just removed. Buttons
+   come from .moo-button --outline / --ghost + --xs; only layout lives here. */
+.moo-unkick-notice {
+  background: var(--moo-warn-bg);
+  border-radius: var(--moo-global-border-radius);
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.moo-unkick-notice__text {
+  font-size: 13px;
+  color: var(--moo-text-strong);
+  line-height: 1.6;
+}
+
+.moo-unkick-notice__hint {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+/* Sits between the hint and the actions row, which owns its own top margin. */
+.moo-unkick-notice__error {
+  font-size: 12px;
+  color: var(--moo-danger-alt);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.moo-unkick-notice__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* ── DisplayNameEditor ────────────────────────────────────────────────── */
 
 .moo-name-editor {

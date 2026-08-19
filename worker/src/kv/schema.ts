@@ -141,14 +141,19 @@ export function normalizeFamilyRecord(record: RawFamilyRecord): FamilyRecord {
  * 403 MEMBER_REMOVED — otherwise the removed member's client, which retries the
  * join automatically, silently re-adds itself moments after being removed.
  *
- * The window bounds how long the removal is server-enforced: after expiry a
- * rejoin with the sync code is possible again, which is the legitimate re-add
- * path (security-ux Invariant 4 requires immediate removal from the member list,
- * not a permanent ban). Deliberately hours-scale rather than days because there
- * is NO un-kick path: while the tombstone lives the removed user cannot return
- * at all — the sync code and a QR token are both refused — so the only remedy
- * for a mistaken removal is waiting the TTL out. An owner-initiated un-kick
- * endpoint is a possible future extension, not implemented.
+ * The window bounds how long the removal stays server-enforced with NO ONE
+ * acting: after expiry a rejoin with the sync code is possible again, which is
+ * the legitimate re-add path (security-ux Invariant 4 requires immediate removal
+ * from the member list, not a permanent ban).
+ *
+ * A removal made by mistake does not have to be waited out. The owner can delete
+ * this key on demand via `DELETE /api/family/:id/kicked/:uid` (owner-only,
+ * idempotent, `routes/family.ts`), after which the user may rejoin with the sync
+ * code immediately — lifting the ban does not re-add them. The TTL is therefore
+ * the unattended recovery bound, not the only remedy. Still deliberately
+ * hours-scale rather than days: while the tombstone lives the removed user
+ * cannot return at all (the sync code and a QR token are both refused), so an
+ * owner who is unreachable would otherwise strand them for days.
  *
  * Comfortably above `KV_MIN_TTL_SECONDS` (60), and an integer, so the KV `put`
  * cannot be rejected for a sub-minimum `expirationTtl`.

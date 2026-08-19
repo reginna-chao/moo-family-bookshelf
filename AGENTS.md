@@ -28,7 +28,9 @@ moo-family-bookshelf/
 │   │   ├── config/             # Readmoo host/selector config, report links
 │   │   ├── icons/              # Inline brand SVG paths
 │   │   ├── invite/             # Invite message templates
-│   │   └── personal/           # Personal-shelf save strategy (PUT vs PATCH)
+│   │   ├── personal/           # Personal-shelf save strategy (PUT vs PATCH)
+│   │   ├── publicShelf/        # Public-shelf local-vs-server divergence rule
+│   │   └── unkick/             # Un-kick notice copy (removed / cleared / hint)
 │   ├── eslint.config.js
 │   ├── tsconfig.json
 │   └── package.json

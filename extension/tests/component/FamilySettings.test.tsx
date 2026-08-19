@@ -6,11 +6,15 @@ import {
   act,
   within,
 } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { FamilySettings, FamilySettingsProps } from "@/dialog/FamilySettings";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
-import { validateEndpointUrl, type ApiClient } from "@/api/client";
+import {
+  buildRemovedNoticeText,
+  buildUnkickedNoticeText,
+} from "@/dialog/UnkickNotice";
+import { BoolFlag, validateEndpointUrl, type ApiClient } from "@/api/client";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import {
   API_ENDPOINT_KEY,
@@ -37,6 +41,9 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     joinFamily: vi.fn(),
     leaveFamily: vi.fn().mockResolvedValue({ data: { ok: true } }),
     removeMember: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    unkickMember: vi
+      .fn()
+      .mockResolvedValue({ data: { cleared: BoolFlag.TRUE } }),
     transferOwnership: vi.fn().mockResolvedValue({ data: { ok: true } }),
     getPersonalBooks: vi.fn(),
     updatePersonalBooks: vi.fn(),
@@ -570,6 +577,244 @@ describe("FamilySettings", () => {
 
     await waitFor(() => {
       expect(screen.getByText("權限不足")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * A removal writes a 6-hour server-side block on rejoining, so the owner gets
+   * an entry to lift it again right where the removal happened. It is owner-only
+   * (the endpoint refuses anyone else) and must outlive a failed member refresh,
+   * because by then the removal — and the block — already happened.
+   */
+  describe("un-kick entry after a removal", () => {
+    const SELF_ID = "user-abc12345";
+    const REMOVED_ID = "user-def67890";
+    const THIRD_ID = "user-ghi00000";
+
+    function membersResponse(ownerId: string) {
+      return {
+        data: {
+          familyId: "fam-123",
+          ownerId,
+          members: [
+            { userId: SELF_ID, displayName: "小明" },
+            { userId: REMOVED_ID, displayName: "大明" },
+            { userId: THIRD_ID, displayName: "阿華" },
+          ],
+          maxMembers: 6,
+          createdAt: "2026-01-01",
+        },
+      };
+    }
+
+    /**
+     * `removedAt` is what makes the notice's `key` unique PER REMOVAL, and the
+     * real clock can put two removals of the same member in the same
+     * millisecond. Pin it so the second-removal regression below actually
+     * exercises the remount instead of passing or failing on timing luck.
+     */
+    let restoreClock: (() => void) | null = null;
+
+    afterEach(() => {
+      restoreClock?.();
+      restoreClock = null;
+    });
+
+    function controlClock(startMs: number) {
+      let now = startMs;
+      const spy = vi.spyOn(Date, "now").mockImplementation(() => now);
+      restoreClock = () => spy.mockRestore();
+      return {
+        advance(ms: number) {
+          now += ms;
+        },
+      };
+    }
+
+    /**
+     * Confirm the removal of 大明 (the first non-self member in the list).
+     * The confirm click is wrapped in `act` so the whole chain it kicks off —
+     * removal → report to the parent → member/bookshelf refresh — has settled
+     * before the caller asserts; `waitFor` alone can pass on an intermediate
+     * render (the confirm dialog also hides the 移除 buttons).
+     */
+    async function removeSecondMember() {
+      await waitFor(() => {
+        expect(screen.getAllByText("移除").length).toBeGreaterThan(0);
+      });
+      fireEvent.click(screen.getAllByText("移除")[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText("確定")).toBeInTheDocument();
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText("確定"));
+      });
+    }
+
+    it("does not offer the entry before anything was removed", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(SELF_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await waitFor(() => {
+        expect(screen.getByText("大明")).toBeInTheDocument();
+      });
+
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("offers to lift the rejoin block, naming the member just removed", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(SELF_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildRemovedNoticeText("大明")),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("lifts the block for the removed member when the entry is used", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(SELF_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildRemovedNoticeText("大明")),
+        ).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "解除移除限制" }));
+
+      await waitFor(() => {
+        expect(apiClient.unkickMember).toHaveBeenCalledWith(
+          "fam-123",
+          REMOVED_ID,
+        );
+      });
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildUnkickedNoticeText("大明")),
+        ).toBeInTheDocument();
+      });
+    });
+
+    /**
+     * 解除限制後對方可以重新加入，也可能再被移除一次——這時後端寫了一個新的
+     * tombstone，通知卡必須回到 idle 把「解除移除限制」入口交還給管理者。若卡片
+     * 停在上一次的成功文案，管理者會以為第二次的限制也已經解除。
+     */
+    it("returns the entry to idle when the same member is removed again", async () => {
+      const clock = controlClock(1_700_000_000_000);
+      const apiClient = createMockApiClient({
+        // The refreshed list still holds 大明 — standing in for them rejoining
+        // with the sync code once the first block was lifted.
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(SELF_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildRemovedNoticeText("大明")),
+        ).toBeInTheDocument();
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "解除移除限制" }));
+      });
+      expect(
+        screen.getByText(buildUnkickedNoticeText("大明")),
+      ).toBeInTheDocument();
+
+      // 大明 rejoined; a minute later the owner removes them a second time.
+      clock.advance(60_000);
+      await removeSecondMember();
+
+      expect(
+        screen.getByText(buildRemovedNoticeText("大明")),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(buildUnkickedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "解除移除限制" }),
+      ).toBeEnabled();
+      // Only the FIRST block was lifted — the new one still stands.
+      expect(apiClient.unkickMember).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the entry when the member-list refresh fails afterwards", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi
+          .fn()
+          .mockResolvedValueOnce(membersResponse(SELF_ID))
+          .mockResolvedValue({
+            error: { code: "SERVER_ERROR", message: "載入成員失敗" },
+          }),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+
+      // The list itself is gone (error state), but the block was still written.
+      await waitFor(() => {
+        expect(screen.getByText("載入成員失敗")).toBeInTheDocument();
+      });
+      expect(
+        screen.getByText(buildRemovedNoticeText("大明")),
+      ).toBeInTheDocument();
+    });
+
+    it("withdraws the entry if the caller is no longer the owner", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi
+          .fn()
+          .mockResolvedValueOnce(membersResponse(SELF_ID))
+          // Ownership moved to 阿華 while the removal was in flight — only the
+          // owner may lift the block, so the entry must not linger.
+          .mockResolvedValue(membersResponse(THIRD_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+
+      // The refresh landed and the confirm dialog closed, so a still-owner
+      // would be showing 移除 again here — its absence is the ownership change.
+      await waitFor(() => {
+        expect(apiClient.getFamilyMembers).toHaveBeenCalledTimes(2);
+      });
+      expect(screen.queryByText("確定")).not.toBeInTheDocument();
+      expect(screen.queryByText("移除")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not offer the entry to a non-owner member", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(THIRD_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await waitFor(() => {
+        expect(screen.getByText("大明")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("移除")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
     });
   });
 

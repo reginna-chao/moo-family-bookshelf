@@ -36,6 +36,15 @@ function memberSettingsErrorMessage(err: unknown, fallback: string): string {
  */
 const MIN_MEMBERS_FOR_READMOO_NAME = 3;
 
+/** A member the owner just removed, as reported to the parent. */
+export interface RemovedMemberInfo {
+  userId: string;
+  /** Resolved via `getMemberLabel` — never empty. */
+  displayName: string;
+  /** 每次移除唯一，使父層的 key 能區分「同一人的第二次移除」。 */
+  removedAt: number;
+}
+
 interface MemberListProps {
   members: FamilyMember[];
   ownerId: string;
@@ -43,6 +52,14 @@ interface MemberListProps {
   familyId: string;
   apiClient: ApiClient;
   onMembersChanged: () => void;
+  /**
+   * Called once a removal succeeds, so the parent can offer to lift the
+   * server's 6-hour rejoin block (see `UnkickNotice`). Optional: the removal
+   * itself does not depend on it. Reported from here rather than owned here
+   * because the notice must outlive a failed member-list refresh, which
+   * unmounts this component.
+   */
+  onMemberRemoved?: (removed: RemovedMemberInfo) => void;
 }
 
 type ConfirmAction =
@@ -55,6 +72,7 @@ export function MemberList({
   familyId,
   apiClient,
   onMembersChanged,
+  onMemberRemoved,
 }: MemberListProps) {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(
     null,
@@ -98,6 +116,17 @@ export function MemberList({
           setLoading(false);
           return;
         }
+        // Resolve the label BEFORE the refresh drops the member from the list.
+        const removed = members.find(
+          (m) => m.userId === confirmAction.targetId,
+        );
+        onMemberRemoved?.({
+          userId: confirmAction.targetId,
+          displayName: removed
+            ? getMemberLabel(removed)
+            : confirmAction.targetId.slice(0, 8),
+          removedAt: Date.now(),
+        });
       } else {
         const res = await apiClient.transferOwnership(
           familyId,
