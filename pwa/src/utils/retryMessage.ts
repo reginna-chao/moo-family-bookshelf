@@ -43,6 +43,44 @@ export function buildRetryMessage(
 }
 
 /**
+ * `RATE_LIMITED` copy for callers holding an error ENVELOPE (`res.error`)
+ * instead of a thrown `ApiError`. Returns null for any other code so the caller
+ * keeps its own action-specific fallback.
+ *
+ * The envelope is raw `JSON.parse` output — unlike `ApiError`, whose
+ * constructor validates the wait, nothing has checked `retryAfter` yet, and a
+ * self-hosted (BYO) backend sending a string / NaN / negative would surface as
+ * 「NaN 秒」. Sanitizing here keeps that guard in one place instead of at every
+ * call site; an unusable value degrades to the static copy.
+ *
+ * Deliberately NOT identical to the same-named export in
+ * `extension/src/dialog/verificationMessages.ts`: here `retryAfter === 0` counts
+ * as unusable and yields the static copy (matching `buildRetryMessage`, whose
+ * `<= 0` branch this module has always followed), while the extension renders it
+ * as a 「0 秒」 countdown and only rejects negatives. Each side keeps the
+ * 0-semantics of the copy helpers it already had, which is also why the pair is
+ * not hoisted into `shared/` — one implementation would silently reword one of
+ * the two apps. The split is pinned from both ends by
+ * `pwa/tests/unit/retryMessage.test.ts` and
+ * `extension/tests/unit/dialog/verificationMessages.test.ts`.
+ */
+export function rateLimitedEnvelopeMessage(error: {
+  code: string;
+  retryAfter?: number;
+}): string | null {
+  if (error.code !== "RATE_LIMITED") return null;
+  const { retryAfter } = error;
+  if (
+    typeof retryAfter !== "number" ||
+    !Number.isFinite(retryAfter) ||
+    retryAfter <= 0
+  ) {
+    return buildRetryMessage("RATE_LIMITED", 0);
+  }
+  return buildRetryMessage("RATE_LIMITED", Math.floor(retryAfter));
+}
+
+/**
  * Countdown-free variant of the same copy. Used as the sentence announced to
  * assistive tech: the visible message re-renders every second, so announcing it
  * verbatim would interrupt a screen-reader user once per second for the whole

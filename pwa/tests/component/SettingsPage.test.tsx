@@ -11,6 +11,7 @@ import React from "react";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { FamilyDataProvider, useFamilyData } from "@/hooks/useFamilyData";
 import { type ApiClient } from "@/api/client";
+import { buildRetryMessage } from "@/utils/retryMessage";
 import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 
 // Mock syncCode module
@@ -255,6 +256,99 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(
         screen.getByText("管理者必須先轉移管理權才能離開家庭"),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // --- Rate-limited writes ---
+
+  /**
+   * The Worker rate-limits the family write endpoints (429 RATE_LIMITED, with
+   * an optional `retryAfter`). Its `message` is English, so both write paths
+   * here render the localized back-off copy instead — asserted against the
+   * production builder, whose literals are pinned in
+   * pwa/tests/unit/retryMessage.test.ts.
+   */
+  it("shows the localized back-off copy when leave family is rate limited", async () => {
+    mockLeaveFamily.mockResolvedValue({
+      error: {
+        code: "RATE_LIMITED",
+        message: "Too many requests",
+        retryAfter: 90,
+      },
+    });
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(buildRetryMessage("RATE_LIMITED", 90)),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Too many requests")).not.toBeInTheDocument();
+    // A refused leave must not look like it succeeded.
+    expect(defaultProps.onLogout).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "離開家庭" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the localized back-off copy when the display name save is rate limited", async () => {
+    mockUpdateDisplayName.mockResolvedValue({
+      error: {
+        code: "RATE_LIMITED",
+        message: "Too many requests",
+        retryAfter: 45,
+      },
+    });
+    mockGetFamilyMembers.mockResolvedValue({
+      data: {
+        members: [{ userId: defaultProps.userId, displayName: "Alice" }],
+        ownerId: defaultProps.userId,
+      },
+    });
+    renderWithProvider();
+
+    await waitFor(() => {
+      expect(screen.getByText("Alice")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "編輯顯示名稱" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "顯示名稱" }), {
+      target: { value: "Bob" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "確認修改名稱" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(buildRetryMessage("RATE_LIMITED", 45)),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Too many requests")).not.toBeInTheDocument();
+  });
+
+  it("shows the static back-off copy when the 429 carried no retryAfter", async () => {
+    mockLeaveFamily.mockResolvedValue({
+      error: { code: "RATE_LIMITED", message: "Too many requests" },
+    });
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(buildRetryMessage("RATE_LIMITED", 0)),
       ).toBeInTheDocument();
     });
   });

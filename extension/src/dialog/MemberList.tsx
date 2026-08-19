@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { ApiClient, BoolFlag, FamilyMember } from "../api/client";
+import { memberSettingsErrorMessage } from "./memberSettingsMessages";
+import { rateLimitedEnvelopeMessage } from "./verificationMessages";
 
 function switchTrackClass(on: boolean): string {
   return on ? "moo-switch__track moo-switch__track--on" : "moo-switch__track";
@@ -70,7 +72,7 @@ export function MemberList({
       });
       onMembersChanged();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "更新失敗");
+      setActionError(memberSettingsErrorMessage(err, "更新失敗"));
     } finally {
       setCanLendUpdating(null);
     }
@@ -85,7 +87,7 @@ export function MemberList({
       });
       onMembersChanged();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "刪除失敗");
+      setActionError(memberSettingsErrorMessage(err, "刪除失敗"));
     } finally {
       setReadmooNameDeleting(null);
     }
@@ -97,7 +99,9 @@ export function MemberList({
     try {
       const response = await apiClient.removeMember(familyId, targetId);
       if (response.error) {
-        setActionError(response.error.message);
+        setActionError(
+          rateLimitedEnvelopeMessage(response.error) ?? response.error.message,
+        );
       } else {
         onMembersChanged();
       }
@@ -119,7 +123,9 @@ export function MemberList({
         clearEndpoint,
       );
       if (response.error) {
-        setActionError(response.error.message);
+        setActionError(
+          rateLimitedEnvelopeMessage(response.error) ?? response.error.message,
+        );
       } else {
         onMembersChanged();
       }

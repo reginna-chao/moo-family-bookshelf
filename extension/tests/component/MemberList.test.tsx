@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { MemberList, MemberListProps } from "@/dialog/MemberList";
+import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import type { ApiClient } from "@/api/client";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
@@ -158,6 +159,56 @@ describe("MemberList", () => {
 
     await waitFor(() => {
       expect(screen.getByText("轉移失敗")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The Worker rate-limits the family write endpoints (429 RATE_LIMITED, with
+   * an optional `retryAfter`). Both envelope-returning actions here render the
+   * localized back-off copy instead of the server's English `error.message` —
+   * asserted against the production builder, whose literals are pinned in
+   * tests/unit/dialog/verificationMessages.test.ts.
+   */
+  describe("rate-limited actions", () => {
+    it("shows the localized countdown copy when removeMember is rate limited", async () => {
+      const apiClient = createMockApiClient({
+        removeMember: vi.fn().mockResolvedValue({
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many requests",
+            retryAfter: 45,
+          },
+        }),
+      });
+      const onMembersChanged = vi.fn();
+      renderMemberList({ apiClient, onMembersChanged });
+
+      fireEvent.click(screen.getByText("移除"));
+      fireEvent.click(screen.getByText("確定"));
+
+      await waitFor(() => {
+        expect(screen.getByText(rateLimitedMessage(45))).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Too many requests")).not.toBeInTheDocument();
+      // A refused removal must not trigger a member-list refresh.
+      expect(onMembersChanged).not.toHaveBeenCalled();
+    });
+
+    it("shows the static back-off copy when transferOwnership is rate limited without a retryAfter", async () => {
+      const apiClient = createMockApiClient({
+        transferOwnership: vi.fn().mockResolvedValue({
+          error: { code: "RATE_LIMITED", message: "Too many requests" },
+        }),
+      });
+      renderMemberList({ apiClient });
+
+      fireEvent.click(screen.getByText("轉移管理權"));
+      fireEvent.click(screen.getByText("確定"));
+
+      await waitFor(() => {
+        expect(screen.getByText(rateLimitedMessage(null))).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Too many requests")).not.toBeInTheDocument();
     });
   });
 

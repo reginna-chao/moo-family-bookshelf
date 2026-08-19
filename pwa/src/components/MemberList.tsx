@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { BoolFlag } from "@/api/client";
+import { ApiError, BoolFlag } from "@/api/client";
 import type { ApiClient, FamilyMember } from "@/api/client";
+import { rateLimitedEnvelopeMessage } from "@/utils/retryMessage";
 
 function getMemberLabel(member: FamilyMember): string {
   return member.displayName || member.userId.slice(0, 8);
@@ -8,6 +9,26 @@ function getMemberLabel(member: FamilyMember): string {
 
 function canLendValue(member: FamilyMember): boolean {
   return member.canLend !== BoolFlag.FALSE;
+}
+
+/**
+ * Failure copy for the member-settings write, which throws instead of
+ * returning an envelope. A 429 gets the localized back-off copy (with the wait
+ * when the server sent one); everything else keeps the previous wording.
+ *
+ * Mirrors `memberSettingsErrorMessage` in
+ * `extension/src/dialog/memberSettingsMessages.ts` — both clients call the same
+ * rate-limited family write endpoints, so the back-off copy must not drift
+ * between them. Not a byte-for-byte twin: the extension version additionally
+ * passes through the client-synthesized `AUTH_REFRESH_RATE_LIMITED` error, a
+ * convention this client does not have (no such code exists in `pwa/src`).
+ */
+function memberSettingsErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    const rateLimited = rateLimitedEnvelopeMessage(err);
+    if (rateLimited !== null) return rateLimited;
+  }
+  return err instanceof Error ? err.message : fallback;
 }
 
 /**
@@ -55,7 +76,7 @@ export function MemberList({
       });
       onMembersChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "更新失敗");
+      setError(memberSettingsErrorMessage(err, "更新失敗"));
     } finally {
       setCanLendUpdating(null);
     }
@@ -73,7 +94,7 @@ export function MemberList({
           confirmAction.targetId,
         );
         if (res.error) {
-          setError(res.error.message);
+          setError(rateLimitedEnvelopeMessage(res.error) ?? res.error.message);
           setLoading(false);
           return;
         }
@@ -84,7 +105,7 @@ export function MemberList({
           confirmAction.targetId,
         );
         if (res.error) {
-          setError(res.error.message);
+          setError(rateLimitedEnvelopeMessage(res.error) ?? res.error.message);
           setLoading(false);
           return;
         }

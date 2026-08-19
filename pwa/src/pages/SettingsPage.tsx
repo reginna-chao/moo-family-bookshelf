@@ -12,6 +12,7 @@ import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "@/constants";
 import { MemberList } from "@/components/MemberList";
 import { namespacedKey, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import { useFamilyData } from "@/hooks/useFamilyData";
+import { rateLimitedEnvelopeMessage } from "@/utils/retryMessage";
 
 const reportLinks = getReportLinks({ appVersion: __APP_VERSION__ });
 
@@ -154,7 +155,10 @@ export function SettingsPage({
     try {
       const res = await apiClient.updateDisplayName(familyId, userId, trimmed);
       if (res.error) {
-        setNameError(res.error.message);
+        // 429 shows the localized back-off copy instead of server English.
+        setNameError(
+          rateLimitedEnvelopeMessage(res.error) ?? res.error.message,
+        );
         setNameSaving(false);
         return;
       }
@@ -188,10 +192,12 @@ export function SettingsPage({
     try {
       const res = await apiClient.leaveFamily(familyId, userId);
       if (res.error) {
+        // 429 shows the localized back-off copy (with the wait when the server
+        // sent one) instead of the server's English message.
         const msg =
           res.error.code === "OWNER_CANNOT_LEAVE"
             ? "管理者必須先轉移管理權才能離開家庭"
-            : res.error.message;
+            : (rateLimitedEnvelopeMessage(res.error) ?? res.error.message);
         setLeaveError(msg);
         setLeaveState("idle");
         return;
