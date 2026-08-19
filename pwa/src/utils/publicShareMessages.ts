@@ -14,17 +14,21 @@
 import { ApiError } from "@/api/client";
 import { buildRetryMessage } from "@/utils/retryMessage";
 
-/** Codes the public-shelf endpoints return that a user can act on. */
-const CODE_MESSAGES: Readonly<Record<string, string>> = {
-  INVALID_TITLE: "標題需為 1 至 60 個字",
-  INVALID_EXPIRES_DAYS: "過期時間選項無效，請重新選擇",
-  MAX_SHELVES_REACHED: "已達公開書櫃數量上限",
-  SHELF_NOT_FOUND: "找不到這個公開書櫃，請重新開啟視窗",
-  USER_NOT_FOUND: "請先同步個人書櫃，再啟用公開分享",
-  UNAUTHORIZED: "登入狀態已失效，請重新登入",
-  FORBIDDEN: "沒有權限操作這個公開書櫃",
-  NETWORK_ERROR: "連線失敗，請檢查網路後再試",
-};
+/**
+ * Codes the public-shelf endpoints return that a user can act on. A `Map`
+ * because `code` is backend-controlled: an object lookup would resolve
+ * `"__proto__"` / `"toString"` through the prototype chain.
+ */
+const CODE_MESSAGES: ReadonlyMap<string, string> = new Map([
+  ["INVALID_TITLE", "標題需為 1 至 60 個字"],
+  ["INVALID_EXPIRES_DAYS", "過期時間選項無效，請重新選擇"],
+  ["MAX_SHELVES_REACHED", "已達公開書櫃數量上限"],
+  ["SHELF_NOT_FOUND", "找不到這個公開書櫃，請重新開啟視窗"],
+  ["USER_NOT_FOUND", "請先同步個人書櫃，再啟用公開分享"],
+  ["UNAUTHORIZED", "登入狀態已失效，請重新登入"],
+  ["FORBIDDEN", "沒有權限操作這個公開書櫃"],
+  ["NETWORK_ERROR", "連線失敗，請檢查網路後再試"],
+]);
 
 /**
  * Map a thrown value to user-facing 繁體中文.
@@ -41,7 +45,7 @@ export function publicShelfErrorMessage(
   if (error.code === "RATE_LIMITED") {
     return buildRetryMessage("RATE_LIMITED", error.retryAfter ?? 0);
   }
-  return CODE_MESSAGES[error.code] ?? fallback;
+  return CODE_MESSAGES.get(error.code) ?? fallback;
 }
 
 /** Standalone wording for the "your value is not on the server" notice. */
