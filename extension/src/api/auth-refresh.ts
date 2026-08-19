@@ -37,12 +37,25 @@ const VERIFICATION_ERROR_CODES = new Set([
 ]);
 
 /**
- * Backend join error codes that mean the family is genuinely gone for this user
- * (deleted, or the user is no longer a member). Only these justify clearing the
- * local family data — anything else (network/transient/verification) must not
- * silently drop the user's data (security-ux Invariant 2).
+ * Backend join error codes that mean the family is genuinely gone for this user,
+ * so retrying the recovery join can never succeed:
+ *  - FAMILY_NOT_FOUND — the family record itself is gone.
+ *  - FAMILY_FULL      — no seat left to rejoin.
+ *  - MEMBER_REMOVED   — the owner removed this member and the server's kicked
+ *                       tombstone is refusing the rejoin. Without this code the
+ *                       client would silently auto-rejoin once the tombstone
+ *                       expires, undoing the removal; treat it as "family gone
+ *                       for this user" — stop retrying, clear local family data.
+ *
+ * Only these justify clearing the local family data — anything else
+ * (network/transient/verification) must not silently drop the user's data
+ * (security-ux Invariant 2).
  */
-const FAMILY_GONE_ERROR_CODES = new Set(["FAMILY_NOT_FOUND", "FAMILY_FULL"]);
+const FAMILY_GONE_ERROR_CODES = new Set([
+  "FAMILY_NOT_FOUND",
+  "FAMILY_FULL",
+  "MEMBER_REMOVED",
+]);
 
 /**
  * What blocked the silent recovery, handed to `onReauthRequired` so the prompt

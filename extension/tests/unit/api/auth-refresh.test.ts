@@ -24,8 +24,8 @@ import {
  *  - recovery cooldown still active → skip the join entirely, same rate-limited
  *    outcome.
  *  - recovery blocked by a verification code → call onReauthRequired, KEEP data.
- *  - recovery says family is gone (FAMILY_NOT_FOUND / FAMILY_FULL) → clear +
- *    FAMILY_REMOVED.
+ *  - recovery says family is gone (FAMILY_NOT_FOUND / FAMILY_FULL /
+ *    MEMBER_REMOVED) → clear + FAMILY_REMOVED.
  *  - any other / transient failure → leave family data intact for a later retry.
  *
  * doRefreshToken takes an injected `deps` boundary (request / setAuthToken /
@@ -68,15 +68,32 @@ function makeDeps(
   };
 }
 
-/** Seed storage.local so doRefreshToken + attemptJoinRecovery find userId/familyId. */
-function seedStorage(
+/**
+ * Seed storage.local so doRefreshToken + attemptJoinRecovery find
+ * userId/familyId.
+ *
+ * Writes go into the shared store-backed mock from `tests/setup.ts`, so every
+ * read and every write in a test hits ONE store: what doRefreshToken sets or
+ * removes is what the next read sees. Stubbing `get` with a frozen snapshot
+ * instead would keep answering the pre-call world, silently defusing any test
+ * that calls doRefreshToken twice (see the auto-rejoin test below).
+ *
+ * The seeding calls are then wiped from the spies so the assertion helpers only
+ * ever observe calls PRODUCTION made.
+ */
+async function seedStorage(
   data: Record<string, unknown> = {
     [USER_ID_KEY]: "u1",
     [FAMILY_ID_KEY]: "fam-1",
     [AUTH_TOKEN_KEY]: "old-token",
   },
-): void {
-  vi.mocked(chrome.storage.local.get).mockResolvedValue(data as never);
+): Promise<void> {
+  await chrome.storage.local.clear();
+  await chrome.storage.sync.clear();
+  await chrome.storage.local.set(data);
+  vi.mocked(chrome.storage.local.clear).mockClear();
+  vi.mocked(chrome.storage.sync.clear).mockClear();
+  vi.mocked(chrome.storage.local.set).mockClear();
 }
 
 /** True when family data (FAMILY_ID_KEY) was removed from storage. */
@@ -110,10 +127,16 @@ function cooldownWriteValue(): number | undefined {
   return undefined;
 }
 
+/** Inspect the injected request spy: how many `/join` requests were issued? */
+function joinRequestCount(request: unknown): number {
+  const spy = request as ReturnType<typeof vi.fn>;
+  return spy.mock.calls.filter((call) => String(call[0]).endsWith("/join"))
+    .length;
+}
+
 /** Inspect the injected request spy: was any `/join` request issued? */
 function joinWasRequested(request: unknown): boolean {
-  const spy = request as ReturnType<typeof vi.fn>;
-  return spy.mock.calls.some((call) => String(call[0]).endsWith("/join"));
+  return joinRequestCount(request) > 0;
 }
 
 describe("doRefreshToken", () => {
@@ -121,12 +144,17 @@ describe("doRefreshToken", () => {
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // The store behind the setup mock is module-scoped, so entries written by
+    // one test would otherwise outlive it. Clear before restoring, while the
+    // store-backed implementations are still installed.
+    await chrome.storage.local.clear();
+    await chrome.storage.sync.clear();
     vi.restoreAllMocks();
   });
 
   it("returns not-refreshed without calling request when userId/familyId are missing", async () => {
-    seedStorage({}); // no userId/familyId
+    await seedStorage({}); // no userId/familyId
     const deps = makeDeps({ refresh: { data: { token: "t", expiresAt: 1 } } });
 
     const result = await doRefreshToken(deps);
@@ -136,7 +164,7 @@ describe("doRefreshToken", () => {
   });
 
   it("stores the new token and reports refreshed when refresh succeeds", async () => {
-    seedStorage();
+    await seedStorage();
     const deps = makeDeps({
       refresh: { data: { token: "fresh-token", expiresAt: 9999 } },
     });
@@ -158,7 +186,7 @@ describe("doRefreshToken", () => {
   });
 
   it("recovers via joinFamily and reports refreshed when refresh fails but join succeeds", async () => {
-    seedStorage();
+    await seedStorage();
     const deps = makeDeps({
       refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
       join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
@@ -225,6 +253,13 @@ describe("doRefreshToken", () => {
         expectCleared: true,
       },
       {
+        name: "MEMBER_REMOVED → clear family + notify",
+        code: "MEMBER_REMOVED",
+        expectReauth: false,
+        expectFamilyRemoved: true,
+        expectCleared: true,
+      },
+      {
         name: "no error code (network-ish) → leave data intact",
         code: undefined,
         expectReauth: false,
@@ -235,7 +270,7 @@ describe("doRefreshToken", () => {
 
     for (const c of cases) {
       it(c.name, async () => {
-        seedStorage();
+        await seedStorage();
         const join = c.code ? { error: { code: c.code, message: "x" } } : {}; // no data.authToken and no error.code
         const deps = makeDeps({
           refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
@@ -266,12 +301,69 @@ describe("doRefreshToken", () => {
   });
 
   /**
+   * Owner-initiated removal. The worker writes a `kicked:{familyId}:{userId}`
+   * tombstone when an owner removes another member, so the recovery join is
+   * answered with 403 MEMBER_REMOVED for as long as it lives. Treating that as
+   * family-gone is the whole point of the code: otherwise silent recovery keeps
+   * re-joining and, once the tombstone expires, quietly undoes the removal.
+   */
+  describe("MEMBER_REMOVED (owner-initiated removal)", () => {
+    it("clears family data from local and sync storage and broadcasts FAMILY_REMOVED", async () => {
+      await seedStorage();
+      const deps = makeDeps({
+        refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+        join: { error: { code: "MEMBER_REMOVED", message: "removed" } },
+      });
+
+      const result = await doRefreshToken(deps);
+
+      // Terminal, not rate-limited: no cooldown is written, so the outcome
+      // carries no retry hint for the UI to count down on.
+      expect(result).toEqual({ refreshed: false });
+      expect(cooldownWriteValue()).toBeUndefined();
+      // Dropped from BOTH storage areas — a synced familyId left behind would
+      // let another device hand the local one back and resume rejoining.
+      expect(familyWasCleared()).toBe(true);
+      expect(chrome.storage.sync.remove).toHaveBeenCalledWith([FAMILY_ID_KEY]);
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "FAMILY_REMOVED",
+      });
+      expect(deps.onFamilyRemoved).toHaveBeenCalledTimes(1);
+      // A removal is not a verification problem — never prompt for a secret.
+      expect(deps.onReauthRequired).not.toHaveBeenCalled();
+    });
+
+    it("stops the silent auto-rejoin: a later refresh issues no second join", async () => {
+      // Two calls against ONE store (seedStorage seeds the shared setup mock),
+      // so the second call sees the world the first call left behind — the
+      // removal of familyId is what has to stop the rejoin.
+      await seedStorage();
+      const deps = makeDeps({
+        refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+        join: { error: { code: "MEMBER_REMOVED", message: "removed" } },
+      });
+
+      const first = await doRefreshToken(deps);
+      const second = await doRefreshToken(deps);
+
+      expect(first.refreshed).toBe(false);
+      expect(second.refreshed).toBe(false);
+      // Exactly one join ever leaves the client: the removal is not retried.
+      expect(joinRequestCount(deps.request)).toBe(1);
+      const stored = await chrome.storage.local.get(FAMILY_ID_KEY);
+      expect(stored[FAMILY_ID_KEY]).toBeUndefined();
+      // The user is told once, not on every subsequent request wave.
+      expect(deps.onFamilyRemoved).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
    * The verification branch now reports WHAT blocked recovery, so the dialog can
    * open the prompt in the right state (locked + countdown vs. plain challenge).
    */
   describe("onReauthRequired payload", () => {
     it("passes the blocking code and retryAfter from a 429 lockout", async () => {
-      seedStorage();
+      await seedStorage();
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
         join: {
@@ -294,7 +386,7 @@ describe("doRefreshToken", () => {
     });
 
     it("passes the code with an undefined retryAfter when the backend omits it", async () => {
-      seedStorage();
+      await seedStorage();
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
         join: { error: { code: "VERIFICATION_REQUIRED", message: "verify" } },
@@ -310,7 +402,7 @@ describe("doRefreshToken", () => {
   });
 
   it("always clears only the token (not family) before attempting recovery", async () => {
-    seedStorage();
+    await seedStorage();
     const deps = makeDeps({
       refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
       join: { error: { code: "VERIFICATION_REQUIRED", message: "x" } },
@@ -328,7 +420,7 @@ describe("doRefreshToken", () => {
   });
 
   it("does not throw when onReauthRequired is null on a verification failure", async () => {
-    seedStorage();
+    await seedStorage();
     const deps = {
       request: makeRequest({
         refresh: { error: { code: "REFRESH_FAILED", message: "x" } },
@@ -410,7 +502,7 @@ describe("doRefreshToken", () => {
 
     for (const c of cases) {
       it(`${c.name} on a fresh RATE_LIMITED recovery`, async () => {
-        seedStorage(); // no cooldown key → no active cooldown
+        await seedStorage(); // no cooldown key → no active cooldown
         const deps = makeDeps({
           refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
           join: {
@@ -446,7 +538,7 @@ describe("doRefreshToken", () => {
 
     it("skips the join entirely while a cooldown is still active", async () => {
       const activeUntil = FIXED_NOW + 60_000; // 60s in the future
-      seedStorage({
+      await seedStorage({
         [USER_ID_KEY]: "u1",
         [FAMILY_ID_KEY]: "fam-1",
         [AUTH_TOKEN_KEY]: "old-token",
@@ -514,7 +606,7 @@ describe("doRefreshToken", () => {
 
       for (const c of readCases) {
         it(c.name, async () => {
-          seedStorage({
+          await seedStorage({
             [USER_ID_KEY]: "u1",
             [FAMILY_ID_KEY]: "fam-1",
             [AUTH_TOKEN_KEY]: "old-token",
@@ -545,7 +637,7 @@ describe("doRefreshToken", () => {
       }
 
       it("ignores a non-number persisted cooldown and attempts the join", async () => {
-        seedStorage({
+        await seedStorage({
           [USER_ID_KEY]: "u1",
           [FAMILY_ID_KEY]: "fam-1",
           [AUTH_TOKEN_KEY]: "old-token",
@@ -565,7 +657,7 @@ describe("doRefreshToken", () => {
     });
 
     it("attempts the join when the stored cooldown has expired", async () => {
-      seedStorage({
+      await seedStorage({
         [USER_ID_KEY]: "u1",
         [FAMILY_ID_KEY]: "fam-1",
         [AUTH_TOKEN_KEY]: "old-token",
@@ -585,7 +677,7 @@ describe("doRefreshToken", () => {
     });
 
     it("clears the cooldown after a successful refresh", async () => {
-      seedStorage();
+      await seedStorage();
       const deps = makeDeps({
         refresh: { data: { token: "fresh-token", expiresAt: 9999 } },
       });
@@ -597,7 +689,7 @@ describe("doRefreshToken", () => {
     });
 
     it("clears the cooldown after a successful join recovery", async () => {
-      seedStorage();
+      await seedStorage();
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
         join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
@@ -610,7 +702,7 @@ describe("doRefreshToken", () => {
     });
 
     it("does not prompt re-verification (onReauthRequired) on a rate-limited recovery", async () => {
-      seedStorage();
+      await seedStorage();
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
         join: {
@@ -635,7 +727,7 @@ describe("doRefreshToken", () => {
    */
   describe("reauth-pending latch", () => {
     it("skips join recovery and all side effects when isReauthPending() is true", async () => {
-      seedStorage();
+      await seedStorage();
       const deps = makeDeps(
         {
           refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
@@ -658,7 +750,7 @@ describe("doRefreshToken", () => {
     });
 
     it("proceeds with join recovery when isReauthPending() is false", async () => {
-      seedStorage();
+      await seedStorage();
       const deps = makeDeps(
         {
           refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
