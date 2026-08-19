@@ -21,10 +21,10 @@ const REQUEST: BorrowRequest = {
   updatedAt: new Date().toISOString(),
 };
 
-function renderCard(actions: BorrowAction[]) {
+function renderCard(actions: BorrowAction[], request: BorrowRequest = REQUEST) {
   return render(
     <BorrowRequestCard
-      request={REQUEST}
+      request={request}
       otherPartyName="小華"
       actions={actions}
     />,
@@ -128,5 +128,97 @@ describe("BorrowRequestCard", () => {
         "moo-request-card__action--danger",
       );
     });
+  });
+
+  /**
+   * `request.status` is bare-cast out of the API response by
+   * `listBorrowRequests()`, and the API endpoint is user-configurable (BYO
+   * backend), so an out-of-enum value can reach this render. The badge lookup
+   * is a Map rather than an object literal precisely so a prototype-chain key
+   * resolves to nothing, and a miss must degrade to the fallback badge — a
+   * throw here takes down the whole Dialog, which has no ErrorBoundary.
+   */
+  describe("status badge", () => {
+    const KNOWN_STATUS_CASES = [
+      {
+        status: BorrowStatus.PENDING,
+        label: "待處理",
+        modifier: "moo-request-card__status--pending",
+      },
+      {
+        status: BorrowStatus.LENT,
+        label: "出借中",
+        modifier: "moo-request-card__status--lent",
+      },
+      {
+        status: BorrowStatus.RETURNED,
+        label: "已歸還",
+        modifier: "moo-request-card__status--returned",
+      },
+      {
+        status: BorrowStatus.REJECTED,
+        label: "已拒絕",
+        modifier: "moo-request-card__status--rejected",
+      },
+      {
+        status: BorrowStatus.CANCELLED,
+        label: "已取消",
+        modifier: "moo-request-card__status--cancelled",
+      },
+    ];
+
+    it.each(KNOWN_STATUS_CASES)(
+      "labels the known status $status as $label",
+      ({ status, label, modifier }) => {
+        renderCard([], { ...REQUEST, status });
+
+        const badge = screen.getByText(label);
+        expect(badge).toHaveClass("moo-request-card__status");
+        expect(badge).toHaveClass(modifier);
+      },
+    );
+
+    // Replaces the exhaustiveness the old `Record<BorrowStatus, StatusMeta>`
+    // gave us: a new enum member fails here until the table (and the Map)
+    // cover it.
+    it("covers every BorrowStatus member", () => {
+      const members = Object.values(BorrowStatus).filter(
+        (v): v is BorrowStatus => typeof v === "number",
+      );
+      expect(KNOWN_STATUS_CASES.map((c) => c.status).sort()).toEqual(
+        members.sort(),
+      );
+    });
+
+    it.each([
+      { name: '"__proto__"', status: "__proto__" },
+      { name: '"toString"', status: "toString" },
+      { name: '"constructor"', status: "constructor" },
+      { name: '"valueOf"', status: "valueOf" },
+      { name: '"hasOwnProperty"', status: "hasOwnProperty" },
+      { name: "an unknown numeric status (99)", status: 99 },
+      // A backend that simply omits `status` is the likeliest out-of-range
+      // case, and is exactly where the old object-literal lookup crashed
+      // (`STATUS_META[undefined]` → reading `.modifier` of undefined).
+      { name: "a null status", status: null },
+      { name: "a missing status (undefined)", status: undefined },
+    ])(
+      "falls back to the unknown badge for $name instead of crashing",
+      ({ status }) => {
+        expect(() =>
+          renderCard([], {
+            ...REQUEST,
+            status: status as unknown as BorrowStatus,
+          }),
+        ).not.toThrow();
+
+        const badge = screen.getByText("狀態未知");
+        expect(badge).toHaveClass("moo-request-card__status");
+        expect(badge).toHaveClass("moo-request-card__status--returned");
+        // A prototype-chain hit used to yield `undefined` as the modifier,
+        // which React happily stringified into the class attribute.
+        expect(badge.className).not.toContain("undefined");
+      },
+    );
   });
 });

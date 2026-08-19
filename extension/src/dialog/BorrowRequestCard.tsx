@@ -16,28 +16,45 @@ export interface BorrowRequestCardProps {
   actions: BorrowAction[];
 }
 
-/** Per-status label + badge modifier class (colors live in styles.css). */
-const STATUS_META: Record<BorrowStatus, { label: string; modifier: string }> = {
-  [BorrowStatus.PENDING]: {
-    label: "待處理",
-    modifier: "moo-request-card__status--pending",
-  },
-  [BorrowStatus.LENT]: {
-    label: "出借中",
-    modifier: "moo-request-card__status--lent",
-  },
-  [BorrowStatus.RETURNED]: {
-    label: "已歸還",
-    modifier: "moo-request-card__status--returned",
-  },
-  [BorrowStatus.REJECTED]: {
-    label: "已拒絕",
-    modifier: "moo-request-card__status--rejected",
-  },
-  [BorrowStatus.CANCELLED]: {
-    label: "已取消",
-    modifier: "moo-request-card__status--cancelled",
-  },
+interface StatusMeta {
+  label: string;
+  modifier: string;
+}
+
+/**
+ * Per-status label + badge modifier class (colors live in styles.css).
+ * A Map, not an object literal: `request.status` arrives unvalidated from a
+ * user-configurable backend, and a Map lookup never walks the prototype chain,
+ * so a hostile `"__proto__"` / `"toString"` resolves to nothing instead of an
+ * Object.prototype member.
+ */
+const STATUS_META: ReadonlyMap<BorrowStatus, StatusMeta> = new Map([
+  [
+    BorrowStatus.PENDING,
+    { label: "待處理", modifier: "moo-request-card__status--pending" },
+  ],
+  [
+    BorrowStatus.LENT,
+    { label: "出借中", modifier: "moo-request-card__status--lent" },
+  ],
+  [
+    BorrowStatus.RETURNED,
+    { label: "已歸還", modifier: "moo-request-card__status--returned" },
+  ],
+  [
+    BorrowStatus.REJECTED,
+    { label: "已拒絕", modifier: "moo-request-card__status--rejected" },
+  ],
+  [
+    BorrowStatus.CANCELLED,
+    { label: "已取消", modifier: "moo-request-card__status--cancelled" },
+  ],
+]);
+
+/** Shown for any status outside the enum; reuses the neutral gray badge. */
+const UNKNOWN_STATUS: StatusMeta = {
+  label: "狀態未知",
+  modifier: "moo-request-card__status--returned",
 };
 
 const ACTION_VARIANT_CLASS: Record<BorrowActionVariant, string> = {
@@ -66,7 +83,7 @@ export function BorrowRequestCard({
   otherPartyName,
   actions,
 }: BorrowRequestCardProps) {
-  const status = STATUS_META[request.status];
+  const status = STATUS_META.get(request.status) ?? UNKNOWN_STATUS;
 
   return (
     <div className="moo-request-card">
