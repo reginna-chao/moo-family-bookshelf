@@ -21,8 +21,10 @@ Your **first actions**:
 
 1. `Read .claude/rules/global.md` — architecture / performance / lifecycle / side-effect / data-access rules.
 2. Based on `scope` → `Read .claude/rules/frontend.md` or `.claude/rules/backend.md`.
-3. `Read .claude/rules/security-ux-invariants.md` — the four invariants any review must respect.
-4. `Read .claude/rules/change-triage.md` — the severity gate every SUGGESTION you raise must clear.
+3. `Read .claude/rules/security-ux-invariants.md` — the five invariants any review must respect.
+4. `Read .claude/rules/change-triage.md` — the severity gate every SUGGESTION and OBSERVATION you
+   raise must clear. The dimension checks below still run in full; the gate only decides what gets REPORTED.
+   A P2-tier item is dropped entirely, not downgraded to an Observation.
 5. Read all files/diffs in `target` before starting.
 
 Evaluate every dimension below but **only report findings** — do not list items that pass.

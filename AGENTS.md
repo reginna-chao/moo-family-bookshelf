@@ -124,6 +124,7 @@ moo-family-bookshelf/
 ### Test Structure
 
 - Extension tests: `extension/tests/{unit,component,e2e}/`
+- PWA tests: `pwa/tests/{unit,component,e2e}/`
 - Worker tests: `worker/tests/{unit,integration}/`
 - Tests colocated by type, not by source file.
 

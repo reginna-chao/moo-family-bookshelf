@@ -37,5 +37,5 @@ tiers below BEFORE raising it; P2 and non-goals are not raised at all.
 3. Whether a check that fails on it today can be written.
 
 Item 3 is the gate: if no failing check can be written, it is usually taste rather than a defect.
-When it IS worth fixing, add that check alongside the fix — in `extension/tests/` or `worker/tests/`
-(see `.claude/rules/test.md`) — so CI's `pnpm test` catches the next one.
+When it IS worth fixing, add that check alongside the fix — in `extension/tests/`, `pwa/tests/`, or
+`worker/tests/` (see `.claude/rules/test.md`) — so CI's `pnpm test` catches the next one.
