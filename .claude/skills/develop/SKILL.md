@@ -40,6 +40,7 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 - **Code Modification Workflow is mandatory** (`.claude/rules/global.md`): every code change — regardless of size — goes through coder → typecheck → tester → review → fix. "Too small" is never a reason to skip. Only the user explicitly saying "skip review" / "just write the code" bypasses it, for that task only.
 - **Scope tagging.** Every code work-item is `frontend` or `backend`. When dispatching a `coder` / `tester` / `reviewer` agent, pass `scope` so it reads the right rules (`frontend.md` / `backend.md`) and runs the right commands. A full-stack feature splits into separate scoped dispatches.
 - **Agents dispatched via the Agent tool are non-interactive** — they cannot pause for the user. YOU hold every user gate (requirements confirm, verify-before-test, SUGGESTION decisions, commit) in this session. Do not push a user gate into an agent prompt.
+- **Triage before proposing.** `Read .claude/rules/change-triage.md` before surfacing any unsolicited "X could be improved" item — SUGGESTION findings, follow-up task chips, opportunistic cleanups. P2 items and non-goals are not raised at all; a P0/P1 must carry `file:line`, the consequence of leaving it unfixed, and whether a failing check can be written.
 - **Progress tracking (mandatory).** Once requirements are confirmed, keep a TodoWrite checklist of the phases and update it (✅ / ⏳ / ⬜) so the user always sees progress. If TodoWrite is unavailable, render the same checklist inline.
 
 ## §2 Stop discipline (both routes)
