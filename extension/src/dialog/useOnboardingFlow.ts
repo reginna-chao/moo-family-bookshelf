@@ -281,7 +281,10 @@ export function useOnboardingFlow(
           onCancel: params.onCancel,
           // Nothing local to clear — onboarding persists a family only once a
           // join succeeds — so this branch only has to end the attempt and say
-          // why, in the server's own words when it sent them.
+          // why. Only the manual-join path (`PerformJoinFailure`) carries the
+          // server's own message today; the recovery bridges' `RecoveryResult`
+          // has no `errorMessage` field, so those paths always show the client
+          // fallback below.
           onFamilyGone: (_errorCode, errorMessage) => {
             const message = errorMessage ?? FAMILY_GONE_FALLBACK_MESSAGE;
             (params.onFamilyGone ?? showRetryableError)(message);
