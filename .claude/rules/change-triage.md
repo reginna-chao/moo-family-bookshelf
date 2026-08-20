@@ -1,34 +1,41 @@
-## 修改建議分級
+## Change Triage Rules
 
-適用於任何「我發現 X 可以改進」的主動建議（含 Code 分頁的任務 chip）。
-提出建議前先自我分級；P2 與非目標不主動提。
+Applies to any unsolicited "I noticed X could be improved" proposal — reviewer SUGGESTION findings,
+follow-up task chips, and anything else raised that the user did not ask for. Grade it against the
+tiers below BEFORE raising it; P2 and non-goals are not raised at all.
 
-### 分級（以「交付給後端之後的後果」為標準）
+### Tiers (graded by the consequence of NOT fixing it)
 
-- **P0 — 交付後會壞**
-  HTML 結構錯誤、W3C 驗證失敗、瀏覽器相容問題、明顯 a11y 缺失、安全性問題。
+- **P0 — ships broken.**
+  Privacy leak or data disclosure; violation of any invariant in `.claude/rules/security-ux-invariants.md`;
+  a book shared without explicit opt-in; auth-token or permission bypass; unrecoverable state left
+  behind on an error path.
 
-- **P1 — 後端接手會踩到**
-  class 命名衝突、樣式跨元件耦合、無法 re-template 的結構、資產路徑錯誤、
-  重複樣式未登記於 docs/COMPONENTS.md。
+- **P1 — another surface trips over it.**
+  Contract drift between Extension / PWA / Worker (payload shape, error `code`, `BoolFlag` handling);
+  logic that belongs in `shared/` written separately on each side, so the two ends can diverge;
+  anything that turns CI red (`pnpm lint` / `pnpm typecheck` / `pnpm test`).
 
-- **P2 — 只影響開發期**
-  DX、重構、可讀性、命名偏好。預設不做，除非我明確要求。
+- **P2 — only affects development.**
+  DX, refactoring, readability, naming preference. Not done by default unless explicitly requested.
 
-### 非目標（不要提議，即使技術上正確）
+### Non-goals (do not propose, even when technically correct)
 
-- 新增抽象層或元件封裝（除非同一模式已重複 3 次以上）
-- 新增 build 步驟、新依賴、新工具鏈
-- 檔名加 hash、啟用 View Transitions、改變輸出檔案結構
-- 增加 runtime JS 以取代 CSS 可解的問題
-- 效能微優化（除非有實測數據支持）
-- 補註解、補型別標註等 linter 或 formatter 可涵蓋的事項
+- A new abstraction layer or component wrapper, unless the same pattern already repeats 3+ times.
+  Distinct from `.claude/agents/reviewer.md`'s "extract duplication (2+ occurrences)": that threshold
+  covers pulling out code that is ALREADY duplicated; this one covers introducing a NEW abstraction.
+- New build steps, new dependencies, new toolchains.
+- Hashed filenames, View Transitions, changes to the output file layout.
+- Runtime JS added to solve what CSS already solves.
+- Micro-optimizations without measured evidence.
+- Comments, type annotations, or anything `pnpm lint` / `pnpm format` / `pnpm typecheck` already covers.
 
-### 提出建議時必須附帶
+### Every proposal must carry
 
-1. 具體位置（檔案:行號）。給不出來就不要提。
-2. 級別（P0 / P1），以及不修的實際後果。
-3. 是否寫得出一個會 fail 的檢查。
+1. An exact location (`file:line`). If you cannot give one, do not raise it.
+2. The tier (P0 / P1) and the concrete consequence of leaving it unfixed.
+3. Whether a check that fails on it today can be written.
 
-第 3 點是門檻：寫不出可失敗的檢查，通常代表這是品味問題而非缺陷。
-若判定值得修，修正的同時要把該檢查加進 scripts/，讓同類問題往後由 CI 攔截。
+Item 3 is the gate: if no failing check can be written, it is usually taste rather than a defect.
+When it IS worth fixing, add that check alongside the fix — in `extension/tests/` or `worker/tests/`
+(see `.claude/rules/test.md`) — so CI's `pnpm test` catches the next one.
