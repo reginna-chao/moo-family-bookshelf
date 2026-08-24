@@ -24,6 +24,7 @@ import { VerifySetupPrompt } from "./components/VerifySetupPrompt";
 import { FamilyDataProvider, useFamilyData } from "./hooks/useFamilyData";
 import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
+import { JOIN_BLOCKED_MESSAGES } from "./utils/joinErrorMessages";
 import { encodeSyncCode } from "@/crypto/syncCode";
 
 type Page = "family-shelf" | "personal-shelf" | "borrow" | "settings";
@@ -88,7 +89,8 @@ function AuthenticatedApp() {
   const [currentPage, setCurrentPage] = useState<Page>(
     () => pageFromHash() ?? "family-shelf",
   );
-  const [familyFullError, setFamilyFullError] = useState("");
+  // Reason for an involuntary logout, handed to LandingPage as `externalError`.
+  const [landingError, setLandingError] = useState("");
   const [verifySetupDone, setVerifySetupDone] = useState(false);
 
   // Sync page state with hash
@@ -139,8 +141,13 @@ function AuthenticatedApp() {
       {},
     );
     if (res.error) {
-      if (res.error.code === "FAMILY_FULL") {
-        setFamilyFullError("家庭成員已達上限（每個家庭最多 2 位成員）");
+      // A blocked code is terminal — retrying this join cannot succeed — so the
+      // branch only picks the explanatory copy; the logout below still runs.
+      // `.get` on a Map, never an object index: the code is backend-controlled
+      // (see the prototype-chain note in `utils/joinErrorMessages.ts`).
+      const blockedMessage = JOIN_BLOCKED_MESSAGES.get(res.error.code);
+      if (blockedMessage !== undefined) {
+        setLandingError(blockedMessage);
       } else if (
         res.error.code === "VERIFICATION_REQUIRED" &&
         current.familyId
@@ -201,13 +208,13 @@ function AuthenticatedApp() {
     return (
       <LandingPage
         onAuth={(data) => {
-          setFamilyFullError("");
+          setLandingError("");
           login(data);
         }}
         initialSyncCode={initialSyncCode}
         qrUserId={qrUserId}
         qrToken={qrToken}
-        externalError={familyFullError}
+        externalError={landingError}
       />
     );
   }

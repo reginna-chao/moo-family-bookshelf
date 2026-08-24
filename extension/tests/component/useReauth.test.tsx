@@ -37,6 +37,7 @@ function seedStorage(
 function createApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     onReauthRequired: null,
+    onFamilyRemoved: null,
     getVerifyMethod: vi
       .fn()
       .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
@@ -314,6 +315,198 @@ describe("useReauth", () => {
       expect(result.current.countdownSeconds).toBeNull();
       expect(result.current.method).toBe("pin");
     });
+  });
+
+  /**
+   * REGRESSION (PR #130 review): a verification-enabled member whom the owner
+   * REMOVED could never learn of it through this prompt. The worker's
+   * verification gate answers BEFORE its kicked-tombstone check, so the silent
+   * recovery in api/auth-refresh only ever saw VERIFICATION_REQUIRED and handed
+   * over to this prompt; the re-join then came back 403 MEMBER_REMOVED even
+   * though the PIN was CORRECT, and the prompt just re-offered the same input.
+   * The user looped on "right secret → error" for the tombstone's whole life (6h).
+   *
+   * The teardown ends that loop, and must be byte-identical to the silent path's
+   * (both go through `clearFamilyStorageAndBroadcast`, pinned in
+   * tests/unit/api/auth-refresh.test.ts).
+   */
+  describe("family gone after a verified re-join", () => {
+    /**
+     * Arbitrary backend-style message — these tests assert PASS-THROUGH (that
+     * whatever the server said reaches the caller untouched), not production
+     * copy. It is never compared against a worker literal, so it is
+     * deliberately NOT claimed to be the worker's own wording.
+     */
+    const GONE_MESSAGE = "你已被家庭管理者移出，無法重新加入";
+
+    function goneApiClient(errorCode: string): ApiClient {
+      return createApiClient({
+        joinFamily: vi.fn().mockResolvedValue({
+          error: { code: errorCode, message: GONE_MESSAGE },
+        }),
+        onFamilyRemoved: vi.fn(),
+      });
+    }
+
+    it.each(["MEMBER_REMOVED", "FAMILY_NOT_FOUND", "FAMILY_FULL"])(
+      "clears the family binding and closes the prompt on %s",
+      async (errorCode) => {
+        seedStorage();
+        const apiClient = goneApiClient(errorCode);
+        const onSuccess = vi.fn();
+        const { result } = renderHook(() =>
+          useReauth(apiClient, { onSuccess }),
+        );
+
+        await triggerReauth(apiClient, result);
+        await act(async () => {
+          await result.current.submit("1234");
+        });
+
+        // Dropped from BOTH storage areas — a synced familyId left behind would
+        // let another device hand the local one back and resume rejoining.
+        expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+          FAMILY_ID_KEY,
+        ]);
+        expect(chrome.storage.sync.remove).toHaveBeenCalledWith([
+          FAMILY_ID_KEY,
+        ]);
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+          type: "FAMILY_REMOVED",
+        });
+        // The dead token goes, the reauth latch is released (a stale one would
+        // mute every later 401), and the dialog is told to fall back.
+        expect(apiClient.setAuthToken).toHaveBeenCalledWith(null);
+        expect(apiClient.clearReauthPending).toHaveBeenCalledTimes(1);
+        expect(apiClient.onFamilyRemoved).toHaveBeenCalledTimes(1);
+        // The prompt is gone rather than errored: there is nothing left to type.
+        expect(result.current.active).toBe(false);
+        expect(result.current.error).toBe("");
+        expect(result.current.locked).toBe(false);
+        expect(onSuccess).not.toHaveBeenCalled();
+      },
+    );
+
+    it("notifies the dialog only after storage and the client are consistent", async () => {
+      seedStorage();
+      const apiClient = goneApiClient("MEMBER_REMOVED");
+      const { result } = renderHook(() => useReauth(apiClient));
+
+      await triggerReauth(apiClient, result);
+      await act(async () => {
+        await result.current.submit("1234");
+      });
+
+      // The dialog flips to onboarding inside onFamilyRemoved; arriving there
+      // before the clears land would render a family-less view over a client and
+      // a storage record that still claim a family.
+      const notifiedAt = vi.mocked(apiClient.onFamilyRemoved!).mock
+        .invocationCallOrder[0];
+      expect(notifiedAt).toBeGreaterThan(
+        vi.mocked(chrome.storage.local.remove).mock.invocationCallOrder[0],
+      );
+      expect(notifiedAt).toBeGreaterThan(
+        vi.mocked(apiClient.setAuthToken).mock.invocationCallOrder[0],
+      );
+      expect(notifiedAt).toBeGreaterThan(
+        vi.mocked(apiClient.clearReauthPending).mock.invocationCallOrder[0],
+      );
+    });
+
+    it("does not re-join after the teardown", async () => {
+      seedStorage();
+      const apiClient = goneApiClient("MEMBER_REMOVED");
+      const { result } = renderHook(() => useReauth(apiClient));
+
+      await triggerReauth(apiClient, result);
+      await act(async () => {
+        await result.current.submit("1234");
+      });
+      await act(async () => {
+        await result.current.submit("1234");
+      });
+
+      // Re-spending the server's join budget for a membership that no longer
+      // exists is exactly the loop this branch ends.
+      expect(apiClient.joinFamily).toHaveBeenCalledTimes(1);
+      expect(apiClient.onFamilyRemoved).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * The teardown's FIRST step writes storage, and that write can genuinely
+     * reject (extension context invalidated mid-flow, quota, a storage area that
+     * went away). Unguarded, it took the whole handover down with it: the reauth
+     * latch stayed set — which mutes silent recovery for every later 401, i.e.
+     * no prompt ever appears again this session — the dead token stayed primed,
+     * the dialog never flipped to onboarding, and the rejection escaped through
+     * submit() as an unhandled promise rejection. Storage is the least critical
+     * of the four steps, so it must never be the one that blocks the other three.
+     */
+    it("finishes the handover and resolves even when the storage clear rejects", async () => {
+      seedStorage();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      // A family-gone join short-circuits runReauthJoin before its cooldown
+      // remove, so this is the flow's ONLY storage.local.remove: the
+      // `[FAMILY_ID_KEY]` clear inside clearFamilyStorageAndBroadcast.
+      vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(
+        new Error("Extension context invalidated"),
+      );
+      const apiClient = goneApiClient("MEMBER_REMOVED");
+      const { result } = renderHook(() => useReauth(apiClient));
+
+      await triggerReauth(apiClient, result);
+      await act(async () => {
+        // An escaping rejection here is the unhandled-rejection half of the bug.
+        await expect(result.current.submit("1234")).resolves.toBeUndefined();
+      });
+
+      // The clear really was attempted and really did fail.
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([FAMILY_ID_KEY]);
+      // ...and every step after it still ran. Releasing the latch is the one
+      // that must not be skipped, or re-auth is muted for the whole session.
+      expect(apiClient.clearReauthPending).toHaveBeenCalledTimes(1);
+      expect(apiClient.setAuthToken).toHaveBeenCalledWith(null);
+      expect(apiClient.onFamilyRemoved).toHaveBeenCalledTimes(1);
+      // Swallowed, not silenced — the failure stays on the record.
+      expect(warn).toHaveBeenCalledTimes(1);
+      // The prompt is gone regardless of the storage outcome: with the family
+      // gone there is nothing left to type.
+      expect(result.current.active).toBe(false);
+    });
+
+    /**
+     * The mirror image, and the reason the classification has to be exact: a
+     * retryable refusal must NEVER drop the user's family data (Invariant 2).
+     */
+    it.each(["VERIFICATION_FAILED", "RATE_LIMITED"])(
+      "keeps the family binding intact on a retryable %s refusal",
+      async (errorCode) => {
+        seedStorage();
+        const apiClient = createApiClient({
+          joinFamily: vi.fn().mockResolvedValue({
+            error: { code: errorCode, message: "nope" },
+          }),
+          onFamilyRemoved: vi.fn(),
+        });
+        const { result } = renderHook(() => useReauth(apiClient));
+
+        await triggerReauth(apiClient, result);
+        await act(async () => {
+          await result.current.submit("0000");
+        });
+
+        expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
+          FAMILY_ID_KEY,
+        ]);
+        expect(chrome.storage.sync.remove).not.toHaveBeenCalled();
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({
+          type: "FAMILY_REMOVED",
+        });
+        expect(apiClient.onFamilyRemoved).not.toHaveBeenCalled();
+        // The user can still correct the secret / wait out the window.
+        expect(result.current.active).toBe(true);
+      },
+    );
   });
 
   it("no-ops the reauth signal when userId or familyId is missing from storage", async () => {

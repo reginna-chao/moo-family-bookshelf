@@ -8,10 +8,18 @@
  * VerificationPrompt) and wires `apiClient.onReauthRequired`. On completion it
  * re-joins the family with the collected secret, persists the fresh token, and
  * dismisses the prompt so the user continues exactly where they were.
+ *
+ * When that re-join is refused with a family-gone code instead, the local family
+ * data is cleared and the dialog falls back to onboarding — see
+ * `tearDownGoneFamily`. That branch is not hypothetical: the server's
+ * verification gate runs BEFORE its kicked-tombstone check, so a removed member
+ * whose account has verification configured cannot learn of the removal until
+ * they have supplied a valid secret.
  */
 
 import { useEffect } from "react";
 import browser from "webextension-polyfill";
+import { clearFamilyStorageAndBroadcast } from "../api/auth-refresh";
 import type { ApiClient } from "../api/client";
 import {
   USER_ID_KEY,
@@ -59,6 +67,7 @@ async function runReauthJoin(
       ok: false,
       errorCode: res.error.code,
       retryAfter: res.error.retryAfter,
+      errorMessage: res.error.message,
     };
   }
   const authToken = res.data?.authToken;
@@ -76,6 +85,38 @@ async function runReauthJoin(
   await browser.storage.local.remove(RECOVERY_COOLDOWN_UNTIL_KEY);
   onSuccess?.();
   return { ok: true };
+}
+
+/**
+ * Tear down the local family binding after a re-verification join came back with
+ * a family-gone code (family deleted / full / owner removed this member).
+ *
+ * The secret was CORRECT here — the silent recovery never got past the server's
+ * verification gate, so the refusal only surfaces once the user has typed a
+ * valid PIN/pattern. Without this teardown the prompt would keep re-offering the
+ * same input and the user would loop on "correct secret → error" for as long as
+ * the server's kicked tombstone lives (6h).
+ */
+async function tearDownGoneFamily(apiClient: ApiClient): Promise<void> {
+  try {
+    await clearFamilyStorageAndBroadcast();
+  } catch (err) {
+    // `storage.local.remove` inside is unguarded, so this can reject. Swallow
+    // it: a storage failure must not strand the latch — a stale one mutes every
+    // later 401 for the rest of the session and the view never flips.
+    console.warn("[Reauth] Family teardown storage clear failed", err);
+  } finally {
+    // The 401 path that raised this prompt already nulled the token; repeated
+    // here because this hook owns the client's state rather than inheriting it
+    // from whoever ran before (and `onFamilyRemoved` below is optional).
+    apiClient.setAuthToken(null);
+    // Release the latch BEFORE handing over: while it is set every later 401
+    // skips silent recovery, so a stale one would mute re-auth for good.
+    apiClient.clearReauthPending();
+    // Last, so the dialog only flips to onboarding once storage and the client
+    // are already consistent with "this user has no family".
+    apiClient.onFamilyRemoved?.();
+  }
 }
 
 export function useReauth(
@@ -131,6 +172,9 @@ export function useReauth(
             onCancel: () => {
               apiClient.clearReauthPending();
             },
+            // The gate answers before the server's kicked-tombstone check, so a
+            // removed member reaches this verdict only after passing it.
+            onFamilyGone: () => tearDownGoneFamily(apiClient),
           },
           blocked?.retryAfter,
         );

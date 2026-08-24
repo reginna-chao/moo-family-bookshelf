@@ -28,8 +28,9 @@ function makeCtx(
   retry: VerificationContext["retry"],
   onCancel: () => void = vi.fn(),
   onAttemptFailed?: () => void,
+  onFamilyGone?: VerificationContext["onFamilyGone"],
 ): VerificationContext {
-  return { userId: "user-1", retry, onCancel, onAttemptFailed };
+  return { userId: "user-1", retry, onCancel, onAttemptFailed, onFamilyGone };
 }
 
 /** A retry closure the test can settle by hand, to interleave unmount/begin. */
@@ -696,6 +697,331 @@ describe("useVerificationPrompt", () => {
       // Every failed attempt restores the prompt — not just the first.
       expect(onAttemptFailed).toHaveBeenCalledTimes(2);
       expect(result.current.error).toBe("驗證失敗，請重新輸入");
+    });
+  });
+
+  /**
+   * TERMINAL refusal (the join target is gone for THIS user). The backend only
+   * answers a re-join with a family-gone code AFTER its verification gate has
+   * passed — the gate runs BEFORE the kicked-tombstone check — so the user who
+   * sees one has just typed the CORRECT secret. No retry can succeed, and the
+   * generic failure handling below would re-offer the same input: the user then
+   * loops on "correct secret → error" until the server's tombstone expires (6h).
+   *
+   * `onFamilyGone` is the escape: the prompt tears itself down and hands the
+   * verdict (plus the server's own wording) to the caller, who owns the side
+   * effects. Flows that do not pass one keep the old behaviour verbatim.
+   */
+  describe("onFamilyGone (terminal refusal)", () => {
+    /**
+     * Arbitrary backend-style message — these tests assert PASS-THROUGH (that
+     * whatever the server said reaches the caller untouched), not production
+     * copy. It is never compared against a worker literal, so it is
+     * deliberately NOT claimed to be the server's own wording.
+     */
+    const SERVER_MESSAGE = "你已被家庭管理者移出，無法重新加入";
+
+    it.each(["MEMBER_REMOVED", "FAMILY_NOT_FOUND", "FAMILY_FULL"])(
+      "closes the prompt and hands %s to the caller instead of inviting a retry",
+      async (errorCode) => {
+        const api = createMockApiClient();
+        const onAttemptFailed = vi.fn();
+        const onFamilyGone = vi.fn();
+        const retry = vi.fn().mockResolvedValue({
+          ok: false,
+          errorCode,
+          errorMessage: SERVER_MESSAGE,
+        });
+        const { result } = renderHook(() => useVerificationPrompt(api));
+
+        await act(async () => {
+          await result.current.begin(
+            "VERIFICATION_REQUIRED",
+            makeCtx(retry, vi.fn(), onAttemptFailed, onFamilyGone),
+          );
+        });
+        await act(async () => {
+          await result.current.submit("123456");
+        });
+
+        expect(onFamilyGone).toHaveBeenCalledTimes(1);
+        expect(onFamilyGone).toHaveBeenCalledWith(errorCode, SERVER_MESSAGE);
+        // Torn down, not merely errored: a retryable-looking prompt would
+        // invite the input loop this branch exists to break.
+        expect(result.current.active).toBe(false);
+        expect(result.current.method).toBeNull();
+        expect(result.current.error).toBe("");
+        expect(result.current.locked).toBe(false);
+        expect(result.current.submitting).toBe(false);
+        // The restore-view callback must NOT run — it would put the caller back
+        // on the very flow onFamilyGone is unwinding.
+        expect(onAttemptFailed).not.toHaveBeenCalled();
+      },
+    );
+
+    it("passes an undefined message through when the backend sent none", async () => {
+      const api = createMockApiClient();
+      const onFamilyGone = vi.fn();
+      const retry = vi
+        .fn()
+        .mockResolvedValue({ ok: false, errorCode: "MEMBER_REMOVED" });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(retry, vi.fn(), undefined, onFamilyGone),
+        );
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+
+      // An older / self-hosted backend explains nothing; the caller decides what
+      // fallback copy to show, so the controller must not invent one.
+      expect(onFamilyGone).toHaveBeenCalledWith("MEMBER_REMOVED", undefined);
+      expect(result.current.active).toBe(false);
+    });
+
+    it("keeps the generic retryable failure for a flow that supplies no onFamilyGone", async () => {
+      const api = createMockApiClient();
+      const onAttemptFailed = vi.fn();
+      const retry = vi.fn().mockResolvedValue({
+        ok: false,
+        errorCode: "MEMBER_REMOVED",
+        errorMessage: SERVER_MESSAGE,
+      });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(retry, vi.fn(), onAttemptFailed),
+        );
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+
+      // Pre-existing call sites are untouched: prompt open, view restored,
+      // generic message — exactly the behaviour before onFamilyGone existed.
+      expect(result.current.active).toBe(true);
+      expect(result.current.error).toBe("發生錯誤，請稍後再試");
+      expect(onAttemptFailed).toHaveBeenCalledTimes(1);
+    });
+
+    it("awaits an async onFamilyGone before the submit resolves", async () => {
+      const api = createMockApiClient();
+      // The real teardown writes storage and broadcasts; callers sequence their
+      // own work after it, which only holds if the controller awaits it.
+      const log: string[] = [];
+      const onFamilyGone = vi.fn(async () => {
+        log.push("teardown:start");
+        await Promise.resolve();
+        log.push("teardown:end");
+      });
+      const retry = vi
+        .fn()
+        .mockResolvedValue({ ok: false, errorCode: "MEMBER_REMOVED" });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(retry, vi.fn(), undefined, onFamilyGone),
+        );
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+        log.push("submit:resolved");
+      });
+
+      expect(log).toEqual([
+        "teardown:start",
+        "teardown:end",
+        "submit:resolved",
+      ]);
+    });
+
+    it("stays torn down and resolves when the caller's onFamilyGone rejects", async () => {
+      const api = createMockApiClient();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      // The real handler clears storage and broadcasts, so it can reject; the
+      // controller must not adopt a caller's failure as its own.
+      const onFamilyGone = vi
+        .fn()
+        .mockRejectedValue(new Error("Extension context invalidated"));
+      const onAttemptFailed = vi.fn();
+      const retry = vi.fn().mockResolvedValue({
+        ok: false,
+        errorCode: "MEMBER_REMOVED",
+        errorMessage: SERVER_MESSAGE,
+      });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(retry, vi.fn(), onAttemptFailed, onFamilyGone),
+        );
+      });
+      await act(async () => {
+        // Awaiting the callback unguarded made its rejection submit()'s own, so
+        // it escaped into whatever fired onComplete as an unhandled rejection.
+        await expect(result.current.submit("123456")).resolves.toBeUndefined();
+      });
+
+      expect(onFamilyGone).toHaveBeenCalledTimes(1);
+      // Contained, not hidden.
+      expect(warn).toHaveBeenCalledTimes(1);
+      // reset() runs BEFORE the handover, so a rejecting caller can neither
+      // strand the prompt on 「驗證中…」 nor re-open an input no secret can
+      // satisfy — the teardown stands on its own.
+      expect(result.current.active).toBe(false);
+      expect(result.current.submitting).toBe(false);
+      expect(result.current.method).toBeNull();
+      expect(result.current.error).toBe("");
+      expect(result.current.locked).toBe(false);
+      // Still terminal: restoring the caller's view would put it back on the
+      // very flow onFamilyGone was unwinding, failed teardown or not.
+      expect(onAttemptFailed).not.toHaveBeenCalled();
+    });
+
+    it("cannot be re-submitted after the teardown (the context is gone)", async () => {
+      const api = createMockApiClient();
+      const onFamilyGone = vi.fn();
+      const retry = vi
+        .fn()
+        .mockResolvedValue({ ok: false, errorCode: "MEMBER_REMOVED" });
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(retry, vi.fn(), undefined, onFamilyGone),
+        );
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+      await act(async () => {
+        await result.current.submit("123456");
+      });
+
+      // A second join would re-spend the server's join budget for a membership
+      // that no longer exists.
+      expect(retry).toHaveBeenCalledTimes(1);
+      expect(onFamilyGone).toHaveBeenCalledTimes(1);
+    });
+
+    it("does NOT fire for an attempt superseded by a newer begin()", async () => {
+      const api = createMockApiClient();
+      const onFamilyGone = vi.fn();
+      const deferred = deferredRetry();
+      const { result } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(deferred.retry, vi.fn(), undefined, onFamilyGone),
+        );
+      });
+      let submitPromise: Promise<void> = Promise.resolve();
+      act(() => {
+        submitPromise = result.current.submit("123456");
+      });
+
+      // A new challenge (different flow) takes over while the first is pending.
+      await act(async () => {
+        await result.current.begin("VERIFICATION_REQUIRED", makeCtx(vi.fn()));
+      });
+      await act(async () => {
+        deferred.resolve({ ok: false, errorCode: "MEMBER_REMOVED" });
+        await submitPromise;
+      });
+
+      // Tearing down a family binding on behalf of a session the user already
+      // left is a data-loss bug, not a late notification.
+      expect(onFamilyGone).not.toHaveBeenCalled();
+      expect(result.current.active).toBe(true);
+    });
+
+    it("does NOT fire when the prompt unmounted while the attempt was in flight", async () => {
+      const api = createMockApiClient();
+      const onFamilyGone = vi.fn();
+      const deferred = deferredRetry();
+      const { result, unmount } = renderHook(() => useVerificationPrompt(api));
+
+      await act(async () => {
+        await result.current.begin(
+          "VERIFICATION_REQUIRED",
+          makeCtx(deferred.retry, vi.fn(), undefined, onFamilyGone),
+        );
+      });
+      let submitPromise: Promise<void> = Promise.resolve();
+      act(() => {
+        submitPromise = result.current.submit("123456");
+      });
+
+      unmount();
+      await act(async () => {
+        deferred.resolve({ ok: false, errorCode: "MEMBER_REMOVED" });
+        await submitPromise;
+      });
+
+      expect(onFamilyGone).not.toHaveBeenCalled();
+    });
+
+    describe("countdown cleanup", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      });
+
+      it("clears a running 429 countdown when the next attempt is refused for good", async () => {
+        const api = createMockApiClient();
+        const onFamilyGone = vi.fn();
+        const retry = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            errorCode: "RATE_LIMITED",
+            retryAfter: 300,
+          })
+          .mockResolvedValueOnce({
+            ok: false,
+            errorCode: "MEMBER_REMOVED",
+            errorMessage: SERVER_MESSAGE,
+          });
+        const { result } = renderHook(() => useVerificationPrompt(api));
+
+        await act(async () => {
+          await result.current.begin(
+            "VERIFICATION_REQUIRED",
+            makeCtx(retry, vi.fn(), undefined, onFamilyGone),
+          );
+        });
+        await act(async () => {
+          await result.current.submit("123456");
+        });
+        expect(result.current.countdownSeconds).toBe(300);
+        expect(vi.getTimerCount()).toBe(1);
+
+        await act(async () => {
+          await result.current.submit("654321");
+        });
+
+        // The teardown must take the ticker with it — a surviving interval
+        // outlives the prompt it belongs to.
+        expect(onFamilyGone).toHaveBeenCalledTimes(1);
+        expect(result.current.active).toBe(false);
+        expect(result.current.countdownSeconds).toBeNull();
+        expect(vi.getTimerCount()).toBe(0);
+      });
     });
   });
 
