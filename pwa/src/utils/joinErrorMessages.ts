@@ -45,7 +45,8 @@ export const FAMILY_FULL_MESSAGE = "家庭成員已達上限（每個家庭最�
  *
  * Test anchoring: `pwa/tests/component/App.test.tsx` renders every entry
  * through the landing page via THIS map (its key-set tripwire fails on a
- * removed or renamed code); `FAMILY_FULL` is additionally pinned verbatim by
+ * removed or renamed code); the copy itself is pinned verbatim by
+ * `pwa/tests/unit/joinErrorMessages.test.ts`, and `FAMILY_FULL` additionally by
  * `pwa/tests/component/LandingPage.test.tsx`.
  */
 export const JOIN_BLOCKED_MESSAGES: ReadonlyMap<string, string> = new Map([
