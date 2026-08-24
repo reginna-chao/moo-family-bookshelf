@@ -19,6 +19,16 @@ interface StatusStyle {
   className: string;
 }
 
+/**
+ * Runtime-reachable fallback with a compile-time exhaustiveness tripwire:
+ * `status` narrows to `never` here only while every BorrowStatus member has a
+ * case above, so adding a 6th member fails the build instead of silently
+ * shipping 「狀態未知」.
+ */
+function unknownStatusStyle(_status: never): StatusStyle {
+  return { label: "狀態未知", className: "bg-gray-200 text-gray-600" };
+}
+
 function getStatusStyle(status: BorrowStatus): StatusStyle {
   switch (status) {
     case BorrowStatus.PENDING:
@@ -31,6 +41,10 @@ function getStatusStyle(status: BorrowStatus): StatusStyle {
       return { label: "已拒絕", className: "bg-red-100 text-red-700" };
     case BorrowStatus.CANCELLED:
       return { label: "已取消", className: "bg-gray-200 text-gray-500" };
+    // `status` arrives unvalidated from a user-configurable backend, so an
+    // out-of-enum value must degrade to a neutral badge, not crash the render.
+    default:
+      return unknownStatusStyle(status);
   }
 }
 
