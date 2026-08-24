@@ -650,18 +650,31 @@ describe("PersonalShelf", () => {
   });
 
   describe("error state", () => {
+    /**
+     * Render, then settle the failed load before asserting on it.
+     *
+     * The rejection → setErrorMessage/setStatus("error") → commit chain runs
+     * outside React's knowledge (usePersonalBooks' load effect). A bare
+     * `waitFor` is not a barrier for it — it polls with the act environment
+     * disabled on a 1s budget, which CPU contention alone can outrun. Only
+     * `act` guarantees pending effects have flushed on exit, after which a
+     * getBy fails loudly instead of timing out.
+     */
+    async function renderSettledFailedLoad(apiClient: ApiClient) {
+      await act(async () => {
+        render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      });
+    }
+
     it("shows error message when the load (API fetch) fails", async () => {
       const apiClient = createMockApiClient({
         getPersonalBooks: vi.fn().mockRejectedValue(new Error("Load failed")),
       });
       seedCache(DEFAULT_BOOKS);
 
-      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      await renderSettledFailedLoad(apiClient);
 
-      await waitFor(() => {
-        expect(screen.getByText("Load failed")).toBeInTheDocument();
-      });
-
+      expect(screen.getByText("Load failed")).toBeInTheDocument();
       // Should show a return button
       expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
     });
@@ -672,11 +685,9 @@ describe("PersonalShelf", () => {
       });
       setSyncBooks([]);
 
-      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      await renderSettledFailedLoad(apiClient);
 
-      await waitFor(() => {
-        expect(screen.getByText("Error test")).toBeInTheDocument();
-      });
+      expect(screen.getByText("Error test")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "返回" }));
 
@@ -691,11 +702,9 @@ describe("PersonalShelf", () => {
       });
       seedCache(DEFAULT_BOOKS);
 
-      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      await renderSettledFailedLoad(apiClient);
 
-      await waitFor(() => {
-        expect(screen.getByText("載入失敗")).toBeInTheDocument();
-      });
+      expect(screen.getByText("載入失敗")).toBeInTheDocument();
     });
   });
 

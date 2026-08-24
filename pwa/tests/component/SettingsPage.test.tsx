@@ -6,6 +6,7 @@ import {
   fireEvent,
   waitFor,
   within,
+  act,
 } from "@testing-library/react";
 import React from "react";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -140,14 +141,16 @@ describe("SettingsPage", () => {
   });
 
   it("copy sync code changes button text to '已複製'", async () => {
-    renderWithProvider();
-
-    // Wait for async member loading to settle
-    await waitFor(() => {
-      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    // act is the readiness barrier: on exit the member-load effects have been
+    // flushed. A `queryByText("載入中...")` waiter only proves the spinner left
+    // the DOM, which is not the same as the load's effects having committed.
+    await act(async () => {
+      renderWithProvider();
     });
+    // getBy, not findBy: the settled view must be committed, not merely coming.
+    const copyButton = screen.getByRole("button", { name: "複製同步碼" });
 
-    fireEvent.click(screen.getByRole("button", { name: "複製同步碼" }));
+    fireEvent.click(copyButton);
 
     // Clipboard now receives a welcome message that embeds the sync code
     // (full wording is covered by inviteMessages.test.ts).

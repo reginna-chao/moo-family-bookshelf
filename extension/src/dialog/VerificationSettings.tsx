@@ -37,6 +37,14 @@ export function VerificationSettings({
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
   const [otpCountdown, setOtpCountdown] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Pending "saved" → "idle" reset; cleared on unmount and before rescheduling. */
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,7 +103,8 @@ export function VerificationSettings({
       setShowSetup(false);
       setShowNoneWarning(false);
       setSaveState("saved");
-      setTimeout(() => setSaveState("idle"), 2000);
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState("idle"), 2000);
     },
     [userId, apiClient],
   );
