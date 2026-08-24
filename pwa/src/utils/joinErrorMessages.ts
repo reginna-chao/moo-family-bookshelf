@@ -19,9 +19,13 @@ export const FAMILY_FULL_MESSAGE = "家庭成員已達上限（每個家庭最�
  * Token-recovery join failures the landing page explains. Every one of them is
  * terminal — retrying the join cannot succeed.
  *
- *  - FAMILY_FULL    — no seat left to rejoin.
- *  - MEMBER_REMOVED — the owner removed this member and the server's kicked
- *                     tombstone is refusing the rejoin.
+ *  - FAMILY_FULL       — no seat left to rejoin.
+ *  - MEMBER_REMOVED    — the owner removed this member and the server's kicked
+ *                        tombstone is refusing the rejoin.
+ *  - FAMILY_NOT_FOUND  — the family was dissolved (or never existed), so there
+ *                        is no record left for a rejoin to land in.
+ *  - ALREADY_IN_FAMILY — the stored familyId no longer matches this account's
+ *                        actual membership; only leaving the other family helps.
  *
  * A `Map`, NOT an object literal, on purpose: the lookup key is `error.code`
  * straight off the wire, and a hostile or buggy self-hosted backend is an
@@ -35,14 +39,19 @@ export const FAMILY_FULL_MESSAGE = "家庭成員已達上限（每個家庭最�
  * `extension/src/api/auth-refresh.ts` (`FAMILY_GONE_ERROR_CODES`).
  *
  * Only the token-recovery path consults the whole table. The manual-join path
- * deliberately reuses `FAMILY_FULL_MESSAGE` alone and lets `MEMBER_REMOVED`
- * fall through to its generic branch, which shows the server's own message —
- * do not reroute it here.
+ * deliberately reuses `FAMILY_FULL_MESSAGE` alone and lets the other three fall
+ * through to its generic branch, which shows the server's own message — do not
+ * reroute them here.
  *
- * These strings are asserted verbatim by `pwa/tests/component/App.test.tsx` and
- * `pwa/tests/component/LandingPage.test.tsx`; editing one fails those tests.
+ * Test anchoring: `pwa/tests/component/App.test.tsx` renders every entry
+ * through the landing page via THIS map (its key-set tripwire fails on a
+ * removed or renamed code); the copy itself is pinned verbatim by
+ * `pwa/tests/unit/joinErrorMessages.test.ts`, and `FAMILY_FULL` additionally by
+ * `pwa/tests/component/LandingPage.test.tsx`.
  */
 export const JOIN_BLOCKED_MESSAGES: ReadonlyMap<string, string> = new Map([
   ["FAMILY_FULL", FAMILY_FULL_MESSAGE],
   ["MEMBER_REMOVED", "你已被家庭管理者移出，已為你登出"],
+  ["FAMILY_NOT_FOUND", "找不到這個家庭，家庭可能已被解散"],
+  ["ALREADY_IN_FAMILY", "此帳號已加入其他家庭，請先離開原本的家庭"],
 ]);
