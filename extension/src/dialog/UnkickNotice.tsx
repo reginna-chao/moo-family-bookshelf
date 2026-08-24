@@ -13,7 +13,8 @@ import type { ApiClient } from "../api/client";
  * tombstone，**不會**把對方加回家庭——對方仍須自己輸入同步碼。
  */
 
-// Re-exported so existing import sites (including tests) keep pointing here.
+// Re-exported so tests can treat this component as the single import entry
+// for its copy, instead of also reaching into shared/.
 export {
   buildRemovedNoticeText,
   buildUnkickedNoticeText,
