@@ -235,4 +235,106 @@ describe("MemberList", () => {
     expect(screen.getByText("user-own")).toBeInTheDocument();
     expect(screen.getByText("user-mem")).toBeInTheDocument();
   });
+
+  /**
+   * The parent owns the "lift the rejoin block" entry (see UnkickNotice), so a
+   * successful removal must hand it the target's id AND a label resolved from
+   * the list that is about to be refreshed away. A report on a FAILED removal
+   * would offer to un-kick someone who was never kicked.
+   */
+  describe("onMemberRemoved reporting", () => {
+    it("reports the removed member's id and display name on success", async () => {
+      const apiClient = createMockApiClient();
+      const onMemberRemoved = vi.fn();
+      renderMemberList({
+        apiClient,
+        onMemberRemoved,
+        members: [
+          { userId: "user-owner123", displayName: "小明" },
+          { userId: "user-member456", displayName: "大明" },
+        ],
+      });
+
+      fireEvent.click(screen.getByText("移除"));
+      fireEvent.click(screen.getByText("確定"));
+
+      await waitFor(() => {
+        expect(onMemberRemoved).toHaveBeenCalledWith({
+          userId: "user-member456",
+          displayName: "大明",
+          // Stamped per removal so the parent's notice can tell a second
+          // removal of the SAME member apart from the first (see FamilySettings).
+          removedAt: expect.any(Number),
+        });
+      });
+      expect(onMemberRemoved).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports the userId prefix when the member has no display name", async () => {
+      const onMemberRemoved = vi.fn();
+      renderMemberList({ onMemberRemoved });
+
+      fireEvent.click(screen.getByText("移除"));
+      fireEvent.click(screen.getByText("確定"));
+
+      await waitFor(() => {
+        expect(onMemberRemoved).toHaveBeenCalledWith({
+          userId: "user-member456",
+          displayName: "user-mem",
+          removedAt: expect.any(Number),
+        });
+      });
+    });
+
+    it("does not report when the server refuses the removal", async () => {
+      const apiClient = createMockApiClient({
+        removeMember: vi.fn().mockResolvedValue({
+          error: { code: "FORBIDDEN", message: "權限不足" },
+        }),
+      });
+      const onMemberRemoved = vi.fn();
+      renderMemberList({ apiClient, onMemberRemoved });
+
+      fireEvent.click(screen.getByText("移除"));
+      fireEvent.click(screen.getByText("確定"));
+
+      await waitFor(() => {
+        expect(screen.getByText("權限不足")).toBeInTheDocument();
+      });
+      expect(onMemberRemoved).not.toHaveBeenCalled();
+    });
+
+    it("does not report when the removal request throws", async () => {
+      const apiClient = createMockApiClient({
+        removeMember: vi.fn().mockRejectedValue(new Error("Failed to fetch")),
+      });
+      const onMemberRemoved = vi.fn();
+      renderMemberList({ apiClient, onMemberRemoved });
+
+      fireEvent.click(screen.getByText("移除"));
+      fireEvent.click(screen.getByText("確定"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Failed to fetch")).toBeInTheDocument();
+      });
+      expect(onMemberRemoved).not.toHaveBeenCalled();
+    });
+
+    it("still removes and refreshes when the parent passes no callback", async () => {
+      const apiClient = createMockApiClient();
+      const onMembersChanged = vi.fn();
+      renderMemberList({ apiClient, onMembersChanged });
+
+      fireEvent.click(screen.getByText("移除"));
+      fireEvent.click(screen.getByText("確定"));
+
+      await waitFor(() => {
+        expect(apiClient.removeMember).toHaveBeenCalledWith(
+          "fam-123",
+          "user-member456",
+        );
+        expect(onMembersChanged).toHaveBeenCalled();
+      });
+    });
+  });
 });

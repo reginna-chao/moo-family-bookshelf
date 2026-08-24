@@ -45,7 +45,7 @@ import { jsonError } from "../utils/errors";
 
 export const familyRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
-/** Shared per-userId write ceiling for the five family-domain write handlers. */
+/** Shared per-userId write ceiling for the six family-domain write handlers. */
 export const FAMILY_WRITE_LIMIT = {
   scope: "family-write",
   max: 30,
@@ -116,7 +116,9 @@ const removeMemberRoute = createRoute({
     "caller) writes no tombstone — leave-then-rejoin stays legitimate. The " +
     "tombstone is also written when the owner targets a userId that is not in " +
     "the family, so a retry after a partly-failed removal still applies the " +
-    "ban even though the response is 404 `MEMBER_NOT_FOUND`.",
+    "ban even though the response is 404 `MEMBER_NOT_FOUND`. A removal made by " +
+    "mistake does not have to be waited out: the owner can lift the ban at any " +
+    "time with `DELETE /{id}/kicked/{uid}`.",
   request: {
     params: z.object({ id: z.string(), uid: z.string() }),
   },
@@ -128,6 +130,36 @@ const removeMemberRoute = createRoute({
     404: jsonRes("Family or member not found"),
     429: jsonRes("Rate limited"),
     500: jsonRes("Borrow cleanup failed"),
+  },
+});
+
+const clearKickedRoute = createRoute({
+  method: "delete",
+  path: "/{id}/kicked/{uid}",
+  tags: ["Family"],
+  summary: "Clear a member's removal tombstone (un-kick)",
+  description:
+    "Owner-only remedy for a removal made by mistake: deletes " +
+    "`kicked:{id}:{uid}`, so that userId can `POST /{id}/join` again straight " +
+    "away instead of waiting out the 6-hour tombstone TTL. Idempotent — the " +
+    "tombstone is deleted without being read, so a call for a userId that was " +
+    "never removed (or whose tombstone already expired) also answers 200 " +
+    "`{ cleared: 1 }`; the response never reveals whether a tombstone existed. " +
+    "Lifting the ban does NOT re-add the member: they rejoin themselves with " +
+    "the sync code, so security-ux Invariant 4 (removal is immediate and only " +
+    "reversible by an explicit rejoin) still holds. Cross-family safety: the " +
+    "key deleted is derived from the path `id`, and the caller must be the " +
+    "owner OF THAT `id`, so no caller can clear a tombstone of another family.",
+  request: {
+    params: z.object({ id: z.string(), uid: z.string() }),
+  },
+  responses: {
+    200: jsonRes("Kicked tombstone cleared"),
+    400: jsonRes("Invalid input"),
+    401: jsonRes("Unauthorized"),
+    403: jsonRes("Not the owner"),
+    404: jsonRes("Family not found"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -464,7 +496,9 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   //
   // The owner removed this userId from this family within the last
   // KICKED_TOMBSTONE_TTL_SECONDS. Refuse the (re)join for as long as the
-  // tombstone lives; after it expires, a sync-code rejoin is legitimate again.
+  // tombstone lives; once it is gone — it expired, or the owner lifted the ban
+  // via DELETE /api/family/:id/kicked/:uid — a sync-code rejoin is legitimate
+  // again.
   //
   // Placement AFTER the verification gate is deliberate: backend rules forbid
   // new pre-gate disclosures. "This userId was recently removed from this
@@ -555,8 +589,9 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   }
 
   // Per-userId write ceiling: 30 family-domain writes per userId per hour,
-  // shared by remove-member / displayName / member-settings / transfer /
-  // endpoint under one "family-write" scope. Layered on top of the per-IP limit.
+  // shared by remove-member / un-kick / displayName / member-settings /
+  // transfer / endpoint under one "family-write" scope. Layered on top of the
+  // per-IP limit.
   //
   // Charged to the AUTHENTICATED caller, never to the `:uid` path param: a
   // counter keyed on someone else's id is a victim-facing DoS lever — the same
@@ -578,7 +613,7 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   // (Cloudflare WAF rate limiting, see docs/architecture.md and
   // worker/DEPLOY.md).
   //
-  // Placement rule, uniform across all five handlers: the charge sits AFTER
+  // Placement rule, uniform across all six handlers: the charge sits AFTER
   // every zero-I/O guard (path-format validation, the 401, and displayName's
   // pure self-only 403) and BEFORE the first KV read or body parse. A
   // permission check that needs a KV read therefore lands AFTER the charge —
@@ -687,6 +722,72 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   return c.json({ data: record });
 });
 
+// DELETE /api/family/:id/kicked/:uid — owner lifts a removal ban (un-kick)
+familyRoutes.openapi(clearKickedRoute, async (c) => {
+  const familyId = c.req.param("id");
+  const targetUserId = c.req.param("uid");
+
+  if (!isValidFamilyId(familyId)) {
+    return jsonError(
+      c,
+      400,
+      "INVALID_FAMILY_ID",
+      "Family ID format is invalid",
+    );
+  }
+
+  const callerId = getAuthenticatedUserId(c);
+
+  if (!callerId) {
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
+  }
+
+  if (!isValidUserId(targetUserId)) {
+    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
+  }
+
+  // Shared "family-write" per-userId write ceiling (30/hr across the six family
+  // write handlers) — see the DELETE member handler for rationale. Charged to
+  // the AUTHENTICATED caller, never to the `:uid` path param: a counter keyed
+  // on someone else's id would be a victim-facing DoS lever. Same placement as
+  // its siblings — after every zero-I/O guard, before the first KV read.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId: callerId,
+    ...FAMILY_WRITE_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const raw = await c.env.KV.get<RawFamilyRecord>(
+    kvKeys.family(familyId),
+    "json",
+  );
+
+  if (!raw) {
+    return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
+  }
+
+  const record = normalizeFamilyRecord(raw);
+
+  if (callerId !== record.ownerId) {
+    return jsonError(c, 403, "NOT_OWNER", "只有管理者可以解除移除限制");
+  }
+
+  // Idempotent by design: the tombstone is never read first, and deleting an
+  // absent key is a no-op, so a retry after a failed call — or a call for a
+  // userId that was never removed — behaves identically and answers 200. That
+  // also means the response discloses nothing about whether the target was
+  // kicked, to an owner who is by definition entitled to know anyway.
+  //
+  // Cross-family safety: the key is built from the path `id` the caller was
+  // just proven to own, so this can only ever clear a tombstone of THIS family.
+  //
+  // Not a re-add: the user is merely allowed to join again, which they must do
+  // themselves with the sync code (Invariant 4 stays intact).
+  await c.env.KV.delete(kvKeys.kicked(familyId, targetUserId));
+
+  return c.json({ data: { cleared: BoolFlag.TRUE } });
+});
+
 // GET /api/family/:id/members
 familyRoutes.openapi(listMembersRoute, async (c) => {
   const familyId = c.req.param("id");
@@ -753,7 +854,7 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
     return jsonError(c, 403, "FORBIDDEN", "只能修改自己的顯示名稱");
   }
 
-  // Shared "family-write" per-userId write ceiling (30/hr across the five family
+  // Shared "family-write" per-userId write ceiling (30/hr across the six family
   // write handlers) — see the DELETE member handler for rationale.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId: callerId,
@@ -832,7 +933,7 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Shared "family-write" per-userId write ceiling (30/hr across the five family
+  // Shared "family-write" per-userId write ceiling (30/hr across the six family
   // write handlers) — see the DELETE member handler for rationale.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId: callerId,
@@ -975,7 +1076,7 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Shared "family-write" per-userId write ceiling (30/hr across the five family
+  // Shared "family-write" per-userId write ceiling (30/hr across the six family
   // write handlers) — see the DELETE member handler for rationale.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId: callerUserId,
@@ -1153,7 +1254,7 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Shared "family-write" per-userId write ceiling (30/hr across the five family
+  // Shared "family-write" per-userId write ceiling (30/hr across the six family
   // write handlers) — see the DELETE member handler for rationale.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId: callerId,
@@ -1226,6 +1327,10 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
  * legitimate flow), and the sole-member owner-dissolve path never reaches a call
  * site. Enforcing that discriminator is the CALLER's job; this helper writes
  * unconditionally.
+ *
+ * Reversible before its TTL: the owner-only `DELETE /api/family/:id/kicked/:uid`
+ * handler deletes the same key, so a removal made by mistake is undone on demand
+ * instead of being waited out.
  *
  * FAIL-OPEN by design: a failed put is logged and swallowed, never surfaced as a
  * 500. On the post-removal call site the removal itself already succeeded and

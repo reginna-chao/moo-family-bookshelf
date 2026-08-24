@@ -9,7 +9,8 @@ import { FloatingIconSizeSelector } from "./FloatingIconSizeSelector";
 import { useAutoSyncInterval } from "./useAutoSyncInterval";
 import { AutoSyncIntervalSelector } from "./AutoSyncIntervalSelector";
 import { DisplayNameEditor } from "./DisplayNameEditor";
-import { MemberList } from "./MemberList";
+import { MemberList, type RemovedMemberInfo } from "./MemberList";
+import { UnkickNotice } from "./UnkickNotice";
 import { EndpointSwitchPanel } from "./EndpointSwitchPanel";
 import { useEndpointSwitch } from "./useEndpointSwitch";
 import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "../constants";
@@ -86,6 +87,15 @@ export function FamilySettings({
   const [deleteState, setDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
   const [syncArchived, setSyncArchived] = useState<number>(0);
+  /**
+   * The member removed most recently in THIS dialog session, kept only to offer
+   * the "lift the rejoin block" entry (see `UnkickNotice`). Deliberately local:
+   * closing the dialog forgets it, and a second removal replaces the first.
+   * Held here rather than inside `MemberList` so a failed member-list refresh —
+   * which unmounts `MemberList` — cannot swallow the entry.
+   */
+  const [recentlyRemoved, setRecentlyRemoved] =
+    useState<RemovedMemberInfo | null>(null);
   const { size: iconSize, setSize: setIconSize } = useFloatingIconSize();
   const { interval: autoSyncInterval, setInterval: setAutoSyncInterval } =
     useAutoSyncInterval();
@@ -391,7 +401,23 @@ export function FamilySettings({
                   void fetchMembers();
                   void refreshBookshelf();
                 }}
+                onMemberRemoved={setRecentlyRemoved}
                 familyEndpoint={familyEndpoint}
+              />
+            )}
+            {/* Outside the loading/error guard on purpose: the removal already
+                succeeded, so the entry must survive a failed member refresh.
+                `key` resets the notice's own request state per REMOVAL, not per
+                target: removing the same member again (after an un-kick and a
+                rejoin) must not leave the card stuck in its "cleared" state. */}
+            {recentlyRemoved && userId === ownerId && (
+              <UnkickNotice
+                key={`${recentlyRemoved.userId}:${recentlyRemoved.removedAt}`}
+                familyId={familyId}
+                targetUserId={recentlyRemoved.userId}
+                displayName={recentlyRemoved.displayName}
+                apiClient={apiClient}
+                onDismiss={() => setRecentlyRemoved(null)}
               />
             )}
             <div className="moo-settings__hint">

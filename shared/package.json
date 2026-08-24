@@ -9,7 +9,8 @@
     "./icons/*": "./src/icons/*",
     "./invite/*": "./src/invite/*",
     "./personal/*": "./src/personal/*",
-    "./publicShelf/*": "./src/publicShelf/*"
+    "./publicShelf/*": "./src/publicShelf/*",
+    "./unkick/*": "./src/unkick/*"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
