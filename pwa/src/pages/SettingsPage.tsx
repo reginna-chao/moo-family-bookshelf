@@ -9,7 +9,8 @@ import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "@/constants";
-import { MemberList } from "@/components/MemberList";
+import { MemberList, type RemovedMemberInfo } from "@/components/MemberList";
+import { UnkickNotice } from "@/components/UnkickNotice";
 import { namespacedKey, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import { useFamilyData } from "@/hooks/useFamilyData";
 import { rateLimitedEnvelopeMessage } from "@/utils/retryMessage";
@@ -129,6 +130,15 @@ export function SettingsPage({
   } = useFamilyData();
   const membersLoading = membersState === "loading";
   const membersError = ctxMembersError || null;
+  /**
+   * The member removed most recently in THIS page session, kept only to offer
+   * the "lift the rejoin block" entry (see `UnkickNotice`). Deliberately local:
+   * leaving the page forgets it, and a second removal replaces the first.
+   * Held here rather than inside `MemberList` so a failed member-list refresh —
+   * which unmounts `MemberList` — cannot swallow the entry.
+   */
+  const [recentlyRemoved, setRecentlyRemoved] =
+    useState<RemovedMemberInfo | null>(null);
 
   // --- Display name ---
   const [editingName, setEditingName] = useState(false);
@@ -422,7 +432,25 @@ export function SettingsPage({
                   void loadMembers();
                   void refreshBookshelf();
                 }}
+                onMemberRemoved={setRecentlyRemoved}
               />
+            )}
+            {/* Outside the loading/error guard on purpose: the removal already
+                succeeded, so the entry must survive a failed member refresh.
+                `key` resets the notice's own request state per REMOVAL, not per
+                target: removing the same member again (after an un-kick and a
+                rejoin) must not leave the card stuck in its "cleared" state. */}
+            {recentlyRemoved && userId === ownerId && (
+              <div className="px-3 py-2.5">
+                <UnkickNotice
+                  key={`${recentlyRemoved.userId}:${recentlyRemoved.removedAt}`}
+                  familyId={familyId}
+                  targetUserId={recentlyRemoved.userId}
+                  displayName={recentlyRemoved.displayName}
+                  apiClient={apiClient}
+                  onDismiss={() => setRecentlyRemoved(null)}
+                />
+              </div>
             )}
             <p className="text-gray-400 text-xs mt-1.5">
               基於讀墨家庭帳戶限制，每個家庭最多 2 位成員

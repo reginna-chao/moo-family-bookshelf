@@ -6,11 +6,15 @@ import {
   act,
   within,
 } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { FamilySettings, FamilySettingsProps } from "@/dialog/FamilySettings";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
-import { validateEndpointUrl, type ApiClient } from "@/api/client";
+import {
+  buildRemovedNoticeText,
+  buildUnkickedNoticeText,
+} from "@/dialog/UnkickNotice";
+import { BoolFlag, validateEndpointUrl, type ApiClient } from "@/api/client";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import {
   API_ENDPOINT_KEY,
@@ -19,12 +23,27 @@ import {
   DISPLAY_NAME_KEY,
 } from "@/constants";
 
+// FamilySettings mounts InviteQrCode, which does a real `await import("qrcode")`
+// plus a PNG encode on every mount (its effect keys on [inviteUrl], so it reruns
+// per mount / invite-URL change — src/dialog/InviteQrCode.tsx). Nothing in
+// this file asserts on QR output, so stub the encoder instead of paying module
+// resolution + encoding ~60 times per file run — that cost lands inside every
+// readiness barrier below. Shape mirrors tests/component/QrCodeLink.test.tsx.
+vi.mock("qrcode", () => ({
+  default: {
+    toDataURL: vi.fn().mockResolvedValue("data:image/png;base64,stub"),
+  },
+}));
+
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     createFamily: vi.fn(),
     joinFamily: vi.fn(),
     leaveFamily: vi.fn().mockResolvedValue({ data: { ok: true } }),
     removeMember: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    unkickMember: vi
+      .fn()
+      .mockResolvedValue({ data: { cleared: BoolFlag.TRUE } }),
     transferOwnership: vi.fn().mockResolvedValue({ data: { ok: true } }),
     getPersonalBooks: vi.fn(),
     updatePersonalBooks: vi.fn(),
@@ -558,6 +577,244 @@ describe("FamilySettings", () => {
 
     await waitFor(() => {
       expect(screen.getByText("權限不足")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * A removal writes a 6-hour server-side block on rejoining, so the owner gets
+   * an entry to lift it again right where the removal happened. It is owner-only
+   * (the endpoint refuses anyone else) and must outlive a failed member refresh,
+   * because by then the removal — and the block — already happened.
+   */
+  describe("un-kick entry after a removal", () => {
+    const SELF_ID = "user-abc12345";
+    const REMOVED_ID = "user-def67890";
+    const THIRD_ID = "user-ghi00000";
+
+    function membersResponse(ownerId: string) {
+      return {
+        data: {
+          familyId: "fam-123",
+          ownerId,
+          members: [
+            { userId: SELF_ID, displayName: "小明" },
+            { userId: REMOVED_ID, displayName: "大明" },
+            { userId: THIRD_ID, displayName: "阿華" },
+          ],
+          maxMembers: 6,
+          createdAt: "2026-01-01",
+        },
+      };
+    }
+
+    /**
+     * `removedAt` is what makes the notice's `key` unique PER REMOVAL, and the
+     * real clock can put two removals of the same member in the same
+     * millisecond. Pin it so the second-removal regression below actually
+     * exercises the remount instead of passing or failing on timing luck.
+     */
+    let restoreClock: (() => void) | null = null;
+
+    afterEach(() => {
+      restoreClock?.();
+      restoreClock = null;
+    });
+
+    function controlClock(startMs: number) {
+      let now = startMs;
+      const spy = vi.spyOn(Date, "now").mockImplementation(() => now);
+      restoreClock = () => spy.mockRestore();
+      return {
+        advance(ms: number) {
+          now += ms;
+        },
+      };
+    }
+
+    /**
+     * Confirm the removal of 大明 (the first non-self member in the list).
+     * The confirm click is wrapped in `act` so the whole chain it kicks off —
+     * removal → report to the parent → member/bookshelf refresh — has settled
+     * before the caller asserts; `waitFor` alone can pass on an intermediate
+     * render (the confirm dialog also hides the 移除 buttons).
+     */
+    async function removeSecondMember() {
+      await waitFor(() => {
+        expect(screen.getAllByText("移除").length).toBeGreaterThan(0);
+      });
+      fireEvent.click(screen.getAllByText("移除")[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText("確定")).toBeInTheDocument();
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText("確定"));
+      });
+    }
+
+    it("does not offer the entry before anything was removed", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(SELF_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await waitFor(() => {
+        expect(screen.getByText("大明")).toBeInTheDocument();
+      });
+
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("offers to lift the rejoin block, naming the member just removed", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(SELF_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildRemovedNoticeText("大明")),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("lifts the block for the removed member when the entry is used", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(SELF_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildRemovedNoticeText("大明")),
+        ).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "解除移除限制" }));
+
+      await waitFor(() => {
+        expect(apiClient.unkickMember).toHaveBeenCalledWith(
+          "fam-123",
+          REMOVED_ID,
+        );
+      });
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildUnkickedNoticeText("大明")),
+        ).toBeInTheDocument();
+      });
+    });
+
+    /**
+     * 解除限制後對方可以重新加入，也可能再被移除一次——這時後端寫了一個新的
+     * tombstone，通知卡必須回到 idle 把「解除移除限制」入口交還給管理者。若卡片
+     * 停在上一次的成功文案，管理者會以為第二次的限制也已經解除。
+     */
+    it("returns the entry to idle when the same member is removed again", async () => {
+      const clock = controlClock(1_700_000_000_000);
+      const apiClient = createMockApiClient({
+        // The refreshed list still holds 大明 — standing in for them rejoining
+        // with the sync code once the first block was lifted.
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(SELF_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildRemovedNoticeText("大明")),
+        ).toBeInTheDocument();
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "解除移除限制" }));
+      });
+      expect(
+        screen.getByText(buildUnkickedNoticeText("大明")),
+      ).toBeInTheDocument();
+
+      // 大明 rejoined; a minute later the owner removes them a second time.
+      clock.advance(60_000);
+      await removeSecondMember();
+
+      expect(
+        screen.getByText(buildRemovedNoticeText("大明")),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(buildUnkickedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "解除移除限制" }),
+      ).toBeEnabled();
+      // Only the FIRST block was lifted — the new one still stands.
+      expect(apiClient.unkickMember).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the entry when the member-list refresh fails afterwards", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi
+          .fn()
+          .mockResolvedValueOnce(membersResponse(SELF_ID))
+          .mockResolvedValue({
+            error: { code: "SERVER_ERROR", message: "載入成員失敗" },
+          }),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+
+      // The list itself is gone (error state), but the block was still written.
+      await waitFor(() => {
+        expect(screen.getByText("載入成員失敗")).toBeInTheDocument();
+      });
+      expect(
+        screen.getByText(buildRemovedNoticeText("大明")),
+      ).toBeInTheDocument();
+    });
+
+    it("withdraws the entry if the caller is no longer the owner", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi
+          .fn()
+          .mockResolvedValueOnce(membersResponse(SELF_ID))
+          // Ownership moved to 阿華 while the removal was in flight — only the
+          // owner may lift the block, so the entry must not linger.
+          .mockResolvedValue(membersResponse(THIRD_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await removeSecondMember();
+
+      // The refresh landed and the confirm dialog closed, so a still-owner
+      // would be showing 移除 again here — its absence is the ownership change.
+      await waitFor(() => {
+        expect(apiClient.getFamilyMembers).toHaveBeenCalledTimes(2);
+      });
+      expect(screen.queryByText("確定")).not.toBeInTheDocument();
+      expect(screen.queryByText("移除")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not offer the entry to a non-owner member", async () => {
+      const apiClient = createMockApiClient({
+        getFamilyMembers: vi.fn().mockResolvedValue(membersResponse(THIRD_ID)),
+      });
+      renderFamilySettings({ apiClient });
+
+      await waitFor(() => {
+        expect(screen.getByText("大明")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("移除")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -1122,13 +1379,57 @@ describe("FamilySettings", () => {
       return apiClient;
     }
 
+    /**
+     * Render, then settle the endpoint decision — every test below asserts on
+     * its outcome, panel or no panel.
+     *
+     * Whether the panel appears is a THREE-deep effect conjunction: the members
+     * fetch (FamilyDataProvider → membersState "ready"), useEndpointSwitch's
+     * declined-marker storage read, and the effect that joins the two into
+     * `pending`. `findByTestId` is not a barrier for that — it polls with the
+     * act environment disabled and ends on a bare `setTimeout(0)`, so a node
+     * still missing at poll time says nothing about whether React owes the
+     * commit; under CPU contention the chain simply outlives the 1s budget.
+     * Only `act` guarantees pending effects have flushed on exit.
+     */
+    async function renderSettledEndpoints(opts: {
+      current: string;
+      family: string | null;
+      setEndpoint?: (url: string) => void;
+    }): Promise<ApiClient> {
+      let apiClient!: ApiClient;
+      await act(async () => {
+        apiClient = renderWithEndpoints(opts);
+      });
+      // getBy, not findBy: a load that failed to settle must fail loudly right
+      // here. The member-count suffix is the production tell that membersState
+      // reached "ready" (src/dialog/FamilySettings.tsx) — unlike the display
+      // name, which also renders from chrome.storage while members still load.
+      expect(screen.getByText("家庭成員 (1)")).toBeInTheDocument();
+      return apiClient;
+    }
+
+    /**
+     * The confirmation panel. getBy for the same reason as above: after a
+     * settled render the decision is already committed, so a fixture that
+     * should have raised the question must fail here rather than in a waiter.
+     */
+    function getEndpointSwitchPanel(): HTMLElement {
+      return screen.getByTestId("endpoint-switch");
+    }
+
+    /** The sync code as currently rendered (settle the render first). */
+    function readSyncCode(): string {
+      return screen.getByTestId("sync-code").textContent ?? "";
+    }
+
     it("asks before adopting the endpoint the family record advertises", async () => {
-      renderWithEndpoints({
+      await renderSettledEndpoints({
         current: CURRENT_ENDPOINT,
         family: FAMILY_ENDPOINT,
       });
 
-      const panel = await screen.findByTestId("endpoint-switch");
+      const panel = getEndpointSwitchPanel();
 
       // It interrupts the Settings tab with a security decision, so it is
       // announced to assistive tech the moment it appears.
@@ -1159,9 +1460,9 @@ describe("FamilySettings", () => {
     });
 
     it("labels a revert to the official default endpoint", async () => {
-      renderWithEndpoints({ current: CURRENT_ENDPOINT, family: null });
+      await renderSettledEndpoints({ current: CURRENT_ENDPOINT, family: null });
 
-      const panel = await screen.findByTestId("endpoint-switch");
+      const panel = getEndpointSwitchPanel();
 
       expect(
         within(panel).getByText("將切換至（官方預設端點）"),
@@ -1171,13 +1472,9 @@ describe("FamilySettings", () => {
     });
 
     it("asks nothing when the family endpoint is already in effect", async () => {
-      renderWithEndpoints({
+      await renderSettledEndpoints({
         current: FAMILY_ENDPOINT,
         family: FAMILY_ENDPOINT,
-      });
-
-      await waitFor(() => {
-        expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
       });
 
       // The panel is mounted unconditionally, so "nothing to say" must render
@@ -1221,12 +1518,12 @@ describe("FamilySettings", () => {
     });
 
     it("confirm switches the client, persists the endpoint, and closes the panel", async () => {
-      const apiClient = renderWithEndpoints({
+      const apiClient = await renderSettledEndpoints({
         current: CURRENT_ENDPOINT,
         family: FAMILY_ENDPOINT,
       });
 
-      const panel = await screen.findByTestId("endpoint-switch");
+      const panel = getEndpointSwitchPanel();
       fireEvent.click(within(panel).getByText("確認切換"));
 
       expect(apiClient.setEndpoint).toHaveBeenCalledWith(FAMILY_ENDPOINT);
@@ -1255,12 +1552,12 @@ describe("FamilySettings", () => {
     });
 
     it("decline records the refusal and leaves the endpoint untouched", async () => {
-      const apiClient = renderWithEndpoints({
+      const apiClient = await renderSettledEndpoints({
         current: CURRENT_ENDPOINT,
         family: FAMILY_ENDPOINT,
       });
 
-      const panel = await screen.findByTestId("endpoint-switch");
+      const panel = getEndpointSwitchPanel();
       fireEvent.click(within(panel).getByText("暫不切換"));
 
       expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
@@ -1284,13 +1581,9 @@ describe("FamilySettings", () => {
         [DECLINED_FAMILY_ENDPOINT_KEY]: { value: FAMILY_ENDPOINT },
       });
 
-      renderWithEndpoints({
+      await renderSettledEndpoints({
         current: CURRENT_ENDPOINT,
         family: FAMILY_ENDPOINT,
-      });
-
-      await waitFor(() => {
-        expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
       });
 
       expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
@@ -1301,18 +1594,18 @@ describe("FamilySettings", () => {
         [DECLINED_FAMILY_ENDPOINT_KEY]: { value: "https://declined.example" },
       });
 
-      renderWithEndpoints({
+      await renderSettledEndpoints({
         current: CURRENT_ENDPOINT,
         family: FAMILY_ENDPOINT,
       });
 
-      const panel = await screen.findByTestId("endpoint-switch");
+      const panel = getEndpointSwitchPanel();
       expect(within(panel).getByText(FAMILY_ENDPOINT)).toBeInTheDocument();
     });
 
     it("keeps the current endpoint when the client rejects the family endpoint", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const apiClient = renderWithEndpoints({
+      const apiClient = await renderSettledEndpoints({
         current: CURRENT_ENDPOINT,
         family: FAMILY_ENDPOINT,
         setEndpoint: () => {
@@ -1320,7 +1613,7 @@ describe("FamilySettings", () => {
         },
       });
 
-      const panel = await screen.findByTestId("endpoint-switch");
+      const panel = getEndpointSwitchPanel();
       fireEvent.click(within(panel).getByText("確認切換"));
 
       expect(apiClient.setEndpoint).toHaveBeenCalledWith(FAMILY_ENDPOINT);
@@ -1354,7 +1647,7 @@ describe("FamilySettings", () => {
 
     it("dismisses the failure notice with 「知道了」 and leaves the question closed", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      renderWithEndpoints({
+      await renderSettledEndpoints({
         current: CURRENT_ENDPOINT,
         family: FAMILY_ENDPOINT,
         setEndpoint: () => {
@@ -1362,7 +1655,7 @@ describe("FamilySettings", () => {
         },
       });
 
-      const panel = await screen.findByTestId("endpoint-switch");
+      const panel = getEndpointSwitchPanel();
       fireEvent.click(within(panel).getByText("確認切換"));
 
       const notice = await screen.findByTestId("endpoint-switch-error");
@@ -1391,41 +1684,33 @@ describe("FamilySettings", () => {
      * only the person who made it.
      */
     describe("sync code follows the adopted endpoint", () => {
-      /** Read the rendered sync code once the members request has settled. */
-      async function readSyncCode(): Promise<string> {
-        await waitFor(() => {
-          expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
-        });
-        return screen.getByTestId("sync-code").textContent ?? "";
-      }
-
       it("carries no @host while this device is on the official default", async () => {
-        renderWithEndpoints({
+        await renderSettledEndpoints({
           current: DEFAULT_API_ENDPOINT,
           family: null,
         });
 
-        expect(await readSyncCode()).toBe("moo-fam-123");
+        expect(readSyncCode()).toBe("moo-fam-123");
       });
 
       it("carries the @host when owner and member are already aligned on a custom endpoint", async () => {
-        renderWithEndpoints({
+        await renderSettledEndpoints({
           current: FAMILY_ENDPOINT,
           family: FAMILY_ENDPOINT,
         });
 
-        expect(await readSyncCode()).toBe(`moo-fam-123@${FAMILY_ENDPOINT}`);
+        expect(readSyncCode()).toBe(`moo-fam-123@${FAMILY_ENDPOINT}`);
         // Aligned already, so there was nothing to confirm.
         expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
       });
 
       it("keeps the code @host-free after declining a switch to a custom endpoint", async () => {
-        renderWithEndpoints({
+        await renderSettledEndpoints({
           current: DEFAULT_API_ENDPOINT,
           family: FAMILY_ENDPOINT,
         });
 
-        const panel = await screen.findByTestId("endpoint-switch");
+        const panel = getEndpointSwitchPanel();
         expect(screen.getByTestId("sync-code")).toHaveTextContent(
           "moo-fam-123",
         );
@@ -1433,32 +1718,32 @@ describe("FamilySettings", () => {
         fireEvent.click(within(panel).getByText("暫不切換"));
 
         // The refused endpoint must not travel out in the invite.
-        const code = await readSyncCode();
+        const code = readSyncCode();
         expect(code).toBe("moo-fam-123");
         expect(code).not.toContain(FAMILY_ENDPOINT);
       });
 
       it("keeps the custom @host after declining a revert to the official default", async () => {
-        renderWithEndpoints({
+        await renderSettledEndpoints({
           current: CURRENT_ENDPOINT,
           family: null,
         });
 
-        const panel = await screen.findByTestId("endpoint-switch");
+        const panel = getEndpointSwitchPanel();
         fireEvent.click(within(panel).getByText("暫不切換"));
 
         // This device stays on its custom endpoint, so an invite that dropped
         // the @host would send the invitee to the wrong (default) server.
-        expect(await readSyncCode()).toBe(`moo-fam-123@${CURRENT_ENDPOINT}`);
+        expect(readSyncCode()).toBe(`moo-fam-123@${CURRENT_ENDPOINT}`);
       });
 
       it("adds the new @host as soon as a switch is confirmed, with no reopen", async () => {
-        renderWithEndpoints({
+        await renderSettledEndpoints({
           current: DEFAULT_API_ENDPOINT,
           family: FAMILY_ENDPOINT,
         });
 
-        const panel = await screen.findByTestId("endpoint-switch");
+        const panel = getEndpointSwitchPanel();
         expect(screen.getByTestId("sync-code")).toHaveTextContent(
           "moo-fam-123",
         );
@@ -1475,12 +1760,12 @@ describe("FamilySettings", () => {
       });
 
       it("drops the @host as soon as a revert to the official default is confirmed", async () => {
-        renderWithEndpoints({
+        await renderSettledEndpoints({
           current: CURRENT_ENDPOINT,
           family: null,
         });
 
-        const panel = await screen.findByTestId("endpoint-switch");
+        const panel = getEndpointSwitchPanel();
         expect(screen.getByTestId("sync-code")).toHaveTextContent(
           `moo-fam-123@${CURRENT_ENDPOINT}`,
         );
@@ -1496,7 +1781,7 @@ describe("FamilySettings", () => {
 
       it("keeps the current @host when a confirmed switch is refused by URL validation", async () => {
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-        renderWithEndpoints({
+        await renderSettledEndpoints({
           current: CURRENT_ENDPOINT,
           family: FAMILY_ENDPOINT,
           setEndpoint: () => {
@@ -1504,7 +1789,7 @@ describe("FamilySettings", () => {
           },
         });
 
-        const panel = await screen.findByTestId("endpoint-switch");
+        const panel = getEndpointSwitchPanel();
         fireEvent.click(within(panel).getByText("確認切換"));
 
         await screen.findByTestId("endpoint-switch-error");
@@ -1520,14 +1805,15 @@ describe("FamilySettings", () => {
         const writeText = vi.fn().mockResolvedValue(undefined);
         Object.assign(navigator, { clipboard: { writeText } });
 
-        renderWithEndpoints({
+        await renderSettledEndpoints({
           current: DEFAULT_API_ENDPOINT,
           family: FAMILY_ENDPOINT,
         });
 
-        const panel = await screen.findByTestId("endpoint-switch");
+        const panel = getEndpointSwitchPanel();
         fireEvent.click(within(panel).getByText("暫不切換"));
-        await readSyncCode();
+        // What the copy button is about to read, pinned before it is pressed.
+        expect(readSyncCode()).toBe("moo-fam-123");
 
         fireEvent.click(screen.getByText("複製同步碼"));
 

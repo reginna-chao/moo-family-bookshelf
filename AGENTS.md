@@ -28,7 +28,9 @@ moo-family-bookshelf/
 │   │   ├── config/             # Readmoo host/selector config, report links
 │   │   ├── icons/              # Inline brand SVG paths
 │   │   ├── invite/             # Invite message templates
-│   │   └── personal/           # Personal-shelf save strategy (PUT vs PATCH)
+│   │   ├── personal/           # Personal-shelf save strategy (PUT vs PATCH)
+│   │   ├── publicShelf/        # Public-shelf local-vs-server divergence rule
+│   │   └── unkick/             # Un-kick notice copy (removed / cleared / hint)
 │   ├── eslint.config.js
 │   ├── tsconfig.json
 │   └── package.json
@@ -124,6 +126,7 @@ moo-family-bookshelf/
 ### Test Structure
 
 - Extension tests: `extension/tests/{unit,component,e2e}/`
+- PWA tests: `pwa/tests/{unit,component,e2e}/`
 - Worker tests: `worker/tests/{unit,integration}/`
 - Tests colocated by type, not by source file.
 
@@ -327,6 +330,7 @@ All development and design go through a **single skill entry: `/develop`**. It t
 │   ├── frontend.md     # Extension + PWA (React/TS) conventions
 │   ├── backend.md      # Worker (Hono/KV) conventions
 │   ├── test.md         # test framework, locations, coverage
+│   ├── change-triage.md # severity gate applied before proposing any unsolicited change
 │   └── security-ux-invariants.md
 ├── agents/         # role agents (invisible in the slash menu)
 │   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md

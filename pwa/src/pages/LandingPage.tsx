@@ -9,6 +9,7 @@ import type { AuthState } from "@/hooks/useAuth";
 import { REMEMBERED_LOGOUT_KEY, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import { getAppEnv } from "@/utils/appEnv";
 import { isUnsafeApiHost, UNSAFE_API_HOST_ERROR } from "@/utils/apiHostGuard";
+import { FAMILY_FULL_MESSAGE } from "@/utils/joinErrorMessages";
 import { useRetryCountdown } from "@/hooks/useRetryCountdown";
 import { useSyncCodeHostVerdict } from "@/hooks/useSyncCodeHostVerdict";
 import { useQrJoin } from "@/hooks/useQrJoin";
@@ -32,7 +33,7 @@ interface LandingPageProps {
   qrUserId?: string;
   /** Short-lived QR token from Extension. Bypasses verification when valid. */
   qrToken?: string;
-  /** External error (e.g., FAMILY_FULL from token refresh). */
+  /** External error (e.g., FAMILY_FULL / MEMBER_REMOVED from token refresh). */
   externalError?: string;
 }
 
@@ -240,7 +241,10 @@ export function LandingPage({
         const retryAfter = joinRes.error.retryAfter;
         const hasRetryHint = typeof retryAfter === "number" && retryAfter > 0;
         if (code === "FAMILY_FULL") {
-          setGeneralError("家庭成員已達上限（每個家庭最多 2 位成員）");
+          // Same entry the token-recovery path shows (App.tsx reads it out of
+          // JOIN_BLOCKED_MESSAGES, which is built from this constant), so the
+          // two join paths cannot report a full family differently.
+          setGeneralError(FAMILY_FULL_MESSAGE);
         } else if (
           code === "VERIFICATION_REQUIRED" ||
           code === "VERIFICATION_FAILED"

@@ -192,6 +192,20 @@ export interface CreateBorrowPayload {
   ownerId: string;
 }
 
+/**
+ * `DELETE /api/family/:id/kicked/:uid` payload — the removal's rejoin block was
+ * lifted.
+ *
+ * `cleared` is a `BoolFlag`, not a `boolean`: it travels on the wire (AGENTS.md
+ * → Boolean Convention). Callers must NOT branch on its value — the endpoint is
+ * idempotent, so a userId whose tombstone had already expired is still a 200 and
+ * the user-visible outcome ("the sync code works for them again") is identical
+ * either way. Any 200 is success.
+ */
+export interface UnkickResult {
+  cleared: BoolFlag;
+}
+
 /** Settings updatable on a family member via PATCH /api/family/:id/member/:uid. */
 export interface MemberSettingsPayload {
   canLend?: BoolFlag;

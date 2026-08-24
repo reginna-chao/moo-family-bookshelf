@@ -459,6 +459,53 @@ describe("ApiClient", () => {
     });
   });
 
+  /**
+   * Lifts the 6-hour `kicked:` tombstone a removal leaves behind, so the removed
+   * member's sync code works again. It must hit the `kicked` collection —
+   * `/member/` is the REMOVAL endpoint, so a wrong path would be a destructive
+   * no-op the UI still reports as success.
+   */
+  describe("unkickMember", () => {
+    it("should call DELETE /api/family/:id/kicked/:uid", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { cleared: BoolFlag.TRUE } }),
+      );
+
+      const result = await client.unkickMember("fam-1", USER_TARGET);
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(
+        `https://api.example.com/api/family/fam-1/kicked/${USER_TARGET}`,
+      );
+      expect(init.method).toBe("DELETE");
+      expect(result.data).toEqual({ cleared: BoolFlag.TRUE });
+    });
+
+    it("should reject a malformed targetUserId before reaching the network", async () => {
+      await expect(client.unkickMember("fam-1", "not-a-user")).rejects.toThrow(
+        "Invalid targetUserId",
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("should surface an owner-only refusal through the error envelope", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: "NOT_OWNER", message: "只有管理者可以操作" } },
+          403,
+        ),
+      );
+
+      const result = await client.unkickMember("fam-1", USER_TARGET);
+
+      expect(result.error).toEqual({
+        code: "NOT_OWNER",
+        message: "只有管理者可以操作",
+      });
+      expect(result.data).toBeUndefined();
+    });
+  });
+
   describe("transferOwnership", () => {
     it("should call PUT /api/family/:id/transfer with userId and newOwnerId", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));

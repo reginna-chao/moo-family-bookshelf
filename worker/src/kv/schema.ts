@@ -5,6 +5,7 @@
  *   user:{userId}    → personal book list + sharing settings (JSON)
  *   family:{familyId} → family member list (JSON)
  *   member:{userId}  → familyId (reverse lookup)
+ *   kicked:{familyId}:{userId} → KickedRecord (owner-initiated removal tombstone, TTL 21600s)
  *   qr:{token}       → QrTokenRecord (one-time QR login bypass, TTL 300s)
  *   verifyfail:{userId}:{callerKey} → VerifyFailRecord (per-caller failure accounting, TTL 900s)
  *   borrow:{requestId} → BorrowRequest (JSON)
@@ -48,6 +49,7 @@ export const kvKeys = {
   user: (userId: string) => `user:${userId}`,
   family: (familyId: string) => `family:${familyId}`,
   member: (userId: string) => `member:${userId}`,
+  kicked: (familyId: string, userId: string) => `kicked:${familyId}:${userId}`,
   auth: (userId: string) => `auth:${userId}`,
   authToken: (token: string) => `token:${token}`,
   verify: (userId: string) => `verify:${userId}`,
@@ -128,6 +130,48 @@ export function normalizeFamilyRecord(record: RawFamilyRecord): FamilyRecord {
     maxMembers: record.maxMembers ?? 2,
   };
   return normalized;
+}
+
+/**
+ * Kicked tombstone TTL: 6 hours in seconds (21600).
+ *
+ * Owner-initiated member removal (`DELETE /api/family/:id/member/:uid`, when the
+ * target is NOT the caller) writes `kicked:{familyId}:{userId}`. While that key
+ * lives, `POST /api/family/:id/join` refuses the removed userId with
+ * 403 MEMBER_REMOVED — otherwise the removed member's client, which retries the
+ * join automatically, silently re-adds itself moments after being removed.
+ *
+ * The window bounds how long the removal stays server-enforced with NO ONE
+ * acting: after expiry a rejoin with the sync code is possible again, which is
+ * the legitimate re-add path (security-ux Invariant 4 requires immediate removal
+ * from the member list, not a permanent ban).
+ *
+ * A removal made by mistake does not have to be waited out. The owner can delete
+ * this key on demand via `DELETE /api/family/:id/kicked/:uid` (owner-only,
+ * idempotent, `routes/family.ts`), after which the user may rejoin with the sync
+ * code immediately — lifting the ban does not re-add them. The TTL is therefore
+ * the unattended recovery bound, not the only remedy. Still deliberately
+ * hours-scale rather than days: while the tombstone lives the removed user
+ * cannot return at all (the sync code and a QR token are both refused), so an
+ * owner who is unreachable would otherwise strand them for days.
+ *
+ * Comfortably above `KV_MIN_TTL_SECONDS` (60), and an integer, so the KV `put`
+ * cannot be rejected for a sub-minimum `expirationTtl`.
+ */
+export const KICKED_TOMBSTONE_TTL_SECONDS = 6 * 60 * 60;
+
+/**
+ * Value stored at `kicked:{familyId}:{userId}`.
+ *
+ * Only the key's PRESENCE gates joins — the join handler never parses this
+ * value. Both fields are diagnostic (support / audit: who removed whom, when),
+ * so a corrupted or legacy-shaped value still blocks the rejoin.
+ */
+export interface KickedRecord {
+  /** ISO timestamp of the removal. */
+  removedAt: string;
+  /** userId of the owner who performed the removal. */
+  removedBy: string;
 }
 
 export interface BookEntry {

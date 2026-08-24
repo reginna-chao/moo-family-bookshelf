@@ -492,4 +492,57 @@ describe("BorrowPage", () => {
       expect(localStorage.getItem(MANUAL_LEND_KEY)).toBeNull();
     });
   });
+
+  /**
+   * `status` is bare-cast out of the API response by `listBorrowRequests()`,
+   * and the API endpoint is user-configurable (BYO backend), so an out-of-enum
+   * value can reach the badge. Anything that is not PENDING is archived, so the
+   * card only mounts when the history toggle is expanded — that click is where
+   * the old `getStatusStyle` (an exhaustive switch with no `default`) returned
+   * `undefined` and threw, blanking the page.
+   */
+  describe("unknown status fallback", () => {
+    it.each([
+      { name: '"__proto__"', status: "__proto__" },
+      { name: '"toString"', status: "toString" },
+      { name: '"constructor"', status: "constructor" },
+      { name: '"valueOf"', status: "valueOf" },
+      { name: '"hasOwnProperty"', status: "hasOwnProperty" },
+      { name: "an unknown numeric status (99)", status: 99 },
+      // A backend that simply omits `status` is the likeliest out-of-range
+      // case. `isActive` is `status === PENDING`, so these land in the
+      // archived bucket exactly like the rows above.
+      { name: "a null status", status: null },
+      { name: "a missing status (undefined)", status: undefined },
+    ])(
+      "renders the unknown badge for $name instead of crashing",
+      ({ status }) => {
+        setMockFamilyData({
+          borrowRequestsState: "loaded",
+          borrowRequests: [
+            makeRequest({
+              requestId: "req-hostile",
+              ownerId: SELF_USER_ID,
+              borrowerId: OTHER_USER_ID,
+              bookTitle: "未知狀態書",
+              status: status as unknown as BorrowStatus,
+            }),
+          ],
+        });
+
+        expect(() => renderPage()).not.toThrow();
+        // Non-PENDING ⇒ archived bucket, still collapsed at this point.
+        expect(screen.queryByText("未知狀態書")).not.toBeInTheDocument();
+
+        expect(() =>
+          fireEvent.click(screen.getByText("顯示歷史紀錄 (1)")),
+        ).not.toThrow();
+
+        expect(screen.getByText("未知狀態書")).toBeInTheDocument();
+        const badge = screen.getByText("狀態未知");
+        expect(badge).toBeInTheDocument();
+        expect(badge.className).not.toContain("undefined");
+      },
+    );
+  });
 });

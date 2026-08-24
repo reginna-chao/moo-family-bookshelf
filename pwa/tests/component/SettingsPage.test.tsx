@@ -6,11 +6,16 @@ import {
   fireEvent,
   waitFor,
   within,
+  act,
 } from "@testing-library/react";
 import React from "react";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { FamilyDataProvider, useFamilyData } from "@/hooks/useFamilyData";
-import { type ApiClient } from "@/api/client";
+import {
+  buildRemovedNoticeText,
+  buildUnkickedNoticeText,
+} from "@/components/UnkickNotice";
+import { BoolFlag, type ApiClient } from "@/api/client";
 import { buildRetryMessage } from "@/utils/retryMessage";
 import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 
@@ -32,12 +37,16 @@ const mockGetFamilyBookshelf = vi.fn();
 const mockLeaveFamily = vi.fn();
 const mockUpdateDisplayName = vi.fn();
 const mockDeleteAccount = vi.fn();
+const mockRemoveMember = vi.fn();
+const mockUnkickMember = vi.fn();
 const mockApiClient = {
   getFamilyMembers: mockGetFamilyMembers,
   getFamilyBookshelf: mockGetFamilyBookshelf,
   leaveFamily: mockLeaveFamily,
   updateDisplayName: mockUpdateDisplayName,
   deleteAccount: mockDeleteAccount,
+  removeMember: mockRemoveMember,
+  unkickMember: mockUnkickMember,
   getEndpoint: vi.fn().mockReturnValue(DEFAULT_API_ENDPOINT),
 } as unknown as ApiClient;
 
@@ -140,14 +149,16 @@ describe("SettingsPage", () => {
   });
 
   it("copy sync code changes button text to '已複製'", async () => {
-    renderWithProvider();
-
-    // Wait for async member loading to settle
-    await waitFor(() => {
-      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    // act is the readiness barrier: on exit the member-load effects have been
+    // flushed. A `queryByText("載入中...")` waiter only proves the spinner left
+    // the DOM, which is not the same as the load's effects having committed.
+    await act(async () => {
+      renderWithProvider();
     });
+    // getBy, not findBy: the settled view must be committed, not merely coming.
+    const copyButton = screen.getByRole("button", { name: "複製同步碼" });
 
-    fireEvent.click(screen.getByRole("button", { name: "複製同步碼" }));
+    fireEvent.click(copyButton);
 
     // Clipboard now receives a welcome message that embeds the sync code
     // (full wording is covered by inviteMessages.test.ts).
@@ -200,6 +211,265 @@ describe("SettingsPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("無法載入成員")).toBeInTheDocument();
+    });
+  });
+
+  // --- Un-kick entry after a removal ---
+
+  /**
+   * Removing a member writes a 6-hour server-side block on rejoining, so the
+   * owner gets an entry to lift it again (see `UnkickNotice`). This page — not
+   * `MemberList` — owns that entry, precisely so it survives the member refresh
+   * the removal triggers: a failed refresh unmounts the list, and swallowing the
+   * entry with it would leave the owner no way to undo a mis-click.
+   */
+  describe("un-kick entry after a removal", () => {
+    const SELF_ID = defaultProps.userId;
+    const REMOVED_ID =
+      "1111111122222222333333334444444455555555666666667777777788888888";
+    const THIRD_ID =
+      "aabbccdd11223344556677889900aabbccddeeff11223344556677889900aabb";
+
+    function membersResponse(ownerId: string) {
+      return {
+        data: {
+          members: [
+            { userId: SELF_ID, displayName: "小明" },
+            { userId: REMOVED_ID, displayName: "大明" },
+            { userId: THIRD_ID, displayName: "阿華" },
+          ],
+          ownerId,
+        },
+      };
+    }
+
+    beforeEach(() => {
+      mockGetFamilyMembers.mockResolvedValue(membersResponse(SELF_ID));
+      mockRemoveMember.mockResolvedValue({ data: { ok: true } });
+      mockUnkickMember.mockResolvedValue({ data: { cleared: BoolFlag.TRUE } });
+    });
+
+    /**
+     * `removedAt` is what makes the notice's `key` unique PER REMOVAL, and the
+     * real clock can put two removals of the same member in the same
+     * millisecond. Pin it so the second-removal regression below actually
+     * exercises the remount instead of passing or failing on timing luck.
+     */
+    let restoreClock: (() => void) | null = null;
+
+    function controlClock(startMs: number) {
+      let now = startMs;
+      const spy = vi.spyOn(Date, "now").mockImplementation(() => now);
+      restoreClock = () => spy.mockRestore();
+      return {
+        advance(ms: number) {
+          now += ms;
+        },
+      };
+    }
+
+    afterEach(() => {
+      // The outer `clearAllMocks` only clears calls, not implementations, and
+      // these two mocks are set up nowhere else — drop them so no later test in
+      // this file inherits a removal/un-kick that silently succeeds.
+      mockRemoveMember.mockReset();
+      mockUnkickMember.mockReset();
+      restoreClock?.();
+      restoreClock = null;
+    });
+
+    /**
+     * Mount and settle the initial member load. `act` is the readiness signal
+     * rather than `findBy*`: the interactions below depend on state published by
+     * the provider's mount effect, and only `act` guarantees it has committed.
+     */
+    async function renderSettled() {
+      await act(async () => {
+        renderWithProvider();
+      });
+      await waitFor(() => {
+        expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+      });
+    }
+
+    /**
+     * Remove 大明 — the first member the owner can act on. The confirm click is
+     * wrapped in `act` so the whole chain it starts (removal → report to this
+     * page → member/bookshelf refresh) has settled before the caller asserts.
+     */
+    async function removeDaMing() {
+      fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "確定" }));
+      });
+    }
+
+    it("does not offer the entry before anything was removed", async () => {
+      await renderSettled();
+
+      expect(screen.getByText("大明")).toBeInTheDocument();
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("offers to lift the rejoin block, naming the member just removed", async () => {
+      await renderSettled();
+
+      await removeDaMing();
+
+      expect(mockRemoveMember).toHaveBeenCalledWith(
+        defaultProps.familyId,
+        REMOVED_ID,
+      );
+      expect(
+        screen.getByText(buildRemovedNoticeText("大明")),
+      ).toBeInTheDocument();
+    });
+
+    it("lifts the block for the removed member when the entry is used", async () => {
+      await renderSettled();
+      await removeDaMing();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "解除移除限制" }));
+      });
+
+      expect(mockUnkickMember).toHaveBeenCalledWith(
+        defaultProps.familyId,
+        REMOVED_ID,
+      );
+      expect(
+        screen.getByText(buildUnkickedNoticeText("大明")),
+      ).toBeInTheDocument();
+    });
+
+    /**
+     * 解除限制後對方可以重新加入，也可能再被移除一次——這時後端寫了一個新的
+     * tombstone，通知卡必須回到 idle 把「解除移除限制」入口交還給管理者。若卡片
+     * 停在上一次的成功文案，管理者會以為第二次的限制也已經解除。
+     */
+    it("returns the entry to idle when the same member is removed again", async () => {
+      // The refreshed list still holds 大明 (see this describe's beforeEach) —
+      // standing in for them rejoining once the first block was lifted.
+      const clock = controlClock(1_700_000_000_000);
+      await renderSettled();
+
+      await removeDaMing();
+      expect(
+        screen.getByText(buildRemovedNoticeText("大明")),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "解除移除限制" }));
+      });
+      expect(
+        screen.getByText(buildUnkickedNoticeText("大明")),
+      ).toBeInTheDocument();
+
+      // 大明 rejoined; a minute later the owner removes them a second time.
+      clock.advance(60_000);
+      await removeDaMing();
+
+      expect(
+        screen.getByText(buildRemovedNoticeText("大明")),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(buildUnkickedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "解除移除限制" }),
+      ).toBeEnabled();
+      // Only the FIRST block was lifted — the new one still stands.
+      expect(mockUnkickMember).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * The reason the state lives on this page: the removal — and the block it
+     * wrote — already happened, so a member refresh failing afterwards must not
+     * take the only way to undo it down with the list.
+     */
+    it("keeps the entry when the member-list refresh fails afterwards", async () => {
+      mockGetFamilyMembers.mockReset();
+      mockGetFamilyMembers
+        .mockResolvedValueOnce(membersResponse(SELF_ID))
+        .mockResolvedValue({
+          error: { code: "SERVER_ERROR", message: "載入成員失敗" },
+        });
+      await renderSettled();
+
+      await removeDaMing();
+
+      // The list itself is gone (error state) — 阿華 only ever renders there.
+      expect(screen.getByText("載入成員失敗")).toBeInTheDocument();
+      expect(screen.queryByText("阿華")).not.toBeInTheDocument();
+      // ...but the entry to lift the block the removal wrote is still offered.
+      expect(
+        screen.getByText(buildRemovedNoticeText("大明")),
+      ).toBeInTheDocument();
+    });
+
+    it("dismisses the entry when 關閉 is pressed", async () => {
+      await renderSettled();
+      await removeDaMing();
+      expect(
+        screen.getByText(buildRemovedNoticeText("大明")),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "關閉" }));
+
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+      expect(mockUnkickMember).not.toHaveBeenCalled();
+    });
+
+    it("withdraws the entry when ownership moved away during the removal", async () => {
+      mockGetFamilyMembers.mockReset();
+      mockGetFamilyMembers
+        .mockResolvedValueOnce(membersResponse(SELF_ID))
+        // Ownership moved to 阿華 while the removal was in flight — only the
+        // owner may lift the block, so the entry must not linger.
+        .mockResolvedValue(membersResponse(THIRD_ID));
+      await renderSettled();
+
+      await removeDaMing();
+
+      // The refresh landed, so a still-owner would be showing 移除 again here.
+      expect(mockGetFamilyMembers).toHaveBeenCalledTimes(2);
+      expect(
+        screen.queryByRole("button", { name: "移除" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not offer the entry to a non-owner member", async () => {
+      mockGetFamilyMembers.mockResolvedValue(membersResponse(THIRD_ID));
+      await renderSettled();
+
+      expect(screen.getByText("大明")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "移除" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not offer the entry when the removal itself failed", async () => {
+      mockRemoveMember.mockResolvedValue({
+        error: { code: "FORBIDDEN", message: "權限不足" },
+      });
+      await renderSettled();
+
+      await removeDaMing();
+
+      expect(screen.getByText("權限不足")).toBeInTheDocument();
+      expect(
+        screen.queryByText(buildRemovedNoticeText("大明")),
+      ).not.toBeInTheDocument();
     });
   });
 

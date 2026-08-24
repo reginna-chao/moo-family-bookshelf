@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { MemberList } from "@/components/MemberList";
+import { buildRemovedNoticeText } from "@/components/UnkickNotice";
 import { ApiError, BoolFlag, type ApiClient } from "@/api/client";
 import {
   buildRetryMessage,
@@ -342,6 +349,151 @@ describe("MemberList", () => {
       });
       expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
       expect(onMembersChanged).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * A removal writes a 6-hour server-side block on rejoining, and the entry to
+   * lift it (see `UnkickNotice`) belongs to the PARENT — it has to outlive the
+   * member refresh that unmounts this list. All this component owes the parent
+   * is an accurate report: the target's id plus a label resolved from the list
+   * that is about to be refreshed away. A report on a FAILED removal would
+   * offer to un-kick someone who was never kicked.
+   */
+  describe("onMemberRemoved reporting", () => {
+    /** Confirm the pending removal and let the whole chain settle. */
+    async function confirmRemoval() {
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "確定" }));
+      });
+    }
+
+    /** Start removing the member at `index` among the owner's removable rows. */
+    function startRemoval(index: number) {
+      fireEvent.click(screen.getAllByRole("button", { name: "移除" })[index]);
+    }
+
+    it("reports the removed member's id and display name on success", async () => {
+      mockRemoveMember.mockResolvedValue({ data: { ok: true } });
+      const onMemberRemoved = vi.fn();
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          onMemberRemoved={onMemberRemoved}
+        />,
+      );
+
+      startRemoval(0); // 小明
+      await confirmRemoval();
+
+      expect(onMemberRemoved).toHaveBeenCalledWith({
+        userId: USER_ID,
+        displayName: "小明",
+        // Stamped per removal so the parent's notice can tell a second removal
+        // of the SAME member apart from the first (see SettingsPage.test.tsx).
+        removedAt: expect.any(Number),
+      });
+      expect(onMemberRemoved).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports the userId prefix when the removed member has no display name", async () => {
+      mockRemoveMember.mockResolvedValue({ data: { ok: true } });
+      const onMemberRemoved = vi.fn();
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          onMemberRemoved={onMemberRemoved}
+        />,
+      );
+
+      startRemoval(1); // OTHER_ID, displayName: ""
+      await confirmRemoval();
+
+      expect(onMemberRemoved).toHaveBeenCalledWith({
+        userId: OTHER_ID,
+        displayName: OTHER_ID.slice(0, 8),
+        removedAt: expect.any(Number),
+      });
+    });
+
+    it("does not report when the server refuses the removal", async () => {
+      mockRemoveMember.mockResolvedValue({
+        error: { code: "FORBIDDEN", message: "權限不足" },
+      });
+      const onMemberRemoved = vi.fn();
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          onMemberRemoved={onMemberRemoved}
+        />,
+      );
+
+      startRemoval(0);
+      await confirmRemoval();
+
+      expect(screen.getByText("權限不足")).toBeInTheDocument();
+      expect(onMemberRemoved).not.toHaveBeenCalled();
+    });
+
+    it("does not report when the removal request throws", async () => {
+      mockRemoveMember.mockRejectedValue(new Error("Failed to fetch"));
+      const onMemberRemoved = vi.fn();
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          onMemberRemoved={onMemberRemoved}
+        />,
+      );
+
+      startRemoval(0);
+      await confirmRemoval();
+
+      expect(screen.getByText("Failed to fetch")).toBeInTheDocument();
+      expect(onMemberRemoved).not.toHaveBeenCalled();
+    });
+
+    it("still removes and refreshes when the parent passes no callback", async () => {
+      mockRemoveMember.mockResolvedValue({ data: { ok: true } });
+      render(
+        <MemberList {...defaultProps} userId={OWNER_ID} ownerId={OWNER_ID} />,
+      );
+
+      startRemoval(0);
+      await confirmRemoval();
+
+      expect(mockRemoveMember).toHaveBeenCalledWith(
+        defaultProps.familyId,
+        USER_ID,
+      );
+      expect(defaultProps.onMembersChanged).toHaveBeenCalled();
+    });
+
+    it("leaves the un-kick entry itself to the parent", async () => {
+      mockRemoveMember.mockResolvedValue({ data: { ok: true } });
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          onMemberRemoved={vi.fn()}
+        />,
+      );
+
+      startRemoval(0);
+      await confirmRemoval();
+
+      // Rendered by SettingsPage, never here — see SettingsPage.test.tsx.
+      expect(
+        screen.queryByText(buildRemovedNoticeText("小明")),
+      ).not.toBeInTheDocument();
     });
   });
 

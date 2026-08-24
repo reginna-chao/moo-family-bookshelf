@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { kvKeys, type VerifyRecord } from "../../src/kv/schema";
+import { seedAuthToken } from "../helpers/auth";
+import {
+  kvKeys,
+  KICKED_TOMBSTONE_TTL_SECONDS,
+  type KickedRecord,
+  type VerifyRecord,
+} from "../../src/kv/schema";
 import { USER1, USER2, USER3 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,6 +42,51 @@ async function seedVerifyRecord(userId: string, method: "pin" | "pattern") {
     prompted: 1,
   };
   await kv.put(kvKeys.verify(userId), JSON.stringify(record));
+}
+
+const CORRECT_PIN = "123456";
+
+/** Set a real PIN through the production route, so hash + salt are genuine. */
+async function setPin(userId: string, pin: string) {
+  const token = await seedAuthToken(kv, userId);
+  const res = await app.request(
+    `/api/user/${userId}/verify`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ method: "pin", secret: pin }),
+    },
+    { KV: kv, DEV_MODE: "1" },
+  );
+  expect(res.status).toBe(200);
+}
+
+/**
+ * Write an owner-removal tombstone straight into KV, through the production key
+ * builder and TTL constant.
+ *
+ * Seeding it directly rather than driving a real `DELETE /:id/member/:uid` is
+ * deliberate: these cases are about what JOIN does once the key exists, and one
+ * of them needs a state the DELETE cannot leave behind — a family record that
+ * still LISTS the removed member (a stale cross-colo read racing the removal).
+ * The write itself is covered end-to-end in
+ * tests/integration/kickedTombstone.test.ts.
+ */
+async function seedKickedTombstone(
+  familyId: string,
+  userId: string,
+  removedBy = USER1,
+) {
+  const record: KickedRecord = {
+    removedAt: new Date().toISOString(),
+    removedBy,
+  };
+  await kv.put(kvKeys.kicked(familyId, userId), JSON.stringify(record), {
+    expirationTtl: KICKED_TOMBSTONE_TTL_SECONDS,
+  });
 }
 
 beforeEach(() => {
@@ -267,5 +318,114 @@ describe("POST /:id/join — new member verification enforcement", () => {
     expect(joinRes.status).toBe(409);
     const joinJson = (await joinRes.json()) as Json;
     expect(joinJson.error.code).toBe("FAMILY_FULL");
+  });
+});
+
+// ===========================================================================
+// Kicked tombstone — the reconnect branch
+//
+// The tombstone check sits AFTER the verification gate and BEFORE the
+// existing-member branch, so it covers a reconnect as well as a first-time
+// join. While the key lives, "still in the member list" can only mean a stale
+// KV read of the family record racing the removal write, and denying is the
+// fail-closed reading of the owner's newer intent.
+//
+// The 繁中 refusal copy is pinned over the real HTTP path in
+// tests/integration/kickedTombstone.test.ts; these cases assert the code.
+// ===========================================================================
+
+describe("POST /:id/join — kicked tombstone on the existing-member branch", () => {
+  it("should refuse an existing-member reconnect while a tombstone exists", async () => {
+    const { familyId } = await createFamily(USER1);
+    const joinRes = await request("POST", `/api/family/${familyId}/join`, {
+      userId: USER2,
+    });
+    expect(joinRes.status).toBe(200);
+
+    // The owner's removal landed elsewhere; this read still lists USER2 and
+    // `member:{USER2}` still points at the family — the widest possible stale
+    // state, in which the pre-fix code happily minted a fresh token.
+    await seedKickedTombstone(familyId, USER2);
+
+    const rejoinRes = await request("POST", `/api/family/${familyId}/join`, {
+      userId: USER2,
+    });
+
+    expect(rejoinRes.status).toBe(403);
+    const rejoinJson = (await rejoinRes.json()) as Json;
+    expect(rejoinJson.error.code).toBe("MEMBER_REMOVED");
+    expect(rejoinJson.data).toBeUndefined();
+  });
+
+  it("should not touch the stale family record when it refuses the reconnect", async () => {
+    const { familyId } = await createFamily(USER1);
+    await request("POST", `/api/family/${familyId}/join`, {
+      userId: USER2,
+      displayName: "Bob",
+    });
+    await seedKickedTombstone(familyId, USER2);
+    const before = await kv.get(kvKeys.family(familyId));
+
+    // A reconnect normally rewrites the record to update displayName. A
+    // refused one must not write at all.
+    const rejoinRes = await request("POST", `/api/family/${familyId}/join`, {
+      userId: USER2,
+      displayName: "Bobby",
+    });
+
+    expect(rejoinRes.status).toBe(403);
+    expect(await kv.get(kvKeys.family(familyId))).toBe(before);
+  });
+});
+
+// ===========================================================================
+// Ordering: the verification gate runs BEFORE the tombstone gate
+//
+// Backend rules forbid adding a PRE-gate disclosure to this public endpoint.
+// "This userId was recently removed from this family" is therefore revealed
+// only to a caller who already passed the account's OWN verification gate.
+// ===========================================================================
+
+describe("POST /:id/join — kicked tombstone vs verification gate ordering", () => {
+  it("should ask for verification rather than disclose the removal when no secret is supplied", async () => {
+    const { familyId } = await createFamily(USER1);
+    // USER2 was removed by the owner: absent from the member list, no member
+    // key — but the account itself still has a PIN configured.
+    await setPin(USER2, CORRECT_PIN);
+    await seedKickedTombstone(familyId, USER2);
+
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: USER2,
+    });
+
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("VERIFICATION_REQUIRED");
+    expect(json.error.code).not.toBe("MEMBER_REMOVED");
+  });
+
+  it("should answer MEMBER_REMOVED once the correct secret is supplied", async () => {
+    const { familyId } = await createFamily(USER1);
+    await setPin(USER2, CORRECT_PIN);
+    await seedKickedTombstone(familyId, USER2);
+
+    const res = await request("POST", `/api/family/${familyId}/join`, {
+      userId: USER2,
+      verifySecret: CORRECT_PIN,
+    });
+
+    // Proving ownership of the account does not undo the owner's removal — and
+    // the family has a free seat, so the refusal can only come from the
+    // tombstone, never from FAMILY_FULL.
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("MEMBER_REMOVED");
+
+    // Fail-closed: no membership written, member list unchanged.
+    expect(await kv.get(kvKeys.member(USER2))).toBeNull();
+    const record = (await kv.get(kvKeys.family(familyId), "json")) as Json;
+    expect(record.members.map((m: { userId: string }) => m.userId)).toEqual([
+      USER1,
+    ]);
   });
 });

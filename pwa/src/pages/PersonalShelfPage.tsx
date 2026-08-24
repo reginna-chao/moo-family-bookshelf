@@ -54,6 +54,14 @@ export function PersonalShelfPage({
   const originalBooksRef = useRef<BookEntry[]>([]);
   /** Raw server response — kept so save can spread back unknown fields from future versions */
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
+  /** Pending "saved" → "ready" reset; cleared on unmount and before rescheduling. */
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   const markDirty = useCallback((bookId: string) => {
     setDirtyBookIds((prev) => {
@@ -128,7 +136,8 @@ export function PersonalShelfPage({
     // Nothing changed → treat as an instant no-op save (UI guards this too).
     if (dirtyBookIds.size === 0) {
       setState("saved");
-      setTimeout(() => setState("ready"), 1500);
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setState("ready"), 1500);
       return;
     }
 
@@ -175,7 +184,8 @@ export function PersonalShelfPage({
       setState("saved");
       // Refresh the aggregated family bookshelf so it reflects the saved shares
       void refreshBookshelf();
-      setTimeout(() => setState("ready"), 1500);
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setState("ready"), 1500);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setState("error");

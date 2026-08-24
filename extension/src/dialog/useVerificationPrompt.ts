@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isFamilyGoneError } from "../api/auth-refresh";
 import type { ApiClient } from "../api/client";
 import type { VerifyMethod } from "../api/types";
 import { useRetryCountdown } from "./useRetryCountdown";
@@ -35,6 +36,12 @@ export interface VerificationAttemptResult {
    * VERIFICATION_LOCKED only does on newer backends.
    */
   retryAfter?: number;
+  /**
+   * The backend's user-facing message for this failure, when it sent one.
+   * Handed to `onFamilyGone` so a terminal refusal can be explained in the
+   * server's own words instead of a second, client-side copy of them.
+   */
+  errorMessage?: string;
 }
 
 export interface VerificationContext {
@@ -51,6 +58,18 @@ export interface VerificationContext {
    * never resurrect a prompt whose context has already been torn down.
    */
   onAttemptFailed?: () => void;
+  /**
+   * The join target is gone for this user (family deleted / full / member
+   * removed by the owner). Retrying with a correct secret can never succeed, so
+   * the prompt tears itself down instead of showing a retryable error; the
+   * caller owns the side effects (clearing local family data, navigating, or
+   * just surfacing the reason). Omit it and the flow keeps the generic failure
+   * handling — the controller stays flow-agnostic either way.
+   */
+  onFamilyGone?: (
+    errorCode: string,
+    errorMessage?: string,
+  ) => void | Promise<void>;
 }
 
 export interface UseVerificationPromptResult {
@@ -260,6 +279,23 @@ export function useVerificationPrompt(
         // No onAttemptFailed here: the flow has navigated away, and forcing the
         // prompt back would render it over an already-completed journey.
         reset();
+        return;
+      }
+      // Terminal for this user — no secret can make this join succeed, so the
+      // prompt must close instead of inviting a retry that will fail forever.
+      // Ordered BEFORE onAttemptFailed on purpose: the restore-view callback
+      // would put the caller back on a flow it is about to unwind.
+      if (isFamilyGoneError(result.errorCode) && ctx.onFamilyGone) {
+        reset();
+        try {
+          await ctx.onFamilyGone(result.errorCode, result.errorMessage);
+        } catch (err) {
+          // Same containment stance as the `retry` closure above: the callback
+          // runs caller-owned teardown (storage clears, navigation) that can
+          // reject, and letting it escape would reject submit() itself. Nothing
+          // is left to unwind here — the prompt is already reset — so log only.
+          console.warn("[Verification] onFamilyGone handler failed", err);
+        }
         return;
       }
       // The prompt stays open on every failure branch below, so bring the

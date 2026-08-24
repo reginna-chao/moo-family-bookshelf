@@ -12,6 +12,7 @@
 ### Test Locations
 
 - Extension: `extension/tests/{unit,component,e2e}/`
+- PWA: `pwa/tests/{unit,component,e2e}/`
 - Worker: `worker/tests/{unit,integration}/`
 
 ### Conventions

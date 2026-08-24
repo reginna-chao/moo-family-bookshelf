@@ -263,6 +263,20 @@ export interface PublicShelfData {
   expiresAt: number | null;
 }
 
+/**
+ * `DELETE /api/family/:id/kicked/:uid` payload — the removal's rejoin block was
+ * lifted. Kept in sync with `extension/src/api/types.ts`.
+ *
+ * `cleared` is a `BoolFlag`, not a `boolean`: it travels on the wire (AGENTS.md
+ * → Boolean Convention). Callers must NOT branch on its value — the endpoint is
+ * idempotent, so a userId whose tombstone had already expired is still a 200 and
+ * the user-visible outcome ("the sync code works for them again") is identical
+ * either way. Any 200 is success.
+ */
+export interface UnkickResult {
+  cleared: BoolFlag;
+}
+
 /** Settings updatable on a family member via PATCH /api/family/:id/member/:uid. */
 export interface MemberSettingsPayload {
   canLend?: BoolFlag;
@@ -494,6 +508,23 @@ export class ApiClient {
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(targetUserId, "targetUserId");
     return this.del(`/api/family/${familyId}/member/${targetUserId}`);
+  }
+
+  /**
+   * Lift the "kicked" tombstone `removeMember` leaves behind, so the removed
+   * member can use the sync code again before it expires on its own.
+   *
+   * This does NOT put anyone back in the family: the member stays out and must
+   * join again themselves — the copy in `components/UnkickNotice.tsx` says so,
+   * and must keep saying so. Owner-only server-side (403 `NOT_OWNER` otherwise)
+   * and idempotent: no live tombstone still answers 200.
+   */
+  async unkickMember(
+    familyId: string,
+    targetUserId: string,
+  ): Promise<ApiResponse<UnkickResult>> {
+    this.validateHexId(targetUserId, "targetUserId");
+    return this.del(`/api/family/${familyId}/kicked/${targetUserId}`);
   }
 
   async transferOwnership(

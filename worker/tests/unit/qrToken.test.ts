@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { seedAuthToken } from "../helpers/auth";
+import {
+  kvKeys,
+  KICKED_TOMBSTONE_TTL_SECONDS,
+  type KickedRecord,
+} from "../../src/kv/schema";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -390,6 +395,47 @@ describe("Join with QR token bypass", () => {
     );
 
     expect(joinRes.status).toBe(200);
+  });
+
+  it("should NOT bypass a kicked tombstone, and still consume the token", async () => {
+    await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
+
+    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
+    const qrRes = await request("POST", `/api/user/${VALID_USER_ID}/qr-token`, {
+      body: JSON.stringify({}),
+      headers: { Authorization: `Bearer ${userAuthToken}` },
+    });
+    const qrToken = ((await qrRes.json()) as Json).data.token as string;
+
+    // The owner removed this user AFTER the QR code was minted.
+    const kicked: KickedRecord = {
+      removedAt: new Date().toISOString(),
+      removedBy: OTHER_USER_ID,
+    };
+    await kv.put(
+      kvKeys.kicked(VALID_FAMILY_ID, VALID_USER_ID),
+      JSON.stringify(kicked),
+      { expirationTtl: KICKED_TOMBSTONE_TTL_SECONDS },
+    );
+
+    const joinRes = await request(
+      "POST",
+      `/api/family/${VALID_FAMILY_ID}/join`,
+      { body: JSON.stringify({ userId: VALID_USER_ID, qrToken }) },
+    );
+
+    // The QR bypass skips VERIFICATION only. A token minted minutes before the
+    // kick must not outrank the kick, so the tombstone gate still refuses.
+    expect(joinRes.status).toBe(403);
+    const json = (await joinRes.json()) as Json;
+    expect(json.error.code).toBe("MEMBER_REMOVED");
+
+    // Pinning current behaviour: the one-time token is resolved (and deleted)
+    // inside the gate block, which runs BEFORE the tombstone check, so a
+    // refused join still burns it. Deliberate — the alternative is holding a
+    // consumed-or-not decision open across the rest of the handler — at the
+    // cost of the user needing a fresh QR code once the tombstone expires.
+    expect(await kv.get(kvKeys.qrToken(qrToken))).toBeNull();
   });
 
   it("should bypass verification even with OTP method set", async () => {

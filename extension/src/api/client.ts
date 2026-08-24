@@ -27,6 +27,7 @@ import type {
   OtpInfo,
   PersonalBooks,
   PublicShelf,
+  UnkickResult,
   VerifyInfo,
   VersionInfo,
 } from "./types";
@@ -66,6 +67,7 @@ export type {
   PublicShelf,
   PublicShelfData,
   SelectionMode,
+  UnkickResult,
   VerifyInfo,
   VerifyMethod,
   VersionInfo,
@@ -430,6 +432,22 @@ export class ApiClient {
     targetUserId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     return this.del(`/api/family/${familyId}/member/${targetUserId}`);
+  }
+
+  /**
+   * Lift the "kicked" tombstone `removeMember` leaves behind, so the removed
+   * member can use the sync code again before it expires on its own.
+   *
+   * This does NOT put anyone back in the family: the member stays out and must
+   * join again themselves — the copy in `dialog/UnkickNotice.tsx` says so, and
+   * must keep saying so. Owner-only server-side (403 `NOT_OWNER` otherwise) and
+   * idempotent: no live tombstone still answers 200.
+   */
+  async unkickMember(
+    familyId: string,
+    targetUserId: string,
+  ): Promise<ApiResponse<UnkickResult>> {
+    return this.del(`/api/family/${familyId}/kicked/${targetUserId}`);
   }
 
   async transferOwnership(

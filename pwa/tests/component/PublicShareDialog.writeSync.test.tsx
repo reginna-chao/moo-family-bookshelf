@@ -123,9 +123,26 @@ function expectNoUnsavedNotice() {
   expect(screen.queryAllByText(new RegExp(UNSAVED_NOTICE))).toHaveLength(0);
 }
 
-/** Press a destructive action and answer its confirm box with 確定. */
+/**
+ * Press a destructive action and answer its confirm box with 確定.
+ *
+ * BOTH clicks are drained inside `act`. The confirm click's handler awaits the
+ * API call and then owes the `[shelf]` passive effect that clears the active
+ * shelfId; that drain crosses a macrotask hop the fake clock never patches, so
+ * leaving the first click on RTL's synchronous act alone made the second act
+ * carry work it might finish one flush short of — and a queued write then slips
+ * past the shelfId guard.
+ *
+ * Every gate in here must stay a synchronous `getBy`: most callers run under
+ * vi fake timers, which RTL cannot detect, so a `waitFor` / `findBy*` would
+ * poll a frozen clock and hang to the full test timeout.
+ */
 async function confirmAction(name: "重設網址" | "關閉公開分享") {
-  fireEvent.click(screen.getByRole("button", { name }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name }));
+  });
+  // getBy, not findBy: the confirm box must be committed, not merely coming.
+  expect(screen.getByRole("button", { name: "確定" })).toBeInTheDocument();
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "確定" }));
   });
@@ -193,6 +210,12 @@ describe("PublicShareDialog · concurrent title / expiry writes", () => {
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "新標題" } });
     await confirmAction("關閉公開分享");
+    // The revocation is fully committed — the create view is what the user sees.
+    // Sequencing point: only past it does the queued write below face the null
+    // shelfId this test is about.
+    expect(
+      screen.getByRole("button", { name: "啟用公開書櫃" }),
+    ).toBeInTheDocument();
 
     await act(async () => {
       vi.advanceTimersByTime(1000);

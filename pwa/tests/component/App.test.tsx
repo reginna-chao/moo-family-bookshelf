@@ -57,9 +57,11 @@ vi.mock("@/api/client", () => {
   return { ApiClient: MockApiClient };
 });
 
-// Mock pages. The stub renders `externalError` as visible text so tests can
-// assert the copy App passes down — the copy itself lives in production
-// App.tsx (TERMINAL_RECOVERY_ERRORS), so the assertion is production-anchored.
+// Mock pages.
+// LandingPage is a pass-through for `externalError`: it renders whatever App
+// hands it verbatim, so the terminal-failure tests below assert on the copy
+// produced by JOIN_BLOCKED_MESSAGES in `pwa/src/utils/joinErrorMessages.ts`
+// (App resolves it with `.get`) rather than on a string invented here.
 vi.mock("@/pages/LandingPage", () => ({
   LandingPage: ({
     onAuth,
@@ -69,7 +71,9 @@ vi.mock("@/pages/LandingPage", () => ({
     externalError?: string;
   }) => (
     <div data-testid="landing-page">
-      {externalError ? <p>{externalError}</p> : null}
+      {externalError ? (
+        <p data-testid="landing-external-error">{externalError}</p>
+      ) : null}
       <button
         onClick={() =>
           onAuth({ userId: "u1", familyId: "f1", encryptionKey: "k1" })
@@ -134,6 +138,10 @@ import App from "@/App";
 import { REMEMBER_SYNC_CODE_KEY, REMEMBERED_LOGOUT_KEY } from "@/hooks/useAuth";
 import { RECOVERY_COOLDOWN_UNTIL_KEY } from "@/utils/recoveryCooldown";
 import { decodeSyncCode } from "@/crypto/syncCode";
+// The terminal-failure copy under test is production's own — App resolves it
+// from this map with `.get`, so the assertions below cannot drift from
+// `pwa/src/utils/joinErrorMessages.ts`.
+import { JOIN_BLOCKED_MESSAGES } from "@/utils/joinErrorMessages";
 
 /** localStorage keys this suite touches — cleared around every test. */
 function clearSuiteStorageKeys() {
@@ -303,67 +311,158 @@ describe("App", () => {
       encryptionKey: "key-123",
     };
 
-    it.each([
-      {
-        code: "FAMILY_FULL",
-        copy: "家庭成員已達上限（每個家庭最多 2 位成員）",
-      },
-      { code: "FAMILY_NOT_FOUND", copy: "找不到這個家庭，家庭可能已被解散" },
-      {
-        code: "ALREADY_IN_FAMILY",
-        copy: "此帳號已加入其他家庭，請先離開原本的家庭",
-      },
-    ])(
-      "logs out and shows landing copy on terminal $code",
-      async ({ code, copy }) => {
-        mockJoinFamily.mockResolvedValueOnce({
-          error: { code, message: "server text (never rendered)" },
-        });
-        // After logout, auth becomes null → LandingPage renders with externalError
-        mockLogout.mockImplementationOnce(() => {
-          mockAuth = null;
-        });
-        mockAuth = { ...AUTH_WITHOUT_TOKEN };
+    /**
+     * The codes JOIN_BLOCKED_MESSAGES marks terminal: retrying the recovery
+     * join cannot succeed, so the stored session really is unrecoverable and
+     * the logout is earned. Spelled out here rather than derived from the map,
+     * so a NEW terminal code cannot ship without a rendered case — see the
+     * tripwire below.
+     */
+    const TERMINAL_CODES = [
+      "FAMILY_FULL",
+      "MEMBER_REMOVED",
+      "FAMILY_NOT_FOUND",
+      "ALREADY_IN_FAMILY",
+    ];
 
-        await act(async () => {
-          render(<App />);
-        });
+    beforeEach(() => {
+      // Production logout() drops the stored session; mirroring that here is
+      // what lets LandingPage render on the branches that DO log out.
+      // Registered per test, after the suite-level vi.clearAllMocks(), so no
+      // implementation leaks between tests.
+      mockLogout.mockImplementation(() => {
+        mockAuth = null;
+      });
+    });
+
+    /**
+     * Render with a token-less auth — the auto-acquire effect fires
+     * acquireNewToken — and the recovery join stubbed to fail with `code`.
+     * `errorExtras` carries envelope fields only some branches read
+     * (`retryAfter`).
+     */
+    async function renderWithFailedJoin(
+      code: string,
+      errorExtras: Record<string, unknown> = {},
+    ): Promise<void> {
+      mockJoinFamily.mockResolvedValueOnce({
+        error: { code, message: `stub ${code}`, ...errorExtras },
+      });
+      mockAuth = { ...AUTH_WITHOUT_TOKEN };
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      // The stubbed failure must really have been consumed; otherwise a
+      // "no logout" assertion downstream would pass for the wrong reason.
+      expect(mockJoinFamily).toHaveBeenCalled();
+    }
+
+    it("covers every code JOIN_BLOCKED_MESSAGES treats as terminal", () => {
+      // Tripwire: a new entry in the production map without a case below would
+      // otherwise ship an unexercised logout branch.
+      expect([...JOIN_BLOCKED_MESSAGES.keys()].sort()).toEqual(
+        [...TERMINAL_CODES].sort(),
+      );
+    });
+
+    /**
+     * Terminal failure: App logs out AND hands LandingPage a reason, instead of
+     * dropping the user at a bare login form wondering why the session
+     * evaporated. MEMBER_REMOVED is the sharpest case — the owner removed this
+     * member, so the server's kicked tombstone refuses the recovery join.
+     *
+     * The expected copy is read from JOIN_BLOCKED_MESSAGES in
+     * `pwa/src/utils/joinErrorMessages.ts`, the very map App looks the code up
+     * in, so the assertion is production-anchored end to end: this code must
+     * resolve to THAT entry and reach the render site. The wording itself is
+     * additionally pinned verbatim on the manual-join side by
+     * `pwa/tests/component/LandingPage.test.tsx`.
+     */
+    it.each(TERMINAL_CODES)(
+      "logs out and explains %s on the landing page",
+      async (code) => {
+        const expected = JOIN_BLOCKED_MESSAGES.get(code);
+        expect(expected).toBeDefined();
+
+        await renderWithFailedJoin(code);
 
         await waitFor(() => {
           expect(mockLogout).toHaveBeenCalled();
         });
         expect(screen.getByTestId("landing-page")).toBeInTheDocument();
-        expect(screen.getByText(copy)).toBeInTheDocument();
+        expect(screen.getByTestId("landing-external-error")).toHaveTextContent(
+          expected as string,
+        );
       },
     );
 
+    /**
+     * Anything neither terminal nor a verification failure KEEPS the session
+     * (security-ux Invariant 2): a dropped connection, or a code this client
+     * does not know, is not a reason to drop the user's data — retrying can
+     * still succeed.
+     */
     it.each(["INVALID_TOKEN", "NETWORK_ERROR"])(
-      "keeps the session on %s (no logout)",
+      "keeps the session on %s (no logout, no landing message)",
       async (code) => {
-        mockJoinFamily.mockResolvedValueOnce({
-          error: { code, message: "transient failure" },
-        });
-        mockAuth = { ...AUTH_WITHOUT_TOKEN };
-
-        await act(async () => {
-          render(<App />);
-        });
+        await renderWithFailedJoin(code);
 
         expect(mockLogout).not.toHaveBeenCalled();
         expect(screen.getByTestId("family-shelf-page")).toBeInTheDocument();
+        expect(
+          screen.queryByTestId("landing-external-error"),
+        ).not.toBeInTheDocument();
+      },
+    );
+
+    /**
+     * `error.code` arrives straight off the wire from a backend that may be
+     * self-hosted, buggy, or hostile, so a code naming an `Object.prototype`
+     * member is a reachable input. Looked up in a Map it is simply an unknown
+     * code — nothing to explain, session kept — i.e. it must behave exactly
+     * like INVALID_TOKEN above.
+     *
+     * Regression guard for the object-literal table this Map replaced, where
+     * the lookup answered off the prototype chain: `__proto__` returned
+     * `Object.prototype`, and rendering that object as a React child took the
+     * whole PWA down (there is no ErrorBoundary); the function-valued members
+     * (`toString` / `constructor` / `valueOf` / `hasOwnProperty`) reached
+     * `setLandingError`, which treats a function as a state UPDATER — so they
+     * either threw inside the state update or put the updater's return value on
+     * screen as the "reason" for a logout that was never earned.
+     *
+     * The render itself is the crash assertion — `renderWithFailedJoin` renders
+     * inside `act`, so a React child error surfaces as a test failure there.
+     */
+    const PROTOTYPE_CHAIN_CODES = [
+      "__proto__",
+      "toString",
+      "constructor",
+      "valueOf",
+      "hasOwnProperty",
+    ];
+
+    it.each(PROTOTYPE_CHAIN_CODES)(
+      "treats the prototype-chain code %s as an ordinary unknown code",
+      async (code) => {
+        await renderWithFailedJoin(code);
+
+        // Same outcome as any other unknown code: session kept, nothing to
+        // explain — and, critically, the app is still standing.
+        expect(mockLogout).not.toHaveBeenCalled();
+        expect(screen.getByTestId("family-shelf-page")).toBeInTheDocument();
+        expect(
+          screen.queryByTestId("landing-external-error"),
+        ).not.toBeInTheDocument();
       },
     );
 
     it("keeps the session and writes a retryAfter cooldown on RATE_LIMITED", async () => {
-      mockJoinFamily.mockResolvedValueOnce({
-        error: { code: "RATE_LIMITED", message: "Too many", retryAfter: 60 },
-      });
-      mockAuth = { ...AUTH_WITHOUT_TOKEN };
       const before = Date.now();
 
-      await act(async () => {
-        render(<App />);
-      });
+      await renderWithFailedJoin("RATE_LIMITED", { retryAfter: 60 });
 
       expect(mockLogout).not.toHaveBeenCalled();
       expect(screen.getByTestId("family-shelf-page")).toBeInTheDocument();
@@ -435,17 +534,7 @@ describe("App", () => {
       "VERIFICATION_FAILED",
       "VERIFICATION_LOCKED",
     ])("logs out and remembers the sync code on %s", async (code) => {
-      mockJoinFamily.mockResolvedValueOnce({
-        error: { code, message: "Verification needed" },
-      });
-      mockLogout.mockImplementationOnce(() => {
-        mockAuth = null;
-      });
-      mockAuth = { ...AUTH_WITHOUT_TOKEN };
-
-      await act(async () => {
-        render(<App />);
-      });
+      await renderWithFailedJoin(code);
 
       await waitFor(() => {
         expect(mockLogout).toHaveBeenCalled();
@@ -461,17 +550,8 @@ describe("App", () => {
 
     it("still logs out but does not remember the sync code when rememberSyncCode is off", async () => {
       localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "0");
-      mockJoinFamily.mockResolvedValueOnce({
-        error: {
-          code: "VERIFICATION_REQUIRED",
-          message: "Verification needed",
-        },
-      });
-      mockAuth = { ...AUTH_WITHOUT_TOKEN };
 
-      await act(async () => {
-        render(<App />);
-      });
+      await renderWithFailedJoin("VERIFICATION_REQUIRED");
 
       await waitFor(() => {
         expect(mockLogout).toHaveBeenCalled();

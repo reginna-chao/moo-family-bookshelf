@@ -25,6 +25,7 @@ import { VerifySetupPrompt } from "./components/VerifySetupPrompt";
 import { FamilyDataProvider, useFamilyData } from "./hooks/useFamilyData";
 import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
+import { JOIN_BLOCKED_MESSAGES } from "./utils/joinErrorMessages";
 import {
   clearRecoveryCooldown,
   getActiveRecoveryCooldown,
@@ -70,23 +71,6 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const PUBLIC_PATH_RE = /^\/public\/([a-f0-9]{32})\/?$/;
-
-/**
- * Recovery-join failures that make the stored session genuinely unrecoverable,
- * mapped to the copy LandingPage shows after the logout. Mirrors the branch map
- * in `extension/src/api/auth-refresh.ts`: a code NOT classified as terminal or
- * verification keeps the session, so a transient failure never silently drops
- * the user's data (security-ux Invariant 2).
- *
- * A `Map` because `code` is backend-controlled — an object lookup would resolve
- * `"__proto__"` through the prototype chain. Server-supplied `message` text is
- * never rendered.
- */
-const TERMINAL_RECOVERY_ERRORS: ReadonlyMap<string, string> = new Map([
-  ["FAMILY_FULL", "家庭成員已達上限（每個家庭最多 2 位成員）"],
-  ["FAMILY_NOT_FOUND", "找不到這個家庭，家庭可能已被解散"],
-  ["ALREADY_IN_FAMILY", "此帳號已加入其他家庭，請先離開原本的家庭"],
-]);
 
 /**
  * Recovery-join failures that need the member's PWA-login secret. The recovery
@@ -140,7 +124,7 @@ function AuthenticatedApp() {
   const [currentPage, setCurrentPage] = useState<Page>(
     () => pageFromHash() ?? "family-shelf",
   );
-  /** Terminal recovery-join failure copy, handed to LandingPage after a logout. */
+  // Reason for an involuntary logout, handed to LandingPage as `externalError`.
   const [landingError, setLandingError] = useState("");
   const [verifySetupDone, setVerifySetupDone] = useState(false);
 
@@ -199,9 +183,17 @@ function AuthenticatedApp() {
     );
     if (res.error) {
       const { code, retryAfter } = res.error;
-      const terminalMessage = TERMINAL_RECOVERY_ERRORS.get(code);
-      if (terminalMessage) {
-        setLandingError(terminalMessage);
+      // A blocked code is terminal — retrying this join cannot succeed — so the
+      // stored session really is unrecoverable and the logout is earned.
+      // `.get` on a Map, never an object index: the code is backend-controlled
+      // (see the prototype-chain note in `utils/joinErrorMessages.ts`).
+      // Anything NOT in that table and not a verification failure keeps the
+      // session instead, so a transient failure never silently drops the user's
+      // data (security-ux Invariant 2) — the same split as the branch map in
+      // `extension/src/api/auth-refresh.ts`.
+      const blockedMessage = JOIN_BLOCKED_MESSAGES.get(code);
+      if (blockedMessage !== undefined) {
+        setLandingError(blockedMessage);
         logout();
         return null;
       }
