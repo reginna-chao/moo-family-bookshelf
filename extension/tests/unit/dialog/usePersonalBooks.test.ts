@@ -86,6 +86,36 @@ async function waitForReady(result: { current: { status: string } }) {
   await waitFor(() => expect(result.current.status).toBe("ready"));
 }
 
+const makeBook = (bookId: string, isShared = BoolFlag.FALSE): BookEntry => ({
+  bookId,
+  title: `書-${bookId}`,
+  author: "",
+  isbn: "",
+  coverUrl: "",
+  readmooUrl: "",
+  category: "",
+  isShared,
+});
+
+/** Build a client whose server record already contains `books` (server-known). */
+function clientWithServerBooks(
+  books: BookEntry[],
+  overrides: Partial<ApiClient> = {},
+): ApiClient {
+  return createMockApiClient({
+    getPersonalBooks: vi.fn().mockResolvedValue({
+      data: {
+        schemaVersion: 1,
+        userId: "user-abc",
+        displayName: "小明",
+        books,
+        lastUpdated: "2026-01-01T00:00:00.000Z",
+      },
+    }),
+    ...overrides,
+  });
+}
+
 describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -656,36 +686,6 @@ describe("usePersonalBooks — dirty Set", () => {
 });
 
 describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
-  const makeBook = (bookId: string, isShared = BoolFlag.FALSE): BookEntry => ({
-    bookId,
-    title: `書-${bookId}`,
-    author: "",
-    isbn: "",
-    coverUrl: "",
-    readmooUrl: "",
-    category: "",
-    isShared,
-  });
-
-  /** Build a client whose server record already contains `books` (server-known). */
-  function clientWithServerBooks(
-    books: BookEntry[],
-    overrides: Partial<ApiClient> = {},
-  ): ApiClient {
-    return createMockApiClient({
-      getPersonalBooks: vi.fn().mockResolvedValue({
-        data: {
-          schemaVersion: 1,
-          userId: "user-abc",
-          displayName: "小明",
-          books,
-          lastUpdated: "2026-01-01T00:00:00.000Z",
-        },
-      }),
-      ...overrides,
-    });
-  }
-
   beforeEach(() => {
     vi.clearAllMocks();
     // No scrape; the baseline comes straight from the API record, so every book
@@ -856,5 +856,102 @@ describe("usePersonalBooks — unmount cleanup", () => {
     // Unmount cleanup must clear the armed reset timer, or the deferred
     // setStatus("ready") lands on an unmounted component.
     expect(clearSpy).toHaveBeenCalled();
+  });
+});
+
+/**
+ * A successful save leaves a 1500ms "saved → ready" reset armed. A SECOND save
+ * started inside that window must supersede it: the old timer belongs to a
+ * finished save, so letting it fire would rewrite the status of the one now in
+ * flight — dropping the UI out of "saving" while the request is still on the
+ * wire, or out of "error" after it came back failed.
+ *
+ * Timer discipline: settle the load with REAL timers first (`waitForReady` is a
+ * waiter, and RTL cannot see vi's clock — it would poll a frozen one), and only
+ * then install the fake clock. Past that point every assertion is synchronous;
+ * a `waitFor` / `findBy*` here would hang to the full test timeout.
+ */
+describe("usePersonalBooks — stale reset-timer supersede", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupStorage();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps status 'saving' when the previous save's reset timer fires mid-flight", async () => {
+    // b1 is server-known, so the second save goes out as a PATCH — and that
+    // request never answers, holding the save in flight past the old deadline.
+    const client = clientWithServerBooks([makeBook("b1")], {
+      patchPersonalBooks: vi.fn().mockReturnValue(new Promise(() => undefined)),
+    });
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    vi.useFakeTimers();
+
+    // First save: nothing is dirty → the no-op branch arms the 1500ms reset
+    // without spending a request. Same state a user is in right after any
+    // successful save, minus the network.
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    expect(result.current.status).toBe("saved");
+
+    // Second save, still inside that window.
+    act(() => {
+      result.current.handleToggle("b1");
+    });
+    await act(async () => {
+      void result.current.handleSave();
+    });
+    expect(result.current.status).toBe("saving");
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    // The superseded timer must be dead. Otherwise the shelf goes back to
+    // "ready" — re-enabling 儲存 — while the first request is still unanswered.
+    expect(result.current.status).toBe("saving");
+  });
+
+  it("keeps the error state when the previous save's reset timer fires after a failure", async () => {
+    const client = clientWithServerBooks([makeBook("b1")], {
+      patchPersonalBooks: vi.fn().mockResolvedValue({
+        error: { code: "BOOM", message: "patch failed" },
+      }),
+    });
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    vi.useFakeTimers();
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    expect(result.current.status).toBe("saved");
+
+    act(() => {
+      result.current.handleToggle("b1");
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    expect(result.current.status).toBe("error");
+    expect(result.current.errorMessage).toBe("patch failed");
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    // The stale reset must not swallow the failure: a silent return to "ready"
+    // hides the banner while the toggle is still unsaved (dirty).
+    expect(result.current.status).toBe("error");
+    expect(result.current.errorMessage).toBe("patch failed");
+    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
   });
 });

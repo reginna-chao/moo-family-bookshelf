@@ -356,6 +356,39 @@ describe("useBookSync", () => {
       expect(result.current.syncStatus).toBe("idle");
     });
 
+    it("stays syncing when the previous sync's done->idle reset comes due", async () => {
+      // A manual sync started inside the 2s "done" window must supersede the
+      // pending done->idle timer. If that stale timer still fires, syncStatus
+      // drops to "idle" mid-sync and the sync button re-enables — the button's
+      // disabled state is the only guard against a second concurrent syncBooks().
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+
+      // First manual sync completes and arms the done->idle reset.
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+
+      expect(result.current.syncStatus).toBe("done");
+
+      // Second manual sync starts while that reset is still pending; its work
+      // never settles, so the status can only change via the stale timer.
+      vi.mocked(syncBooks).mockImplementation(
+        () => new Promise<never>(() => {}),
+      );
+      await act(async () => {
+        void result.current.triggerManualSync();
+      });
+
+      expect(result.current.syncStatus).toBe("syncing");
+
+      // 2000ms is the done->idle delay armed by the first sync.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(result.current.syncStatus).toBe("syncing");
+    });
+
     it("sets error state on failed manual sync", async () => {
       vi.mocked(syncBooks).mockResolvedValue({
         success: false,

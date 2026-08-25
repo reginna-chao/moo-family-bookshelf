@@ -1,5 +1,11 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { VerificationSettings } from "@/dialog/VerificationSettings";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
@@ -281,5 +287,62 @@ describe("VerificationSettings", () => {
         }
       },
     );
+  });
+
+  // Fake timers are installed mid-test (only after the real-clock settle), so
+  // this suite owns the restore hook the rest of the file does not need.
+  describe("stale saved->idle reset", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("keeps the saving indicator when the previous save's reset comes due", async () => {
+      // Method buttons are disabled only while saveState === "saving", so a
+      // second save is reachable inside the 2s 已儲存 window. If the first
+      // save's pending saved->idle timer still fires, it drops the in-flight
+      // save out of "saving" and the UI stops reporting the request.
+      const api = createMockApiClient({
+        getVerifyMethod: vi
+          .fn()
+          .mockResolvedValue({ data: { method: "pin", prompted: 1 } }),
+        setVerifyMethod: vi
+          .fn()
+          .mockResolvedValueOnce({ data: { ok: true } })
+          // Second save never settles: only the stale timer can move the state.
+          .mockImplementation(() => new Promise<never>(() => {})),
+      });
+
+      // Real clock: settle the initial load before touching timers. `act` (not
+      // findBy/waitFor) is the ready signal — it guarantees pending effects are
+      // flushed on exit, and waitFor cannot run once fake timers are installed.
+      await act(async () => {
+        render(<VerificationSettings userId="user-1" apiClient={api} />);
+      });
+      expect(screen.getByText("目前方式：PIN 碼")).toBeInTheDocument();
+
+      vi.useFakeTimers();
+
+      // First save succeeds and arms the 2000ms saved->idle reset.
+      fireEvent.click(screen.getByText("不設定驗證"));
+      await act(async () => {
+        fireEvent.click(screen.getByText("確定不設定驗證"));
+      });
+
+      expect(screen.getByText("已儲存")).toBeInTheDocument();
+
+      // Second save starts inside that window.
+      await act(async () => {
+        fireEvent.click(screen.getByText("隨機驗證碼"));
+      });
+
+      expect(screen.getByText("儲存中...")).toBeInTheDocument();
+
+      // 2000ms is the saved->idle delay armed by the first save.
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      expect(screen.getByText("儲存中...")).toBeInTheDocument();
+    });
   });
 });
