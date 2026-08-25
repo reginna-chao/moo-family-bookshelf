@@ -11,12 +11,22 @@ export interface VerificationSettingsProps {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-const METHOD_LABELS: Record<VerifyMethod, string> = {
-  pin: "PIN 碼",
-  pattern: "圖形驗證",
-  code: "隨機驗證碼",
-  none: "不設定驗證",
-};
+/**
+ * Per-method label, in the order the selection buttons render (Map preserves
+ * insertion order). A Map, not an object literal: `method` arrives unvalidated
+ * from a user-configurable backend, and a Map lookup never walks the prototype
+ * chain, so a hostile `"__proto__"` / `"toString"` resolves to nothing instead
+ * of an Object.prototype member React would refuse to render.
+ */
+const METHOD_LABELS: ReadonlyMap<VerifyMethod, string> = new Map([
+  ["pin", "PIN 碼"],
+  ["pattern", "圖形驗證"],
+  ["code", "隨機驗證碼"],
+  ["none", "不設定驗證"],
+]);
+
+/** Shown for a method outside the union; same wording as the "none" label. */
+const UNKNOWN_METHOD_LABEL = "不設定驗證";
 
 export function VerificationSettings({
   userId,
@@ -151,7 +161,8 @@ export function VerificationSettings({
     <div className="moo-verify">
       <div className="moo-verify__title">手機版登入驗證</div>
       <div className="moo-verify__current">
-        目前方式：{METHOD_LABELS[currentMethod ?? "none"]}
+        目前方式：
+        {METHOD_LABELS.get(currentMethod ?? "none") ?? UNKNOWN_METHOD_LABEL}
       </div>
       <div className="moo-verify__tip">
         提示：此驗證僅用於手機版登入時保護你的書櫃資料。
@@ -159,7 +170,7 @@ export function VerificationSettings({
 
       {/* Method selection buttons */}
       <div className="moo-verify__methods">
-        {(Object.keys(METHOD_LABELS) as VerifyMethod[]).map((method) => {
+        {[...METHOD_LABELS.entries()].map(([method, label]) => {
           const isActive = (selectedMethod ?? currentMethod) === method;
           const methodClass = isActive
             ? "moo-verify__method moo-verify__method--active"
@@ -171,7 +182,7 @@ export function VerificationSettings({
               disabled={saveState === "saving"}
               className={methodClass}
             >
-              {METHOD_LABELS[method]}
+              {label}
             </button>
           );
         })}
