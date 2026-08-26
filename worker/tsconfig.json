@@ -11,7 +11,14 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "types": ["@cloudflare/workers-types", "vitest/globals"]
+    "types": ["@cloudflare/workers-types", "vitest/globals"],
+    "baseUrl": ".",
+    // Mirrors extension/ and pwa/: the shared package ships raw .ts and its
+    // exports map points at extension-less paths, so tsc needs the explicit
+    // mapping to find moo-family-bookshelf-shared/<entry>.
+    "paths": {
+      "moo-family-bookshelf-shared/*": ["../shared/src/*"]
+    }
   },
   "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules", "dist"]

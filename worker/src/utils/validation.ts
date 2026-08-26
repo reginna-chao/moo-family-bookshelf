@@ -1,3 +1,4 @@
+import { isAllowedCoverUrl } from "moo-family-bookshelf-shared/config/readmoo";
 import type { VerifyMethod } from "../kv/schema";
 import {
   UserIdSchema,
@@ -88,6 +89,25 @@ export function sanitizeVerifySecret(value: unknown): string | null {
   if (typeof value !== "string") return null;
   if (value.length > VERIFY_SECRET_MAX_LENGTH) return null;
   return value;
+}
+
+/**
+ * Keep a coverUrl only when it is empty (scraper placeholder) or on the
+ * Readmoo cover-host whitelist; anything else is blanked to "". Sanitize
+ * instead of reject: one attacker-crafted cover in a sync payload must not
+ * fail the whole books sync, and a blanked cover renders as the normal
+ * no-cover state. Off-whitelist covers would otherwise act as tracking
+ * beacons against family members and public-shelf visitors.
+ *
+ * Lives at the boundary so both consumers scrub identically: the books write
+ * paths in `routes/user.ts` (which protect the family bookshelf aggregation
+ * reading `user:{id}` directly) and `buildSnapshot` in
+ * `services/publicShelf.ts` (which protects every `public:{shareToken}`
+ * snapshot).
+ */
+export function sanitizeCoverUrl(value: unknown): string {
+  const url = typeof value === "string" ? value : "";
+  return url === "" || isAllowedCoverUrl(url) ? url : "";
 }
 
 /**

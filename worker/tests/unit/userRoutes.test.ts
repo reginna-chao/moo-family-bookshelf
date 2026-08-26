@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { kvKeys } from "../../src/kv/schema";
+import { watchKvOps } from "../helpers/kvOps";
+import { BoolFlag, kvKeys } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
-import { USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
+import { ALICE, USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -57,6 +58,11 @@ async function createFamilyAndGetToken(userId = USER1) {
 
 beforeEach(() => {
   kv = createMockKV();
+});
+
+// `watchKvOps` installs `vi.spyOn` handlers and does not clean up after itself.
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 // ===========================================================================
@@ -717,7 +723,10 @@ describe("PATCH /api/user/:id/books", () => {
         title: "My Book",
         author: "Jane",
         isbn: "978-xxx",
-        coverUrl: "https://img/b1.jpg",
+        // Must be a whitelisted Readmoo cover host: the books write paths blank
+        // anything else (see the coverUrl lazy-cleanup suite below), so an
+        // arbitrary host here would test blanking, not field preservation.
+        coverUrl: "https://cdn.readmoo.com/b1.jpg",
         readmooUrl: "https://readmoo.com/book/b1",
         category: "sci-fi",
         isShared: 0,
@@ -745,7 +754,7 @@ describe("PATCH /api/user/:id/books", () => {
     expect(book.title).toBe("My Book");
     expect(book.author).toBe("Jane");
     expect(book.isbn).toBe("978-xxx");
-    expect(book.coverUrl).toBe("https://img/b1.jpg");
+    expect(book.coverUrl).toBe("https://cdn.readmoo.com/b1.jpg");
     expect(book.readmooUrl).toBe("https://readmoo.com/book/b1");
     expect(book.category).toBe("sci-fi");
     expect(book.isShared).toBe(1);
@@ -864,6 +873,163 @@ describe("PATCH /api/user/:id/books", () => {
     );
     const getJson = (await getRes.json()) as Json;
     expect(getJson.data.lastUpdated).toBe(fixedTimestamp);
+  });
+});
+
+// ===========================================================================
+// PATCH /api/user/:id/books — coverUrl lazy cleanup (P0 privacy)
+//
+// A book cover is fetched by every family member and every public-shelf
+// visitor, so an attacker-chosen cover host acts as a tracking beacon. PUT
+// blocks new ones at the boundary; PATCH additionally SCRUBS records written
+// before that guard existed. The cleanup is opportunistic on purpose: it rides
+// a write that was going to happen anyway and never forces one.
+// ===========================================================================
+
+describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
+  const LEGACY_USER = ALICE;
+  const POISONED_COVER = "https://evil.example.com/beacon.gif";
+  const POISONED_HOST = "evil.example.com";
+  const CLEAN_COVER = "https://cdn.readmoo.com/clean.jpg";
+  /** Fixed so "the record was not rewritten" is provable from `lastUpdated`. */
+  const SEEDED_AT = "2020-01-01T00:00:00.000Z";
+
+  function book(bookId: string, coverUrl: string, isShared = BoolFlag.FALSE) {
+    return {
+      bookId,
+      title: `Book ${bookId}`,
+      author: "",
+      isbn: "",
+      coverUrl,
+      readmooUrl: "",
+      category: "",
+      isShared,
+    };
+  }
+
+  /**
+   * Seed `user:{id}` DIRECTLY rather than through PUT. A poisoned coverUrl can
+   * only be in KV because it was written BEFORE the whitelist existed — PUT
+   * sanitizes on the way in, so it cannot produce this fixture.
+   */
+  async function seedLegacyRecord(
+    books: ReturnType<typeof book>[],
+  ): Promise<string> {
+    await kv.put(
+      kvKeys.user(LEGACY_USER),
+      JSON.stringify({
+        schemaVersion: 1,
+        userId: LEGACY_USER,
+        displayName: "Legacy User",
+        books,
+        lastUpdated: SEEDED_AT,
+      }),
+    );
+    return generateAuthToken(kv, LEGACY_USER);
+  }
+
+  async function storedRecord(): Promise<Json> {
+    return kv.get(kvKeys.user(LEGACY_USER), "json");
+  }
+
+  function patch(body: unknown, token: string) {
+    return request("PATCH", `/api/user/${LEGACY_USER}/books`, body, token);
+  }
+
+  it("scrubs the poisoned cover of the book a change targets, keeping a whitelisted one", async () => {
+    const token = await seedLegacyRecord([
+      book("b1", POISONED_COVER),
+      book("b2", CLEAN_COVER),
+    ]);
+
+    const res = await patch(
+      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      token,
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Json).data.applied).toBe(1);
+
+    const record = await storedRecord();
+    const [b1, b2] = record.books;
+    expect(b1.coverUrl).toBe("");
+    expect(b1.isShared).toBe(BoolFlag.TRUE);
+    expect(b2.coverUrl).toBe(CLEAN_COVER);
+    expect(JSON.stringify(record)).not.toContain(POISONED_HOST);
+  });
+
+  it("scrubs the poisoned cover of a book no change targets", async () => {
+    const token = await seedLegacyRecord([
+      book("b1", CLEAN_COVER),
+      book("b2", POISONED_COVER),
+    ]);
+
+    const res = await patch(
+      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      token,
+    );
+    expect(res.status).toBe(200);
+
+    const record = await storedRecord();
+    const untouched = record.books.find((b: Json) => b.bookId === "b2");
+    expect(untouched.coverUrl).toBe("");
+    // Only the cover moved: the book's own sharing state is not a change target.
+    expect(untouched.isShared).toBe(BoolFlag.FALSE);
+    expect(untouched.title).toBe("Book b2");
+  });
+
+  it("counts only requested isShared changes in `applied`, never sanitize rewrites", async () => {
+    const token = await seedLegacyRecord([
+      book("b1", POISONED_COVER),
+      book("b2", POISONED_COVER),
+    ]);
+
+    const res = await patch(
+      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      token,
+    );
+
+    // Two books were rewritten, but only one change was requested.
+    expect(((await res.json()) as Json).data.applied).toBe(1);
+    const record = await storedRecord();
+    expect(record.books.map((b: Json) => b.coverUrl)).toEqual(["", ""]);
+  });
+
+  it("leaves a poisoned cover in KV when the PATCH is a pure no-op", async () => {
+    const token = await seedLegacyRecord([book("b1", POISONED_COVER)]);
+    const ops = watchKvOps(kv);
+
+    const res = await patch(
+      { changes: [{ bookId: "unknown-book", isShared: BoolFlag.TRUE }] },
+      token,
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Json).data.applied).toBe(0);
+
+    // The short-circuit still skips the KV write entirely — cleanup rides an
+    // existing write and must never become a hidden one of its own.
+    expect(ops.putKeys()).toEqual([]);
+    const record = await storedRecord();
+    expect(record.books[0].coverUrl).toBe(POISONED_COVER);
+    expect(record.lastUpdated).toBe(SEEDED_AT);
+  });
+
+  it("scrubs poisoned covers on a displayName-only PATCH, which writes anyway", async () => {
+    const token = await seedLegacyRecord([book("b1", POISONED_COVER)]);
+
+    const res = await patch(
+      {
+        changes: [{ bookId: "unknown-book", isShared: BoolFlag.TRUE }],
+        displayName: "New Name",
+      },
+      token,
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Json).data.applied).toBe(0);
+
+    const record = await storedRecord();
+    expect(record.books[0].coverUrl).toBe("");
+    expect(record.displayName).toBe("New Name");
+    expect(record.lastUpdated).not.toBe(SEEDED_AT);
   });
 });
 

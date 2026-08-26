@@ -41,6 +41,22 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
+/**
+ * An attacker-controlled cover host. Every anonymous public-shelf visitor's
+ * browser fetches the cover URLs a snapshot carries, so an off-whitelist host
+ * that reaches a snapshot is a tracking beacon — the P0 the sanitize chokepoint
+ * (`buildSnapshot` in `src/services/publicShelf.ts`) guards.
+ */
+const BEACON_HOST = "evil.example.com";
+const BEACON_COVER = `https://${BEACON_HOST}/beacon.gif`;
+
+/**
+ * Whitelisted cover of book3 (shared). Used as the control in every sanitize
+ * case: the chokepoint must blank ONLY the off-whitelist value, never scrub
+ * covers wholesale.
+ */
+const CONTROL_COVER = "https://cdn.readmoo.com/cover3.jpg";
+
 function sampleBooks(): UserBooksRecord["books"] {
   return [
     {
@@ -68,7 +84,7 @@ function sampleBooks(): UserBooksRecord["books"] {
       title: "Another Shared",
       author: "Author C",
       isbn: "333",
-      coverUrl: "https://cdn.readmoo.com/cover3.jpg",
+      coverUrl: CONTROL_COVER,
       readmooUrl: "https://readmoo.com/book/book3",
       category: "fiction",
       isShared: BoolFlag.TRUE,
@@ -486,6 +502,132 @@ describe("POST reset-token", () => {
     );
 
     expect(res.status).toBe(404);
+  });
+});
+
+// ── Public snapshot coverUrl sanitize (buildSnapshot chokepoint) ─
+//
+// A `user:{id}` record written BEFORE the cover-host whitelist shipped can
+// still carry an attacker-chosen coverUrl. The books write paths scrub it only
+// on the owner's NEXT sync — but the three snapshot-minting public-shelf
+// handlers hand that raw record straight to the snapshot writer, so without the
+// sanitize inside `buildSnapshot` (`src/services/publicShelf.ts`) any of them
+// could publish a fresh beaconing `public:{shareToken}` snapshot for a record
+// whose owner never syncs books again. One case per minting handler; the
+// books-sync refresh path is covered under "PUT /api/user/:id/books
+// side-effect" below.
+
+describe("Public snapshot coverUrl sanitize", () => {
+  /**
+   * Write an off-whitelist cover DIRECTLY into the stored `user:{userId}`
+   * record, bypassing every books handler — the shape of a record poisoned
+   * before the whitelist existed. Targets book1, which is SHARED and therefore
+   * a candidate for publication; book3 keeps CONTROL_COVER.
+   */
+  async function poisonStoredCover(userId: string): Promise<void> {
+    const record = await kv.get<UserBooksRecord>(kvKeys.user(userId), "json");
+    if (!record) throw new Error(`no seeded books record for ${userId}`);
+    const target = record.books.find((b) => b.bookId === "book1");
+    if (!target) throw new Error("fixture no longer contains book1");
+    target.coverUrl = BEACON_COVER;
+    await kv.put(kvKeys.user(userId), JSON.stringify(record));
+  }
+
+  async function readSnapshot(
+    shareToken: string,
+  ): Promise<PublicShelfSnapshot> {
+    const snapshot = await kv.get<PublicShelfSnapshot>(
+      kvKeys.publicShelf(shareToken),
+      "json",
+    );
+    if (!snapshot) throw new Error(`no snapshot stored for ${shareToken}`);
+    return snapshot;
+  }
+
+  function coverOf(
+    snapshot: PublicShelfSnapshot,
+    bookId: string,
+  ): string | undefined {
+    return snapshot.books.find((b) => b.bookId === bookId)?.coverUrl;
+  }
+
+  /** Poisoned book published with a blank cover; the control one untouched. */
+  function expectSanitized(snapshot: PublicShelfSnapshot): void {
+    expect(coverOf(snapshot, "book1")).toBe("");
+    expect(coverOf(snapshot, "book3")).toBe(CONTROL_COVER);
+  }
+
+  /** Nothing an anonymous visitor receives mentions the beacon host. */
+  async function expectPublicReadClean(shareToken: string): Promise<void> {
+    const res = await request("GET", `/api/public/${shareToken}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain(BEACON_HOST);
+  }
+
+  it("blanks a poisoned coverUrl when create mints the shelf's first snapshot", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    await poisonStoredCover(USER_ID);
+
+    const { res, json } = await createShelf(USER_ID, AUTH_TOKEN);
+    expect(res.status).toBe(201);
+    const shareToken = json.data.shelf.shareToken;
+
+    expectSanitized(await readSnapshot(shareToken));
+    await expectPublicReadClean(shareToken);
+
+    // The handler writes no books record, so the poison is still sitting in
+    // `user:{id}`: the snapshot is clean because of the chokepoint, not because
+    // something scrubbed KV first.
+    const record = await kv.get<UserBooksRecord>(kvKeys.user(USER_ID), "json");
+    const stored = record?.books.find((b) => b.bookId === "book1");
+    expect(stored?.coverUrl).toBe(BEACON_COVER);
+  });
+
+  it("blanks a poisoned coverUrl when update rewrites the snapshot", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
+    const { shelfId, shareToken } = created.data.shelf;
+
+    // Poisoned AFTER the shelf exists, so only the update's snapshot rewrite
+    // can carry the value onto the public surface.
+    await poisonStoredCover(USER_ID);
+
+    const res = await request(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}`,
+      { body: JSON.stringify({ title: "新標題" }), token: AUTH_TOKEN },
+    );
+    expect(res.status).toBe(200);
+
+    const snapshot = await readSnapshot(shareToken);
+    // Proves the snapshot really was rebuilt from the poisoned record — a
+    // handler that skipped the rewrite would leave the pre-poison snapshot and
+    // pass the cover assertions for the wrong reason.
+    expect(snapshot.title).toBe("新標題");
+    expectSanitized(snapshot);
+    await expectPublicReadClean(shareToken);
+  });
+
+  it("blanks a poisoned coverUrl when reset-token republishes under the new token", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
+    const { shelfId, shareToken: oldToken } = created.data.shelf;
+
+    await poisonStoredCover(USER_ID);
+
+    const res = await request(
+      "POST",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}/reset-token`,
+      { token: AUTH_TOKEN },
+    );
+    expect(res.status).toBe(200);
+    const newToken = ((await res.json()) as Json).data.shelf.shareToken;
+    expect(newToken).not.toBe(oldToken);
+
+    // `readSnapshot` throws when the new token has no snapshot, so reaching the
+    // assertions proves this handler minted a fresh one from the raw record.
+    expectSanitized(await readSnapshot(newToken));
+    await expectPublicReadClean(newToken);
   });
 });
 
@@ -1475,6 +1617,48 @@ describe("PUT /api/user/:id/books side-effect", () => {
     expect(snap2.books).toHaveLength(2);
     const snapshotBookIds = snap2.books.map((b: Json) => b.bookId).sort();
     expect(snapshotBookIds).toEqual(["book2", "book3"]);
+  });
+
+  it("blanks an off-whitelist coverUrl on the books-sync snapshot refresh", async () => {
+    // Scope, named honestly: this covers the REFRESH path only — a poisoned
+    // cover arriving in a PUT body, which `parseBooks` already blanks before
+    // the record is stored, so the refreshed snapshot inherits a clean value.
+    // Defence in depth rather than the chokepoint's own failing check: a record
+    // poisoned BEFORE the whitelist shipped never passes through here, and is
+    // covered by the "Public snapshot coverUrl sanitize" suite above.
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
+    const shareToken = created.data.shelf.shareToken;
+
+    // book1 is SHARED, so its cover is published; book3 (also shared) keeps a
+    // whitelisted cover as the control.
+    const poisonedBooks = sampleBooks();
+    poisonedBooks[0].coverUrl = BEACON_COVER;
+
+    const res = await request("PUT", `/api/user/${USER_ID}/books`, {
+      body: JSON.stringify({
+        schemaVersion: 1,
+        userId: USER_ID,
+        displayName: "Test User",
+        books: poisonedBooks,
+      }),
+      token: AUTH_TOKEN,
+    });
+    expect(res.status).toBe(200);
+
+    const snapshot = (await kv.get(
+      kvKeys.publicShelf(shareToken),
+      "json",
+    )) as PublicShelfSnapshot;
+    const published = snapshot.books.find((b: Json) => b.bookId === "book1");
+    expect(published?.coverUrl).toBe("");
+    const control = snapshot.books.find((b: Json) => b.bookId === "book3");
+    expect(control?.coverUrl).toBe(CONTROL_COVER);
+
+    // And nothing the public read serves mentions the beacon host either.
+    const publicRead = await request("GET", `/api/public/${shareToken}`);
+    expect(publicRead.status).toBe(200);
+    expect(await publicRead.text()).not.toContain(BEACON_HOST);
   });
 
   it("keeps the shelf list in the pointer key and writes no shelf list into the record", async () => {
