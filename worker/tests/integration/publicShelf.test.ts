@@ -6,6 +6,7 @@ import { watchKvOps } from "../helpers/kvOps";
 import {
   BoolFlag,
   kvKeys,
+  type BookEntry,
   type PublicShelf,
   type UserBooksRecord,
   type PublicShelfSnapshot,
@@ -516,6 +517,11 @@ describe("POST reset-token", () => {
 // whose owner never syncs books again. One case per minting handler; the
 // books-sync refresh path is covered under "PUT /api/user/:id/books
 // side-effect" below.
+//
+// WRITE side only: every case here starts from a poisoned `user:{id}` record
+// and pins that the snapshot is MINTED clean. The READ side — a snapshot
+// already STORED poisoned, which no write path can reach any more — is the
+// suite immediately after this one.
 
 describe("Public snapshot coverUrl sanitize", () => {
   /**
@@ -628,6 +634,188 @@ describe("Public snapshot coverUrl sanitize", () => {
     // assertions proves this handler minted a fresh one from the raw record.
     expectSanitized(await readSnapshot(newToken));
     await expectPublicReadClean(newToken);
+  });
+});
+
+// ── GET /api/public/:shareToken — coverUrl read-side scrub ────
+//
+// Read-side twin of the suite above, and not a duplicate of it: the write-side
+// chokepoint only governs snapshots minted AFTER the whitelist shipped. One
+// minted BEFORE it keeps its attacker-chosen coverUrl until the shelf is
+// refreshed — and a PERMANENT snapshot has no TTL and may never be refreshed at
+// all, so it would beacon every anonymous visitor indefinitely. The PWA's CSP
+// `img-src` does not close that: `_headers` only takes effect on a host that
+// parses it, and self-hosting the PWA elsewhere is a documented selling point.
+// So the scrub happens on the way out, as a response transform: the handler
+// keeps its zero-KV-write invariant and the stored snapshot is NOT repaired.
+
+describe("GET /api/public/:shareToken — coverUrl read-side scrub", () => {
+  const SHARE_TOKEN = "beadbeadbeadbeadbeadbeadbeadbead";
+  const SHELF_ID = "12345678-1234-4123-8123-123456789abc";
+  const SNAPSHOT_TITLE = "永久公開書櫃";
+  const CREATED_AT = Date.parse("2026-02-01T00:00:00.000Z");
+  const NO_COVER_BOOK_ID = "book-nocover";
+
+  /**
+   * The books the STORED snapshot carries — one per cover shape the scrub has
+   * to answer for: book1 poisoned before the whitelist existed, book3
+   * whitelisted (the control that must survive byte-identical), and a scraper
+   * placeholder with an empty cover. Derived from the shared fixture, so a
+   * `BookEntry` field change breaks here too.
+   */
+  function storedBooks(): BookEntry[] {
+    const shared = sampleBooks().filter((b) => b.isShared === BoolFlag.TRUE);
+    const poisoned = shared.find((b) => b.bookId === "book1");
+    const control = shared.find((b) => b.bookId === "book3");
+    if (!poisoned || !control) {
+      throw new Error("fixture no longer carries book1 + book3 as shared");
+    }
+    poisoned.coverUrl = BEACON_COVER;
+    return [
+      poisoned,
+      control,
+      { ...control, bookId: NO_COVER_BOOK_ID, title: "No Cover", coverUrl: "" },
+    ];
+  }
+
+  /**
+   * Seed the poisoned PERMANENT snapshot DIRECTLY into `public:{shareToken}`,
+   * bypassing every write path on purpose: `buildSnapshot` would have blanked
+   * the cover, so no handler alive today can produce this state — only a
+   * snapshot minted before the whitelist shipped carries it.
+   *
+   * The pointer key is seeded alongside it because the liveness guard 404s any
+   * snapshot the owner's CURRENT shelf list does not back; without it the
+   * request would stop at that guard and never reach the scrub, passing the
+   * "no beacon host in the body" assertions for entirely the wrong reason.
+   */
+  async function seedPoisonedSnapshot(): Promise<void> {
+    const snapshot: PublicShelfSnapshot = {
+      userId: USER_ID,
+      shelfId: SHELF_ID,
+      title: SNAPSHOT_TITLE,
+      books: storedBooks(),
+      createdAt: CREATED_AT,
+      expiresAt: null,
+    };
+    await kv.put(kvKeys.publicShelf(SHARE_TOKEN), JSON.stringify(snapshot));
+
+    const pointer: PublicShelvesRecord = {
+      shelves: [
+        {
+          shelfId: SHELF_ID,
+          shareToken: SHARE_TOKEN,
+          title: SNAPSHOT_TITLE,
+          expiresDays: null,
+          createdAt: CREATED_AT,
+          expiresAt: null,
+          selectionMode: "all-shared",
+        },
+      ],
+    };
+    await kv.put(kvKeys.publicShelves(USER_ID), JSON.stringify(pointer));
+  }
+
+  /** The anonymous read, RAW body kept — a host leaks through any field. */
+  async function fetchPublicShelf(): Promise<{ body: string; json: Json }> {
+    const res = await request("GET", `/api/public/${SHARE_TOKEN}`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    return { body, json: JSON.parse(body) as Json };
+  }
+
+  function servedBook(json: Json, bookId: string): Json | undefined {
+    return json.data.books.find((b: Json) => b.bookId === bookId);
+  }
+
+  async function storedCover(bookId: string): Promise<string | undefined> {
+    const snapshot = await kv.get<PublicShelfSnapshot>(
+      kvKeys.publicShelf(SHARE_TOKEN),
+      "json",
+    );
+    return snapshot?.books.find((b) => b.bookId === bookId)?.coverUrl;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    {
+      label: "blanks a beacon cover a pre-whitelist snapshot still stores",
+      bookId: "book1",
+      served: "",
+    },
+    {
+      label: "returns the whitelisted cover beside it byte-identical",
+      bookId: "book3",
+      served: CONTROL_COVER,
+    },
+    {
+      label: "leaves an empty placeholder cover empty",
+      bookId: NO_COVER_BOOK_ID,
+      served: "",
+    },
+  ])("$label", async ({ bookId, served }) => {
+    // One seeded snapshot carries all three shapes, so each row also proves the
+    // scrub is per-BOOK — never a wholesale blanking of the response.
+    await seedPoisonedSnapshot();
+
+    const { json } = await fetchPublicShelf();
+
+    expect(servedBook(json, bookId)?.coverUrl).toBe(served);
+  });
+
+  it("keeps the poisoned book itself, with every field but its cover intact", async () => {
+    await seedPoisonedSnapshot();
+    const poisoned = storedBooks()[0];
+
+    const { json } = await fetchPublicShelf();
+
+    // Sanitize, never drop: the visitor still sees the book (id, title, and the
+    // rest byte-identical), it just renders as the normal no-cover state.
+    expect(servedBook(json, "book1")).toEqual({ ...poisoned, coverUrl: "" });
+  });
+
+  it("leaks the beacon host nowhere in the response body", async () => {
+    await seedPoisonedSnapshot();
+
+    const { body } = await fetchPublicShelf();
+
+    // Not in a cover, not in a title, not in a stray carried-over field.
+    expect(body).not.toContain(BEACON_HOST);
+  });
+
+  it("returns every non-cover field of the snapshot unchanged", async () => {
+    await seedPoisonedSnapshot();
+
+    const { json } = await fetchPublicShelf();
+
+    expect(json.data.title).toBe(SNAPSHOT_TITLE);
+    expect(json.data.createdAt).toBe(CREATED_AT);
+    expect(json.data.expiresAt).toBeNull();
+    // A one-to-one map: no book dropped, none reordered, nothing filtered out.
+    expect(json.data.books.map((b: Json) => b.bookId)).toEqual([
+      "book1",
+      "book3",
+      NO_COVER_BOOK_ID,
+    ]);
+  });
+
+  it("scrubs on the way out only — the stored snapshot keeps the poison and the handler writes nothing", async () => {
+    await seedPoisonedSnapshot();
+    const ops = watchKvOps(kv);
+
+    const { json } = await fetchPublicShelf();
+
+    expect(servedBook(json, "book1")?.coverUrl).toBe("");
+    // Anti-tautology anchor: the response is clean because THIS handler
+    // scrubbed it, not because something rewrote KV first. A lazy repair write
+    // would also hand an anonymous stranger a key to have written. (DEV_MODE
+    // elides the per-IP counter put — see the scope caveat in
+    // `helpers/kvOps.ts`; this trail is the handler's own writes.)
+    expect(await storedCover("book1")).toBe(BEACON_COVER);
+    expect(ops.writeTrail()).toEqual([]);
   });
 });
 

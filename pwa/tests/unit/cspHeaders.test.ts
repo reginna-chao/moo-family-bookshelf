@@ -6,13 +6,17 @@ import { READMOO_COVER_DOMAINS } from "moo-family-bookshelf-shared/config/readmo
 /**
  * Anti-drift guard for the `img-src` directive in `pwa/public/_headers`.
  *
- * `docs/architecture.md` (已接受的殘餘風險) names this CSP as the READ-SIDE
- * neutraliser for the one residual the write-side cover-URL whitelist cannot
- * reach: a `public:{share_token}` snapshot minted BEFORE `sanitizeCoverUrl`
- * existed keeps its foreign cover URL until the shelf is refreshed — for a
- * permanent snapshot, indefinitely. The browser never issues that request only
- * because `img-src` is narrowed to the Readmoo cover domains, which makes this
- * header a load-bearing mitigation rather than defence in depth.
+ * The residual behind it (`docs/architecture.md` → 已接受的殘餘風險): a
+ * `public:{share_token}` snapshot minted BEFORE `sanitizeCoverUrl` existed
+ * keeps its foreign cover URL until the shelf is refreshed — for a permanent
+ * snapshot, indefinitely. The PRIMARY neutraliser is now server-side: the
+ * Worker's `GET /api/public/:shareToken` scrubs every stored coverUrl through
+ * `sanitizeCoverUrl` on the way out, so a foreign URL never reaches the browser
+ * (`worker/tests/integration/publicShelf.test.ts` → "coverUrl read-side
+ * scrub"). That demotes this header from a load-bearing mitigation to DEFENCE
+ * IN DEPTH — still worth pinning, because `_headers` is honoured only on hosts
+ * that parse it, and it is the last line for any cover URL reaching the app
+ * from a surface the Worker scrub does not cover.
  *
  * The header is a hand-written mirror of `READMOO_COVER_DOMAINS`
  * (`shared/src/config/readmoo.ts`) — the same list the Worker's
@@ -113,7 +117,7 @@ describe("pwa/public/_headers img-src", () => {
   it("does not fall back to the bare https: scheme source", () => {
     // Deliberately redundant with the case above: `img-src 'self' https: data:`
     // is the exact value this branch replaced, and it allows a cover fetch to
-    // ANY https host — the whole residual the CSP is supposed to neutralise.
+    // ANY https host — i.e. no depth left behind the Worker's read-side scrub.
     expect(imgSrcSources).not.toContain("https:");
   });
 });
