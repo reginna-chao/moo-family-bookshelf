@@ -42,6 +42,7 @@ jobs:
               - '.github/workflows/cicd.yml'
             worker:
               - 'worker/**'
+              - 'shared/**'
               - '.github/workflows/cicd.yml'
             site:
               - 'site/**'

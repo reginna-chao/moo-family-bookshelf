@@ -3,6 +3,7 @@ import { BookEntry, BoolFlag } from "../api/client";
 import { FavoriteButton } from "./FavoriteButton";
 import { LazyCover } from "./LazyCover";
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
+import { safeCoverUrl } from "./safeCoverUrl";
 
 export interface BookWithMember extends BookEntry {
   memberName: string;
@@ -108,7 +109,7 @@ export function BookCard({
           {/* width/height are only an intrinsic-ratio hint (CLS placeholder); actual
               responsive sizing lives in the .moo-book-card__cover class. */}
           <LazyCover
-            src={book.coverUrl}
+            src={safeCoverUrl(book.coverUrl)}
             alt={book.title}
             width={120}
             height={180}

@@ -4,6 +4,7 @@ import type { BookWithMember } from "./BookCard";
 import { FavoriteButton } from "./FavoriteButton";
 import { LazyCover } from "./LazyCover";
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
+import { safeCoverUrl } from "./safeCoverUrl";
 
 export interface FamilyBookRowProps {
   book: BookWithMember;
@@ -56,7 +57,7 @@ export function FamilyBookRow({
     >
       <div className="moo-book-row__cover-wrap">
         <LazyCover
-          src={book.coverUrl}
+          src={safeCoverUrl(book.coverUrl)}
           alt={book.title}
           width={40}
           height={60}

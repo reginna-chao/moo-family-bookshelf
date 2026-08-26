@@ -1,4 +1,5 @@
 import { BorrowStatus, type BorrowRequest } from "@/api/client";
+import { LazyCover } from "@/components/LazyCover";
 
 interface StatusStyle {
   label: string;
@@ -78,15 +79,17 @@ export function BorrowCard({
   const status = getStatusStyle(request.status);
   return (
     <div className="flex gap-3 p-3 bg-white border border-gray-200 rounded-lg">
-      {request.bookCoverUrl ? (
-        <img
-          src={request.bookCoverUrl}
-          alt={request.bookTitle}
-          className="w-10 h-[60px] object-cover rounded bg-gray-100 flex-shrink-0"
-        />
-      ) : (
-        <div className="w-10 h-[60px] rounded bg-gray-100 flex-shrink-0" />
-      )}
+      {/* Borrow records have no TTL, so legacy covers outside the CSP img-src
+          whitelist still exist; LazyCover degrades on both empty src and the
+          img error event so a blocked cover cannot break the card layout. */}
+      <LazyCover
+        src={request.bookCoverUrl}
+        alt={request.bookTitle}
+        className="w-10 h-[60px] object-cover rounded bg-gray-100 flex-shrink-0"
+        fallback={
+          <div className="w-10 h-[60px] rounded bg-gray-100 flex-shrink-0" />
+        }
+      />
       <div className="flex-1 min-w-0 flex flex-col gap-1">
         <div className="text-sm font-semibold text-gray-900 leading-tight truncate">
           {request.bookTitle}

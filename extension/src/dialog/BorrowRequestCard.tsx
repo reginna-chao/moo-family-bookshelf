@@ -1,4 +1,5 @@
 import { BorrowRequest, BorrowStatus } from "../api/client";
+import { safeCoverUrl } from "./safeCoverUrl";
 
 export type BorrowActionVariant = "primary" | "danger" | "secondary";
 
@@ -84,14 +85,19 @@ export function BorrowRequestCard({
   actions,
 }: BorrowRequestCardProps) {
   const status = STATUS_META.get(request.status) ?? UNKNOWN_STATUS;
+  const coverUrl = safeCoverUrl(request.bookCoverUrl);
 
   return (
     <div className="moo-request-card">
-      <img
-        src={request.bookCoverUrl}
-        alt={request.bookTitle}
-        className="moo-request-card__cover"
-      />
+      {coverUrl ? (
+        <img
+          src={coverUrl}
+          alt={request.bookTitle}
+          className="moo-request-card__cover"
+        />
+      ) : (
+        <div className="moo-request-card__cover" aria-hidden="true" />
+      )}
       <div className="moo-request-card__body">
         <div className="moo-request-card__title">{request.bookTitle}</div>
         {request.bookAuthor && (

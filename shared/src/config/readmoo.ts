@@ -48,6 +48,54 @@ export function isReadmooHost(hostname: string): boolean {
   return READMOO_HOSTS.includes(hostname);
 }
 
+/**
+ * Registrable domains that may serve Readmoo book-cover images.
+ * Covers observed on readmoo.com are served from cdn.readmoo.com and
+ * cdn.readmoo.tw, so both registrable domains are allowed (any subdomain).
+ */
+export const READMOO_COVER_DOMAINS: readonly string[] = [
+  "readmoo.com",
+  "readmoo.tw",
+];
+
+/**
+ * True when `hostname` is a cover domain or a subdomain of one.
+ *
+ * The leading `.` boundary is required so a look-alike registration such as
+ * `evilreadmoo.com` — or a deeper `readmoo.com.evil.com` — is rejected, the
+ * same defence `isReadmooHost` above gets from its exact-match list.
+ */
+export function isReadmooCoverHost(hostname: string): boolean {
+  return READMOO_COVER_DOMAINS.some(
+    (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
+  );
+}
+
+/**
+ * True when `url` parses as an https:// URL on an allowed Readmoo cover host
+ * with the default port. Used by the Worker to refuse attacker-controlled
+ * cover URLs (privacy tracking beacons) at the API boundary; the PWA CSP
+ * img-src mirrors the same domain list.
+ *
+ * `parsed.port === ""` requires the default port: the WHATWG URL parser
+ * normalises an explicit `:443` on https away, so `https://cdn.readmoo.com:443`
+ * passes while `:8443` does not. That keeps acceptance here aligned with CSP
+ * host-source semantics, which only match the default port.
+ */
+export function isAllowedCoverUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return (
+    parsed.protocol === "https:" &&
+    parsed.port === "" &&
+    isReadmooCoverHost(parsed.hostname)
+  );
+}
+
 /** True when `pathname` sits under the new site's `/read` app root. */
 function isNextAppPath(pathname: string): boolean {
   return (

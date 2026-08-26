@@ -244,6 +244,69 @@ describe("BorrowPage", () => {
     expect(screen.queryByText("標記已歸還")).not.toBeInTheDocument();
   });
 
+  /**
+   * The borrow card renders its cover through `LazyCover`, so a cover that is
+   * missing OR fails to load degrades to the same neutral placeholder instead
+   * of leaving a broken-image box. The PWA does NOT filter the URL itself —
+   * its render-time beacon defence is the CSP `img-src` in pwa/public/_headers
+   * (pinned by tests/unit/cspImgSrc.test.ts), which the browser enforces and
+   * jsdom cannot. What is observable here is the degradation path.
+   */
+  describe("borrow card cover", () => {
+    function renderWithCover(bookCoverUrl: string) {
+      setMockFamilyData({
+        borrowRequestsState: "loaded",
+        borrowRequests: [
+          makeRequest({
+            requestId: "req-cover",
+            ownerId: SELF_USER_ID,
+            borrowerId: OTHER_USER_ID,
+            status: BorrowStatus.PENDING,
+            bookCoverUrl,
+          }),
+        ],
+      });
+      return renderPage();
+    }
+
+    it("renders the cover image when the request carries one", () => {
+      renderWithCover("https://cdn.readmoo.com/cover/x.jpg");
+
+      const img = screen.getByRole("img");
+      expect(img).toHaveAttribute("src", "https://cdn.readmoo.com/cover/x.jpg");
+      expect(img).toHaveAttribute("alt", "測試書名");
+      expect(img).toHaveAttribute("loading", "lazy");
+    });
+
+    it("degrades to the placeholder when the cover image fails to load", () => {
+      const { container } = renderWithCover(
+        "https://cdn.readmoo.com/cover/gone.jpg",
+      );
+
+      fireEvent.error(screen.getByRole("img"));
+
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      // The fallback is the same neutral box the empty-cover case renders.
+      const placeholder = container.querySelector("div.bg-gray-100");
+      expect(placeholder).not.toBeNull();
+      // LazyCover 的 wrapper 也帶 bg-gray-100，多驗 relative 才能證明「wrapper 已消失、只剩 fallback」
+      expect(placeholder).not.toHaveClass("relative");
+      // The card itself must survive the failed cover.
+      expect(screen.getByText("測試書名")).toBeInTheDocument();
+    });
+
+    it("renders no image at all when the request carries no cover URL", () => {
+      const { container } = renderWithCover("");
+
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      const placeholder = container.querySelector("div.bg-gray-100");
+      expect(placeholder).not.toBeNull();
+      // LazyCover 的 wrapper 也帶 bg-gray-100，多驗 relative 才能證明「wrapper 已消失、只剩 fallback」
+      expect(placeholder).not.toHaveClass("relative");
+      expect(screen.getByText("測試書名")).toBeInTheDocument();
+    });
+  });
+
   it("clicking 拒絕 calls updateBorrowStatus with REJECTED", async () => {
     mockUpdateBorrowStatus.mockResolvedValue({ requestId: "req-1" });
     setMockFamilyData({
