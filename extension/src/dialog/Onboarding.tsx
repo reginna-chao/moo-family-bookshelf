@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { ApiClient } from "../api/client";
 import { DISPLAY_NAME_KEY } from "../constants";
+import { useTimedFlag } from "../hooks/useTimedFlag";
 import { safeStorageGet } from "../storage/safeStorage";
 import { classifyAdoptedEndpoint } from "./adoptedEndpoint";
 import { LoadingOverlay } from "./LoadingOverlay";
@@ -30,7 +31,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
   const autoSetup = useAutoSetup();
   const flow = useOnboardingFlow({ apiClient, onFamilyJoined, autoSetup });
 
-  const [copied, setCopied] = useState(false);
+  const [copied, markCopied] = useTimedFlag(2000);
   const [hasUsedBefore, setHasUsedBefore] = useState(false);
 
   // Check if user has previously used the extension (has displayName stored)
@@ -50,8 +51,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(flow.generatedSyncCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    markCopied();
   };
 
   const isAutoSetupActive =
