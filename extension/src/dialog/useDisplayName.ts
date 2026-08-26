@@ -4,6 +4,7 @@ import { ApiClient } from "../api/client";
 import { DISPLAY_NAME_KEY } from "../constants";
 import { safeStorageGet } from "../storage/safeStorage";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 
 type NameSaveState = "idle" | "saving" | "saved" | "error";
 
@@ -110,7 +111,7 @@ export function useDisplayName(
           // 429 shows the localized back-off copy instead of server English.
           setNameSaveError(
             rateLimitedEnvelopeMessage(response.error) ??
-              response.error.message,
+              safeErrorText(response.error.message, "儲存失敗，請稍後再試"),
           );
           setNameSaveState("error");
           return false;

@@ -4,6 +4,7 @@ import {
   buildRemovedNoticeText,
   buildUnkickedNoticeText,
 } from "moo-family-bookshelf-shared/unkick/messages";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type { ApiClient } from "@/api/client";
 
 /**
@@ -48,7 +49,7 @@ export function UnkickNotice({
     try {
       const res = await apiClient.unkickMember(familyId, targetUserId);
       if (res.error) {
-        setError(res.error.message);
+        setError(safeErrorText(res.error.message, "解除失敗，請稍後再試"));
         setState("idle");
         return;
       }

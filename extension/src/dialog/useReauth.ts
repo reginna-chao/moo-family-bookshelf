@@ -20,6 +20,7 @@
 import { useEffect } from "react";
 import browser from "webextension-polyfill";
 import { clearFamilyStorageAndBroadcast } from "../api/auth-refresh";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type { ApiClient } from "../api/client";
 import {
   USER_ID_KEY,
@@ -68,7 +69,7 @@ async function runReauthJoin(
       ok: false,
       errorCode: res.error.code,
       retryAfter: res.error.retryAfter,
-      errorMessage: res.error.message,
+      errorMessage: safeErrorText(res.error.message, "驗證失敗，請重試"),
     };
   }
   const authToken = res.data?.authToken;

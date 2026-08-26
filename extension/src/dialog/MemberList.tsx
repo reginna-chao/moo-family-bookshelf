@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ApiClient, BoolFlag, FamilyMember } from "../api/client";
 import { memberSettingsErrorMessage } from "./memberSettingsMessages";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 
 function switchTrackClass(on: boolean): string {
   return on ? "moo-switch__track moo-switch__track--on" : "moo-switch__track";
@@ -118,7 +119,8 @@ export function MemberList({
       const response = await apiClient.removeMember(familyId, targetId);
       if (response.error) {
         setActionError(
-          rateLimitedEnvelopeMessage(response.error) ?? response.error.message,
+          rateLimitedEnvelopeMessage(response.error) ??
+            safeErrorText(response.error.message, "移除成員失敗，請稍後再試"),
         );
       } else {
         // Resolve the label BEFORE the refresh drops the member from the list.
@@ -149,7 +151,8 @@ export function MemberList({
       );
       if (response.error) {
         setActionError(
-          rateLimitedEnvelopeMessage(response.error) ?? response.error.message,
+          rateLimitedEnvelopeMessage(response.error) ??
+            safeErrorText(response.error.message, "轉移管理權失敗，請稍後再試"),
         );
       } else {
         onMembersChanged();

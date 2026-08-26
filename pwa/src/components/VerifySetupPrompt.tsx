@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { ApiClient } from "@/api/client";
 import type { VerifyMethod, VerifyInfo } from "@/api/client";
 import { PinInput } from "@/components/PinInput";
@@ -53,7 +54,7 @@ export function VerifySetupPrompt({
       if (secret) body.secret = secret;
       const res = await apiClient.setVerifyMethod(userId, body);
       if (res.error) {
-        setSaveError(res.error.message || "儲存失敗，請重試。");
+        setSaveError(safeErrorText(res.error.message, "儲存失敗，請重試。"));
         setSaving(false);
         return false;
       }
