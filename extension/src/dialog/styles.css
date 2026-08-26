@@ -3061,6 +3061,36 @@
   margin-top: 8px;
 }
 
+/* ── Family-gone notice ───────────────────────────────────────────────────
+   Explains why the dialog fell back to onboarding after the family binding was
+   torn down (removed by the owner / family gone / full). Same amber
+   (informational) treatment as .moo-unkick-notice — the state is already
+   resolved and the next step is simply to create or join a family, so this is a
+   notice, not an error. It sits OUTSIDE .moo-onboarding-view, so it supplies
+   that view's 24px gutter itself and the panel's own top padding provides the
+   gap below it — the same arrangement as .moo-sync-host-note--verify. The soft
+   border is what keeps it readable as a block on the plain onboarding
+   background, which the in-list unkick notice does not need. */
+.moo-family-gone-notice {
+  background: var(--moo-warn-bg);
+  border: 1px solid var(--moo-warn-border-soft);
+  border-radius: var(--moo-global-border-radius);
+  padding: 12px;
+  margin: 24px 24px 0 24px;
+}
+
+.moo-family-gone-notice__text {
+  font-size: 13px;
+  color: var(--moo-text-strong);
+  line-height: 1.6;
+}
+
+.moo-family-gone-notice__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* ── DisplayNameEditor ────────────────────────────────────────────────── */
 
 .moo-name-editor {

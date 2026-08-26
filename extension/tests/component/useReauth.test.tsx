@@ -9,6 +9,8 @@ import {
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
+  API_ENDPOINT_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
 } from "@/constants";
 import { verificationLockedMessage } from "@/dialog/verificationMessages";
 
@@ -374,11 +376,29 @@ describe("useReauth", () => {
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
           type: "FAMILY_REMOVED",
         });
+        // The family's API endpoint dies with the membership: being removed ends
+        // it exactly like leaving does, and a client left pointing at the
+        // ex-family's server would send the next create/join there. Identical to
+        // the silent path because both go through clearFamilyStorageAndBroadcast
+        // (pinned in tests/unit/api/auth-refresh.test.ts).
+        expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            API_ENDPOINT_KEY,
+            DECLINED_FAMILY_ENDPOINT_KEY,
+          ]),
+        );
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+          type: "SET_API_ENDPOINT",
+          apiEndpoint: null,
+        });
         // The dead token goes, the reauth latch is released (a stale one would
-        // mute every later 401), and the dialog is told to fall back.
+        // mute every later 401), and the dialog is told to fall back — naming
+        // the refusal, so onboarding can explain itself instead of just
+        // appearing.
         expect(apiClient.setAuthToken).toHaveBeenCalledWith(null);
         expect(apiClient.clearReauthPending).toHaveBeenCalledTimes(1);
         expect(apiClient.onFamilyRemoved).toHaveBeenCalledTimes(1);
+        expect(apiClient.onFamilyRemoved).toHaveBeenCalledWith({ errorCode });
         // The prompt is gone rather than errored: there is nothing left to type.
         expect(result.current.active).toBe(false);
         expect(result.current.error).toBe("");
@@ -441,13 +461,23 @@ describe("useReauth", () => {
      * the dialog never flipped to onboarding, and the rejection escaped through
      * submit() as an unhandled promise rejection. Storage is the least critical
      * of the four steps, so it must never be the one that blocks the other three.
+     *
+     * Swallowing alone was not enough, though: the aborted clear also skips the
+     * endpoint reset that normally rides along inside it, while the handover
+     * still completes. The catch therefore re-runs that reset on its own — the
+     * second half this case pins.
      */
-    it("finishes the handover and resolves even when the storage clear rejects", async () => {
+    it("resets the endpoint choice and finishes the handover even when the storage clear rejects", async () => {
       seedStorage();
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       // A family-gone join short-circuits runReauthJoin before its cooldown
-      // remove, so this is the flow's ONLY storage.local.remove: the
-      // `[FAMILY_ID_KEY]` clear inside clearFamilyStorageAndBroadcast.
+      // remove, so the FIRST storage.local.remove of the flow is the
+      // `[FAMILY_ID_KEY]` clear inside clearFamilyStorageAndBroadcast — which is
+      // what this rejection takes down, aborting that function before it reaches
+      // its own endpoint reset and its FAMILY_REMOVED broadcast.
+      // `mockRejectedValueOnce` fails that ONE call; every later remove resolves
+      // through the shared setup mock, so the recovery reset asserted below is
+      // free to land.
       vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(
         new Error("Extension context invalidated"),
       );
@@ -467,11 +497,55 @@ describe("useReauth", () => {
       expect(apiClient.clearReauthPending).toHaveBeenCalledTimes(1);
       expect(apiClient.setAuthToken).toHaveBeenCalledWith(null);
       expect(apiClient.onFamilyRemoved).toHaveBeenCalledTimes(1);
-      // Swallowed, not silenced — the failure stays on the record.
+      // Swallowed, not silenced — the failure stays on the record. Still exactly
+      // one warning: the recovery reset below succeeds, so it adds none of its
+      // own.
       expect(warn).toHaveBeenCalledTimes(1);
       // The prompt is gone regardless of the storage outcome: with the family
       // gone there is nothing left to type.
       expect(result.current.active).toBe(false);
+
+      // The teardown really was partial — the aborted clear never reached its
+      // broadcast, so nothing downstream of it re-ran on its own.
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({
+        type: "FAMILY_REMOVED",
+      });
+      // ...which is why the catch block has to re-run the endpoint reset itself.
+      // The `finally` above notifies onFamilyRemoved regardless, so without this
+      // the dialog flips to onboarding while storage still holds the ex-family's
+      // custom @host — the value the NEXT boot restores, and one that a later
+      // join with a plain (no-@host) sync code never overwrites, so the new
+      // family's traffic would be sent to the old family's server.
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          API_ENDPOINT_KEY,
+          DECLINED_FAMILY_ENDPOINT_KEY,
+        ]),
+      );
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "SET_API_ENDPOINT",
+        apiEndpoint: null,
+      });
+      // Exactly two clears, in this order: the familyId one that failed, then
+      // the recovery reset. Pinning the sequence is what distinguishes the
+      // catch-block reset from the one inside clearFamilyStorageAndBroadcast,
+      // which never ran — before the fix there was only ever call #1 here.
+      const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
+      expect(removeCalls).toHaveLength(2);
+      expect(removeCalls[0][0]).toEqual([FAMILY_ID_KEY]);
+      expect(removeCalls[1][0]).toEqual(
+        expect.arrayContaining([
+          API_ENDPOINT_KEY,
+          DECLINED_FAMILY_ENDPOINT_KEY,
+        ]),
+      );
+      // And it lands BEFORE the dialog is told the family is gone, so onboarding
+      // never renders over a stored endpoint still pointing at the ex-family.
+      expect(
+        vi.mocked(apiClient.onFamilyRemoved!).mock.invocationCallOrder[0],
+      ).toBeGreaterThan(
+        vi.mocked(chrome.storage.local.remove).mock.invocationCallOrder[1],
+      );
     });
 
     /**
@@ -503,6 +577,18 @@ describe("useReauth", () => {
           type: "FAMILY_REMOVED",
         });
         expect(apiClient.onFamilyRemoved).not.toHaveBeenCalled();
+        // The endpoint survives too — the retry the user is about to make has to
+        // reach the SAME server, so an over-eager reset would break it.
+        expect(chrome.storage.local.remove).not.toHaveBeenCalledWith(
+          expect.arrayContaining([
+            API_ENDPOINT_KEY,
+            DECLINED_FAMILY_ENDPOINT_KEY,
+          ]),
+        );
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({
+          type: "SET_API_ENDPOINT",
+          apiEndpoint: null,
+        });
         // The user can still correct the secret / wait out the window.
         expect(result.current.active).toBe(true);
       },

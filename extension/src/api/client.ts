@@ -40,6 +40,7 @@ import {
 } from "./types";
 import {
   doRefreshToken,
+  type FamilyRemovedInfo,
   type ReauthInfo,
   type RefreshOutcome,
 } from "./auth-refresh";
@@ -179,8 +180,10 @@ export class ApiClient {
    */
   private reauthPending = false;
   /** Callback invoked when token refresh fails because the family is genuinely
-   *  gone (deleted / user no longer a member) — the caller clears family data. */
-  onFamilyRemoved: (() => void) | null = null;
+   *  gone (deleted / user no longer a member) — the caller clears family data.
+   *  Receives the family-gone code that triggered the teardown so the UI can
+   *  explain WHY the dialog fell back to onboarding. */
+  onFamilyRemoved: ((info: FamilyRemovedInfo) => void) | null = null;
   /** Callback invoked when recovery needs a PWA-login verification secret, so
    *  the caller can prompt re-verification instead of dropping the user's data.
    *  Receives the blocking error code (+ retryAfter when the backend sent one)

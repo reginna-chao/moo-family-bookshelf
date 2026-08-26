@@ -16,6 +16,7 @@ import {
   resetFamilyEndpointChoice,
 } from "../storage/familyEndpointChoice";
 import { safeStorageGet } from "../storage/safeStorage";
+import { familyGoneNoticeText } from "./familyGoneNotice";
 import { Onboarding } from "./Onboarding";
 import { PersonalShelf } from "./PersonalShelf";
 import { FamilyShelf } from "./FamilyShelf";
@@ -58,6 +59,10 @@ export function App({
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [contextLost, setContextLost] = useState(false);
+  // Why the family binding was torn down (removed by the owner / family gone /
+  // full). Rendered above Onboarding so the forced flip has a stated reason
+  // instead of looking like the dialog reset itself.
+  const [familyGoneNotice, setFamilyGoneNotice] = useState<string | null>(null);
   // Bumped after a successful re-verification so FamilyDataProvider re-runs its
   // initial load (members → bookshelf → borrow) and the stale 401 view clears
   // automatically, without a manual "重試" tap.
@@ -82,10 +87,18 @@ export function App({
   // (e.g., KV data lost after wrangler dev restart, or user removed from family)
   useEffect(() => {
     const client = apiClientRef.current;
-    client.onFamilyRemoved = () => {
+    client.onFamilyRemoved = (info) => {
       client.setAuthToken(null);
+      // Live-client half of the endpoint restore; the storage half already ran
+      // inside clearFamilyStorageAndBroadcast(). Being removed ends the
+      // membership exactly like leaving it (see handleLeaveFamily): the endpoint
+      // is FAMILY-scoped, and a client still pointed at the ex-family's server
+      // would hand the next create/join its userId, token and whole book list —
+      // and bake that host into the sync code it then hands out.
+      client.setEndpoint(DEFAULT_API_ENDPOINT);
       setFamilyId(null);
       setUserId(null);
+      setFamilyGoneNotice(familyGoneNoticeText(info.errorCode));
       setActiveTab("family-shelf");
       setView("onboarding");
     };
@@ -153,6 +166,8 @@ export function App({
   const handleFamilyJoined = (id: string, newUserId: string) => {
     setFamilyId(id);
     setUserId(newUserId);
+    // A fresh family supersedes the explanation of the previous one's teardown.
+    setFamilyGoneNotice(null);
     // First-time onboarding: default to personal-shelf tab
     void (async () => {
       const result = await safeStorageGet([HAS_COMPLETED_INITIAL_SETUP_KEY]);
@@ -210,6 +225,21 @@ export function App({
   if (view === "onboarding") {
     return (
       <div className="moo-app__fill">
+        {familyGoneNotice && (
+          <div role="alert" className="moo-family-gone-notice">
+            <div className="moo-family-gone-notice__text">
+              {familyGoneNotice}
+            </div>
+            <div className="moo-family-gone-notice__actions">
+              <button
+                onClick={() => setFamilyGoneNotice(null)}
+                className="moo-button moo-button--ghost moo-button--xs"
+              >
+                關閉
+              </button>
+            </div>
+          </div>
+        )}
         <Onboarding
           onFamilyJoined={handleFamilyJoined}
           apiClient={apiClientRef.current}
