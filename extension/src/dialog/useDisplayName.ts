@@ -89,6 +89,10 @@ export function useDisplayName(
 
   const handleSaveDisplayName = useCallback(async (): Promise<boolean> => {
     if (inFlightRef.current) return false;
+    // A new save supersedes the pending saved→idle reset: letting the old timer
+    // fire mid-save would flip nameSaveState back to "idle" and drop the
+    // in-progress "saving" feedback.
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
     inFlightRef.current = true;
 
     const trimmed = displayName.trim();
@@ -128,6 +132,9 @@ export function useDisplayName(
       setDisplayName(trimmed);
       setSavedDisplayName(trimmed);
       setNameSaveState("saved");
+      // Clear before arming so a previous timer id is never overwritten
+      // unclearable (the unmount cleanup only holds the latest id).
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => setNameSaveState("idle"), 1500);
       return true;
     } catch (err) {

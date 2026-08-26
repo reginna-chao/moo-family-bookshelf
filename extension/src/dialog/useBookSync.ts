@@ -115,6 +115,10 @@ export function useBookSync({
 
   // Mechanism B: Manual sync (no rate limiting)
   const triggerManualSync = useCallback(async () => {
+    // A manual sync supersedes the pending done→idle reset: letting the old
+    // timer fire mid-sync flips syncStatus to "idle" and re-enables the sync
+    // button, which is the only guard against a second concurrent syncBooks().
+    if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
     setSyncStatus("syncing");
     setSyncError("");
     setProgressMessage("");

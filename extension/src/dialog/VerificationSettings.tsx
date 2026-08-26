@@ -98,6 +98,10 @@ export function VerificationSettings({
 
   const handleSave = useCallback(
     async (method: VerifyMethod, secret?: string) => {
+      // A new save supersedes any pending saved→idle reset: letting the old timer
+      // fire mid-flight would drop saveState out of "saving" (and out of "error").
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+
       setSaveState("saving");
       setSaveError("");
       const body: { method: VerifyMethod; secret?: string } = { method };

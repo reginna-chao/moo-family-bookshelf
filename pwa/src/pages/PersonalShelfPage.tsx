@@ -133,6 +133,10 @@ export function PersonalShelfPage({
   }, [loadBooks]);
 
   const handleSave = useCallback(async () => {
+    // A new save supersedes any pending saved→ready reset: letting the old timer
+    // fire mid-flight would drop `state` out of "saving" (and out of "error").
+    if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+
     // Nothing changed → treat as an instant no-op save (UI guards this too).
     if (dirtyBookIds.size === 0) {
       setState("saved");
