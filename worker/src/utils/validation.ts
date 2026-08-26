@@ -99,11 +99,17 @@ export function sanitizeVerifySecret(value: unknown): string | null {
  * no-cover state. Off-whitelist covers would otherwise act as tracking
  * beacons against family members and public-shelf visitors.
  *
- * Lives at the boundary so both consumers scrub identically: the books write
- * paths in `routes/user.ts` (which protect the family bookshelf aggregation
- * reading `user:{id}` directly) and `buildSnapshot` in
- * `services/publicShelf.ts` (which protects every `public:{shareToken}`
- * snapshot).
+ * Lives at the boundary so all three consumer groups scrub identically:
+ *
+ * - the books write paths in `routes/user.ts` (PUT sync, PATCH rebuild, and the
+ *   family-prefs rebuild), which keep fresh poison out of `user:{id}` and
+ *   lazily scrub whatever a pre-whitelist write left there;
+ * - `buildSnapshot` in `services/publicShelf.ts`, the chokepoint every
+ *   `public:{shareToken}` snapshot writer funnels through;
+ * - the family bookshelf aggregation in `routes/bookshelf.ts`, which sanitizes
+ *   again at READ time. The write paths alone do NOT protect that surface: a
+ *   record poisoned before the whitelist existed keeps its value until that
+ *   account's next real write, and a dormant account may never make one.
  */
 export function sanitizeCoverUrl(value: unknown): string {
   const url = typeof value === "string" ? value : "";

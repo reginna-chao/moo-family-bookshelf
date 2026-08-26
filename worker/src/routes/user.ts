@@ -767,8 +767,9 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
 
   // Per-field merge semantics: a field present in the body full-replaces that
   // list; an absent field preserves its existing KV value (protecting live
-  // v1.5.0 clients that only send `hidden`). All other record fields — books,
-  // displayName, schemaVersion, lastUpdated — are preserved untouched, and no
+  // v1.5.0 clients that only send `hidden`). Apart from the coverUrl lazy scrub
+  // applied to `books` below, all other record fields — displayName,
+  // schemaVersion, lastUpdated — are preserved untouched, and no
   // public snapshot is written (this is a private per-viewer preference).
   // Cross-device concurrent edits carry a lost-update risk, acceptable for the
   // single-user scenario.
