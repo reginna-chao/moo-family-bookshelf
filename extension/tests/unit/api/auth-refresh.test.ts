@@ -852,10 +852,12 @@ describe("doRefreshToken", () => {
 
 /**
  * `isFamilyGoneError` is the SINGLE definition of "the join target is gone for
- * this user". The underlying code set stays module-private, so the dialog's
- * re-verification flow (`dialog/useVerificationPrompt.ts`, reached from
- * `dialog/useReauth.ts`) classifies through this predicate rather than keeping a
- * second copy — the drift a second copy invites is what the export prevents.
+ * this user". The underlying code set is exported READ-ONLY for one consumer —
+ * the copy-coverage tripwire in `tests/unit/dialog/familyGoneNotice.test.ts` —
+ * and is never membership-tested at runtime, so the dialog's re-verification
+ * flow (`dialog/useVerificationPrompt.ts`, reached from `dialog/useReauth.ts`)
+ * classifies through this predicate rather than keeping a second copy — the
+ * drift a second copy invites is what the export prevents.
  *
  * The distinction it draws is load-bearing: a family-gone code means NO secret
  * can make the join succeed (stop retrying, drop the local family binding),

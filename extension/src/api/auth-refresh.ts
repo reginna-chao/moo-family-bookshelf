@@ -52,10 +52,19 @@ const VERIFICATION_ERROR_CODES = new Set([
  * (network/transient/verification) must not silently drop the user's data
  * (security-ux Invariant 2).
  *
- * The set stays private; everyone classifies through `isFamilyGoneError` below,
- * so there is exactly one definition of "gone" in the codebase.
+ * Exported READ-ONLY (`ReadonlySet`, so no caller can add or drop a code) for a
+ * single consumer: the copy-coverage test in
+ * `extension/tests/unit/dialog/familyGoneNotice.test.ts`, which asserts every
+ * code listed here has a user-facing reason message in
+ * `dialog/familyGoneNotice.ts`. Without that reach-in the coverage check only
+ * runs message-key → gone, so a code added here and nowhere else would silently
+ * degrade to the generic fallback banner with no test failing.
+ *
+ * Runtime classification still goes exclusively through `isFamilyGoneError`
+ * below — it stays the one definition of "gone" in the codebase. Do not
+ * membership-test this set directly.
  */
-const FAMILY_GONE_ERROR_CODES = new Set([
+export const FAMILY_GONE_ERROR_CODES: ReadonlySet<string> = new Set([
   "FAMILY_NOT_FOUND",
   "FAMILY_FULL",
   "MEMBER_REMOVED",
