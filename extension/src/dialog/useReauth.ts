@@ -29,6 +29,7 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
 } from "../constants";
+import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
 import { safeStorageGet } from "../storage/safeStorage";
 import {
   isVerificationError,
@@ -96,8 +97,14 @@ async function runReauthJoin(
  * valid PIN/pattern. Without this teardown the prompt would keep re-offering the
  * same input and the user would loop on "correct secret → error" for as long as
  * the server's kicked tombstone lives (6h).
+ *
+ * `errorCode` is the family-gone code that caused the refusal; it is forwarded
+ * to `onFamilyRemoved` so the dialog can name the reason on the onboarding view.
  */
-async function tearDownGoneFamily(apiClient: ApiClient): Promise<void> {
+async function tearDownGoneFamily(
+  apiClient: ApiClient,
+  errorCode: string,
+): Promise<void> {
   try {
     await clearFamilyStorageAndBroadcast();
   } catch (err) {
@@ -105,6 +112,13 @@ async function tearDownGoneFamily(apiClient: ApiClient): Promise<void> {
     // it: a storage failure must not strand the latch — a stale one mutes every
     // later 401 for the rest of the session and the view never flips.
     console.warn("[Reauth] Family teardown storage clear failed", err);
+    // The `finally` below tells the dialog the family is gone regardless, and
+    // App's handler puts the LIVE client back on the default endpoint. The
+    // stored choice must not be the one thing left pointing at the ex-family's
+    // server: it is what the NEXT boot restores, and by then the user may have
+    // joined a different family with a plain (no-@host) sync code, which never
+    // overwrites it. Cannot reject — it swallows its own storage failures.
+    await resetFamilyEndpointChoice();
   } finally {
     // The 401 path that raised this prompt already nulled the token; repeated
     // here because this hook owns the client's state rather than inheriting it
@@ -115,7 +129,7 @@ async function tearDownGoneFamily(apiClient: ApiClient): Promise<void> {
     apiClient.clearReauthPending();
     // Last, so the dialog only flips to onboarding once storage and the client
     // are already consistent with "this user has no family".
-    apiClient.onFamilyRemoved?.();
+    apiClient.onFamilyRemoved?.({ errorCode });
   }
 }
 
@@ -174,7 +188,8 @@ export function useReauth(
             },
             // The gate answers before the server's kicked-tombstone check, so a
             // removed member reaches this verdict only after passing it.
-            onFamilyGone: () => tearDownGoneFamily(apiClient),
+            onFamilyGone: (errorCode) =>
+              tearDownGoneFamily(apiClient, errorCode),
           },
           blocked?.retryAfter,
         );

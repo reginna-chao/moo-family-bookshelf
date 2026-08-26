@@ -324,8 +324,8 @@
    對「owner 指向他人」會等冪補寫墓碑再回 404，確保禁令補得上
 4. 墓碑存續期間，該 userId 對此家庭的 POST /api/family/:id/join 一律回 403 MEMBER_REMOVED
    （涵蓋 client 自動重連、手動輸入同步碼與 QR token bypass 三條路徑；檢查位於驗證閘門之後）
-5. 被移除成員的 client 收到 MEMBER_REMOVED：Extension 清除本地家庭資料回到引導畫面，
-   PWA 顯示訊息並登出——不再無聲重試
+5. 被移除成員的 client 收到 MEMBER_REMOVED：Extension 清除本地家庭資料並還原伺服器設定，
+   回到引導畫面並說明原因，PWA 顯示訊息並登出——不再無聲重試
 6. 誤移除的補救：Owner 呼叫 DELETE /api/family/:id/kicked/:uid 立即刪除墓碑（等冪，
    只解除限制、不會自動把人加回家庭），該使用者隨即可持同步碼重新加入
 7. 無人操作時，墓碑過期後該使用者亦可持同步碼重新加入（Inv-4 認可的合法再加入路徑；

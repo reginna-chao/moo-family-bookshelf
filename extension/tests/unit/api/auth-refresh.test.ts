@@ -11,6 +11,8 @@ import {
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
+  API_ENDPOINT_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
 } from "@/constants";
 
 /**
@@ -29,7 +31,8 @@ import {
  *    outcome.
  *  - recovery blocked by a verification code → call onReauthRequired, KEEP data.
  *  - recovery says family is gone (FAMILY_NOT_FOUND / FAMILY_FULL /
- *    MEMBER_REMOVED) → clear + FAMILY_REMOVED.
+ *    MEMBER_REMOVED) → clear (family id + the family-scoped API endpoint) and
+ *    hand the triggering code to onFamilyRemoved + FAMILY_REMOVED.
  *  - any other / transient failure → leave family data intact for a later retry.
  *
  * doRefreshToken takes an injected `deps` boundary (request / setAuthToken /
@@ -73,6 +76,13 @@ function makeDeps(
 }
 
 /**
+ * The family's self-hosted API endpoint this device had accepted, seeded by
+ * default so EVERY branch's effect on the family-scoped endpoint keys is
+ * observable — the gone branch must drop them, and no other branch may.
+ */
+const SEEDED_ENDPOINT = "https://family.example.com";
+
+/**
  * Seed storage.local so doRefreshToken + attemptJoinRecovery find
  * userId/familyId.
  *
@@ -90,6 +100,8 @@ async function seedStorage(
     [USER_ID_KEY]: "u1",
     [FAMILY_ID_KEY]: "fam-1",
     [AUTH_TOKEN_KEY]: "old-token",
+    [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
+    [DECLINED_FAMILY_ENDPOINT_KEY]: { value: null },
   },
 ): Promise<void> {
   await chrome.storage.local.clear();
@@ -108,6 +120,30 @@ function familyWasCleared(): boolean {
       (call) =>
         Array.isArray(call[0]) && (call[0] as string[]).includes(FAMILY_ID_KEY),
     );
+}
+
+/**
+ * True when the family-scoped endpoint choice was reset — BOTH the accepted
+ * endpoint and the declined marker, which is what `resetFamilyEndpointChoice`
+ * removes in one call.
+ */
+function endpointChoiceWasReset(): boolean {
+  return vi
+    .mocked(chrome.storage.local.remove)
+    .mock.calls.some(
+      (call) =>
+        Array.isArray(call[0]) &&
+        (call[0] as string[]).includes(API_ENDPOINT_KEY) &&
+        (call[0] as string[]).includes(DECLINED_FAMILY_ENDPOINT_KEY),
+    );
+}
+
+/** What the store still holds for the two family-scoped endpoint keys. */
+async function storedEndpointChoice(): Promise<Record<string, unknown>> {
+  return chrome.storage.local.get([
+    API_ENDPOINT_KEY,
+    DECLINED_FAMILY_ENDPOINT_KEY,
+  ]);
 }
 
 /** True when the recovery cooldown key was removed (cleared) from storage. */
@@ -295,11 +331,29 @@ describe("doRefreshToken", () => {
           expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
             type: "FAMILY_REMOVED",
           });
+          // The dialog is told WHICH refusal tore the binding down, so the
+          // onboarding view can name the reason instead of flipping silently.
+          expect(deps.onFamilyRemoved).toHaveBeenCalledWith({
+            errorCode: c.code,
+          });
         } else {
           expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({
             type: "FAMILY_REMOVED",
           });
         }
+        // The API endpoint is FAMILY-scoped, so it lives and dies with the
+        // membership: the gone branch drops it, every retryable branch keeps it
+        // (an over-eager reset would send the user's next request — and the
+        // retry that is still expected to succeed — to a different server).
+        expect(endpointChoiceWasReset()).toBe(c.expectCleared);
+        expect(await storedEndpointChoice()).toEqual(
+          c.expectCleared
+            ? {}
+            : {
+                [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
+                [DECLINED_FAMILY_ENDPOINT_KEY]: { value: null },
+              },
+        );
       });
     }
   });
@@ -333,6 +387,18 @@ describe("doRefreshToken", () => {
         type: "FAMILY_REMOVED",
       });
       expect(deps.onFamilyRemoved).toHaveBeenCalledTimes(1);
+      expect(deps.onFamilyRemoved).toHaveBeenCalledWith({
+        errorCode: "MEMBER_REMOVED",
+      });
+      // The family's endpoint goes with the membership: a client left pointed at
+      // the ex-family's server would send the NEXT create/join there — userId,
+      // display name, the token that server issues and the whole personal book
+      // list — and bake that host into the sync code it then hands out.
+      expect(await storedEndpointChoice()).toEqual({});
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "SET_API_ENDPOINT",
+        apiEndpoint: null,
+      });
       // A removal is not a verification problem — never prompt for a secret.
       expect(deps.onReauthRequired).not.toHaveBeenCalled();
     });
@@ -419,8 +485,15 @@ describe("doRefreshToken", () => {
       AUTH_TOKEN_KEY,
       TOKEN_EXPIRES_AT_KEY,
     ]);
-    // ...but the verification branch must NOT clear family data.
+    // ...but the verification branch must NOT clear family data, and the
+    // family-scoped endpoint must survive too: the user is about to re-supply
+    // their secret, and that join has to reach the SAME server.
     expect(familyWasCleared()).toBe(false);
+    expect(endpointChoiceWasReset()).toBe(false);
+    expect(await storedEndpointChoice()).toEqual({
+      [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
+      [DECLINED_FAMILY_ENDPOINT_KEY]: { value: null },
+    });
   });
 
   it("does not throw when onReauthRequired is null on a verification failure", async () => {
@@ -533,10 +606,13 @@ describe("doRefreshToken", () => {
           [RECOVERY_COOLDOWN_UNTIL_KEY]: expectedUntil,
         });
         expect(cooldownWriteValue()).toBe(expectedUntil);
-        // A rate-limit must NOT prompt verification nor drop family data.
+        // A rate-limit must NOT prompt verification nor drop family data —
+        // including the family-scoped endpoint, which the client still needs to
+        // reach the right server once the window clears.
         expect(deps.onReauthRequired).not.toHaveBeenCalled();
         expect(deps.onFamilyRemoved).not.toHaveBeenCalled();
         expect(familyWasCleared()).toBe(false);
+        expect(endpointChoiceWasReset()).toBe(false);
       });
     }
 
@@ -822,6 +898,8 @@ describe("clearFamilyStorageAndBroadcast", () => {
       [USER_ID_KEY]: "u1",
       [FAMILY_ID_KEY]: "fam-1",
       [AUTH_TOKEN_KEY]: "old-token",
+      [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
+      [DECLINED_FAMILY_ENDPOINT_KEY]: { value: null },
     });
     await chrome.storage.sync.set({ [FAMILY_ID_KEY]: "fam-1" });
     // Seeding calls are wiped so the assertions only observe production's.
@@ -845,6 +923,100 @@ describe("clearFamilyStorageAndBroadcast", () => {
     // back and resume exactly the rejoin loop the removal exists to stop.
     const synced = await chrome.storage.sync.get(FAMILY_ID_KEY);
     expect(synced[FAMILY_ID_KEY]).toBeUndefined();
+  });
+
+  /**
+   * The API endpoint is a FAMILY-scoped setting — the owner picks it and every
+   * member adopts it — so it must not outlive the membership, and being REMOVED
+   * ends the membership exactly like leaving does. A client left pointing at the
+   * former family's server would send the next create/join there (userId,
+   * display name, the token that server issues, the whole personal book list)
+   * and bake that host into the sync code it hands out next. The declined marker
+   * goes for the same reason: a refusal recorded against the old family must not
+   * silently suppress the confirmation prompt for the next one.
+   *
+   * Housing this INSIDE the shared teardown is what structurally guarantees the
+   * silent path and the re-verification path do it identically.
+   */
+  describe("family-scoped endpoint reset", () => {
+    it("drops both the accepted endpoint and the declined marker", async () => {
+      await clearFamilyStorageAndBroadcast();
+
+      const local = await chrome.storage.local.get([
+        API_ENDPOINT_KEY,
+        DECLINED_FAMILY_ENDPOINT_KEY,
+      ]);
+      expect(local).toEqual({});
+    });
+
+    it("tells the background to revert to the official default as well", async () => {
+      await clearFamilyStorageAndBroadcast();
+
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "SET_API_ENDPOINT",
+        apiEndpoint: null,
+      });
+    });
+
+    it("resets the endpoint only after the family binding is gone, and before the broadcast", async () => {
+      await clearFamilyStorageAndBroadcast();
+
+      // Order matters in both directions: resetting the endpoint while the
+      // family binding still stands would leave a bound client talking to the
+      // wrong server, and broadcasting first would let another context react to
+      // FAMILY_REMOVED while the endpoint was still the ex-family's.
+      const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
+      expect(removeCalls[0][0]).toEqual([FAMILY_ID_KEY]);
+      expect(removeCalls[1][0]).toEqual(
+        expect.arrayContaining([
+          API_ENDPOINT_KEY,
+          DECLINED_FAMILY_ENDPOINT_KEY,
+        ]),
+      );
+      // The overload set types `sendMessage`'s first parameter as the optional
+      // extensionId, so the recorded message needs the double cast.
+      const messageTypes = vi
+        .mocked(chrome.runtime.sendMessage)
+        .mock.calls.map(
+          (call) => (call[0] as unknown as { type: string }).type,
+        );
+      expect(messageTypes).toEqual(["SET_API_ENDPOINT", "FAMILY_REMOVED"]);
+    });
+
+    /**
+     * `resetFamilyEndpointChoice` swallows its own storage failures, so it can
+     * never abort the teardown it was added to. Losing the endpoint reset is
+     * survivable (App's own handler still puts the LIVE client back on the
+     * default); losing the broadcast is not — other contexts would keep showing
+     * a family that is gone.
+     */
+    it("still broadcasts when the endpoint reset's storage write fails", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      // Only the endpoint remove rejects; the familyId remove still resolves.
+      const remove = vi.mocked(chrome.storage.local.remove);
+      remove.mockImplementation(((keys: unknown) =>
+        Array.isArray(keys) && (keys as string[]).includes(API_ENDPOINT_KEY)
+          ? Promise.reject(new Error("storage unavailable"))
+          : Promise.resolve()) as typeof chrome.storage.local.remove);
+
+      try {
+        await expect(clearFamilyStorageAndBroadcast()).resolves.toBeUndefined();
+
+        // The family binding — the part that must not survive — was still
+        // dropped, and every later step ran.
+        expect(remove).toHaveBeenCalledWith([FAMILY_ID_KEY]);
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+          type: "FAMILY_REMOVED",
+        });
+        // Swallowed, not silenced — the failure stays on the record.
+        expect(warn).toHaveBeenCalled();
+      } finally {
+        // Hand the shared store-backed implementation back: the file's other
+        // suites read and write through it.
+        remove.mockRestore();
+        warn.mockRestore();
+      }
+    });
   });
 
   it("leaves the rest of the record alone (userId, auth token)", async () => {

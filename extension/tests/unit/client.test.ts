@@ -1126,6 +1126,14 @@ describe("ApiClient", () => {
       await client.getPersonalBooks("u1");
 
       expect(onFamilyRemoved).toHaveBeenCalledOnce();
+      // The refusal that tore the binding down travels all the way from the
+      // wire body to the callback payload, so the dialog can NAME the reason on
+      // the onboarding view instead of flipping there silently. This is the only
+      // test that covers that trip end-to-end: the auth-refresh unit tests
+      // inject `deps.request`, so they never exercise the response parsing.
+      expect(onFamilyRemoved).toHaveBeenCalledWith({
+        errorCode: "FAMILY_NOT_FOUND",
+      });
     });
 
     it("does not throw when onFamilyRemoved is null on REFRESH_FAILED", async () => {

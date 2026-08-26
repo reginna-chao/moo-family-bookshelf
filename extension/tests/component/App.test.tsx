@@ -9,6 +9,7 @@ import {
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { App } from "@/dialog/App";
 import { ApiClient, validateEndpointUrl } from "@/api/client";
+import { familyGoneNoticeText } from "@/dialog/familyGoneNotice";
 import {
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
@@ -318,6 +319,9 @@ describe("App", () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       type: "CLEAR_FAMILY_ID",
     });
+    // Leaving is the user's own decision, so there is nothing to explain: the
+    // family-gone banner belongs to the FORCED teardowns only.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("handleLeaveFamily resets active tab to family-shelf", async () => {
@@ -398,9 +402,10 @@ describe("App", () => {
     const apiClient = instances[0];
     expect(apiClient.onFamilyRemoved).not.toBeNull();
 
-    // Simulate ApiClient calling onFamilyRemoved (e.g., REFRESH_FAILED)
+    // Simulate ApiClient calling onFamilyRemoved after a recovery join came back
+    // with a family-gone code (here: the owner removed this member).
     await act(async () => {
-      apiClient.onFamilyRemoved!();
+      apiClient.onFamilyRemoved!({ errorCode: "MEMBER_REMOVED" });
     });
 
     await waitFor(() => {
@@ -408,6 +413,146 @@ describe("App", () => {
     });
 
     restore();
+  });
+
+  /**
+   * A forced flip back to onboarding has to say WHY. Without the banner the
+   * dialog just resets itself in front of the user, which reads as a bug rather
+   * than as a state change their family owner caused (or a family that is gone).
+   *
+   * The copy is imported from production (`dialog/familyGoneNotice.ts`) and
+   * pinned verbatim, once, in tests/unit/dialog/familyGoneNotice.test.ts —
+   * restating a literal here would let the two drift apart silently.
+   */
+  describe("family-gone notice banner", () => {
+    /** Boot into the main view, then have the client report a family teardown. */
+    async function tearDownFamily(
+      errorCode: string,
+    ): Promise<{ apiClient: ApiClient; restore: () => void }> {
+      const { instances, restore } = await captureApiClients();
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+      });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        instances[0].onFamilyRemoved!({ errorCode });
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+      });
+
+      return { apiClient: instances[0], restore };
+    }
+
+    it.each(["MEMBER_REMOVED", "FAMILY_NOT_FOUND", "FAMILY_FULL"])(
+      "names the %s refusal above the onboarding view",
+      async (errorCode) => {
+        const { restore } = await tearDownFamily(errorCode);
+
+        // An alert, not a plain div: the view changed under the user without
+        // them asking, so a screen reader has to announce the reason.
+        const banner = screen.getByRole("alert");
+        expect(
+          within(banner).getByText(familyGoneNoticeText(errorCode)),
+        ).toBeInTheDocument();
+        // The amber notice styling lives on this class in styles.css; jsdom does
+        // not apply stylesheet rules, so the class is the observable contract.
+        expect(banner).toHaveClass("moo-family-gone-notice");
+
+        restore();
+      },
+    );
+
+    it("dismisses the banner on 關閉 and keeps the user on onboarding", async () => {
+      const { restore } = await tearDownFamily("MEMBER_REMOVED");
+
+      fireEvent.click(screen.getByRole("button", { name: "關閉" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      });
+      // Dismissing the explanation must not dismiss the view it explains.
+      expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+
+      restore();
+    });
+
+    it("shows no banner on an ordinary family-less boot", async () => {
+      setupChromeMessages({ familyId: null, userId: null });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+      });
+
+      // Nothing was torn down, so there is nothing to explain — a banner on
+      // every first run would train the user to ignore the one that matters.
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("drops the notice once a new family is joined", async () => {
+      const { restore } = await tearDownFamily("MEMBER_REMOVED");
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+
+      // Join a fresh family (the Onboarding mock reports fam-123/user-456)...
+      fireEvent.click(screen.getByText("Mock Join"));
+      await waitFor(() => {
+        expect(screen.getByText("設定")).toBeInTheDocument();
+      });
+
+      // ...then leave it. The onboarding view is back, but the previous
+      // family's removal is stale news and must not resurface.
+      fireEvent.click(screen.getByText("設定"));
+      fireEvent.click(screen.getByText("Mock Leave"));
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+      });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+      restore();
+    });
+
+    /**
+     * The live-client half of the endpoint restore. The storage half runs
+     * earlier, inside `clearFamilyStorageAndBroadcast` (pinned in
+     * tests/unit/api/auth-refresh.test.ts) — invoking the callback directly here
+     * deliberately skips it, so this case only speaks for the client.
+     */
+    it("puts the live client back on the official default endpoint", async () => {
+      const { instances, restore } = await captureApiClients();
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+        apiEndpoint: "https://custom.workers.dev",
+      });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(instances[0].getEndpoint()).toBe("https://custom.workers.dev");
+      });
+
+      await act(async () => {
+        instances[0].onFamilyRemoved!({ errorCode: "MEMBER_REMOVED" });
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+      });
+
+      // Being removed ends the membership exactly like leaving does, and the
+      // endpoint is FAMILY-scoped: a family-less client still aimed at the
+      // ex-family's server would send the next create/join there.
+      expect(instances[0].getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+
+      restore();
+    });
   });
 
   it("boots on the accepted API endpoint read directly from storage", async () => {
