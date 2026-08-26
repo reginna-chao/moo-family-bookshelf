@@ -5,6 +5,7 @@
 
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import { DEFAULT_API_ENDPOINT } from "../constants";
+import { sanitizeBorrowRequests } from "./borrowValidation";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -580,11 +581,15 @@ export class ApiClient {
     return this.unwrap(res);
   }
 
+  /**
+   * `unknown`, not `BorrowRequest[]`: the wire shape is only a claim until
+   * `sanitizeBorrowRequests` has checked it. `unwrap` still runs first — it owns
+   * the `{ data, error }` envelope contract (throws `ApiError` on `error`,
+   * `EMPTY_RESPONSE` on missing data).
+   */
   async listBorrowRequests(familyId: string): Promise<BorrowRequest[]> {
-    const res = await this.get<BorrowRequest[]>(
-      `/api/family/${familyId}/borrow`,
-    );
-    return this.unwrap(res);
+    const res = await this.get<unknown>(`/api/family/${familyId}/borrow`);
+    return sanitizeBorrowRequests(this.unwrap(res));
   }
 
   async updateBorrowStatus(
