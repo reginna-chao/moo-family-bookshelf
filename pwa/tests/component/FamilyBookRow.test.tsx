@@ -106,6 +106,75 @@ describe("FamilyBookRow", () => {
     expect(link).toHaveAttribute("target", "_blank");
   });
 
+  /**
+   * A family-shelf cover is ANOTHER member's server data, so it is exactly the
+   * value a hostile member would point at a tracking beacon to collect every
+   * viewer's IP / UA. `safeCoverUrl` (pwa/src/utils/safeCoverUrl.ts) drops it
+   * before it becomes an `<img src>`; LazyCover then renders the BookOpen
+   * fallback box. The CSP `img-src` in pwa/public/_headers is the second layer
+   * (tests/unit/cspImgSrc.test.ts) but is only served by Cloudflare Pages /
+   * Netlify — `vite dev` / `vite preview` and plain static hosts have only this
+   * code filter, which is what the cases below pin.
+   */
+  describe("cover URL whitelist", () => {
+    const READMOO_COVER = "https://cdn.readmoo.com/cover/x.jpg";
+    const BEACON_COVER = "https://evil.example/beacon.gif";
+
+    /**
+     * LazyCover's BookOpen fallback box. `bg-gray-100` singles it out here: the
+     * wrapper LazyCover renders around a live cover carries `relative` and the
+     * row's own classes, never a background, so a non-null result means the
+     * fallback branch ran. The nested icon is asserted alongside it.
+     */
+    function coverFallback(container: HTMLElement): Element | null {
+      return container.querySelector("div.bg-gray-100");
+    }
+
+    // Positive control: without it the negative case below would still pass on
+    // a row that never renders a cover at all.
+    it("renders a cover served from a Readmoo host", () => {
+      const { container } = render(
+        <FamilyBookRow book={makeBook({ coverUrl: READMOO_COVER })} />,
+      );
+
+      const img = screen.getByRole("img");
+      expect(img).toHaveAttribute("src", READMOO_COVER);
+      expect(img).toHaveAttribute("alt", "測試書名");
+      expect(coverFallback(container)).toBeNull();
+    });
+
+    it("renders no image for a cover on a non-Readmoo host", () => {
+      const { container } = render(
+        <FamilyBookRow book={makeBook({ coverUrl: BEACON_COVER })} />,
+      );
+
+      // No `<img>` ⇒ the browser issues no request ⇒ no IP / UA leak.
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      expect(container.querySelector("img")).toBeNull();
+      // The beacon host must not survive anywhere in the markup (src, srcset,
+      // a link, a data-* attribute...).
+      expect(container.innerHTML).not.toContain("evil.example");
+      // The BookOpen fallback box takes the cover's place and holds the layout.
+      const fallback = coverFallback(container);
+      expect(fallback).not.toBeNull();
+      expect(fallback?.querySelector("svg")).not.toBeNull();
+      // The row itself must survive a filtered cover.
+      expect(screen.getByText("測試書名")).toBeInTheDocument();
+      expect(screen.getByText("Alice")).toBeInTheDocument();
+    });
+
+    it("renders the same fallback when the book carries no cover URL", () => {
+      const { container } = render(
+        <FamilyBookRow book={makeBook({ coverUrl: "" })} />,
+      );
+
+      expect(container.querySelector("img")).toBeNull();
+      const fallback = coverFallback(container);
+      expect(fallback).not.toBeNull();
+      expect(fallback?.querySelector("svg")).not.toBeNull();
+    });
+  });
+
   describe("hide action overflow menu (v1.5.0)", () => {
     it("renders the overflow trigger when onHideToggle and label are provided", () => {
       render(

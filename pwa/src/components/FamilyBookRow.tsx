@@ -5,6 +5,7 @@ import type { BookEntry } from "@/api/client";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { LazyCover } from "@/components/LazyCover";
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu";
+import { safeCoverUrl } from "@/utils/safeCoverUrl";
 
 export interface FamilyBookRowBook extends BookEntry {
   memberName: string;
@@ -56,8 +57,10 @@ export function FamilyBookRow({
       className="flex items-center gap-3 py-3 border-b border-gray-100 no-underline text-inherit"
     >
       <div className="relative flex-shrink-0">
+        {/* Another member's cover comes from the server; filter it before it
+            becomes an `<img src>` — LazyCover renders the fallback on "". */}
         <LazyCover
-          src={book.coverUrl}
+          src={safeCoverUrl(book.coverUrl)}
           alt={book.title}
           className="w-10 h-[54px] rounded object-cover"
           fallback={

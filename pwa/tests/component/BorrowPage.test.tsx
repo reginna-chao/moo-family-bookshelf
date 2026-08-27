@@ -247,10 +247,19 @@ describe("BorrowPage", () => {
   /**
    * The borrow card renders its cover through `LazyCover`, so a cover that is
    * missing OR fails to load degrades to the same neutral placeholder instead
-   * of leaving a broken-image box. The PWA does NOT filter the URL itself —
-   * its render-time beacon defence is the CSP `img-src` in pwa/public/_headers
-   * (pinned by tests/unit/cspImgSrc.test.ts), which the browser enforces and
-   * jsdom cannot. What is observable here is the degradation path.
+   * of leaving a broken-image box.
+   *
+   * The PWA runs TWO render-time beacon defences, not one:
+   *   1. `safeCoverUrl` (pwa/src/utils/safeCoverUrl.ts) drops a cover outside
+   *      the Readmoo host whitelist BEFORE it can become an `<img src>` — a
+   *      code-level filter, so jsdom observes it and the cases below pin it.
+   *   2. The CSP `img-src` in pwa/public/_headers (pinned by
+   *      tests/unit/cspImgSrc.test.ts), which only a real browser enforces.
+   * Layer 2 alone would not cover every deployment: `_headers` is honoured only
+   * by hosts that serve it (Cloudflare Pages / Netlify), so `vite dev` /
+   * `vite preview` and plain static hosts send no CSP at all and rely on
+   * layer 1. Borrow records have no TTL, so covers stored before the Worker's
+   * write-time check (INVALID_COVER_URL) still reach this render path.
    */
   describe("borrow card cover", () => {
     function renderWithCover(bookCoverUrl: string) {
@@ -304,6 +313,27 @@ describe("BorrowPage", () => {
       // LazyCover 的 wrapper 也帶 bg-gray-100，多驗 relative 才能證明「wrapper 已消失、只剩 fallback」
       expect(placeholder).not.toHaveClass("relative");
       expect(screen.getByText("測試書名")).toBeInTheDocument();
+    });
+
+    it("drops a cover on a non-Readmoo host instead of requesting it", () => {
+      const { container } = renderWithCover("https://evil.example/beacon.gif");
+
+      // No `<img>` ⇒ the browser issues no request ⇒ no IP / UA leak. This is
+      // the whole point of the filter, so assert on the element too, not only
+      // on the accessible role.
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      expect(container.querySelector("img")).toBeNull();
+      // The beacon host must not survive anywhere in the markup (src, srcset,
+      // a link, a data-* attribute...).
+      expect(container.innerHTML).not.toContain("evil.example");
+
+      const placeholder = container.querySelector("div.bg-gray-100");
+      expect(placeholder).not.toBeNull();
+      // LazyCover 的 wrapper 也帶 bg-gray-100，多驗 relative 才能證明「wrapper 已消失、只剩 fallback」
+      expect(placeholder).not.toHaveClass("relative");
+      // The card must still render — filtering a cover is not an error state.
+      expect(screen.getByText("測試書名")).toBeInTheDocument();
+      expect(screen.getByText("借閱者A")).toBeInTheDocument();
     });
   });
 
