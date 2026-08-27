@@ -24,7 +24,8 @@ The conditions are mechanical: check each one, record the answer. Never pick the
    - `worker/src/**` — the entire Worker runtime (routes, middleware, services, utils, schemas, kv, index)
    - `extension/src/crypto/**`, `pwa/src/crypto/**` — both ends run the same hash / sync-code logic, so the exclusion is symmetric
    - `extension/src/background/**`
-   - `extension/src/dialog/PersonalShelf.tsx`, `pwa/src/pages/PersonalShelfPage.tsx`, `extension/src/api/client.ts`, `pwa/src/api/client.ts` — whole files; touching the file at all disqualifies. Both PersonalShelf surfaces are listed because Phase 6's `invariants` trigger covers the FE sharing / save-before-sync flow on EITHER surface (Inv-3 / Inv-5)
+   - `extension/src/dialog/PersonalShelf.tsx`, `extension/src/dialog/usePersonalBooks.ts`, `pwa/src/pages/PersonalShelfPage.tsx`, `extension/src/api/client.ts`, `pwa/src/api/client.ts` — whole files; touching the file at all disqualifies. Both PersonalShelf surfaces are listed because Phase 6's `invariants` trigger covers the FE sharing / save-before-sync flow on EITHER surface (Inv-3 / Inv-5); on the Extension side that flow lives in the `usePersonalBooks` hook, not in the presentational component
+   - `shared/src/personal/**` — the PUT/PATCH save decision shared by BOTH ends; one edit here changes save-before-sync behaviour on Extension and PWA at once
    - `.env*`, `wrangler.toml`, `.github/workflows/**`
    - any dependency manifest: `package.json` at any level, `pnpm-lock.yaml`
 
