@@ -285,7 +285,7 @@ export async function createNewFamily(opts: {
   );
   if (response.error) {
     throw new CreateFamilyError(
-      response.error.message,
+      safeErrorText(response.error.message, "建立家庭失敗，請稍後再試"),
       response.error.code,
       response.error.retryAfter,
     );
