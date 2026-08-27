@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isJsonObject,
+  sanitizeCoverUrl,
   sanitizeDisplayName,
   validateDisplayName,
 } from "../../src/utils/validation";
@@ -67,6 +68,42 @@ describe("validateDisplayName", () => {
     // 20 visible chars + zero-width chars should pass
     const name = "a".repeat(20) + "\u200B".repeat(5);
     expect(validateDisplayName(name)).toBe("a".repeat(20));
+  });
+});
+
+/**
+ * Deliberately LEAN. The full URL matrix (schemes, ports, look-alike domains,
+ * userinfo smuggling, non-string shapes) is pinned through `parseBooks` in
+ * `tests/unit/putBooksAllowlist.test.ts`; duplicating it here would only make
+ * two tables drift apart.
+ *
+ * What this suite adds is the EXPORT itself: `sanitizeCoverUrl` moved out of
+ * `routes/user.ts` to become shared boundary logic, so `services/publicShelf.ts`
+ * can re-sanitize every public snapshot it writes. A rename, a removal, or a
+ * change to the keep/blank verdict now fails here rather than only inside one
+ * caller's suite.
+ */
+describe("sanitizeCoverUrl", () => {
+  it.each<{ label: string; input: string }>([
+    { label: "the empty-string scraper placeholder", input: "" },
+    {
+      label: "a whitelisted Readmoo cover host, verbatim",
+      input: "https://cdn.readmoo.com/cover/abc.jpg",
+    },
+  ])("keeps $label", ({ input }) => {
+    expect(sanitizeCoverUrl(input)).toBe(input);
+  });
+
+  it.each<{ label: string; input: unknown }>([
+    {
+      label: "an attacker-controlled host",
+      input: "https://evil.example.com/beacon.gif",
+    },
+    { label: "a non-string value", input: 123 },
+    { label: "null", input: null },
+    { label: "undefined (absent field)", input: undefined },
+  ])("blanks $label", ({ input }) => {
+    expect(sanitizeCoverUrl(input)).toBe("");
   });
 });
 

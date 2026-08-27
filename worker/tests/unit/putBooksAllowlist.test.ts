@@ -14,6 +14,22 @@ import { USER1 } from "../helpers/ids";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
+/**
+ * A coverUrl the Readmoo whitelist accepts (`isAllowedCoverUrl` in
+ * `shared/src/config/readmoo.ts`). Fixtures that are NOT about cover
+ * sanitization must use a whitelisted value, otherwise the write path blanks it
+ * and the assertion silently ends up about the wrong thing.
+ */
+const ALLOWED_COVER = "https://cdn.readmoo.com/cover/abc.jpg";
+
+/**
+ * An attacker-controlled cover host. Rendered by every family member and every
+ * public-shelf visitor, so storing it would turn a book cover into a tracking
+ * beacon — the P0 this suite guards.
+ */
+const BEACON_COVER = "https://evil.example.com/beacon.gif";
+const BEACON_HOST = "evil.example.com";
+
 let kv: KVNamespace;
 
 function request(
@@ -53,7 +69,10 @@ describe("parseBooks", () => {
           title: "T",
           author: "A",
           isbn: "I",
-          coverUrl: "C",
+          // Whitelisted on purpose — an off-whitelist cover is blanked (see the
+          // sanitize table below), which would make this a test about blanking
+          // rather than about the field allowlist.
+          coverUrl: ALLOWED_COVER,
           readmooUrl: "R",
           category: "cat",
           isShared: BoolFlag.TRUE,
@@ -73,7 +92,7 @@ describe("parseBooks", () => {
       title: "T",
       author: "A",
       isbn: "I",
-      coverUrl: "C",
+      coverUrl: ALLOWED_COVER,
       readmooUrl: "R",
       category: "cat",
       isShared: BoolFlag.TRUE,
@@ -132,6 +151,162 @@ describe("parseBooks", () => {
     if (result.ok) return;
     expect(result.code).toBe("INVALID_PAYLOAD");
     expect(result.message).toContain("2");
+  });
+});
+
+// ===========================================================================
+// coverUrl whitelist sanitize (P0 privacy): a book cover is loaded by every
+// family member and every public-shelf visitor, so an attacker-chosen cover
+// host is a tracking beacon. The write paths keep only "" (the scraper's
+// no-cover placeholder) and Readmoo-hosted https URLs; everything else is
+// blanked. Blanking, never rejecting — one crafted entry must not fail a sync.
+// ===========================================================================
+
+describe("parseBooks — coverUrl whitelist sanitize", () => {
+  function storedCoverUrl(rawCover: unknown): string {
+    const result = parseBooks(
+      [{ bookId: "b1", coverUrl: rawCover }],
+      MAX_PUT_BOOKS,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("payload was rejected, not sanitized");
+    return result.books[0].coverUrl;
+  }
+
+  // Values that reach KV byte-identical. A kept URL is stored verbatim (the
+  // parser is only consulted for the verdict), so `:443` and an uppercase host
+  // survive in their original spelling.
+  it.each<{ label: string; input: string }>([
+    {
+      label: "an apex readmoo.com https URL",
+      input: "https://readmoo.com/x.jpg",
+    },
+    {
+      label: "a cdn.readmoo.com subdomain URL",
+      input: "https://cdn.readmoo.com/x.jpg",
+    },
+    {
+      label: "a cdn.readmoo.tw subdomain URL (second cover domain)",
+      input: "https://cdn.readmoo.tw/x.jpg",
+    },
+    {
+      label: "a deeper subdomain of a cover domain",
+      input: "https://img.cdn.readmoo.com/x.jpg",
+    },
+    {
+      label: "an explicit :443, which the URL parser normalises away",
+      input: "https://cdn.readmoo.com:443/x.jpg",
+    },
+    {
+      label: "an uppercase scheme and host, which the URL parser lowercases",
+      input: "HTTPS://CDN.READMOO.COM/x.jpg",
+    },
+    { label: "the empty-string scraper placeholder", input: "" },
+  ])("keeps $label unchanged", ({ input }) => {
+    expect(storedCoverUrl(input)).toBe(input);
+  });
+
+  // Everything else is replaced by "", which renders as the normal no-cover
+  // state. Each row is a way an off-whitelist host could otherwise sneak past.
+  it.each<{ label: string; input: unknown }>([
+    {
+      label: "a plain-http URL on an allowed host",
+      input: "http://cdn.readmoo.com/x.jpg",
+    },
+    {
+      label: "an allowed host on a non-default port",
+      input: "https://cdn.readmoo.com:8443/x.jpg",
+    },
+    {
+      label: "a look-alike registrable domain",
+      input: "https://evilreadmoo.com/x.jpg",
+    },
+    {
+      label: "a cover domain used as a leading label of another domain",
+      input: "https://readmoo.com.evil.com/x.jpg",
+    },
+    {
+      label: "a cover domain smuggled into the userinfo segment",
+      input: "https://cdn.readmoo.com@evil.example.com/x.jpg",
+    },
+    { label: "an outright foreign host", input: BEACON_COVER },
+    { label: "an unparseable string", input: "not a url" },
+    {
+      label: "a protocol-relative URL",
+      input: "//cdn.readmoo.com/x.jpg",
+    },
+    { label: "a javascript: URL", input: "javascript:alert(1)" },
+    {
+      label: "a data: URL",
+      input: "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+    },
+    { label: "a number", input: 123 },
+    { label: "null", input: null },
+    {
+      label: "an object wrapping a whitelisted URL",
+      input: { href: "https://cdn.readmoo.com/x.jpg" },
+    },
+    {
+      label: "an array wrapping a whitelisted URL",
+      input: ["https://cdn.readmoo.com/x.jpg"],
+    },
+  ])("blanks $label", ({ input }) => {
+    expect(storedCoverUrl(input)).toBe("");
+  });
+
+  it("blanks a missing coverUrl field to the empty string", () => {
+    const result = parseBooks([{ bookId: "b1" }], MAX_PUT_BOOKS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.books[0].coverUrl).toBe("");
+  });
+
+  it("sanitizes every entry in the payload, not only the first", () => {
+    const result = parseBooks(
+      [
+        { bookId: "b1", coverUrl: ALLOWED_COVER },
+        { bookId: "b2", coverUrl: BEACON_COVER },
+        { bookId: "b3", coverUrl: "https://evilreadmoo.com/x.jpg" },
+      ],
+      MAX_PUT_BOOKS,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.books.map((b) => b.coverUrl)).toEqual([
+      ALLOWED_COVER,
+      "",
+      "",
+    ]);
+  });
+
+  it("keeps the rest of an entry intact while blanking its coverUrl", () => {
+    const result = parseBooks(
+      [
+        {
+          bookId: "b1",
+          title: "T",
+          author: "A",
+          isbn: "I",
+          coverUrl: BEACON_COVER,
+          readmooUrl: "https://readmoo.com/book/b1",
+          category: "cat",
+          isShared: BoolFlag.TRUE,
+        },
+      ],
+      MAX_PUT_BOOKS,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.books[0]).toEqual({
+      bookId: "b1",
+      title: "T",
+      author: "A",
+      isbn: "I",
+      coverUrl: "",
+      readmooUrl: "https://readmoo.com/book/b1",
+      category: "cat",
+      isShared: BoolFlag.TRUE,
+    });
   });
 });
 
@@ -334,5 +509,68 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
     // Either the size guard (413) or the count cap (400) must reject it — never a 200.
     expect([400, 413]).toContain(res.status);
     expect(res.status).not.toBe(200);
+  });
+});
+
+// ===========================================================================
+// PUT /api/user/:id/books — coverUrl sanitize over the real HTTP path
+// ===========================================================================
+
+describe("PUT /api/user/:id/books — coverUrl sanitize", () => {
+  /** Off-whitelist, whitelisted, and the empty placeholder, in one save. */
+  const MIXED_BOOKS = [
+    { bookId: "b1", title: "Beacon", coverUrl: BEACON_COVER },
+    { bookId: "b2", title: "Clean", coverUrl: ALLOWED_COVER },
+    { bookId: "b3", title: "No cover", coverUrl: "" },
+  ];
+  const EXPECTED_COVERS = ["", ALLOWED_COVER, ""];
+
+  async function putMixedBooks(): Promise<Response> {
+    const token = await generateAuthToken(kv, USER1);
+    return request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      { books: MIXED_BOOKS },
+      token,
+    );
+  }
+
+  it("accepts the save and keeps every book instead of rejecting the payload", async () => {
+    const res = await putMixedBooks();
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.books.map((b: Json) => b.bookId)).toEqual([
+      "b1",
+      "b2",
+      "b3",
+    ]);
+  });
+
+  it("returns the off-whitelist cover blanked and the whitelisted one intact", async () => {
+    const res = await putMixedBooks();
+
+    const json = (await res.json()) as Json;
+    expect(json.data.books.map((b: Json) => b.coverUrl)).toEqual(
+      EXPECTED_COVERS,
+    );
+  });
+
+  it("never lets the off-whitelist host reach the stored user record", async () => {
+    await putMixedBooks();
+
+    const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+    expect(stored?.books.map((b) => b.coverUrl)).toEqual(EXPECTED_COVERS);
+    // Nothing anywhere in the record — not in a stray field, not in a title.
+    expect(JSON.stringify(stored)).not.toContain(BEACON_HOST);
+  });
+
+  it("keeps the other fields of a blanked book unchanged", async () => {
+    await putMixedBooks();
+
+    const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+    const beaconBook = stored?.books.find((b) => b.bookId === "b1");
+    expect(beaconBook?.title).toBe("Beacon");
+    expect(beaconBook?.isShared).toBe(BoolFlag.FALSE);
   });
 });
