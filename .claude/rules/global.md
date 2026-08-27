@@ -75,11 +75,13 @@ Testability > Readability > Simplicity > Consistency > Performance > Maintainabi
 
 ### Code Modification Workflow (Mandatory)
 
-Any code modification — **regardless of size** — must go through the full cycle:
+Any code modification — **regardless of size** — must go through this cycle, in one of its two sanctioned forms:
 
 1. **Write** (coder agent) → 2. **Typecheck** → 3. **Test** (tester agent, where applicable) → 4. **Review** (reviewer agent) → 5. **Fix cycle** for any CRITICAL findings → 6. **Report** to user
 
-"Size too small" is NEVER a valid reason to skip review. A one-line fix is subject to the same cycle as a 500-line feature. The cost of an extra review round is trivial; the cost of silently shipping unreviewed code is not.
+**Two sanctioned forms.** The workflow runs in one of two forms. The **full cycle** (default) is the complete `/develop` lifecycle around the sequence above. **Fix mode** is the lightweight form defined in `.claude/skills/develop/references/code-cycle.md` → "Mode Selection: fix mode vs full cycle" — available only when ALL of that section's mechanical eligibility conditions hold (single scope; no API-contract / KV-schema change; production diff ≤ 40 lines measured against the run's merge-base, test trees excluded; no security-sensitive path touched). Fix mode still runs coder → verify → one regression test → CRITICAL-only review; eligibility is re-measured after every coder return (Fix-Cycle rounds included), and a violated condition escalates the run in place to the full cycle.
+
+"Size too small" is NEVER a valid reason to skip review. A one-line fix is subject to the same cycle as a 500-line feature — at most it qualifies for fix mode, which reduces ceremony but still reviews. The cost of an extra review round is trivial; the cost of silently shipping unreviewed code is not.
 
 **Only exceptions:**
 

@@ -12,7 +12,7 @@ description: >
   DO NOT TRIGGER when: user only wants to cut a release / bump version (/bump-ver), or to
   re-adapt the .claude templates for a new project (/project-init).
 argument-hint: "<feature, fix, or design request>"
-allowed-tools: Read, Grep, Glob, Bash(pnpm*), Bash(cd*), Bash(git*), Bash(ls*), Bash(mkdir*), Bash(cp*), Bash(npx tsc*), Agent, AskUserQuestion, TodoWrite
+allowed-tools: Read, Grep, Glob, Bash(pnpm*), Bash(cd*), Bash(git*), Bash(ls*), Bash(mkdir*), Bash(cp*), Bash(npx tsc*), Bash(gh issue*), Bash(gh label*), Agent, AskUserQuestion, TodoWrite
 model: opus
 ---
 
@@ -37,15 +37,15 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 ## §1 Hard rules (both routes)
 
 - **Never write code or design assets directly.** Dispatch agents.
-- **Code Modification Workflow is mandatory** (`.claude/rules/global.md`): every code change — regardless of size — goes through coder → typecheck → tester → review → fix. "Too small" is never a reason to skip. Only the user explicitly saying "skip review" / "just write the code" bypasses it, for that task only.
+- **Code Modification Workflow is mandatory** (`.claude/rules/global.md`): every code change — regardless of size — goes through coder → typecheck → tester → review → fix. It has **two sanctioned forms**: the **full cycle** (default) and **fix mode** — the lightweight path defined in `references/code-cycle.md` → "Mode Selection: fix mode vs full cycle": same workflow, reduced ceremony, available only when that section's mechanical eligibility conditions ALL hold. "Too small to review" is still never a reason to skip review — fix mode still runs coder → verify → regression test → CRITICAL-only review. (Where `.claude/rules/global.md`'s "Code Modification Workflow (Mandatory)" section describes the full cycle, fix mode is the sanctioned lightweight form of that same workflow.) Only the user explicitly saying "skip review" / "just write the code" bypasses it, for that task only.
 - **Scope tagging.** Every code work-item is `frontend` or `backend`. When dispatching a `coder` / `tester` / `reviewer` agent, pass `scope` so it reads the right rules (`frontend.md` / `backend.md`) and runs the right commands. A full-stack feature splits into separate scoped dispatches.
-- **Agents dispatched via the Agent tool are non-interactive** — they cannot pause for the user. YOU hold every user gate (requirements confirm, verify-before-test, SUGGESTION decisions, commit) in this session. Do not push a user gate into an agent prompt.
-- **Triage before proposing.** `Read .claude/rules/change-triage.md` before surfacing any unsolicited "X could be improved" item — SUGGESTION findings, follow-up task chips, opportunistic cleanups. P2 items and non-goals are not raised at all; a P0/P1 must carry `file:line`, the consequence of leaving it unfixed, and whether a failing check can be written.
+- **Agents dispatched via the Agent tool are non-interactive** — they cannot pause for the user. YOU hold every user gate (requirements confirm, verify-before-test, SUGGESTION decisions, commit) in this session (in fix mode the commit gate is the only user gate — the other three do not occur). Do not push a user gate into an agent prompt.
+- **Triage before proposing.** `Read .claude/rules/change-triage.md` before surfacing any unsolicited "X could be improved" item — SUGGESTION findings, follow-up items surfaced mid-run, opportunistic cleanups. P2 items and non-goals are not raised at all; a P0/P1 must carry `file:line`, the consequence of leaving it unfixed, and whether a failing check can be written.
 - **Progress tracking (mandatory).** Once requirements are confirmed, keep a TodoWrite checklist of the phases and update it (✅ / ⏳ / ⬜) so the user always sees progress. If TodoWrite is unavailable, render the same checklist inline.
 
 ## §2 Stop discipline (both routes)
 
-- **Requirements/planning is collaborative** — iterate with the user until confirmed.
+- **Requirements/planning is collaborative** — iterate with the user until confirmed. (Fix-mode exception: per `references/code-cycle.md`, Phase 1 collapses to the opening statement — no separate confirmation stop.)
 - **After confirmation, run autonomously.** Do NOT stop merely to ask "可以進下一階段嗎" — continue. Stop ONLY for: a **user choice** (which SUGGESTION fixes; whether to commit/push; design direction), a **manual verification** the user must perform (verify-before-test gate; CRITICAL security findings), or a **blocker** (architecture/security problem invalidating the plan).
 - **CRITICAL code findings are auto-fixed without asking.**
 
@@ -59,7 +59,7 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 [the ONE concrete action the user must take now, as explicit options]
 ```
 
-**Decision prompts use AskUserQuestion.** Whenever the stop is a _choice_ (SUGGESTION 取捨、提交方式、方向/範圍選擇、retro 要不要做…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form stops (e.g. manual verification feedback) stay text-only.
+**Decision prompts use AskUserQuestion.** Whenever the stop is a _choice_ (SUGGESTION 取捨、提交方式、方向/範圍選擇…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form stops (e.g. manual verification feedback) stay text-only.
 
 ## §3 Agent dispatch quick-reference
 
@@ -77,8 +77,8 @@ If a dispatched agent dies mid-run (API error, connection closed), re-dispatch a
 
 ## §4 References
 
-- `references/code-cycle.md` — the CODE lifecycle: branch preflight (fresh from origin/main) → requirements + risk analysis → API contract → coder → verify-before-test gate → tester → review → Fix Cycle (CRITICAL auto-fix / SUGGESTION decision with 🟢🟡🔴 TL 建議) → cross-scope validation → security scan → retro offer → commit.
+- `references/code-cycle.md` — **mode selection (fix mode vs full cycle)** up front, then the CODE lifecycle: branch preflight (fresh from origin/main) → requirements + risk analysis → API contract → coder → verify-before-test gate → tester → review → Fix Cycle (CRITICAL auto-fix / SUGGESTION decision with 🟢🔴 TL 建議) → cross-scope validation → security scan → retro (explicit request only) → commit. Fix mode is the sanctioned lightweight path through the same workflow: coder → verify → one regression test → CRITICAL-only review.
 - `references/design.md` — the DESIGN orchestration: triage (brand assets / add icon / style consultation) → brief → dispatch `designer` → Review & Deliver (integration snippets) → commit.
-- `references/retro.md` — the run retrospective, offered ONCE per run **before the commit gate** (code route: after the security scan; design route: at Deliver) so the report rides along in the feature's commit. User decides; never auto-run. Writes `.claude/reports/<MMDD_HHMM>.md` — conclusions only; proposals are applied later by `/distill`, never in-run. Load only when the user accepts the offer.
+- `references/retro.md` — the run retrospective. **Never offered by default and never proactively suggested**; it runs ONLY when the user explicitly asks for one. When requested it runs **before the commit gate** (code route: after the security scan; design route: at Deliver) so the report rides along in the feature's commit. Writes `.claude/reports/<MMDD_HHMM>.md` — conclusions only; proposals are applied later by `/distill`, never in-run. Load only when the user asks for it.
 
 Read the one the §0 fork selected. Do not preload both.

@@ -2,6 +2,59 @@
 
 The full development lifecycle for a code change. You (the `/develop` orchestrator) run every phase in THIS session and hold every user gate yourself — dispatch the `coder` / `tester` / `reviewer` / `security-auditor` agents via the Agent tool, always passing `scope` (`frontend` or `backend`). See `SKILL.md` §1–§3 for hard rules, stop discipline, and the dispatch quick-reference.
 
+## Mode Selection: fix mode vs full cycle
+
+Every code change runs the Code Modification Workflow, in ONE of two sanctioned forms. **Full cycle** (Phases 0–8 below) is the default. **Fix mode** is the lightweight form — the same workflow with reduced ceremony — and is allowed ONLY when EVERY condition below holds.
+
+The conditions are mechanical: check each one, record the answer. Never pick the mode "by judgment" / 視情況 — a condition that is unmet **or unknown** means full cycle.
+
+### Fix-mode eligibility (ALL four must hold)
+
+1. **Single scope.** The change is `frontend` OR `backend` — never both. A full-stack change is always full cycle.
+2. **No contract change.** No API contract change (endpoint, method, request/response shape, error `code`) AND no KV schema change (new key pattern, changed value shape, changed TTL).
+3. **Diff ≤ 40 lines, production files only.** Measure against the run's OWN base — the merge-base, never the moving tip of `origin/main` — and exclude the test trees:
+
+   ```
+   git diff --numstat $(git merge-base origin/main HEAD) -- ':(top)' ':(exclude,top)extension/tests' ':(exclude,top)pwa/tests' ':(exclude,top)worker/tests'
+   ```
+
+   Sum BOTH numeric columns (added + deleted) over all rows; that total must be ≤ 40. The `top` magic prefixes keep the pathspecs repo-rooted, so the command is safe to run from ANY subdirectory — a CWD-relative `-- .` run from `worker/` (where a backend verify leaves the shell) matches nothing and silently reports 0 lines, passing the size gate by accident. When the user named a different base branch for the run, substitute it for `origin/main` in the `merge-base` call. **Why the merge-base:** it measures only THIS run's work even when `origin/main` has advanced mid-run or the run continues an existing branch — measuring against a moved `origin/main` would count other people's commits into the 40-line budget. **Why production-only:** the fix-mode regression test's own size must never flip the mode.
+
+4. **No security-sensitive path touched.** No file in the diff matches ANY pattern below. The list is **path-only** — never a per-call or per-symbol judgment about what inside the file was edited:
+   - `worker/src/**` — the entire Worker runtime (routes, middleware, services, utils, schemas, kv, index)
+   - `extension/src/crypto/**`
+   - `extension/src/background/**`
+   - `extension/src/dialog/PersonalShelf.tsx`, `extension/src/api/client.ts`, `pwa/src/api/client.ts` — whole files; touching the file at all disqualifies
+   - `.env*`, `wrangler.toml`, `.github/workflows/**`
+   - any dependency manifest: `package.json` at any level, `pnpm-lock.yaml`
+
+   A match ⇒ full cycle. No exception, at any diff size.
+
+### Decision timing: predict at entry, measure after every coder return
+
+- **Predict** (before Phase 0): check the four conditions against the ESTIMATED change. That prediction selects the mode for the run.
+- **Measure — after EVERY coder return, not only the first.** Re-run the condition-3 measurement verbatim — same `merge-base` base, same test-tree exclusions, both `--numstat` columns summed — and re-check all four conditions against the ACTUAL cumulative diff. Also run `git status --porcelain`: any untracked (`??`) entry under `extension/`, `pwa/`, `worker/`, or `shared/` escalates the run to the full cycle, because an un-added new file is invisible to `git diff` and would otherwise count as 0 lines. The three test trees are the exception — an untracked entry under `extension/tests/`, `pwa/tests/`, or `worker/tests/` NEVER escalates and only earns a `git add` reminder, since test code sits outside the 40-line budget and fix mode's own regression test is normally a brand-new file. This explicitly includes every Fix-Cycle CRITICAL-fix round: a fix round can push the total past 40 lines or drag in a condition-4 path, and that round's measurement escalates the run exactly like the first one would. The measurement, not the prediction, is authoritative.
+- **Escalate in place.** When any measurement shows the diff over 40 lines, or any other condition violated, switch to the full cycle FROM THE CURRENT POSITION: phases already completed are NOT re-run; continue through the remaining full-cycle phases (verify-before-test gate, tester, full review, Phase 5 / Phase 6 as applicable). Late escalation (after the tester or the CRITICAL-only review has already run) does NOT re-instate the verify-before-test gate — its purpose has passed. It MUST re-dispatch the `reviewer` for a FULL review of the cumulative diff (SUGGESTIONs tabled per 4.1/4.3); the CRITICAL-only pass does not count as the full-cycle review. State to the user that the mode escalated, which condition tripped, and the measured number.
+- Escalation is one-way: a full-cycle run never downgrades to fix mode mid-run.
+
+### Fix-mode flow
+
+Phase 0 branch preflight → `coder` → scope verify (`pnpm typecheck && pnpm lint && pnpm test`; backend prefixes `cd worker &&`) → `tester` per the fix-mode tester rule → re-run the scope verify so the new regression test is included → E2E impact check (frontend scope) → `reviewer`, dispatched normally → Phase 8 (completion report + commit gate).
+
+- **Phase 1 collapses to a single opening presentation.** Restate the pinned root cause (`file:line`) and the acceptance check in the run's opening message, then continue — there is NO separate confirmation stop. The TodoWrite checklist is still maintained (with the fix-mode steps). Phase 1's **bug fast-path** does not apply here: it defers confirmation to the verify-before-test gate, and fix mode has no such gate — the root-cause restatement above replaces it.
+- **Phase 2 is structurally N/A** — eligibility condition 2 forbids API-contract and KV-schema changes, so there is no contract to define.
+- **Tester dispatch, spelled out.** Dispatch `tester` with `scope`, `target`, `scope_intent: quick`, and `change_summary` (+ the actual diff). The prompt MUST carry this sentence verbatim: "EXACTLY ONE regression test — the single check that is red before the fix and green after it; no coverage expansion." Both halves are load-bearing: `.claude/agents/tester.md` defaults `scope_intent` to `full`, so omitting either the `quick` intent or that sentence gets the coverage expansion fix mode exists to avoid.
+- **The E2E impact check is KEPT (frontend scope).** Only the verify-before-test GATE is skipped in fix mode — this check is not. Run the existing **Phase 3 E2E Impact Check** procedure unchanged, in the position it holds there (after the scope verify that includes the new regression test, i.e. once unit/component tests pass): identify whether any changed production file is imported — directly or transitively — by `extension/tests/e2e/` or `pwa/tests/e2e/`; run `npx tsc --noEmit --project tests/e2e/tsconfig.json` in the affected package; on failure dispatch `coder` to fix the breakage (imports, helpers).
+- **The `reviewer` is dispatched NORMALLY; only the ORCHESTRATOR is CRITICAL-only.** Pass the usual `scope` / `target` / `business_logic` and do not ask the reviewer to narrow its output — its return format is unchanged (Critical / Suggestions / Observations per `.claude/agents/reviewer.md`). "CRITICAL findings only" describes what YOU do with that return: SUGGESTION findings are never tabled, never presented for a decision, never fixed in-run. They have exactly ONE outlet — every SUGGESTION that grades **P0 or P1** against `.claude/rules/change-triage.md` is recorded through that file's "Disposition of out-of-scope P0/P1" path (`gh issue create`, tier label, `file:line`, consequence of leaving it unfixed), **whether or not it belongs to the current task**. In-scope is deliberately routed the same way: fix mode declines to widen the run, so without that outlet an in-scope P0/P1 would be silently dropped. P2 items and non-goals are dropped silently, as always. Never a worktree, never a follow-up task chip, never scope expansion.
+- **CRITICAL findings are auto-fixed** exactly as in §4.2 — fix → re-verify → re-review only the changed files — with no user gate.
+- **Skipped in fix mode:** the Phase 3 verify-before-test gate, Phase 5 (cross-scope validation — unreachable, fix mode is single-scope), Phase 6 (security scan), and Phase 7 (retro). Be honest about what skipping Phase 6 costs: condition 4 excludes every path that would trigger a security-auditor-specific scope (`api`, `crypto`, `secrets`, `deps`, `invariants` per Phase 6's scope map), so what fix mode forgoes is the generic `code` / `extension` sweep over a ≤ 40-line, CRITICAL-reviewed diff — a documented residual, accepted deliberately.
+- **Not skipped:** Phase 8. **The Phase 8 commit gate is fix mode's single user gate** — the commit is ALWAYS an explicit user question, in either mode. The Phase 8 completion report MUST state that the run used fix mode, list what fix mode skipped (the verify-before-test gate, Phase 5, Phase 6, Phase 7), and state how many P0/P1 SUGGESTION issues were opened via the disposition path — zero is stated as zero, never left implicit. Omitting that disclosure is a defect, not a tidier report.
+
+### Fix-mode tester rule
+
+- A **behavioral bug fix** gets EXACTLY ONE regression test — the single check that is red before the fix and green after it. No coverage expansion beyond it: no extra cases, no neighbouring-behaviour tests, no reshaping of existing test files.
+- A **pure copy / typo fix** (user-facing string, comment) needs no new test; run the existing suite only. If an existing assertion pins the changed string, update that assertion instead of adding a test.
+
 ## Phase 0: Branch Preflight (before any code)
 
 Guarantee the change lands on its own clean branch off `origin/main`, so another task's commits can never contaminate this PR's diff. Do this once, up front — silently if already clean, otherwise fix it before Phase 1.
@@ -12,6 +65,7 @@ Guarantee the change lands on its own clean branch off `origin/main`, so another
 4. **Name it meaningfully:** `<type>/<short-kebab-slug>` — conventional type (`feat`/`fix`/`refactor`/`docs`/`test`/`chore`) + a concise English task slug (e.g. `fix/save-before-sync`). Never keep an opaque auto-generated worktree name (`claude/angry-moore-3651ca`) as the PR branch — rename first.
 5. Re-confirm `git log --oneline origin/main..HEAD` is empty before starting Phase 1. See `.claude/rules/global.md` → "Branch & Worktree Hygiene".
 6. **Worktree tasks:** when the task runs in a dedicated worktree, start EVERY agent prompt by restating the worktree's absolute path and forbidding any write to the main checkout.
+7. **Worktrees are only for tasks the user explicitly starts.** A defect or improvement surfaced mid-run never gets a worktree or a follow-up task chip of its own — see `.claude/rules/change-triage.md` → "Disposition of out-of-scope P0/P1".
 
 ## Phase 1: Requirements Analysis (collaborative — iterate until confirmed)
 
@@ -85,21 +139,21 @@ Findings are **always tables**, never free-form bullets (write "None." in a sing
 | --- | ----------- | ------------------------------- | ------------- |
 | C1  | `file:line` | <issue><br>**Impact**: <impact> | ...           |
 
-**SUGGESTION** (pass through verbatim; add the rightmost **TL 建議 / 原因** column — colored circle + Chinese label + one-line reason):
+**SUGGESTION triage gate (BEFORE the table).** Grade every SUGGESTION finding against `.claude/rules/change-triage.md` first. Only **P0** and **P1** findings enter the table; **P2 items and non-goals are dropped silently** — not tabled, not mentioned in passing, not turned into follow-ups. (This is SKILL.md §1's "Triage before proposing" applied to the reviewer's output.) A finding that survives the gate must carry its `file:line`, the consequence of leaving it unfixed, and whether a failing check can be written. If nothing survives, the table is a single "None." row. A surviving P0/P1 that does NOT belong to the current task is not tabled either — it goes to `.claude/rules/change-triage.md` → "Disposition of out-of-scope P0/P1".
 
-| #   | Location & Issue     | Suggested Fix | TL 建議 / 原因                  |
-| --- | -------------------- | ------------- | ------------------------------- |
-| S1  | `file:42` — <issue>  | <fix>         | 🟢 **建議修**<br><reason>       |
-| S2  | `file:88` — <issue>  | <fix>         | 🟡 **建議修小細節**<br><reason> |
-| S3  | `file:120` — <issue> | <fix>         | 🔴 **建議跳過**<br><reason>     |
+**SUGGESTION** (pass the surviving findings through verbatim; add the rightmost **TL 建議 / 原因** column — colored circle + Chinese label + one-line reason):
 
-**TL Recommendation legend** (use exactly these three — no variants):
+| #   | Location & Issue     | Suggested Fix | TL 建議 / 原因              |
+| --- | -------------------- | ------------- | --------------------------- |
+| S1  | `file:42` — <issue>  | <fix>         | 🟢 **建議修**<br><reason>   |
+| S2  | `file:120` — <issue> | <fix>         | 🔴 **建議跳過**<br><reason> |
 
-| Label               | Use when                                                                                            |
-| ------------------- | --------------------------------------------------------------------------------------------------- |
-| 🟢 **建議修**       | Low risk, clear benefit — bugs, type/auth/KV-schema inconsistency, security gaps, broken invariants |
-| 🟡 **建議修小細節** | Optional quality lift — test cleanliness, naming, comments, minor consistency                       |
-| 🔴 **建議跳過**     | YAGNI — boilerplate, premature abstraction, style preference, out-of-scope                          |
+**TL Recommendation legend** (use exactly these two — no variants):
+
+| Label           | Use when                                                                                       |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| 🟢 **建議修**   | Low risk, clear benefit — this P0/P1 finding is worth fixing in this run                       |
+| 🔴 **建議跳過** | YAGNI / out-of-scope for this run / better deferred to a `gh` issue (per the disposition rule) |
 
 The TL Recommendation is **your professional judgment** — the "原因" line lets the user confidently override. Be honest: many SUGGESTIONs are safe to skip. While classifying, flag any **special technical decision** (a choice between equally-reasonable options, e.g. strict vs lenient validation) for the 4.3 Decision Prompt.
 
@@ -128,13 +182,12 @@ When no CRITICAL remain and SUGGESTIONs exist:
    ```
    ## TL 建議
    🟢 建議修：S1, S3（<一句話理由>）
-   🟡 建議修小細節：S5
-   🔴 建議跳過：S2, S4（YAGNI）
+   🔴 建議跳過：S2, S4（YAGNI／改開 gh issue）
 
    ## 請您決策
    [若有特殊技術抉擇，列為前面的問題]
    1. <技術抉擇問題…>
-   2. 採用 TL 建議（修 S1, S3, S5）？／自選清單？／全部跳過直接出報告？
+   2. 採用 TL 建議（修 S1, S3）？／自選清單？／全部跳過直接出報告？
    ```
 2. **Wait for the user.** End with the Stop Block.
 3. On approval: dispatch `coder`/`tester` for the selected rows only → verify → re-review only changed files → back to 4.1.
@@ -167,13 +220,15 @@ Run **once** after the whole feature is complete (all sub-tasks done, cross-scop
 
 This phase auto-starts (no confirmation to begin), but CRITICAL findings require user acknowledgement.
 
-## Phase 7: Retro Offer (before the commit gate)
+## Phase 7: Retro (on explicit user request only)
 
-After Phase 6's findings are presented, offer the run retrospective **ONCE** (user decides; never auto-run; declined → don't re-offer this run). On yes, read `references/retro.md` and follow it in **this session** (it needs the full conversation history — an isolated subagent cannot write it). The report lands in `.claude/reports/` **before Phase 8's commit gate**, so it rides along in the feature's commit — no follow-up `chore(retro)` commit needed. The retro writes conclusions only; applying its proposals is `/distill`'s job (periodic, user-invoked), never done in-run.
+The run retrospective is **NOT offered by default and MUST NOT be proactively suggested** — no "要不要做 retro？" at the end of a run, and no retro option inside any AskUserQuestion batch. It runs ONLY when the user explicitly asks for one (mid-run or at the end).
+
+When the user asks: read `references/retro.md` and follow it in **this session** (it needs the full conversation history — an isolated subagent cannot write it). The report lands in `.claude/reports/<MMDD_HHMM>.md` **before Phase 8's commit gate**, so it rides along in the feature's commit — no follow-up `chore(retro)` commit needed. The retro writes conclusions only; applying its proposals is `/distill`'s job (periodic, user-invoked), never done in-run.
 
 ## Phase 8: Complete
 
-1. Re-present the Fix Cycle 總結 (+ any cross-scope additions + the security-scan verdict).
+1. Re-present the Fix Cycle 總結 (+ any cross-scope additions + the security-scan verdict). In fix mode, render the security-scan line as 「不適用（fix mode — no scan was run）」 — never drop the line, never state a verdict no scan produced.
 2. List changed files (all scopes) + final verification status.
 3. End with a single **prose headline paragraph** consolidating the outcome.
 4. `git add` changed files (including the retro report, if one was written).
