@@ -46,6 +46,12 @@ A P0/P1 discovered during a run that does NOT belong to the current task is **re
 issue** — `gh issue create`. Never open a worktree for it, never spawn a follow-up task chip
 (`spawn_task`), never widen the current run's scope to absorb it.
 
+**Who runs `gh issue create`.** ONLY the session that owns the run — the `/develop` orchestrator, or
+the main assistant session when working outside `/develop`. A dispatched agent (`reviewer`, `coder`,
+`tester`) NEVER creates the issue itself, even when its toolset includes Bash: it surfaces the item
+in its structured return and the owning session records it. Otherwise one finding read by both the
+agent and the orchestrator lands as two duplicate issues.
+
 - **Issue body** carries, explicitly: the tier (P0 / P1), the exact `file:line`, the concrete
   consequence of leaving it unfixed, and whether a failing check can be written — the same three
   items required of any proposal above.

@@ -22,9 +22,9 @@ The conditions are mechanical: check each one, record the answer. Never pick the
 
 4. **No security-sensitive path touched.** No file in the diff matches ANY pattern below. The list is **path-only** — never a per-call or per-symbol judgment about what inside the file was edited:
    - `worker/src/**` — the entire Worker runtime (routes, middleware, services, utils, schemas, kv, index)
-   - `extension/src/crypto/**`
+   - `extension/src/crypto/**`, `pwa/src/crypto/**` — both ends run the same hash / sync-code logic, so the exclusion is symmetric
    - `extension/src/background/**`
-   - `extension/src/dialog/PersonalShelf.tsx`, `extension/src/api/client.ts`, `pwa/src/api/client.ts` — whole files; touching the file at all disqualifies
+   - `extension/src/dialog/PersonalShelf.tsx`, `pwa/src/pages/PersonalShelfPage.tsx`, `extension/src/api/client.ts`, `pwa/src/api/client.ts` — whole files; touching the file at all disqualifies. Both PersonalShelf surfaces are listed because Phase 6's `invariants` trigger covers the FE sharing / save-before-sync flow on EITHER surface (Inv-3 / Inv-5)
    - `.env*`, `wrangler.toml`, `.github/workflows/**`
    - any dependency manifest: `package.json` at any level, `pnpm-lock.yaml`
 
