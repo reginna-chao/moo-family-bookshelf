@@ -5,6 +5,18 @@
 
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { sanitizeRecord } from "moo-family-bookshelf-shared/api/safeText";
+import {
+  sanitizeBorrowRequestText,
+  sanitizeFamilyBookshelfText,
+  sanitizeFamilyGroupText,
+  sanitizeMemberText,
+  sanitizePersonalBooksText,
+  sanitizePublicShelfDataText,
+  sanitizePublicShelfListText,
+  sanitizePublicShelfResultText,
+  sanitizeVersionInfoText,
+} from "moo-family-bookshelf-shared/api/entityText";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { sanitizeBorrowRequests } from "./borrowValidation";
 import { sanitizeFamilyMembersResponse } from "./memberValidation";
@@ -327,7 +339,9 @@ export class ApiClient {
       const res = await fetch(`${this.baseUrl}/api/version`);
       if (!res.ok) return null;
       const json = (await res.json()) as ApiResponse<VersionInfo>;
-      return json.data ?? null;
+      const data = json.data ?? null;
+      if (data === null) return null;
+      return sanitizeRecord(data, sanitizeVersionInfoText);
     } catch {
       return null;
     }
@@ -380,6 +394,20 @@ export class ApiClient {
    */
   private unwrapVoid(res: ApiResponse<unknown>): void {
     this.throwOnError(res);
+  }
+
+  /**
+   * Coerce a success payload's backend TEXT fields before it leaves the client,
+   * so no consumer ever holds a `string`-typed field that is not one (see
+   * `shared/src/api/safeText.ts`). Error envelopes and bodyless successes pass
+   * through untouched.
+   */
+  private sanitizeEnvelope<T>(
+    res: ApiResponse<T>,
+    sanitize: (data: T) => T,
+  ): ApiResponse<T> {
+    if (res.data === undefined) return res;
+    return { ...res, data: sanitizeRecord(res.data, sanitize) };
   }
 
   /**
@@ -437,7 +465,8 @@ export class ApiClient {
 
   async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
     this.validateHexId(userId, "userId");
-    return this.get(`/api/user/${userId}/books`);
+    const res = await this.get<PersonalBooks>(`/api/user/${userId}/books`);
+    return this.sanitizeEnvelope(res, sanitizePersonalBooksText);
   }
 
   async updatePersonalBooks(
@@ -492,7 +521,8 @@ export class ApiClient {
       userId,
       displayName: displayName ?? "",
     };
-    return this.post("/api/family", body);
+    const res = await this.post<FamilyGroup>("/api/family", body);
+    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
   }
 
   async joinFamily(
@@ -565,7 +595,15 @@ export class ApiClient {
    */
   async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
     const res = await this.get<unknown>(`/api/family/${familyId}/members`);
-    return sanitizeFamilyMembersResponse(res);
+    // Two deliberate layers, in this order: `memberValidation` rebuilds
+    // `data.members` structurally (drops unaddressable elements, strips hostile
+    // extras) and normalizes `apiEndpoint`; the shared text layer then coerces
+    // the remaining declared-string fields (`familyId` / `ownerId` /
+    // `createdAt`) that memberValidation documents as out of its scope.
+    return this.sanitizeEnvelope(
+      sanitizeFamilyMembersResponse(res),
+      sanitizeFamilyGroupText,
+    );
   }
 
   async updateDisplayName(
@@ -591,7 +629,10 @@ export class ApiClient {
   async getFamilyBookshelf(
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
-    return this.get(`/api/family/${familyId}/bookshelf`);
+    const res = await this.get<FamilyBookshelf>(
+      `/api/family/${familyId}/bookshelf`,
+    );
+    return this.sanitizeEnvelope(res, sanitizeFamilyBookshelfText);
   }
 
   // --- Borrow Requests (v1.1.0) ---
@@ -604,7 +645,7 @@ export class ApiClient {
       `/api/family/${familyId}/borrow`,
       payload,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
   /**
@@ -625,7 +666,7 @@ export class ApiClient {
     const res = await this.patch<BorrowRequest>(`/api/borrow/${requestId}`, {
       status,
     });
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
   async updateMemberSettings(
@@ -637,7 +678,7 @@ export class ApiClient {
       `/api/family/${familyId}/member/${uid}`,
       settings,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizeMemberText);
   }
 
   // --- Verification ---
@@ -672,7 +713,7 @@ export class ApiClient {
     const res = await this.get<{ shelves: PublicShelf[] }>(
       `/api/user/${userId}/public-shelf`,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfListText);
   }
 
   async createPublicShelf(
@@ -684,7 +725,7 @@ export class ApiClient {
       `/api/user/${userId}/public-shelf`,
       body,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
   async updatePublicShelf(
@@ -697,7 +738,7 @@ export class ApiClient {
       `/api/user/${userId}/public-shelf/${shelfId}`,
       body,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
   async resetPublicShelfToken(
@@ -708,7 +749,7 @@ export class ApiClient {
     const res = await this.post<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf/${shelfId}/reset-token`,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
   /**
@@ -742,7 +783,11 @@ export class ApiClient {
     if (!json.data) {
       throw new Error("EMPTY_RESPONSE: response body missing data");
     }
-    return json.data;
+    // This method bypasses `readEnvelope` with its own bare cast (:699), so the
+    // sanitizer is the ONLY thing standing between a hostile public snapshot and
+    // `PublicShelfPage`, which renders `title` / `book.title` / `book.author`
+    // straight into JSX and calls `.toLowerCase()` on them while searching.
+    return sanitizeRecord(json.data, sanitizePublicShelfDataText);
   }
 
   // --- Internal ---

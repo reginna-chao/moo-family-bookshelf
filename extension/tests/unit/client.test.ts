@@ -281,10 +281,18 @@ describe("ApiClient", () => {
   });
 
   describe("request() — success handling", () => {
+    /**
+     * `toMatchObject`, not `toEqual`: `getPersonalBooks` runs its payload
+     * through `sanitizePersonalBooksText`, which materializes the record's
+     * declared text fields, so a partial stand-in payload comes back with the
+     * missing ones as `""`. That coercion has its own coverage in
+     * `tests/unit/api/sanitizeEnvelope.test.ts`; this suite is about the
+     * request mechanics, so it pins only the field it supplied.
+     */
     it("returns data on successful response", async () => {
       globalThis.fetch = mockFetchSuccess({ userId: "abc" });
       const result = await client.getPersonalBooks("user-1");
-      expect(result.data).toEqual({ userId: "abc" });
+      expect(result.data).toMatchObject({ userId: "abc" });
       expect(result.error).toBeUndefined();
     });
 
@@ -940,7 +948,9 @@ describe("ApiClient", () => {
       );
 
       const result = await client.getPersonalBooks("u1");
-      expect(result.data).toEqual({ userId: "u1", books: [] });
+      // toMatchObject: the payload is sanitized on the way out — see the note
+      // on "returns data on successful response" above.
+      expect(result.data).toMatchObject({ userId: "u1", books: [] });
       expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
@@ -1075,8 +1085,10 @@ describe("ApiClient", () => {
 
       // Only one refresh call should have been made
       expect(refreshCallCount).toBe(1);
-      expect(r1.data).toEqual({ ok: true });
-      expect(r2.data).toEqual({ ok: true });
+      // toMatchObject: both payloads are sanitized on the way out — see the
+      // note on "returns data on successful response" above.
+      expect(r1.data).toMatchObject({ ok: true });
+      expect(r2.data).toMatchObject({ ok: true });
     });
 
     it("calls onFamilyRemoved callback on REFRESH_FAILED when recovery fails", async () => {
@@ -1258,8 +1270,10 @@ describe("ApiClient", () => {
 
       const result = await client.getPersonalBooks("u1");
 
-      // Recovery succeeded — original request retried successfully
-      expect(result.data).toEqual({ userId: "u1", books: [] });
+      // Recovery succeeded — original request retried successfully.
+      // toMatchObject: the payload is sanitized on the way out — see the note
+      // on "returns data on successful response" above.
+      expect(result.data).toMatchObject({ userId: "u1", books: [] });
       expect(fetchMock).toHaveBeenCalledTimes(4);
       // onFamilyRemoved should NOT be called on successful recovery
       expect(onFamilyRemoved).not.toHaveBeenCalled();
