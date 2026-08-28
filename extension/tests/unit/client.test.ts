@@ -1063,10 +1063,14 @@ describe("ApiClient", () => {
         },
       );
 
-      // Fire two concurrent requests that both get 401
+      // Fire two concurrent requests that both get 401. Two DIFFERENT URLs, so
+      // the GET dedup map cannot merge them into one request — and neither
+      // rebuilds its payload at the API boundary (that is `getFamilyMembers`,
+      // covered in `tests/unit/api/member-client.test.ts`), which keeps the
+      // assertion below about refresh dedup and nothing else.
       const [r1, r2] = await Promise.all([
         client.getPersonalBooks("u1"),
-        client.getFamilyMembers("fam-1"),
+        client.getFamilyBookshelf("fam-1"),
       ]);
 
       // Only one refresh call should have been made
