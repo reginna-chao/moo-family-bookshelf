@@ -1537,9 +1537,14 @@ describe("Onboarding", () => {
   });
 
   describe("copy sync code", () => {
-    it("copies sync code to clipboard", async () => {
-      const mockClipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
-      Object.assign(navigator, { clipboard: mockClipboard });
+    /**
+     * Create a family and land on the created view, with the clipboard stubbed
+     * so 複製同步碼 resolves. Returns the render handle (for `unmount`) and the
+     * clipboard spy.
+     */
+    async function reachCreatedViewWithClipboard() {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText } });
 
       const mockApi = createMockApiClient({
         createFamily: vi.fn().mockResolvedValue({
@@ -1552,7 +1557,7 @@ describe("Onboarding", () => {
         }),
       });
 
-      renderOnboarding({ apiClient: mockApi });
+      const view = renderOnboarding({ apiClient: mockApi });
 
       await clickStartAndWait();
 
@@ -1569,11 +1574,31 @@ describe("Onboarding", () => {
         expect(screen.getByText("複製同步碼")).toBeInTheDocument();
       });
 
+      return { view, writeText };
+    }
+
+    /**
+     * Undoes the clearTimeout spy of the unmount-cleanup test. It must run
+     * BEFORE the outer `afterEach`'s `vi.useRealTimers()` — the spy wraps the
+     * FAKE clearTimeout, so restoring after the clock swap would strand the
+     * fake on globalThis for every later test. Vitest runs a nested suite's
+     * afterEach ahead of its parent's, which is exactly that order.
+     */
+    let restoreClearTimeout = () => {};
+
+    afterEach(() => {
+      restoreClearTimeout();
+      restoreClearTimeout = () => {};
+    });
+
+    it("copies sync code to clipboard", async () => {
+      const { writeText } = await reachCreatedViewWithClipboard();
+
       await act(async () => {
         fireEvent.click(screen.getByText("複製同步碼"));
       });
 
-      expect(mockClipboard.writeText).toHaveBeenCalled();
+      expect(writeText).toHaveBeenCalled();
 
       await waitFor(() => {
         expect(screen.getByText("已複製")).toBeInTheDocument();
@@ -1585,6 +1610,34 @@ describe("Onboarding", () => {
       });
 
       expect(screen.getByText("複製同步碼")).toBeInTheDocument();
+    });
+
+    /**
+     * The 已複製 reset is a 2s timer armed by the copy click. Closing the dialog
+     * inside that window must cancel it — a bare `setTimeout(() => setCopied
+     * (false), 2000)` would fire on a component that is gone. The flag is held
+     * by `useTimedFlag`, whose unmount cleanup does the cancelling.
+     */
+    it("clears the pending 已複製 reset timer when the dialog unmounts", async () => {
+      const { view } = await reachCreatedViewWithClipboard();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("複製同步碼"));
+      });
+
+      // The flag on screen is the proof the 2s reset timer is now armed.
+      await waitFor(() => {
+        expect(screen.getByText("已複製")).toBeInTheDocument();
+      });
+
+      // Spy only from here, so nothing the copy itself cleared can be mistaken
+      // for the unmount cleanup.
+      const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+      restoreClearTimeout = () => clearSpy.mockRestore();
+
+      view.unmount();
+
+      expect(clearSpy).toHaveBeenCalled();
     });
   });
 });
