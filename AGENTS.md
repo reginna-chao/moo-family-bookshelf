@@ -332,6 +332,7 @@ All development and design go through a **single skill entry: `/develop`**. It t
 │   ├── backend.md      # Worker (Hono/KV) conventions
 │   ├── test.md         # test framework, locations, coverage
 │   ├── change-triage.md # severity gate applied before proposing any unsolicited change
+│   ├── user-facing-copy.md # plain-language rules for CHANGELOG / release notes / site / UI strings
 │   └── security-ux-invariants.md
 ├── agents/         # role agents (invisible in the slash menu)
 │   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md

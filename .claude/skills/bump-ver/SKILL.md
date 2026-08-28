@@ -25,6 +25,7 @@ Pure version bumps don't need the /develop Fix Cycle. This skill encodes the pro
 ## Encoded conventions (do not re-ask)
 
 - **All 5 version files synced** to the same target: `extension/package.json`, `extension/public/manifest.json`, `pwa/package.json`, `worker/package.json`, root `package.json`.
+- **Plain-language copy is mandatory**: `CHANGELOG.md` and `docs/release-notes/v*.md` are user-facing. **Read `.claude/rules/user-facing-copy.md` before drafting any bullet** and apply its checklist before commit. The two failure modes it exists to stop: translating a commit subject into Chinese, and manufacturing a bullet for a change no reader can observe.
 - **CHANGELOG language**: 繁體中文（台灣）, follows existing structure. Heading: `## vX.Y.Z（YYYY-MM-DD）`. Group bullets under sub-section headings (e.g. `### 問題修正`, `### 功能新增`, `### 安全與穩定性`) — match how prior entries are organized.
 - **Excluded from CHANGELOG** (internal, not user-facing): `chore:`, `docs:`, `test:`, `refactor:`, `ci:`, `build:`, `style(<dev-tooling>):`. Internal tooling commits (e.g. `chore(skills): ...`) are always excluded.
 - **Included in CHANGELOG** (user-facing): `feat:`, `fix:`, `perf:`, `security:`. `style(<user-facing>):` (e.g. `style(extension)`, `style(pwa)`) is included as a UI tweak.
@@ -85,7 +86,7 @@ Sub-section heading rules (pick the headings that fit the included commits):
 - `### 介面調整` for user-facing `style:`
 - If only one category exists, the heading still goes in (matches existing entries).
 
-Bullet style: short, action-oriented sentence describing **what the user notices**, not the technical change. Use existing CHANGELOG bullets as reference for tone and granularity.
+Bullet style: short, action-oriented sentence describing **what the user notices**, not the technical change. `.claude/rules/user-facing-copy.md` is the authority here — its banned-vocabulary table and worked examples are binding, and its Rule 2 explicitly permits merging or dropping commits whose effect no reader can observe. Do NOT copy tone from older CHANGELOG entries indiscriminately; entries written before that rule existed contain implementation vocabulary and are not a reference.
 
 ### Step 3b — Draft the bilingual Release notes file
 
