@@ -432,6 +432,54 @@ describe("syncBooks — full flow", () => {
     expect(result.error).toBe("Upload error");
   });
 
+  /**
+   * `updatePersonalBooks` resolves the `{ data, error }` envelope through
+   * `readEnvelope`, which bare-casts `response.json()` (src/api/client.ts), and
+   * the endpoint is user-configurable (BYO backend via the sync code's `@host`),
+   * so `error.message` is `unknown` at runtime. It is handed to `new Error(...)`,
+   * whose ToString turns an object into "[object Object]" and an array into its
+   * bare contents — the sync banner then shows that instead of an explanation.
+   * An absent or empty message is worse still: `err.message` stays "", so the
+   * failed sync reports NOTHING (the outer catch's "同步失敗" default only covers
+   * non-Error throws, not an Error with a blank message).
+   *
+   * String passthrough is already pinned by "returns error when upload fails"
+   * above — not repeated here. The exhaustive value-domain proof for the
+   * coercion lives in tests/unit/safeErrorText.test.ts; this pins the wiring
+   * and the copy.
+   */
+  it.each([
+    { name: "an object message", message: { zh: "壞掉了" } },
+    { name: "an empty-string message", message: "" },
+    { name: "an array message", message: ["壞掉了"] },
+  ])(
+    "reports the local sync-failure copy when the upload error carries $name",
+    async ({ message }) => {
+      setupStorage({ displayName: "Test", syncArchived: 0 });
+      vi.mocked(scrapeBooks).mockResolvedValue([]);
+
+      const apiClient: ApiClient = {
+        getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+        updatePersonalBooks: vi
+          .fn()
+          .mockResolvedValue({ error: { code: "UPLOAD_FAILED", message } }),
+      } as unknown as ApiClient;
+
+      const result = await syncBooks({
+        navigate: false,
+        userId: "user-123",
+        apiClient,
+      });
+
+      expect(result.success).toBe(false);
+      // Literal from src/sync/syncBooks.ts (the upload-error throw), read back
+      // off `result.error` — the thrown Error's own message, which is what the
+      // sync banner renders.
+      expect(result.error).toBe("同步書單失敗，請稍後再試");
+      expect(result.books).toEqual([]);
+    },
+  );
+
   it("navigates to #/library and restores hash when navigate=true", async () => {
     Object.defineProperty(window, "location", {
       writable: true,

@@ -7,6 +7,7 @@ import {
   PERSONAL_BOOKS_SCHEMA_VERSION,
 } from "../api/client";
 import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import {
   PERSONAL_BOOKS_CACHE_KEY,
   PERSONAL_SHELF_SAVED_AT_KEY,
@@ -251,7 +252,9 @@ export function usePersonalBooks({
             dirtyBooks.map((b) => ({ bookId: b.bookId, isShared: b.isShared })),
           );
       if (response.error) {
-        setErrorMessage(response.error.message);
+        setErrorMessage(
+          safeErrorText(response.error.message, "儲存失敗，請稍後再試"),
+        );
         setStatus("error");
         return;
       }

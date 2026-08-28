@@ -747,4 +747,66 @@ describe("PersonalShelfPage", () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  /**
+   * `getPersonalBooks` / `patchPersonalBooks` resolve the `{ data, error }`
+   * envelope through `readEnvelope`, which bare-casts `response.json()`
+   * (pwa/src/api/client.ts), and the endpoint is user-configurable (BYO
+   * backend), so `error.message` is `unknown` at runtime. Both the load and the
+   * save path put it into `errorMessage`, which the error view renders as a JSX
+   * child: React 19 throws on an object/array and the app mounts no
+   * ErrorBoundary, so a refused load/save blanked the page instead of offering
+   * 重試. The exhaustive value-domain proof lives in
+   * extension/tests/unit/safeErrorText.test.ts (shared helper, one copy); these
+   * pin the wiring and the copy.
+   */
+  describe("hostile error envelopes", () => {
+    it("shows the local load-failure copy for an object message instead of crashing", async () => {
+      mockGetPersonalBooks.mockResolvedValue({
+        error: { code: "SERVER_ERROR", message: { zh: "壞掉了" } },
+      });
+
+      // act is the readiness barrier: on exit the mount fetch's error branch
+      // has committed, so the error view is really on screen.
+      await act(async () => {
+        render(<PersonalShelfPage {...defaultProps} />);
+      });
+
+      // Literal from PersonalShelfPage.tsx (loadBooks). `getByText` matches the
+      // node's whole text, so a hostile value that reached state would fail.
+      expect(screen.getByText("載入失敗，請稍後再試")).toBeInTheDocument();
+      // A thrown render tears the tree down; a page that still offers 重試 is
+      // what the regression is really about.
+      expect(screen.getByText("重試")).toBeInTheDocument();
+    });
+
+    it("shows the local save-failure copy for an object message instead of crashing", async () => {
+      await renderWithBooks([
+        {
+          bookId: "b1",
+          title: "書籍一",
+          author: "作者A",
+          isShared: BoolFlag.FALSE,
+        },
+      ]);
+
+      // Server-known book → the save goes out as a PATCH.
+      mockPatchPersonalBooks.mockResolvedValue({
+        error: { code: "SERVER_ERROR", message: { zh: "壞掉了" } },
+      });
+
+      fireEvent.click(screen.getByLabelText("選取 書籍一"));
+      fireEvent.click(screen.getByText("設為開放"));
+      fireEvent.click(screen.getByText("儲存變更"));
+
+      // Literal from PersonalShelfPage.tsx (handleSave).
+      await waitFor(() => {
+        expect(screen.getByText("儲存失敗，請稍後再試")).toBeInTheDocument();
+      });
+      expect(screen.getByText("重試")).toBeInTheDocument();
+      // A refused save is not a save: the aggregated family shelf must not be
+      // re-fetched as if the shares had changed.
+      expect(mockRefreshBookshelf).not.toHaveBeenCalled();
+    });
+  });
 });

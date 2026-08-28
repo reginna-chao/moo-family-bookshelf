@@ -353,6 +353,138 @@ describe("MemberList", () => {
   });
 
   /**
+   * `removeMember` / `transferOwnership` resolve the `{ data, error }` envelope
+   * through `readEnvelope`, which bare-casts `response.json()`
+   * (pwa/src/api/client.ts), and the endpoint is user-configurable (BYO
+   * backend), so `error.message` is `unknown` at runtime. A non-string used to
+   * land in `error` state and render as a JSX child: React 19 throws on an
+   * object/array, and nothing above this list is an ErrorBoundary, so a refused
+   * removal blanked the Settings page instead of explaining itself. The quieter
+   * half of the same bug: the site took `res.error.message` verbatim, so an
+   * absent or empty message left `error` falsy and the alert never rendered —
+   * the removal simply appeared to do nothing.
+   *
+   * The guard sits UNDER the 429 rewrite (`rateLimitedEnvelopeMessage(…) ??
+   * safeErrorText(…)`), so the last case pins the order: a rate-limited
+   * envelope keeps the localized back-off copy no matter what its `message`
+   * holds.
+   */
+  describe("hostile error envelopes", () => {
+    // Local client + callbacks per test: the module-level mocks are shared
+    // across the file, and these cases assert on "was never called".
+    function renderAsOwnerWith(overrides: Partial<ApiClient>) {
+      const onMembersChanged = vi.fn();
+      const onMemberRemoved = vi.fn();
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          apiClient={
+            {
+              removeMember: vi.fn().mockResolvedValue({ data: { ok: true } }),
+              transferOwnership: vi
+                .fn()
+                .mockResolvedValue({ data: { ok: true } }),
+              ...overrides,
+            } as unknown as ApiClient
+          }
+          onMembersChanged={onMembersChanged}
+          onMemberRemoved={onMemberRemoved}
+        />,
+      );
+      return { onMembersChanged, onMemberRemoved };
+    }
+
+    const HOSTILE_MESSAGES = [
+      { name: "an object message", message: { zh: "壞掉了" } },
+      { name: "an array message", message: ["壞掉了"] },
+      { name: "a number message", message: 500 },
+      { name: "a null message", message: null },
+      { name: "a missing message", message: undefined },
+      // Degrades too: a blank error tells the user nothing.
+      { name: "an empty-string message", message: "" },
+    ];
+
+    it.each(HOSTILE_MESSAGES)(
+      "shows the local removal-failure copy for $name instead of crashing",
+      async ({ message }) => {
+        const { onMembersChanged, onMemberRemoved } = renderAsOwnerWith({
+          removeMember: vi.fn().mockResolvedValue({
+            error: { code: "SERVER_ERROR", message },
+          }),
+        });
+
+        fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]);
+        fireEvent.click(screen.getByRole("button", { name: "確定" }));
+
+        // Literal from MemberList.tsx (`handleConfirm`), read back off the
+        // production render path. `getByText` matches the node's whole text, so
+        // a hostile value that had reached state would fail here.
+        await waitFor(() => {
+          expect(screen.getByText("移除成員失敗，請稍後再試")).toHaveAttribute(
+            "role",
+            "alert",
+          );
+        });
+        // A thrown render tears the tree down; a surviving, still-usable list
+        // is what the regression is really about.
+        expect(
+          screen.getByRole("button", { name: "確定" }),
+        ).toBeInTheDocument();
+        // A refused removal is not a removal.
+        expect(onMembersChanged).not.toHaveBeenCalled();
+        expect(onMemberRemoved).not.toHaveBeenCalled();
+      },
+    );
+
+    it("shows the local transfer-failure copy for an object message instead of crashing", async () => {
+      const { onMembersChanged } = renderAsOwnerWith({
+        transferOwnership: vi.fn().mockResolvedValue({
+          error: { code: "SERVER_ERROR", message: { zh: "壞掉了" } },
+        }),
+      });
+
+      fireEvent.click(screen.getAllByRole("button", { name: "轉移管理權" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "確定" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("轉移管理權失敗，請稍後再試")).toHaveAttribute(
+          "role",
+          "alert",
+        );
+      });
+      expect(onMembersChanged).not.toHaveBeenCalled();
+    });
+
+    it("keeps the localized back-off copy when a rate-limited envelope carries a hostile message", async () => {
+      renderAsOwnerWith({
+        removeMember: vi.fn().mockResolvedValue({
+          error: {
+            code: "RATE_LIMITED",
+            message: { zh: "壞掉了" },
+            retryAfter: 90,
+          },
+        }),
+      });
+
+      fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "確定" }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(buildRetryMessage("RATE_LIMITED", 90)),
+        ).toBeInTheDocument();
+      });
+      // The `??` chain must not fall through to the generic copy just because
+      // the message was unusable — the 429 branch never reads `message`.
+      expect(
+        screen.queryByText("移除成員失敗，請稍後再試"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  /**
    * A removal writes a 6-hour server-side block on rejoining, and the entry to
    * lift it (see `UnkickNotice`) belongs to the PARENT — it has to outlive the
    * member refresh that unmounts this list. All this component owes the parent

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type { ApiClient } from "../api/client";
 import type { VerifyMethod } from "../api/types";
 import { PinInput } from "./PinInput";
 import { PatternLock } from "./PatternLock";
+import { rateLimitedEnvelopeMessage } from "./verificationMessages";
 
 export interface VerificationSettingsProps {
   userId: string;
@@ -109,7 +111,7 @@ export function VerificationSettings({
       const result = await apiClient.setVerifyMethod(userId, body);
       if (result.error) {
         setSaveState("error");
-        setSaveError(result.error.message);
+        setSaveError(safeErrorText(result.error.message, "儲存失敗，請重試"));
         return;
       }
       setCurrentMethod(method);
@@ -150,11 +152,43 @@ export function VerificationSettings({
   );
 
   const handleGenerateOtp = useCallback(async () => {
+    // A new OTP generation supersedes any pending saved→idle reset: the stale
+    // timer would dismiss this handler's own failure banner mid-flight.
+    if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+
+    setSaveState("idle");
+    setSaveError("");
     const result = await apiClient.generateOtp(userId);
-    if (result.data) {
-      setOtpCode(result.data.code);
-      setOtpExpiresAt(result.data.expiresAt);
+    // The envelope is a bare cast, so these are `string` / `number` by type
+    // only. A non-string code is rendered as a JSX child below (React 19 throws
+    // on an object, and there is no ErrorBoundary). A non-finite expiry breaks
+    // the countdown effect above in two different ways: `Infinity` — or a
+    // string whose remaining-time arithmetic yields NaN — is truthy, so the
+    // effect mounts the 1s interval but `remaining <= 0` never becomes true
+    // and the interval never clears itself; NaN itself is falsy, so the effect
+    // early-returns and no countdown ever starts. Either way the value is
+    // unusable, so the whole response is treated as a failed generation.
+    const code: unknown = result.data?.code;
+    const expiresAt: unknown = result.data?.expiresAt;
+    if (
+      typeof code !== "string" ||
+      code.length === 0 ||
+      typeof expiresAt !== "number" ||
+      !Number.isFinite(expiresAt)
+    ) {
+      setSaveState("error");
+      // `generateOtp` sits on the server's verify-write ceiling, so a genuine
+      // 429 is reachable here and gets the shared back-off copy (+ retryAfter)
+      // instead of the raw server message. There may be no envelope at all —
+      // this branch also catches a success envelope with malformed fields.
+      setSaveError(
+        (result.error ? rateLimitedEnvelopeMessage(result.error) : null) ??
+          safeErrorText(result.error?.message, "驗證碼產生失敗，請重試"),
+      );
+      return;
     }
+    setOtpCode(code);
+    setOtpExpiresAt(expiresAt);
   }, [userId, apiClient]);
 
   if (loading) {

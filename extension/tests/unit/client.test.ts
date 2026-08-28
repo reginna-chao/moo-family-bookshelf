@@ -1930,4 +1930,141 @@ describe("ApiClient", () => {
       });
     });
   });
+
+  /**
+   * `throwOnError` is the single chokepoint every thrown `ApiError` passes
+   * through, and both of its text inputs arrive via `readEnvelope`, which
+   * bare-casts `response.json()` (src/api/client.ts). The endpoint is
+   * user-configurable (BYO backend via the sync code's `@host`), so `code` and
+   * `message` are `unknown` at runtime while the types call them `string`.
+   *
+   * That gap costs more than wording. `ApiError`'s constructor interpolates
+   * both — `super(\`${code}: ${message}\`)` — so a value whose ToPrimitive
+   * throws (`{ toString: null, valueOf: null }`, a shape `JSON.parse` really
+   * can produce) used to raise a TypeError from INSIDE the constructor: no
+   * `ApiError` was ever built, every caller's `instanceof ApiError` branch went
+   * false, and the machine-readable `code` plus the 429 `retryAfter` the
+   * localized back-off copy counts down from were lost with it. Sanitizing both
+   * halves before construction is what preserves the error's IDENTITY, not just
+   * its text.
+   *
+   * Driven through `listPublicShelves` because it is an unwrapping method (its
+   * result is the value, so refusals can only surface as a throw).
+   */
+  describe("throwOnError — hostile envelope text", () => {
+    /** Fallbacks as written at the production call site in src/api/client.ts. */
+    const CODE_FALLBACK = "UNKNOWN_ERROR";
+    const MESSAGE_FALLBACK = "請稍後再試";
+
+    /**
+     * Refuse the next request with `error` verbatim, then hand back whatever
+     * the unwrapping method threw. `captureRejection`'s trailing throw keeps a
+     * resolved call from passing vacuously.
+     */
+    async function captureThrown(
+      error: Record<string, unknown>,
+      status: number,
+    ): Promise<unknown> {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status,
+        json: () => Promise.resolve({ error }),
+      });
+      return captureRejection(client.listPublicShelves("u1"));
+    }
+
+    it.each([
+      { name: "an object message", message: { zh: "壞掉了" } },
+      { name: "an array message", message: ["壞掉了"] },
+      // Degrades too: a blank or absent error is not a report — the dialog
+      // would render "SHELF_NOT_FOUND: " and tell the user nothing.
+      { name: "an empty-string message", message: "" },
+      { name: "a null message", message: null },
+    ])(
+      "throws an ApiError with the local fallback copy and the code preserved for $name",
+      async ({ message }) => {
+        const thrown = await captureThrown(
+          { code: "SHELF_NOT_FOUND", message },
+          404,
+        );
+
+        expect(thrown).toBeInstanceOf(ApiError);
+        expect((thrown as ApiError).rawMessage).toBe(MESSAGE_FALLBACK);
+        // The code is what callers branch on — degrading the message must
+        // never cost it.
+        expect((thrown as ApiError).code).toBe("SHELF_NOT_FOUND");
+        expect((thrown as ApiError).message).toBe(
+          `SHELF_NOT_FOUND: ${MESSAGE_FALLBACK}`,
+        );
+      },
+    );
+
+    it("still throws an ApiError (not a TypeError) for a message that cannot be stringified", async () => {
+      // The exact payload from review: nulling both `toString` and `valueOf`
+      // makes ToPrimitive throw, so `new ApiError(code, message, …)` used to
+      // die inside its own constructor. A TypeError is not an ApiError, so the
+      // 429 branch that renders the localized back-off copy was skipped — and
+      // that branch reads exactly the two fields asserted here, which is why
+      // this pins them rather than the (degraded) wording.
+      const thrown = await captureThrown(
+        {
+          code: "RATE_LIMITED",
+          message: { toString: null, valueOf: null },
+          retryAfter: 90,
+        },
+        429,
+      );
+
+      expect(thrown).toBeInstanceOf(ApiError);
+      expect(thrown).not.toBeInstanceOf(TypeError);
+      expect((thrown as ApiError).code).toBe("RATE_LIMITED");
+      expect((thrown as ApiError).retryAfter).toBe(90);
+      expect((thrown as ApiError).rawMessage).toBe(MESSAGE_FALLBACK);
+    });
+
+    it("falls back to UNKNOWN_ERROR when the code itself is not a string", async () => {
+      // `code` is interpolated first, so a hostile code kills construction just
+      // as thoroughly as a hostile message. It must still land as a non-empty
+      // string: `err.code === ""` would match no branch and read as "no code".
+      const thrown = await captureThrown(
+        {
+          code: { toString: null, valueOf: null },
+          message: "伺服器拒絕了這個請求",
+        },
+        500,
+      );
+
+      expect(thrown).toBeInstanceOf(ApiError);
+      expect((thrown as ApiError).code).toBe(CODE_FALLBACK);
+      // A legitimate message still reaches the user even when the code is junk
+      // — and its presence proves the envelope's own error was used, not the
+      // client's `HTTP 500` stand-in for a missing error field.
+      expect((thrown as ApiError).rawMessage).toBe("伺服器拒絕了這個請求");
+      // Sanitizing must not launder provenance: this payload came off the wire,
+      // so the UI may not render its text verbatim.
+      expect((thrown as ApiError).synthesized).toBe(false);
+    });
+
+    it("passes a legitimate string code and message through unchanged", async () => {
+      // Positive control: the guard must not over-degrade. Real server text
+      // still reaches the user, the legacy "CODE: message" shape stays intact
+      // for callers that read `message`, and `retryAfter` rides along.
+      const thrown = await captureThrown(
+        {
+          code: "MAX_SHELVES_REACHED",
+          message: "已達公開書櫃數量上限",
+          retryAfter: 45,
+        },
+        409,
+      );
+
+      expect(thrown).toBeInstanceOf(ApiError);
+      expect((thrown as ApiError).code).toBe("MAX_SHELVES_REACHED");
+      expect((thrown as ApiError).rawMessage).toBe("已達公開書櫃數量上限");
+      expect((thrown as ApiError).message).toBe(
+        "MAX_SHELVES_REACHED: 已達公開書櫃數量上限",
+      );
+      expect((thrown as ApiError).retryAfter).toBe(45);
+    });
+  });
 });
