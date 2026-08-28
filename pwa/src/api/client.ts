@@ -7,6 +7,7 @@ import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { sanitizeBorrowRequests } from "./borrowValidation";
+import { sanitizeFamilyMembersResponse } from "./memberValidation";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -555,8 +556,16 @@ export class ApiClient {
     return this.put(`/api/family/${familyId}/transfer`, { userId, newOwnerId });
   }
 
+  /**
+   * `unknown`, not `FamilyGroup`: the wire shape is only a claim until
+   * `sanitizeFamilyMembersResponse` has checked it. The envelope is sanitized
+   * whole — callers of this method read `{ data, error }` themselves instead of
+   * going through `unwrap`, so an `error` envelope must reach them unchanged
+   * while `data.members` is rebuilt.
+   */
   async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
-    return this.get(`/api/family/${familyId}/members`);
+    const res = await this.get<unknown>(`/api/family/${familyId}/members`);
+    return sanitizeFamilyMembersResponse(res);
   }
 
   async updateDisplayName(

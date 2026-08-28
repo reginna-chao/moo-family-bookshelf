@@ -524,10 +524,17 @@ describe("ApiClient", () => {
 
   describe("getFamilyMembers", () => {
     it("should call GET /api/family/:id/members", async () => {
+      // Well-formed member objects: the client rebuilds `data.members` at the
+      // API boundary, so only a valid list comes back verbatim, and it always
+      // emits `apiEndpoint` (`null` when the payload omits it). The malformed
+      // cases live in `tests/unit/api/member-client.test.ts`.
       const familyData = {
         familyId: "fam-1",
         ownerId: USER_1,
-        members: [USER_1, USER_2],
+        members: [
+          { userId: USER_1, displayName: "Alice" },
+          { userId: USER_2, displayName: "Bob" },
+        ],
         maxMembers: 6,
         createdAt: "2026-01-01T00:00:00Z",
       };
@@ -537,7 +544,7 @@ describe("ApiClient", () => {
 
       const [url] = mockFetch.mock.calls[0];
       expect(url).toBe("https://api.example.com/api/family/fam-1/members");
-      expect(result.data).toEqual(familyData);
+      expect(result.data).toEqual({ ...familyData, apiEndpoint: null });
     });
   });
 

@@ -46,6 +46,7 @@ import {
   type RefreshOutcome,
 } from "./auth-refresh";
 import { sanitizeBorrowRequests } from "./borrowValidation";
+import { sanitizeFamilyMembersResponse } from "./memberValidation";
 
 // Re-export all types so existing imports from "./client" continue to work
 export {
@@ -493,8 +494,16 @@ export class ApiClient {
     return this.put(`/api/family/${familyId}/endpoint`, { apiEndpoint });
   }
 
+  /**
+   * `unknown`, not `FamilyGroup`: the wire shape is only a claim until
+   * `sanitizeFamilyMembersResponse` has checked it. The envelope is sanitized
+   * whole — callers of this method read `{ data, error }` themselves instead of
+   * going through `unwrap`, so an `error` envelope must reach them unchanged
+   * while `data.members` is rebuilt.
+   */
   async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
-    return this.get(`/api/family/${familyId}/members`);
+    const res = await this.get<unknown>(`/api/family/${familyId}/members`);
+    return sanitizeFamilyMembersResponse(res);
   }
 
   // --- Account ---
