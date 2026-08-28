@@ -128,6 +128,22 @@ jobs:
             root. Read them if helpful, but if any file is unavailable, proceed using
             the diff alone — never get blocked on reading a file.
 
+            VERIFICATION SCOPE — this job deliberately does NOT install
+            node_modules. lint / typecheck / test / build are owned by
+            `cicd.yml`, which runs the full matrix (shared / extension / pwa /
+            worker, plus both E2E suites) against this same commit. Your job is
+            to review the diff by reading it.
+
+            - Do NOT run `pnpm install`, `pnpm test`, `pnpm typecheck`,
+              `pnpm lint`, or any other build tooling. Dependencies are absent,
+              so those commands only fail and burn turns.
+            - Do NOT add a disclaimer that you could not run them. The division
+              of labour above is by design, not a gap in this run — restating it
+              in the review is noise. Omit it entirely.
+            - When a finding would need a build or a test run to confirm, say
+              what you observed in the diff and name the check that would settle
+              it. Never present it as a verified failure.
+
             Review ONLY the actual diff of this PR, across six dimensions:
 
             1. Design: single responsibility, clear layering, depend on abstractions;
