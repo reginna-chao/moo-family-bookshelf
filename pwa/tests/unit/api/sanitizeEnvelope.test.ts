@@ -5,8 +5,8 @@ import { ApiClient, BoolFlag, BorrowStatus } from "@/api/client";
  * The WIRING half of the backend-text hardening. `pwa/tests/unit/entityText.test.ts`
  * proves the sanitizers are correct in isolation; this file proves they are
  * actually CALLED — a method that silently loses its `sanitizeEnvelope(...)` /
- * `sanitizeRecord(...)` wrapper would keep every unit test green while shipping
- * the white screen back.
+ * `sanitizeRecord(...)` / `sanitizeBorrowRequests(...)` wrapper would keep every
+ * unit test green while shipping the white screen back.
  *
  * Threat model (full version at `shared/src/api/safeText.ts`): the client reads
  * its envelope through a bare cast and the endpoint is user-configurable — a
@@ -31,6 +31,7 @@ const USER_ID = "a".repeat(64);
 const OTHER_USER_ID = "b".repeat(64);
 const SHELF_ID = "shelf-1";
 const REQUEST_ID = "req-123";
+const LIST_REQUEST_ID = "req-hostile-1";
 const SHARE_TOKEN = "tok-public-abc";
 
 const mockFetch = vi.fn();
@@ -127,6 +128,23 @@ const HOSTILE_REQUEST = {
   updatedAt: [2026],
 };
 
+/**
+ * The borrow LIST element, which answers to a different (stricter) sanitizer
+ * than `HOSTILE_REQUEST` above. Three deliberate differences:
+ * - a usable `requestId`, because `sanitizeBorrowRequests` DROPS an element
+ *   without one instead of degrading it to `""`;
+ * - a NON-string `bookCoverUrl`, because the list path normalizes that field
+ *   too (the single-object path leaves it alone);
+ * - two extra properties, which the 12-field rebuild must strip.
+ */
+const HOSTILE_LIST_REQUEST = {
+  ...HOSTILE_REQUEST,
+  requestId: LIST_REQUEST_ID,
+  bookCoverUrl: { href: "https://cdn.readmoo.com/cover/1.jpg" },
+  evil: "x",
+  nested: { deep: true },
+};
+
 const HOSTILE_SHELF = {
   shelfId: { id: "shelf" },
   shareToken: 42,
@@ -172,24 +190,54 @@ const GROUP_EXPECTATIONS: Expectation[] = [
   { path: "data.maxMembers", value: 6 },
 ];
 
-const BORROW_EXPECTATIONS = (prefix: string): Expectation[] => [
-  { path: `${prefix}requestId`, value: "" },
-  { path: `${prefix}familyId`, value: "" },
-  { path: `${prefix}borrowerId`, value: "" },
-  { path: `${prefix}borrowerName`, value: "" },
-  { path: `${prefix}ownerId`, value: "" },
-  { path: `${prefix}bookId`, value: "" },
-  { path: `${prefix}bookTitle`, value: "" },
-  { path: `${prefix}bookAuthor`, value: "" },
-  { path: `${prefix}createdAt`, value: "" },
-  { path: `${prefix}updatedAt`, value: "" },
+/**
+ * The two SINGLE-OBJECT borrow paths (`createBorrowRequest` /
+ * `updateBorrowStatus`), which run `sanitizeRecord` + `sanitizeBorrowRequestText`.
+ * The list path answers to a different sanitizer — see `LIST_BORROW_EXPECTATIONS`.
+ */
+const BORROW_EXPECTATIONS: Expectation[] = [
+  { path: "requestId", value: "" },
+  { path: "familyId", value: "" },
+  { path: "borrowerId", value: "" },
+  { path: "borrowerName", value: "" },
+  { path: "ownerId", value: "" },
+  { path: "bookId", value: "" },
+  { path: "bookTitle", value: "" },
+  { path: "bookAuthor", value: "" },
+  { path: "createdAt", value: "" },
+  { path: "updatedAt", value: "" },
   // Excluded on purpose: the badge lookup hardens `status` itself, and the
   // cover URL only ever reaches an attribute.
-  { path: `${prefix}status`, value: BorrowStatus.PENDING },
-  {
-    path: `${prefix}bookCoverUrl`,
-    value: "https://cdn.readmoo.com/cover/1.jpg",
-  },
+  { path: "status", value: BorrowStatus.PENDING },
+  { path: "bookCoverUrl", value: "https://cdn.readmoo.com/cover/1.jpg" },
+];
+
+/**
+ * `listBorrowRequests` is owned by `sanitizeBorrowRequests`
+ * (`pwa/src/api/borrowValidation.ts`, PR #144), NOT by
+ * `sanitizeBorrowRequestText`. Its contract is strictly stronger, and these rows
+ * are what tells the two apart: `requestId` survives verbatim (an unusable one
+ * drops the whole element rather than degrading to `""`), `bookCoverUrl` IS
+ * normalized here, and every surviving element is rebuilt from exactly the 12
+ * interface fields, so hostile extras cannot reach React state.
+ */
+const LIST_BORROW_EXPECTATIONS: Expectation[] = [
+  { path: "0.requestId", value: LIST_REQUEST_ID },
+  { path: "0.familyId", value: "" },
+  { path: "0.borrowerId", value: "" },
+  { path: "0.borrowerName", value: "" },
+  { path: "0.ownerId", value: "" },
+  { path: "0.bookId", value: "" },
+  { path: "0.bookTitle", value: "" },
+  { path: "0.bookAuthor", value: "" },
+  { path: "0.bookCoverUrl", value: "" },
+  { path: "0.createdAt", value: "" },
+  { path: "0.updatedAt", value: "" },
+  // Still excluded on purpose — the badge lookup hardens `status` itself.
+  { path: "0.status", value: BorrowStatus.PENDING },
+  // Stripped by the 12-field rebuild, never spread through.
+  { path: "0.evil", value: undefined },
+  { path: "0.nested", value: undefined },
 ];
 
 const SHELF_RESULT_EXPECTATIONS: Expectation[] = [
@@ -258,9 +306,9 @@ const WIRING_CASES: WiringCase[] = [
   },
   {
     name: "listBorrowRequests",
-    data: [HOSTILE_REQUEST],
+    data: [HOSTILE_LIST_REQUEST],
     invoke: (client) => client.listBorrowRequests(FAMILY_ID),
-    expected: BORROW_EXPECTATIONS("0."),
+    expected: LIST_BORROW_EXPECTATIONS,
   },
   {
     name: "createBorrowRequest",
@@ -273,14 +321,14 @@ const WIRING_CASES: WiringCase[] = [
         bookCoverUrl: "https://cdn.readmoo.com/cover/1.jpg",
         ownerId: OTHER_USER_ID,
       }),
-    expected: BORROW_EXPECTATIONS(""),
+    expected: BORROW_EXPECTATIONS,
   },
   {
     name: "updateBorrowStatus",
     data: HOSTILE_REQUEST,
     invoke: (client) =>
       client.updateBorrowStatus(REQUEST_ID, BorrowStatus.LENT),
-    expected: BORROW_EXPECTATIONS(""),
+    expected: BORROW_EXPECTATIONS,
   },
   {
     name: "updateMemberSettings",
@@ -593,6 +641,12 @@ describe("ApiClient backend-text sanitization", () => {
    * reach the caller exactly as it did before this layer existed. Reading
    * through it would throw a TypeError out of the client — turning the
    * hardening into the very failure it prevents.
+   *
+   * The borrow LIST is the one deliberate exception: `sanitizeBorrowRequests`
+   * (PR #144) fails CLOSED instead — a non-array container degrades to `[]` and
+   * an unaddressable element is dropped, because an element with no usable
+   * `requestId` can serve neither as a React key nor as the target of
+   * `PATCH /api/borrow/:id`.
    */
   describe("structurally broken payloads", () => {
     it("passes a members list that is not an array straight through", async () => {
@@ -629,23 +683,32 @@ describe("ApiClient backend-text sanitization", () => {
       expect(result.data).toBe("a bare string, not a record");
     });
 
-    it("passes a borrow list that is not an array straight through", async () => {
+    it("degrades a borrow list that is not an array to an empty list", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       mockFetch.mockResolvedValue(jsonResponse({ data: "not-a-list" }));
 
-      await expect(client.listBorrowRequests(FAMILY_ID)).resolves.toBe(
-        "not-a-list",
+      await expect(client.listBorrowRequests(FAMILY_ID)).resolves.toEqual([]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[borrowValidation]"),
       );
     });
 
-    it("lets a null borrow request survive inside the list", async () => {
+    it("drops a null borrow request from the list instead of passing it through", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       mockFetch.mockResolvedValue(
-        jsonResponse({ data: [null, HOSTILE_REQUEST] }),
+        jsonResponse({ data: [null, HOSTILE_LIST_REQUEST] }),
       );
 
       const result = await client.listBorrowRequests(FAMILY_ID);
 
-      expect(result[0]).toBeNull();
-      expect(result[1].bookTitle).toBe("");
+      expect(result).toHaveLength(1);
+      expect(result[0].requestId).toBe(LIST_REQUEST_ID);
+      expect(result[0].bookTitle).toBe("");
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("dropped 1"),
+      );
     });
   });
 });
