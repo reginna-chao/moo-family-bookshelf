@@ -120,6 +120,40 @@ describe("FamilyBookRow", () => {
     expect(link).toHaveAttribute("target", "_blank");
   });
 
+  /**
+   * Cover URLs on a family book arrive from the SERVER, and the dialog is
+   * injected into Readmoo pages that send no CSP — so `safeCoverUrl`
+   * (extension/src/dialog/safeCoverUrl.ts) is the only thing between a stored
+   * tracking beacon and every viewer's IP / UA.
+   */
+  describe("cover URL whitelist", () => {
+    it("renders the cover image when the URL is on a Readmoo cover host", () => {
+      render(
+        <FamilyBookRow
+          book={makeBook({ coverUrl: "https://cdn.readmoo.com/cover/x.jpg" })}
+        />,
+      );
+
+      const img = screen.getByAltText("測試書名") as HTMLImageElement;
+      expect(img.src).toBe("https://cdn.readmoo.com/cover/x.jpg");
+    });
+
+    it("drops a non-Readmoo cover URL and renders the fallback instead", () => {
+      const { container } = render(
+        <FamilyBookRow
+          book={makeBook({ coverUrl: "https://evil.example/beacon.gif" })}
+        />,
+      );
+
+      expect(container.querySelector("img")).toBeNull();
+      expect(screen.queryByAltText("測試書名")).not.toBeInTheDocument();
+      expect(container.innerHTML).not.toContain("evil.example");
+      expect(
+        container.querySelector(".moo-book-row__cover-fallback"),
+      ).not.toBeNull();
+    });
+  });
+
   describe("owner badge placement (isMobile)", () => {
     it("renders the owner badge as a trailing sibling on desktop (isMobile omitted)", () => {
       const { container } = render(

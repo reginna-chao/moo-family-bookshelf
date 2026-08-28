@@ -68,11 +68,19 @@ async function createFamilyWithTwoMembers() {
   return { familyId, token1, token2 };
 }
 
+/**
+ * A cover URL that clears the `isAllowedCoverUrl` boundary check in
+ * `src/routes/borrow.ts` (https + Readmoo registrable domain + default port).
+ * Every fixture that expects to reach the handler's business logic must carry
+ * one — an off-Readmoo host now short-circuits at 400 INVALID_COVER_URL.
+ */
+const VALID_COVER_URL = "https://cdn.readmoo.com/cover/cover.jpg";
+
 const validBorrowBody = {
   bookId: "book-123",
   bookTitle: "Test Book",
   bookAuthor: "Test Author",
-  bookCoverUrl: "https://example.com/cover.jpg",
+  bookCoverUrl: VALID_COVER_URL,
   ownerId: USER1,
 };
 
@@ -92,7 +100,7 @@ describe("POST /api/family/:id/borrow", () => {
       bookId: "book-123",
       bookTitle: "Test Book",
       bookAuthor: "Test Author",
-      bookCoverUrl: "https://example.com/cover.jpg",
+      bookCoverUrl: VALID_COVER_URL,
       ownerId: USER1,
     };
 
@@ -114,7 +122,7 @@ describe("POST /api/family/:id/borrow", () => {
     expect(data.bookId).toBe("book-123");
     expect(data.bookTitle).toBe("Test Book");
     expect(data.bookAuthor).toBe("Test Author");
-    expect(data.bookCoverUrl).toBe("https://example.com/cover.jpg");
+    expect(data.bookCoverUrl).toBe(VALID_COVER_URL);
     expect(data.status).toBe(BorrowStatus.PENDING);
     expect(data.createdAt).toBeDefined();
     expect(data.updatedAt).toBeDefined();
@@ -431,6 +439,192 @@ describe("POST /api/family/:id/borrow", () => {
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_FAMILY_ID");
+  });
+});
+
+// ===========================================================================
+// POST /api/family/:id/borrow — bookCoverUrl whitelist
+// ===========================================================================
+//
+// `bookCoverUrl` is stored verbatim and later rendered into an <img src> by the
+// PWA / Extension, so a family member who plants an attacker-controlled URL
+// turns every viewer's render into a tracking beacon (IP + UA leak). The
+// handler refuses anything `isAllowedCoverUrl` (shared/src/config/readmoo.ts)
+// does not accept: https, a Readmoo registrable domain, and the default port.
+
+/** Prefix shared by every per-userId rate-limit counter key. */
+const PER_USER_COUNTER_PREFIX = "ratelimit:user:";
+
+/**
+ * Counter scope of the create-borrow ceiling.
+ *
+ * Mirrors the inline `enforcePerUserRateLimit({ scope: "borrow-create", … })`
+ * call in `src/routes/borrow.ts`, which does not export its options object —
+ * this literal is the one unavoidable copy. The assertions below stay honest
+ * even if the scope is renamed, because they first pin the count of ALL
+ * per-userId counters.
+ */
+const BORROW_CREATE_SCOPE = "borrow-create";
+
+describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
+  it.each([
+    { label: "a plain-http URL", coverUrl: "http://cdn.readmoo.com/x.jpg" },
+    { label: "an unparseable value", coverUrl: "not-a-url" },
+    {
+      label: "a suffix look-alike host",
+      coverUrl: "https://evilreadmoo.com/x.jpg",
+    },
+    {
+      label: "a prefix look-alike host",
+      coverUrl: "https://readmoo.com.evil.com/x.jpg",
+    },
+    {
+      label: "a non-default port",
+      coverUrl: "https://cdn.readmoo.com:8443/x.jpg",
+    },
+    {
+      label: "a third-party tracking beacon",
+      coverUrl: "https://attacker.example/b.png?u=victim",
+    },
+  ])(
+    "should reject $label with 400 INVALID_COVER_URL",
+    async ({ coverUrl }) => {
+      const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+      const res = await request(
+        "POST",
+        `/api/family/${familyId}/borrow`,
+        { ...validBorrowBody, bookCoverUrl: coverUrl },
+        token2,
+      );
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("INVALID_COVER_URL");
+    },
+  );
+
+  it("should not persist a borrow request when the cover URL is rejected", async () => {
+    const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+    const res = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      { ...validBorrowBody, bookCoverUrl: "https://attacker.example/b.png" },
+      token2,
+    );
+    expect(res.status).toBe(400);
+
+    const index = await kv.get(kvKeys.borrowsByFamily(familyId), "json");
+    expect(index).toBeNull();
+  });
+
+  it.each([
+    {
+      label: "a readmoo.com subdomain",
+      coverUrl: "https://cdn.readmoo.com/cover/x.jpg",
+    },
+    {
+      label: "a readmoo.tw subdomain",
+      coverUrl: "https://cdn.readmoo.tw/cover/x.jpg",
+    },
+    {
+      label: "an explicit default port",
+      coverUrl: "https://cdn.readmoo.com:443/x.jpg",
+    },
+  ])(
+    "should accept $label and store it verbatim (201)",
+    async ({ coverUrl }) => {
+      const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+      const res = await request(
+        "POST",
+        `/api/family/${familyId}/borrow`,
+        { ...validBorrowBody, bookCoverUrl: coverUrl },
+        token2,
+      );
+      expect(res.status).toBe(201);
+
+      const json = (await res.json()) as Json;
+      expect(json.data.bookCoverUrl).toBe(coverUrl);
+
+      const stored = (await kv.get(
+        kvKeys.borrow(json.data.requestId),
+        "json",
+      )) as BorrowRequest;
+      expect(stored.bookCoverUrl).toBe(coverUrl);
+    },
+  );
+
+  // --- Rate-limit accounting (these cases run WITHOUT DEV_MODE) ---
+  //
+  // DEV_MODE short-circuits `enforcePerUserRateLimit`, so the borrow POST below
+  // goes through a helper that omits it. Family setup deliberately keeps using
+  // the DEV_MODE helper: it must not spend any of the caller's budget.
+
+  /** Same as {@link request} but WITHOUT `DEV_MODE`, so the live limiters run. */
+  function prodRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+    authToken?: string,
+  ) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
+    const init: RequestInit = { method, headers };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    return app.request(path, init, { KV: kv });
+  }
+
+  /** Every per-userId counter key currently in KV, whatever the scope. */
+  async function perUserCounterKeys(): Promise<string[]> {
+    const listed = await kv.list();
+    return listed.keys
+      .map((k: { name: string }) => k.name)
+      .filter((name: string) => name.startsWith(PER_USER_COUNTER_PREFIX));
+  }
+
+  it("should not charge the borrow-create counter for a rejected cover URL", async () => {
+    const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+    const res = await prodRequest(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      {
+        ...validBorrowBody,
+        bookCoverUrl: "https://attacker.example/b.png?u=victim",
+      },
+      token2,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Json).error.code).toBe("INVALID_COVER_URL");
+
+    // A format error must not burn quota — otherwise a malformed request is a
+    // free lever for exhausting the caller's own borrow budget.
+    expect(await perUserCounterKeys()).toHaveLength(0);
+  });
+
+  it("should charge the borrow-create counter once for an accepted cover URL", async () => {
+    const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+    const res = await prodRequest(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      validBorrowBody,
+      token2,
+    );
+    expect(res.status).toBe(201);
+
+    const keys = await perUserCounterKeys();
+    expect(keys).toEqual([
+      expect.stringContaining(
+        `${PER_USER_COUNTER_PREFIX}${BORROW_CREATE_SCOPE}:${USER2}:`,
+      ),
+    ]);
+    expect(await kv.get(keys[0])).toBe("1");
   });
 });
 

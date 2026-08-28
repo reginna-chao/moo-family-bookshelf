@@ -55,6 +55,12 @@ beforeEach(() => {
 // ===========================================================================
 // Borrow Lifecycle: PENDING → LENT → RETURNED
 // ===========================================================================
+//
+// Every `bookCoverUrl` below sits on a Readmoo host on purpose: the create
+// handler runs `isAllowedCoverUrl` (shared/src/config/readmoo.ts) and refuses
+// anything else with 400 INVALID_COVER_URL, which would never reach the
+// lifecycle logic these cases are about. Rejection cases live in
+// `tests/unit/borrow.test.ts`.
 
 describe("Borrow Lifecycle Integration", () => {
   it("should complete full lifecycle: create family → add members → create borrow → approve → return", async () => {
@@ -87,7 +93,7 @@ describe("Borrow Lifecycle Integration", () => {
       bookId: "book-abc",
       bookTitle: "TypeScript Handbook",
       bookAuthor: "Microsoft",
-      bookCoverUrl: "https://example.com/ts-cover.jpg",
+      bookCoverUrl: "https://cdn.readmoo.com/cover/ts-cover.jpg",
       ownerId: USER1,
     };
 
@@ -192,7 +198,7 @@ describe("Borrow Lifecycle Integration", () => {
         bookId: "book-xyz",
         bookTitle: "Rejected Book",
         bookAuthor: "Author",
-        bookCoverUrl: "https://example.com/cover.jpg",
+        bookCoverUrl: "https://cdn.readmoo.com/cover/rejected.jpg",
         ownerId: USER1,
       },
       token2,
@@ -238,7 +244,7 @@ describe("Borrow Lifecycle Integration", () => {
         bookId: "book-cancel",
         bookTitle: "Cancelled Book",
         bookAuthor: "Author",
-        bookCoverUrl: "https://example.com/cover.jpg",
+        bookCoverUrl: "https://cdn.readmoo.com/cover/cancelled.jpg",
         ownerId: USER1,
       },
       token2,
@@ -284,19 +290,19 @@ describe("Borrow Lifecycle Integration", () => {
         bookId: "book-1",
         bookTitle: "Book One",
         bookAuthor: "Author 1",
-        bookCoverUrl: "https://example.com/1.jpg",
+        bookCoverUrl: "https://cdn.readmoo.com/cover/1.jpg",
       },
       {
         bookId: "book-2",
         bookTitle: "Book Two",
         bookAuthor: "Author 2",
-        bookCoverUrl: "https://example.com/2.jpg",
+        bookCoverUrl: "https://cdn.readmoo.com/cover/2.jpg",
       },
       {
         bookId: "book-3",
         bookTitle: "Book Three",
         bookAuthor: "Author 3",
-        bookCoverUrl: "https://example.com/3.jpg",
+        bookCoverUrl: "https://cdn.readmoo.com/cover/3.jpg",
       },
     ];
 
