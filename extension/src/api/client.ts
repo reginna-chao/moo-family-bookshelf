@@ -5,6 +5,7 @@
 
 import browser from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { DEFAULT_API_ENDPOINT, TOKEN_EXPIRES_AT_KEY } from "../constants";
 
 /**
@@ -300,11 +301,29 @@ export class ApiClient {
     this.throwOnError(res);
   }
 
+  /**
+   * The single chokepoint through which every thrown `ApiError` passes, so the
+   * envelope text is sanitized once here rather than at each call site.
+   *
+   * `code` / `message` are typed `string` but reach us through a bare cast of
+   * `response.json()`, and the backend is self-hostable. A payload such as
+   * `{"toString":null,"valueOf":null}` — which `JSON.parse` really can produce
+   * — makes the constructor's `super(\`${code}: ${message}\`)` throw a
+   * TypeError, so no `ApiError` is ever constructed: `err instanceof ApiError`
+   * turns false and the localized 429 back-off branch (which needs `code` and
+   * `retryAfter`) is skipped in favour of an English TypeError. Sanitizing the
+   * two interpolated fields keeps the error's identity, not just its wording.
+   *
+   * `retryAfter` is passed through untouched — the constructor already
+   * validates it — and `isClientSynthesized` deliberately reads the ORIGINAL
+   * payload, since the symbol marker is the provenance proof and must not be
+   * inferred from sanitized text.
+   */
   private throwOnError(res: ApiResponse<unknown>): void {
     if (res.error) {
       throw new ApiError(
-        res.error.code,
-        res.error.message,
+        safeErrorText(res.error.code, "UNKNOWN_ERROR"),
+        safeErrorText(res.error.message, "請稍後再試"),
         res.error.retryAfter,
         isClientSynthesized(res.error),
       );
