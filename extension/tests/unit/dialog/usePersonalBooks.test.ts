@@ -955,3 +955,48 @@ describe("usePersonalBooks — stale reset-timer supersede", () => {
     expect(result.current.dirtyBookIds.has("b1")).toBe(true);
   });
 });
+
+/**
+ * `patchPersonalBooks` / `updatePersonalBooks` resolve the `{ data, error }`
+ * envelope through `readEnvelope`, which bare-casts `response.json()`
+ * (src/api/client.ts), and the endpoint is user-configurable (BYO backend via
+ * the sync code's `@host`), so `error.message` is `unknown` at runtime.
+ * `errorMessage` is rendered as a JSX child by PersonalShelf; React 19 throws
+ * on an object/array and the Dialog mounts no ErrorBoundary, so a refused save
+ * used to blank the overlay instead of explaining itself.
+ *
+ * Both save strategies funnel through the SAME `response.error` branch, so one
+ * case covers PATCH and PUT alike. The exhaustive value-domain proof lives in
+ * tests/unit/safeErrorText.test.ts; this pins the wiring and the copy.
+ */
+describe("usePersonalBooks — hostile save error envelope", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupStorage();
+  });
+
+  it("falls back to the local save-failure copy for an object message", async () => {
+    const client = clientWithServerBooks([makeBook("b1")], {
+      patchPersonalBooks: vi.fn().mockResolvedValue({
+        error: { code: "SERVER_ERROR", message: { zh: "壞掉了" } },
+      }),
+    });
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    act(() => {
+      result.current.handleToggle("b1");
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    // Literal from src/dialog/usePersonalBooks.ts (handleSave), read back off
+    // the state the shelf renders. Exact equality proves the fallback REPLACED
+    // the hostile value rather than sitting beside a leaked one.
+    expect(result.current.errorMessage).toBe("儲存失敗，請稍後再試");
+    expect(result.current.status).toBe("error");
+    // A refused save keeps the toggle staged (save-before-sync, invariant 3).
+    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
+  });
+});

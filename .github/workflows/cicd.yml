@@ -42,6 +42,7 @@ jobs:
               - '.github/workflows/cicd.yml'
             worker:
               - 'worker/**'
+              - 'shared/**'
               - '.github/workflows/cicd.yml'
             site:
               - 'site/**'
@@ -97,7 +98,7 @@ jobs:
         run: pnpm --filter moo-family-bookshelf-extension build
 
   worker-check:
-    name: Worker — Lint, Typecheck, Test
+    name: Worker — Lint, Typecheck, Test, Build
     needs: changes
     if: >-
       ${{ !cancelled() &&
@@ -129,6 +130,13 @@ jobs:
 
       - name: Test
         run: pnpm test:coverage
+
+      # `wrangler deploy --dry-run` — bundles the Worker without touching
+      # Cloudflare (no secrets needed). Catches esbuild resolution failures
+      # (e.g. the cross-package `moo-family-bookshelf-shared` import) here
+      # instead of at post-merge deploy time.
+      - name: Build
+        run: pnpm build
 
   pwa-check:
     name: PWA — Lint, Typecheck, Test, Build

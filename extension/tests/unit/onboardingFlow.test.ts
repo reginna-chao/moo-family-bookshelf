@@ -23,6 +23,7 @@ import {
   restoreApiEndpoint,
   tryAutoRecovery,
   createNewFamily,
+  CreateFamilyError,
 } from "@/dialog/onboardingFlow";
 import { decodeSyncCode } from "@/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
@@ -1187,5 +1188,131 @@ describe("familyId persists to storage.local even when SET_FAMILY_ID message rej
     const setCall = familyIdSetCall();
     expect(setCall).toBeDefined();
     expect(setCall).toMatchObject({ [FAMILY_ID_KEY]: "fam-solo-recover-1" });
+  });
+});
+
+/**
+ * `createFamily` resolves the `{ data, error }` envelope through `readEnvelope`,
+ * which bare-casts `response.json()` (src/api/client.ts), and the endpoint is
+ * user-configurable (BYO backend via the sync code's `@host`), so
+ * `error.message` is `unknown` at runtime — while `CreateFamilyError`'s
+ * constructor parameter is typed `string`.
+ *
+ * That gap is load-bearing here, because the thrown value is not just copy: the
+ * caller distinguishes a verification challenge from a dead end by
+ * `instanceof CreateFamilyError` plus its `code`. A message the Error
+ * constructor cannot stringify (ToString throws for an object with `toString`
+ * and `valueOf` nulled out) used to throw a TypeError from INSIDE the
+ * constructor, so no CreateFamilyError ever existed — the VERIFICATION_REQUIRED
+ * bridge was skipped and the user was dead-ended on an account that only needed
+ * a PIN. Coercing before construction is what keeps that bridge reachable.
+ */
+describe("createNewFamily — refused by the backend", () => {
+  const FALLBACK = "建立家庭失敗，請稍後再試";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(chrome.storage.local.set).mockImplementation(() =>
+      Promise.resolve(),
+    );
+    vi.mocked(chrome.storage.local.get).mockImplementation(
+      (
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
+        if (typeof callback === "function") callback({});
+        return Promise.resolve({}) as unknown as void;
+      },
+    );
+    vi.mocked(chrome.storage.sync.set).mockImplementation(() =>
+      Promise.resolve(),
+    );
+    vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A client whose createFamily refuses with the given envelope error. */
+  function refusingApiClient(error: Record<string, unknown>): ApiClient {
+    return createMockApiClient({
+      createFamily: vi.fn().mockResolvedValue({ error }),
+    });
+  }
+
+  /**
+   * Run createNewFamily and hand back whatever it threw. The trailing throw
+   * keeps a resolved call from passing vacuously.
+   */
+  async function captureThrown(apiClient: ApiClient): Promise<unknown> {
+    try {
+      await createNewFamily({
+        userId: "user-create",
+        displayName: "Creator",
+        apiClient,
+      });
+    } catch (err) {
+      return err;
+    }
+    throw new Error("createNewFamily resolved; expected it to throw");
+  }
+
+  it.each([
+    { name: "an object message", message: { zh: "壞掉了" } },
+    // Degrades too: a blank error would leave the dialog reporting nothing.
+    { name: "an empty-string message", message: "" },
+  ])(
+    "throws CreateFamilyError with the local copy and the code preserved for $name",
+    async ({ message }) => {
+      const thrown = await captureThrown(
+        refusingApiClient({ code: "VERIFICATION_REQUIRED", message }),
+      );
+
+      expect(thrown).toBeInstanceOf(CreateFamilyError);
+      // Literal from src/dialog/onboardingFlow.ts (createNewFamily).
+      expect((thrown as CreateFamilyError).message).toBe(FALLBACK);
+      // The code is what the caller bridges on — degrading the message must
+      // never cost it.
+      expect((thrown as CreateFamilyError).code).toBe("VERIFICATION_REQUIRED");
+    },
+  );
+
+  it("still throws CreateFamilyError (not TypeError) for a message that cannot be stringified", async () => {
+    // The exact payload from review: nulling both `toString` and `valueOf`
+    // makes ToPrimitive throw, so `new CreateFamilyError(message, …)` used to
+    // die inside its own constructor with a TypeError. A TypeError is not a
+    // CreateFamilyError, so the caller's instanceof check failed and the
+    // verification prompt never opened.
+    const thrown = await captureThrown(
+      refusingApiClient({
+        code: "VERIFICATION_REQUIRED",
+        message: { toString: null, valueOf: null },
+      }),
+    );
+
+    expect(thrown).toBeInstanceOf(CreateFamilyError);
+    expect(thrown).not.toBeInstanceOf(TypeError);
+    expect((thrown as CreateFamilyError).message).toBe(FALLBACK);
+    expect((thrown as CreateFamilyError).code).toBe("VERIFICATION_REQUIRED");
+  });
+
+  it("passes a legitimate server message through, with code and retryAfter", async () => {
+    // The guard must not over-degrade: a real string still reaches the user,
+    // and the 429 wait rides along so the prompt can count down.
+    const thrown = await captureThrown(
+      refusingApiClient({
+        code: "VERIFICATION_LOCKED",
+        message: "驗證已鎖定，請稍後再試",
+        retryAfter: 120,
+      }),
+    );
+
+    expect(thrown).toBeInstanceOf(CreateFamilyError);
+    expect((thrown as CreateFamilyError).message).toBe(
+      "驗證已鎖定，請稍後再試",
+    );
+    expect((thrown as CreateFamilyError).code).toBe("VERIFICATION_LOCKED");
+    expect((thrown as CreateFamilyError).retryAfter).toBe(120);
   });
 });

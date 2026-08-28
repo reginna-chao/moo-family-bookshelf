@@ -4,6 +4,7 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { LazyCover } from "@/components/LazyCover";
 import { OverflowMenu } from "@/components/OverflowMenu";
 import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
+import { safeCoverUrl } from "@/utils/safeCoverUrl";
 
 export interface FamilyBookCardProps {
   book: BookWithMember;
@@ -69,8 +70,10 @@ export function FamilyBookCard({
         className="block"
       >
         <div className="relative">
+          {/* Another member's cover comes from the server; filter it before it
+              becomes an `<img src>` — LazyCover renders the fallback on "". */}
           <LazyCover
-            src={book.coverUrl}
+            src={safeCoverUrl(book.coverUrl)}
             alt={book.title}
             className="w-full aspect-[3/4] object-cover"
             fallback={

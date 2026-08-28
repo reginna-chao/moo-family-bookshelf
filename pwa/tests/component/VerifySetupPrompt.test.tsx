@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { VerifySetupPrompt } from "@/components/VerifySetupPrompt";
 import { ApiClient } from "@/api/client";
 
@@ -257,6 +263,89 @@ describe("VerifySetupPrompt", () => {
 
     await waitFor(() => {
       expect(screen.getByText("設定登入驗證")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * `setVerifyMethod` resolves the `{ data, error }` envelope through
+   * `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/client.ts),
+   * and the endpoint is user-configurable (BYO backend), so `error.message` is
+   * `unknown` at runtime. This site used to read it as `res.error.message ||
+   * "…"`, and `||` lets every truthy non-string through — including exactly the
+   * objects and arrays React 19 refuses as a JSX child. With no ErrorBoundary
+   * above it, the throw took the whole page white while this overlay
+   * (`fixed inset-0`) was covering it.
+   */
+  describe("hostile save-error envelopes", () => {
+    /** Walk to the one save that needs no secret: 不設定驗證 → 確定不設定. */
+    async function confirmSkipWith(setVerifyMethod: ReturnType<typeof vi.fn>) {
+      const client = createMockClient({ setVerifyMethod });
+      render(
+        <VerifySetupPrompt
+          userId={USER_ID}
+          apiClient={client}
+          onComplete={mockOnComplete}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("不設定驗證")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("不設定驗證"));
+      await waitFor(() => {
+        expect(screen.getByText("確定不設定")).toBeInTheDocument();
+      });
+      // `act` is the barrier for the save: its state update lands in a promise
+      // continuation that would otherwise settle outside any act scope, between
+      // this helper resolving and the caller's next assertion.
+      await act(async () => {
+        fireEvent.click(screen.getByText("確定不設定"));
+      });
+    }
+
+    it.each([
+      { name: "an object message", message: { zh: "壞掉了" } },
+      { name: "an array message", message: ["壞掉了"] },
+      { name: "a number message", message: 500 },
+      { name: "a boolean message", message: true },
+      { name: "a null message", message: null },
+      { name: "a missing message", message: undefined },
+      // Degrades too: a blank error tells the user nothing.
+      { name: "an empty-string message", message: "" },
+    ])(
+      "should show the local save-failure copy for $name instead of crashing",
+      async ({ message }) => {
+        await confirmSkipWith(
+          vi.fn().mockResolvedValue({
+            error: { code: "SERVER_ERROR", message },
+          }),
+        );
+
+        // The literal lives in VerifySetupPrompt.tsx (`saveMethod`); this reads
+        // it back off the production render path. `getByText` matches the
+        // node's whole text, so a hostile value that had reached state would
+        // fail here rather than hide inside the same node.
+        expect(screen.getByText("儲存失敗，請重試。")).toHaveAttribute(
+          "role",
+          "alert",
+        );
+        // A thrown render tears the tree down; the still-mounted overlay is
+        // what the regression is really about — and a failed save must not
+        // report completion.
+        expect(screen.getByText("確定不設定驗證？")).toBeInTheDocument();
+        expect(mockOnComplete).not.toHaveBeenCalled();
+      },
+    );
+
+    it("should keep a usable server message unchanged", async () => {
+      await confirmSkipWith(
+        vi.fn().mockResolvedValue({
+          error: { code: "INVALID_METHOD", message: "驗證方式無效" },
+        }),
+      );
+
+      expect(screen.getByText("驗證方式無效")).toBeInTheDocument();
+      expect(screen.queryByText("儲存失敗，請重試。")).not.toBeInTheDocument();
     });
   });
 

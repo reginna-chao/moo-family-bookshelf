@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 import { deriveUserId } from "@/crypto/hash";
 import { ApiClient } from "@/api/client";
@@ -286,7 +287,9 @@ export function LandingPage({
           setVerifyError("");
           startRetryLock("RATE_LIMITED", retryAfter);
         } else {
-          setGeneralError(joinRes.error.message || "加入家庭失敗，請重試。");
+          setGeneralError(
+            safeErrorText(joinRes.error.message, "加入家庭失敗，請重試。"),
+          );
         }
         setJoinOrigin(null);
         return;

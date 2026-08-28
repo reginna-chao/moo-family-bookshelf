@@ -79,11 +79,11 @@ moo-family-bookshelf/
 
 ### The `shared/` package
 
-`moo-family-bookshelf-shared` 是 workspace 內的純 TypeScript 原始碼套件，沒有 build 步驟——`extension/` 與 `pwa/` 都直接以 `moo-family-bookshelf-shared/<entry>` import 原始碼，由各自的 Vite 打包。存放兩端必須完全一致的邏輯（Readmoo 設定、邀請訊息、個人書櫃儲存策略、API 端點位址驗證與同步碼 `@host` 分類等），避免同一份規則在兩邊各寫一次而漂移。
+`moo-family-bookshelf-shared` 是 workspace 內的純 TypeScript 原始碼套件，沒有 build 步驟——`extension/`、`pwa/` 與 `worker/` 都直接以 `moo-family-bookshelf-shared/<entry>` import 原始碼，前兩者由各自的 Vite 打包，`worker/` 則由 wrangler 的 esbuild 打包（三者的 `tsconfig.json` 都以 `paths` 指向 `../shared/src/*`）。存放多端必須完全一致的邏輯（Readmoo 設定與封面網址白名單、邀請訊息、個人書櫃儲存策略、API 端點位址驗證與同步碼 `@host` 分類等），避免同一份規則在各端各寫一次而漂移。
 
 - **不得依賴任何 runtime 專屬 API。** `shared/` 除了被瀏覽器端 import，也被 `extension/scripts/` 底下以 `tsx` 執行的 Node 腳本 import。`tsconfig.json` 雖含 `DOM` lib（`URLSearchParams` 型別所需），但 `eslint.config.js` 以 `no-restricted-globals` 擋掉 `document` / `window` / `localStorage` / `sessionStorage` / `navigator`，讓這條界線由靜態檢查保證。
-- **CI 覆蓋**：`shared/` 有自己的 `lint` / `typecheck` script，在 CI 的 `extension-check` job 內執行（`shared/**` 已在該 job 的 path filter 內）。新增檔案不需額外設定即被檢查。
-- **測試**：`shared/` 本身沒有 test script，其行為由 `extension/tests/` 與 `pwa/tests/` 涵蓋。
+- **CI 覆蓋**：`shared/` 有自己的 `lint` / `typecheck` script，在 CI 的 `extension-check` job 內執行（`shared/**` 已在該 job 的 path filter 內）。新增檔案不需額外設定即被檢查。`worker-check` 的 path filter 同樣含 `shared/**`，因此改動 `shared/` 也會跑 worker 檢查，壞掉的 import 不會靜默通過。
+- **測試**：`shared/` 本身沒有 test script，其行為由 `extension/tests/`、`pwa/tests/` 與 `worker/tests/` 涵蓋。
 
 ## Tech Stack
 
@@ -316,6 +316,7 @@ Family membership is the gate for all features. Without a family, only onboardin
 - Bug investigations: read related source code before concluding.
 - Do not edit `node_modules`.
 - Keep `pnpm-lock.yaml` in sync when changing dependencies.
+- Out-of-scope P0/P1 found mid-task → record it with `gh issue create` — created ONLY by the session that owns the run (the `/develop` orchestrator, or the main session outside `/develop`); a dispatched agent surfaces the item in its structured return and never calls `gh` itself (tier label `P0` / `P1`; body carries the tier, exact `file:line`, the consequence of leaving it unfixed, and whether a failing check can be written; English imperative title). Labeling is best-effort — if the label cannot be attached, still create the issue and prefix the title with `[P0]` / `[P1]`. Never open a worktree for it, never spawn a follow-up task chip, never widen the current task. P2 and non-goals are not raised at all. Worktrees are only for tasks the user explicitly starts; if `gh` is unavailable or issue creation fails, list the item in the final report instead of dropping it. Full detail: `.claude/rules/change-triage.md` → "Disposition of out-of-scope P0/P1".
 - PWA limitation: cannot scrape Readmoo book lists (no Content Script). Personal shelf management requires at least one sync from desktop Extension first.
 
 ## Agent Orchestration & Rules Layout (`.claude/`)
@@ -331,11 +332,12 @@ All development and design go through a **single skill entry: `/develop`**. It t
 │   ├── backend.md      # Worker (Hono/KV) conventions
 │   ├── test.md         # test framework, locations, coverage
 │   ├── change-triage.md # severity gate applied before proposing any unsolicited change
+│   ├── user-facing-copy.md # plain-language rules for CHANGELOG / release notes / site / UI strings
 │   └── security-ux-invariants.md
 ├── agents/         # role agents (invisible in the slash menu)
 │   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md
 │   └── references/designer/{pencil-mockup,logo,icon,banner}.md
-├── reports/        # retro reports — written by /develop's retro offer, consumed & cleared by /distill
+├── reports/        # retro reports — written by /develop's retro (only on explicit user request), consumed & cleared by /distill
 └── skills/         # slash-menu entries
     ├── develop/        # SKILL.md (router) + references/{code-cycle,design,retro}.md
     ├── distill/        # fold retro reports into durable rules, then clear them
@@ -359,8 +361,8 @@ All development and design go through a **single skill entry: `/develop`**. It t
 
 ### Retro → Distill 自我改善迴圈
 
-- **Retro（產報告）**：每次 `/develop` run 收尾時**問一次**是否做 retrospective（使用者決定，
-  絕不自動跑）。同意後在主 session 依 `develop/references/retro.md` 產出
+- **Retro（產報告）**：只在使用者**明確要求**時才做 retrospective（不再每次 run 收尾主動詢問，
+  也絕不自動跑）。要求後在主 session 依 `develop/references/retro.md` 產出
   `.claude/reports/<MMDD_HHMM>.md` — 只寫結論（卡點、改進提案 L#/E#、KPI），**不套用任何提案**。
 - **Distill（蒸餾）**：報告累積數份後，由使用者定期呼叫 `/distill` — 彙整所有報告的提案、
   跨報告重現的教訓優先、逐項由使用者決定採納與否，套用到 `.claude/rules/`、skills、agents、

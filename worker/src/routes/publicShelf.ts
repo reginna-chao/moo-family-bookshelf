@@ -15,6 +15,7 @@ import {
   isValidShareToken,
   sanitizePublicShelfTitle,
   isValidExpiresDays,
+  sanitizeCoverUrl,
 } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
@@ -707,7 +708,16 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
   return c.json({
     data: {
       title: snapshot.title,
-      books: snapshot.books,
+      // Read-side twin of the aggregation scrub: a snapshot minted BEFORE the
+      // whitelist existed keeps its foreign cover URL until the shelf is
+      // refreshed — for a permanent shelf, indefinitely. Scrubbing on the way
+      // out keeps the mitigation independent of whether the PWA CSP is
+      // actually delivered (a self-hosted PWA on a host that ignores
+      // `_headers` has none). Response transform only — no KV write.
+      books: snapshot.books.map((b) => ({
+        ...b,
+        coverUrl: sanitizeCoverUrl(b.coverUrl),
+      })),
       createdAt: snapshot.createdAt,
       expiresAt: snapshot.expiresAt,
     },

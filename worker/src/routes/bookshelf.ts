@@ -7,7 +7,7 @@ import {
   type UserBooksRecord,
   normalizeFamilyRecord,
 } from "../kv/schema";
-import { isValidFamilyId } from "../utils/validation";
+import { isValidFamilyId, sanitizeCoverUrl } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
@@ -93,9 +93,11 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
         kvKeys.user(member.userId),
         "json",
       );
-      const sharedBooks = (record?.books ?? []).filter(
-        (b) => b.isShared === BoolFlag.TRUE,
-      );
+      // Read-side twin of the buildSnapshot chokepoint — a dormant pre-whitelist
+      // record must not beacon family members via the aggregation.
+      const sharedBooks = (record?.books ?? [])
+        .filter((b) => b.isShared === BoolFlag.TRUE)
+        .map((b) => ({ ...b, coverUrl: sanitizeCoverUrl(b.coverUrl) }));
       return {
         userId: member.userId,
         displayName: member.displayName,

@@ -4,8 +4,10 @@
  */
 
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { sanitizeBorrowRequests } from "./borrowValidation";
+import { sanitizeFamilyMembersResponse } from "./memberValidation";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -380,11 +382,27 @@ export class ApiClient {
     this.throwOnError(res);
   }
 
+  /**
+   * The single chokepoint through which every thrown `ApiError` passes, so the
+   * envelope text is sanitized once here rather than at each call site.
+   *
+   * `code` / `message` are typed `string` but reach us through a bare cast of
+   * `response.json()`, and the backend is self-hostable. A payload such as
+   * `{"toString":null,"valueOf":null}` — which `JSON.parse` really can produce
+   * — makes the constructor's `super(\`${code}: ${message}\`)` throw a
+   * TypeError, so no `ApiError` is ever constructed: `err instanceof ApiError`
+   * turns false and the localized 429 back-off branch (which needs `code` and
+   * `retryAfter`) is skipped in favour of an English TypeError. Sanitizing the
+   * two interpolated fields keeps the error's identity, not just its wording.
+   *
+   * `retryAfter` is passed through untouched — the constructor already
+   * validates it.
+   */
   private throwOnError(res: ApiResponse<unknown>): void {
     if (res.error) {
       throw new ApiError(
-        res.error.code,
-        res.error.message,
+        safeErrorText(res.error.code, "UNKNOWN_ERROR"),
+        safeErrorText(res.error.message, "請稍後再試"),
         res.error.retryAfter,
       );
     }
@@ -538,8 +556,16 @@ export class ApiClient {
     return this.put(`/api/family/${familyId}/transfer`, { userId, newOwnerId });
   }
 
+  /**
+   * `unknown`, not `FamilyGroup`: the wire shape is only a claim until
+   * `sanitizeFamilyMembersResponse` has checked it. The envelope is sanitized
+   * whole — callers of this method read `{ data, error }` themselves instead of
+   * going through `unwrap`, so an `error` envelope must reach them unchanged
+   * while `data.members` is rebuilt.
+   */
   async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
-    return this.get(`/api/family/${familyId}/members`);
+    const res = await this.get<unknown>(`/api/family/${familyId}/members`);
+    return sanitizeFamilyMembersResponse(res);
   }
 
   async updateDisplayName(
@@ -703,7 +729,13 @@ export class ApiClient {
     });
     const json = (await response.json()) as ApiResponse<PublicShelfData>;
     if (json.error) {
-      const err = new Error(`${json.error.code}: ${json.error.message}`);
+      // Sanitize before interpolation: a hostile `{"toString":null}` field makes
+      // `new Error(...)` throw before `status` is attached, and PublicShelfPage
+      // switches on that `status` — a 404 would lose its「此公開書櫃不存在或已過期」
+      // screen and fall back to the generic load error.
+      const code = safeErrorText(json.error.code, "UNKNOWN_ERROR");
+      const message = safeErrorText(json.error.message, "請稍後再試");
+      const err = new Error(`${code}: ${message}`);
       (err as Error & { status: number }).status = response.status;
       throw err;
     }

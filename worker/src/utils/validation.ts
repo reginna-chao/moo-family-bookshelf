@@ -1,3 +1,4 @@
+import { isAllowedCoverUrl } from "moo-family-bookshelf-shared/config/readmoo";
 import type { VerifyMethod } from "../kv/schema";
 import {
   UserIdSchema,
@@ -88,6 +89,36 @@ export function sanitizeVerifySecret(value: unknown): string | null {
   if (typeof value !== "string") return null;
   if (value.length > VERIFY_SECRET_MAX_LENGTH) return null;
   return value;
+}
+
+/**
+ * Keep a coverUrl only when it is empty (scraper placeholder) or on the
+ * Readmoo cover-host whitelist; anything else is blanked to "". Sanitize
+ * instead of reject: one attacker-crafted cover in a sync payload must not
+ * fail the whole books sync, and a blanked cover renders as the normal
+ * no-cover state. Off-whitelist covers would otherwise act as tracking
+ * beacons against family members and public-shelf visitors.
+ *
+ * Lives at the boundary so all four consumer groups scrub identically:
+ *
+ * - the books write paths in `routes/user.ts` (PUT sync, PATCH rebuild, and the
+ *   family-prefs rebuild), which keep fresh poison out of `user:{id}` and
+ *   lazily scrub whatever a pre-whitelist write left there;
+ * - `buildSnapshot` in `services/publicShelf.ts`, the chokepoint every
+ *   `public:{shareToken}` snapshot writer funnels through;
+ * - the family bookshelf aggregation in `routes/bookshelf.ts`, which sanitizes
+ *   again at READ time. The write paths alone do NOT protect that surface: a
+ *   record poisoned before the whitelist existed keeps its value until that
+ *   account's next real write, and a dormant account may never make one;
+ * - the public-shelf read path (`GET /api/public/:shareToken` in
+ *   `routes/publicShelf.ts`), same reasoning applied to an already-minted
+ *   snapshot — a permanent one may never be rewritten. Response transform
+ *   only (that handler writes no KV), and CSP-independent: a self-hosted PWA
+ *   on a host that ignores `_headers` ships no `img-src` whitelist.
+ */
+export function sanitizeCoverUrl(value: unknown): string {
+  const url = typeof value === "string" ? value : "";
+  return url === "" || isAllowedCoverUrl(url) ? url : "";
 }
 
 /**

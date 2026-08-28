@@ -1,9 +1,15 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
+import { watchKvOps } from "../helpers/kvOps";
 import {
+  BoolFlag,
   kvKeys,
   MAX_FAMILY_PREF_ENTRIES,
+  type BookEntry,
+  type PublicShelf,
+  type PublicShelfSnapshot,
+  type PublicShelvesRecord,
   type UserBooksRecord,
 } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
@@ -93,6 +99,11 @@ async function seedUser(
 
 beforeEach(() => {
   kv = createMockKV();
+});
+
+// `watchKvOps` installs `vi.spyOn` handlers and does not clean up after itself.
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 // ===========================================================================
@@ -327,13 +338,16 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
   it("preserves books, displayName, and lastUpdated (byte-identical) untouched", async () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
     const KNOWN_LAST_UPDATED = "2021-06-15T08:30:00.000Z";
+    // Both covers must be on the Readmoo cover-host whitelist: this handler
+    // scrubs every carried-over coverUrl (see the lazy-cleanup suite below), so
+    // an arbitrary host here would test blanking, not byte-identical carry-over.
     const seededBooks = [
       {
         bookId: "b1",
         title: "Preserved Book",
         author: "Jane",
         isbn: "978-x",
-        coverUrl: "https://img/b1.jpg",
+        coverUrl: "https://cdn.readmoo.com/b1.jpg",
         readmooUrl: "https://readmoo.com/book/b1",
         category: "sci-fi",
         isShared: 1,
@@ -343,7 +357,7 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
         title: "Second Book",
         author: "Joe",
         isbn: "978-y",
-        coverUrl: "https://img/b2.jpg",
+        coverUrl: "https://cdn.readmoo.com/b2.jpg",
         readmooUrl: "https://readmoo.com/book/b2",
         category: "fiction",
         isShared: 0,
@@ -567,6 +581,182 @@ describe("PUT /api/user/:id/family-prefs — favorites & merge semantics", () =>
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("NOT_FOUND");
+  });
+});
+
+// ===========================================================================
+// PUT /api/user/:id/family-prefs — coverUrl lazy cleanup (P0 privacy)
+//
+// A book cover is fetched by every family member and every public-shelf
+// visitor, so an attacker-chosen cover host acts as a tracking beacon. The
+// books write paths block new ones at the boundary; this handler additionally
+// SCRUBS records written before that guard existed. The cleanup is
+// opportunistic on purpose: it rides the record write this handler performs
+// anyway and never forces one — in particular it publishes no snapshot, so a
+// stale snapshot stays poisoned until the owner's next books write.
+// ===========================================================================
+
+describe("PUT /api/user/:id/family-prefs — coverUrl lazy cleanup", () => {
+  const POISONED_COVER = "https://evil.example.com/beacon.gif";
+  const POISONED_HOST = "evil.example.com";
+  /** On the Readmoo cover-host whitelist (`isAllowedCoverUrl`), so it survives. */
+  const CLEAN_COVER = "https://cdn.readmoo.com/clean.jpg";
+
+  const SHELF_ID = "11111111-1111-4111-8111-111111111111";
+  const SHARE_TOKEN = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+  const SHELF_CREATED_AT = Date.parse("2026-02-01T00:00:00.000Z");
+
+  function book(bookId: string, coverUrl: string): BookEntry {
+    return {
+      bookId,
+      title: `Book ${bookId}`,
+      author: "Author",
+      isbn: `isbn-${bookId}`,
+      coverUrl,
+      readmooUrl: `https://readmoo.com/book/${bookId}`,
+      category: "fiction",
+      isShared: BoolFlag.TRUE,
+    };
+  }
+
+  /** Poisoned covers in the FIRST and LAST slots — position must not matter. */
+  function legacyBooks(): BookEntry[] {
+    return [
+      book("b1", POISONED_COVER),
+      book("b2", CLEAN_COVER),
+      book("b3", POISONED_COVER),
+    ];
+  }
+
+  /**
+   * Seed `user:{USER1}` DIRECTLY (the file's `seedUser` writes to KV without
+   * going through a handler). A poisoned coverUrl can only be in KV because it
+   * was written BEFORE the whitelist existed — the books write paths sanitize
+   * on the way in, so they cannot produce this fixture.
+   */
+  async function seedLegacyRecord(): Promise<string> {
+    const { authToken } = await createFamilyAndGetToken(USER1);
+    await seedUser(USER1, { books: legacyBooks() });
+    return authToken;
+  }
+
+  function storedRecord(): Promise<UserBooksRecord | null> {
+    return kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+  }
+
+  function savePrefs(
+    authToken: string,
+    body: unknown = { hidden: [ref("b1")] },
+  ) {
+    return request("PUT", `/api/user/${USER1}/family-prefs`, body, authToken);
+  }
+
+  it("scrubs a pre-whitelist poisoned coverUrl when saving family-prefs", async () => {
+    const authToken = await seedLegacyRecord();
+
+    const res = await savePrefs(authToken);
+    expect(res.status).toBe(200);
+
+    const record = await storedRecord();
+    expect(record?.books.map((b) => b.coverUrl)).toEqual(["", CLEAN_COVER, ""]);
+    // The whitelisted control survives field for field, not just its cover.
+    expect(record?.books[1]).toEqual(book("b2", CLEAN_COVER));
+  });
+
+  it("keeps every other field of a scrubbed book unchanged", async () => {
+    const authToken = await seedLegacyRecord();
+
+    await savePrefs(authToken);
+
+    const record = await storedRecord();
+    // Only the cover moved: title, isShared and the rest are byte-identical.
+    expect(record?.books[0]).toEqual({
+      ...book("b1", POISONED_COVER),
+      coverUrl: "",
+    });
+    // Nothing anywhere in the record — not in a stray field, not in a title.
+    expect(JSON.stringify(record)).not.toContain(POISONED_HOST);
+  });
+
+  it("still applies the requested prefs while cleaning up", async () => {
+    const authToken = await seedLegacyRecord();
+
+    const res = await savePrefs(authToken, {
+      hidden: [ref("b1")],
+      favorites: [ref("b2")],
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.hidden).toEqual([ref("b1")]);
+    expect(json.data.favorites).toEqual([ref("b2")]);
+
+    const record = await storedRecord();
+    expect(record?.familyShelfPrefs).toEqual({
+      hidden: [ref("b1")],
+      favorites: [ref("b2")],
+    });
+  });
+
+  it("writes only the user record — the cleanup publishes no snapshot", async () => {
+    const authToken = await seedLegacyRecord();
+    // A migrated owner with one live shelf whose snapshot was published BEFORE
+    // the whitelist existed. Seeded raw rather than through the production
+    // writer (`writePublicSnapshot`), which sanitizes covers and so cannot mint
+    // a poisoned snapshot.
+    const pointer: PublicShelvesRecord = {
+      shelves: [
+        {
+          shelfId: SHELF_ID,
+          shareToken: SHARE_TOKEN,
+          title: "公開書櫃",
+          expiresDays: null,
+          createdAt: SHELF_CREATED_AT,
+          expiresAt: null,
+          selectionMode: "all-shared",
+        } satisfies PublicShelf,
+      ],
+    };
+    const staleSnapshot = JSON.stringify({
+      userId: USER1,
+      shelfId: SHELF_ID,
+      title: "公開書櫃",
+      books: [book("b1", POISONED_COVER)],
+      createdAt: SHELF_CREATED_AT,
+      expiresAt: null,
+    } satisfies PublicShelfSnapshot);
+    await kv.put(kvKeys.publicShelves(USER1), JSON.stringify(pointer));
+    await kv.put(kvKeys.publicShelf(SHARE_TOKEN), staleSnapshot);
+
+    const ops = watchKvOps(kv);
+    const res = await savePrefs(authToken);
+    expect(res.status).toBe(200);
+
+    // The record write is the handler's ONLY mutation: the cleanup rides a write
+    // that was going to happen anyway and must never become a snapshot write of
+    // its own. (DEV_MODE elides the rate-limit counter put, so this trail is the
+    // handler's own writes — see the scope caveat in `helpers/kvOps.ts`.)
+    expect(ops.writeTrail()).toEqual([`put ${kvKeys.user(USER1)}`]);
+    // No pointer read either — this path publishes nothing, so it needs no
+    // shelf list (`.claude/rules/backend.md`, single-writer public-shelf domain).
+    expect(ops.getKeys()).not.toContain(kvKeys.publicShelves(USER1));
+    // Documented convergence gap: the record is now cleaner than the snapshot,
+    // which stays poisoned until the owner's next books write rebuilds it.
+    expect(await kv.get(kvKeys.publicShelf(SHARE_TOKEN))).toBe(staleSnapshot);
+  });
+
+  it("leaves the poisoned cover untouched when the request is rejected", async () => {
+    const authToken = await seedLegacyRecord();
+    const ops = watchKvOps(kv);
+
+    const res = await savePrefs(authToken, { hidden: ["not-a-valid-ref"] });
+    expect(res.status).toBe(400);
+
+    // Validation runs before the record read/rebuild, so a refused request
+    // performs no handler write at all — the cleanup rides an accepted save
+    // only. (Rate-limit counter puts are elided by DEV_MODE.)
+    expect(ops.putKeys()).toEqual([]);
+    const record = await storedRecord();
+    expect(record?.books[0].coverUrl).toBe(POISONED_COVER);
   });
 });
 

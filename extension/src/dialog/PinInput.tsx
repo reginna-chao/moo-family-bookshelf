@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 
 export interface PinInputProps {
   onComplete: (pin: string) => void;
@@ -32,6 +32,25 @@ export function PinInput({
   const [firstPin, setFirstPin] = useState("");
   const [localError, setLocalError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Refocus has to wait for the re-render that clears the field, so it is
+  // deferred by a 0ms timer. Track that timer: re-arming clears the previous
+  // one, and unmount clears any pending one instead of touching a dead ref.
+  const focusInputSoon = useCallback(() => {
+    if (focusTimerRef.current !== null) clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = setTimeout(() => {
+      focusTimerRef.current = null;
+      inputRef.current?.focus();
+    }, 0);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (focusTimerRef.current !== null) clearTimeout(focusTimerRef.current);
+    },
+    [],
+  );
 
   const resetInput = useCallback(() => {
     setPin("");
@@ -65,7 +84,7 @@ export function PinInput({
       setFirstPin(pin);
       setSetupStep("confirm");
       setPin("");
-      setTimeout(() => inputRef.current?.focus(), 0);
+      focusInputSoon();
       return;
     }
 
@@ -75,9 +94,9 @@ export function PinInput({
     } else {
       setLocalError("PIN 碼不一致，請重新輸入");
       setPin("");
-      setTimeout(() => inputRef.current?.focus(), 0);
+      focusInputSoon();
     }
-  }, [pin, mode, setupStep, firstPin, onComplete, disabled]);
+  }, [pin, mode, setupStep, firstPin, onComplete, disabled, focusInputSoon]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
