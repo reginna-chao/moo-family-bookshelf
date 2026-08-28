@@ -316,6 +316,7 @@ Family membership is the gate for all features. Without a family, only onboardin
 - Bug investigations: read related source code before concluding.
 - Do not edit `node_modules`.
 - Keep `pnpm-lock.yaml` in sync when changing dependencies.
+- Out-of-scope P0/P1 found mid-task → record it with `gh issue create` — created ONLY by the session that owns the run (the `/develop` orchestrator, or the main session outside `/develop`); a dispatched agent surfaces the item in its structured return and never calls `gh` itself (tier label `P0` / `P1`; body carries the tier, exact `file:line`, the consequence of leaving it unfixed, and whether a failing check can be written; English imperative title). Labeling is best-effort — if the label cannot be attached, still create the issue and prefix the title with `[P0]` / `[P1]`. Never open a worktree for it, never spawn a follow-up task chip, never widen the current task. P2 and non-goals are not raised at all. Worktrees are only for tasks the user explicitly starts; if `gh` is unavailable or issue creation fails, list the item in the final report instead of dropping it. Full detail: `.claude/rules/change-triage.md` → "Disposition of out-of-scope P0/P1".
 - PWA limitation: cannot scrape Readmoo book lists (no Content Script). Personal shelf management requires at least one sync from desktop Extension first.
 
 ## Agent Orchestration & Rules Layout (`.claude/`)
@@ -335,7 +336,7 @@ All development and design go through a **single skill entry: `/develop`**. It t
 ├── agents/         # role agents (invisible in the slash menu)
 │   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md
 │   └── references/designer/{pencil-mockup,logo,icon,banner}.md
-├── reports/        # retro reports — written by /develop's retro offer, consumed & cleared by /distill
+├── reports/        # retro reports — written by /develop's retro (only on explicit user request), consumed & cleared by /distill
 └── skills/         # slash-menu entries
     ├── develop/        # SKILL.md (router) + references/{code-cycle,design,retro}.md
     ├── distill/        # fold retro reports into durable rules, then clear them
@@ -359,8 +360,8 @@ All development and design go through a **single skill entry: `/develop`**. It t
 
 ### Retro → Distill 自我改善迴圈
 
-- **Retro（產報告）**：每次 `/develop` run 收尾時**問一次**是否做 retrospective（使用者決定，
-  絕不自動跑）。同意後在主 session 依 `develop/references/retro.md` 產出
+- **Retro（產報告）**：只在使用者**明確要求**時才做 retrospective（不再每次 run 收尾主動詢問，
+  也絕不自動跑）。要求後在主 session 依 `develop/references/retro.md` 產出
   `.claude/reports/<MMDD_HHMM>.md` — 只寫結論（卡點、改進提案 L#/E#、KPI），**不套用任何提案**。
 - **Distill（蒸餾）**：報告累積數份後，由使用者定期呼叫 `/distill` — 彙整所有報告的提案、
   跨報告重現的教訓優先、逐項由使用者決定採納與否，套用到 `.claude/rules/`、skills、agents、
