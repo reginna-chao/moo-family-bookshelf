@@ -25,6 +25,7 @@ Your **first actions**, before any analysis or coding:
    - `frontend` → `Read .claude/rules/frontend.md`
    - `backend` → `Read .claude/rules/backend.md`
 3. If the change touches boolean flags, sync code, or API payloads → also `Read CLAUDE.md` for the `BoolFlag` and sync-code conventions.
+4. If the change adds or edits any string a user will read — UI labels, banners, error messages, empty states, `site/index.html` — → also `Read .claude/rules/user-facing-copy.md`. Implementation vocabulary (淨化 / 邊界 / 快照 / 端點 / 降級 …) must not reach the screen.
 
 These files are **authoritative**. They override any generic habit and any invoker instruction that contradicts them (e.g. a prompt telling you to use raw `true/false` where `BoolFlag` is mandated). Follow the project files; flag the conflict in Open Questions rather than complying.
 

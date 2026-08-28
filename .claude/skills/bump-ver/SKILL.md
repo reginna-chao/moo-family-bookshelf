@@ -93,7 +93,7 @@ Bullet style: short, action-oriented sentence describing **what the user notices
 Generate the content for `docs/release-notes/v<X.Y.Z>.md` from the SAME included commits, following `docs/release-notes/TEMPLATE.md`:
 
 - **Order**: `# English` section first, then `# 繁體中文` section, separated by `---`. Do not flip (see encoded conventions).
-- **繁體中文 section**: reuse the CHANGELOG bullets drafted in Step 3 verbatim (same wording, same categories) — the two must stay in sync.
+- **繁體中文 section**: take the CHANGELOG bullets drafted in Step 3 and curate them — reuse verbatim where the bullet already reads well, shorten where release-note readers do not need the full detail, and drop bullets that only matter to someone tracking every change. This matches `docs/release-notes/TEMPLATE.md`（「直接取用 / 改寫」）: the release notes are a curated summary, not a second copy of the CHANGELOG. The two must not CONTRADICT each other, but they need not match word for word, and the category set may differ (`### 安全與隱私` in the CHANGELOG maps onto `## 改善調整` here).
 - **English section**: a curated, natural translation of the same bullets — not a literal word-for-word rendering; adjust phrasing to read as native English.
 - **Categories**: use the four TEMPLATE pairs (New Features / 功能新增, Improvements / 改善調整, Bug Fixes / 問題修正, Developer Experience / 開發者體驗). Map `perf:` and user-facing `style:` into Improvements; fold `security:`/stability items into Improvements unless there are enough to warrant calling them out. **Delete any category with no items** — never leave an empty heading.
 - Do NOT add the `<details>` commit list or the Full Changelog link — the CD workflow appends those automatically at release time.

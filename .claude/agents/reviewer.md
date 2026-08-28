@@ -25,7 +25,10 @@ Your **first actions**:
 4. `Read .claude/rules/change-triage.md` — the severity gate every SUGGESTION and OBSERVATION you
    raise must clear. The dimension checks below still run in full; the gate only decides what gets REPORTED.
    A P2-tier item is dropped entirely, not downgraded to an Observation.
-5. Read all files/diffs in `target` before starting.
+5. If `target` adds or edits any string a user will read — UI labels, banners, error messages, empty
+   states, `CHANGELOG.md`, `docs/release-notes/v*.md`, `site/index.html` — → `Read .claude/rules/user-facing-copy.md`
+   and review that copy against it. Implementation vocabulary reaching the screen is a finding, not a nitpick.
+6. Read all files/diffs in `target` before starting.
 
 Evaluate every dimension below but **only report findings** — do not list items that pass.
 
