@@ -32,7 +32,7 @@ import { BoolFlag, type BookEntry } from "@/api/client";
  * title placeholder shows instead.
  *
  * The CSP `img-src` in pwa/public/_headers is the second layer (pinned by
- * tests/unit/cspImgSrc.test.ts), but `_headers` is only honoured by hosts that
+ * tests/unit/cspHeaders.test.ts), but `_headers` is only honoured by hosts that
  * serve it (Cloudflare Pages / Netlify) — `vite dev` / `vite preview` and plain
  * static hosts send no CSP and rely on this code filter alone.
  *

@@ -16,7 +16,7 @@ import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
  * viewer's IP / UA. `safeCoverUrl` (pwa/src/utils/safeCoverUrl.ts) drops it
  * before it becomes an `<img src>`; LazyCover then renders the BookOpen
  * fallback box. The CSP `img-src` in pwa/public/_headers is the second layer
- * (tests/unit/cspImgSrc.test.ts) but is only served by Cloudflare Pages /
+ * (tests/unit/cspHeaders.test.ts) but is only served by Cloudflare Pages /
  * Netlify — `vite dev` / `vite preview` and plain static hosts have only this
  * code filter, which is what the cases below pin.
  *

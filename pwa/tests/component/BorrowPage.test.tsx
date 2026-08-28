@@ -254,7 +254,7 @@ describe("BorrowPage", () => {
    *      the Readmoo host whitelist BEFORE it can become an `<img src>` — a
    *      code-level filter, so jsdom observes it and the cases below pin it.
    *   2. The CSP `img-src` in pwa/public/_headers (pinned by
-   *      tests/unit/cspImgSrc.test.ts), which only a real browser enforces.
+   *      tests/unit/cspHeaders.test.ts), which only a real browser enforces.
    * Layer 2 alone would not cover every deployment: `_headers` is honoured only
    * by hosts that serve it (Cloudflare Pages / Netlify), so `vite dev` /
    * `vite preview` and plain static hosts send no CSP at all and rely on

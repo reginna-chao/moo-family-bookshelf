@@ -221,7 +221,7 @@ describe("READMOO_COVER_DOMAINS", () => {
   it("holds registrable domains only, never a host pattern or a URL", () => {
     for (const domain of READMOO_COVER_DOMAINS) {
       // The PWA CSP derives `https://{d}` and `https://*.{d}` from these
-      // entries (see pwa/tests/unit/cspImgSrc.test.ts), which only works while
+      // entries (see pwa/tests/unit/cspHeaders.test.ts), which only works while
       // each entry is a bare registrable domain.
       expect(domain).toMatch(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/);
       expect(domain).not.toContain("*");
