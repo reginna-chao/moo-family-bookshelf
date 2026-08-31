@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
-import { BoolFlag, BorrowStatus } from "../api/client";
+import { BoolFlag } from "../api/client";
 import { type MemberFilterValue } from "./MemberDropdown";
 import { useSearch } from "./useSearch";
 import { useLoadMore } from "./useLoadMore";
@@ -9,10 +9,8 @@ import { LoadingState } from "./LoadingState";
 import { useFamilyShelfViewMode } from "./useFamilyShelfViewMode";
 import { useBookSort } from "./useBookSort";
 import { sortBooks } from "./sortBooks";
-import {
-  useFamilyShelfBooks,
-  type FamilyShelfBook,
-} from "./useFamilyShelfBooks";
+import { useFamilyShelfBooks } from "./useFamilyShelfBooks";
+import { useBorrowAction } from "./useBorrowAction";
 import { FamilyShelfBookList } from "./FamilyShelfBookList";
 import { FamilyShelfError, FamilyShelfEmpty } from "./FamilyShelfStatus";
 import { FamilyShelfToolbar } from "./FamilyShelfToolbar";
@@ -123,33 +121,17 @@ export function FamilyShelf({ userId, pageSize }: FamilyShelfProps) {
 
   const viewerCanLend = memberCanLendMap.get(userId) ?? true;
 
-  const pendingBookIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of borrowRequests) {
-      if (r.borrowerId === userId && r.status === BorrowStatus.PENDING) {
-        set.add(r.bookId);
-      }
-    }
-    return set;
-  }, [borrowRequests, userId]);
-
-  const handleBorrowClick = useCallback(
-    async (book: FamilyShelfBook) => {
-      try {
-        await apiClient.createBorrowRequest(familyId, {
-          bookId: book.bookId,
-          bookTitle: book.title,
-          bookAuthor: book.author,
-          bookCoverUrl: book.coverUrl,
-          ownerId: book.ownerId,
-        });
-        await refreshBorrowRequests();
-      } catch {
-        // Errors surface via the borrow tab; keep family shelf quiet.
-      }
-    },
-    [apiClient, familyId, refreshBorrowRequests],
-  );
+  const {
+    borrow,
+    failureText: borrowFailureText,
+    pendingBookIds,
+  } = useBorrowAction({
+    apiClient,
+    familyId,
+    userId,
+    borrowRequests,
+    refreshBorrowRequests,
+  });
 
   if (state === "loading") {
     return <LoadingState message="載入家庭書櫃中..." />;
@@ -196,6 +178,12 @@ export function FamilyShelf({ userId, pageSize }: FamilyShelfProps) {
 
       {prefsSyncFailed && <PrefsSyncFailedNotice />}
 
+      {borrowFailureText !== "" && (
+        <div role="alert" className="moo-borrow-failed-notice">
+          {borrowFailureText}
+        </div>
+      )}
+
       <FamilyShelfBookList
         books={visibleBooks}
         viewMode={viewMode}
@@ -203,7 +191,7 @@ export function FamilyShelf({ userId, pageSize }: FamilyShelfProps) {
         viewerCanLend={viewerCanLend}
         memberCanLendMap={memberCanLendMap}
         pendingBookIds={pendingBookIds}
-        onBorrow={(book) => void handleBorrowClick(book)}
+        onBorrow={(book) => void borrow(book)}
         onToggleHidden={toggleHidden}
         isHidden={isHidden}
         isFavorite={isFavorite}

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./api/*": "./src/api/*",
+    "./borrow/*": "./src/borrow/*",
     "./config/*": "./src/config/*",
     "./hostNote/*": "./src/hostNote/*",
     "./icons/*": "./src/icons/*",

@@ -806,6 +806,32 @@
   line-height: 1.4;
 }
 
+/* Same box metrics as the prefs notice above so the two banners stack
+   consistently; danger tokens because a failed borrow is an error, not a
+   warning. Sticky against the .moo-tab-panels scrollport so a failure stays on
+   screen after the user scrolled deep into a long shelf — a failed create
+   leaves no pending request, so the button label does not signal it either.
+   The 8px margin-top is part of the sticky margin-box constraint, so `top: 0`
+   parks it 8px below the scrollport edge rather than flush against it. */
+.moo-borrow-failed-notice {
+  position: sticky;
+  top: 0;
+  /* 1 = above the book rows' positioned cover wraps (z-index auto, later in tree
+     order); must stay below every overlay reachable here — .moo-loading-overlay
+     (10), .moo-category__menu / .moo-member-filter__menu (50),
+     .moo-public-share__overlay (100), .moo-modal-overlay (200),
+     .moo-sort__menu / .moo-overflow__menu (100001). */
+  z-index: 1;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: var(--moo-global-border-radius);
+  border: 1px solid var(--moo-danger-border);
+  background: var(--moo-danger-bg);
+  color: var(--moo-danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .moo-load-more {
   width: 100%;
   padding: 10px 0;

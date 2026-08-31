@@ -30,6 +30,25 @@ function isMemberLendingEnabled(member: FamilyMember): boolean {
   return member.canLend !== BoolFlag.FALSE;
 }
 
+/**
+ * Classify the OPTIONAL `bookCoverUrl` at the handler boundary, mirroring
+ * `sanitizeVerifySecret()` in `utils/validation.ts`:
+ *
+ * - absent / `null` / `""` ⇒ "no cover", normalized to `""` (a book whose cover
+ *   the bookshelf aggregation sanitized away must still be borrowable);
+ * - any other non-string ⇒ `null`, i.e. a request-format error (`400
+ *   INVALID_FIELDS`) — never a cover-whitelist rejection;
+ * - a non-empty string is returned verbatim for the whitelist check.
+ *
+ * `BorrowRequest.bookCoverUrl` stays a non-optional `string`, so the stored
+ * record never carries `undefined` / `null`.
+ */
+function normalizeBookCoverUrl(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string") return null;
+  return value;
+}
+
 // --- Route definitions ---
 
 const createBorrowRoute = createRoute({
@@ -108,11 +127,13 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
+  // Raw parsed-JSON shape: `bookCoverUrl` is optional AND unconstrained, so it
+  // is typed `unknown` and narrowed by `normalizeBookCoverUrl` below.
   let body: {
     bookId?: string;
     bookTitle?: string;
     bookAuthor?: string;
-    bookCoverUrl?: string;
+    bookCoverUrl?: unknown;
     ownerId?: string;
   } | null;
   try {
@@ -121,27 +142,27 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
-  if (
-    !body?.bookId ||
-    !body.bookTitle ||
-    !body.bookAuthor ||
-    !body.bookCoverUrl ||
-    !body.ownerId
-  ) {
+  if (!body?.bookId || !body.bookTitle || !body.bookAuthor || !body.ownerId) {
     return jsonError(
       c,
       400,
       "MISSING_FIELDS",
-      "bookId, bookTitle, bookAuthor, bookCoverUrl, and ownerId are required",
+      "bookId, bookTitle, bookAuthor, and ownerId are required",
     );
   }
+
+  // `bookCoverUrl` is optional, but a SUPPLIED value of the wrong type is still
+  // a format error — classified in the same guard slot as the required fields
+  // so it keeps its INVALID_FIELDS precedence over INVALID_USER_ID /
+  // INVALID_COVER_URL. `null` here means "wrong type", not "no cover".
+  const bookCoverUrl = normalizeBookCoverUrl(body.bookCoverUrl);
 
   if (
     typeof body.bookId !== "string" ||
     typeof body.bookTitle !== "string" ||
     typeof body.bookAuthor !== "string" ||
-    typeof body.bookCoverUrl !== "string" ||
-    typeof body.ownerId !== "string"
+    typeof body.ownerId !== "string" ||
+    bookCoverUrl === null
   ) {
     return jsonError(c, 400, "INVALID_FIELDS", "All fields must be strings");
   }
@@ -156,7 +177,12 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   // every render). Restrict it to Readmoo-served https covers at the boundary.
   // Runs before the rate-limit charge: a malformed request is a format error
   // and must not burn the caller's quota (same rule as `verifySecret`).
-  if (!isAllowedCoverUrl(body.bookCoverUrl)) {
+  // Only the EMPTY case is exempt, and it does not weaken the control: the
+  // family-bookshelf aggregation sanitizes every off-whitelist cover to "", so
+  // "" reaching this handler means "this book has no renderable cover" — a
+  // legitimate signal, not an attack. Every NON-EMPTY value still runs the
+  // whitelist.
+  if (bookCoverUrl !== "" && !isAllowedCoverUrl(bookCoverUrl)) {
     return jsonError(
       c,
       400,
@@ -275,7 +301,8 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     bookId,
     bookTitle: body.bookTitle,
     bookAuthor: body.bookAuthor,
-    bookCoverUrl: body.bookCoverUrl,
+    // Normalized above: "" when no cover was supplied, never undefined/null.
+    bookCoverUrl,
     status: BorrowStatus.PENDING,
     createdAt: now,
     updatedAt: now,

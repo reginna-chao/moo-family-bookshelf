@@ -56,11 +56,12 @@ beforeEach(() => {
 // Borrow Lifecycle: PENDING → LENT → RETURNED
 // ===========================================================================
 //
-// Every `bookCoverUrl` below sits on a Readmoo host on purpose: the create
-// handler runs `isAllowedCoverUrl` (shared/src/config/readmoo.ts) and refuses
-// anything else with 400 INVALID_COVER_URL, which would never reach the
-// lifecycle logic these cases are about. Rejection cases live in
-// `tests/unit/borrow.test.ts`.
+// `bookCoverUrl` is OPTIONAL, but every value SUPPLIED below sits on a Readmoo
+// host on purpose: the create handler runs `isAllowedCoverUrl`
+// (shared/src/config/readmoo.ts) on every non-empty value and refuses anything
+// else with 400 INVALID_COVER_URL, which would never reach the lifecycle logic
+// these cases are about. The cover-less variant gets its own case at the end of
+// this block; rejection cases live in `tests/unit/borrow.test.ts`.
 
 describe("Borrow Lifecycle Integration", () => {
   it("should complete full lifecycle: create family → add members → create borrow → approve → return", async () => {
@@ -360,5 +361,70 @@ describe("Borrow Lifecycle Integration", () => {
     expect(data.find((r: Json) => r.requestId === requestIds[2]).status).toBe(
       BorrowStatus.PENDING,
     );
+  });
+
+  it("should run the full lifecycle for a cover-less book, keeping bookCoverUrl empty end to end", async () => {
+    // The bookshelf aggregation sanitizes an off-whitelist cover to "" and the
+    // clients forward that verbatim, so this is exactly the payload a book with
+    // no renderable cover produces. It used to be answered 400 MISSING_FIELDS,
+    // making such books permanently unborrowable.
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(
+      USER1,
+      "Alice",
+    );
+    const { authToken: token2 } = await joinFamilyAndGetToken(
+      familyId,
+      USER2,
+      "Bob",
+    );
+
+    const createRes = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      {
+        bookId: "book-no-cover",
+        bookTitle: "Cover-less Book",
+        bookAuthor: "Author",
+        bookCoverUrl: "",
+        ownerId: USER1,
+      },
+      token2,
+    );
+    expect(createRes.status).toBe(201);
+    const createJson = (await createRes.json()) as Json;
+    const requestId = createJson.data.requestId;
+    expect(createJson.data.bookCoverUrl).toBe("");
+
+    // The owner sees the request in their list with the empty cover intact.
+    const listRes = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token1,
+    );
+    const listJson = (await listRes.json()) as Json;
+    expect(listJson.data).toHaveLength(1);
+    expect(listJson.data[0].bookCoverUrl).toBe("");
+
+    // PENDING → LENT → RETURNED, and the empty cover survives both PATCH
+    // rewrites of the record.
+    const lentRes = await request(
+      "PATCH",
+      `/api/borrow/${requestId}`,
+      { status: BorrowStatus.LENT },
+      token1,
+    );
+    expect(lentRes.status).toBe(200);
+
+    const returnRes = await request(
+      "PATCH",
+      `/api/borrow/${requestId}`,
+      { status: BorrowStatus.RETURNED },
+      token2,
+    );
+    expect(returnRes.status).toBe(200);
+    const returnJson = (await returnRes.json()) as Json;
+    expect(returnJson.data.status).toBe(BorrowStatus.RETURNED);
+    expect(returnJson.data.bookCoverUrl).toBe("");
   });
 });
