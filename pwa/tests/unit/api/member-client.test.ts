@@ -97,6 +97,20 @@ describe("ApiClient getFamilyMembers (PWA)", () => {
    * `{ data, error }` envelope — callers unwrap it themselves — so the
    * passthrough cases below are about the envelope, not about a thrown error.
    *
+   * Driving the public surface means what these cases pin is the COMPOSED
+   * contract of the TWO layers `getFamilyMembers` wires, in this order:
+   *  1. `pwa/src/api/memberValidation.ts` — the STRUCTURAL rebuild. Drops
+   *     elements that cannot be addressed, rebuilds each survivor from at most
+   *     the four `FamilyMember` keys (so hostile extras and a non-string
+   *     optional lose their key rather than degrade), always emits
+   *     `apiEndpoint`, and refuses to touch an envelope carrying an `error`.
+   *  2. `shared/src/api/entityText.ts` — the declared-STRING coercion, which
+   *     then hardens the three group-level text fields (`familyId` / `ownerId` /
+   *     `createdAt`) that layer 1 documents as out of its own scope, and re-runs
+   *     over the already-rebuilt members as a no-op.
+   * Where a case can tell the two apart it says so, because a regression in
+   * either layer must fail here instead of being absorbed by the other.
+   *
    * The same case tables live in
    * `extension/tests/unit/api/member-client.test.ts` — the two sanitizer copies
    * are deliberately separate, so mirrored tables are what makes drift between
@@ -205,7 +219,14 @@ describe("ApiClient getFamilyMembers (PWA)", () => {
         expect(warnSpy).not.toHaveBeenCalled();
       });
 
-      it("leaves data untouched when a 200 envelope carries an error alongside it", async () => {
+      it("keeps the error verbatim and stands the structural rebuild down when a 200 envelope carries both", async () => {
+        // The two layers answer this envelope differently, and both answers
+        // matter. Layer 1 (`memberValidation`) stands down entirely, because an
+        // auth failure must never be laundered into a member list
+        // (Invariant 2). Layer 2 (the shared text layer) has no such rule — it
+        // short-circuits on ABSENT data only — so the claimed text fields are
+        // still coerced. Neither can turn the failure into a success: `error`
+        // reaches the caller's own `if (response.error)` byte-identical.
         mockFetch.mockResolvedValueOnce(
           jsonResponse({
             data: { members: 42 },
@@ -219,8 +240,19 @@ describe("ApiClient getFamilyMembers (PWA)", () => {
           code: "STALE_DATA",
           message: "Rebuild in progress",
         });
-        expect(asRecord(result.data).members).toBe(42);
+        // Silence is the proof layer 1 did not run: `members: 42` is exactly
+        // what its malformed-container branch warns about, and the text layer's
+        // own degradation of that field is deliberately quiet.
         expect(warnSpy).not.toHaveBeenCalled();
+        expect(result.data).toStrictEqual({
+          familyId: "",
+          ownerId: "",
+          createdAt: "",
+          members: [],
+        });
+        // Second, independent tell: layer 1 ALWAYS emits `apiEndpoint`, so its
+        // absence here says the rebuild was skipped rather than merely quiet.
+        expect(asRecord(result.data)).not.toHaveProperty("apiEndpoint");
       });
 
       it("passes a data-less success envelope through as-is", async () => {
@@ -301,13 +333,22 @@ describe("ApiClient getFamilyMembers (PWA)", () => {
       ];
 
       it.each(NON_OBJECT_DATA)(
-        "degrades to a members-only group and warns once when data is $name",
+        "materializes an empty family group and warns once when data is $name",
         async ({ data }) => {
           const group = await sanitizedGroup(data);
 
-          // A members-only group still carries the always-emitted
-          // `apiEndpoint`, which a non-object `data` can never have claimed.
-          expect(group).toEqual({ members: [], apiEndpoint: null });
+          // Both layers contribute, and neither invents a claim: layer 1
+          // degrades a non-record `data` to a members-only group plus its
+          // always-emitted `apiEndpoint`, then layer 2 materializes the three
+          // declared-string fields as `""`. A non-object `data` never claimed
+          // any of them, so the result is the renderable EMPTY state.
+          expect(group).toEqual({
+            familyId: "",
+            ownerId: "",
+            createdAt: "",
+            members: [],
+            apiEndpoint: null,
+          });
           expect(warnSpy).toHaveBeenCalledTimes(1);
           expect(warnSpy).toHaveBeenCalledWith(
             expect.stringContaining("[memberValidation]"),
@@ -483,11 +524,13 @@ describe("ApiClient getFamilyMembers (PWA)", () => {
       });
     });
 
-    describe("group field passthrough", () => {
+    describe("group field handling", () => {
       it("passes every other FamilyGroup field through verbatim while rebuilding members", async () => {
-        // `apiEndpoint` is a string here, so it survives verbatim like the
-        // rest; it is the ONE field that is not a raw passthrough, and the
-        // `apiEndpoint normalization` suite below owns that behavior.
+        // Every text field here is a REAL string, which is the point: the
+        // layers coerce TYPES, never content, so a well-formed payload has to
+        // come back byte-identical. `apiEndpoint` survives verbatim for the
+        // same reason; the `apiEndpoint normalization` suite below owns what
+        // happens when it is not a string.
         const group = await sanitizedGroup({
           familyId: FAMILY_ID,
           ownerId: USER_A,
@@ -524,21 +567,38 @@ describe("ApiClient getFamilyMembers (PWA)", () => {
         expect(warnSpy).not.toHaveBeenCalled();
       });
 
-      it("leaves the other top-level fields unvalidated, sanitizing only members", async () => {
-        // Those fields are unproven claims by design: their consumers do `===`
-        // comparisons and `??` fallbacks that are safe for an arbitrary value.
+      it("coerces the declared-string fields in the text layer while non-text fields stay unproven claims", async () => {
+        // Where the two layers divide. `memberValidation` rebuilds `members`
+        // and normalizes `apiEndpoint` and stops there, documenting the rest as
+        // out of its scope — but the shared text layer composed after it then
+        // hardens every field the `FamilyGroup` interface declares `string`, so
+        // `familyId` / `ownerId` / `createdAt` are no longer claims.
+        //
+        // What NEITHER layer touches stays a claim on purpose: `maxMembers` and
+        // `expiresAt` are numbers whose consumers do `===` comparisons and `??`
+        // fallbacks that are safe for an arbitrary value, and `authToken` is a
+        // credential — degrading it to `""` would hide a broken backend behind
+        // a silent re-auth loop instead of the 401 the request already
+        // produces.
         const group = await sanitizedGroup({
           familyId: 42,
           ownerId: null,
-          maxMembers: "six",
           createdAt: { at: 0 },
+          maxMembers: "six",
+          authToken: { token: "abc" },
+          expiresAt: "soon",
           members: [makeMember()],
         });
 
-        expect(asRecord(group).familyId).toBe(42);
-        expect(asRecord(group).ownerId).toBeNull();
+        // Coerced by the text layer.
+        expect(asRecord(group).familyId).toBe("");
+        expect(asRecord(group).ownerId).toBe("");
+        expect(asRecord(group).createdAt).toBe("");
+        // Untouched by both layers.
         expect(asRecord(group).maxMembers).toBe("six");
-        expect(asRecord(group).createdAt).toEqual({ at: 0 });
+        expect(asRecord(group).authToken).toEqual({ token: "abc" });
+        expect(asRecord(group).expiresAt).toBe("soon");
+        // Rebuilt by the structural layer; the text layer is a no-op over it.
         expect(group.members).toEqual([makeMember()]);
         expect(warnSpy).not.toHaveBeenCalled();
       });

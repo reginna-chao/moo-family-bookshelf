@@ -9,11 +9,19 @@
  * declares beyond the text ones — `BoolFlag` flags, numbers, timestamps,
  * `PersonalBooks`' index-signature extras — survives untouched.
  *
- * An optional field is rebuilt as `field === undefined ? undefined : safeText(…)`
- * so absence stays absence. That writes an explicit `undefined` own property,
- * which is harmless on the write paths: `JSON.stringify` drops explicit
- * `undefined`, so a payload round-tripped back through `PUT /api/user/:id/books`
- * is byte-identical to before.
+ * An optional field is rebuilt with a CONDITIONAL spread —
+ * `...(field !== undefined && { field: safeText(field) })` — so a field the
+ * backend omitted stays OMITTED rather than becoming an explicit `undefined` own
+ * property. Absence, not an `undefined` value, is what the "treat missing as X"
+ * fallbacks downstream are written against, and it is the idiom
+ * `extension/src/api/memberValidation.ts` (and its PWA twin) already uses:
+ * `getFamilyMembers` composes both layers — member validation first, this
+ * sanitizer second — so the spread here must not re-introduce a key that layer
+ * deliberately left out.
+ *
+ * The condition is `!== undefined`, never truthiness: `null` is a PRESENT value
+ * (`apiEndpoint: null` means "this family uses the default endpoint"), so it
+ * survives the rebuild through `safeNullableText`.
  *
  * `authToken` is the one declared-`string` field deliberately left alone: it is
  * a credential, never rendered and never passed to a string method, and
@@ -63,10 +71,9 @@ export function sanitizeMemberText<T extends MemberTextFields>(member: T): T {
     ...member,
     userId: safeText(member.userId),
     displayName: safeText(member.displayName),
-    readmooName:
-      member.readmooName === undefined
-        ? undefined
-        : safeText(member.readmooName),
+    ...(member.readmooName !== undefined && {
+      readmooName: safeText(member.readmooName),
+    }),
   };
 }
 
@@ -88,10 +95,9 @@ export function sanitizeFamilyGroupText<T extends FamilyGroupTextFields>(
     ownerId: safeText(group.ownerId),
     createdAt: safeText(group.createdAt),
     members: sanitizeList(group.members, sanitizeMemberText),
-    apiEndpoint:
-      group.apiEndpoint === undefined
-        ? undefined
-        : safeNullableText(group.apiEndpoint),
+    ...(group.apiEndpoint !== undefined && {
+      apiEndpoint: safeNullableText(group.apiEndpoint),
+    }),
   };
 }
 
@@ -111,10 +117,9 @@ export function sanitizeBookshelfMemberText<
     userId: safeText(member.userId),
     displayName: safeText(member.displayName),
     books: sanitizeList(member.books, sanitizeBookText),
-    lastUpdated:
-      member.lastUpdated === undefined
-        ? undefined
-        : safeNullableText(member.lastUpdated),
+    ...(member.lastUpdated !== undefined && {
+      lastUpdated: safeNullableText(member.lastUpdated),
+    }),
   };
 }
 
@@ -130,10 +135,9 @@ export function sanitizeFamilyBookshelfText<
   return {
     ...bookshelf,
     members: sanitizeList(bookshelf.members, sanitizeBookshelfMemberText),
-    familyId:
-      bookshelf.familyId === undefined
-        ? undefined
-        : safeText(bookshelf.familyId),
+    ...(bookshelf.familyId !== undefined && {
+      familyId: safeText(bookshelf.familyId),
+    }),
   };
 }
 

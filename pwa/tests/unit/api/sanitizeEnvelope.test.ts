@@ -93,6 +93,33 @@ const HOSTILE_GROUP = {
   expiresAt: 1_700_000_000_000,
 };
 
+/**
+ * The member-list element as `getFamilyMembers` sees it — that method answers
+ * to a COMPOSED contract (structural rebuild first, text layer second), not to
+ * the text layer alone. Three deliberate differences from `HOSTILE_MEMBER`:
+ * - a usable `userId`, because `sanitizeFamilyMembersResponse`
+ *   (`pwa/src/api/memberValidation.ts`) DROPS an element without one instead of
+ *   degrading it to `""`;
+ * - it keeps the non-string `readmooName`, which the rebuild OMITS rather than
+ *   degrades — the exact divergence the wiring rows have to make visible;
+ * - two extra properties, which the 4-field rebuild must strip.
+ */
+const HOSTILE_MEMBER_WITH_ID = {
+  ...HOSTILE_MEMBER,
+  userId: OTHER_USER_ID,
+  evil: "x",
+  nested: { deep: true },
+};
+
+/**
+ * The group payload for `getFamilyMembers`: `HOSTILE_MEMBER` is unaddressable
+ * and gets dropped, `HOSTILE_MEMBER_WITH_ID` survives and gets rebuilt.
+ */
+const HOSTILE_MEMBERS_GROUP = {
+  ...HOSTILE_GROUP,
+  members: [HOSTILE_MEMBER, HOSTILE_MEMBER_WITH_ID],
+};
+
 const HOSTILE_BOOKSHELF = {
   familyId: { id: "fam" },
   members: [
@@ -175,6 +202,12 @@ interface WiringCase {
   expected: Expectation[];
 }
 
+/**
+ * The group methods governed by the shared text layer ALONE (`createFamily`).
+ * Every declared-`string` field degrades to `""` in place — including a
+ * member's, since nothing here drops or rebuilds an element.
+ * `getFamilyMembers` is the exception and has its own table below.
+ */
 const GROUP_EXPECTATIONS: Expectation[] = [
   { path: "data.familyId", value: "" },
   { path: "data.ownerId", value: "" },
@@ -182,6 +215,40 @@ const GROUP_EXPECTATIONS: Expectation[] = [
   { path: "data.members.0.userId", value: "" },
   { path: "data.members.0.displayName", value: "" },
   { path: "data.members.0.readmooName", value: "" },
+  // Tri-state: a non-string endpoint degrades to null, never to "".
+  { path: "data.apiEndpoint", value: null },
+  // Deliberate exclusions — a credential, a flag and a number.
+  { path: "data.authToken", value: "tok-secret-value" },
+  { path: "data.members.0.canLend", value: BoolFlag.FALSE },
+  { path: "data.maxMembers", value: 6 },
+];
+
+/**
+ * `getFamilyMembers` is the one group method behind TWO layers: the structural
+ * rebuild in `pwa/src/api/memberValidation.ts` runs FIRST, the shared text layer
+ * second. Its member-level contract is strictly stronger than
+ * `GROUP_EXPECTATIONS`, and these rows are what tell the two apart — an
+ * unaddressable element is DROPPED rather than blanked, `userId` survives
+ * verbatim (an unusable one costs the whole element), a non-string
+ * `readmooName` loses its KEY instead of becoming `""`, and hostile extras
+ * cannot reach React state at all. The three GROUP-level text fields still come
+ * from the shared layer, which is why they read exactly as they do above.
+ */
+const MEMBERS_GROUP_EXPECTATIONS: Expectation[] = [
+  // Layer 2 — the same declared-string coercion every group method gets.
+  { path: "data.familyId", value: "" },
+  { path: "data.ownerId", value: "" },
+  { path: "data.createdAt", value: "" },
+  // Layer 1 — the element whose `userId` is an array is gone, not blanked.
+  { path: "data.members.length", value: 1 },
+  { path: "data.members.0.userId", value: OTHER_USER_ID },
+  { path: "data.members.0.displayName", value: "" },
+  // Omitted by the rebuild, NOT degraded to "": absence is what the "尚未記錄"
+  // hint and the "missing canLend means TRUE" fallback are written against.
+  { path: "data.members.0.readmooName", value: undefined },
+  // Stripped by the 4-field rebuild, never spread through.
+  { path: "data.members.0.evil", value: undefined },
+  { path: "data.members.0.nested", value: undefined },
   // Tri-state: a non-string endpoint degrades to null, never to "".
   { path: "data.apiEndpoint", value: null },
   // Deliberate exclusions — a credential, a flag and a number.
@@ -257,9 +324,9 @@ const SHELF_RESULT_EXPECTATIONS: Expectation[] = [
 const WIRING_CASES: WiringCase[] = [
   {
     name: "getFamilyMembers",
-    data: HOSTILE_GROUP,
+    data: HOSTILE_MEMBERS_GROUP,
     invoke: (client) => client.getFamilyMembers(FAMILY_ID),
-    expected: GROUP_EXPECTATIONS,
+    expected: MEMBERS_GROUP_EXPECTATIONS,
   },
   {
     name: "createFamily",
@@ -585,13 +652,35 @@ describe("ApiClient backend-text sanitization", () => {
       expect(result.data?.apiEndpoint).toBeNull();
     });
 
-    it("keeps an omitted apiEndpoint absent from the JSON payload", async () => {
+    it("materializes an omitted apiEndpoint as null on getFamilyMembers", async () => {
+      // The one field where the two layers disagree about absence, and layer 1
+      // wins because it runs first: `memberValidation` ALWAYS emits the key, so
+      // a caller of THIS method never has to tell "absent" from "not a string".
+      // The shared layer then sees a PRESENT `null` and keeps it as null.
       const withoutEndpoint = omit(VALID_GROUP, "apiEndpoint");
       mockFetch.mockResolvedValue(jsonResponse({ data: withoutEndpoint }));
 
       const result = await client.getFamilyMembers(FAMILY_ID);
 
-      expect(result.data?.apiEndpoint).toBeUndefined();
+      expect(Object.keys(result.data ?? {})).toContain("apiEndpoint");
+      expect(result.data?.apiEndpoint).toBeNull();
+      expect(JSON.stringify(result.data)).toBe(
+        JSON.stringify({ ...withoutEndpoint, apiEndpoint: null }),
+      );
+    });
+
+    it("keeps an omitted apiEndpoint absent on a method the text layer alone governs", async () => {
+      // `createFamily` has no structural layer, so the conditional spread in
+      // `sanitizeFamilyGroupText` decides alone: an omitted optional stays
+      // OMITTED rather than becoming an explicit `undefined` own property.
+      // `JSON.stringify` cannot tell those two apart — it drops an `undefined`
+      // value either way — so the key check is the load-bearing assertion here.
+      const withoutEndpoint = omit(VALID_GROUP, "apiEndpoint");
+      mockFetch.mockResolvedValue(jsonResponse({ data: withoutEndpoint }));
+
+      const result = await client.createFamily(USER_ID, "小明");
+
+      expect(Object.keys(result.data ?? {})).not.toContain("apiEndpoint");
       expect(JSON.stringify(result.data)).toBe(JSON.stringify(withoutEndpoint));
     });
   });
@@ -666,6 +755,13 @@ describe("ApiClient backend-text sanitization", () => {
    * `requestId` can serve neither as a React key nor as the target of
    * `PATCH /api/borrow/:id`. Its rows below are unchanged — it is the precedent
    * this layer was aligned to.
+   *
+   * `getFamilyMembers` now meets that same element-dropping strictness ONE
+   * LAYER EARLIER (`pwa/src/api/memberValidation.ts`, PR #150), so its cases
+   * below assert drops rather than blanked fields: a member with no usable
+   * `userId` is exactly as unaddressable as a borrow request with no
+   * `requestId`. Every other group method still answers to the text layer
+   * alone, where a hostile member is degraded in place instead.
    */
   describe("structurally broken payloads", () => {
     it("degrades a members list that is not an array to an empty list", async () => {
@@ -679,21 +775,35 @@ describe("ApiClient backend-text sanitization", () => {
       expect(result.data?.familyId).toBe("");
     });
 
-    it("drops a null member and keeps only the sanitized valid one", async () => {
+    it("drops every unaddressable member and keeps only the sanitized survivor", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       mockFetch.mockResolvedValue(
         jsonResponse({
-          data: { ...HOSTILE_GROUP, members: [null, HOSTILE_MEMBER] },
+          data: {
+            ...HOSTILE_GROUP,
+            // `null` cannot carry fields at all, and `HOSTILE_MEMBER`'s
+            // `userId` is an ARRAY — unusable as a React key, as either
+            // name-lookup key, or as the `:uid` of `updateMemberSettings` /
+            // `removeMember` — so on this method both are DROPPED rather than
+            // degraded to `""`. Only the third carries a usable `userId`.
+            members: [null, HOSTILE_MEMBER, HOSTILE_MEMBER_WITH_ID],
+          },
         }),
       );
 
       const result = await client.getFamilyMembers(FAMILY_ID);
+      const members = result.data?.members ?? [];
 
-      expect(result.data?.members).toHaveLength(1);
-      expect(result.data?.members[0].userId).toBe("");
-      expect(result.data?.members[0].displayName).toBe("");
-      expect(result.data?.members[0].readmooName).toBe("");
+      expect(members).toHaveLength(1);
+      expect(members[0].userId).toBe(OTHER_USER_ID);
+      expect(members[0].displayName).toBe("");
+      // Omitted by the 4-field rebuild, not degraded to "".
+      expect(Object.keys(members[0])).not.toContain("readmooName");
       // The survivor is still the real member, not a fabricated blank one.
-      expect(result.data?.members[0].canLend).toBe(BoolFlag.FALSE);
+      expect(members[0].canLend).toBe(BoolFlag.FALSE);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("dropped 2"),
+      );
     });
 
     it.each([
@@ -707,12 +817,16 @@ describe("ApiClient backend-text sanitization", () => {
 
         const result = await client.getFamilyMembers(FAMILY_ID);
 
+        // Both layers contribute: `memberValidation` degrades a non-record
+        // `data` to a members-only group plus its always-emitted `apiEndpoint`,
+        // then the shared text layer materializes the three declared-string
+        // fields. The result renders as an EMPTY family instead of throwing.
         expect(result.data).toStrictEqual({
           familyId: "",
           ownerId: "",
           createdAt: "",
           members: [],
-          apiEndpoint: undefined,
+          apiEndpoint: null,
         });
       },
     );
