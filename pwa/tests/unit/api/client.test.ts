@@ -350,10 +350,17 @@ describe("ApiClient", () => {
 
   describe("createFamily", () => {
     it("should call POST /api/family with userId only when no displayName", async () => {
+      // `members` carries MEMBER RECORDS, matching what the Worker actually
+      // returns (`worker/src/routes/family.ts` builds `members: [member]`).
+      // Bare userId strings are not a shape the API ever produced, and since
+      // PR #149 `sanitizeList` drops elements that cannot carry fields — a
+      // fixture that lies about the wire shape now reads back as `[]`.
       const familyData = {
         familyId: "fam-1",
         ownerId: USER_1,
-        members: [USER_1],
+        members: [
+          { userId: USER_1, displayName: "小明", canLend: BoolFlag.TRUE },
+        ],
         maxMembers: 6,
         createdAt: "2026-01-01T00:00:00Z",
       };
@@ -563,6 +570,11 @@ describe("ApiClient", () => {
                 isbn: "978-0000000000",
                 coverUrl: "https://example.com/cover.jpg",
                 readmooUrl: "https://readmoo.com/book/b1",
+                // Kept complete on purpose: the client sanitizes this payload
+                // on the way out (`sanitizeFamilyBookshelfText`), which
+                // materializes any declared text field the fixture omits, and
+                // the assertion below stays a strict `toEqual`.
+                category: "文學小說",
                 isShared: BoolFlag.TRUE,
               },
             ],
@@ -685,7 +697,15 @@ describe("ApiClient", () => {
       // Second call should use new token
       const [, retryInit] = mockFetch.mock.calls[1];
       expect(retryInit.headers["Authorization"]).toBe("Bearer new-token");
-      expect(result.data).toEqual({ payload: "encrypted" });
+      /**
+       * `toMatchObject`, not `toEqual`: `getPersonalBooks` runs its payload
+       * through `sanitizePersonalBooksText`, which materializes the record's
+       * declared text fields, so this stand-in payload comes back carrying them
+       * as `""`. That coercion has its own coverage in
+       * `tests/unit/api/sanitizeEnvelope.test.ts`; this test is about the retry
+       * mechanics, so it pins only the field it supplied.
+       */
+      expect(result.data).toMatchObject({ payload: "encrypted" });
     });
 
     it("should not retry on 401 when no refresher is set", async () => {

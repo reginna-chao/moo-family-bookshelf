@@ -24,7 +24,7 @@ moo-family-bookshelf/
 │   └── architecture.md
 ├── shared/                      # Cross-app TypeScript library (no build step)
 │   ├── src/
-│   │   ├── api/                # Endpoint URL validation + sync-code @host classification
+│   │   ├── api/                # Endpoint URL validation + sync-code @host classification + backend data-field runtime coercion
 │   │   ├── config/             # Readmoo host/selector config, report links
 │   │   ├── icons/              # Inline brand SVG paths
 │   │   ├── invite/             # Invite message templates
