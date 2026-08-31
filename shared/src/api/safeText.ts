@@ -94,11 +94,15 @@ function isRecordLike(value: unknown): boolean {
  *    "the backend sent an empty family" — a different and worse lie.
  *  - Anything ELSE — a primitive, or an array — is garbage that nonetheless
  *    walks past those guards, since `[]` and `"x"` are both truthy. It degrades
- *    to `sanitize({})`, letting the per-entity sanitizer materialize the full
+ *    to `sanitize({})`, letting the per-entity sanitizer materialize its own
  *    safe shape: `""` for every text field, `[]` for every list, optionals left
- *    absent. That renders as an EMPTY state instead of throwing on the first
- *    field read — the same degradation philosophy as `""` for text, one level
- *    up.
+ *    absent. A NESTED required record stays `undefined` — it recurses into this
+ *    same helper and hits the pass-through branch. The one case today is
+ *    `sanitizePublicShelfResultText`'s `shelf`, and that is the right outcome:
+ *    a blank shelf would render a share URL built on an empty token, which is a
+ *    worse lie than "no shelf". Callers guard it (`shelf ? … : ""`).
+ *    That renders as an EMPTY state instead of throwing on the first field
+ *    read — the same degradation philosophy as `""` for text, one level up.
  *
  * The empty-entity branch is what closes the container half of the white-screen
  * gap: `data: []` and `data: "x"` otherwise reach the exact render line a
@@ -136,6 +140,12 @@ export function sanitizeRecord<T>(value: T, sanitize: (record: T) => T): T {
  * counterpart of a required text field materializing as `""`. Losing a hostile
  * element is affordable here in a way it is not for a record: "no members" /
  * "no books" is a state the UI already renders.
+ *
+ * Dropping is deliberately SILENT — no `console.warn`, unlike
+ * `borrowValidation.ts` / `memberValidation.ts`, whose aggregate warnings sit on
+ * single fetch paths. This helper runs inside the bookshelf aggregation and
+ * other hot paths, where a per-response warning would be noise; the omission is
+ * a policy choice, not an oversight.
  *
  * The stricter precedent is `extension/src/api/borrowValidation.ts` (and its PWA
  * twin), which already answers a malformed borrow container with `[]` and drops
