@@ -9,7 +9,9 @@ function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
     title: "測試書籍",
     author: "測試作者",
     isbn: "",
-    coverUrl: "https://example.com/cover.jpg",
+    // Readmoo cover host on purpose: `safeCoverUrl` filters any other host out
+    // at render time (extension/src/dialog/safeCoverUrl.ts).
+    coverUrl: "https://cdn.readmoo.com/cover/test.jpg",
     readmooUrl: "https://readmoo.com/book/book-1",
     category: "",
     isShared: BoolFlag.TRUE,

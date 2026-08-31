@@ -11,7 +11,8 @@ description: >
   TRIGGER when: user invokes /distill, or asks to 蒸餾 / consolidate retro reports /
   apply accumulated retro proposals.
   DO NOT TRIGGER when: user wants a retrospective of the CURRENT session (that is
-  /develop's end-of-run retro offer), or wants any production code change (/develop).
+  /develop's retro, run only on explicit user request), or wants any production code
+  change (/develop).
 argument-hint: (none)
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash(git*), Bash(ls*), Bash(rm*), AskUserQuestion, TodoWrite
 model: opus

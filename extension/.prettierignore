@@ -1,0 +1,28 @@
+# Prettier v3 resolves ignore files from the CURRENT WORKING DIRECTORY only —
+# it never searches upward. Running `prettier --write .` (or `--check .`) with
+# cwd = `extension/` therefore ignores the repo-root `.prettierignore` entirely.
+# This file exists so such a run behaves like a repo-root run.
+# Keep it in sync with the root `.prettierignore` (extension-relative subset).
+
+# Generated files — rewritten verbatim by the scripts that own them, so
+# reformatting them here would just churn on the next build.
+# public/manifest.json: scripts/sync-version.ts + plugins/devManifest.ts
+# mock-readmoo.html: scripts/verify-selectors.ts --update-mock
+public/manifest.json
+tests/e2e/fixtures/mock-readmoo.html
+
+# Build output
+dist/
+dist-firefox/
+dist-firefox-amo/
+dist-firefox-direct/
+dist-firefox-updates.json
+web-ext-artifacts/
+web-ext-artifacts-amo/
+web-ext-artifacts-direct/
+
+# Test / tooling artifacts
+coverage/
+playwright-report/
+test-results/
+.verify-selectors-profile/

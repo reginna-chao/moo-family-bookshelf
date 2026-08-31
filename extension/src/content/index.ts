@@ -37,7 +37,8 @@ import {
   USER_EMAIL_KEY,
   DISPLAY_NAME_KEY,
 } from "../constants";
-import { BorrowStatus, type BorrowRequest } from "../api/types";
+import { BorrowStatus } from "../api/types";
+import { sanitizeBorrowRequests } from "../api/borrowValidation";
 
 const APP_ENV = getAppEnv();
 
@@ -256,8 +257,13 @@ async function injectFamilyBookshelfButton(): Promise<void> {
  * Fetch pending incoming borrow requests and add a numeric badge to the
  * floating button when count > 0. Silently no-ops on any error so a
  * misconfigured backend never blocks the button from appearing.
+ *
+ * Exported for unit tests; production callers go through
+ * `injectFamilyBookshelfButton`.
  */
-async function updatePendingBorrowBadge(button: HTMLElement): Promise<void> {
+export async function updatePendingBorrowBadge(
+  button: HTMLElement,
+): Promise<void> {
   try {
     const stored = await browser.storage.local.get([
       USER_ID_KEY,
@@ -273,12 +279,25 @@ async function updatePendingBorrowBadge(button: HTMLElement): Promise<void> {
     if (!userId || !familyId || !authToken) return;
 
     const url = `${apiEndpoint.replace(/\/+$/, "")}/api/family/${encodeURIComponent(familyId)}/borrow`;
+    // The bare fetch is deliberate: this content script is a light IIFE bundle
+    // and must not pull in ApiClient (auth-refresh, endpoint validation, dedup),
+    // which lives in the code-split dialog module. Payload trust is therefore
+    // delegated to `sanitizeBorrowRequests` — the same boundary
+    // `ApiClient.listBorrowRequests` uses — so the two clients of this endpoint
+    // cannot diverge on how they treat an untrusted (BYO) backend response.
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
     if (!res.ok) return;
-    const json = (await res.json()) as { data?: BorrowRequest[] };
-    const requests = json.data ?? [];
+    const json: unknown = await res.json();
+    // The envelope is untrusted too: read `.data` only off a real object, then
+    // let the sanitizer own array/element validation. Anything unusable degrades
+    // to an empty list (badge simply absent), never a throw.
+    const data =
+      typeof json === "object" && json !== null && "data" in json
+        ? json.data
+        : undefined;
+    const requests = sanitizeBorrowRequests(data);
     const pending = requests.filter(
       (r) => r.status === BorrowStatus.PENDING && r.ownerId === userId,
     ).length;

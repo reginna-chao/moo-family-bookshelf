@@ -61,7 +61,9 @@ async function createBorrowRequest(
       bookId: `book-${bookSuffix}`,
       bookTitle: `Book ${bookSuffix}`,
       bookAuthor: "Author",
-      bookCoverUrl: "https://example.com/cover.jpg",
+      // Must clear `isAllowedCoverUrl` in src/routes/borrow.ts — an off-Readmoo
+      // host is refused with 400 INVALID_COVER_URL before the handler runs.
+      bookCoverUrl: `https://cdn.readmoo.com/cover/${bookSuffix}.jpg`,
       ownerId,
     },
     borrowerToken,

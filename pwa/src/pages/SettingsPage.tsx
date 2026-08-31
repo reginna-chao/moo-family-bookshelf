@@ -5,6 +5,7 @@ import {
   buildSyncCodeInviteMessage,
   buildLinkInviteMessage,
 } from "moo-family-bookshelf-shared/invite/messages";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "@/crypto/syncCode";
@@ -167,7 +168,8 @@ export function SettingsPage({
       if (res.error) {
         // 429 shows the localized back-off copy instead of server English.
         setNameError(
-          rateLimitedEnvelopeMessage(res.error) ?? res.error.message,
+          rateLimitedEnvelopeMessage(res.error) ??
+            safeErrorText(res.error.message, "更新失敗，請稍後再試"),
         );
         setNameSaving(false);
         return;
@@ -207,7 +209,8 @@ export function SettingsPage({
         const msg =
           res.error.code === "OWNER_CANNOT_LEAVE"
             ? "管理者必須先轉移管理權才能離開家庭"
-            : (rateLimitedEnvelopeMessage(res.error) ?? res.error.message);
+            : (rateLimitedEnvelopeMessage(res.error) ??
+              safeErrorText(res.error.message, "離開家庭失敗，請稍後再試"));
         setLeaveError(msg);
         setLeaveState("idle");
         return;
@@ -243,7 +246,7 @@ export function SettingsPage({
         const msg =
           res.error.code === "OWNER_CANNOT_DELETE"
             ? "管理者必須先轉移管理權才能移除帳戶"
-            : res.error.message;
+            : safeErrorText(res.error.message, "移除帳戶失敗，請稍後再試");
         setDeleteError(msg);
         setDeleteState("idle");
         return;

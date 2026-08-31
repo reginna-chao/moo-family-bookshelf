@@ -12,14 +12,21 @@ import {
 import { validateEndpointUrl } from "@/api/client";
 
 /**
- * Production copy, pinned here because `VALID_LEAD_IN` is module-private. The
- * PWA twin renders the SAME two strings — pwa/tests/component/SyncCodeHostNote
- * .test.tsx pins its own copy of this pair, and the two MUST stay byte-identical
- * so the two apps never describe the same server differently.
+ * Production copy, pinned as literals ON PURPOSE. The strings now live in
+ * `moo-family-bookshelf-shared/hostNote/messages` and both twins import them
+ * from there, so importing them HERE too would compare production with itself
+ * and let any reword sail through green. Pinned, a reword has to be made twice
+ * — once in shared/, once here — which is the point.
+ *
+ * The PWA twin renders the SAME three lead-ins from that same shared module and
+ * pins its own copy of this set (pwa/tests/component/SyncCodeHostNote.test.tsx).
+ * Cross-app drift is now impossible at the source; these pins guard the
+ * remaining direction — copy changing without anyone deciding to change it.
  */
 const JOIN_LEAD_IN = "此同步碼將連線至自訂伺服器：";
 const VERIFY_LEAD_IN = "將連線至自訂伺服器：";
-/** Shared by both variants — deliberately, see the variant block below. */
+const ONBOARDING_LEAD_IN = "目前使用自訂伺服器：";
+/** Shared by every variant — deliberately, see the variant block below. */
 const INVALID_WARNING = "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認";
 
 /**
@@ -38,20 +45,21 @@ const INVALID_WARNING = "⚠️ 此同步碼的伺服器位址無效或不安全
  *   3. Nothing at all for a default-endpoint (or still-being-typed) code.
  *
  * The component is PRESENTATIONAL — the verdict arrives as a prop, which is what
- * lets one component serve both the join screens (verdict from the typed code)
- * and the two secret-collecting screens: the onboarding verification challenge
- * and the re-auth modal, whose verdict is the endpoint the client has ALREADY
- * adopted and where no sync code is on display at all. Most cases below still
- * drive it through the real `parseSyncCodeApiHost`: mocking the parse would
- * leave the mapping from verdict to rendered copy — the whole component —
- * unverified.
+ * lets one component serve the join screens (verdict from the typed code), the
+ * two secret-collecting screens (the onboarding verification challenge and the
+ * re-auth modal) and the onboarding container's status note, whose verdict is
+ * the endpoint the client has ALREADY adopted and where no sync code is on
+ * display at all. Most cases below still drive it through the real
+ * `parseSyncCodeApiHost`: mocking the parse would leave the mapping from verdict
+ * to rendered copy — the whole component — unverified.
  *
  * `variant` follows exactly that boundary and changes NOTHING else: whether a
  * sync code is visible on the screen decides whether the valid branch's lead-in
  * names one (`join`, the default, so the three join call sites need no prop) or
- * drops the mention (`verify`). The invalid branch's warning is shared by both
- * variants by decision, not omission — see "the valid-branch lead-in per
- * variant" below.
+ * drops the mention (`verify` before handing over a secret, `onboarding` for the
+ * container's plain statement of where the buttons below will connect). The
+ * invalid branch's warning is shared by every variant by decision, not omission
+ * — see "the valid-branch lead-in per variant" below.
  */
 describe("SyncCodeHostNote", () => {
   describe("no custom host", () => {
@@ -327,7 +335,10 @@ describe("SyncCodeHostNote", () => {
    *
    *   - a sync code is on display (the join screens) → name it, "此同步碼…";
    *   - none is (the verification challenge, the re-auth modal) → drop the
-   *     mention, because there is no code on screen for the user to look at.
+   *     mention, because there is no code on screen for the user to look at;
+   *   - nothing has happened yet (the onboarding container's status note, which
+   *     sits above whichever step is showing) → present tense, "目前使用…",
+   *     because it reports a standing fact rather than a pending connection.
    *
    * `join` is the DEFAULT so the three join call sites keep working with no prop
    * at all — that default is what this block pins. The invalid branch is
@@ -357,15 +368,34 @@ describe("SyncCodeHostNote", () => {
     it.each([
       ["join", "join" as const, JOIN_LEAD_IN],
       ["verify", "verify" as const, VERIFY_LEAD_IN],
+      ["onboarding", "onboarding" as const, ONBOARDING_LEAD_IN],
     ])("names the server with the %s lead-in", (_label, variant, leadIn) => {
       // Exact equality, not `toContain`: the join copy CONTAINS the verify copy,
       // so a substring assertion cannot tell the two variants apart.
       expect(textOf(VALID, variant)).toBe(`${leadIn}${VALID.endpoint}`);
     });
 
-    it("drops the sync-code mention on the verify variant", () => {
+    it("drops the sync-code mention on the verify and onboarding variants", () => {
       expect(textOf(VALID, "verify")).not.toContain("此同步碼");
+      expect(textOf(VALID, "onboarding")).not.toContain("此同步碼");
       expect(textOf(VALID, "join")).toContain("此同步碼");
+    });
+
+    /**
+     * The onboarding container's note and the challenge's note answer DIFFERENT
+     * questions about the same address ("which server am I on" vs "which server
+     * is about to receive this PIN"), and dialog/Onboarding.tsx can put the
+     * container's note on screen at the same time as the join screen's. Three
+     * variants that render the same sentence would make `variant` decorative and
+     * hide a wrong key at the call site; pairwise inequality is the assertion
+     * that keeps holding after any one of them is reworded.
+     */
+    it("gives each variant a lead-in no other variant produces", () => {
+      const rendered = (["join", "verify", "onboarding"] as const).map(
+        (variant) => textOf(VALID, variant),
+      );
+
+      expect(new Set(rendered).size).toBe(rendered.length);
     });
 
     /**
@@ -386,10 +416,11 @@ describe("SyncCodeHostNote", () => {
      * is what carried the refused host, and a caller asking for `verify` copy
      * must not get a softened version of a security refusal.
      */
-    it("warns identically on both variants", () => {
+    it("warns identically on every variant", () => {
       const onJoin = textOf(INVALID, "join");
 
       expect(textOf(INVALID, "verify")).toBe(onJoin);
+      expect(textOf(INVALID, "onboarding")).toBe(onJoin);
       expect(textOf(INVALID)).toBe(onJoin);
       expect(onJoin).toBe(INVALID_WARNING);
     });
@@ -397,17 +428,18 @@ describe("SyncCodeHostNote", () => {
 
   /**
    * `className` carries LAYOUT only — the caller decides spacing, the component
-   * keeps its own palette/size classes. The secret-collecting screens are the
-   * reason the prop exists: on both of them the note sits outside the container
-   * that would otherwise supply the gutter (`.moo-onboarding-view` on the
-   * challenge, `.moo-modal`'s padding flow on the re-auth modal), so each passes
-   * its own spacing modifier.
+   * keeps its own palette/size classes. The screens that mount the note OUTSIDE
+   * the container that would otherwise supply the gutter are the reason the prop
+   * exists: `.moo-onboarding-view` on the challenge, `.moo-modal`'s padding flow
+   * on the re-auth modal, and the onboarding container, whose note precedes
+   * `.moo-onboarding-view` entirely — so each passes its own spacing modifier.
    */
   describe("extra layout classes", () => {
-    /** The modifiers the two production call sites actually pass. */
+    /** The modifiers the three production call sites actually pass. */
     const LAYOUT_CLASSES = [
       ["the onboarding challenge", "moo-sync-host-note--verify"],
       ["the re-auth modal", "moo-sync-host-note--reauth"],
+      ["the onboarding container", "moo-sync-host-note--onboarding"],
     ] as const;
 
     function classesOf(

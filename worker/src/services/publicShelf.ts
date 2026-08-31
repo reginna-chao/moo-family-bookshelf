@@ -15,6 +15,7 @@ import {
   type PublicShelvesRecord,
   type UserBooksRecord,
 } from "../kv/schema";
+import { sanitizeCoverUrl } from "../utils/validation";
 
 /**
  * Where a resolved shelf list came from:
@@ -79,6 +80,16 @@ function remainingTtlSeconds(expiresAt: number | null): number | undefined {
   return remaining >= KV_MIN_TTL_SECONDS ? remaining : 0;
 }
 
+/**
+ * The single chokepoint for `public:{shareToken}` snapshot contents — the
+ * books-path refresh in `routes/user.ts` AND the create / update / reset-token
+ * handlers in `routes/publicShelf.ts` all funnel through here. That is why
+ * `coverUrl` is re-sanitized at this point rather than trusted from the
+ * `user:{userId}` record: the shelf handlers hand over a raw KV read, so a
+ * record poisoned before the cover-host whitelist existed could otherwise mint
+ * a fresh beaconing snapshot for anonymous visitors even if its owner never
+ * syncs books again.
+ */
 function buildSnapshot(
   userId: string,
   shelf: PublicShelf,
@@ -88,7 +99,10 @@ function buildSnapshot(
     userId,
     shelfId: shelf.shelfId,
     title: shelf.title,
-    books: sharedBooks(books),
+    books: sharedBooks(books).map((b) => ({
+      ...b,
+      coverUrl: sanitizeCoverUrl(b.coverUrl),
+    })),
     createdAt: shelf.createdAt,
     expiresAt: shelf.expiresAt,
   };

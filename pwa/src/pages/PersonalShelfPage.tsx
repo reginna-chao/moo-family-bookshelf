@@ -3,6 +3,7 @@ import { Share2 } from "lucide-react";
 import { BoolFlag, PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
 import type { ApiClient, BookEntry } from "@/api/client";
 import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { useSearch } from "@/hooks/useSearch";
 import { useLoadMore } from "@/hooks/useLoadMore";
 import {
@@ -96,7 +97,9 @@ export function PersonalShelfPage({
     try {
       const response = await apiClient.getPersonalBooks(userId);
       if (response.error) {
-        setErrorMessage(response.error.message);
+        setErrorMessage(
+          safeErrorText(response.error.message, "載入失敗，請稍後再試"),
+        );
         setState("error");
         return;
       }
@@ -172,7 +175,9 @@ export function PersonalShelfPage({
             dirtyBooks.map((b) => ({ bookId: b.bookId, isShared: b.isShared })),
           );
       if (response.error) {
-        setErrorMessage(response.error.message);
+        setErrorMessage(
+          safeErrorText(response.error.message, "儲存失敗，請稍後再試"),
+        );
         setState("error");
         return;
       }

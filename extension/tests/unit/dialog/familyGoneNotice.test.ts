@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isFamilyGoneError } from "@/api/auth-refresh";
+import { FAMILY_GONE_ERROR_CODES, isFamilyGoneError } from "@/api/auth-refresh";
 import {
   FAMILY_GONE_NOTICE_FALLBACK,
   FAMILY_GONE_NOTICE_MESSAGES,
@@ -41,18 +41,38 @@ describe("FAMILY_GONE_NOTICE_MESSAGES", () => {
   });
 
   /**
-   * Anti-drift against the classifier: a message keyed on a code that is NOT
-   * family-gone would be unreachable copy, because both teardown entry points
-   * run `isFamilyGoneError` before anything is torn down.
+   * Anti-drift against the classifier, message → classifier: a message keyed on
+   * a code that is NOT family-gone would be unreachable copy, because both
+   * teardown entry points run `isFamilyGoneError` before anything is torn down.
    *
-   * Only this direction is checkable — FAMILY_GONE_ERROR_CODES stays private in
-   * `api/auth-refresh.ts`, so a NEW gone code added there without a message here
-   * silently falls to the generic fallback rather than failing this test.
+   * Asserted through `isFamilyGoneError` rather than against the exported set on
+   * purpose — the classifier is the production entry point, and the set's own
+   * doc in `api/auth-refresh.ts` says not to membership-test it directly.
    */
   it.each(MESSAGES.map(([code]) => code))(
     "keys %s, which the shared classifier agrees is family-gone",
     (code) => {
       expect(isFamilyGoneError(code)).toBe(true);
+    },
+  );
+
+  /**
+   * The reverse direction, classifier → message. `FAMILY_GONE_ERROR_CODES` is
+   * exported read-only from `api/auth-refresh.ts` for exactly this check: a
+   * FOURTH gone code added there and nowhere else would tear the family binding
+   * down and then explain it with the generic fallback banner, which names no
+   * cause and no remedy.
+   *
+   * The table is the production set itself, so that fourth code shows up here as
+   * a new failing case with no edit to this file. Not vacuous even if the set
+   * were emptied: the three cases above assert `isFamilyGoneError` on every
+   * message key, so an empty set fails them first.
+   */
+  it.each([...FAMILY_GONE_ERROR_CODES])(
+    "covers the family-gone code %s with its own copy, not the fallback",
+    (code) => {
+      expect(FAMILY_GONE_NOTICE_MESSAGES.has(code)).toBe(true);
+      expect(familyGoneNoticeText(code)).not.toBe(FAMILY_GONE_NOTICE_FALLBACK);
     },
   );
 });

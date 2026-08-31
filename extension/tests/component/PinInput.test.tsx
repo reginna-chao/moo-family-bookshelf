@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { PinInput } from "@/dialog/PinInput";
 import { dimmedAncestor, dimmedElements } from "./helpers/dimStyle";
 
@@ -324,6 +324,57 @@ describe("PinInput", () => {
 
       expect(screen.getByText("PIN 碼長度須為 6-12 位數")).toBeInTheDocument();
       expect(onComplete).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Moving to the confirm step defers a refocus by a 0ms timer, because the
+   * field can only be refocused after the re-render that clears it. Closing the
+   * widget before that tick must cancel the timer, or the callback runs on a
+   * dead component and reaches through a ref React has already detached.
+   *
+   * Timer discipline: the render settles on the REAL clock first; the fake one
+   * goes in only to hold the 0ms timer PENDING at unmount. Every assertion past
+   * that point is synchronous — an RTL waiter cannot see vi's clock and would
+   * poll a frozen one until the test times out.
+   */
+  describe("deferred refocus cleanup", () => {
+    /**
+     * Undoes the clearTimeout spy while the FAKE clearTimeout is still on
+     * globalThis; restoring after `useRealTimers()` would strand the fake there
+     * for every later test. Hence: restore, then swap the clock back.
+     */
+    let restoreClearTimeout = () => {};
+
+    afterEach(() => {
+      restoreClearTimeout();
+      restoreClearTimeout = () => {};
+      vi.useRealTimers();
+    });
+
+    it("clears the pending refocus timer when the widget unmounts", () => {
+      const { unmount } = render(
+        <PinInput mode="setup" onComplete={vi.fn()} />,
+      );
+
+      vi.useFakeTimers();
+
+      fireEvent.change(getInput(), { target: { value: "123456" } });
+      fireEvent.click(getSubmitButton());
+
+      // Reaching the confirm step is what arms the deferred refocus.
+      expect(screen.getByText("再次輸入 PIN 碼確認")).toBeInTheDocument();
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      // Spy only from here, so an arming clear cannot pass for the cleanup one.
+      const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+      restoreClearTimeout = () => clearSpy.mockRestore();
+
+      unmount();
+
+      expect(clearSpy).toHaveBeenCalled();
+      // Nothing outlives the widget, so the refocus can never run on a dead ref.
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 });

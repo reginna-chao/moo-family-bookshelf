@@ -26,6 +26,7 @@ import {
   FAMILY_ID_KEY,
 } from "../constants";
 import { persistAcceptedFamilyEndpoint } from "../storage/familyEndpointChoice";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type { useAutoSetup } from "./useAutoSetup";
 
 /**
@@ -284,7 +285,7 @@ export async function createNewFamily(opts: {
   );
   if (response.error) {
     throw new CreateFamilyError(
-      response.error.message,
+      safeErrorText(response.error.message, "建立家庭失敗，請稍後再試"),
       response.error.code,
       response.error.retryAfter,
     );
@@ -439,7 +440,10 @@ export async function performJoin(opts: {
     return {
       ok: false,
       errorCode: response.error.code,
-      errorMessage: response.error.message,
+      errorMessage: safeErrorText(
+        response.error.message,
+        "加入家庭失敗，請稍後再試",
+      ),
       retryAfter: response.error.retryAfter,
     };
   }

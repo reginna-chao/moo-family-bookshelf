@@ -24,6 +24,7 @@ import { VerificationSettings } from "./VerificationSettings";
 import { useFamilyData } from "./FamilyDataContext";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
 import { getReportLinks } from "moo-family-bookshelf-shared/config/links";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 
 const reportLinks = getReportLinks({ appVersion: __APP_VERSION__ });
 
@@ -217,7 +218,10 @@ export function FamilySettings({
           response.error.code === "OWNER_CANNOT_LEAVE"
             ? "管理者必須先轉移管理權才能離開家庭"
             : (rateLimitedEnvelopeMessage(response.error) ??
-              response.error.message);
+              safeErrorText(
+                response.error.message,
+                "離開家庭失敗，請稍後再試",
+              ));
         setLeaveError(msg);
         setLeaveState("idle");
         return;
@@ -238,7 +242,7 @@ export function FamilySettings({
         const msg =
           response.error.code === "OWNER_CANNOT_DELETE"
             ? "管理者必須先轉移管理權才能移除帳戶"
-            : response.error.message;
+            : safeErrorText(response.error.message, "移除帳戶失敗，請稍後再試");
         setDeleteError(msg);
         setDeleteState("idle");
         return;

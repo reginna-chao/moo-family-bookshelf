@@ -15,7 +15,10 @@ const REQUEST: BorrowRequest = {
   bookId: "book-1",
   bookTitle: "深度學習",
   bookAuthor: "作者甲",
-  bookCoverUrl: "https://cdn.example/cover.jpg",
+  // Must sit on a Readmoo cover host: the card filters `bookCoverUrl` through
+  // `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) at render time, so
+  // any other host renders the placeholder instead of an <img>.
+  bookCoverUrl: "https://cdn.readmoo.com/cover.jpg",
   status: BorrowStatus.PENDING,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
@@ -39,6 +42,48 @@ describe("BorrowRequestCard", () => {
     expect(screen.getByText("作者甲")).toBeInTheDocument();
     expect(screen.getByText("小華")).toBeInTheDocument();
     expect(screen.getByText("待處理")).toBeInTheDocument();
+  });
+
+  /**
+   * A borrow record carries the cover URL its BORROWER sent, has no TTL, and is
+   * rendered on the other party's screen — inside a Readmoo page that sends no
+   * CSP. `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) is therefore the
+   * only render-time brake on a stored tracking beacon leaking the viewer's
+   * IP / UA, including rows written before the Worker rejected such URLs.
+   */
+  describe("cover URL whitelist", () => {
+    it("renders the cover image when the URL is on a Readmoo cover host", () => {
+      renderCard([]);
+
+      const img = screen.getByAltText("深度學習") as HTMLImageElement;
+      expect(img.src).toBe("https://cdn.readmoo.com/cover.jpg");
+      expect(img).toHaveClass("moo-request-card__cover");
+    });
+
+    it("drops a non-Readmoo cover URL and renders the placeholder instead", () => {
+      const { container } = renderCard([], {
+        ...REQUEST,
+        bookCoverUrl: "https://evil.example/beacon.gif",
+      });
+
+      expect(container.querySelector("img")).toBeNull();
+      expect(screen.queryByAltText("深度學習")).not.toBeInTheDocument();
+      expect(container.innerHTML).not.toContain("evil.example");
+
+      const placeholder = container.querySelector(".moo-request-card__cover");
+      expect(placeholder).not.toBeNull();
+      expect(placeholder?.tagName).toBe("DIV");
+      expect(placeholder).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("renders the placeholder when the request carries no cover URL", () => {
+      const { container } = renderCard([], { ...REQUEST, bookCoverUrl: "" });
+
+      expect(container.querySelector("img")).toBeNull();
+      const placeholder = container.querySelector(".moo-request-card__cover");
+      expect(placeholder?.tagName).toBe("DIV");
+      expect(placeholder).toHaveAttribute("aria-hidden", "true");
+    });
   });
 
   it("invokes the action's onClick when its button is pressed", () => {

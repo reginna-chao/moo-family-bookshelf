@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ApiError, BoolFlag } from "@/api/client";
 import type { ApiClient, FamilyMember } from "@/api/client";
 import { rateLimitedEnvelopeMessage } from "@/utils/retryMessage";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 
 function getMemberLabel(member: FamilyMember): string {
   return member.displayName || member.userId.slice(0, 8);
@@ -112,7 +113,10 @@ export function MemberList({
           confirmAction.targetId,
         );
         if (res.error) {
-          setError(rateLimitedEnvelopeMessage(res.error) ?? res.error.message);
+          setError(
+            rateLimitedEnvelopeMessage(res.error) ??
+              safeErrorText(res.error.message, "移除成員失敗，請稍後再試"),
+          );
           setLoading(false);
           return;
         }
@@ -134,7 +138,10 @@ export function MemberList({
           confirmAction.targetId,
         );
         if (res.error) {
-          setError(rateLimitedEnvelopeMessage(res.error) ?? res.error.message);
+          setError(
+            rateLimitedEnvelopeMessage(res.error) ??
+              safeErrorText(res.error.message, "轉移管理權失敗，請稍後再試"),
+          );
           setLoading(false);
           return;
         }

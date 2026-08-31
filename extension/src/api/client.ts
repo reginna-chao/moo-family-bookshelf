@@ -5,6 +5,19 @@
 
 import browser from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { sanitizeRecord } from "moo-family-bookshelf-shared/api/safeText";
+import {
+  sanitizeBorrowRequestText,
+  sanitizeFamilyBookshelfText,
+  sanitizeFamilyGroupText,
+  sanitizeMemberText,
+  sanitizeOtpInfoText,
+  sanitizePersonalBooksText,
+  sanitizePublicShelfListText,
+  sanitizePublicShelfResultText,
+  sanitizeVersionInfoText,
+} from "moo-family-bookshelf-shared/api/entityText";
 import { DEFAULT_API_ENDPOINT, TOKEN_EXPIRES_AT_KEY } from "../constants";
 
 /**
@@ -44,6 +57,11 @@ import {
   type ReauthInfo,
   type RefreshOutcome,
 } from "./auth-refresh";
+import { sanitizeBorrowRequests } from "./borrowValidation";
+import {
+  sanitizeFamilyMember,
+  sanitizeFamilyMembersResponse,
+} from "./memberValidation";
 
 // Re-export all types so existing imports from "./client" continue to work
 export {
@@ -224,7 +242,9 @@ export class ApiClient {
       const res = await fetch(`${this.baseUrl}/api/version`);
       if (!res.ok) return null;
       const json = (await res.json()) as ApiResponse<VersionInfo>;
-      return json.data ?? null;
+      const data = json.data ?? null;
+      if (data === null) return null;
+      return sanitizeRecord(data, sanitizeVersionInfoText);
     } catch {
       return null;
     }
@@ -300,11 +320,43 @@ export class ApiClient {
     this.throwOnError(res);
   }
 
+  /**
+   * Coerce a success payload's backend TEXT fields before it leaves the client,
+   * so no consumer ever holds a `string`-typed field that is not one (see
+   * `shared/src/api/safeText.ts`). Error envelopes and bodyless successes pass
+   * through untouched.
+   */
+  private sanitizeEnvelope<T>(
+    res: ApiResponse<T>,
+    sanitize: (data: T) => T,
+  ): ApiResponse<T> {
+    if (res.data === undefined) return res;
+    return { ...res, data: sanitizeRecord(res.data, sanitize) };
+  }
+
+  /**
+   * The single chokepoint through which every thrown `ApiError` passes, so the
+   * envelope text is sanitized once here rather than at each call site.
+   *
+   * `code` / `message` are typed `string` but reach us through a bare cast of
+   * `response.json()`, and the backend is self-hostable. A payload such as
+   * `{"toString":null,"valueOf":null}` — which `JSON.parse` really can produce
+   * — makes the constructor's `super(\`${code}: ${message}\`)` throw a
+   * TypeError, so no `ApiError` is ever constructed: `err instanceof ApiError`
+   * turns false and the localized 429 back-off branch (which needs `code` and
+   * `retryAfter`) is skipped in favour of an English TypeError. Sanitizing the
+   * two interpolated fields keeps the error's identity, not just its wording.
+   *
+   * `retryAfter` is passed through untouched — the constructor already
+   * validates it — and `isClientSynthesized` deliberately reads the ORIGINAL
+   * payload, since the symbol marker is the provenance proof and must not be
+   * inferred from sanitized text.
+   */
   private throwOnError(res: ApiResponse<unknown>): void {
     if (res.error) {
       throw new ApiError(
-        res.error.code,
-        res.error.message,
+        safeErrorText(res.error.code, "UNKNOWN_ERROR"),
+        safeErrorText(res.error.message, "請稍後再試"),
         res.error.retryAfter,
         isClientSynthesized(res.error),
       );
@@ -336,7 +388,8 @@ export class ApiClient {
   // --- Personal Settings ---
 
   async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
-    return this.get(`/api/user/${userId}/books`);
+    const res = await this.get<PersonalBooks>(`/api/user/${userId}/books`);
+    return this.sanitizeEnvelope(res, sanitizePersonalBooksText);
   }
 
   async updatePersonalBooks(
@@ -394,7 +447,8 @@ export class ApiClient {
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
     }
-    return this.post("/api/family", body);
+    const res = await this.post<FamilyGroup>("/api/family", body);
+    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
   }
 
   async joinFamily(
@@ -410,7 +464,11 @@ export class ApiClient {
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
     }
-    return this.post(`/api/family/${familyId}/join`, body);
+    const res = await this.post<FamilyGroup>(
+      `/api/family/${familyId}/join`,
+      body,
+    );
+    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
   }
 
   async updateDisplayName(
@@ -459,11 +517,15 @@ export class ApiClient {
     newOwnerId: string,
     clearEndpoint?: 1,
   ): Promise<ApiResponse<FamilyGroup>> {
-    return this.put(`/api/family/${familyId}/transfer`, {
-      userId,
-      newOwnerId,
-      ...(clearEndpoint !== undefined && { clearEndpoint }),
-    });
+    const res = await this.put<FamilyGroup>(
+      `/api/family/${familyId}/transfer`,
+      {
+        userId,
+        newOwnerId,
+        ...(clearEndpoint !== undefined && { clearEndpoint }),
+      },
+    );
+    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
   }
 
   async updateFamilyEndpoint(
@@ -473,8 +535,24 @@ export class ApiClient {
     return this.put(`/api/family/${familyId}/endpoint`, { apiEndpoint });
   }
 
+  /**
+   * `unknown`, not `FamilyGroup`: the wire shape is only a claim until
+   * `sanitizeFamilyMembersResponse` has checked it. The envelope is sanitized
+   * whole — callers of this method read `{ data, error }` themselves instead of
+   * going through `unwrap`, so an `error` envelope must reach them unchanged
+   * while `data.members` is rebuilt.
+   */
   async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
-    return this.get(`/api/family/${familyId}/members`);
+    const res = await this.get<unknown>(`/api/family/${familyId}/members`);
+    // Two deliberate layers, in this order: `memberValidation` rebuilds
+    // `data.members` structurally (drops unaddressable elements, strips hostile
+    // extras) and normalizes `apiEndpoint`; the shared text layer then coerces
+    // the remaining declared-string fields (`familyId` / `ownerId` /
+    // `createdAt`) that memberValidation documents as out of its scope.
+    return this.sanitizeEnvelope(
+      sanitizeFamilyMembersResponse(res),
+      sanitizeFamilyGroupText,
+    );
   }
 
   // --- Account ---
@@ -488,7 +566,10 @@ export class ApiClient {
   async getFamilyBookshelf(
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
-    return this.get(`/api/family/${familyId}/bookshelf`);
+    const res = await this.get<FamilyBookshelf>(
+      `/api/family/${familyId}/bookshelf`,
+    );
+    return this.sanitizeEnvelope(res, sanitizeFamilyBookshelfText);
   }
 
   // --- Borrow Requests (v1.1.0) ---
@@ -501,14 +582,18 @@ export class ApiClient {
       `/api/family/${familyId}/borrow`,
       payload,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
+  /**
+   * `unknown`, not `BorrowRequest[]`: the wire shape is only a claim until
+   * `sanitizeBorrowRequests` has checked it. `unwrap` still runs first — it owns
+   * the `{ data, error }` envelope contract (throws `ApiError` on `error`,
+   * `EMPTY_RESPONSE` on missing data).
+   */
   async listBorrowRequests(familyId: string): Promise<BorrowRequest[]> {
-    const res = await this.get<BorrowRequest[]>(
-      `/api/family/${familyId}/borrow`,
-    );
-    return this.unwrap(res);
+    const res = await this.get<unknown>(`/api/family/${familyId}/borrow`);
+    return sanitizeBorrowRequests(this.unwrap(res));
   }
 
   async updateBorrowStatus(
@@ -518,19 +603,41 @@ export class ApiClient {
     const res = await this.patch<BorrowRequest>(`/api/borrow/${requestId}`, {
       status,
     });
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
+  /**
+   * `unknown`, not `FamilyMember`: the wire shape is only a claim until
+   * `sanitizeFamilyMember` has checked it. `unwrap` still runs first — it owns
+   * the `{ data, error }` envelope contract (throws `ApiError` on `error`,
+   * `EMPTY_RESPONSE` on missing data).
+   *
+   * Throwing on an unusable payload is safe for every caller: all three call
+   * sites (`dialog/BorrowTab.tsx`'s picker write-back, `dialog/MemberList.tsx`'s
+   * canLend toggle and readmooName delete) already catch and route through
+   * `memberSettingsErrorMessage`, so a malformed response surfaces as a
+   * retryable error instead of poisoning `members` state.
+   */
   async updateMemberSettings(
     familyId: string,
     uid: string,
     settings: MemberSettingsPayload,
   ): Promise<FamilyMember> {
-    const res = await this.patch<FamilyMember>(
+    const res = await this.patch<unknown>(
       `/api/family/${familyId}/member/${uid}`,
       settings,
     );
-    return this.unwrap(res);
+    const member = sanitizeFamilyMember(this.unwrap(res));
+    if (member === null) {
+      throw new ApiError(
+        "INVALID_RESPONSE",
+        "response is not a valid family member",
+      );
+    }
+    // Two deliberate layers, same order as `getFamilyMembers`: the structural
+    // rebuild above, then the shared text layer coercing the surviving
+    // record's declared-string fields.
+    return sanitizeRecord(member, sanitizeMemberText);
   }
 
   // --- Verification ---
@@ -547,7 +654,8 @@ export class ApiClient {
   }
 
   async generateOtp(userId: string): Promise<ApiResponse<OtpInfo>> {
-    return this.post(`/api/user/${userId}/verify/otp`);
+    const res = await this.post<OtpInfo>(`/api/user/${userId}/verify/otp`);
+    return this.sanitizeEnvelope(res, sanitizeOtpInfoText);
   }
 
   // --- QR Token ---
@@ -573,7 +681,7 @@ export class ApiClient {
     const res = await this.get<{ shelves: PublicShelf[] }>(
       `/api/user/${userId}/public-shelf`,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfListText);
   }
 
   async createPublicShelf(
@@ -584,7 +692,7 @@ export class ApiClient {
       `/api/user/${userId}/public-shelf`,
       body,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
   async updatePublicShelf(
@@ -596,7 +704,7 @@ export class ApiClient {
       `/api/user/${userId}/public-shelf/${shelfId}`,
       body,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
   async resetPublicShelfToken(
@@ -606,7 +714,7 @@ export class ApiClient {
     const res = await this.post<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf/${shelfId}/reset-token`,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
   /**

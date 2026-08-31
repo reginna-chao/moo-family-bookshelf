@@ -24,9 +24,10 @@ extension/src/
 ├── crypto/          # Hashing utilities (SHA-256)
 └── api/             # API client (configurable endpoint)
 
-shared/src/         # moo-family-bookshelf-shared — consumed by BOTH extension/ and pwa/
-├── api/            # Endpoint URL validation + sync-code @host classification
+shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pwa/ and worker/
+├── api/            # Endpoint URL validation + sync-code @host classification + backend data-field runtime coercion
 ├── config/         # Readmoo host/selector config, report links
+├── hostNote/       # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 ├── icons/          # Inline brand SVG paths
 ├── invite/         # Invite message templates
 ├── personal/       # Personal-shelf save strategy (PUT vs PATCH)
@@ -36,10 +37,10 @@ shared/src/         # moo-family-bookshelf-shared — consumed by BOTH extension
 
 ### The `shared/` Package
 
-- Source-only package (no build step); `extension/` and `pwa/` import the `.ts` files directly and bundle them with their own Vite config.
-- Put logic here when Extension and PWA must behave identically; drift between two copies is the failure mode it exists to prevent.
+- Source-only package (no build step); `extension/`, `pwa/` and `worker/` import the `.ts` files directly — the first two bundle them with their own Vite config, `worker/` with wrangler's esbuild. All three map the package via `paths` → `../shared/src/*` in their `tsconfig.json`.
+- Put logic here when Extension and PWA must behave identically; drift between two copies is the failure mode it exists to prevent. The Worker consumes it too where a client rule and a server-side boundary check must agree (e.g. the Readmoo cover-URL whitelist in `src/config/readmoo.ts`).
 - **Runtime-agnostic.** It is also imported by Node scripts run under `tsx` (`extension/scripts/verify-build.ts`, `verify-selectors.ts`). `tsconfig.json` includes the `DOM` lib (needed for `URLSearchParams` typing), so `no-restricted-globals` in `shared/eslint.config.js` blocks `document` / `window` / `localStorage` / `sessionStorage` / `navigator`. Take such values as parameters from the caller instead.
-- Covered in CI by the `Lint (shared)` / `Typecheck (shared)` steps of the `extension-check` job (`shared/**` is inside that job's path filter). No test script of its own — behaviour is covered by `extension/tests/` and `pwa/tests/`.
+- Covered in CI by the `Lint (shared)` / `Typecheck (shared)` steps of the `extension-check` job (`shared/**` is inside that job's path filter), and `shared/**` also sits in `worker-check`'s filter, so a shared change runs the Worker checks too. No test script of its own — behaviour is covered by `extension/tests/`, `pwa/tests/` and `worker/tests/`.
 - Commands: `pnpm --filter moo-family-bookshelf-shared lint` / `typecheck`.
 
 ### Coding Conventions

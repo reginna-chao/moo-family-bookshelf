@@ -1,10 +1,10 @@
 # Run retrospective (reference)
 
-Lazy-loaded by `/develop` at the retro offer, before the commit gate (code-cycle
-Phase 7 / design Deliver). Runs in the **main session** — it needs the full conversation history
-(dispatches, gates, Fix Cycle rounds, user corrections) that an isolated subagent cannot
-see. Read this only when the user accepts the retro offer; never load it preemptively,
-never auto-run.
+Lazy-loaded by `/develop` when the user explicitly requests a retro, before the commit
+gate (code-cycle Phase 7 / design Deliver). Runs in the **main session** — it needs the
+full conversation history (dispatches, gates, Fix Cycle rounds, user corrections) that an
+isolated subagent cannot see. Read this only when the user explicitly requests a retro;
+never load it preemptively, never suggest it proactively, never auto-run.
 
 Instructions are English; the report file and all user-facing output are 繁體中文.
 Read-only toward source code: cite `file:line`, never paste long excerpts.

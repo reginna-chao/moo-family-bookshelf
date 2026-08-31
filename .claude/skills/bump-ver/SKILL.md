@@ -25,6 +25,7 @@ Pure version bumps don't need the /develop Fix Cycle. This skill encodes the pro
 ## Encoded conventions (do not re-ask)
 
 - **All 5 version files synced** to the same target: `extension/package.json`, `extension/public/manifest.json`, `pwa/package.json`, `worker/package.json`, root `package.json`.
+- **Plain-language copy is mandatory**: `CHANGELOG.md` and `docs/release-notes/v*.md` are user-facing. **Read `.claude/rules/user-facing-copy.md` before drafting any bullet** and apply its checklist before commit. The two failure modes it exists to stop: translating a commit subject into Chinese, and manufacturing a bullet for a change no reader can observe.
 - **CHANGELOG language**: 繁體中文（台灣）, follows existing structure. Heading: `## vX.Y.Z（YYYY-MM-DD）`. Group bullets under sub-section headings (e.g. `### 問題修正`, `### 功能新增`, `### 安全與穩定性`) — match how prior entries are organized.
 - **Excluded from CHANGELOG** (internal, not user-facing): `chore:`, `docs:`, `test:`, `refactor:`, `ci:`, `build:`, `style(<dev-tooling>):`. Internal tooling commits (e.g. `chore(skills): ...`) are always excluded.
 - **Included in CHANGELOG** (user-facing): `feat:`, `fix:`, `perf:`, `security:`. `style(<user-facing>):` (e.g. `style(extension)`, `style(pwa)`) is included as a UI tweak.
@@ -85,14 +86,14 @@ Sub-section heading rules (pick the headings that fit the included commits):
 - `### 介面調整` for user-facing `style:`
 - If only one category exists, the heading still goes in (matches existing entries).
 
-Bullet style: short, action-oriented sentence describing **what the user notices**, not the technical change. Use existing CHANGELOG bullets as reference for tone and granularity.
+Bullet style: short, action-oriented sentence describing **what the user notices**, not the technical change. `.claude/rules/user-facing-copy.md` is the authority here — its banned-vocabulary table and worked examples are binding, and its Rule 2 explicitly permits merging or dropping commits whose effect no reader can observe. Do NOT copy tone from older CHANGELOG entries indiscriminately; entries written before that rule existed contain implementation vocabulary and are not a reference.
 
 ### Step 3b — Draft the bilingual Release notes file
 
 Generate the content for `docs/release-notes/v<X.Y.Z>.md` from the SAME included commits, following `docs/release-notes/TEMPLATE.md`:
 
 - **Order**: `# English` section first, then `# 繁體中文` section, separated by `---`. Do not flip (see encoded conventions).
-- **繁體中文 section**: reuse the CHANGELOG bullets drafted in Step 3 verbatim (same wording, same categories) — the two must stay in sync.
+- **繁體中文 section**: take the CHANGELOG bullets drafted in Step 3 and curate them — reuse verbatim where the bullet already reads well, shorten where release-note readers do not need the full detail, and drop bullets that only matter to someone tracking every change. This matches `docs/release-notes/TEMPLATE.md`（「直接取用 / 改寫」）: the release notes are a curated summary, not a second copy of the CHANGELOG. The two must not CONTRADICT each other, but they need not match word for word, and the category set may differ (`### 安全與隱私` in the CHANGELOG maps onto `## 改善調整` here).
 - **English section**: a curated, natural translation of the same bullets — not a literal word-for-word rendering; adjust phrasing to read as native English.
 - **Categories**: use the four TEMPLATE pairs (New Features / 功能新增, Improvements / 改善調整, Bug Fixes / 問題修正, Developer Experience / 開發者體驗). Map `perf:` and user-facing `style:` into Improvements; fold `security:`/stability items into Improvements unless there are enough to warrant calling them out. **Delete any category with no items** — never leave an empty heading.
 - Do NOT add the `<details>` commit list or the Full Changelog link — the CD workflow appends those automatically at release time.

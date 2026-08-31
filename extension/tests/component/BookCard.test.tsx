@@ -9,7 +9,10 @@ function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
     title: "測試書籍",
     author: "測試作者",
     isbn: "",
-    coverUrl: "https://example.com/cover.jpg",
+    // Must sit on a Readmoo cover host: the card filters `coverUrl` through
+    // `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) at render time, so
+    // any other host yields "" and no <img> is emitted at all.
+    coverUrl: "https://cdn.readmoo.com/cover/test.jpg",
     readmooUrl: "https://readmoo.com/book/book-1",
     category: "",
     isShared: BoolFlag.FALSE,
@@ -25,7 +28,30 @@ describe("BookCard", () => {
 
     const img = screen.getByAltText("測試書籍") as HTMLImageElement;
     expect(img).toBeInTheDocument();
-    expect(img.src).toBe("https://example.com/cover.jpg");
+    expect(img.src).toBe("https://cdn.readmoo.com/cover/test.jpg");
+  });
+
+  /**
+   * Cover URLs on a family book arrive from the SERVER, and the dialog is
+   * injected into Readmoo pages that send no CSP — so this render-time filter
+   * is the only thing between a stored tracking beacon and every viewer's
+   * IP / UA. A rejected URL must degrade to the empty-cover placeholder, never
+   * reach an `<img src>`.
+   */
+  it("drops a non-Readmoo cover URL and renders the fallback instead", () => {
+    const { container } = render(
+      <BookCard
+        book={makeBook({ coverUrl: "https://evil.example/beacon.gif" })}
+      />,
+    );
+
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.queryByAltText("測試書籍")).not.toBeInTheDocument();
+    // Nothing anywhere in the tree may reference the hostile host.
+    expect(container.innerHTML).not.toContain("evil.example");
+    expect(
+      container.querySelector(".moo-book-card__cover-fallback"),
+    ).not.toBeNull();
   });
 
   it("wraps cover image in a link to readmooUrl", () => {

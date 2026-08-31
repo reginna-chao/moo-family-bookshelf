@@ -27,6 +27,7 @@ import {
   type BookshelfChipsRecord,
 } from "./updateTracking";
 import { useFamilyShelfPrefs } from "./useFamilyShelfPrefs";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 
 /** Member bookshelf for family shelf display */
 export interface MemberBooks {
@@ -195,7 +196,9 @@ export function FamilyDataProvider({
       const response = await apiClient.getFamilyMembers(familyId);
       if (!mountedRef.current) return;
       if (response.error) {
-        setMembersError(response.error.message);
+        setMembersError(
+          safeErrorText(response.error.message, "載入失敗，請稍後再試"),
+        );
         setMembersState("error");
         return;
       }
@@ -221,7 +224,9 @@ export function FamilyDataProvider({
       if (!mountedRef.current) return;
 
       if (response.error) {
-        setBookshelfError(response.error.message);
+        setBookshelfError(
+          safeErrorText(response.error.message, "載入失敗，請稍後再試"),
+        );
         setBookshelfState("error");
         return;
       }

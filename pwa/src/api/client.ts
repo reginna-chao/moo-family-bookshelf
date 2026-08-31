@@ -4,7 +4,22 @@
  */
 
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { sanitizeRecord } from "moo-family-bookshelf-shared/api/safeText";
+import {
+  sanitizeBorrowRequestText,
+  sanitizeFamilyBookshelfText,
+  sanitizeFamilyGroupText,
+  sanitizeMemberText,
+  sanitizePersonalBooksText,
+  sanitizePublicShelfDataText,
+  sanitizePublicShelfListText,
+  sanitizePublicShelfResultText,
+  sanitizeVersionInfoText,
+} from "moo-family-bookshelf-shared/api/entityText";
 import { DEFAULT_API_ENDPOINT } from "../constants";
+import { sanitizeBorrowRequests } from "./borrowValidation";
+import { sanitizeFamilyMembersResponse } from "./memberValidation";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -324,7 +339,9 @@ export class ApiClient {
       const res = await fetch(`${this.baseUrl}/api/version`);
       if (!res.ok) return null;
       const json = (await res.json()) as ApiResponse<VersionInfo>;
-      return json.data ?? null;
+      const data = json.data ?? null;
+      if (data === null) return null;
+      return sanitizeRecord(data, sanitizeVersionInfoText);
     } catch {
       return null;
     }
@@ -379,11 +396,41 @@ export class ApiClient {
     this.throwOnError(res);
   }
 
+  /**
+   * Coerce a success payload's backend TEXT fields before it leaves the client,
+   * so no consumer ever holds a `string`-typed field that is not one (see
+   * `shared/src/api/safeText.ts`). Error envelopes and bodyless successes pass
+   * through untouched.
+   */
+  private sanitizeEnvelope<T>(
+    res: ApiResponse<T>,
+    sanitize: (data: T) => T,
+  ): ApiResponse<T> {
+    if (res.data === undefined) return res;
+    return { ...res, data: sanitizeRecord(res.data, sanitize) };
+  }
+
+  /**
+   * The single chokepoint through which every thrown `ApiError` passes, so the
+   * envelope text is sanitized once here rather than at each call site.
+   *
+   * `code` / `message` are typed `string` but reach us through a bare cast of
+   * `response.json()`, and the backend is self-hostable. A payload such as
+   * `{"toString":null,"valueOf":null}` — which `JSON.parse` really can produce
+   * — makes the constructor's `super(\`${code}: ${message}\`)` throw a
+   * TypeError, so no `ApiError` is ever constructed: `err instanceof ApiError`
+   * turns false and the localized 429 back-off branch (which needs `code` and
+   * `retryAfter`) is skipped in favour of an English TypeError. Sanitizing the
+   * two interpolated fields keeps the error's identity, not just its wording.
+   *
+   * `retryAfter` is passed through untouched — the constructor already
+   * validates it.
+   */
   private throwOnError(res: ApiResponse<unknown>): void {
     if (res.error) {
       throw new ApiError(
-        res.error.code,
-        res.error.message,
+        safeErrorText(res.error.code, "UNKNOWN_ERROR"),
+        safeErrorText(res.error.message, "請稍後再試"),
         res.error.retryAfter,
       );
     }
@@ -418,7 +465,8 @@ export class ApiClient {
 
   async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
     this.validateHexId(userId, "userId");
-    return this.get(`/api/user/${userId}/books`);
+    const res = await this.get<PersonalBooks>(`/api/user/${userId}/books`);
+    return this.sanitizeEnvelope(res, sanitizePersonalBooksText);
   }
 
   async updatePersonalBooks(
@@ -473,7 +521,8 @@ export class ApiClient {
       userId,
       displayName: displayName ?? "",
     };
-    return this.post("/api/family", body);
+    const res = await this.post<FamilyGroup>("/api/family", body);
+    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
   }
 
   async joinFamily(
@@ -537,8 +586,24 @@ export class ApiClient {
     return this.put(`/api/family/${familyId}/transfer`, { userId, newOwnerId });
   }
 
+  /**
+   * `unknown`, not `FamilyGroup`: the wire shape is only a claim until
+   * `sanitizeFamilyMembersResponse` has checked it. The envelope is sanitized
+   * whole — callers of this method read `{ data, error }` themselves instead of
+   * going through `unwrap`, so an `error` envelope must reach them unchanged
+   * while `data.members` is rebuilt.
+   */
   async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
-    return this.get(`/api/family/${familyId}/members`);
+    const res = await this.get<unknown>(`/api/family/${familyId}/members`);
+    // Two deliberate layers, in this order: `memberValidation` rebuilds
+    // `data.members` structurally (drops unaddressable elements, strips hostile
+    // extras) and normalizes `apiEndpoint`; the shared text layer then coerces
+    // the remaining declared-string fields (`familyId` / `ownerId` /
+    // `createdAt`) that memberValidation documents as out of its scope.
+    return this.sanitizeEnvelope(
+      sanitizeFamilyMembersResponse(res),
+      sanitizeFamilyGroupText,
+    );
   }
 
   async updateDisplayName(
@@ -564,7 +629,10 @@ export class ApiClient {
   async getFamilyBookshelf(
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
-    return this.get(`/api/family/${familyId}/bookshelf`);
+    const res = await this.get<FamilyBookshelf>(
+      `/api/family/${familyId}/bookshelf`,
+    );
+    return this.sanitizeEnvelope(res, sanitizeFamilyBookshelfText);
   }
 
   // --- Borrow Requests (v1.1.0) ---
@@ -577,14 +645,18 @@ export class ApiClient {
       `/api/family/${familyId}/borrow`,
       payload,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
+  /**
+   * `unknown`, not `BorrowRequest[]`: the wire shape is only a claim until
+   * `sanitizeBorrowRequests` has checked it. `unwrap` still runs first — it owns
+   * the `{ data, error }` envelope contract (throws `ApiError` on `error`,
+   * `EMPTY_RESPONSE` on missing data).
+   */
   async listBorrowRequests(familyId: string): Promise<BorrowRequest[]> {
-    const res = await this.get<BorrowRequest[]>(
-      `/api/family/${familyId}/borrow`,
-    );
-    return this.unwrap(res);
+    const res = await this.get<unknown>(`/api/family/${familyId}/borrow`);
+    return sanitizeBorrowRequests(this.unwrap(res));
   }
 
   async updateBorrowStatus(
@@ -594,7 +666,7 @@ export class ApiClient {
     const res = await this.patch<BorrowRequest>(`/api/borrow/${requestId}`, {
       status,
     });
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
   async updateMemberSettings(
@@ -606,7 +678,7 @@ export class ApiClient {
       `/api/family/${familyId}/member/${uid}`,
       settings,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizeMemberText);
   }
 
   // --- Verification ---
@@ -641,7 +713,7 @@ export class ApiClient {
     const res = await this.get<{ shelves: PublicShelf[] }>(
       `/api/user/${userId}/public-shelf`,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfListText);
   }
 
   async createPublicShelf(
@@ -653,7 +725,7 @@ export class ApiClient {
       `/api/user/${userId}/public-shelf`,
       body,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
   async updatePublicShelf(
@@ -666,7 +738,7 @@ export class ApiClient {
       `/api/user/${userId}/public-shelf/${shelfId}`,
       body,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
   async resetPublicShelfToken(
@@ -677,7 +749,7 @@ export class ApiClient {
     const res = await this.post<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf/${shelfId}/reset-token`,
     );
-    return this.unwrap(res);
+    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
   /**
@@ -698,14 +770,24 @@ export class ApiClient {
     });
     const json = (await response.json()) as ApiResponse<PublicShelfData>;
     if (json.error) {
-      const err = new Error(`${json.error.code}: ${json.error.message}`);
+      // Sanitize before interpolation: a hostile `{"toString":null}` field makes
+      // `new Error(...)` throw before `status` is attached, and PublicShelfPage
+      // switches on that `status` — a 404 would lose its「此公開書櫃不存在或已過期」
+      // screen and fall back to the generic load error.
+      const code = safeErrorText(json.error.code, "UNKNOWN_ERROR");
+      const message = safeErrorText(json.error.message, "請稍後再試");
+      const err = new Error(`${code}: ${message}`);
       (err as Error & { status: number }).status = response.status;
       throw err;
     }
     if (!json.data) {
       throw new Error("EMPTY_RESPONSE: response body missing data");
     }
-    return json.data;
+    // This method bypasses `readEnvelope` with its own bare cast (:699), so the
+    // sanitizer is the ONLY thing standing between a hostile public snapshot and
+    // `PublicShelfPage`, which renders `title` / `book.title` / `book.author`
+    // straight into JSX and calls `.toLowerCase()` on them while searching.
+    return sanitizeRecord(json.data, sanitizePublicShelfDataText);
   }
 
   // --- Internal ---

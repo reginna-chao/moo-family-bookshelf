@@ -3,6 +3,7 @@ import { Search, BookX, AlertCircle } from "lucide-react";
 import { ApiClient } from "@/api/client";
 import type { BookEntry, PublicShelfData } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
+import { safeCoverUrl } from "@/utils/safeCoverUrl";
 
 interface PublicShelfPageProps {
   shareToken: string;
@@ -126,6 +127,12 @@ export function PublicShelfPage({ shareToken }: PublicShelfPageProps) {
 
 function BookCard({ book }: { book: BookEntry }) {
   const [imgError, setImgError] = useState(false);
+  // A public shelf is someone else's server data, and this page is reachable
+  // without login — drop covers outside the Readmoo whitelist. Omitting the
+  // `<img>` entirely (rather than passing src="") means the browser issues no
+  // request at all and the existing title placeholder shows immediately.
+  const coverUrl = safeCoverUrl(book.coverUrl);
+  const showCover = coverUrl !== "" && !imgError;
 
   return (
     <a
@@ -135,9 +142,9 @@ function BookCard({ book }: { book: BookEntry }) {
       className="block rounded-lg border border-gray-100 overflow-hidden hover:shadow-md transition-shadow bg-white"
     >
       <div className="aspect-[3/4] bg-gray-100 relative">
-        {!imgError ? (
+        {showCover ? (
           <img
-            src={book.coverUrl}
+            src={coverUrl}
             alt={book.title}
             loading="lazy"
             className="w-full h-full object-cover"

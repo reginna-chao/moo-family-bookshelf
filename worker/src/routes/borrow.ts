@@ -1,4 +1,5 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
+import { isAllowedCoverUrl } from "moo-family-bookshelf-shared/config/readmoo";
 import type { Env } from "../utils/env";
 import {
   kvKeys,
@@ -147,6 +148,21 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
 
   if (!isValidUserId(body.ownerId)) {
     return jsonError(c, 400, "INVALID_USER_ID", "ownerId format is invalid");
+  }
+
+  // The cover URL is stored verbatim and later rendered into an <img src> by
+  // the PWA / Extension, so an arbitrary URL from a family member would be a
+  // privacy tracking beacon (it leaks the viewer's IP + UA to the attacker on
+  // every render). Restrict it to Readmoo-served https covers at the boundary.
+  // Runs before the rate-limit charge: a malformed request is a format error
+  // and must not burn the caller's quota (same rule as `verifySecret`).
+  if (!isAllowedCoverUrl(body.bookCoverUrl)) {
+    return jsonError(
+      c,
+      400,
+      "INVALID_COVER_URL",
+      "bookCoverUrl must be an https URL on a Readmoo host",
+    );
   }
 
   // Capture validated fields into locals (narrows types for the rest of the handler)
