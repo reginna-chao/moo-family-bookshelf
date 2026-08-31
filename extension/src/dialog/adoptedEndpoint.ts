@@ -1,8 +1,14 @@
 /**
- * The single authoritative source of the endpoint-disclosure rule for screens
+ * The single authoritative source of the endpoint-disclosure rule for every
+ * screen that discloses which backend the client is talking to: the screens
  * that collect a verification secret (the onboarding challenge and the re-auth
- * modal). Both call this; neither re-derives it, so the rule cannot drift into
- * two answers that disagree on the same question.
+ * modal) and, since the disclosure is the same question, the onboarding
+ * container's status note. That third caller collects no secret — it just tells
+ * a self-hoster which server the create / join / recovery buttons below it will
+ * hit — but it is bound by the same two invariants, which is exactly why it
+ * calls this instead of reading the endpoint itself. All three call this; none
+ * re-derives it, so the rule cannot drift into answers that disagree on the
+ * same question.
  *
  * Two invariants live here and nowhere else:
  *

@@ -6,6 +6,7 @@
   "exports": {
     "./api/*": "./src/api/*",
     "./config/*": "./src/config/*",
+    "./hostNote/*": "./src/hostNote/*",
     "./icons/*": "./src/icons/*",
     "./invite/*": "./src/invite/*",
     "./personal/*": "./src/personal/*",
