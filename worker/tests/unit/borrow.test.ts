@@ -68,6 +68,34 @@ async function createFamilyWithTwoMembers() {
   return { familyId, token1, token2 };
 }
 
+/**
+ * USER1 (family owner) + USER2 + USER3, so a record can have a party set that
+ * excludes one member.
+ *
+ * `maxMembers` defaults to 2 on create (`routes/family.ts`) and no route raises
+ * it, so the capacity is bumped directly in KV — setup only, every assertion
+ * below still goes through the HTTP handlers.
+ */
+async function createFamilyWithThreeMembers() {
+  const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1);
+
+  const raw = await kv.get<Json>(kvKeys.family(familyId), "json");
+  raw.maxMembers = 3;
+  await kv.put(kvKeys.family(familyId), JSON.stringify(raw));
+
+  const { authToken: token2 } = await joinFamilyAndGetToken(
+    familyId,
+    USER2,
+    "User2",
+  );
+  const { authToken: token3 } = await joinFamilyAndGetToken(
+    familyId,
+    USER3,
+    "User3",
+  );
+  return { familyId, token1, token2, token3 };
+}
+
 const validBorrowBody = {
   bookId: "book-123",
   bookTitle: "Test Book",
@@ -439,7 +467,38 @@ describe("POST /api/family/:id/borrow", () => {
 // ===========================================================================
 
 describe("GET /api/family/:id/borrow", () => {
-  it("should return all borrow requests for the family", async () => {
+  /** Create a PENDING borrow request; returns its requestId. */
+  async function createBorrow(
+    familyId: string,
+    borrowerToken: string,
+    ownerId: string,
+    bookId: string,
+  ) {
+    const res = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      { ...validBorrowBody, ownerId, bookId },
+      borrowerToken,
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as Json;
+    return json.data.requestId as string;
+  }
+
+  /** GET the family borrow list as `token`; asserts 200 and returns `data`. */
+  async function listBorrows(familyId: string, token: string) {
+    const res = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    return json.data as BorrowRequest[];
+  }
+
+  it("should return all borrow requests the caller is a party to", async () => {
     const { familyId, token1, token2 } = await createFamilyWithTwoMembers();
 
     // Create two borrow requests
@@ -468,6 +527,54 @@ describe("GET /api/family/:id/borrow", () => {
     expect(json.data).toHaveLength(2);
     expect(json.data[0].bookId).toBe("book-1");
     expect(json.data[1].bookId).toBe("book-2");
+  });
+
+  it("should hide a record from a family member who is neither borrower nor owner", async () => {
+    const { familyId, token2, token3 } = await createFamilyWithThreeMembers();
+
+    // USER2 borrows USER1's book — USER3 is in the family but not a party.
+    const requestId = await createBorrow(familyId, token2, USER1, "book-1");
+
+    // The record really exists; emptiness below must come from the filter.
+    expect(await kv.get(kvKeys.borrow(requestId), "json")).not.toBeNull();
+
+    const visible = await listBorrows(familyId, token3);
+    expect(visible).toEqual([]);
+  });
+
+  it("should return the record to both parties of the transaction", async () => {
+    const { familyId, token1, token2 } = await createFamilyWithThreeMembers();
+
+    const requestId = await createBorrow(familyId, token2, USER1, "book-1");
+
+    const ownerView = await listBorrows(familyId, token1);
+    expect(ownerView).toHaveLength(1);
+    expect(ownerView[0].requestId).toBe(requestId);
+
+    const borrowerView = await listBorrows(familyId, token2);
+    expect(borrowerView).toHaveLength(1);
+    expect(borrowerView[0].requestId).toBe(requestId);
+  });
+
+  it("should scope each caller's list to the records they are a party to", async () => {
+    const { familyId, token1, token2, token3 } =
+      await createFamilyWithThreeMembers();
+
+    // Two records sharing an owner (USER1) but with different borrowers.
+    const req2to1 = await createBorrow(familyId, token2, USER1, "book-1");
+    const req3to1 = await createBorrow(familyId, token3, USER1, "book-2");
+
+    const borrower2View = await listBorrows(familyId, token2);
+    expect(borrower2View.map((r) => r.requestId)).toEqual([req2to1]);
+    expect(borrower2View.every((r) => r.borrowerId !== USER3)).toBe(true);
+
+    const borrower3View = await listBorrows(familyId, token3);
+    expect(borrower3View.map((r) => r.requestId)).toEqual([req3to1]);
+    expect(borrower3View.every((r) => r.borrowerId !== USER2)).toBe(true);
+
+    // The shared owner is a party to both.
+    const ownerView = await listBorrows(familyId, token1);
+    expect(ownerView.map((r) => r.requestId)).toEqual([req2to1, req3to1]);
   });
 
   it("should return empty array when no requests exist", async () => {
