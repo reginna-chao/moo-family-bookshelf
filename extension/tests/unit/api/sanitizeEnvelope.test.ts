@@ -102,11 +102,12 @@ const HOSTILE_GROUP = {
 };
 
 /**
- * The member-list element as `getFamilyMembers` sees it — that method answers
- * to a COMPOSED contract (structural rebuild first, text layer second), not to
- * the text layer alone. Three deliberate differences from `HOSTILE_MEMBER`:
- * - a usable `userId`, because `sanitizeFamilyMembersResponse`
- *   (`extension/src/api/memberValidation.ts`) DROPS an element without one
+ * The member as BOTH composed call sites see it — `getFamilyMembers` reads it as
+ * a list element, `updateMemberSettings` as the whole PATCH response — where
+ * "composed" means a structural rebuild FIRST and the text layer second, not the
+ * text layer alone. Three deliberate differences from `HOSTILE_MEMBER`:
+ * - a usable `userId`, because `sanitizeFamilyMember`
+ *   (`extension/src/api/memberValidation.ts`) DROPS a member without one
  *   instead of degrading it to `""`;
  * - it keeps the non-string `readmooName`, which the rebuild OMITS rather than
  *   degrades — the exact divergence the wiring rows have to make visible;
@@ -406,17 +407,31 @@ const WIRING_CASES: WiringCase[] = [
       client.updateBorrowStatus(REQUEST_ID, BorrowStatus.LENT),
     expected: BORROW_EXPECTATIONS,
   },
+  // Composed exactly like `getFamilyMembers` — structural rebuild first, text
+  // layer second — so the fixture has to be ADDRESSABLE: an unusable payload no
+  // longer degrades in place, it rejects with `INVALID_RESPONSE`. That reject
+  // path is pinned in `extension/tests/unit/api/member-client.test.ts` and is
+  // deliberately NOT duplicated here, so the blanket "resolves instead of
+  // throwing" row below keeps holding for every entry in this table.
   {
     name: "updateMemberSettings",
-    data: HOSTILE_MEMBER,
+    data: HOSTILE_MEMBER_WITH_ID,
     invoke: (client) =>
       client.updateMemberSettings(FAMILY_ID, USER_ID, {
         canLend: BoolFlag.FALSE,
       }),
+    // `MEMBERS_GROUP_EXPECTATIONS`' member rows, unwrapped — this method
+    // resolves with the member itself rather than an envelope. `userId` reads
+    // back as the PAYLOAD's id, not the `:uid` argument: the rebuild copies it
+    // verbatim and never echoes the request.
     expected: [
-      { path: "userId", value: "" },
+      { path: "userId", value: OTHER_USER_ID },
       { path: "displayName", value: "" },
-      { path: "readmooName", value: "" },
+      // Omitted by the rebuild, NOT degraded to "".
+      { path: "readmooName", value: undefined },
+      // Stripped by the 4-field rebuild, never spread through.
+      { path: "evil", value: undefined },
+      { path: "nested", value: undefined },
       { path: "canLend", value: BoolFlag.FALSE },
     ],
   },
