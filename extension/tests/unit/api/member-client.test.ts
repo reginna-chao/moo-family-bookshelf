@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiClient } from "@/api/client";
-import { BoolFlag } from "@/api/types";
-import type { ApiResponse, FamilyGroup, FamilyMember } from "@/api/types";
+import { ApiError, BoolFlag } from "@/api/types";
+import type {
+  ApiResponse,
+  FamilyGroup,
+  FamilyMember,
+  MemberSettingsPayload,
+} from "@/api/types";
 
 vi.mock("@/constants", () => ({
   DEFAULT_API_ENDPOINT: "https://default.workers.dev",
@@ -61,6 +66,67 @@ function makeGroup(overrides: Partial<FamilyGroup> = {}): FamilyGroup {
     ...overrides,
   };
 }
+
+/** The rejection reason, typed — `rejects.toThrow` cannot inspect fields. */
+async function captureRejection(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (e) {
+    return e;
+  }
+  throw new Error("expected the promise to reject, but it resolved");
+}
+
+/*
+ * Member-shape fixtures shared by both payload-validation suites below: the
+ * list (`getFamilyMembers`) and the single object (`updateMemberSettings`) go
+ * through the SAME `sanitizeFamilyMember` rules, so one set of tables is what
+ * keeps the two suites from asserting subtly different criteria.
+ */
+
+/** Exactly the keys `FamilyMember` declares — the sanitized member's key set. */
+const MEMBER_KEYS = ["userId", "displayName", "canLend", "readmooName"];
+const SORTED_MEMBER_KEYS = [...MEMBER_KEYS].sort();
+
+/** Read a value as a bag of unknowns — the tables feed fields the type forbids. */
+function asRecord(value: unknown): Record<string, unknown> {
+  return value as Record<string, unknown>;
+}
+
+/** A valid member with one field replaced by an untrusted value. */
+function withField(field: string, value: unknown): Record<string, unknown> {
+  return { ...makeMember(), [field]: value };
+}
+
+/** A valid member with one field absent entirely. */
+function withoutField(field: string): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(makeMember()).filter(([key]) => key !== field),
+  );
+}
+
+/** Values that are not strings — reused by both string-typed fields. */
+const NON_STRING_VALUES: Array<{ name: string; value: unknown }> = [
+  { name: "a number", value: 42 },
+  { name: "null", value: null },
+  { name: "undefined", value: undefined },
+  { name: "an object", value: { nested: "x" } },
+  { name: "an array", value: ["x"] },
+  { name: "a boolean", value: false },
+];
+
+/** Values that are not exactly one of the two `BoolFlag` members. */
+const INVALID_CANLEND: Array<{ name: string; value: unknown }> = [
+  { name: "the boolean true", value: true },
+  { name: "the boolean false", value: false },
+  { name: 'the string "1"', value: "1" },
+  { name: 'the string "0"', value: "0" },
+  { name: "an out-of-range number", value: 2 },
+  { name: "a negative number", value: -1 },
+  { name: "null", value: null },
+  { name: "an object", value: { canLend: 1 } },
+  { name: "an array", value: [1] },
+];
 
 describe("ApiClient getFamilyMembers", () => {
   let client: ApiClient;
@@ -130,10 +196,6 @@ describe("ApiClient getFamilyMembers", () => {
    * what makes drift between them visible.
    */
   describe("getFamilyMembers payload validation", () => {
-    /** Exactly the keys `FamilyMember` declares — the sanitized element's key set. */
-    const MEMBER_KEYS = ["userId", "displayName", "canLend", "readmooName"];
-    const SORTED_MEMBER_KEYS = [...MEMBER_KEYS].sort();
-
     /** Mirrors the literal in `extension/src/api/memberValidation.ts`. */
     const MALFORMED_CONTAINER_WARNING =
       "[memberValidation] malformed members payload: expected an array, treating as empty";
@@ -177,33 +239,6 @@ describe("ApiClient getFamilyMembers", () => {
       expect(members).toHaveLength(1);
       return members[0];
     }
-
-    /** Read a value as a bag of unknowns — the tables feed fields the type forbids. */
-    function asRecord(value: unknown): Record<string, unknown> {
-      return value as Record<string, unknown>;
-    }
-
-    /** A valid member with one field replaced by an untrusted value. */
-    function withField(field: string, value: unknown): Record<string, unknown> {
-      return { ...makeMember(), [field]: value };
-    }
-
-    /** A valid member with one field absent entirely. */
-    function withoutField(field: string): Record<string, unknown> {
-      return Object.fromEntries(
-        Object.entries(makeMember()).filter(([key]) => key !== field),
-      );
-    }
-
-    /** Values that are not strings — reused by both string-typed fields. */
-    const NON_STRING_VALUES: Array<{ name: string; value: unknown }> = [
-      { name: "a number", value: 42 },
-      { name: "null", value: null },
-      { name: "undefined", value: undefined },
-      { name: "an object", value: { nested: "x" } },
-      { name: "an array", value: ["x"] },
-      { name: "a boolean", value: false },
-    ];
 
     describe("envelope passthrough", () => {
       it("passes an error envelope through without sanitizing or warning", async () => {
@@ -454,18 +489,6 @@ describe("ApiClient getFamilyMembers", () => {
           expect(warnSpy).not.toHaveBeenCalled();
         },
       );
-
-      const INVALID_CANLEND: Array<{ name: string; value: unknown }> = [
-        { name: "the boolean true", value: true },
-        { name: "the boolean false", value: false },
-        { name: 'the string "1"', value: "1" },
-        { name: 'the string "0"', value: "0" },
-        { name: "an out-of-range number", value: 2 },
-        { name: "a negative number", value: -1 },
-        { name: "null", value: null },
-        { name: "an object", value: { canLend: 1 } },
-        { name: "an array", value: [1] },
-      ];
 
       it.each(INVALID_CANLEND)(
         "omits canLend entirely when the backend sends $name",
@@ -820,6 +843,402 @@ describe("ApiClient getFamilyMembers", () => {
         expect(members).toEqual([]);
         expect(warnSpy).not.toHaveBeenCalled();
       });
+    });
+  });
+});
+
+/**
+ * Runtime boundary validation of the single-member `PATCH
+ * /api/family/:id/member/:uid` payload.
+ *
+ * The criteria are the SAME `sanitizeFamilyMember` drop/normalize rules the list
+ * suite above pins — one function, one contract — but the verdict for a payload
+ * that has to be dropped differs: an unusable element of a list is skipped
+ * silently, while an unusable PATCH response becomes an `ApiError`. It has to be
+ * one: `updateMember` in `dialog/FamilyDataContext.tsx` splices this object
+ * straight into `members` state, so "skip it" is not an available outcome, and
+ * all three call sites (`dialog/BorrowTab.tsx`'s picker write-back,
+ * `dialog/MemberList.tsx`'s canLend toggle and readmooName delete) already catch
+ * and route through `memberSettingsErrorMessage`.
+ *
+ * Driven through the public `updateMemberSettings` surface instead of importing
+ * the sanitizer: the contract is what a caller receives when a self-hosted (BYO)
+ * or hostile backend answers. Request-body wiring for the three settings
+ * combinations lives in `extension/tests/unit/api/borrow-client.test.ts`.
+ */
+describe("ApiClient updateMemberSettings", () => {
+  /** The PATCH target — the member whose settings are being written. */
+  const TARGET_UID = USER_A;
+  const SETTINGS: MemberSettingsPayload = { canLend: BoolFlag.FALSE };
+
+  let client: ApiClient;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    client = new ApiClient(MOCK_ENDPOINT);
+    client.setAuthToken("test-token");
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+    globalThis.fetch = originalFetch;
+  });
+
+  /** Issue the PATCH against whatever fetch mock is currently installed. */
+  function sendPatch(): Promise<FamilyMember> {
+    return client.updateMemberSettings(FAMILY_ID, TARGET_UID, SETTINGS);
+  }
+
+  /** Serve an arbitrary (untyped) payload as the `data` of a 200 envelope. */
+  function patchMember(data: unknown): Promise<FamilyMember> {
+    globalThis.fetch = mockFetchSuccess(data);
+    return sendPatch();
+  }
+
+  /** The `ApiError` the PATCH threw — fails loudly when it resolved instead. */
+  async function rejectedRequest(): Promise<ApiError> {
+    const err = await captureRejection(sendPatch());
+    expect(err).toBeInstanceOf(ApiError);
+    return err as ApiError;
+  }
+
+  /** The `ApiError` thrown for a payload served as the `data` of a 200. */
+  function rejectedPayload(data: unknown): Promise<ApiError> {
+    globalThis.fetch = mockFetchSuccess(data);
+    return rejectedRequest();
+  }
+
+  describe("request wiring", () => {
+    it("sends PATCH to /api/family/:id/member/:uid with the settings body and returns the sanitized member", async () => {
+      const member = makeMember({ canLend: BoolFlag.FALSE });
+
+      const result = await patchMember(member);
+
+      expect(result).toEqual(member);
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe(
+        `${MOCK_ENDPOINT}/api/family/${FAMILY_ID}/member/${TARGET_UID}`,
+      );
+      expect(call[1].method).toBe("PATCH");
+      expect(JSON.parse(call[1].body as string)).toEqual(SETTINGS);
+      expect(call[1].headers).toEqual(
+        expect.objectContaining({
+          Authorization: "Bearer test-token",
+          "Content-Type": "application/json",
+        }),
+      );
+    });
+  });
+
+  describe("valid payload", () => {
+    it("resolves with a member carrying exactly the 4 FamilyMember keys", async () => {
+      const result = await patchMember(makeMember());
+
+      expect(result).toEqual(makeMember());
+      expect(Object.keys(result).sort()).toEqual(SORTED_MEMBER_KEYS);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("resolves with userId plus a normalized displayName for the most minimal member a backend can send", async () => {
+      const result = await patchMember({ userId: USER_B });
+
+      expect(result).toEqual({ userId: USER_B, displayName: "" });
+      expect(Object.keys(result).sort()).toEqual(["displayName", "userId"]);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("unusable payload", () => {
+    const DROPPED_CASES: Array<{ name: string; data: unknown }> = [
+      { name: "null", data: null },
+      { name: "a string primitive", data: USER_A },
+      { name: "an empty string", data: "" },
+      { name: "a number primitive", data: 42 },
+      { name: "the number zero", data: 0 },
+      { name: "a boolean primitive", data: true },
+      { name: "an array wrapping the member", data: [makeMember()] },
+      { name: "an empty array", data: [] },
+      { name: "an empty object", data: {} },
+      { name: "an object with no userId", data: withoutField("userId") },
+      { name: "an empty-string userId", data: withField("userId", "") },
+      { name: "a numeric userId", data: withField("userId", 7) },
+      { name: "a null userId", data: withField("userId", null) },
+      { name: "a boolean userId", data: withField("userId", true) },
+      { name: "an object userId", data: withField("userId", { id: USER_A }) },
+      { name: "an array userId", data: withField("userId", [USER_A]) },
+    ];
+
+    it.each(DROPPED_CASES)(
+      "rejects with INVALID_RESPONSE when the backend answers with $name",
+      async ({ data }) => {
+        const err = await rejectedPayload(data);
+
+        expect(err.code).toBe("INVALID_RESPONSE");
+      },
+    );
+
+    it("throws an ApiError whose code, wording and provenance the UI can act on", async () => {
+      const err = await rejectedPayload({ displayName: "no id" });
+
+      expect(err.code).toBe("INVALID_RESPONSE");
+      expect(err.rawMessage).toBe("response is not a valid family member");
+      // The legacy "CODE: text" shape stays intact for existing callers.
+      expect(err.message).toBe(
+        "INVALID_RESPONSE: response is not a valid family member",
+      );
+      // No wait to offer: this is not a throttle, and the back-off copy in
+      // `memberSettingsErrorMessage` must not fire for it.
+      expect(err.retryAfter).toBeUndefined();
+      // `synthesized` is the authority that lets a rawMessage be painted into
+      // the dialog verbatim; this English developer text must never claim it.
+      expect(err.synthesized).toBe(false);
+    });
+
+    it("stays silent rather than warning, because the aggregate log line belongs to the list path", async () => {
+      await rejectedPayload(null);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("field normalization", () => {
+    it.each(NON_STRING_VALUES)(
+      'normalizes displayName to "" when the backend sends $name',
+      async ({ value }) => {
+        const result = await patchMember(withField("displayName", value));
+
+        expect(result.displayName).toBe("");
+        expect(result.userId).toBe(USER_A);
+        expect(warnSpy).not.toHaveBeenCalled();
+      },
+    );
+
+    it('normalizes a missing displayName to ""', async () => {
+      const result = await patchMember(withoutField("displayName"));
+
+      expect(result.displayName).toBe("");
+    });
+
+    it.each([
+      { name: "a name", value: "Alice" },
+      { name: "an empty string", value: "" },
+    ])(
+      "keeps the displayName string verbatim when the backend sends $name",
+      async ({ value }) => {
+        const result = await patchMember(withField("displayName", value));
+
+        expect(result.displayName).toBe(value);
+      },
+    );
+
+    it.each([
+      { name: "TRUE", flag: BoolFlag.TRUE },
+      { name: "FALSE", flag: BoolFlag.FALSE },
+    ])("keeps canLend when it is exactly BoolFlag.$name", async ({ flag }) => {
+      const result = await patchMember(withField("canLend", flag));
+
+      expect(result.canLend).toBe(flag);
+    });
+
+    it.each(INVALID_CANLEND)(
+      "omits canLend entirely when the backend sends $name",
+      async ({ value }) => {
+        const result = await patchMember(withField("canLend", value));
+
+        // Omitted, not set to `undefined`: this object is spliced into
+        // `members` state as-is, and absence is what the documented "missing
+        // canLend means TRUE" fallback is written against.
+        expect("canLend" in result).toBe(false);
+        expect(Object.keys(result)).not.toContain("canLend");
+      },
+    );
+
+    it("omits canLend when the backend does not send it at all", async () => {
+      const result = await patchMember(withoutField("canLend"));
+
+      expect("canLend" in result).toBe(false);
+    });
+
+    it.each([
+      { name: "a name", value: "alice@readmoo" },
+      { name: "an empty string", value: "" },
+    ])("keeps readmooName when the backend sends $name", async ({ value }) => {
+      const result = await patchMember(withField("readmooName", value));
+
+      expect(result.readmooName).toBe(value);
+    });
+
+    it.each(NON_STRING_VALUES)(
+      "omits readmooName entirely when the backend sends $name",
+      async ({ value }) => {
+        const result = await patchMember(withField("readmooName", value));
+
+        expect("readmooName" in result).toBe(false);
+        expect(Object.keys(result)).not.toContain("readmooName");
+      },
+    );
+
+    it("omits readmooName when the backend does not send it at all", async () => {
+      // The readmooName-delete flow in `dialog/MemberList.tsx` PATCHes `null`
+      // and gets a member without the field back — the "尚未記錄" hint reads
+      // absence, so it must survive the rebuild as absence.
+      const result = await patchMember(withoutField("readmooName"));
+
+      expect("readmooName" in result).toBe(false);
+    });
+  });
+
+  describe("result object shape", () => {
+    it("rebuilds the member as a fresh object carrying at most the 4 FamilyMember keys", async () => {
+      const payload = { ...makeMember(), evil: "x", nested: { deep: true } };
+
+      const result = await patchMember(payload);
+
+      expect(Object.keys(result).sort()).toEqual(SORTED_MEMBER_KEYS);
+      expect(asRecord(result).evil).toBeUndefined();
+      expect(asRecord(result).nested).toBeUndefined();
+      expect(result).not.toBe(payload);
+    });
+
+    it("drops a JSON-supplied __proto__ property instead of carrying or applying it", async () => {
+      // Only `JSON.parse` can produce an OWN "__proto__" key (an object literal
+      // would set the prototype instead) — which is exactly what a real
+      // `response.json()` does with a hostile body.
+      const hostile: unknown = JSON.parse(
+        `{"userId":"${USER_B}","displayName":"Hostile","__proto__":{"polluted":"yes"},"evil":"x"}`,
+      );
+
+      const result = await patchMember(hostile);
+
+      expect(Object.keys(result).sort()).toEqual(["displayName", "userId"]);
+      expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+      expect(asRecord(result).evil).toBeUndefined();
+      expect(asRecord({}).polluted).toBeUndefined();
+      expect(result.userId).toBe(USER_B);
+      expect(result.displayName).toBe("Hostile");
+    });
+
+    it("leaves the parsed payload unmutated", async () => {
+      const payload = withField("evil", "x");
+
+      const result = await patchMember(payload);
+
+      expect(result).not.toBe(payload);
+      expect(payload.evil).toBe("x");
+    });
+  });
+
+  describe("envelope contract", () => {
+    it("rejects with the envelope's own code, never INVALID_RESPONSE, when the backend refuses", async () => {
+      // A 403 must never be laundered into "malformed response": the two send
+      // the user to completely different remedies.
+      globalThis.fetch = mockFetchError(
+        "FORBIDDEN",
+        "Cannot modify another member",
+        403,
+      );
+
+      const err = await rejectedRequest();
+
+      expect(err.code).toBe("FORBIDDEN");
+      expect(err.message).toBe("FORBIDDEN: Cannot modify another member");
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("preserves retryAfter from a rate-limited envelope", async () => {
+      // The localized back-off copy needs both the code and the wait; the
+      // INVALID_RESPONSE throw carries neither, so the two stay distinguishable.
+      globalThis.fetch = mockFetchEnvelope(
+        {
+          error: {
+            code: "RATE_LIMITED",
+            message: "too many requests",
+            retryAfter: 45,
+          },
+        },
+        429,
+      );
+
+      const err = await rejectedRequest();
+
+      expect(err).toMatchObject({ code: "RATE_LIMITED", retryAfter: 45 });
+    });
+
+    it("rejects with NETWORK_ERROR when fetch itself rejects", async () => {
+      globalThis.fetch = vi
+        .fn()
+        .mockRejectedValue(new Error("Failed to fetch"));
+
+      const err = await rejectedRequest();
+
+      expect(err.code).toBe("NETWORK_ERROR");
+    });
+
+    it.each([
+      { name: "carries no data key at all", envelope: {} },
+      { name: "sets data to undefined", envelope: { data: undefined } },
+    ])(
+      "rejects with EMPTY_RESPONSE when a success envelope $name",
+      async ({ envelope }) => {
+        // `unwrap` still owns the envelope contract and runs BEFORE the
+        // sanitizer: a missing `data` is a protocol failure, not a member
+        // object that failed validation.
+        globalThis.fetch = mockFetchEnvelope(envelope);
+
+        const err = await rejectedRequest();
+
+        expect(err.code).toBe("EMPTY_RESPONSE");
+        expect(err.message).toBe("EMPTY_RESPONSE: response body missing data");
+      },
+    );
+
+    it("rejects with INVALID_RESPONSE, not EMPTY_RESPONSE, when data is explicitly null", async () => {
+      // `unwrap` only refuses `undefined`, so a null `data` does reach the
+      // sanitizer — the two failure modes stay distinct for the caller.
+      const err = await rejectedPayload(null);
+
+      expect(err.code).toBe("INVALID_RESPONSE");
+    });
+
+    it.each([
+      { name: "a valid member", data: makeMember() },
+      { name: "an unusable member", data: { displayName: "no id" } },
+    ])(
+      "throws the envelope error before sanitizing when a 200 carries an error alongside $name",
+      async ({ data }) => {
+        globalThis.fetch = mockFetchEnvelope({
+          data,
+          error: { code: "STALE_DATA", message: "Rebuild in progress" },
+        });
+
+        const err = await rejectedRequest();
+
+        expect(err.code).toBe("STALE_DATA");
+      },
+    );
+
+    it("still validates the payload when error is null, because unwrap reads error as truthy", async () => {
+      globalThis.fetch = mockFetchEnvelope({
+        data: { displayName: "no id" },
+        error: null,
+      });
+
+      const err = await rejectedRequest();
+
+      expect(err.code).toBe("INVALID_RESPONSE");
+    });
+
+    it("resolves normally when a valid payload arrives alongside error null", async () => {
+      globalThis.fetch = mockFetchEnvelope({
+        data: makeMember(),
+        error: null,
+      });
+
+      await expect(sendPatch()).resolves.toEqual(makeMember());
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 });

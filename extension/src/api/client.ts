@@ -58,7 +58,10 @@ import {
   type RefreshOutcome,
 } from "./auth-refresh";
 import { sanitizeBorrowRequests } from "./borrowValidation";
-import { sanitizeFamilyMembersResponse } from "./memberValidation";
+import {
+  sanitizeFamilyMember,
+  sanitizeFamilyMembersResponse,
+} from "./memberValidation";
 
 // Re-export all types so existing imports from "./client" continue to work
 export {
@@ -603,16 +606,38 @@ export class ApiClient {
     return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
+  /**
+   * `unknown`, not `FamilyMember`: the wire shape is only a claim until
+   * `sanitizeFamilyMember` has checked it. `unwrap` still runs first — it owns
+   * the `{ data, error }` envelope contract (throws `ApiError` on `error`,
+   * `EMPTY_RESPONSE` on missing data).
+   *
+   * Throwing on an unusable payload is safe for every caller: all three call
+   * sites (`dialog/BorrowTab.tsx`'s picker write-back, `dialog/MemberList.tsx`'s
+   * canLend toggle and readmooName delete) already catch and route through
+   * `memberSettingsErrorMessage`, so a malformed response surfaces as a
+   * retryable error instead of poisoning `members` state.
+   */
   async updateMemberSettings(
     familyId: string,
     uid: string,
     settings: MemberSettingsPayload,
   ): Promise<FamilyMember> {
-    const res = await this.patch<FamilyMember>(
+    const res = await this.patch<unknown>(
       `/api/family/${familyId}/member/${uid}`,
       settings,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizeMemberText);
+    const member = sanitizeFamilyMember(this.unwrap(res));
+    if (member === null) {
+      throw new ApiError(
+        "INVALID_RESPONSE",
+        "response is not a valid family member",
+      );
+    }
+    // Two deliberate layers, same order as `getFamilyMembers`: the structural
+    // rebuild above, then the shared text layer coercing the surviving
+    // record's declared-string fields.
+    return sanitizeRecord(member, sanitizeMemberText);
   }
 
   // --- Verification ---

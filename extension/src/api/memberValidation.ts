@@ -1,5 +1,7 @@
 /**
- * Runtime boundary validation for `GET /api/family/:id/members` payloads.
+ * Runtime boundary validation for `GET /api/family/:id/members` payloads, and —
+ * through the exported `sanitizeFamilyMember` — for the single member object
+ * returned by `PATCH /api/family/:id/member/:uid`.
  *
  * Self-hosted (BYO) backends are inside this project's threat model, so the
  * member list arrives unvalidated: a non-string `userId` crashes `.slice(0, 8)`
@@ -62,8 +64,18 @@ function toBoolFlagField(value: unknown): BoolFlag | undefined {
  * The result is a fresh object literal holding at most the 4 interface fields —
  * never a spread of the raw element, so hostile extra properties (including an
  * own `__proto__` key from `JSON.parse`) cannot survive into React state.
+ *
+ * Exported because the list is not the only door into `members` state: the
+ * single member object returned by `PATCH /api/family/:id/member/:uid` is
+ * spliced into it verbatim by `updateMember` in `dialog/FamilyDataContext.tsx`,
+ * so `client.ts`'s `updateMemberSettings` puts that payload through the same
+ * drop/normalize rules. The drop criterion needs no adjustment there: every
+ * consumer of the result already has the `|| userId.slice(0, 8)` fallback a
+ * normalized `displayName` relies on. A `null` verdict is handled differently
+ * per caller though — one element of a list is dropped silently, a whole PATCH
+ * response becomes an `ApiError` the UI can retry.
  */
-function sanitizeFamilyMember(element: unknown): FamilyMember | null {
+export function sanitizeFamilyMember(element: unknown): FamilyMember | null {
   if (!isRecord(element)) return null;
 
   const userId = element.userId;

@@ -1,5 +1,8 @@
 /**
- * Runtime boundary validation for `GET /api/family/:id/members` payloads.
+ * Runtime boundary validation for `GET /api/family/:id/members` payloads, and —
+ * through the exported `sanitizeFamilyMember` — for the single member object
+ * returned by `PATCH /api/family/:id/member/:uid`, which only the Extension end
+ * consumes today.
  *
  * Self-hosted (BYO) backends are inside this project's threat model, so the
  * member list arrives unvalidated: a non-string `userId` crashes `.slice(0, 8)`
@@ -71,8 +74,15 @@ function toBoolFlagField(value: unknown): BoolFlag | undefined {
  * The result is a fresh object literal holding at most the 4 interface fields —
  * never a spread of the raw element, so hostile extra properties (including an
  * own `__proto__` key from `JSON.parse`) cannot survive into React state.
+ *
+ * Exported to stay in sync with the Extension copy, where the single member
+ * object returned by `PATCH /api/family/:id/member/:uid` is spliced straight
+ * into `members` state and so goes through these same drop/normalize rules.
+ * This end has no such consumer yet — `components/MemberList.tsx` discards that
+ * response and refetches the list via `onMembersChanged()` — so the export
+ * exists so a future PWA consumer finds the guard already here.
  */
-function sanitizeFamilyMember(element: unknown): FamilyMember | null {
+export function sanitizeFamilyMember(element: unknown): FamilyMember | null {
   if (!isRecord(element)) return null;
 
   const userId = element.userId;
