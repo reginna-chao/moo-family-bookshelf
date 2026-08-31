@@ -155,10 +155,26 @@ const emptyTitle = (record: LooseRecord): LooseRecord => ({
 });
 
 /**
- * The fail-safe half of the layer. Reading fields off a payload that is not a
- * non-null object would throw a TypeError straight out of the API client —
- * turning the hardening into the very failure it exists to prevent. Such a
- * payload must reach the caller exactly as it did before this layer existed.
+ * The record half of the container tier. THREE branches, and the split between
+ * the last two is the whole point:
+ *
+ *   - a plain object is sanitized field by field;
+ *   - `null` / `undefined` pass through UNCHANGED, because a missing payload has
+ *     to STAY missing. `checkVersion`'s `if (data === null) return null` and
+ *     `sanitizeEnvelope`'s `if (res.data === undefined) return res` (both in
+ *     `pwa/src/api/client.ts`) are load-bearing on that, and fabricating an
+ *     entity here would turn "the backend sent nothing" into "the backend sent
+ *     an empty family" — a different and worse lie;
+ *   - anything ELSE — a primitive, an array — walks straight past those very
+ *     guards (`[]` and `"x"` are both truthy) and would then crash the first
+ *     field read, so it degrades to a fully materialized EMPTY entity instead.
+ *
+ * PR #149's review is why the last branch exists: `data: []` and `data: "x"`
+ * from `GET /api/family/:id/members` reach `setMembers(response.data.members)`
+ * (`pwa/src/hooks/useFamilyData.tsx:206`) as `undefined`, and `members.length`
+ * (`pwa/src/components/MemberList.tsx:86`) then throws from RENDER — where no
+ * caller `try/catch` can reach it, and with no ErrorBoundary in either app that
+ * is a permanent white screen.
  */
 describe("sanitizeRecord", () => {
   it("applies the sanitizer to a non-null object", () => {
@@ -173,14 +189,11 @@ describe("sanitizeRecord", () => {
     expect(sanitize).toHaveBeenCalledTimes(1);
   });
 
+  // The ONLY pass-through branch left. Absence stays absence: every caller
+  // already guards it, so materializing here would invent a payload.
   it.each([
     { name: "null", value: null },
     { name: "undefined", value: undefined },
-    { name: "a string", value: "not an object" },
-    { name: "the empty string", value: "" },
-    { name: "a number", value: 42 },
-    { name: "the number 0", value: 0 },
-    { name: "a boolean", value: true },
   ])("passes $name through without calling the sanitizer", ({ value }) => {
     const sanitize = vi.fn((record: unknown) => record);
 
@@ -189,14 +202,39 @@ describe("sanitizeRecord", () => {
     expect(sanitize).not.toHaveBeenCalled();
   });
 
-  // An array IS a non-null object, so it reaches the sanitizer. That is what
-  // lets `sanitizeList` lean on `sanitizeRecord` for its own element guard.
-  it("treats an array as a record and hands it to the sanitizer", () => {
-    const sanitize = vi.fn((record: unknown[]) => record);
+  // FAIL-CLOSED: garbage that is neither a record nor absent slips past the
+  // callers' truthiness guards, so it becomes a fully materialized empty
+  // entity rather than a TypeError one render later.
+  it.each([
+    { name: "a string", value: "not an object" },
+    { name: "the empty string", value: "" },
+    { name: "a number", value: 42 },
+    { name: "the number 0", value: 0 },
+    { name: "a boolean", value: true },
+    { name: "an array", value: ["a"] },
+    { name: "an empty array", value: [] },
+  ])("materializes an empty entity from $name", ({ value }) => {
+    const sanitize = vi.fn(emptyTitle);
+    const garbage = value as unknown as LooseRecord;
 
-    sanitizeRecord(["a"], sanitize);
+    expect(() => sanitizeRecord(garbage, sanitize)).not.toThrow();
+    expect(sanitizeRecord(garbage, sanitize)).toEqual({ title: "" });
+    // Handed `{}`, never the garbage itself.
+    expect(sanitize).toHaveBeenCalledWith({});
+  });
 
-    expect(sanitize).toHaveBeenCalledTimes(1);
+  // An array is garbage here and is never SPREAD: `{ ...arr, title: "" }` would
+  // carry the array's numeric keys and dress a malformed payload up as a valid
+  // entity. Excluding arrays is also what keeps the predicate identical to
+  // `isRecord` in `pwa/src/api/borrowValidation.ts`.
+  it("does not spread an array's numeric keys into the result", () => {
+    const result = sanitizeRecord(
+      ["first", "second"] as unknown as LooseRecord,
+      emptyTitle,
+    );
+
+    expect(Object.keys(result)).toEqual(["title"]);
+    expect(Array.isArray(result)).toBe(false);
   });
 
   it("does not mutate the record it was given", () => {
@@ -210,6 +248,28 @@ describe("sanitizeRecord", () => {
   });
 });
 
+/**
+ * The list half of the container tier, FAIL-CLOSED with no pass-through escape
+ * hatch at all — where `sanitizeRecord` still lets `null` / `undefined` reach
+ * the caller's own guard, a MISSING list materializes as `[]` here, because a
+ * list is consumed differently: it goes straight into React state and is read
+ * back with `.map` / `.length` from render.
+ *
+ * PR #149's review filed the two reproductions this block pins:
+ * `GET /api/family/:id/members` answering `members: [null]` used to be stored
+ * verbatim by `setMembers` (`pwa/src/hooks/useFamilyData.tsx:206`, outside any
+ * `try`) and detonate on the NEXT render at `members.map` +
+ * `member.displayName` (`pwa/src/components/MemberList.tsx:166` / `:7`);
+ * `members: "oops"` did the same at `members.length`
+ * (`pwa/src/components/MemberList.tsx:86`). A throw from render is unreachable
+ * to every caller `try/catch`, and with no ErrorBoundary in either app it is a
+ * permanent white screen.
+ *
+ * Losing a hostile element is affordable here in a way it is not for a record:
+ * "no members" / "no books" is a state the UI already renders. The stricter
+ * precedent is `pwa/src/api/borrowValidation.ts` (PR #144), which this layer is
+ * now aligned to.
+ */
 describe("sanitizeList", () => {
   it("sanitizes every element of a real array", () => {
     const list: LooseRecord[] = [
@@ -232,37 +292,49 @@ describe("sanitizeList", () => {
   it.each([
     { name: "a string", value: "not a list" },
     { name: "null", value: null },
-    { name: "undefined", value: undefined },
+    { name: "undefined (the field was omitted)", value: undefined },
     { name: "an object", value: { members: 1 } },
     { name: "a number", value: 7 },
-  ])("passes $name through untouched instead of calling .map", ({ value }) => {
+    { name: "a boolean", value: true },
+  ])("degrades a container that is $name to an empty list", ({ value }) => {
     const sanitize = vi.fn(emptyTitle);
     const list = value as unknown as LooseRecord[];
 
     expect(() => sanitizeList(list, sanitize)).not.toThrow();
-    expect(sanitizeList(list, sanitize)).toBe(value);
+    expect(sanitizeList(list, sanitize)).toEqual([]);
     expect(sanitize).not.toHaveBeenCalled();
   });
 
-  // A `null` entry inside an otherwise valid list is the shape that used to
-  // throw: `null.title` is a TypeError, and one bad row would take the whole
-  // family shelf down.
-  it("lets null elements survive without handing them to the sanitizer", () => {
+  // An element that cannot carry fields is DROPPED, never passed through: a
+  // single `null` row used to be enough to throw `member.displayName` out of
+  // `.map` and take the whole family shelf down.
+  it.each([
+    { name: "null", value: null },
+    { name: "a string", value: "plain" },
+    { name: "a number", value: 42 },
+    { name: "a boolean", value: true },
+    { name: "a nested array", value: ["nested"] },
+  ])("drops an element that is $name", ({ value }) => {
     const sanitize = vi.fn(emptyTitle);
-    const list = [null, { title: { a: 1 } }, null] as unknown as LooseRecord[];
+    const list = [value, { title: { a: 1 } }] as unknown as LooseRecord[];
 
     const result = sanitizeList(list, sanitize);
 
-    expect(result[0]).toBeNull();
-    expect(result[1]).toEqual({ title: "" });
-    expect(result[2]).toBeNull();
+    expect(result).toEqual([{ title: "" }]);
     expect(sanitize).toHaveBeenCalledTimes(1);
   });
 
-  it("lets primitive elements survive untouched", () => {
-    const list = ["plain", 42, true] as unknown as LooseRecord[];
+  it("keeps every survivor when a hostile element sits between valid ones", () => {
+    const list = [
+      { title: { a: 1 } },
+      null,
+      { title: 42 },
+    ] as unknown as LooseRecord[];
 
-    expect(sanitizeList(list, emptyTitle)).toEqual(["plain", 42, true]);
+    expect(sanitizeList(list, emptyTitle)).toEqual([
+      { title: "" },
+      { title: "" },
+    ]);
   });
 
   it("does not mutate the array it was given", () => {

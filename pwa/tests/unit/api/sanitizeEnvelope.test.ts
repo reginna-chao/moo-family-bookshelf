@@ -493,18 +493,21 @@ describe("ApiClient backend-text sanitization", () => {
       expect(JSON.stringify(result)).toBe(JSON.stringify(valid));
     });
 
-    it("passes a books list that is not an array straight through", async () => {
+    // A share-link visitor never configured the endpoint and cannot diagnose a
+    // blank page, so this path degrades to "an empty shelf" rather than letting
+    // `books.map` throw out of `PublicShelfPage`.
+    it("degrades a books list that is not an array to an empty list", async () => {
       mockFetch.mockResolvedValue(
         jsonResponse({ data: { ...HOSTILE_SHELF_DATA, books: "nope" } }),
       );
 
       const result = await client.getPublicShelf(SHARE_TOKEN);
 
-      expect(result.books).toBe("nope");
+      expect(result.books).toEqual([]);
       expect(result.title).toBe("");
     });
 
-    it("lets a null book survive inside the snapshot list", async () => {
+    it("drops a null book from the snapshot list", async () => {
       mockFetch.mockResolvedValue(
         jsonResponse({
           data: { ...HOSTILE_SHELF_DATA, books: [null, HOSTILE_BOOK] },
@@ -513,8 +516,8 @@ describe("ApiClient backend-text sanitization", () => {
 
       const result = await client.getPublicShelf(SHARE_TOKEN);
 
-      expect(result.books[0]).toBeNull();
-      expect(result.books[1].title).toBe("");
+      expect(result.books).toHaveLength(1);
+      expect(result.books[0].title).toBe("");
     });
 
     // Sanitizing must not swallow the two failure modes the page branches on.
@@ -637,30 +640,46 @@ describe("ApiClient backend-text sanitization", () => {
   });
 
   /**
-   * The fail-safe contract: a `data` that cannot carry the expected fields must
-   * reach the caller exactly as it did before this layer existed. Reading
-   * through it would throw a TypeError out of the client — turning the
-   * hardening into the very failure it prevents.
+   * The FAIL-CLOSED container contract, and the three reproductions PR #149's
+   * review filed as the container-tier white-screen gap. Before that fix each of
+   * these reached React state intact and detonated one render later — where no
+   * caller `try/catch` can reach, and with no ErrorBoundary in the PWA the page
+   * stays blank until the user reloads:
    *
-   * The borrow LIST is the one deliberate exception: `sanitizeBorrowRequests`
-   * (PR #144) fails CLOSED instead — a non-array container degrades to `[]` and
-   * an unaddressable element is dropped, because an element with no usable
+   *   - `members: [null]` → stored by `setMembers`
+   *     (`pwa/src/hooks/useFamilyData.tsx:206`), then `members.map` +
+   *     `member.displayName` (`pwa/src/components/MemberList.tsx:166` / `:7`)
+   *     throws a TypeError.
+   *   - `members: "not-an-array"` → same store, then `members.length`
+   *     (`pwa/src/components/MemberList.tsx:86`) throws.
+   *   - `data: []` / `data: "x"` → both TRUTHY, so they walk past
+   *     `if (response.data)` and `setMembers(response.data.members)` stores
+   *     `undefined`, which hits that same `members.length`.
+   *
+   * All three now degrade to a renderable EMPTY state. `null` / `undefined`
+   * data is the deliberate exception and still passes through, because absence
+   * must stay absence for that very `if (response.data)` guard.
+   *
+   * The borrow LIST already failed closed before this (PR #144,
+   * `pwa/src/api/borrowValidation.ts`): a non-array container degrades to `[]`
+   * and an unaddressable element is dropped, because an element with no usable
    * `requestId` can serve neither as a React key nor as the target of
-   * `PATCH /api/borrow/:id`.
+   * `PATCH /api/borrow/:id`. Its rows below are unchanged — it is the precedent
+   * this layer was aligned to.
    */
   describe("structurally broken payloads", () => {
-    it("passes a members list that is not an array straight through", async () => {
+    it("degrades a members list that is not an array to an empty list", async () => {
       mockFetch.mockResolvedValue(
         jsonResponse({ data: { ...HOSTILE_GROUP, members: "not-an-array" } }),
       );
 
       const result = await client.getFamilyMembers(FAMILY_ID);
 
-      expect(result.data?.members).toBe("not-an-array");
+      expect(result.data?.members).toEqual([]);
       expect(result.data?.familyId).toBe("");
     });
 
-    it("lets a null member survive inside an otherwise valid list", async () => {
+    it("drops a null member and keeps only the sanitized valid one", async () => {
       mockFetch.mockResolvedValue(
         jsonResponse({
           data: { ...HOSTILE_GROUP, members: [null, HOSTILE_MEMBER] },
@@ -669,18 +688,45 @@ describe("ApiClient backend-text sanitization", () => {
 
       const result = await client.getFamilyMembers(FAMILY_ID);
 
-      expect(result.data?.members[0]).toBeNull();
-      expect(result.data?.members[1].displayName).toBe("");
+      expect(result.data?.members).toHaveLength(1);
+      expect(result.data?.members[0].userId).toBe("");
+      expect(result.data?.members[0].displayName).toBe("");
+      expect(result.data?.members[0].readmooName).toBe("");
+      // The survivor is still the real member, not a fabricated blank one.
+      expect(result.data?.members[0].canLend).toBe(BoolFlag.FALSE);
     });
 
-    it("passes a non-object data payload straight through", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ data: "a bare string, not a record" }),
-      );
+    it.each([
+      { name: "an empty array", data: [] as unknown },
+      { name: "a bare string", data: "a bare string, not a record" },
+      { name: "a number", data: 42 },
+    ])(
+      "materializes an empty family group when data is $name",
+      async ({ data }) => {
+        mockFetch.mockResolvedValue(jsonResponse({ data }));
+
+        const result = await client.getFamilyMembers(FAMILY_ID);
+
+        expect(result.data).toStrictEqual({
+          familyId: "",
+          ownerId: "",
+          createdAt: "",
+          members: [],
+          apiEndpoint: undefined,
+        });
+      },
+    );
+
+    // The pass-through branch that must NOT change: `sanitizeEnvelope`
+    // short-circuits on `undefined` and `sanitizeRecord` returns `null`
+    // untouched, so `if (response.data)` in `useFamilyData` keeps its "the
+    // backend sent nothing" branch instead of rendering an invented family.
+    it("leaves a null data payload as null instead of inventing a family", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ data: null }));
 
       const result = await client.getFamilyMembers(FAMILY_ID);
 
-      expect(result.data).toBe("a bare string, not a record");
+      expect(result.data).toBeNull();
     });
 
     it("degrades a borrow list that is not an array to an empty list", async () => {

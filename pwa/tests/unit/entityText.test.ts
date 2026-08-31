@@ -13,6 +13,7 @@ import {
   sanitizePublicShelfText,
   sanitizeVersionInfoText,
 } from "moo-family-bookshelf-shared/api/entityText";
+import { sanitizeRecord } from "moo-family-bookshelf-shared/api/safeText";
 import { BoolFlag, BorrowStatus } from "@/api/client";
 import type {
   BookEntry,
@@ -470,8 +471,19 @@ describeEntitySanitizer<VersionInfo>("sanitizeVersionInfoText", {
 
 /**
  * The collection fields are where a hostile payload gets a second shot at the
- * UI: one bad element used to be enough to throw out of `.map`, and the guard
- * has to hold for a list that is not a list at all.
+ * UI: one bad element is enough to throw out of `.map`, and the guard has to
+ * hold for a list that is not a list at all.
+ *
+ * Since PR #149 this tier is FAIL-CLOSED (`sanitizeList` in
+ * `shared/src/api/safeText.ts`): a non-array container — including a MISSING
+ * one — becomes `[]`, and an element that cannot carry fields is DROPPED. That
+ * is the container half of the white-screen gap the review filed: a `members`
+ * list stored by `setMembers` (`pwa/src/hooks/useFamilyData.tsx:206`, outside
+ * any `try`) only detonates on the NEXT render — `members.map` +
+ * `member.displayName` (`pwa/src/components/MemberList.tsx:166` / `:7`) for a
+ * `null` element, `members.length` (`pwa/src/components/MemberList.tsx:86`) for
+ * a non-array — and a throw from render is unreachable to every caller
+ * `try/catch`, with no ErrorBoundary in either app to catch it.
  */
 describe("nested collections", () => {
   it("sanitizes every member of a family group", () => {
@@ -492,17 +504,32 @@ describe("nested collections", () => {
   it.each([
     { name: "a string", value: "not-an-array" },
     { name: "null", value: null },
+    { name: "undefined", value: undefined },
     { name: "a number", value: 3 },
     { name: "an object", value: { length: 2 } },
-  ])("passes a members list that is $name straight through", ({ value }) => {
+  ])("degrades a members list that is $name to an empty array", ({ value }) => {
     const group = withField(VALID_GROUP, "members", value);
 
     const out = sanitizeFamilyGroupText(group);
 
-    expect(out.members).toBe(value);
+    expect(out.members).toEqual([]);
   });
 
-  it("lets a null member survive instead of throwing on it", () => {
+  /**
+   * A required LIST field's absence materializes as `[]` — the list-level
+   * counterpart of a required text field materializing as `""`, and the one
+   * place `sanitizeList` is deliberately STRICTER than `sanitizeRecord` (which
+   * lets absence stay absence). It is what keeps `members.length`
+   * (`pwa/src/components/MemberList.tsx:86`) readable when the backend omits
+   * the key entirely.
+   */
+  it("materializes an omitted members list as an empty array", () => {
+    const group = withoutField(VALID_GROUP, "members");
+
+    expect(sanitizeFamilyGroupText(group).members).toEqual([]);
+  });
+
+  it("drops a null member instead of letting it reach the render", () => {
     const group = withField(VALID_GROUP, "members", [
       null,
       allHostile(VALID_MEMBER, ["displayName"]),
@@ -510,8 +537,8 @@ describe("nested collections", () => {
 
     const out = sanitizeFamilyGroupText(group);
 
-    expect(out.members[0]).toBeNull();
-    expect(out.members[1].displayName).toBe("");
+    expect(out.members).toHaveLength(1);
+    expect(out.members[0].displayName).toBe("");
   });
 
   it("sanitizes books two levels down, inside a bookshelf member", () => {
@@ -538,28 +565,28 @@ describe("nested collections", () => {
     { name: "null", value: null },
     { name: "undefined", value: undefined },
   ])(
-    "passes a bookshelf whose members list is $name straight through",
+    "degrades a bookshelf whose members list is $name to an empty array",
     ({ value }) => {
       const shelf = withField(VALID_BOOKSHELF, "members", value);
 
       expect(() => sanitizeFamilyBookshelfText(shelf)).not.toThrow();
-      expect(sanitizeFamilyBookshelfText(shelf).members).toBe(value);
+      expect(sanitizeFamilyBookshelfText(shelf).members).toEqual([]);
     },
   );
 
-  it("passes a personal-books list that is not an array straight through", () => {
+  it("degrades a personal-books list that is not an array to an empty array", () => {
     const personal = withField(VALID_PERSONAL, "books", "nope");
 
-    expect(sanitizePersonalBooksText(personal).books).toBe("nope");
+    expect(sanitizePersonalBooksText(personal).books).toEqual([]);
   });
 
-  it("lets a null book survive inside the personal book list", () => {
+  it("drops a null book from the personal book list", () => {
     const personal = withField(VALID_PERSONAL, "books", [null, VALID_BOOK]);
 
     const out = sanitizePersonalBooksText(personal);
 
-    expect(out.books[0]).toBeNull();
-    expect(out.books[1]).toEqual(VALID_BOOK);
+    expect(out.books).toHaveLength(1);
+    expect(out.books[0]).toEqual(VALID_BOOK);
   });
 
   it("preserves the index-signature extras a future schema may add", () => {
@@ -587,22 +614,22 @@ describe("nested collections", () => {
     { name: "null", value: null },
     { name: "undefined", value: undefined },
   ])(
-    "passes a snapshot books list that is $name straight through",
+    "degrades a snapshot books list that is $name to an empty array",
     ({ value }) => {
       const data = withField(VALID_SHELF_DATA, "books", value);
 
       expect(() => sanitizePublicShelfDataText(data)).not.toThrow();
-      expect(sanitizePublicShelfDataText(data).books).toBe(value);
+      expect(sanitizePublicShelfDataText(data).books).toEqual([]);
     },
   );
 
-  it("lets a null book survive inside a public shelf snapshot", () => {
+  it("drops a null book from a public shelf snapshot", () => {
     const data = withField(VALID_SHELF_DATA, "books", [null, VALID_BOOK]);
 
     const out = sanitizePublicShelfDataText(data);
 
-    expect(out.books[0]).toBeNull();
-    expect(out.books[1]).toEqual(VALID_BOOK);
+    expect(out.books).toHaveLength(1);
+    expect(out.books[0]).toEqual(VALID_BOOK);
   });
 
   it("sanitizes every shelf in a public-shelf list", () => {
@@ -620,11 +647,11 @@ describe("nested collections", () => {
     { name: "a string", value: "nope" },
     { name: "null", value: null },
     { name: "undefined", value: undefined },
-  ])("passes a shelves list that is $name straight through", ({ value }) => {
+  ])("degrades a shelves list that is $name to an empty array", ({ value }) => {
     const list = withField({ shelves: [VALID_SHELF] }, "shelves", value);
 
     expect(() => sanitizePublicShelfListText(list)).not.toThrow();
-    expect(sanitizePublicShelfListText(list).shelves).toBe(value);
+    expect(sanitizePublicShelfListText(list).shelves).toEqual([]);
   });
 
   it("sanitizes the single shelf of a public-shelf write result", () => {
@@ -637,10 +664,14 @@ describe("nested collections", () => {
     expect(out.shelf.expiresDays).toBe(30);
   });
 
+  /**
+   * The nested RECORD keeps `sanitizeRecord`'s asymmetry, unlike the lists
+   * above: absence stays absence so a caller's `if (!result.shelf)` guard still
+   * sees "the backend sent nothing".
+   */
   it.each([
     { name: "null", value: null },
     { name: "undefined", value: undefined },
-    { name: "a string", value: "nope" },
   ])(
     "passes a write result whose shelf is $name straight through",
     ({ value }) => {
@@ -650,6 +681,85 @@ describe("nested collections", () => {
       expect(sanitizePublicShelfResultText(result).shelf).toBe(value);
     },
   );
+
+  // Garbage is the other branch: truthy, so it walks past that same guard and
+  // would crash the first field read. It materializes an empty shelf instead.
+  it.each([
+    { name: "a string", value: "nope" },
+    { name: "a number", value: 7 },
+    { name: "an array", value: [VALID_SHELF] },
+  ])(
+    "materializes an empty shelf when the write result's shelf is $name",
+    ({ value }) => {
+      const result = withField({ shelf: VALID_SHELF }, "shelf", value);
+
+      expect(() => sanitizePublicShelfResultText(result)).not.toThrow();
+      expect(sanitizePublicShelfResultText(result).shelf).toEqual({
+        shelfId: "",
+        shareToken: "",
+        title: "",
+      });
+    },
+  );
+});
+
+/**
+ * What "an empty entity" actually IS.
+ *
+ * `sanitizeRecord` answers garbage — a primitive, an array — with
+ * `sanitize({})`, and these rows pin the shape each per-entity sanitizer
+ * materializes from it, because that is exactly what the envelope-level
+ * regression rows in `pwa/tests/unit/api/sanitizeEnvelope.test.ts` assert
+ * reaching React state. Every text field is `""`, every required list is `[]`,
+ * and optionals stay absent — a renderable empty state instead of a TypeError.
+ */
+describe("empty-entity materialization", () => {
+  it("materializes a family group with empty text fields and no members", () => {
+    const out = sanitizeRecord(
+      "not-a-record" as unknown as FamilyGroup,
+      sanitizeFamilyGroupText,
+    );
+
+    expect(out).toEqual({
+      familyId: "",
+      ownerId: "",
+      createdAt: "",
+      members: [],
+      apiEndpoint: undefined,
+    });
+  });
+
+  it("materializes a family bookshelf with no members", () => {
+    const out = sanitizeRecord(
+      [] as unknown as FamilyBookshelf,
+      sanitizeFamilyBookshelfText,
+    );
+
+    expect(out.members).toEqual([]);
+  });
+
+  it("materializes a personal-books record with empty text fields and no books", () => {
+    const out = sanitizeRecord(
+      42 as unknown as PersonalBooks,
+      sanitizePersonalBooksText,
+    );
+
+    expect(out).toEqual({
+      userId: "",
+      displayName: "",
+      lastUpdated: "",
+      books: [],
+    });
+  });
+
+  it("materializes a public shelf snapshot with an empty title and no books", () => {
+    const out = sanitizeRecord(
+      "not-a-record" as unknown as PublicShelfData,
+      sanitizePublicShelfDataText,
+    );
+
+    expect(out).toEqual({ title: "", books: [] });
+  });
 });
 
 /**

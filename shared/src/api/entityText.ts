@@ -169,8 +169,21 @@ export interface BorrowRequestTextFields {
   updatedAt: string;
 }
 
-/** `status` is excluded: its render site already hardens it through a
- *  `ReadonlyMap` lookup, and coercing it would break its enum type. */
+/**
+ * Covers the SINGLE-OBJECT borrow responses only — `POST /api/family/:id/borrow`
+ * and `PATCH /api/borrow/:requestId`.
+ *
+ * The borrow LIST (`GET /api/family/:id/borrow`) deliberately does not come
+ * through here: it is owned by the stricter `extension/src/api/borrowValidation.ts`
+ * and its PWA twin, which rebuild all 12 fields from scratch (no spread of the
+ * raw element), drop elements without a usable `requestId`, and coerce
+ * `bookCoverUrl` as well. Two policies on one entity, so they are cross-linked
+ * here: a field added to `BorrowRequest` must be decided for BOTH, or the list
+ * and the create/update paths silently diverge.
+ *
+ * `status` is excluded from both: its render site already hardens it through a
+ * `ReadonlyMap` lookup, and coercing it would break its enum type.
+ */
 export function sanitizeBorrowRequestText<T extends BorrowRequestTextFields>(
   request: T,
 ): T {

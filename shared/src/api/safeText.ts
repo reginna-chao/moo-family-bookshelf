@@ -27,6 +27,22 @@
  * byte-identical: this layer coerces TYPES, it never trims, normalizes or
  * rewrites content.
  *
+ * The two CONTAINER helpers both degrade rather than pass garbage on, and the
+ * one asymmetry between them is deliberate:
+ *  - `sanitizeRecord` passes `null` / `undefined` straight through — a missing
+ *    payload must STAY missing, and every caller already guards for it — while
+ *    any other non-object (a primitive, an array) degrades to an EMPTY entity,
+ *    because those slip past the very same guards (`[]` and `"x"` are truthy)
+ *    and then crash the first field read.
+ *  - `sanitizeList` degrades a malformed container to `[]` and drops an element
+ *    that cannot carry fields.
+ * Both land on the principle already used for text: renderable emptiness beats a
+ * throw. A bad container or element detonates one render later — inside `.map`
+ * or a field read — where no caller `try` can reach it, and with no
+ * ErrorBoundary in either app that is a permanent white screen.
+ * `extension/src/api/borrowValidation.ts` and its PWA twin already apply this
+ * strictness to the borrow list; this layer now matches it.
+ *
  * Not covered here, deliberately:
  *  - `error.message` / `error.code` — owned by the error-text hardening.
  *  - Cover URLs (`coverUrl`, `bookCoverUrl`) — they only reach an attribute,
@@ -56,26 +72,81 @@ export function safeNullableText(value: unknown): string | null {
 }
 
 /**
- * Apply a sanitizer only to a value that can actually carry fields.
+ * Can this value carry the fields a sanitizer is about to rewrite?
  *
- * A `data` payload that is not a non-null object passes through untouched:
- * reading through `null` would throw a TypeError out of the API client, turning
- * this hardening layer into the very failure it exists to prevent. Such a
- * payload then reaches the caller exactly as it did before this layer existed.
+ * Arrays are excluded on purpose, so this is the same predicate as `isRecord` in
+ * `extension/src/api/borrowValidation.ts` (and its PWA twin) — one definition of
+ * "addressable record" across both hardening layers.
+ */
+function isRecordLike(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Apply a sanitizer to a payload that claims to be an entity.
+ *
+ * Three outcomes, and the split between the last two is the whole point:
+ *  - A plain object is sanitized field by field.
+ *  - `null` / `undefined` pass through UNCHANGED. A missing payload must stay
+ *    missing: every caller already guards it (`if (!response.data)`, and
+ *    `sanitizeEnvelope` in both API clients returns early on `undefined` data),
+ *    so fabricating an entity here would turn "the backend sent nothing" into
+ *    "the backend sent an empty family" — a different and worse lie.
+ *  - Anything ELSE — a primitive, or an array — is garbage that nonetheless
+ *    walks past those guards, since `[]` and `"x"` are both truthy. It degrades
+ *    to `sanitize({})`, letting the per-entity sanitizer materialize the full
+ *    safe shape: `""` for every text field, `[]` for every list, optionals left
+ *    absent. That renders as an EMPTY state instead of throwing on the first
+ *    field read — the same degradation philosophy as `""` for text, one level
+ *    up.
+ *
+ * The empty-entity branch is what closes the container half of the white-screen
+ * gap: `data: []` and `data: "x"` otherwise reach the exact render line a
+ * malformed list does — `setMembers(undefined)`, then `members.length`.
+ *
+ * An array is garbage here and is never SPREAD: `{ ...arr, familyId: "" }` would
+ * carry the array's numeric keys and dress a malformed payload up as a valid
+ * entity. Excluding arrays is also what keeps the predicate identical to
+ * `isRecord` in `extension/src/api/borrowValidation.ts` (and its PWA twin).
  */
 export function sanitizeRecord<T>(value: T, sanitize: (record: T) => T): T {
-  return typeof value === "object" && value !== null ? sanitize(value) : value;
+  if (isRecordLike(value)) return sanitize(value);
+  if (value === null || value === undefined) return value;
+  return sanitize({} as T);
 }
 
 /**
  * Sanitize every element of a backend-supplied list.
  *
- * Same fail-safe contract as `sanitizeRecord`, one level up: a `list` that is
- * not an array is returned as-is instead of being handed to `.map`, and each
- * element goes through `sanitizeRecord` so a `null` entry cannot throw here.
- * Callers that already guard with `Array.isArray` keep behaving identically.
+ * FAIL-CLOSED with no pass-through escape hatch at all — where `sanitizeRecord`
+ * still lets `null` / `undefined` reach the caller's own guard, a MISSING list
+ * materializes as `[]` here, because a list is consumed differently.
+ * `GET /api/family/:id/members` answering
+ * `members: [null]` is stored straight into React state (`setMembers` in
+ * `extension/src/dialog/FamilyDataContext.tsx`, outside any `try`) and only
+ * detonates on the NEXT render, at `members.map` + `member.displayName` in
+ * `extension/src/dialog/MemberList.tsx`; `members: "oops"` does the same at
+ * `members.length`. A throw from render is unreachable to every caller
+ * `try/catch`, and with no ErrorBoundary in either app it is a permanent white
+ * screen — precisely the outcome this module exists to prevent.
+ *
+ * So: a non-array container degrades to `[]`, an element that cannot carry
+ * fields (`null`, a primitive, a nested array) is DROPPED, and the survivors are
+ * sanitized. A MISSING list therefore materializes as `[]` too — the list-level
+ * counterpart of a required text field materializing as `""`. Losing a hostile
+ * element is affordable here in a way it is not for a record: "no members" /
+ * "no books" is a state the UI already renders.
+ *
+ * The stricter precedent is `extension/src/api/borrowValidation.ts` (and its PWA
+ * twin), which already answers a malformed borrow container with `[]` and drops
+ * unaddressable elements; keeping the two policies aligned is what stops them
+ * from drifting apart.
  */
 export function sanitizeList<T>(list: T[], sanitize: (item: T) => T): T[] {
-  if (!Array.isArray(list)) return list;
-  return list.map((item) => sanitizeRecord(item, sanitize));
+  if (!Array.isArray(list)) return [];
+  // `Array.isArray` narrows to `any[]`; re-type so element access stays checked.
+  const items: unknown[] = list;
+  return items
+    .filter((item): item is T => isRecordLike(item))
+    .map((item) => sanitize(item));
 }
