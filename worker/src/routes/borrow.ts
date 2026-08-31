@@ -361,7 +361,25 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
 
   const validRequests = requests.filter((r): r is BorrowRequest => r !== null);
 
-  return c.json({ data: validRequests });
+  // API-layer least privilege: only records the caller is a party to are
+  // returned. A family member who is neither borrower nor owner has no claim to
+  // someone else's transaction, and this is what keeps FORMER members' data
+  // (userId, borrowerName, bookTitle, bookAuthor, bookCoverUrl) out of
+  // uninvolved members' responses — borrow records survive removal in KV, where
+  // family.ts's cancelPendingBorrowsForMember only flips PENDING → CANCELLED
+  // and deletes nothing.
+  //
+  // Nothing downstream needs third-party records: both clients already bucket
+  // exclusively by `ownerId === userId || borrowerId === userId` (extension
+  // BorrowTab.tsx, PWA BorrowPage.tsx; the `pendingBookIds` sets in both
+  // FamilyShelf pages collect only the caller's own PENDING requests), and the
+  // create handler's DUPLICATE_REQUEST check reads KV directly rather than this
+  // response.
+  const visibleRequests = validRequests.filter(
+    (r) => r.borrowerId === userId || r.ownerId === userId,
+  );
+
+  return c.json({ data: visibleRequests });
 });
 
 // PATCH /api/borrow/:requestId — update borrow status

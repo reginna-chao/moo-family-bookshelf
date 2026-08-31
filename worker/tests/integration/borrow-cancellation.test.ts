@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { BorrowStatus, kvKeys, type BorrowRequest } from "../../src/kv/schema";
-import { ALICE, BOB, CHARLIE } from "../helpers/ids";
+import { ALICE, BOB, CHARLIE, DAVE } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -75,6 +75,23 @@ async function createBorrowRequest(
 
 async function readBorrow(requestId: string): Promise<BorrowRequest | null> {
   return await kv.get<BorrowRequest>(kvKeys.borrow(requestId), "json");
+}
+
+/**
+ * GET the family borrow list as `token`. Returns the parsed records plus the
+ * raw response text, so a test can assert that a userId appears NOWHERE in the
+ * payload (not just outside the fields it happens to check).
+ */
+async function listBorrows(familyId: string, token: string) {
+  const res = await request(
+    "GET",
+    `/api/family/${familyId}/borrow`,
+    undefined,
+    token,
+  );
+  expect(res.status).toBe(200);
+  const body = await res.text();
+  return { body, data: (JSON.parse(body) as Json).data as BorrowRequest[] };
 }
 
 beforeEach(() => {
@@ -274,5 +291,164 @@ describe("Borrow Cancellation on Member Removal", () => {
     // Confirm there is still no borrow index
     const idx = await kv.get(kvKeys.borrowsByFamily(familyId));
     expect(idx).toBeNull();
+  });
+});
+
+// ===========================================================================
+// A removed member's borrow data must not stay visible to uninvolved members
+// ===========================================================================
+
+describe("Borrow visibility after member removal", () => {
+  it("keeps a removed member's record with its counterparty and out of an uninvolved member's list", async () => {
+    // 4-person family: Alice (family owner), Bob, Carol, Dave
+    const { familyId, authToken: aliceToken } = await createFamilyAndGetToken(
+      ALICE,
+      "Alice",
+    );
+
+    // maxMembers defaults to 2 and no route raises it — bump it in KV so the
+    // family can hold four members. Setup only; every assertion below goes
+    // through the HTTP handlers.
+    const raw = await kv.get<Json>(kvKeys.family(familyId), "json");
+    raw.maxMembers = 4;
+    await kv.put(kvKeys.family(familyId), JSON.stringify(raw));
+
+    await joinFamilyAndGetToken(familyId, BOB, "Bob");
+    const { authToken: carolToken } = await joinFamilyAndGetToken(
+      familyId,
+      CHARLIE,
+      "Carol",
+    );
+    const { authToken: daveToken } = await joinFamilyAndGetToken(
+      familyId,
+      DAVE,
+      "Dave",
+    );
+
+    // Both records must exist BEFORE the removal: POST requires the ownerId to
+    // be a current family member.
+    // Carol borrows Bob's book — Bob is about to be removed.
+    const reqCarolBorrowsBob = await createBorrowRequest(
+      familyId,
+      carolToken,
+      BOB,
+      "bob",
+    );
+    // Dave borrows Alice's book — Dave's own record, unrelated to Bob.
+    const reqDaveBorrowsAlice = await createBorrowRequest(
+      familyId,
+      daveToken,
+      ALICE,
+      "alice",
+    );
+
+    // Alice removes Bob
+    const removeRes = await request(
+      "DELETE",
+      `/api/family/${familyId}/member/${BOB}`,
+      undefined,
+      aliceToken,
+    );
+    expect(removeRes.status).toBe(200);
+
+    // (a) The PENDING record involving Bob is cancelled, but survives in KV.
+    expect((await readBorrow(reqCarolBorrowsBob))?.status).toBe(
+      BorrowStatus.CANCELLED,
+    );
+
+    // (b) Dave, a party to neither, sees only his own record — nothing about
+    // the removed member reaches him, in any field.
+    const daveView = await listBorrows(familyId, daveToken);
+    expect(daveView.data.map((r) => r.requestId)).toEqual([
+      reqDaveBorrowsAlice,
+    ]);
+    expect(daveView.body).not.toContain(BOB);
+
+    // (c) Carol, the counterparty, keeps her history with the removed member.
+    const carolView = await listBorrows(familyId, carolToken);
+    expect(carolView.data).toHaveLength(1);
+    expect(carolView.data[0].requestId).toBe(reqCarolBorrowsBob);
+    expect(carolView.data[0].ownerId).toBe(BOB);
+    expect(carolView.data[0].status).toBe(BorrowStatus.CANCELLED);
+  });
+});
+
+// ===========================================================================
+// Orphaned borrow records outlive their family record
+// ===========================================================================
+
+describe("Orphaned borrow records after family dissolution", () => {
+  it("lets a party settle an orphaned request while a non-party stays forbidden", async () => {
+    const { familyId } = await createFamilyAndGetToken(ALICE, "Alice");
+    const { authToken: bobToken } = await joinFamilyAndGetToken(
+      familyId,
+      BOB,
+      "Bob",
+    );
+
+    // Carol is an authenticated user in her OWN family — a party to nothing in
+    // Alice's family, but holding a token the auth middleware accepts.
+    const { authToken: carolToken } = await createFamilyAndGetToken(
+      CHARLIE,
+      "Carol",
+    );
+
+    // Bob borrows Alice's book → PENDING
+    const requestId = await createBorrowRequest(
+      familyId,
+      bobToken,
+      ALICE,
+      "orphan",
+    );
+
+    // Dissolve the family by dropping `family:{familyId}`. Setup-only KV
+    // surgery; every assertion below still goes through HTTP. Auth tokens live
+    // in `auth:{userId}` / `authtoken:{token}` and only member removal deletes
+    // them, so Bob's token survives the family record — that is precisely the
+    // residual being pinned here.
+    await kv.delete(kvKeys.family(familyId));
+
+    // Sanity: the family really is gone — a family-scoped route now 404s.
+    const listRes = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      bobToken,
+    );
+    expect(listRes.status).toBe(404);
+    expect(((await listRes.json()) as Json).error.code).toBe(
+      "FAMILY_NOT_FOUND",
+    );
+
+    // A non-party is still refused, and the refusal discloses nothing about the
+    // orphan (no counterparty id leaks into the error body).
+    const carolRes = await request(
+      "PATCH",
+      `/api/borrow/${requestId}`,
+      { status: BorrowStatus.CANCELLED },
+      carolToken,
+    );
+    expect(carolRes.status).toBe(403);
+    const carolBody = await carolRes.text();
+    expect((JSON.parse(carolBody) as Json).error.code).toBe("FORBIDDEN");
+    expect(carolBody).not.toContain(BOB);
+    expect(carolBody).not.toContain(ALICE);
+    // The refused write left the record untouched.
+    expect((await readBorrow(requestId))?.status).toBe(BorrowStatus.PENDING);
+
+    // The borrower CAN still cancel: PATCH /api/borrow/:requestId loads only
+    // `borrow:{requestId}` and never re-reads `family:{familyId}`, so the
+    // orphan stays writable by its parties.
+    const cancelRes = await request(
+      "PATCH",
+      `/api/borrow/${requestId}`,
+      { status: BorrowStatus.CANCELLED },
+      bobToken,
+    );
+    expect(cancelRes.status).toBe(200);
+    expect(((await cancelRes.json()) as Json).data.status).toBe(
+      BorrowStatus.CANCELLED,
+    );
+    expect((await readBorrow(requestId))?.status).toBe(BorrowStatus.CANCELLED);
   });
 });
