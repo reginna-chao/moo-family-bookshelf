@@ -5,7 +5,7 @@ import { safeCoverUrl } from "@/utils/safeCoverUrl";
 /**
  * `safeCoverUrl` is the PWA's CODE-side half of the cover-URL beacon defence.
  * The other half is the CSP `img-src` in pwa/public/_headers (pinned by
- * tests/unit/cspImgSrc.test.ts), but that file is only honoured by hosts that
+ * tests/unit/cspHeaders.test.ts), but that file is only honoured by hosts that
  * serve it (Cloudflare Pages / Netlify) — under `vite dev` / `vite preview` or
  * on a plain static host no CSP is sent at all, and an already-stored hostile
  * `coverUrl` / `bookCoverUrl` would leak every viewer's IP / UA to a third
