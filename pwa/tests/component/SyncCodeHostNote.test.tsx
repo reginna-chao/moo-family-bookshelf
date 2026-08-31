@@ -12,24 +12,24 @@ import {
 import { validateEndpointUrl } from "@/api/client";
 
 /**
- * Production copy, pinned here because `VALID_LEAD_IN` is module-private. The
- * Extension twin renders the SAME two strings — extension/tests/component/
- * SyncCodeHostNote.test.tsx pins its own copy of this pair, and the two MUST
- * stay byte-identical: a family whose members use both apps would otherwise be
- * told about the same server in two different words.
+ * Production copy, pinned as literals ON PURPOSE.
  *
- * Hoisting this copy into `moo-family-bookshelf-shared` WOULD be possible — the
- * PWA already imports that package from both src and tests — and would make the
- * two apps structurally incapable of disagreeing. It is deliberately NOT done:
- * each side pins its OWN package's production literal, so a reworded string is
- * still caught by that app's own test. The price of the choice, stated plainly:
- * nothing FAILS when the Extension's copy and the PWA's copy drift apart,
- * because each suite stays green against its own string. Only code review
- * catches cross-app drift.
+ * The strings themselves now live in `moo-family-bookshelf-shared/hostNote/
+ * messages` and BOTH twins import them from there, so the cross-app drift this
+ * pin used to be powerless against — Extension copy and PWA copy quietly
+ * diverging, each suite green against its own string — is now impossible at the
+ * source rather than watched for in review.
+ *
+ * What the pins still buy is the other direction: importing the shared constants
+ * here would compare production with itself and let any reword sail through
+ * green. Pinned, a reword has to be made twice — once in shared/, once here —
+ * and the Extension twin (extension/tests/component/SyncCodeHostNote.test.tsx)
+ * pins the identical set, so it takes four deliberate edits, not a slip.
  */
 const JOIN_LEAD_IN = "此同步碼將連線至自訂伺服器：";
 const VERIFY_LEAD_IN = "將連線至自訂伺服器：";
-/** Shared by both variants — deliberately, see the variant block below. */
+const ONBOARDING_LEAD_IN = "目前使用自訂伺服器：";
+/** Shared by every variant — deliberately, see the variant block below. */
 const INVALID_WARNING = "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認";
 
 /**
@@ -139,7 +139,16 @@ describe("SyncCodeHostNote", () => {
    *
    *   - a sync code is on display (the landing form) → name it, "此同步碼…";
    *   - none is (the verification screen a QR / invite arrival lands on, where
-   *     the code was never typed) → drop the mention.
+   *     the code was never typed) → drop the mention;
+   *   - nothing has happened yet, the note just states the server in force
+   *     (`onboarding`) → present tense, "目前使用…".
+   *
+   * `onboarding` has no PWA call site today — it arrived with the shared copy
+   * map for the Extension's onboarding container. It is covered here anyway,
+   * because the component accepts it: the PWA must already render it the way the
+   * Extension does on the day a PWA screen starts passing it, and a variant that
+   * is only exercised on one side is exactly how the two apps would drift back
+   * apart.
    *
    * `join` is the DEFAULT so the form's call site needs no prop at all — that
    * default is what this block pins. The invalid branch is deliberately
@@ -173,15 +182,30 @@ describe("SyncCodeHostNote", () => {
     it.each([
       ["join", "join" as const, JOIN_LEAD_IN],
       ["verify", "verify" as const, VERIFY_LEAD_IN],
+      ["onboarding", "onboarding" as const, ONBOARDING_LEAD_IN],
     ])("names the server with the %s lead-in", (_label, variant, leadIn) => {
       // Exact equality, not `toContain`: the join copy CONTAINS the verify copy,
       // so a substring assertion cannot tell the two variants apart.
       expect(textOf(VALID, variant)).toBe(`${leadIn}${VALID.endpoint}`);
     });
 
-    it("drops the sync-code mention on the verify variant", () => {
+    it("drops the sync-code mention on the verify and onboarding variants", () => {
       expect(textOf(VALID, "verify")).not.toContain("此同步碼");
+      expect(textOf(VALID, "onboarding")).not.toContain("此同步碼");
       expect(textOf(VALID, "join")).toContain("此同步碼");
+    });
+
+    /**
+     * Three variants that render the same sentence would make `variant`
+     * decorative and hide a wrong key at a call site; pairwise inequality is the
+     * assertion that keeps holding after any one of them is reworded.
+     */
+    it("gives each variant a lead-in no other variant produces", () => {
+      const rendered = (["join", "verify", "onboarding"] as const).map(
+        (variant) => textOf(VALID, variant),
+      );
+
+      expect(new Set(rendered).size).toBe(rendered.length);
     });
 
     it("defaults to the join lead-in when no variant is given", () => {
@@ -194,10 +218,11 @@ describe("SyncCodeHostNote", () => {
      * is what carried the refused host, and a caller asking for `verify` copy
      * must not get a softened version of a security refusal.
      */
-    it("warns identically on both variants", () => {
+    it("warns identically on every variant", () => {
       const onJoin = textOf(INVALID, "join");
 
       expect(textOf(INVALID, "verify")).toBe(onJoin);
+      expect(textOf(INVALID, "onboarding")).toBe(onJoin);
       expect(textOf(INVALID)).toBe(onJoin);
       expect(onJoin).toBe(INVALID_WARNING);
     });

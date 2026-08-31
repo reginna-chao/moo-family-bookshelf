@@ -14,17 +14,24 @@
  * → drop it (`verify`), which is the case on the verification screen a QR /
  * invite arrival lands on. The invalid branch's warning is deliberately
  * variant-independent — it is about the sync code that carried the bad host.
+ * (`onboarding` comes with the shared copy map and is currently used only by the
+ * Extension's onboarding container; the PWA has no equivalent screen yet.)
+ *
+ * Every string here lives in shared/src/hostNote/messages.ts, imported by BOTH
+ * twins — that module, not a comment, is what keeps the two byte-identical.
  */
 
+import {
+  SYNC_CODE_HOST_NOTE_INVALID,
+  SYNC_CODE_HOST_NOTE_LEAD_IN,
+  type SyncCodeHostNoteVariant,
+} from "moo-family-bookshelf-shared/hostNote/messages";
 import type { SyncCodeApiHostResult } from "@/crypto/syncCode";
-
-/** Which screen the note sits on. Keep in sync with the Extension twin. */
-type SyncCodeHostNoteVariant = "join" | "verify";
 
 export interface SyncCodeHostNoteProps {
   /** Verdict from `parseSyncCodeApiHost` / `classifySyncCodeApiHost`. */
   result: SyncCodeApiHostResult;
-  /** 決定 valid 分支的引導語；join 提「此同步碼」，verify 不提（畫面上沒有同步碼）。 */
+  /** 決定 valid 分支的引導語；join 提「此同步碼」，verify／onboarding 不提（畫面上沒有同步碼）。 */
   variant?: SyncCodeHostNoteVariant;
   /** Extra layout classes (spacing only); colour and size are fixed. */
   className?: string;
@@ -32,12 +39,6 @@ export interface SyncCodeHostNoteProps {
 
 const BASE_CLASS =
   "rounded-md border bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 break-all";
-
-/** Valid-branch lead-in. Must stay byte-identical to the Extension twin's copy. */
-const VALID_LEAD_IN: Record<SyncCodeHostNoteVariant, string> = {
-  join: "此同步碼將連線至自訂伺服器：",
-  verify: "將連線至自訂伺服器：",
-};
 
 export function SyncCodeHostNote({
   result,
@@ -55,7 +56,7 @@ export function SyncCodeHostNote({
         data-testid="sync-code-host-note-invalid"
         className={`${classes} border-amber-400 font-semibold`}
       >
-        ⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認
+        {SYNC_CODE_HOST_NOTE_INVALID}
       </p>
     );
   }
@@ -65,7 +66,7 @@ export function SyncCodeHostNote({
       data-testid="sync-code-host-note"
       className={`${classes} border-amber-200`}
     >
-      {VALID_LEAD_IN[variant]}
+      {SYNC_CODE_HOST_NOTE_LEAD_IN[variant]}
       <span className="font-mono">{result.endpoint}</span>
     </p>
   );

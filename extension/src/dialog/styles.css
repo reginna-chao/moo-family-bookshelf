@@ -4144,6 +4144,16 @@
   margin: 24px 24px 0 24px;
 }
 
+/* Same arrangement for the onboarding container's status note, which likewise
+   precedes .moo-onboarding-view instead of sitting inside it. Both this rule
+   and the base note declare `margin`, and both come AFTER the mobile
+   `.moo-onboarding > * { margin-block: auto }` block at equal specificity, so
+   the note keeps its fixed 24px top offset on phones while the view below it
+   still takes the auto margins that center short content. */
+.moo-sync-host-note--onboarding {
+  margin: 24px 24px 0 24px;
+}
+
 /* Same note on the re-auth modal, which needs its OWN modifier: --verify's 24px
    side gutters would stack on top of .moo-modal's own 20px padding (44px), and
    .moo-modal .moo-onboarding-view zeroes the panel padding, so no gutter is owed

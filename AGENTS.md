@@ -26,6 +26,7 @@ moo-family-bookshelf/
 │   ├── src/
 │   │   ├── api/                # Endpoint URL validation + sync-code @host classification + backend data-field runtime coercion
 │   │   ├── config/             # Readmoo host/selector config, report links
+│   │   ├── hostNote/           # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 │   │   ├── icons/              # Inline brand SVG paths
 │   │   ├── invite/             # Invite message templates
 │   │   ├── personal/           # Personal-shelf save strategy (PUT vs PATCH)

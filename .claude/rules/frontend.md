@@ -27,6 +27,7 @@ extension/src/
 shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pwa/ and worker/
 ├── api/            # Endpoint URL validation + sync-code @host classification + backend data-field runtime coercion
 ├── config/         # Readmoo host/selector config, report links
+├── hostNote/       # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 ├── icons/          # Inline brand SVG paths
 ├── invite/         # Invite message templates
 ├── personal/       # Personal-shelf save strategy (PUT vs PATCH)
