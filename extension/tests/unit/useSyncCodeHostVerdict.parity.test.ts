@@ -161,6 +161,11 @@ function normalize(source: string): string {
  * (`"moo-ab12-cd34@https://api.moofamily.app"`), so the first URL-carrying
  * validator to join the table walks straight into it. The
  * "strips comments with a parser" test below pins the hazard.
+ *
+ * Everything is parsed as plain `.ts` (`ScriptKind.TS`), which is correct for
+ * every code-mode twin registered today. Derive the kind from the row's path
+ * before registering a `.tsx` twin: otherwise its JSX goes through the parser's
+ * error recovery instead of a clean parse.
  */
 function stripComments(source: string): string {
   const sourceFile = ts.createSourceFile(
@@ -197,16 +202,17 @@ describe("Extension / PWA twin modules", () => {
         expect(source).toContain(marker);
       }
 
-      const crossReference = `${what}: each twin must name the other app's copy, so a reader landing on either one is told there is a second one.`;
       if (compare === "code") {
         // That cross-reference lives in the header comment this mode has just
         // stripped, and the code itself names no directories — so the claim is
         // checked against the RAW source instead.
-        expect(extensionRaw, crossReference).toContain(pwa);
-        expect(pwaRaw, crossReference).toContain(extension);
+        const namesTheOtherCopy = `${what}: each twin must name the other app's copy, so a reader landing on either one is told there is a second one.`;
+        expect(extensionRaw, namesTheOtherCopy).toContain(pwa);
+        expect(pwaRaw, namesTheOtherCopy).toContain(extension);
       } else {
+        const namesTheOtherDir = `${what}: each twin must name the other app's directory, so a reader landing on either copy is told there is a second one.`;
         for (const source of [extensionSource, pwaSource]) {
-          expect(source, crossReference).toContain(TWIN_DIR);
+          expect(source, namesTheOtherDir).toContain(TWIN_DIR);
         }
       }
 
