@@ -4,6 +4,7 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { LazyCover } from "@/components/LazyCover";
 import { OverflowMenu } from "@/components/OverflowMenu";
 import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
+import { safeBookUrl } from "@/utils/safeBookUrl";
 import { safeCoverUrl } from "@/utils/safeCoverUrl";
 
 export interface FamilyBookCardProps {
@@ -64,7 +65,7 @@ export function FamilyBookCard({
   return (
     <div className="block rounded-lg bg-white shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
       <a
-        href={book.readmooUrl}
+        href={safeBookUrl(book.readmooUrl) || undefined}
         target="_blank"
         rel="noopener noreferrer"
         className="block"

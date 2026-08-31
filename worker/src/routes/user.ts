@@ -20,6 +20,7 @@ import {
   isJsonObject,
   sanitizeDisplayName,
   sanitizeCoverUrl,
+  sanitizeReadmooUrl,
   isValidFamilyPrefRef,
 } from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
@@ -298,7 +299,9 @@ function asString(value: unknown): string {
  * payload if any entry is not an object with a non-empty string `bookId`.
  * Every entry is rebuilt from an explicit field allowlist so unvalidated client
  * fields never reach KV; isShared/isArchived are normalized to BoolFlag, and
- * `coverUrl` is whitelist-sanitized (blanked when off-whitelist).
+ * both attacker-controlled URL fields — `coverUrl` (rendered as `<img src>`)
+ * and `readmooUrl` (rendered as `<a href>`) — are whitelist-sanitized (blanked
+ * when off-whitelist).
  */
 export function parseBooks(
   rawBooks: unknown[],
@@ -334,7 +337,7 @@ export function parseBooks(
       author: asString(e.author),
       isbn: asString(e.isbn),
       coverUrl: sanitizeCoverUrl(e.coverUrl),
-      readmooUrl: asString(e.readmooUrl),
+      readmooUrl: sanitizeReadmooUrl(e.readmooUrl),
       category: asString(e.category),
       isShared: toBoolFlag(e.isShared),
     };
@@ -628,16 +631,18 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   // Apply changes: update isShared for matching bookIds
   let applied = 0;
   const updatedBooks = existing.books.map((book) => {
-    // Lazy cleanup: records written before the coverUrl whitelist may carry a
-    // poisoned value; re-sanitize on every rebuild so the next real write
-    // scrubs it from KV and from the public snapshots refreshed below.
+    // Lazy cleanup: records written before the coverUrl / readmooUrl whitelists
+    // may carry a poisoned value; re-sanitize both on every rebuild so the next
+    // real write scrubs them from KV and from the public snapshots refreshed
+    // below.
     const coverUrl = sanitizeCoverUrl(book.coverUrl);
+    const readmooUrl = sanitizeReadmooUrl(book.readmooUrl);
     const newIsShared = changeMap.get(book.bookId);
     if (newIsShared !== undefined) {
       applied++;
-      return { ...book, coverUrl, isShared: newIsShared };
+      return { ...book, coverUrl, readmooUrl, isShared: newIsShared };
     }
-    return { ...book, coverUrl };
+    return { ...book, coverUrl, readmooUrl };
   });
 
   // Short-circuit: no matching books and no displayName update → skip KV write
@@ -767,9 +772,9 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
 
   // Per-field merge semantics: a field present in the body full-replaces that
   // list; an absent field preserves its existing KV value (protecting live
-  // v1.5.0 clients that only send `hidden`). Apart from the coverUrl lazy scrub
-  // applied to `books` below, all other record fields — displayName,
-  // schemaVersion, lastUpdated — are preserved untouched, and no
+  // v1.5.0 clients that only send `hidden`). Apart from the coverUrl /
+  // readmooUrl lazy scrub applied to `books` below, all other record fields —
+  // displayName, schemaVersion, lastUpdated — are preserved untouched, and no
   // public snapshot is written (this is a private per-viewer preference).
   // Cross-device concurrent edits carry a lost-update risk, acceptable for the
   // single-user scenario.
@@ -787,12 +792,14 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
   const record: UserBooksRecord = {
     ...existing,
     // Lazy cleanup, same rule as the PATCH rebuild: this handler writes the
-    // record anyway, so scrub any pre-whitelist poisoned coverUrl while we are
-    // here. No snapshot is written on this path — the KV record may briefly be
-    // cleaner than an existing snapshot, which converges on the next books write.
+    // record anyway, so scrub any pre-whitelist poisoned coverUrl / readmooUrl
+    // while we are here. No snapshot is written on this path — the KV record may
+    // briefly be cleaner than an existing snapshot, which converges on the next
+    // books write.
     books: existing.books.map((b) => ({
       ...b,
       coverUrl: sanitizeCoverUrl(b.coverUrl),
+      readmooUrl: sanitizeReadmooUrl(b.readmooUrl),
     })),
     familyShelfPrefs: merged,
   };

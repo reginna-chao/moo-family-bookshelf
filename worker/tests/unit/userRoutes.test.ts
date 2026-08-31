@@ -4,7 +4,7 @@ import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
 import { BoolFlag, kvKeys } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
-import { ALICE, USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
+import { ALICE, BOB, USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -1030,6 +1030,132 @@ describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
     expect(record.books[0].coverUrl).toBe("");
     expect(record.displayName).toBe("New Name");
     expect(record.lastUpdated).not.toBe(SEEDED_AT);
+  });
+});
+
+// ===========================================================================
+// PATCH /api/user/:id/books — readmooUrl lazy cleanup (P0 privacy)
+//
+// The other attacker-controlled URL field of a book, rendered as a clickable
+// `<a href>`: an off-whitelist value is a phishing / arbitrary-redirect lure
+// served under a legitimate book title. PUT blocks new ones at the boundary;
+// PATCH additionally SCRUBS records written before that guard existed. Same
+// opportunistic contract as the coverUrl cleanup above — it rides the write
+// this handler was going to perform anyway and never forces one.
+// ===========================================================================
+
+describe("PATCH /api/user/:id/books — readmooUrl lazy cleanup", () => {
+  const LEGACY_USER = BOB;
+  const PHISHING_HOST = "phish.example.com";
+  const POISONED_LINK = `https://${PHISHING_HOST}/login`;
+  /** On the Readmoo whitelist (`isAllowedBookUrl`), so it must survive. */
+  const CLEAN_LINK = "https://readmoo.com/book/210123456";
+  /** Fixed so "the record was not rewritten" is provable from `lastUpdated`. */
+  const SEEDED_AT = "2020-01-01T00:00:00.000Z";
+
+  function book(bookId: string, readmooUrl: string, isShared = BoolFlag.FALSE) {
+    return {
+      bookId,
+      title: `Book ${bookId}`,
+      author: "",
+      isbn: "",
+      coverUrl: "https://cdn.readmoo.com/clean.jpg",
+      readmooUrl,
+      category: "",
+      isShared,
+    };
+  }
+
+  /**
+   * Seed `user:{id}` DIRECTLY rather than through PUT. A poisoned readmooUrl
+   * can only be in KV because it was written BEFORE the whitelist existed —
+   * PUT sanitizes on the way in, so it cannot produce this fixture.
+   */
+  async function seedLegacyRecord(
+    books: ReturnType<typeof book>[],
+  ): Promise<string> {
+    await kv.put(
+      kvKeys.user(LEGACY_USER),
+      JSON.stringify({
+        schemaVersion: 1,
+        userId: LEGACY_USER,
+        displayName: "Legacy User",
+        books,
+        lastUpdated: SEEDED_AT,
+      }),
+    );
+    return generateAuthToken(kv, LEGACY_USER);
+  }
+
+  async function storedRecord(): Promise<Json> {
+    return kv.get(kvKeys.user(LEGACY_USER), "json");
+  }
+
+  function patch(body: unknown, token: string) {
+    return request("PATCH", `/api/user/${LEGACY_USER}/books`, body, token);
+  }
+
+  it("scrubs the poisoned link of the book a change targets, keeping a whitelisted one", async () => {
+    const token = await seedLegacyRecord([
+      book("b1", POISONED_LINK),
+      book("b2", CLEAN_LINK),
+    ]);
+
+    const res = await patch(
+      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      token,
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Json).data.applied).toBe(1);
+
+    const record = await storedRecord();
+    const [b1, b2] = record.books;
+    expect(b1.readmooUrl).toBe("");
+    expect(b1.isShared).toBe(BoolFlag.TRUE);
+    expect(b2.readmooUrl).toBe(CLEAN_LINK);
+    expect(JSON.stringify(record)).not.toContain(PHISHING_HOST);
+  });
+
+  it("scrubs the poisoned link of a book no change targets", async () => {
+    const token = await seedLegacyRecord([
+      book("b1", CLEAN_LINK),
+      book("b2", POISONED_LINK),
+    ]);
+
+    const res = await patch(
+      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      token,
+    );
+    expect(res.status).toBe(200);
+
+    const record = await storedRecord();
+    const untouched = record.books.find((b: Json) => b.bookId === "b2");
+    // Only the link moved: the book's own sharing state is not a change target,
+    // and its whitelisted cover is untouched — the two URL fields are
+    // sanitized independently.
+    expect(untouched.readmooUrl).toBe("");
+    expect(untouched.isShared).toBe(BoolFlag.FALSE);
+    expect(untouched.coverUrl).toBe("https://cdn.readmoo.com/clean.jpg");
+    expect(untouched.title).toBe("Book b2");
+  });
+
+  it("leaves a poisoned link in KV when the PATCH is a pure no-op", async () => {
+    const token = await seedLegacyRecord([book("b1", POISONED_LINK)]);
+    const ops = watchKvOps(kv);
+
+    const res = await patch(
+      { changes: [{ bookId: "unknown-book", isShared: BoolFlag.TRUE }] },
+      token,
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Json).data.applied).toBe(0);
+
+    // The short-circuit still skips the KV write entirely — cleanup rides an
+    // existing write and must never become a hidden one of its own.
+    expect(ops.putKeys()).toEqual([]);
+    const record = await storedRecord();
+    expect(record.books[0].readmooUrl).toBe(POISONED_LINK);
+    expect(record.lastUpdated).toBe(SEEDED_AT);
   });
 });
 

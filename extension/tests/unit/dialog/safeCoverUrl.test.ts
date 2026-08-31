@@ -37,6 +37,20 @@ describe("safeCoverUrl", () => {
       url: "http://cdn.readmoo.com/x.jpg",
       expected: "",
     },
+    {
+      // The one rejected shape that is NOT just "some other host": a scheme
+      // with no `//` parses to `https://cdn.readmoo.com/x.jpg` on its own, but
+      // an `<img src>` resolves it against the page it is rendered into — and
+      // the dialog is injected INTO a Readmoo page, so on render it fires an
+      // authenticated same-site GET at an attacker-chosen Readmoo path, with
+      // no click. Named explicitly even though the delegation tripwire below
+      // would also catch it, because this is the wrapper's only rejection
+      // whose input LOOKS whitelisted. Full matrix + why no CSP substitutes
+      // for it: tests/unit/readmooConfig.test.ts.
+      name: "a bare scheme with no // that resolves against the rendering page",
+      url: "https:cdn.readmoo.com/../../x.jpg",
+      expected: "",
+    },
     { name: "an empty string", url: "", expected: "" },
   ];
 

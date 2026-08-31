@@ -819,6 +819,348 @@ describe("GET /api/public/:shareToken — coverUrl read-side scrub", () => {
   });
 });
 
+// ── Public snapshot readmooUrl sanitize (buildSnapshot chokepoint) ─
+//
+// Twin of the coverUrl chokepoint suite above for the OTHER attacker-controlled
+// URL field. A `user:{id}` record written BEFORE the Readmoo domain whitelist
+// shipped can still carry an off-whitelist `readmooUrl`, which the PWA renders
+// as a clickable `<a href>` — a phishing / arbitrary-redirect lure served to
+// anonymous strangers under a legitimate book title. The three snapshot-minting
+// handlers hand `buildSnapshot` a RAW record read, so without the sanitize
+// inside it any of them would publish a fresh poisoned snapshot for a record
+// whose owner never syncs books again.
+//
+// WRITE side only: every case starts from a poisoned `user:{id}` record and
+// pins that the snapshot is MINTED clean. The READ side — an already-STORED
+// poisoned snapshot, which no write path can reach any more — is the suite
+// after this one.
+
+describe("Public snapshot readmooUrl sanitize", () => {
+  const PHISHING_HOST = "phish.example.com";
+  const PHISHING_LINK = `https://${PHISHING_HOST}/login`;
+  /** book3's whitelisted link from `sampleBooks()` — the control that survives. */
+  const CONTROL_LINK = "https://readmoo.com/book/book3";
+
+  /**
+   * Write an off-whitelist book link DIRECTLY into the stored `user:{userId}`
+   * record, bypassing every books handler — the shape of a record poisoned
+   * before the whitelist existed. Targets book1, which is SHARED and therefore
+   * a candidate for publication; book3 keeps its whitelisted link.
+   */
+  async function poisonStoredReadmooUrl(userId: string): Promise<void> {
+    const record = await kv.get<UserBooksRecord>(kvKeys.user(userId), "json");
+    if (!record) throw new Error(`no seeded books record for ${userId}`);
+    const target = record.books.find((b) => b.bookId === "book1");
+    if (!target) throw new Error("fixture no longer contains book1");
+    target.readmooUrl = PHISHING_LINK;
+    await kv.put(kvKeys.user(userId), JSON.stringify(record));
+  }
+
+  async function readSnapshot(
+    shareToken: string,
+  ): Promise<PublicShelfSnapshot> {
+    const snapshot = await kv.get<PublicShelfSnapshot>(
+      kvKeys.publicShelf(shareToken),
+      "json",
+    );
+    if (!snapshot) throw new Error(`no snapshot stored for ${shareToken}`);
+    return snapshot;
+  }
+
+  function linkOf(
+    snapshot: PublicShelfSnapshot,
+    bookId: string,
+  ): string | undefined {
+    return snapshot.books.find((b) => b.bookId === bookId)?.readmooUrl;
+  }
+
+  /** Poisoned book published with a blank link; the control one untouched. */
+  function expectSanitized(snapshot: PublicShelfSnapshot): void {
+    expect(linkOf(snapshot, "book1")).toBe("");
+    expect(linkOf(snapshot, "book3")).toBe(CONTROL_LINK);
+  }
+
+  /** Nothing an anonymous visitor receives mentions the phishing host. */
+  async function expectPublicReadClean(shareToken: string): Promise<void> {
+    const res = await request("GET", `/api/public/${shareToken}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain(PHISHING_HOST);
+  }
+
+  it("blanks a poisoned readmooUrl when create mints the shelf's first snapshot", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    await poisonStoredReadmooUrl(USER_ID);
+
+    const { res, json } = await createShelf(USER_ID, AUTH_TOKEN);
+    expect(res.status).toBe(201);
+    const shareToken = json.data.shelf.shareToken;
+
+    expectSanitized(await readSnapshot(shareToken));
+    await expectPublicReadClean(shareToken);
+
+    // The handler writes no books record, so the poison is still sitting in
+    // `user:{id}`: the snapshot is clean because of the chokepoint, not because
+    // something scrubbed KV first.
+    const record = await kv.get<UserBooksRecord>(kvKeys.user(USER_ID), "json");
+    const stored = record?.books.find((b) => b.bookId === "book1");
+    expect(stored?.readmooUrl).toBe(PHISHING_LINK);
+  });
+
+  it("blanks a poisoned readmooUrl when update rewrites the snapshot", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
+    const { shelfId, shareToken } = created.data.shelf;
+
+    // Poisoned AFTER the shelf exists, so only the update's snapshot rewrite
+    // can carry the value onto the public surface.
+    await poisonStoredReadmooUrl(USER_ID);
+
+    const res = await request(
+      "PUT",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}`,
+      { body: JSON.stringify({ title: "新標題" }), token: AUTH_TOKEN },
+    );
+    expect(res.status).toBe(200);
+
+    const snapshot = await readSnapshot(shareToken);
+    // Proves the snapshot really was rebuilt from the poisoned record — a
+    // handler that skipped the rewrite would leave the pre-poison snapshot and
+    // pass the link assertions for the wrong reason.
+    expect(snapshot.title).toBe("新標題");
+    expectSanitized(snapshot);
+    await expectPublicReadClean(shareToken);
+  });
+
+  it("blanks a poisoned readmooUrl when reset-token republishes under the new token", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
+    const { shelfId, shareToken: oldToken } = created.data.shelf;
+
+    await poisonStoredReadmooUrl(USER_ID);
+
+    const res = await request(
+      "POST",
+      `/api/user/${USER_ID}/public-shelf/${shelfId}/reset-token`,
+      { token: AUTH_TOKEN },
+    );
+    expect(res.status).toBe(200);
+    const newToken = ((await res.json()) as Json).data.shelf.shareToken;
+    expect(newToken).not.toBe(oldToken);
+
+    // `readSnapshot` throws when the new token has no snapshot, so reaching the
+    // assertions proves this handler minted a fresh one from the raw record.
+    expectSanitized(await readSnapshot(newToken));
+    await expectPublicReadClean(newToken);
+  });
+
+  it("keeps the whitelisted cover of the same book while blanking only its link", async () => {
+    await seedUser(USER_ID, AUTH_TOKEN);
+    await poisonStoredReadmooUrl(USER_ID);
+
+    const { json } = await createShelf(USER_ID, AUTH_TOKEN);
+    const snapshot = await readSnapshot(json.data.shelf.shareToken);
+
+    // The chokepoint sanitizes the two URL fields independently: a blanked link
+    // must not take the book's legitimate cover down with it. The expected
+    // cover is read back off the shared fixture so the two cannot drift.
+    const fixtureCover = sampleBooks().find(
+      (b) => b.bookId === "book1",
+    )?.coverUrl;
+    expect(fixtureCover).toBeTruthy();
+    const published = snapshot.books.find((b) => b.bookId === "book1");
+    expect(published?.coverUrl).toBe(fixtureCover);
+    expect(published?.readmooUrl).toBe("");
+    expect(published?.title).toBe("Shared Book");
+  });
+});
+
+// ── GET /api/public/:shareToken — readmooUrl read-side scrub ──
+//
+// Read-side twin of the suite above, and not a duplicate of it: the write-side
+// chokepoint only governs snapshots minted AFTER the whitelist shipped. One
+// minted BEFORE it keeps its attacker-chosen `readmooUrl` until the shelf is
+// refreshed — and a PERMANENT snapshot has no TTL and may never be refreshed at
+// all, so it would keep offering anonymous visitors a clickable lure
+// indefinitely. No CSP substitutes for this one: `img-src` never constrained a
+// navigation. So the scrub happens on the way out as a response transform, the
+// handler keeps its zero-KV-write invariant, and the stored snapshot is NOT
+// repaired.
+
+describe("GET /api/public/:shareToken — readmooUrl read-side scrub", () => {
+  const SHARE_TOKEN = "cafecafecafecafecafecafecafecafe";
+  const SHELF_ID = "87654321-4321-4321-8321-cba987654321";
+  const SNAPSHOT_TITLE = "永久公開書櫃";
+  const CREATED_AT = Date.parse("2026-02-01T00:00:00.000Z");
+  const NO_LINK_BOOK_ID = "book-nolink";
+
+  const PHISHING_HOST = "phish.example.com";
+  const PHISHING_LINK = `https://${PHISHING_HOST}/login`;
+  /** book3's whitelisted link from `sampleBooks()` — the control that survives. */
+  const CONTROL_LINK = "https://readmoo.com/book/book3";
+
+  /**
+   * The books the STORED snapshot carries — one per link shape the scrub has to
+   * answer for: book1 poisoned before the whitelist existed, book3 whitelisted
+   * (the control that must survive byte-identical), and a scraper placeholder
+   * with an empty link. Derived from the shared fixture, so a `BookEntry` field
+   * change breaks here too.
+   */
+  function storedBooks(): BookEntry[] {
+    const shared = sampleBooks().filter((b) => b.isShared === BoolFlag.TRUE);
+    const poisoned = shared.find((b) => b.bookId === "book1");
+    const control = shared.find((b) => b.bookId === "book3");
+    if (!poisoned || !control) {
+      throw new Error("fixture no longer carries book1 + book3 as shared");
+    }
+    poisoned.readmooUrl = PHISHING_LINK;
+    return [
+      poisoned,
+      control,
+      { ...control, bookId: NO_LINK_BOOK_ID, title: "No Link", readmooUrl: "" },
+    ];
+  }
+
+  /**
+   * Seed the poisoned PERMANENT snapshot DIRECTLY into `public:{shareToken}`,
+   * bypassing every write path on purpose: `buildSnapshot` would have blanked
+   * the link, so no handler alive today can produce this state — only a
+   * snapshot minted before the whitelist shipped carries it.
+   *
+   * The pointer key is seeded alongside it because the liveness guard 404s any
+   * snapshot the owner's CURRENT shelf list does not back; without it the
+   * request would stop at that guard and never reach the scrub, passing the
+   * "no phishing host in the body" assertions for entirely the wrong reason.
+   */
+  async function seedPoisonedSnapshot(): Promise<void> {
+    const snapshot: PublicShelfSnapshot = {
+      userId: USER_ID,
+      shelfId: SHELF_ID,
+      title: SNAPSHOT_TITLE,
+      books: storedBooks(),
+      createdAt: CREATED_AT,
+      expiresAt: null,
+    };
+    await kv.put(kvKeys.publicShelf(SHARE_TOKEN), JSON.stringify(snapshot));
+
+    const pointer: PublicShelvesRecord = {
+      shelves: [
+        {
+          shelfId: SHELF_ID,
+          shareToken: SHARE_TOKEN,
+          title: SNAPSHOT_TITLE,
+          expiresDays: null,
+          createdAt: CREATED_AT,
+          expiresAt: null,
+          selectionMode: "all-shared",
+        },
+      ],
+    };
+    await kv.put(kvKeys.publicShelves(USER_ID), JSON.stringify(pointer));
+  }
+
+  /** The anonymous read, RAW body kept — a host leaks through any field. */
+  async function fetchPublicShelf(): Promise<{ body: string; json: Json }> {
+    const res = await request("GET", `/api/public/${SHARE_TOKEN}`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    return { body, json: JSON.parse(body) as Json };
+  }
+
+  function servedBook(json: Json, bookId: string): Json | undefined {
+    return json.data.books.find((b: Json) => b.bookId === bookId);
+  }
+
+  async function storedLink(bookId: string): Promise<string | undefined> {
+    const snapshot = await kv.get<PublicShelfSnapshot>(
+      kvKeys.publicShelf(SHARE_TOKEN),
+      "json",
+    );
+    return snapshot?.books.find((b) => b.bookId === bookId)?.readmooUrl;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    {
+      label: "blanks a phishing link a pre-whitelist snapshot still stores",
+      bookId: "book1",
+      served: "",
+    },
+    {
+      label: "returns the whitelisted link beside it byte-identical",
+      bookId: "book3",
+      served: CONTROL_LINK,
+    },
+    {
+      label: "leaves an empty placeholder link empty",
+      bookId: NO_LINK_BOOK_ID,
+      served: "",
+    },
+  ])("$label", async ({ bookId, served }) => {
+    // One seeded snapshot carries all three shapes, so each row also proves the
+    // scrub is per-BOOK — never a wholesale blanking of the response.
+    await seedPoisonedSnapshot();
+
+    const { json } = await fetchPublicShelf();
+
+    expect(servedBook(json, bookId)?.readmooUrl).toBe(served);
+  });
+
+  it("keeps the poisoned book itself, with every field but its link intact", async () => {
+    await seedPoisonedSnapshot();
+    const poisoned = storedBooks()[0];
+
+    const { json } = await fetchPublicShelf();
+
+    // Sanitize, never drop: the visitor still sees the book (id, title, cover
+    // and the rest byte-identical), the link just renders as unavailable.
+    expect(servedBook(json, "book1")).toEqual({ ...poisoned, readmooUrl: "" });
+  });
+
+  it("leaks the phishing host nowhere in the response body", async () => {
+    await seedPoisonedSnapshot();
+
+    const { body } = await fetchPublicShelf();
+
+    // Not in a link, not in a title, not in a stray carried-over field.
+    expect(body).not.toContain(PHISHING_HOST);
+  });
+
+  it("returns every non-book field of the snapshot unchanged", async () => {
+    await seedPoisonedSnapshot();
+
+    const { json } = await fetchPublicShelf();
+
+    expect(json.data.title).toBe(SNAPSHOT_TITLE);
+    expect(json.data.createdAt).toBe(CREATED_AT);
+    expect(json.data.expiresAt).toBeNull();
+    // A one-to-one map: no book dropped, none reordered, nothing filtered out.
+    expect(json.data.books.map((b: Json) => b.bookId)).toEqual([
+      "book1",
+      "book3",
+      NO_LINK_BOOK_ID,
+    ]);
+  });
+
+  it("scrubs on the way out only — the stored snapshot keeps the poison and the handler writes nothing", async () => {
+    await seedPoisonedSnapshot();
+    const ops = watchKvOps(kv);
+
+    const { json } = await fetchPublicShelf();
+
+    expect(servedBook(json, "book1")?.readmooUrl).toBe("");
+    // Anti-tautology anchor: the response is clean because THIS handler
+    // scrubbed it, not because something rewrote KV first. A lazy repair write
+    // would also hand an anonymous stranger a key to have written. (DEV_MODE
+    // elides the per-IP counter put — see the scope caveat in
+    // `helpers/kvOps.ts`; this trail is the handler's own writes.)
+    expect(await storedLink("book1")).toBe(PHISHING_LINK);
+    expect(ops.writeTrail()).toEqual([]);
+  });
+});
+
 // ── DELETE /api/user/:id/public-shelf/:shelfId ────────────────
 
 describe("DELETE /api/user/:id/public-shelf/:shelfId", () => {

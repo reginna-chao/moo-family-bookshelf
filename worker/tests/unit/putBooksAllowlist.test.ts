@@ -30,6 +30,41 @@ const ALLOWED_COVER = "https://cdn.readmoo.com/cover/abc.jpg";
 const BEACON_COVER = "https://evil.example.com/beacon.gif";
 const BEACON_HOST = "evil.example.com";
 
+/**
+ * A readmooUrl the Readmoo whitelist accepts (`isAllowedBookUrl` in
+ * `shared/src/config/readmoo.ts`) — the apex `/book/{id}` shape the scraper
+ * emits. Same rule as ALLOWED_COVER above: a fixture that is NOT about
+ * book-link sanitization must carry a whitelisted value, otherwise the write
+ * path blanks it and the assertion silently ends up about the wrong thing.
+ */
+const ALLOWED_BOOK_URL = "https://readmoo.com/book/210123456";
+
+/**
+ * An attacker-controlled book link, on a host distinct from BEACON_HOST so the
+ * two URL fields can never pass each other's "leaks nowhere" assertion. The
+ * Extension and the PWA render `readmooUrl` as a clickable `<a href>`, so
+ * storing it would serve a phishing / arbitrary-redirect lure under a
+ * legitimate book title — the twin P0 of the beacon cover above.
+ */
+const PHISHING_HOST = "phish.example.com";
+const PHISHING_BOOK_URL = `https://${PHISHING_HOST}/login`;
+
+/**
+ * A base-sensitive book link: an https scheme with no `//`.
+ *
+ * Standalone it parses to host `readmoo.com` — which is why a whitelist that
+ * only inspects the string in isolation used to accept it — but a browser
+ * resolves an `href` against the base of the RENDERING document, and against a
+ * same-scheme base WHATWG switches to "relative" state, so the host becomes the
+ * VIEWER's own origin. Rendered by the PWA that is a click through to its own
+ * `/public/x#invite=…`, a route that unconditionally clears the stored session
+ * (`apiHost` included) and pre-fills the attacker's sync code.
+ *
+ * The `#invite=` marker is what makes the "never reached KV" assertion below
+ * specific: it appears nowhere else in a stored record.
+ */
+const BASE_SENSITIVE_BOOK_URL = "https:readmoo.com/../../public/x#invite=moo-x";
+
 let kv: KVNamespace;
 
 function request(
@@ -73,7 +108,10 @@ describe("parseBooks", () => {
           // sanitize table below), which would make this a test about blanking
           // rather than about the field allowlist.
           coverUrl: ALLOWED_COVER,
-          readmooUrl: "R",
+          // Whitelisted for the same reason as the cover beside it — an
+          // off-whitelist book link is blanked too (see the readmooUrl
+          // sanitize table below).
+          readmooUrl: ALLOWED_BOOK_URL,
           category: "cat",
           isShared: BoolFlag.TRUE,
           // unknown fields that must NOT be carried through:
@@ -93,7 +131,7 @@ describe("parseBooks", () => {
       author: "A",
       isbn: "I",
       coverUrl: ALLOWED_COVER,
-      readmooUrl: "R",
+      readmooUrl: ALLOWED_BOOK_URL,
       category: "cat",
       isShared: BoolFlag.TRUE,
     });
@@ -304,6 +342,109 @@ describe("parseBooks — coverUrl whitelist sanitize", () => {
       isbn: "I",
       coverUrl: "",
       readmooUrl: "https://readmoo.com/book/b1",
+      category: "cat",
+      isShared: BoolFlag.TRUE,
+    });
+  });
+});
+
+// ===========================================================================
+// readmooUrl whitelist sanitize (P0 privacy): the other attacker-controlled URL
+// field of a book. It is rendered as a clickable `<a href>` by the Extension
+// and the PWA, so an off-whitelist value is a phishing / arbitrary-redirect
+// lure served under a legitimate book title, and the destination host learns
+// the clicking viewer's IP and User-Agent. Not the referer: both clients render
+// the link with `rel="noopener noreferrer"`, and `noreferrer` suppresses the
+// Referer header outright — a client-side attribute this server-side check must
+// not lean on, but one whose removal would widen the exposure. Same verdict
+// rule and same blank-never-reject policy as the cover above; the difference is
+// only that it needs a user click to fire, which lowers the rate but not the
+// severity.
+//
+// WIRING level only. The keep/blank matrix for the shared helper is pinned once
+// in `tests/unit/validation.test.ts` → `sanitizeReadmooUrl`; what these cases
+// add is that `parseBooks` actually CALLS it — on every entry, on the
+// missing-field shape, and without disturbing the rest of the entry.
+// ===========================================================================
+
+describe("parseBooks — readmooUrl whitelist sanitize", () => {
+  function storedReadmooUrl(rawUrl: unknown): string {
+    const result = parseBooks(
+      [{ bookId: "b1", readmooUrl: rawUrl }],
+      MAX_PUT_BOOKS,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("payload was rejected, not sanitized");
+    return result.books[0].readmooUrl;
+  }
+
+  it.each<{ label: string; input: string }>([
+    { label: "a whitelisted Readmoo book link", input: ALLOWED_BOOK_URL },
+    { label: "the empty-string scraper placeholder", input: "" },
+  ])("keeps $label unchanged", ({ input }) => {
+    expect(storedReadmooUrl(input)).toBe(input);
+  });
+
+  it.each<{ label: string; input: unknown }>([
+    { label: "an off-whitelist host", input: PHISHING_BOOK_URL },
+    { label: "a javascript: URL", input: "javascript:alert(1)" },
+    { label: "a non-string value", input: 123 },
+  ])("blanks $label", ({ input }) => {
+    expect(storedReadmooUrl(input)).toBe("");
+  });
+
+  it("blanks a missing readmooUrl field to the empty string", () => {
+    const result = parseBooks([{ bookId: "b1" }], MAX_PUT_BOOKS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.books[0].readmooUrl).toBe("");
+  });
+
+  it("sanitizes every entry in the payload, not only the first", () => {
+    const result = parseBooks(
+      [
+        { bookId: "b1", readmooUrl: ALLOWED_BOOK_URL },
+        { bookId: "b2", readmooUrl: PHISHING_BOOK_URL },
+        { bookId: "b3", readmooUrl: "https://evilreadmoo.com/book/1" },
+      ],
+      MAX_PUT_BOOKS,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.books.map((b) => b.readmooUrl)).toEqual([
+      ALLOWED_BOOK_URL,
+      "",
+      "",
+    ]);
+  });
+
+  it("keeps the rest of an entry intact while blanking its readmooUrl", () => {
+    const result = parseBooks(
+      [
+        {
+          bookId: "b1",
+          title: "T",
+          author: "A",
+          isbn: "I",
+          coverUrl: ALLOWED_COVER,
+          readmooUrl: PHISHING_BOOK_URL,
+          category: "cat",
+          isShared: BoolFlag.TRUE,
+        },
+      ],
+      MAX_PUT_BOOKS,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The two URL fields are sanitized independently: a blanked book link must
+    // not take the whitelisted cover beside it down with it.
+    expect(result.books[0]).toEqual({
+      bookId: "b1",
+      title: "T",
+      author: "A",
+      isbn: "I",
+      coverUrl: ALLOWED_COVER,
+      readmooUrl: "",
       category: "cat",
       isShared: BoolFlag.TRUE,
     });
@@ -572,5 +713,113 @@ describe("PUT /api/user/:id/books — coverUrl sanitize", () => {
     const beaconBook = stored?.books.find((b) => b.bookId === "b1");
     expect(beaconBook?.title).toBe("Beacon");
     expect(beaconBook?.isShared).toBe(BoolFlag.FALSE);
+  });
+});
+
+// ===========================================================================
+// PUT /api/user/:id/books — readmooUrl sanitize over the real HTTP path
+//
+// The write boundary for the book link. Sanitizing at the handler is what stops
+// a family member who bypasses the UI from PUTting a hostile link and having it
+// presented to relatives — and to anonymous public-shelf visitors — under a
+// legitimate book title.
+// ===========================================================================
+
+describe("PUT /api/user/:id/books — readmooUrl sanitize", () => {
+  /** Off-whitelist, whitelisted, and the empty placeholder, in one save. */
+  const MIXED_BOOKS = [
+    { bookId: "b1", title: "Phish", readmooUrl: PHISHING_BOOK_URL },
+    { bookId: "b2", title: "Clean", readmooUrl: ALLOWED_BOOK_URL },
+    { bookId: "b3", title: "No link", readmooUrl: "" },
+  ];
+  const EXPECTED_LINKS = ["", ALLOWED_BOOK_URL, ""];
+
+  async function putMixedBooks(): Promise<Response> {
+    const token = await generateAuthToken(kv, USER1);
+    return request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      { books: MIXED_BOOKS },
+      token,
+    );
+  }
+
+  it("accepts the save and keeps every book instead of rejecting the payload", async () => {
+    const res = await putMixedBooks();
+
+    // Sanitize, never reject: one crafted link must not fail the whole sync,
+    // and no new error code is introduced for it.
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.books.map((b: Json) => b.bookId)).toEqual([
+      "b1",
+      "b2",
+      "b3",
+    ]);
+  });
+
+  it("returns the off-whitelist book link blanked and the whitelisted one intact", async () => {
+    const res = await putMixedBooks();
+
+    const json = (await res.json()) as Json;
+    expect(json.data.books.map((b: Json) => b.readmooUrl)).toEqual(
+      EXPECTED_LINKS,
+    );
+  });
+
+  it("never lets the off-whitelist host reach the stored user record", async () => {
+    await putMixedBooks();
+
+    const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+    expect(stored?.books.map((b) => b.readmooUrl)).toEqual(EXPECTED_LINKS);
+    // Nothing anywhere in the record — not in a stray field, not in a title.
+    expect(JSON.stringify(stored)).not.toContain(PHISHING_HOST);
+  });
+
+  it("keeps the other fields of a blanked book unchanged", async () => {
+    await putMixedBooks();
+
+    const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+    const phishBook = stored?.books.find((b) => b.bookId === "b1");
+    expect(phishBook?.title).toBe("Phish");
+    expect(phishBook?.isShared).toBe(BoolFlag.FALSE);
+  });
+
+  // The end-to-end half of the base-sensitivity fix: an off-HOST link was
+  // already refused, but a link whose host only changes once a browser resolves
+  // it against the rendering document used to sail through every check and land
+  // in `user:{id}` verbatim — from where the aggregation, the public snapshot
+  // and every client render would faithfully serve it back. This is the case
+  // that pins "the attacker cannot plant that string in KV in the first place".
+  // The keep/blank verdict itself is pinned once in
+  // `tests/unit/validation.test.ts` → BASE_SENSITIVE_URLS.
+  it("blanks a base-sensitive bare-scheme link (no //) before it reaches KV", async () => {
+    const token = await generateAuthToken(kv, USER1);
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        books: [
+          {
+            bookId: "b1",
+            title: "Lure",
+            coverUrl: ALLOWED_COVER,
+            readmooUrl: BASE_SENSITIVE_BOOK_URL,
+          },
+        ],
+      },
+      token,
+    );
+    // Sanitize, never reject — same policy as every other off-whitelist link.
+    expect(res.status).toBe(200);
+
+    const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+    expect(stored?.books[0].readmooUrl).toBe("");
+    // The whitelisted cover beside it is untouched: the two URL fields are
+    // sanitized independently.
+    expect(stored?.books[0].coverUrl).toBe(ALLOWED_COVER);
+    // Nowhere in the record — not in a stray field, not in a title.
+    expect(JSON.stringify(stored)).not.toContain(BASE_SENSITIVE_BOOK_URL);
+    expect(JSON.stringify(stored)).not.toContain("#invite=");
   });
 });

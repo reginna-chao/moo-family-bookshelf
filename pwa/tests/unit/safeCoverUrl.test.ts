@@ -39,6 +39,20 @@ describe("safeCoverUrl", () => {
       url: "http://cdn.readmoo.com/x.jpg",
       expected: "",
     },
+    {
+      // The one rejected shape that is NOT just "some other host": a scheme
+      // with no `//` parses to `https://cdn.readmoo.com/x.jpg` on its own, but
+      // an `<img src>` resolves it against the page it is rendered into, so it
+      // fires on render at the PWA's OWN origin. The CSP cannot stand in for
+      // the filter here even where _headers IS served: the resolved origin is
+      // the page's own, which `img-src 'self'` already allows. Named
+      // explicitly even though the delegation tripwire below would also catch
+      // it, because this is the wrapper's only rejection whose input LOOKS
+      // whitelisted. Full matrix: extension/tests/unit/readmooConfig.test.ts.
+      name: "a bare scheme with no // that resolves against the rendering page",
+      url: "https:cdn.readmoo.com/../../x.jpg",
+      expected: "",
+    },
     { name: "an empty string", url: "", expected: "" },
   ];
 

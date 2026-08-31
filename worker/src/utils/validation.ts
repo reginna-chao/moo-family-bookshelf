@@ -1,4 +1,7 @@
-import { isAllowedCoverUrl } from "moo-family-bookshelf-shared/config/readmoo";
+import {
+  isAllowedBookUrl,
+  isAllowedCoverUrl,
+} from "moo-family-bookshelf-shared/config/readmoo";
 import type { VerifyMethod } from "../kv/schema";
 import {
   UserIdSchema,
@@ -119,6 +122,50 @@ export function sanitizeVerifySecret(value: unknown): string | null {
 export function sanitizeCoverUrl(value: unknown): string {
   const url = typeof value === "string" ? value : "";
   return url === "" || isAllowedCoverUrl(url) ? url : "";
+}
+
+/**
+ * Keep a readmooUrl only when it is empty (scraper placeholder) or on the
+ * Readmoo domain whitelist; anything else is blanked to "". Sanitize instead
+ * of reject, exactly as {@link sanitizeCoverUrl}: one attacker-crafted link in
+ * a sync payload must not fail the whole books sync, and `""` is already a
+ * legitimate stored value, so a blanked link degrades to the ordinary
+ * "no link available" state instead of an error.
+ *
+ * `readmooUrl` is rendered as a clickable `<a href>` by four Extension/PWA
+ * components, so an off-whitelist value is a phishing / arbitrary-redirect
+ * lure: a family member who bypasses the UI and PUTs a hostile URL gets it
+ * presented to relatives — and to anonymous public-shelf visitors — under a
+ * legitimate book title, and the click lands them on attacker-controlled
+ * content that learns their IP and User-Agent. What does NOT leak is the
+ * Referer header: all four render sites pair `target="_blank"` with
+ * `rel="noopener noreferrer"`, and `noreferrer` suppresses that header
+ * outright, so the attribute is load-bearing there rather than boilerplate.
+ * It needs a user click to fire, unlike an off-whitelist cover, which loads by
+ * itself; that lowers the rate, not the severity, because the click comes
+ * exactly when the user believes they are opening Readmoo. The surfaces to
+ * defend are otherwise identical.
+ *
+ * Lives at the boundary so all four consumer groups scrub identically:
+ *
+ * - the books write paths in `routes/user.ts` (PUT sync, PATCH rebuild, and the
+ *   family-prefs rebuild), which keep fresh poison out of `user:{id}` and
+ *   lazily scrub whatever a pre-whitelist write left there;
+ * - `buildSnapshot` in `services/publicShelf.ts`, the chokepoint every
+ *   `public:{shareToken}` snapshot writer funnels through;
+ * - the family bookshelf aggregation in `routes/bookshelf.ts`, which sanitizes
+ *   again at READ time. The write paths alone do NOT protect that surface: a
+ *   record poisoned before the whitelist existed keeps its value until that
+ *   account's next real write, and a dormant account may never make one;
+ * - the public-shelf read path (`GET /api/public/:shareToken` in
+ *   `routes/publicShelf.ts`), same reasoning applied to an already-minted
+ *   snapshot — a permanent one may never be rewritten. Response transform
+ *   only (that handler writes no KV). No CSP can stand in for it either: a
+ *   navigation to an arbitrary origin is not something `img-src` constrains.
+ */
+export function sanitizeReadmooUrl(value: unknown): string {
+  const url = typeof value === "string" ? value : "";
+  return url === "" || isAllowedBookUrl(url) ? url : "";
 }
 
 /**

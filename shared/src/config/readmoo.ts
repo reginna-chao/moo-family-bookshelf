@@ -72,28 +72,144 @@ export function isReadmooCoverHost(hostname: string): boolean {
 }
 
 /**
- * True when `url` parses as an https:// URL on an allowed Readmoo cover host
- * with the default port. Used by the Worker to refuse attacker-controlled
- * cover URLs (privacy tracking beacons) at the API boundary; the PWA CSP
- * img-src mirrors the same domain list.
+ * Probe base for the base-sensitivity check in {@link isAllowedReadmooUrl}.
+ *
+ * Two properties are load-bearing:
+ *   - The scheme MUST be `https:`. WHATWG only enters "relative" state when the
+ *     base scheme equals the input's scheme, so a base on any other scheme
+ *     would make the check inert rather than strict.
+ *   - `base.invalid` is reserved by RFC 2606, can never resolve and can never
+ *     be a Readmoo domain, which is what rules out a false "stable" verdict
+ *     (see the core's JSDoc).
+ * The nested path merely keeps relative resolution off the root.
+ */
+const BASE_SENSITIVITY_PROBE = "https://base.invalid/a/b";
+
+/**
+ * Shared core of the two URL whitelists below: `url` must parse as an https://
+ * URL on an allowed Readmoo registrable domain with the default port, AND must
+ * mean the same thing with or without a base document.
  *
  * `parsed.port === ""` requires the default port: the WHATWG URL parser
  * normalises an explicit `:443` on https away, so `https://cdn.readmoo.com:443`
  * passes while `:8443` does not. That keeps acceptance here aligned with CSP
  * host-source semantics, which only match the default port.
+ *
+ * The base-sensitivity check runs last because it costs a second parse: the
+ * `href` resolved against {@link BASE_SENSITIVITY_PROBE} must equal the one
+ * resolved standalone. It exists because what we validate is the STRING, while
+ * what a browser later resolves is that same string against the rendering
+ * document. What it therefore rejects is "this string means something DIFFERENT
+ * once a base document is involved" — NOT "this string is missing a literal
+ * `//`". Those two sets are not the same, and conflating them is the mistake
+ * this paragraph exists to prevent.
+ *
+ * WHATWG decides it on how many slash-ish characters follow `https:` — for a
+ * special scheme `\` is treated as `/`, so the run is counted over BOTH:
+ *   - 0 or 1 → base-SENSITIVE. Parsed standalone the host still comes from the
+ *     string ("special authority ignore slashes" state), but against a
+ *     same-scheme base the parser drops into "relative" state and takes the
+ *     host from the BASE. These are the only forms this check rejects:
+ *     `https:readmoo.com/../../p` (0), `https:/readmoo.com/y` and
+ *     `https:\readmoo.com/y` (1).
+ *   - 2 or more → base-INDEPENDENT. The parser reaches "special authority
+ *     ignore slashes" state with or without a base (via "relative slash" state
+ *     for the backslash spellings) and skips the whole run, so the host is read
+ *     from the string either way.
+ *
+ * Without that check an attacker-supplied `readmooUrl` / `coverUrl` of a
+ * base-sensitive shape passes the scheme / host / port tests above and then
+ * loads/navigates on the VIEWER's own origin: the observed exploit sent a PWA
+ * reader to the PWA's own `/public/x#invite=…`, which the SPA fallback answers
+ * by clearing the stored session and pre-filling the attacker's sync code.
+ *
+ * Why this check is sufficient and does not over-block:
+ *   - Any ordinary absolute URL (`https://host/path`) resolves identically with
+ *     and without a base, so it is unaffected — including a userinfo look-alike
+ *     such as `https://readmoo.com@evil.com/x`, which keeps being rejected on
+ *     the host check as before.
+ *   - Non-canonical but base-stable spellings stay ALLOWED, and that is
+ *     correct: `https:\\readmoo.com/x`, `https:/\readmoo.com/x`,
+ *     `https:\/readmoo.com/x`, `https:///readmoo.com/x` and
+ *     `https:////readmoo.com/x` all resolve to `https://readmoo.com/x` in every
+ *     browser, base or no base, so each is a genuine absolute Readmoo URL. The
+ *     first three carry no literal `//` at all — which is precisely why this
+ *     check must never be re-derived from a `//` test.
+ *   - The only theoretical false "stable" verdict is a string that already
+ *     resolves onto the probe host itself, and `isReadmooCoverHost` rejects
+ *     `base.invalid`.
+ *   - The second `new URL` cannot throw: the standalone parse has already
+ *     succeeded, and supplying a base never turns a parseable string into an
+ *     unparseable one.
+ *
+ * This deliberately tightens BOTH exports, including the `400 INVALID_COVER_URL`
+ * boundary in `worker/src/routes/borrow.ts`. Legitimate clients never emit a
+ * base-sensitive URL — the scraper reads already-absolute `href` / `src` values
+ * off the Readmoo DOM — so the new rejections are intended, not collateral.
+ *
+ * File-local on purpose. The two exported wrappers are separate trust
+ * boundaries and must stay separately tightenable, but they must not drift into
+ * two independently maintained parsers.
  */
-export function isAllowedCoverUrl(url: string): boolean {
+function isAllowedReadmooUrl(url: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
     return false;
   }
-  return (
-    parsed.protocol === "https:" &&
-    parsed.port === "" &&
-    isReadmooCoverHost(parsed.hostname)
-  );
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.port !== "" ||
+    !isReadmooCoverHost(parsed.hostname)
+  ) {
+    return false;
+  }
+  return new URL(url, BASE_SENSITIVITY_PROBE).href === parsed.href;
+}
+
+/**
+ * True when `url` parses as an https:// URL on an allowed Readmoo cover host
+ * with the default port. Used by the Worker to refuse attacker-controlled
+ * cover URLs (privacy tracking beacons) at the API boundary; the PWA CSP
+ * img-src mirrors the same domain list.
+ *
+ * Kept as its own export rather than merged with {@link isAllowedBookUrl},
+ * even though both delegate to the same core today: a cover feeds `<img src>`
+ * and a book link feeds `<a href>`, which are different trust boundaries. If
+ * covers are ever narrowed (e.g. to `cdn.` hosts only), that must not silently
+ * blank every book link too.
+ */
+export function isAllowedCoverUrl(url: string): boolean {
+  return isAllowedReadmooUrl(url);
+}
+
+/**
+ * True when `url` parses as an https:// URL on an allowed Readmoo domain with
+ * the default port. Guards the per-book detail link (`readmooUrl`), which the
+ * Extension and the PWA render as a clickable `<a href>`.
+ *
+ * Used by the Worker at the books write boundary and again on the read paths
+ * (`sanitizeReadmooUrl` in `worker/src/utils/validation.ts`): a family member
+ * can bypass the UI and POST any URL, so an off-domain link is a phishing /
+ * arbitrary-redirect lure served under a legitimate book title — the click
+ * lands the viewer on attacker-controlled content, which learns their IP and
+ * User-Agent. The Referer header does NOT leak: every render site pairs
+ * `target="_blank"` with `rel="noopener noreferrer"`, and `noreferrer`
+ * suppresses that header outright, so the attribute is load-bearing there
+ * rather than boilerplate. Firing takes a user click, unlike a cover, which
+ * loads by itself — that lowers the rate, not the severity, because the click
+ * comes exactly when the user believes they are opening Readmoo.
+ *
+ * Deliberately NOT built on `isReadmooHost`: that exact-match list holds only
+ * the web-app hosts (`next.` / `read.`), while every legitimate book link lives
+ * on the apex — `https://readmoo.com/book/{bookId}`, see `READMOO_BOOK_BASE` in
+ * `extension/src/content/scraper.ts` — so reusing it would blank all of them.
+ *
+ * Separate export from {@link isAllowedCoverUrl} on purpose; see that JSDoc.
+ */
+export function isAllowedBookUrl(url: string): boolean {
+  return isAllowedReadmooUrl(url);
 }
 
 /** True when `pathname` sits under the new site's `/read` app root. */

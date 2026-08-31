@@ -40,14 +40,19 @@ function prodRequest(method: string, path: string, authToken?: string) {
   return app.request(path, { method, headers }, { KV: kv });
 }
 
-function book(bookId: string, isShared: BoolFlag, coverUrl = ""): BookEntry {
+function book(
+  bookId: string,
+  isShared: BoolFlag,
+  coverUrl = "",
+  readmooUrl = "",
+): BookEntry {
   return {
     bookId,
     title: `Title ${bookId}`,
     author: "",
     isbn: "",
     coverUrl,
-    readmooUrl: "",
+    readmooUrl,
     category: "",
     isShared,
   };
@@ -352,6 +357,146 @@ describe("GET /api/family/:id/bookshelf — coverUrl read-side sanitize", () => 
     expect(booksOf(json, USER1).map((b) => b.bookId)).toEqual(["shared-clean"]);
     expect(body).not.toContain("private-poisoned");
     expect(body).not.toContain(BEACON_HOST);
+  });
+});
+
+// ===========================================================================
+// Read-side readmooUrl sanitize (P0 privacy): the same read-side twin argument
+// as the covers above, applied to the OTHER attacker-controlled URL field. A
+// `user:{id}` record poisoned BEFORE the whitelist existed, whose owner never
+// syncs again, would otherwise hand every family member a clickable phishing /
+// arbitrary-redirect link under a legitimate book title. This is the case that
+// matters most for a DORMANT account: no write path can ever reach such a
+// record, and a CSP cannot help — `img-src` never constrained a navigation. So
+// the scrub happens on the way out, response-only, with no repair write.
+// ===========================================================================
+
+describe("GET /api/family/:id/bookshelf — readmooUrl read-side sanitize", () => {
+  /** An attacker-chosen destination — a phishing lure once clicked. */
+  const PHISHING_HOST = "phish.example.com";
+  const PHISHING_LINK = `https://${PHISHING_HOST}/login`;
+  /** On the Readmoo whitelist (`isAllowedBookUrl`), so it survives. */
+  const CLEAN_LINK = "https://readmoo.com/book/210123456";
+  /** Whitelisted cover, so a blanked link cannot be confused with a blanked cover. */
+  const CLEAN_COVER = "https://cdn.readmoo.com/clean.jpg";
+
+  /** Member A (the caller) holds the poison + a control; member B is clean. */
+  function seedPoisonedFamily(): Promise<{ familyId: string; token: string }> {
+    return seedFamily([
+      {
+        userId: USER1,
+        displayName: "Owner",
+        books: [
+          book("a-poisoned", BoolFlag.TRUE, CLEAN_COVER, PHISHING_LINK),
+          book("a-clean", BoolFlag.TRUE, CLEAN_COVER, CLEAN_LINK),
+        ],
+      },
+      {
+        userId: USER2,
+        displayName: "Member",
+        books: [book("b-clean", BoolFlag.TRUE, CLEAN_COVER, CLEAN_LINK)],
+      },
+    ]);
+  }
+
+  /** GET the shelf, returning the RAW body too — host leaks hide in any field. */
+  async function fetchShelf(
+    familyId: string,
+    token: string,
+  ): Promise<{ body: string; json: Json }> {
+    const res = await request(
+      "GET",
+      `/api/family/${familyId}/bookshelf`,
+      undefined,
+      token,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    return { body, json: JSON.parse(body) as Json };
+  }
+
+  function booksOf(json: Json, userId: string): BookEntry[] {
+    const member = json.data.members.find((m: Json) => m.userId === userId);
+    expect(member).toBeDefined();
+    return member.books as BookEntry[];
+  }
+
+  it("blanks an off-whitelist book link while returning every whitelisted one byte-identical", async () => {
+    const { familyId, token } = await seedPoisonedFamily();
+
+    const { json } = await fetchShelf(familyId, token);
+
+    // The poisoned entry is blanked; the control beside it and the second
+    // member's link are untouched — the scrub is per-book, not per-member.
+    expect(booksOf(json, USER1).map((b) => b.readmooUrl)).toEqual([
+      "",
+      CLEAN_LINK,
+    ]);
+    expect(booksOf(json, USER2).map((b) => b.readmooUrl)).toEqual([CLEAN_LINK]);
+  });
+
+  it("keeps the poisoned book itself, with every field but its link intact", async () => {
+    const { familyId, token } = await seedPoisonedFamily();
+
+    const { json } = await fetchShelf(familyId, token);
+
+    // Sanitize, never drop: the member still sees the book, and its whitelisted
+    // cover survives — the two URL fields are scrubbed independently.
+    const poisoned = booksOf(json, USER1).find(
+      (b) => b.bookId === "a-poisoned",
+    );
+    expect(poisoned).toEqual({
+      ...book("a-poisoned", BoolFlag.TRUE, CLEAN_COVER, PHISHING_LINK),
+      readmooUrl: "",
+    });
+  });
+
+  it("leaks the phishing host nowhere in the response body", async () => {
+    const { familyId, token } = await seedPoisonedFamily();
+
+    const { body } = await fetchShelf(familyId, token);
+
+    // Not in a link, not in a title, not in a stray carried-over field.
+    expect(body).not.toContain(PHISHING_HOST);
+  });
+
+  it("performs no KV write and leaves the poisoned record exactly as stored", async () => {
+    const { familyId, token } = await seedPoisonedFamily();
+    const ops = watchKvOps(kv);
+
+    await fetchShelf(familyId, token);
+
+    // Anti-tautology anchor: the response is clean because THIS handler
+    // scrubbed it, not because something repaired KV first. An aggregation read
+    // must never mutate another member's record. (DEV_MODE elides the
+    // rate-limit counter put — see the scope caveat in `helpers/kvOps.ts`.)
+    expect(ops.writeTrail()).toEqual([]);
+    const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+    expect(stored?.books.map((b) => b.readmooUrl)).toEqual([
+      PHISHING_LINK,
+      CLEAN_LINK,
+    ]);
+  });
+
+  it("excludes a poisoned NON-shared book, leaking neither its id nor its host", async () => {
+    const { familyId, token } = await seedFamily([
+      {
+        userId: USER1,
+        displayName: "Owner",
+        books: [
+          book("private-poisoned", BoolFlag.FALSE, CLEAN_COVER, PHISHING_LINK),
+          book("shared-clean", BoolFlag.TRUE, CLEAN_COVER, CLEAN_LINK),
+        ],
+      },
+    ]);
+
+    const { body, json } = await fetchShelf(familyId, token);
+
+    // Filter runs before the map: an unshared book is never sanitized-then-
+    // returned, it is simply absent. The privacy filter still outranks the scrub.
+    expect(booksOf(json, USER1).map((b) => b.bookId)).toEqual(["shared-clean"]);
+    expect(body).not.toContain("private-poisoned");
+    expect(body).not.toContain(PHISHING_HOST);
   });
 });
 
