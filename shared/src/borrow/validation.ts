@@ -1,5 +1,8 @@
 /**
- * Runtime boundary validation for `GET /api/family/:id/borrow` payloads.
+ * Runtime boundary validation for `GET /api/family/:id/borrow` payloads, applied
+ * at the API-client boundary of BOTH apps (`extension/src/api/client.ts`,
+ * `pwa/src/api/client.ts`) — it lives here so the two ends cannot enforce
+ * different rules on the same payload.
  *
  * Self-hosted (BYO) backends are inside this project's threat model, so the
  * borrow list arrives unvalidated: a non-string `createdAt` crashes
@@ -15,9 +18,8 @@
  *   downstream consumer already has a `||` fallback and `""` is safe for both
  *   `localeCompare` and `.slice`.
  *
- * Kept in sync with `pwa/src/api/borrowValidation.ts` — the two ends
- * deliberately stay separate copies (no `shared/` module), mirroring the
- * PR #132 convention.
+ * The `[borrowValidation]` log prefix names the CHECK, not the file, and both
+ * apps' tests assert on it — it deliberately survived the move into `shared/`.
  */
 
 import type { BorrowRequest, BorrowStatus } from "./types";
@@ -56,9 +58,11 @@ function sanitizeBorrowRequest(element: unknown): BorrowRequest | null {
     bookAuthor: toStringField(element.bookAuthor),
     bookCoverUrl: toStringField(element.bookCoverUrl),
     // `status` passes through unvalidated ON PURPOSE. Unknown-status handling is
-    // owned by the render side (`STATUS_META.get(...) ?? UNKNOWN_STATUS` in
-    // `dialog/BorrowRequestCard.tsx`), and every comparison performed on it here
-    // and downstream (`Set.has`, `===`) is safe for an arbitrary value.
+    // owned by the render side of each app (`STATUS_META.get(...) ??
+    // UNKNOWN_STATUS` in `extension/src/dialog/BorrowRequestCard.tsx`, the
+    // `default:` branch of `getStatusStyle` in `pwa/src/components/BorrowCard.tsx`),
+    // and every comparison performed on it here and downstream (`Set.has`,
+    // `===`) is safe for an arbitrary value.
     status: element.status as BorrowStatus,
     createdAt: toStringField(element.createdAt),
     updatedAt: toStringField(element.updatedAt),

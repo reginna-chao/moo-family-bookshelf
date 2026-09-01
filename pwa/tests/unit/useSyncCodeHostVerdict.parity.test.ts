@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import ts from "typescript";
 import { describe, it, expect } from "vitest";
 
 /**
@@ -17,14 +16,10 @@ import { describe, it, expect } from "vitest";
  * This test reads the files off disk and compares them after normalising the
  * differences that are structural rather than behavioural.
  *
- * Some pairs are compared on their CODE ONLY (`compare: "code"` in the table
- * below, which reprints the file with every comment dropped before normalising).
- * The API-boundary validators are the case it exists for: each end's docblock
- * cites ITS OWN consumers — `dialog/BorrowTab.tsx` on one side,
- * `pages/BorrowPage.tsx` on the other — and the PWA copies carry a paragraph
- * about an import cycle the Extension does not have. Forcing that prose to match
- * would mean shipping a comment that is wrong for one of the two readers, so the
- * executable half is pinned and the prose is left free.
+ * A row leaves this table when its subject stops being a pair: the two
+ * API-boundary validators that used to sit here graduated into `shared/`
+ * (`shared/src/api/memberValidation.ts` and `shared/src/borrow/validation.ts`),
+ * which is exactly the repair path the first row's stake describes.
  *
  * This file is itself duplicated into BOTH suites — see
  * extension/tests/unit/useSyncCodeHostVerdict.parity.test.ts and
@@ -59,11 +54,6 @@ interface TwinPair {
   marker: string;
   /** What drift costs here, and how to repair it — shown when a compare fails. */
   stake: string;
-  /**
-   * How much of the file is compared. Omitted compares the whole text; `"code"`
-   * drops every comment first, for pairs whose prose is app-specific by design.
-   */
-  compare?: "code";
 }
 
 const TWINS: TwinPair[] = [
@@ -84,24 +74,6 @@ const TWINS: TwinPair[] = [
       "These constants had already drifted once — HALF_TYPED_PREFIXES existed in three different lengths — which left the two apps proving different things about the same security-facing warning. Apply the same edit to both files.",
   },
   {
-    what: "the family-members payload validator",
-    extension: "extension/src/api/memberValidation.ts",
-    pwa: "pwa/src/api/memberValidation.ts",
-    marker: "export function sanitizeFamilyMembersResponse(",
-    compare: "code",
-    stake:
-      "These two files are deliberate separate copies — the PR #132 convention, no shared/ module — and only their CODE is compared, because each end's docblock legitimately cites its own consumers. Drift means one end validates or normalizes a GET /api/family/:id/members payload differently from the other, so a hostile BYO backend can crash one app with a payload the other shrugs off. Apply the same code edit to both files; the docblock wording may keep differing.",
-  },
-  {
-    what: "the borrow-list payload validator",
-    extension: "extension/src/api/borrowValidation.ts",
-    pwa: "pwa/src/api/borrowValidation.ts",
-    marker: "export function sanitizeBorrowRequests(",
-    compare: "code",
-    stake:
-      "These two files are deliberate separate copies — the PR #132 convention, no shared/ module — and only their CODE is compared, because each end's docblock legitimately cites its own consumers. Drift means one end validates or normalizes a GET /api/family/:id/borrow payload differently from the other, so a hostile BYO backend can crash one app with a payload the other shrugs off. Apply the same code edit to both files; the docblock wording may keep differing.",
-  },
-  {
     what: "this cross-app comparison itself",
     extension: "extension/tests/unit/useSyncCodeHostVerdict.parity.test.ts",
     pwa: "pwa/tests/unit/useSyncCodeHostVerdict.parity.test.ts",
@@ -117,18 +89,14 @@ const TWINS: TwinPair[] = [
 /** Placeholder left where a known-divergent fragment used to be. */
 const TWIN_DIR = "<twin-dir>";
 const CRYPTO_MODULE = "<crypto/syncCode>";
-const API_MODULE = "<api-module>";
 
 /**
- * Erase the four differences the twins are ALLOWED to have, and nothing else:
+ * Erase the three differences the twins are ALLOWED to have, and nothing else:
  *
  *   1. the directory each app keeps its own module in — the FILE NAME after it
  *      is left intact, so a rename on one side still fails this test;
  *   2. how each app resolves its crypto module (`../` vs the `@/` alias);
- *   3. where each app keeps its own api types — the Extension splits them out
- *      into `./types`, the PWA keeps them on `./client`. Only those two
- *      specifiers collapse, so an import moved to any THIRD module still fails;
- *   4. line wrapping — JSDoc leaders and whitespace runs collapse, so prose
+ *   3. line wrapping — JSDoc leaders and whitespace runs collapse, so prose
  *      re-flowed to fit 80 columns is not mistaken for a behaviour change.
  *
  * A JSDoc leader is a `*` followed by whitespace or by end of line, and nothing
@@ -143,58 +111,21 @@ function normalize(source: string): string {
       TWIN_DIR,
     )
     .replace(/(["'])(?:\.\.|@)\/crypto\/syncCode\1/g, `"${CRYPTO_MODULE}"`)
-    .replace(/(["'])\.\/(?:types|client)\1/g, `"${API_MODULE}"`)
     .replace(/^[ \t]*\*(?:[ \t]|$)/gm, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-/**
- * Reprint the source with every comment dropped, via the TypeScript compiler
- * the repo already depends on.
- *
- * A text-level stripper is not good enough: a `//` or a `/*` inside a string or
- * template literal is indistinguishable from a comment to a regex, and eating a
- * literal's contents would let two genuinely different messages compare equal —
- * the exact false green this file exists to prevent. No code-mode twin carries
- * such a literal TODAY, but the fixtures row already does
- * (`"moo-ab12-cd34@https://api.moofamily.app"`), so the first URL-carrying
- * validator to join the table walks straight into it. The
- * "strips comments with a parser" test below pins the hazard.
- *
- * Everything is parsed as plain `.ts` (`ScriptKind.TS`), which is correct for
- * every code-mode twin registered today. Derive the kind from the row's path
- * before registering a `.tsx` twin: otherwise its JSX goes through the parser's
- * error recovery instead of a clean parse.
- */
-function stripComments(source: string): string {
-  const sourceFile = ts.createSourceFile(
-    "twin.ts",
-    source,
-    ts.ScriptTarget.Latest,
-    false,
-    ts.ScriptKind.TS,
-  );
-  return ts.createPrinter({ removeComments: true }).printFile(sourceFile);
 }
 
 function readTwin(repoRelativePath: string): string {
   return readFileSync(resolve(REPO_ROOT, repoRelativePath), "utf-8");
 }
 
-/** Reduce a twin to the text actually compared, per the row's compare mode. */
-function comparable(raw: string, compare?: TwinPair["compare"]): string {
-  return normalize(compare === "code" ? stripComments(raw) : raw);
-}
-
 describe("Extension / PWA twin modules", () => {
   it.each(TWINS)(
     "keeps $what identical in both apps",
-    ({ what, extension, pwa, marker, stake, compare }) => {
-      const extensionRaw = readTwin(extension);
-      const pwaRaw = readTwin(pwa);
-      const extensionSource = comparable(extensionRaw, compare);
-      const pwaSource = comparable(pwaRaw, compare);
+    ({ what, extension, pwa, marker, stake }) => {
+      const extensionSource = normalize(readTwin(extension));
+      const pwaSource = normalize(readTwin(pwa));
 
       // Guard against a vacuous pass: normalisation must leave the real content
       // behind, and each twin must name the other app's copy.
@@ -202,18 +133,9 @@ describe("Extension / PWA twin modules", () => {
         expect(source).toContain(marker);
       }
 
-      if (compare === "code") {
-        // That cross-reference lives in the header comment this mode has just
-        // stripped, and the code itself names no directories — so the claim is
-        // checked against the RAW source instead.
-        const namesTheOtherCopy = `${what}: each twin must name the other app's copy, so a reader landing on either one is told there is a second one.`;
-        expect(extensionRaw, namesTheOtherCopy).toContain(pwa);
-        expect(pwaRaw, namesTheOtherCopy).toContain(extension);
-      } else {
-        const namesTheOtherDir = `${what}: each twin must name the other app's directory, so a reader landing on either copy is told there is a second one.`;
-        for (const source of [extensionSource, pwaSource]) {
-          expect(source, namesTheOtherDir).toContain(TWIN_DIR);
-        }
+      const namesTheOtherDir = `${what}: each twin must name the other app's directory, so a reader landing on either copy is told there is a second one.`;
+      for (const source of [extensionSource, pwaSource]) {
+        expect(source, namesTheOtherDir).toContain(TWIN_DIR);
       }
 
       expect(pwaSource, `${pwa} has drifted from ${extension}. ${stake}`).toBe(
@@ -239,18 +161,6 @@ describe("Extension / PWA twin modules", () => {
     );
   });
 
-  it("normalizes away each app's api-module layout, but not a third module", () => {
-    // The Extension splits its api types into `./types`; the PWA keeps them on
-    // `./client`. Only those two collapse — an import moved anywhere else is a
-    // real difference and must still fail.
-    expect(normalize(`import type { BorrowRequest } from "./types";`)).toBe(
-      normalize(`import type { BorrowRequest } from "./client";`),
-    );
-    expect(
-      normalize(`import type { BorrowRequest } from "./clientV2";`),
-    ).not.toBe(normalize(`import type { BorrowRequest } from "./client";`));
-  });
-
   it("strips JSDoc leaders without eating a `*` that is code", () => {
     // Re-flowed prose still collapses to the same text, blank JSDoc lines and
     // all — that is what makes the comparison survive an 80-column re-wrap.
@@ -266,59 +176,6 @@ describe("Extension / PWA twin modules", () => {
     // twins, which is the one failure mode this whole file exists to prevent.
     expect(normalize("class A {\n  *next() {}\n}")).not.toBe(
       normalize("class A {\n  next() {}\n}"),
-    );
-  });
-
-  it("strips comments with a parser, so a `//` inside a literal survives", () => {
-    const stripped = stripComments(
-      [
-        "// a leading line comment",
-        "/* a leading block comment */",
-        'const a = "https://example.test // still data";',
-        "const b = `dropped ${n} /* still data */ item(s)`; // a trailing one",
-      ].join("\n"),
-    );
-
-    expect(stripped).not.toContain("a leading line comment");
-    expect(stripped).not.toContain("a leading block comment");
-    expect(stripped).not.toContain("a trailing one");
-
-    // The whole reason a regex would not do: these two look exactly like
-    // comments and are the payload of a warning message.
-    expect(stripped).toContain("https://example.test // still data");
-    expect(stripped).toContain("/* still data */");
-  });
-
-  it("compares code-mode twins on their code, not on their prose", () => {
-    const extensionProse = [
-      "/** Rebuilt for `dialog/BorrowTab.tsx`. */",
-      "export function keep(a: string) {",
-      "  // The Extension names its own consumer here.",
-      "  return a;",
-      "}",
-    ].join("\n");
-    const pwaProse = [
-      "/**",
-      " * Rebuilt for `pages/BorrowPage.tsx`; note the import cycle on this end.",
-      " */",
-      "export function keep(a: string) {",
-      "  // The PWA names a different consumer, which is right for its reader.",
-      "  return a;",
-      "}",
-    ].join("\n");
-
-    expect(comparable(pwaProse, "code")).toBe(
-      comparable(extensionProse, "code"),
-    );
-
-    // Full mode still sees that prose — which is why the api-validation rows
-    // opt into code mode instead of the whole table doing so.
-    expect(comparable(pwaProse)).not.toBe(comparable(extensionProse));
-
-    // Code mode is not a licence to diverge: a real edit still fails.
-    const edited = pwaProse.replace("return a;", "return a.trim();");
-    expect(comparable(edited, "code")).not.toBe(
-      comparable(extensionProse, "code"),
     );
   });
 });

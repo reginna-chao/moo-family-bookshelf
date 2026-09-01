@@ -179,7 +179,7 @@ describe("ApiClient getFamilyMembers", () => {
    *
    * Driving the public surface means what these cases pin is the COMPOSED
    * contract of the TWO layers `getFamilyMembers` wires, in this order:
-   *  1. `extension/src/api/memberValidation.ts` — the STRUCTURAL rebuild. Drops
+   *  1. `shared/src/api/memberValidation.ts` — the STRUCTURAL rebuild. Drops
    *     elements that cannot be addressed, rebuilds each survivor from at most
    *     the four `FamilyMember` keys (so hostile extras and a non-string
    *     optional lose their key rather than degrade), always emits
@@ -191,12 +191,14 @@ describe("ApiClient getFamilyMembers", () => {
    * Where a case can tell the two apart it says so, because a regression in
    * either layer must fail here instead of being absorbed by the other.
    *
-   * The same case tables live in `pwa/tests/unit/api/member-client.test.ts` —
-   * the two sanitizer copies are deliberately separate, so mirrored tables are
-   * what makes drift between them visible.
+   * The same case tables live in `pwa/tests/unit/api/member-client.test.ts`.
+   * Layer 1 is now the SHARED implementation both apps import, so the mirrored
+   * tables no longer guard against two copies drifting — they prove each app's
+   * own COMPOSITION of the two layers still holds, which is the part that stays
+   * per-app.
    */
   describe("getFamilyMembers payload validation", () => {
-    /** Mirrors the literal in `extension/src/api/memberValidation.ts`. */
+    /** Mirrors the literal in `shared/src/api/memberValidation.ts`. */
     const MALFORMED_CONTAINER_WARNING =
       "[memberValidation] malformed members payload: expected an array, treating as empty";
 

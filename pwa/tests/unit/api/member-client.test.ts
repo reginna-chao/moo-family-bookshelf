@@ -1,13 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-// `@/api/client` is imported FIRST on purpose. The PWA copy of
-// `memberValidation` reads the `BoolFlag` VALUE back out of `./client`, so the
-// two form a real runtime import cycle, and the entry point decides which body
-// runs first: entering from `client` makes ESM evaluate `memberValidation`'s
-// body BEFORE `client`'s own body initialises the enum — the order in which a
-// module-level `BoolFlag` read would actually throw, and the app's own order,
-// since no production module imports `memberValidation` directly. Entering from
-// `memberValidation` instead would evaluate `client` first and hide exactly
-// that regression. See the direct-import suite at the bottom.
+// `@/api/client` stays first because it is the app's own entry point into this
+// code, but nothing hangs on the order any more: the member-list validator now
+// lives in `shared/src/api/memberValidation.ts` and reads `BoolFlag` from
+// `shared/src/api/types.ts`, so the PWA-only `memberValidation` <-> `client`
+// import cycle this comment used to guard no longer exists.
 import {
   ApiClient,
   BoolFlag,
@@ -15,7 +11,7 @@ import {
   type FamilyGroup,
   type FamilyMember,
 } from "@/api/client";
-import { sanitizeFamilyMembersResponse } from "@/api/memberValidation";
+import { sanitizeFamilyMembersResponse } from "moo-family-bookshelf-shared/api/memberValidation";
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -99,7 +95,7 @@ describe("ApiClient getFamilyMembers (PWA)", () => {
    *
    * Driving the public surface means what these cases pin is the COMPOSED
    * contract of the TWO layers `getFamilyMembers` wires, in this order:
-   *  1. `pwa/src/api/memberValidation.ts` — the STRUCTURAL rebuild. Drops
+   *  1. `shared/src/api/memberValidation.ts` — the STRUCTURAL rebuild. Drops
    *     elements that cannot be addressed, rebuilds each survivor from at most
    *     the four `FamilyMember` keys (so hostile extras and a non-string
    *     optional lose their key rather than degrade), always emits
@@ -112,16 +108,17 @@ describe("ApiClient getFamilyMembers (PWA)", () => {
    * either layer must fail here instead of being absorbed by the other.
    *
    * The same case tables live in
-   * `extension/tests/unit/api/member-client.test.ts` — the two sanitizer copies
-   * are deliberately separate, so mirrored tables are what makes drift between
-   * them visible.
+   * `extension/tests/unit/api/member-client.test.ts`. Layer 1 is now the SHARED
+   * implementation both apps import, so the mirrored tables no longer guard
+   * against two copies drifting — they prove each app's own COMPOSITION of the
+   * two layers still holds, which is the part that stays per-app.
    */
   describe("getFamilyMembers payload validation", () => {
     /** Exactly the keys `FamilyMember` declares — the sanitized element's key set. */
     const MEMBER_KEYS = ["userId", "displayName", "canLend", "readmooName"];
     const SORTED_MEMBER_KEYS = [...MEMBER_KEYS].sort();
 
-    /** Mirrors the literal in `pwa/src/api/memberValidation.ts`. */
+    /** Mirrors the literal in `shared/src/api/memberValidation.ts`. */
     const MALFORMED_CONTAINER_WARNING =
       "[memberValidation] malformed members payload: expected an array, treating as empty";
 
@@ -823,21 +820,14 @@ describe("ApiClient getFamilyMembers (PWA)", () => {
 });
 
 /**
- * Import-cycle smoke test, PWA-only.
+ * The validator's own boundary, called directly.
  *
- * `pwa/src/api/memberValidation.ts` imports the `BoolFlag` VALUE from
- * `./client`, which imports `sanitizeFamilyMembersResponse` back — a cycle that
- * survives compilation (the extension copy reads `BoolFlag` from `./types`
- * instead and has none). Production argues it is safe because both sides touch
- * each other only inside function bodies.
- *
- * This file enters that cycle from `@/api/client` (see the import order at the
- * top) — the app's own order, since no production module imports
- * `memberValidation` directly, and the strictest one: ESM evaluates
- * `memberValidation`'s body BEFORE `client` initialises `BoolFlag`, so a future
- * refactor that hoists either access to module-evaluation time fails here
- * instead of at runtime. This suite then calls the export directly, proving the
- * binding resolved through the cycle rather than only via the client method.
+ * Everything above drives `sanitizeFamilyMembersResponse` through
+ * `getFamilyMembers`, where the shared text layer runs after it and rebuilds
+ * the envelope — so the composed suite cannot observe that the validator hands
+ * an errored envelope BACK, unmodified and by identity. That short-circuit is
+ * Invariant 2 at its source (an auth failure must never be laundered into an
+ * empty member list), so it is pinned here on the export itself.
  */
 describe("sanitizeFamilyMembersResponse (direct import)", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -848,31 +838,6 @@ describe("sanitizeFamilyMembersResponse (direct import)", () => {
 
   afterEach(() => {
     warnSpy.mockRestore();
-  });
-
-  it("resolves the BoolFlag comparisons when the cycle is entered from the client module", () => {
-    const res: ApiResponse<unknown> = {
-      data: {
-        familyId: FAMILY_ID,
-        members: [
-          { userId: USER_A, displayName: "Alice", canLend: BoolFlag.FALSE },
-          { userId: USER_B, displayName: "Bob", canLend: true },
-          "not-a-member",
-        ],
-      },
-    };
-
-    const result = sanitizeFamilyMembersResponse(res);
-
-    // A kept `BoolFlag.FALSE` proves the enum binding was initialised: an
-    // uninitialised one would throw, and a wrong one would drop the field.
-    expect(result.data?.members).toEqual([
-      { userId: USER_A, displayName: "Alice", canLend: BoolFlag.FALSE },
-      { userId: USER_B, displayName: "Bob" },
-    ]);
-    expect(result.data?.familyId).toBe(FAMILY_ID);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("dropped 1"));
   });
 
   it("passes an error envelope through untouched", () => {

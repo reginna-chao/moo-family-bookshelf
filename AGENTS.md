@@ -24,8 +24,8 @@ moo-family-bookshelf/
 │   └── architecture.md
 ├── shared/                      # Cross-app TypeScript library (no build step)
 │   ├── src/
-│   │   ├── api/                # Endpoint URL validation + sync-code @host classification + backend data-field runtime coercion
-│   │   ├── borrow/             # Borrow-request failure copy (error code → 繁中文案)
+│   │   ├── api/                # Wire types (BoolFlag / envelope / family records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member payload validation
+│   │   ├── borrow/             # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中文案)
 │   │   ├── config/             # Readmoo host/selector config, report links
 │   │   ├── hostNote/           # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 │   │   ├── icons/              # Inline brand SVG paths
@@ -81,7 +81,7 @@ moo-family-bookshelf/
 
 ### The `shared/` package
 
-`moo-family-bookshelf-shared` 是 workspace 內的純 TypeScript 原始碼套件，沒有 build 步驟——`extension/`、`pwa/` 與 `worker/` 都直接以 `moo-family-bookshelf-shared/<entry>` import 原始碼，前兩者由各自的 Vite 打包，`worker/` 則由 wrangler 的 esbuild 打包（三者的 `tsconfig.json` 都以 `paths` 指向 `../shared/src/*`）。存放多端必須完全一致的邏輯（Readmoo 設定與封面網址白名單、邀請訊息、個人書櫃儲存策略、API 端點位址驗證與同步碼 `@host` 分類等），避免同一份規則在各端各寫一次而漂移。
+`moo-family-bookshelf-shared` 是 workspace 內的純 TypeScript 原始碼套件，沒有 build 步驟——`extension/`、`pwa/` 與 `worker/` 都直接以 `moo-family-bookshelf-shared/<entry>` import 原始碼，前兩者由各自的 Vite 打包，`worker/` 則由 wrangler 的 esbuild 打包（三者的 `tsconfig.json` 都以 `paths` 指向 `../shared/src/*`）。存放多端必須完全一致的邏輯（Readmoo 設定與封面網址白名單、邀請訊息、個人書櫃儲存策略、API 端點位址驗證與同步碼 `@host` 分類、API wire 型別（`BoolFlag`／`{ data, error }` 信封／家庭與借閱紀錄）與其邊界驗證等），避免同一份規則在各端各寫一次而漂移。
 
 - **不得依賴任何 runtime 專屬 API。** `shared/` 除了被瀏覽器端 import，也被 `extension/scripts/` 底下以 `tsx` 執行的 Node 腳本 import。`tsconfig.json` 雖含 `DOM` lib（`URLSearchParams` 型別所需），但 `eslint.config.js` 以 `no-restricted-globals` 擋掉 `document` / `window` / `localStorage` / `sessionStorage` / `navigator`，讓這條界線由靜態檢查保證。
 - **CI 覆蓋**：`shared/` 有自己的 `lint` / `typecheck` script，在 CI 的 `extension-check` job 內執行（`shared/**` 已在該 job 的 path filter 內）。新增檔案不需額外設定即被檢查。`worker-check` 的 path filter 同樣含 `shared/**`，因此改動 `shared/` 也會跑 worker 檢查，壞掉的 import 不會靜默通過。
@@ -194,7 +194,7 @@ GitHub Release 內容：release job 會讀取 `docs/release-notes/v<X.Y.Z>.md`�
 ### Boolean Convention
 
 - All boolean-like fields in API payloads and KV storage **must** use the `BoolFlag` enum, never `true | false` or raw `0 | 1` literals.
-- `BoolFlag` is defined in both `extension/src/api/client.ts` and `pwa/src/api/client.ts`:
+- On the CLIENT side `BoolFlag` is defined once, in `shared/src/api/types.ts`, and re-exported by `extension/src/api/types.ts` (and onward by `extension/src/api/client.ts`) and by `pwa/src/api/client.ts`, so every existing import path still works. The Worker keeps its OWN deliberately independent declaration in `worker/src/kv/schema.ts` (it consumes no client-side wire types from `shared/`); the two declarations must stay value-identical:
   ```typescript
   export enum BoolFlag {
     FALSE = 0,

@@ -226,7 +226,7 @@ describe("sanitizeRecord", () => {
   // An array is garbage here and is never SPREAD: `{ ...arr, title: "" }` would
   // carry the array's numeric keys and dress a malformed payload up as a valid
   // entity. Excluding arrays is also what keeps the predicate identical to
-  // `isRecord` in `pwa/src/api/borrowValidation.ts`.
+  // `isRecord` in `shared/src/borrow/validation.ts`.
   it("does not spread an array's numeric keys into the result", () => {
     const result = sanitizeRecord(
       ["first", "second"] as unknown as LooseRecord,
@@ -267,7 +267,7 @@ describe("sanitizeRecord", () => {
  *
  * Losing a hostile element is affordable here in a way it is not for a record:
  * "no members" / "no books" is a state the UI already renders. The stricter
- * precedent is `pwa/src/api/borrowValidation.ts` (PR #144), which this layer is
+ * precedent is `shared/src/borrow/validation.ts` (PR #144), which this layer is
  * now aligned to.
  */
 describe("sanitizeList", () => {

@@ -40,8 +40,8 @@
  * throw. A bad container or element detonates one render later — inside `.map`
  * or a field read — where no caller `try` can reach it, and with no
  * ErrorBoundary in either app that is a permanent white screen.
- * `extension/src/api/borrowValidation.ts` and its PWA twin already apply this
- * strictness to the borrow list; this layer now matches it.
+ * `shared/src/borrow/validation.ts` already applies this strictness to the
+ * borrow list; this layer now matches it.
  *
  * Not covered here, deliberately:
  *  - `error.message` / `error.code` — owned by the error-text hardening.
@@ -87,8 +87,8 @@ export function safeNullableText(value: unknown): string | null {
  * Can this value carry the fields a sanitizer is about to rewrite?
  *
  * Arrays are excluded on purpose, so this is the same predicate as `isRecord` in
- * `extension/src/api/borrowValidation.ts` (and its PWA twin) — one definition of
- * "addressable record" across both hardening layers.
+ * `shared/src/borrow/validation.ts` — one definition of "addressable record"
+ * across both hardening layers.
  */
 function isRecordLike(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -123,7 +123,7 @@ function isRecordLike(value: unknown): boolean {
  * An array is garbage here and is never SPREAD: `{ ...arr, familyId: "" }` would
  * carry the array's numeric keys and dress a malformed payload up as a valid
  * entity. Excluding arrays is also what keeps the predicate identical to
- * `isRecord` in `extension/src/api/borrowValidation.ts` (and its PWA twin).
+ * `isRecord` in `shared/src/borrow/validation.ts`.
  */
 export function sanitizeRecord<T>(value: T, sanitize: (record: T) => T): T {
   if (isRecordLike(value)) return sanitize(value);
@@ -154,15 +154,15 @@ export function sanitizeRecord<T>(value: T, sanitize: (record: T) => T): T {
  * "no books" is a state the UI already renders.
  *
  * Dropping is deliberately SILENT — no `console.warn`, unlike
- * `borrowValidation.ts` / `memberValidation.ts`, whose aggregate warnings sit on
- * single fetch paths. This helper runs inside the bookshelf aggregation and
- * other hot paths, where a per-response warning would be noise; the omission is
- * a policy choice, not an oversight.
+ * `shared/src/borrow/validation.ts` / `shared/src/api/memberValidation.ts`,
+ * whose aggregate warnings sit on single fetch paths. This helper runs inside
+ * the bookshelf aggregation and other hot paths, where a per-response warning
+ * would be noise; the omission is a policy choice, not an oversight.
  *
- * The stricter precedent is `extension/src/api/borrowValidation.ts` (and its PWA
- * twin), which already answers a malformed borrow container with `[]` and drops
- * unaddressable elements; keeping the two policies aligned is what stops them
- * from drifting apart.
+ * The stricter precedent is `shared/src/borrow/validation.ts`, which already
+ * answers a malformed borrow container with `[]` and drops unaddressable
+ * elements; keeping the two policies aligned is what stops them from drifting
+ * apart.
  */
 export function sanitizeList<T>(list: T[], sanitize: (item: T) => T): T[] {
   if (!Array.isArray(list)) return [];
