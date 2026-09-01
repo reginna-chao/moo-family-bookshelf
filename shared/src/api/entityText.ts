@@ -14,10 +14,9 @@
  * backend omitted stays OMITTED rather than becoming an explicit `undefined` own
  * property. Absence, not an `undefined` value, is what the "treat missing as X"
  * fallbacks downstream are written against, and it is the idiom
- * `extension/src/api/memberValidation.ts` (and its PWA twin) already uses:
- * `getFamilyMembers` composes both layers — member validation first, this
- * sanitizer second — so the spread here must not re-introduce a key that layer
- * deliberately left out.
+ * `shared/src/api/memberValidation.ts` already uses: `getFamilyMembers`
+ * composes both layers — member validation first, this sanitizer second — so
+ * the spread here must not re-introduce a key that layer deliberately left out.
  *
  * The condition is `!== undefined`, never truthiness: `null` is a PRESENT value
  * (`apiEndpoint: null` means "this family uses the default endpoint"), so it
@@ -178,12 +177,12 @@ export interface BorrowRequestTextFields {
  * and `PATCH /api/borrow/:requestId`.
  *
  * The borrow LIST (`GET /api/family/:id/borrow`) deliberately does not come
- * through here: it is owned by the stricter `extension/src/api/borrowValidation.ts`
- * and its PWA twin, which rebuild all 12 fields from scratch (no spread of the
- * raw element), drop elements without a usable `requestId`, and coerce
- * `bookCoverUrl` as well. Two policies on one entity, so they are cross-linked
- * here: a field added to `BorrowRequest` must be decided for BOTH, or the list
- * and the create/update paths silently diverge.
+ * through here: it is owned by the stricter `shared/src/borrow/validation.ts`,
+ * which rebuilds all 12 fields from scratch (no spread of the raw element),
+ * drops elements without a usable `requestId`, and coerces `bookCoverUrl` as
+ * well. Two policies on one entity, so they are cross-linked here: a field
+ * added to `BorrowRequest` must be decided for BOTH, or the list and the
+ * create/update paths silently diverge.
  *
  * `status` is excluded from both: its render site already hardens it through a
  * `ReadonlyMap` lookup, and coercing it would break its enum type.

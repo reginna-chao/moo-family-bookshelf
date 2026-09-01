@@ -57,11 +57,11 @@ import {
   type ReauthInfo,
   type RefreshOutcome,
 } from "./auth-refresh";
-import { sanitizeBorrowRequests } from "./borrowValidation";
+import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
 import {
   sanitizeFamilyMember,
   sanitizeFamilyMembersResponse,
-} from "./memberValidation";
+} from "moo-family-bookshelf-shared/api/memberValidation";
 
 // Re-export all types so existing imports from "./client" continue to work
 export {

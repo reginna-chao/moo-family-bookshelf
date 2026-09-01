@@ -153,9 +153,10 @@ describe("ApiClient borrow methods (PWA)", () => {
    * `sanitizeBorrowRequests` directly: the contract is what a caller receives
    * when a self-hosted (BYO) or hostile backend answers, not the shape of the
    * helper. The same case tables live in
-   * `extension/tests/unit/api/borrow-client.test.ts` — the two sanitizer copies
-   * are deliberately separate, so mirrored tables are what makes drift between
-   * them visible.
+   * `extension/tests/unit/api/borrow-client.test.ts` — the sanitizer itself is
+   * the shared implementation in `shared/src/borrow/validation.ts` that both
+   * apps import, so the mirrored tables no longer guard two copies against each
+   * other; they prove each app's own client still wires that implementation in.
    */
   describe("listBorrowRequests payload validation", () => {
     /** Exactly the keys `BorrowRequest` declares — the sanitized result's key set. */

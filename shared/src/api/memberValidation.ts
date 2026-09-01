@@ -1,14 +1,20 @@
 /**
  * Runtime boundary validation for `GET /api/family/:id/members` payloads, and —
  * through the exported `sanitizeFamilyMember` — for the single member object
- * returned by `PATCH /api/family/:id/member/:uid`.
+ * returned by `PATCH /api/family/:id/member/:uid`, which only the Extension end
+ * consumes today. Applied at the API-client boundary of BOTH apps
+ * (`extension/src/api/client.ts`, `pwa/src/api/client.ts`); it lives here so the
+ * two ends cannot enforce different rules on the same payload.
  *
  * Self-hosted (BYO) backends are inside this project's threat model, so the
  * member list arrives unvalidated: a non-string `userId` crashes `.slice(0, 8)`
- * in `buildOwnerNameLookup` — a parent-level `useMemo` in `dialog/BorrowTab.tsx`
- * that runs before any card mounts — and React throws outright when an
- * object-valued `displayName` is rendered as a child. Neither end has an
- * ErrorBoundary, so a single malformed element takes the whole Dialog down.
+ * in the parent-level `useMemo` each app builds its name lookup with
+ * (`buildOwnerNameLookup` in `extension/src/dialog/BorrowTab.tsx`,
+ * `buildMemberNameMap` in `pwa/src/pages/BorrowPage.tsx`), which runs before any
+ * card mounts, and React throws outright when an object-valued `displayName` is
+ * rendered as a child (both ends' `MemberList.tsx`). Neither end has an
+ * ErrorBoundary, so a single malformed element takes the whole Dialog / page
+ * down.
  *
  * Two failure modes, deliberately handled differently:
  * - DROP the element when it cannot be addressed at all (not a plain object, or
@@ -25,10 +31,6 @@
  * data, because every `getFamilyMembers` caller reads the envelope itself. An
  * `error` (or data-less) envelope passes through untouched — an auth failure
  * must never be laundered into an empty member list (Invariant 2).
- *
- * Kept in sync with `pwa/src/api/memberValidation.ts` — the two ends
- * deliberately stay separate copies (no `shared/` module), mirroring the
- * PR #132 convention.
  */
 
 import { BoolFlag } from "./types";
@@ -49,8 +51,8 @@ function toStringField(value: unknown): string {
  * anything else (missing, `true`, `2`, `"1"`) becomes `undefined`.
  *
  * `undefined` loses nothing: downstream already reads missing as TRUE
- * (`canLend !== BoolFlag.FALSE`), which is the backward-compat semantics for
- * Workers predating the field.
+ * (`canLend !== BoolFlag.FALSE`, in both ends' `MemberList.tsx`), which is the
+ * backward-compat semantics for Workers predating the field.
  */
 function toBoolFlagField(value: unknown): BoolFlag | undefined {
   if (value === BoolFlag.TRUE) return BoolFlag.TRUE;
@@ -67,13 +69,17 @@ function toBoolFlagField(value: unknown): BoolFlag | undefined {
  *
  * Exported because the list is not the only door into `members` state: the
  * single member object returned by `PATCH /api/family/:id/member/:uid` is
- * spliced into it verbatim by `updateMember` in `dialog/FamilyDataContext.tsx`,
- * so `client.ts`'s `updateMemberSettings` puts that payload through the same
- * drop/normalize rules. The drop criterion needs no adjustment there: every
- * consumer of the result already has the `|| userId.slice(0, 8)` fallback a
- * normalized `displayName` relies on. A `null` verdict is handled differently
- * per caller though — one element of a list is dropped silently, a whole PATCH
- * response becomes an `ApiError` the UI can retry.
+ * spliced into it verbatim by `updateMember` in
+ * `extension/src/dialog/FamilyDataContext.tsx`, so that client's
+ * `updateMemberSettings` puts the payload through the same drop/normalize rules.
+ * The drop criterion needs no adjustment there: every consumer of the result
+ * already has the `|| userId.slice(0, 8)` fallback a normalized `displayName`
+ * relies on. A `null` verdict is handled differently per caller though — one
+ * element of a list is dropped silently, a whole PATCH response becomes an
+ * `ApiError` the UI can retry. The PWA has no such consumer yet
+ * (`pwa/src/components/MemberList.tsx` discards that response and refetches the
+ * list), so the export also means a future PWA consumer finds the guard already
+ * here.
  */
 export function sanitizeFamilyMember(element: unknown): FamilyMember | null {
   if (!isRecord(element)) return null;
@@ -166,9 +172,11 @@ export function sanitizeFamilyMembersResponse(
     data: {
       ...(claimed as unknown as FamilyGroup),
       members: sanitizeFamilyMembers(claimed.members),
-      // The one pass-through field rendered as a React child — the
-      // transfer-owner confirm screen prints it (`dialog/MemberList.tsx`,
-      // `.moo-member-list__endpoint`) — so an object-valued claim throws there,
+      // The one pass-through field that reaches a React child: the Extension's
+      // transfer-owner confirm screen prints it verbatim
+      // (`extension/src/dialog/MemberList.tsx`, `.moo-member-list__endpoint`),
+      // and the PWA publishes the same value through `hooks/useFamilyData.tsx`
+      // for any screen to render — so an object-valued claim throws there,
       // exactly the crash class the other fields' `===` / `??` consumers are
       // immune to. Any string survives verbatim; everything else collapses to
       // `null`, which is what `apiEndpoint ?? undefined` already reads as "no

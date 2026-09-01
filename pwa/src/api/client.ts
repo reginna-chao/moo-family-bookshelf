@@ -17,9 +17,20 @@ import {
   sanitizePublicShelfResultText,
   sanitizeVersionInfoText,
 } from "moo-family-bookshelf-shared/api/entityText";
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
+import type {
+  ApiResponse,
+  FamilyGroup,
+  FamilyMember,
+} from "moo-family-bookshelf-shared/api/types";
+import { BorrowStatus } from "moo-family-bookshelf-shared/borrow/types";
+import type {
+  BorrowRequest,
+  CreateBorrowPayload,
+} from "moo-family-bookshelf-shared/borrow/types";
+import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
+import { sanitizeFamilyMembersResponse } from "moo-family-bookshelf-shared/api/memberValidation";
 import { DEFAULT_API_ENDPOINT } from "../constants";
-import { sanitizeBorrowRequests } from "./borrowValidation";
-import { sanitizeFamilyMembersResponse } from "./memberValidation";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -29,20 +40,25 @@ import { sanitizeFamilyMembersResponse } from "./memberValidation";
  */
 export { validateEndpointUrl };
 
-export enum BoolFlag {
-  FALSE = 0,
-  TRUE = 1,
-}
-
-export interface ApiResponse<T> {
-  data?: T;
-  error?: {
-    code: string;
-    message: string;
-    /** Seconds to wait before retrying, present on rate-limit (429) responses. */
-    retryAfter?: number;
-  };
-}
+/**
+ * The wire contract itself — the `{ data, error }` envelope, `BoolFlag`, and the
+ * family / borrow records — lives in `shared/` for the same reason, so the two
+ * apps cannot describe the same payload differently. Re-exported here because
+ * every existing importer reaches for these names through the API client — new
+ * code outside `api/` should import the shared modules directly rather than
+ * routing through this file.
+ */
+export { BoolFlag, BorrowStatus };
+export type {
+  ApiErrorPayload,
+  ApiResponse,
+  FamilyGroup,
+  FamilyMember,
+} from "moo-family-bookshelf-shared/api/types";
+export type {
+  BorrowRequest,
+  CreateBorrowPayload,
+} from "moo-family-bookshelf-shared/borrow/types";
 
 /**
  * Thrown by the client's `unwrap` helpers when an envelope carries `error`.
@@ -177,28 +193,6 @@ export interface PersonalBooks {
 /** Current schema version for PersonalBooks */
 export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 
-export interface FamilyMember {
-  userId: string;
-  displayName: string;
-  /** Optional for backward compat with old API responses; treat missing/undefined as TRUE. */
-  canLend?: BoolFlag;
-  /** Readmoo display name for lending automation (v1.1.0). */
-  readmooName?: string;
-}
-
-export interface FamilyGroup {
-  familyId: string;
-  ownerId: string;
-  members: FamilyMember[];
-  maxMembers: number;
-  createdAt: string;
-  apiEndpoint?: string | null;
-  /** Auth token issued alongside family create/join responses. */
-  authToken?: string;
-  /** Unix millis when authToken expires. */
-  expiresAt?: number;
-}
-
 export interface VersionInfo {
   apiVersion: number;
   serverVersion: string;
@@ -225,38 +219,6 @@ export interface SetVerifyBody {
   method: VerifyMethod;
   secret?: string;
   prompted?: number;
-}
-
-export enum BorrowStatus {
-  PENDING = 0,
-  LENT = 1,
-  RETURNED = 2,
-  REJECTED = 3,
-  CANCELLED = 4,
-}
-
-export interface BorrowRequest {
-  requestId: string;
-  familyId: string;
-  borrowerId: string;
-  borrowerName: string;
-  ownerId: string;
-  bookId: string;
-  bookTitle: string;
-  bookAuthor: string;
-  bookCoverUrl: string;
-  status: BorrowStatus;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** Payload for creating a borrow request. */
-export interface CreateBorrowPayload {
-  bookId: string;
-  bookTitle: string;
-  bookAuthor: string;
-  bookCoverUrl: string;
-  ownerId: string;
 }
 
 export type SelectionMode = "all-shared";

@@ -2,23 +2,29 @@
  * Shared types, interfaces, and enums for the API layer.
  */
 
-export enum BoolFlag {
-  FALSE = 0,
-  TRUE = 1,
-}
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 
-/** The `error` half of the envelope, as it travels on the wire. */
-export interface ApiErrorPayload {
-  code: string;
-  message: string;
-  /** Seconds to wait before retrying, present on rate-limit (429) responses. */
-  retryAfter?: number;
-}
-
-export interface ApiResponse<T> {
-  data?: T;
-  error?: ApiErrorPayload;
-}
+/**
+ * The wire contract itself — the `{ data, error }` envelope, `BoolFlag`, and the
+ * family / borrow records — lives in `shared/` so the Extension and the PWA
+ * cannot describe the same payload differently. Re-exported here because every
+ * existing importer reaches for these names through the API layer — new code
+ * outside `api/` should import the shared modules directly rather than routing
+ * through this file. `BoolFlag` is also imported above as a real binding,
+ * because the app-local types below are declared in terms of it.
+ */
+export { BoolFlag };
+export type {
+  ApiErrorPayload,
+  ApiResponse,
+  FamilyGroup,
+  FamilyMember,
+} from "moo-family-bookshelf-shared/api/types";
+export { BorrowStatus } from "moo-family-bookshelf-shared/borrow/types";
+export type {
+  BorrowRequest,
+  CreateBorrowPayload,
+} from "moo-family-bookshelf-shared/borrow/types";
 
 /**
  * Client-synthesized code for a 401 whose silent token recovery was itself
@@ -113,28 +119,6 @@ export interface PersonalBooks {
 /** Current schema version for PersonalBooks personal books data */
 export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 
-export interface FamilyMember {
-  userId: string;
-  displayName: string;
-  /** Optional for backward compat with old API responses; treat missing/undefined as TRUE. */
-  canLend?: BoolFlag;
-  /** Readmoo display name for lending automation (v1.1.0). */
-  readmooName?: string;
-}
-
-export interface FamilyGroup {
-  familyId: string;
-  ownerId: string;
-  members: FamilyMember[];
-  maxMembers: number;
-  createdAt: string;
-  apiEndpoint?: string | null;
-  /** Auth token issued alongside family create/join responses. */
-  authToken?: string;
-  /** Unix millis when authToken expires. */
-  expiresAt?: number;
-}
-
 export interface VersionInfo {
   apiVersion: number;
   serverVersion: string;
@@ -158,38 +142,6 @@ export interface VerifyInfo {
 export interface OtpInfo {
   code: string;
   expiresAt: number;
-}
-
-export enum BorrowStatus {
-  PENDING = 0,
-  LENT = 1,
-  RETURNED = 2,
-  REJECTED = 3,
-  CANCELLED = 4,
-}
-
-export interface BorrowRequest {
-  requestId: string;
-  familyId: string;
-  borrowerId: string;
-  borrowerName: string;
-  ownerId: string;
-  bookId: string;
-  bookTitle: string;
-  bookAuthor: string;
-  bookCoverUrl: string;
-  status: BorrowStatus;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** Payload for creating a borrow request. */
-export interface CreateBorrowPayload {
-  bookId: string;
-  bookTitle: string;
-  bookAuthor: string;
-  bookCoverUrl: string;
-  ownerId: string;
 }
 
 /**

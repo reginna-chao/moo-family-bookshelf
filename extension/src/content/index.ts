@@ -38,7 +38,7 @@ import {
   DISPLAY_NAME_KEY,
 } from "../constants";
 import { BorrowStatus } from "../api/types";
-import { sanitizeBorrowRequests } from "../api/borrowValidation";
+import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
 
 const APP_ENV = getAppEnv();
 

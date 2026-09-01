@@ -98,7 +98,7 @@ const HOSTILE_GROUP = {
  * to a COMPOSED contract (structural rebuild first, text layer second), not to
  * the text layer alone. Three deliberate differences from `HOSTILE_MEMBER`:
  * - a usable `userId`, because `sanitizeFamilyMembersResponse`
- *   (`pwa/src/api/memberValidation.ts`) DROPS an element without one instead of
+ *   (`shared/src/api/memberValidation.ts`) DROPS an element without one instead of
  *   degrading it to `""`;
  * - it keeps the non-string `readmooName`, which the rebuild OMITS rather than
  *   degrades — the exact divergence the wiring rows have to make visible;
@@ -225,7 +225,7 @@ const GROUP_EXPECTATIONS: Expectation[] = [
 
 /**
  * `getFamilyMembers` is the one group method behind TWO layers: the structural
- * rebuild in `pwa/src/api/memberValidation.ts` runs FIRST, the shared text layer
+ * rebuild in `shared/src/api/memberValidation.ts` runs FIRST, the shared text layer
  * second. Its member-level contract is strictly stronger than
  * `GROUP_EXPECTATIONS`, and these rows are what tell the two apart — an
  * unaddressable element is DROPPED rather than blanked, `userId` survives
@@ -281,7 +281,7 @@ const BORROW_EXPECTATIONS: Expectation[] = [
 
 /**
  * `listBorrowRequests` is owned by `sanitizeBorrowRequests`
- * (`pwa/src/api/borrowValidation.ts`, PR #144), NOT by
+ * (`shared/src/borrow/validation.ts`, PR #144), NOT by
  * `sanitizeBorrowRequestText`. Its contract is strictly stronger, and these rows
  * are what tells the two apart: `requestId` survives verbatim (an unusable one
  * drops the whole element rather than degrading to `""`), `bookCoverUrl` IS
@@ -750,14 +750,14 @@ describe("ApiClient backend-text sanitization", () => {
    * must stay absence for that very `if (response.data)` guard.
    *
    * The borrow LIST already failed closed before this (PR #144,
-   * `pwa/src/api/borrowValidation.ts`): a non-array container degrades to `[]`
+   * `shared/src/borrow/validation.ts`): a non-array container degrades to `[]`
    * and an unaddressable element is dropped, because an element with no usable
    * `requestId` can serve neither as a React key nor as the target of
    * `PATCH /api/borrow/:id`. Its rows below are unchanged — it is the precedent
    * this layer was aligned to.
    *
    * `getFamilyMembers` now meets that same element-dropping strictness ONE
-   * LAYER EARLIER (`pwa/src/api/memberValidation.ts`, PR #150), so its cases
+   * LAYER EARLIER (`shared/src/api/memberValidation.ts`, PR #150), so its cases
    * below assert drops rather than blanked fields: a member with no usable
    * `userId` is exactly as unaddressable as a borrow request with no
    * `requestId`. Every other group method still answers to the text layer
