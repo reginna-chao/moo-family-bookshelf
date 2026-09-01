@@ -20,9 +20,11 @@ web-ext-artifacts-direct/
 # Environment & secrets
 .env
 .env.*
-!.env.example
-!.env.dev
-!.env.production
+# Tracked on purpose — VITE_* public endpoint URLs only, inlined into the built bundle.
+# Never secrets. If one becomes local-only, remove its negate line here too.
+!/.env.example
+!/.env.production
+!/.env.remote
 .dev.vars
 !.dev.vars.example
 
