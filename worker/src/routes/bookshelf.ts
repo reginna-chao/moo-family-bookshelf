@@ -7,7 +7,11 @@ import {
   type UserBooksRecord,
   normalizeFamilyRecord,
 } from "../kv/schema";
-import { isValidFamilyId, sanitizeCoverUrl } from "../utils/validation";
+import {
+  isValidFamilyId,
+  sanitizeCoverUrl,
+  sanitizeReadmooUrl,
+} from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
@@ -94,10 +98,15 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
         "json",
       );
       // Read-side twin of the buildSnapshot chokepoint — a dormant pre-whitelist
-      // record must not beacon family members via the aggregation.
+      // record must not beacon family members (coverUrl) or hand them a
+      // phishing link (readmooUrl) via the aggregation.
       const sharedBooks = (record?.books ?? [])
         .filter((b) => b.isShared === BoolFlag.TRUE)
-        .map((b) => ({ ...b, coverUrl: sanitizeCoverUrl(b.coverUrl) }));
+        .map((b) => ({
+          ...b,
+          coverUrl: sanitizeCoverUrl(b.coverUrl),
+          readmooUrl: sanitizeReadmooUrl(b.readmooUrl),
+        }));
       return {
         userId: member.userId,
         displayName: member.displayName,

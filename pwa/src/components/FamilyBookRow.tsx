@@ -5,6 +5,7 @@ import type { BookEntry } from "@/api/client";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { LazyCover } from "@/components/LazyCover";
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu";
+import { safeBookUrl } from "@/utils/safeBookUrl";
 import { safeCoverUrl } from "@/utils/safeCoverUrl";
 
 export interface FamilyBookRowBook extends BookEntry {
@@ -51,7 +52,7 @@ export function FamilyBookRow({
 
   return (
     <a
-      href={book.readmooUrl}
+      href={safeBookUrl(book.readmooUrl) || undefined}
       target="_blank"
       rel="noopener noreferrer"
       className="flex items-center gap-3 py-3 border-b border-gray-100 no-underline text-inherit"

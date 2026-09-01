@@ -761,6 +761,141 @@ describe("PUT /api/user/:id/family-prefs — coverUrl lazy cleanup", () => {
 });
 
 // ===========================================================================
+// PUT /api/user/:id/family-prefs — readmooUrl lazy cleanup (P0 privacy)
+//
+// Twin of the coverUrl cleanup above for the other attacker-controlled URL
+// field. `readmooUrl` is rendered as a clickable `<a href>`, so a value written
+// before the whitelist existed is a phishing / arbitrary-redirect lure sitting
+// under a legitimate book title. This handler rebuilds the books array anyway,
+// so it scrubs while it is there — and, exactly as with covers, it must touch
+// nothing else on the record.
+// ===========================================================================
+
+describe("PUT /api/user/:id/family-prefs — readmooUrl lazy cleanup", () => {
+  const PHISHING_HOST = "phish.example.com";
+  const POISONED_LINK = `https://${PHISHING_HOST}/login`;
+  /** On the Readmoo whitelist (`isAllowedBookUrl`), so it must survive. */
+  const CLEAN_LINK = "https://readmoo.com/book/210123456";
+  const SEEDED_AT = "2020-01-01T00:00:00.000Z";
+  const SEEDED_NAME = "Seeded Name";
+
+  function book(bookId: string, readmooUrl: string): BookEntry {
+    return {
+      bookId,
+      title: `Book ${bookId}`,
+      author: "Author",
+      isbn: `isbn-${bookId}`,
+      coverUrl: "https://cdn.readmoo.com/clean.jpg",
+      readmooUrl,
+      category: "fiction",
+      isShared: BoolFlag.TRUE,
+    };
+  }
+
+  /** Poisoned links in the FIRST and LAST slots — position must not matter. */
+  function legacyBooks(): BookEntry[] {
+    return [
+      book("b1", POISONED_LINK),
+      book("b2", CLEAN_LINK),
+      book("b3", POISONED_LINK),
+    ];
+  }
+
+  /**
+   * Seed `user:{USER1}` DIRECTLY. A poisoned readmooUrl can only be in KV
+   * because it was written BEFORE the whitelist existed — the books write paths
+   * sanitize on the way in, so they cannot produce this fixture.
+   */
+  async function seedLegacyRecord(): Promise<string> {
+    const { authToken } = await createFamilyAndGetToken(USER1);
+    await seedUser(USER1, {
+      books: legacyBooks(),
+      displayName: SEEDED_NAME,
+      lastUpdated: SEEDED_AT,
+    });
+    return authToken;
+  }
+
+  function storedRecord(): Promise<UserBooksRecord | null> {
+    return kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+  }
+
+  function savePrefs(
+    authToken: string,
+    body: unknown = { hidden: [ref("b1")] },
+  ) {
+    return request("PUT", `/api/user/${USER1}/family-prefs`, body, authToken);
+  }
+
+  it("scrubs a pre-whitelist poisoned readmooUrl when saving family-prefs", async () => {
+    const authToken = await seedLegacyRecord();
+
+    const res = await savePrefs(authToken);
+    expect(res.status).toBe(200);
+
+    const record = await storedRecord();
+    expect(record?.books.map((b) => b.readmooUrl)).toEqual([
+      "",
+      CLEAN_LINK,
+      "",
+    ]);
+    // The whitelisted control survives field for field, not just its link.
+    expect(record?.books[1]).toEqual(book("b2", CLEAN_LINK));
+  });
+
+  it("keeps every other field of a scrubbed book unchanged", async () => {
+    const authToken = await seedLegacyRecord();
+
+    await savePrefs(authToken);
+
+    const record = await storedRecord();
+    // Only the link moved: title, cover, isShared and the rest are
+    // byte-identical — the two URL fields are sanitized independently.
+    expect(record?.books[0]).toEqual({
+      ...book("b1", POISONED_LINK),
+      readmooUrl: "",
+    });
+    // Nothing anywhere in the record — not in a stray field, not in a title.
+    expect(JSON.stringify(record)).not.toContain(PHISHING_HOST);
+  });
+
+  it("leaves the non-book record fields untouched while scrubbing", async () => {
+    const authToken = await seedLegacyRecord();
+
+    const res = await savePrefs(authToken);
+    expect(res.status).toBe(200);
+
+    const record = await storedRecord();
+    // Per-field merge semantics: the scrub rides the write, it does not widen
+    // it. displayName / schemaVersion / lastUpdated are carried over verbatim.
+    expect(record?.displayName).toBe(SEEDED_NAME);
+    expect(record?.schemaVersion).toBe(1);
+    expect(record?.lastUpdated).toBe(SEEDED_AT);
+    // The prefs themselves ARE the point of the request, and the merge always
+    // normalizes both kinds — an absent `favorites` lands as [], not undefined.
+    expect(record?.familyShelfPrefs).toEqual({
+      hidden: [ref("b1")],
+      favorites: [],
+    });
+  });
+
+  it("leaves the poisoned link untouched when the request is rejected", async () => {
+    const authToken = await seedLegacyRecord();
+    const ops = watchKvOps(kv);
+
+    const res = await savePrefs(authToken, { hidden: ["not-a-valid-ref"] });
+    expect(res.status).toBe(400);
+
+    // Validation runs before the record read/rebuild, so a refused request
+    // performs no handler write at all — the cleanup rides an accepted save
+    // only. (Rate-limit counter puts are elided by DEV_MODE.)
+    expect(ops.putKeys()).toEqual([]);
+    const record = await storedRecord();
+    expect(record?.books[0].readmooUrl).toBe(POISONED_LINK);
+  });
+});
+
+// ===========================================================================
 // PUT /api/user/:id/family-prefs — per-user rate limit (non-dev mode)
 // ===========================================================================
 

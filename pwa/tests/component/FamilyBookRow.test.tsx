@@ -104,6 +104,15 @@ describe("FamilyBookRow", () => {
     const link = screen.getByRole("link");
     expect(link).toHaveAttribute("href", "https://readmoo.com/book/book-1");
     expect(link).toHaveAttribute("target", "_blank");
+    // Full string, not `toContain("noopener")`: the two tokens do different
+    // jobs, so a substring check stays green after the load-bearing half is
+    // deleted. `noopener` severs `window.opener`; `noreferrer` is the one
+    // that suppresses the Referer header. Production documents the pair as
+    // load-bearing (shared/src/config/readmoo.ts → isAllowedBookUrl), and it
+    // is the layer that still holds when the URL whitelist is bypassed —
+    // which has happened: see the base-sensitivity rows in
+    // extension/tests/unit/readmooConfig.test.ts.
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
   /**
@@ -172,6 +181,100 @@ describe("FamilyBookRow", () => {
       const fallback = coverFallback(container);
       expect(fallback).not.toBeNull();
       expect(fallback?.querySelector("svg")).not.toBeNull();
+    });
+  });
+
+  /**
+   * `readmooUrl` is the other attacker-controllable URL on the same server
+   * record: a family member can bypass the UI and POST any value, and here the
+   * whole ROW is the `<a>`, so a click anywhere on the book follows it. That
+   * makes an off-domain value an arbitrary-redirect / phishing lure presented
+   * under a legitimate book title, and the destination host learns the viewer's
+   * IP and User-Agent. The referer does NOT go with it, purely because the
+   * render site pairs the href with `rel="noopener noreferrer"`
+   * (pwa/src/components/FamilyBookRow.tsx), where `noreferrer` suppresses the
+   * Referer header outright — load-bearing, not decoration. It differs from the
+   * cover gate above in when it fires (a click, not a render — lower rate, same
+   * severity) and in what could substitute for it: nothing. The CSP in
+   * pwa/public/_headers is `img-src` only, which says nothing about where a
+   * navigation may go, and that file is in any case only honoured by hosts that
+   * serve it. `safeBookUrl` (pwa/src/utils/safeBookUrl.ts) is the whole defence.
+   *
+   * The degradation contract is `href={safeBookUrl(...) || undefined}`: the
+   * attribute is OMITTED rather than set to `""`, because an empty `href`
+   * resolves to the current document and a click would reload the PWA. With no
+   * `href` the `<a>` has no `link` role and is inert, while the row's layout and
+   * content stay untouched. The whitelisted counterpart is pinned by "links to
+   * readmooUrl" above.
+   */
+  describe("book link whitelist", () => {
+    const PHISHING_URL = "https://evil.example.com/phish";
+
+    const rejected: Array<{ name: string; readmooUrl: string }> = [
+      { name: "a phishing link on a foreign host", readmooUrl: PHISHING_URL },
+      {
+        name: "a plain-HTTP link on the Readmoo apex",
+        readmooUrl: "http://readmoo.com/book/book-1",
+      },
+      // Already a legitimate stored value before this filter existed; it must
+      // degrade the same way rather than emit `href=""`.
+      { name: "an empty stored URL", readmooUrl: "" },
+    ];
+
+    for (const { name, readmooUrl } of rejected) {
+      it(`renders an inert anchor with no href for ${name}`, () => {
+        const { container } = render(
+          <FamilyBookRow book={makeBook({ readmooUrl })} />,
+        );
+
+        const anchors = container.querySelectorAll("a");
+        expect(anchors).toHaveLength(1);
+        // Load-bearing assertion, and NOT interchangeable with the role query
+        // below: RTL reports no `link` role for `href=""` either, so only the
+        // attribute check can tell "omitted" from "empty" — i.e. only this line
+        // fails if the `|| undefined` is ever dropped from the render site.
+        expect(anchors[0].getAttribute("href")).toBeNull();
+        // The role query is what proves the hostile URL never made it in: with
+        // the filter removed this anchor would be a real, followable link.
+        expect(screen.queryByRole("link")).not.toBeInTheDocument();
+      });
+    }
+
+    it("degrades the link only — cover, title and owner still render", () => {
+      const { container } = render(
+        <FamilyBookRow
+          book={makeBook({
+            readmooUrl: PHISHING_URL,
+            coverUrl: "https://cdn.readmoo.com/cover/x.jpg",
+          })}
+        />,
+      );
+
+      // The hostile host must not survive anywhere in the markup.
+      expect(container.innerHTML).not.toContain("evil.example.com");
+      expect(screen.getByRole("img")).toHaveAttribute(
+        "src",
+        "https://cdn.readmoo.com/cover/x.jpg",
+      );
+      expect(screen.getByText("測試書名")).toBeInTheDocument();
+      expect(screen.getByText("測試作者")).toBeInTheDocument();
+      expect(screen.getByText("Alice")).toBeInTheDocument();
+    });
+
+    it("keeps the borrow button usable inside an inert anchor", () => {
+      // The row's own controls must not be collateral damage: the borrow button
+      // lives inside the <a>, and dropping the href must not disable it.
+      const onBorrowClick = vi.fn();
+      render(
+        <FamilyBookRow
+          book={makeBook({ readmooUrl: PHISHING_URL })}
+          showBorrowButton
+          onBorrowClick={onBorrowClick}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "申請借閱" }));
+      expect(onBorrowClick).toHaveBeenCalledTimes(1);
     });
   });
 

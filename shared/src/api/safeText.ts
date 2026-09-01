@@ -45,9 +45,21 @@
  *
  * Not covered here, deliberately:
  *  - `error.message` / `error.code` — owned by the error-text hardening.
- *  - Cover URLs (`coverUrl`, `bookCoverUrl`) — they only reach an attribute,
- *    which the DOM string-coerces, so they cannot crash React; their own
- *    sanitization (URL-scheme allowlisting) is a separate concern.
+ *  - Cover URLs (`coverUrl`, `bookCoverUrl`) — excluded because neither of the
+ *    two places they reach can be crashed by a non-string, which is a two-part
+ *    claim and both parts are load-bearing. They render into an `<img src>`
+ *    attribute, which the DOM string-coerces; and they run through the Readmoo
+ *    URL whitelist first (`safeCoverUrl` in `extension/src/dialog/` and
+ *    `pwa/src/utils/` → `isAllowedCoverUrl` in
+ *    `shared/src/config/readmoo.ts`), which guards its OWN input type — its
+ *    fast path is `typeof`-guarded so a non-string degrades to `false` instead
+ *    of throwing `TypeError` from render. That whitelist is a separate concern
+ *    (domain allowlisting, not type coercion) and stays where it is; if it ever
+ *    drops that guard, this exclusion stops being safe and these fields must be
+ *    coerced here instead. The `describe` block "isAllowedCoverUrl /
+ *    isAllowedBookUrl on non-string input" in
+ *    `extension/tests/unit/readmooConfig.test.ts` is what turns red if that
+ *    guard goes; this note only records why the loss would reach here.
  *  - Numbers, `BoolFlag` flags and string-literal unions (`status`,
  *    `selectionMode`, `method`) — a plain `string` would break their types, and
  *    their render sites harden them with `ReadonlyMap` lookups instead.

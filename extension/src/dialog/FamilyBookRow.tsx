@@ -4,6 +4,7 @@ import type { BookWithMember } from "./BookCard";
 import { FavoriteButton } from "./FavoriteButton";
 import { LazyCover } from "./LazyCover";
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
+import { safeBookUrl } from "./safeBookUrl";
 import { safeCoverUrl } from "./safeCoverUrl";
 
 export interface FamilyBookRowProps {
@@ -50,7 +51,7 @@ export function FamilyBookRow({
 
   return (
     <a
-      href={book.readmooUrl}
+      href={safeBookUrl(book.readmooUrl) || undefined}
       target="_blank"
       rel="noopener noreferrer"
       className="moo-book-row"

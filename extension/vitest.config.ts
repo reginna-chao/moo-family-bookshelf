@@ -23,7 +23,18 @@ export default defineConfig({
     // teardown/hover tests budget 10s wall-clock polls against this value.
     // Pagination suites inject a small pageSize (see each `Load More (Wave G)`
     // describe), so no component test renders more than ~20 rows.
+    // That same reasoning applies verbatim to hooks, which Vitest budgets
+    // SEPARATELY: `hookTimeout` has its own 10s default and does not follow
+    // `testTimeout`, so it has to be raised explicitly. The hooks that actually
+    // hit the ceiling are the `beforeEach`es doing `vi.resetModules()` + a
+    // dynamic `await import(...)` (`tests/unit/scraper.test.ts`,
+    // `tests/unit/syncBooks.test.ts`), which re-transform and re-evaluate a
+    // fresh module graph for every case. The symptom is
+    // `Hook timed out in 10000ms` on a file that changes from run to run —
+    // contention decides the victim, not the test — so it reads like a flaky
+    // test when it is really this setting.
     testTimeout: 30000,
+    hookTimeout: 30000,
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/unit/**/*.test.ts", "tests/component/**/*.test.tsx"],
     coverage: {

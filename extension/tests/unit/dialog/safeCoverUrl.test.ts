@@ -37,6 +37,20 @@ describe("safeCoverUrl", () => {
       url: "http://cdn.readmoo.com/x.jpg",
       expected: "",
     },
+    {
+      // The one rejected shape that is NOT just "some other host": a scheme
+      // with no `//` parses to `https://cdn.readmoo.com/x.jpg` on its own, but
+      // an `<img src>` resolves it against the page it is rendered into — and
+      // the dialog is injected INTO a Readmoo page, so on render it fires an
+      // authenticated same-site GET at an attacker-chosen Readmoo path, with
+      // no click. Named explicitly even though the delegation tripwire below
+      // would also catch it, because this is the wrapper's only rejection
+      // whose input LOOKS whitelisted. Full matrix + why no CSP substitutes
+      // for it: tests/unit/readmooConfig.test.ts.
+      name: "a bare scheme with no // that resolves against the rendering page",
+      url: "https:cdn.readmoo.com/../../x.jpg",
+      expected: "",
+    },
     { name: "an empty string", url: "", expected: "" },
   ];
 
@@ -53,5 +67,48 @@ describe("safeCoverUrl", () => {
     for (const { url } of cases) {
       expect(safeCoverUrl(url)).toBe(isAllowedCoverUrl(url) ? url : "");
     }
+  });
+
+  /**
+   * Return-type soundness — the mirror, on the way OUT, of the non-string
+   * input rows in tests/unit/readmooConfig.test.ts.
+   *
+   * Why a return already declared `string` still needs a `typeof` assertion:
+   * `coverUrl` is deliberately excluded from the runtime text coercion at the
+   * API-client boundary (see the `Not covered here, deliberately:` block of
+   * `shared/src/api/safeText.ts`), so a hostile or merely buggy BYO backend can
+   * land a non-string in this wrapper. The whitelist then judges the
+   * `String()`-coerced value — `new URL` stringifies its argument, and
+   * `String(["https://cdn.readmoo.com/x.jpg"])` IS that element — so a
+   * one-element array is ACCEPTED, and unless the accept branch coerces too,
+   * that array leaves here wearing a `string` type tag.
+   *
+   * Nothing crashes today: every consumer either drops the result into an
+   * `<img src>`, which the DOM string-coerces, or tests it for truthiness. One
+   * future `.startsWith()` on it would replay the exact white screen the
+   * whitelist was just hardened against on the INPUT side — and with the
+   * declaration already promising `string`, no type error warns anyone first.
+   */
+  describe("return-type soundness", () => {
+    const ALLOWED_COVER = "https://cdn.readmoo.com/x.jpg";
+
+    it("returns a real string, not the array it was handed", () => {
+      // Cast at the call site only: the production signature stays strict, and
+      // the cast is the honest spelling of what the network hands over.
+      const result = safeCoverUrl([ALLOWED_COVER] as unknown as string);
+
+      // Both assertions are load-bearing. `typeof` alone would also be
+      // satisfied by a "fix" that blanked accepted URLs to `""` — the opposite
+      // failure, in which every legitimate cover silently disappears.
+      expect(typeof result).toBe("string");
+      expect(result).toBe(ALLOWED_COVER);
+    });
+
+    it("passes a genuine string through byte-identically, on both verdicts", () => {
+      // Pins that the coercion is an identity on real strings: no trimming, no
+      // normalizing, and no change to either branch's existing answer.
+      expect(safeCoverUrl(ALLOWED_COVER)).toBe(ALLOWED_COVER);
+      expect(safeCoverUrl("https://evil.example/beacon.gif")).toBe("");
+    });
   });
 });

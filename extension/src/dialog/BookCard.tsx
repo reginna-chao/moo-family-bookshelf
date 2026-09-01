@@ -3,6 +3,7 @@ import { BookEntry, BoolFlag } from "../api/client";
 import { FavoriteButton } from "./FavoriteButton";
 import { LazyCover } from "./LazyCover";
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
+import { safeBookUrl } from "./safeBookUrl";
 import { safeCoverUrl } from "./safeCoverUrl";
 
 export interface BookWithMember extends BookEntry {
@@ -100,7 +101,7 @@ export function BookCard({
   return (
     <div className="moo-book-card">
       <a
-        href={book.readmooUrl}
+        href={safeBookUrl(book.readmooUrl) || undefined}
         target="_blank"
         rel="noopener noreferrer"
         className="moo-book-card__link"

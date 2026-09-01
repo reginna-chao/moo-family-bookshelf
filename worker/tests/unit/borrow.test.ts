@@ -626,6 +626,20 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
       label: "a third-party tracking beacon",
       coverUrl: "https://attacker.example/b.png?u=victim",
     },
+    // A scheme with no `//`. Standalone it parses to host `cdn.readmoo.com`,
+    // which is why the pre-fix whitelist accepted it, but a browser resolves an
+    // `<img src>` against the base of the RENDERING document and WHATWG then
+    // switches to "relative" state, so the host becomes the VIEWER's own
+    // origin. Unlike a book link this needs no click: the request fires on
+    // render, which inside the Extension means a same-site GET to Readmoo
+    // carrying the viewer's cookies. Rejecting it here is intended, not
+    // collateral — the scraper reads already-absolute `src` values off the
+    // Readmoo DOM and can never emit this shape.
+    {
+      label:
+        "a bare scheme with no // that resolves against the rendering page",
+      coverUrl: "https:cdn.readmoo.com/x.jpg",
+    },
   ])(
     "should reject $label with 400 INVALID_COVER_URL",
     async ({ coverUrl }) => {
