@@ -177,9 +177,9 @@ const ABSOLUTE_HTTPS_PREFIX = "https://";
  *   - Using it to REJECT. It may only ever return true early; a miss means "not
  *     provably safe YET", never "unsafe". Every miss falls through to the full
  *     comparison, which is what keeps `HTTPS://readmoo.com/x`,
- *     `  https://readmoo.com/x` (leading spaces), `https:\\readmoo.com/x`,
- *     `https:/\readmoo.com/x` and `https:///readmoo.com/x` allowed, exactly as
- *     they were before this fast path existed.
+ *     `  https://readmoo.com/x` (leading spaces), `https:\\readmoo.com/x` and
+ *     `https:/\readmoo.com/x` allowed, exactly as they were before this fast
+ *     path existed.
  *   - Promoting it to the criterion. `https:\\readmoo.com/x` carries no `//` at
  *     all yet is a genuine absolute Readmoo URL — the very fact that forbids a
  *     `//` criterion equally forbids this subset from becoming one.
@@ -196,9 +196,10 @@ const ABSOLUTE_HTTPS_PREFIX = "https://";
  * because `GET /api/family/:id/bookshelf` runs this per book per member:
  * 4 members × 1000 shared books ≈ 10.5 ms of pure whitelist CPU against the
  * Workers free tier's 10 ms CPU per request, versus ≈ 4 ms with the fast path.
- * (A re-run on a second machine reproduced every absolute figure and the ~60%
- * cut, but put the `JSON.parse` multiple nearer 6× — that ratio moves with
- * record shape and V8 state; the absolute cost does not.)
+ * (A re-run on a second machine reproduced the whitelist figures and the ~60%
+ * cut, but measured `JSON.parse` about twice as expensive, putting that
+ * multiple nearer 6× — the ratio moves with record shape and V8 state; the
+ * whitelist's own absolute cost does not.)
  *
  * This deliberately tightens BOTH exports, including the `400 INVALID_COVER_URL`
  * boundary in `worker/src/routes/borrow.ts`. Legitimate clients never emit a

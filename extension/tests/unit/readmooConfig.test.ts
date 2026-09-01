@@ -126,6 +126,15 @@ const MAX_SEPARATOR_RUN = 4;
 /** 2^0 + 2^1 + 2^2 + 2^3 + 2^4 — every run up to {@link MAX_SEPARATOR_RUN}. */
 const SEPARATOR_RUN_COUNT = 31;
 
+/**
+ * How many of those runs begin `//` — 1 of length 2, 2 of length 3, 4 of
+ * length 4. Exactly the runs whose URL LITERALLY starts `https://`, so exactly
+ * the subset production's fast path early-accepts without re-proving
+ * base-invariance. That makes them the rows
+ * {@link expectAbsoluteRowsAreBaseInvariant} most needs to see.
+ */
+const FAST_PATH_RUN_COUNT = 7;
+
 /** How many characters of `text` equal `char`. */
 function countChar(text: string, char: string): number {
   return [...text].filter((c) => c === char).length;
@@ -168,10 +177,12 @@ interface SeparatorRunCase {
  *
  * Enumerating all 31 combinations pins WHERE that boundary is rather than
  * sampling either side of it, and it exercises both production paths at once:
- * runs beginning `//` hit the fast path's early-accept, while `\\`, `/\`, `\/`
- * and `///` miss it and must still be allowed by the full base-invariance
- * comparison behind it. A fast path that started REJECTING on a miss, or one
- * promoted from an early-accept to the criterion, turns the second group red.
+ * the {@link FAST_PATH_RUN_COUNT} runs beginning `//` hit the fast path's
+ * early-accept — `///` and `//\` among them, because that test is a PREFIX
+ * test and not an "exactly two" one — while `\\`, `/\`, `\/` and `\//` miss it
+ * and must still be allowed by the full base-invariance comparison behind it.
+ * A fast path that started REJECTING on a miss, or one promoted from an
+ * early-accept to the criterion, turns the second group red.
  */
 function separatorRunCases(target: string): SeparatorRunCase[] {
   const cases: SeparatorRunCase[] = [];
@@ -236,13 +247,30 @@ const SAME_SCHEME_BASES = [
  * from a convenience to a load-bearing assumption: inside the subset a parser
  * deviation is now accepted silently. This test is what would notice.
  *
- * Driven by the caller's own matrix, never a fresh whitelist, so every
- * `https://` row anyone adds there is covered automatically. Unparseable inputs
- * are skipped, matching production: the core reaches the prefix test only after
+ * Driven by the caller's own rows, never a fresh whitelist, so every `https://`
+ * row anyone adds there is covered automatically. Unparseable inputs are
+ * skipped, matching production: the core reaches the prefix test only after
  * `new URL(url)` has already succeeded.
+ *
+ * Callers pass BOTH their hand-written matrix and the exhaustive separator
+ * table, because the hand-written matrix alone spells only the canonical
+ * `https://` form. The table is what covers the six NON-canonical spellings the
+ * fast path also early-accepts — `https:///…`, `https://\…`, `https:////…`,
+ * `https:///\…`, `https://\/…` and `https://\\…` — and those are precisely the
+ * shapes most likely to diverge between parsers. The table's own rows cannot
+ * stand in for this: they assert a `true` verdict against a hand-derived
+ * `expected`, so if an engine ever made one of those forms base-SENSITIVE, the
+ * fast path would return true anyway and the table would stay green. This is
+ * the check that would not.
+ *
+ * `expectedChecked` pins how many rows actually survived the filter. A bare
+ * "> 0" would let the separator spread be deleted at a call site — the
+ * hand-written rows would keep passing while the fast-path shapes went back to
+ * being uncovered, which is the exact hole this test exists to close.
  */
 function expectAbsoluteRowsAreBaseInvariant(
   cases: readonly { url: string }[],
+  expectedChecked: number,
 ): void {
   let checked = 0;
   for (const { url } of cases) {
@@ -258,7 +286,9 @@ function expectAbsoluteRowsAreBaseInvariant(
     }
     checked += 1;
   }
-  // The filter must never silently match nothing.
+  // The filter must never silently match nothing — nor silently match fewer
+  // rows than the caller believes it handed over.
+  expect(checked).toBe(expectedChecked);
   expect(checked).toBeGreaterThan(0);
 }
 
@@ -421,7 +451,15 @@ describe("isAllowedCoverUrl", () => {
        * test. This string DOES carry a literal `//` — in the PATH — while only
        * ONE slash follows the scheme, so it is base-SENSITIVE and must stay
        * rejected. The widening would early-accept it and this row alone turns
-       * red: no other rejected row in this matrix contains a literal `//`.
+       * red — but NOT because it is the only rejected row containing a `//`.
+       * Several others here carry one: plain HTTP, the `ftp:` scheme, a
+       * non-default port, the protocol-relative form, the userinfo smuggle,
+       * the two look-alike hosts, the trailing-dot FQDN. Every one of them is
+       * refused earlier — by the parse itself, or by the scheme / port / host
+       * checks that run BEFORE the fast path is consulted — so the widening
+       * never gets to see them. This row is the only rejected one that BOTH
+       * reaches the fast path and contains a literal `//`, which is what makes
+       * it the tripwire.
        *
        * The criterion is base-INVARIANCE, not the presence or absence of `//`.
        * POSITION carries the whole argument, in both directions: `//` in the
@@ -549,8 +587,13 @@ describe("isAllowedCoverUrl", () => {
     });
   }
 
+  // 12 `https://` rows in the matrix above, plus the separator runs beginning
+  // `//` — see the helper for why the exhaustive table has to be in here too.
   it("resolves every absolute https row identically with and without a base", () => {
-    expectAbsoluteRowsAreBaseInvariant(cases);
+    expectAbsoluteRowsAreBaseInvariant(
+      [...cases, ...separatorRunCases(coverRunTarget)],
+      12 + FAST_PATH_RUN_COUNT,
+    );
   });
 });
 
@@ -727,8 +770,14 @@ describe("isAllowedBookUrl", () => {
        * The criterion is base-INVARIANCE, not the presence or absence of `//`.
        * POSITION decides it, in both directions: a `//` in the path proves
        * nothing (this row), and the doubled-backslash row above is allowed
-       * while containing no `//` at all. This is the only rejected row in the
-       * matrix carrying a literal `//`, so it alone catches that widening.
+       * while containing no `//` at all. It alone catches the widening, but
+       * NOT because it is the only rejected row carrying a `//` — plain HTTP,
+       * a non-default port, the protocol-relative form, the userinfo smuggle,
+       * the two look-alike hosts and the trailing-dot FQDN all carry one too.
+       * Each of those is refused earlier, by the parse itself or by the
+       * scheme / port / host checks that run BEFORE the fast path, so this is
+       * the only rejected row that BOTH reaches the fast path and contains a
+       * literal `//`.
        */
       name: "a single-slash scheme whose path happens to contain //",
       url: "https:/readmoo.com//x",
@@ -868,8 +917,13 @@ describe("isAllowedBookUrl", () => {
     });
   }
 
+  // 13 `https://` rows in the matrix above, plus the separator runs beginning
+  // `//` — see the helper for why the exhaustive table has to be in here too.
   it("resolves every absolute https row identically with and without a base", () => {
-    expectAbsoluteRowsAreBaseInvariant(cases);
+    expectAbsoluteRowsAreBaseInvariant(
+      [...cases, ...separatorRunCases(bookRunTarget)],
+      13 + FAST_PATH_RUN_COUNT,
+    );
   });
 });
 
