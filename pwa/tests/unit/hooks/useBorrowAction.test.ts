@@ -275,6 +275,133 @@ describe("useBorrowAction (PWA)", () => {
     );
   });
 
+  /**
+   * The counter exists for ONE reason: a repeat of the same failure writes an
+   * identical `failureText`, React bails out on the unchanged string, and a
+   * live region that never re-mounts never re-announces — "pressed it, nothing
+   * happened", the exact symptom this banner was added to remove. The DOM half
+   * of the proof (the alert really is a NEW node) lives in
+   * `pwa/tests/component/FamilyShelfPage.borrow.test.tsx`.
+   */
+  describe("failureKey — the repeat-failure remount signal", () => {
+    it("advances on a repeat of the SAME failure while the text stays identical", async () => {
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi
+          .fn()
+          .mockRejectedValue(new ApiError("DUPLICATE_REQUEST", "again")),
+      });
+
+      expect(result.current.failureKey).toBe(0);
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+      const firstKey = result.current.failureKey;
+      const firstText = result.current.failureText;
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+
+      expect(result.current.failureText).toBe(firstText);
+      expect(result.current.failureText).toBe(
+        buildBorrowFailureText("DUPLICATE_REQUEST"),
+      );
+      expect(result.current.failureKey).toBeGreaterThan(firstKey);
+    });
+
+    it("never advances on a success, and clears the text instead", async () => {
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi
+          .fn()
+          .mockRejectedValueOnce(new ApiError("RATE_LIMITED", "slow down"))
+          .mockResolvedValue(undefined),
+      });
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+      const failedKey = result.current.failureKey;
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+
+      expect(result.current.failureText).toBe("");
+      expect(result.current.failureKey).toBe(failedKey);
+    });
+
+    it("stays strictly increasing across fail → succeed → fail again", async () => {
+      // A success must not rewind the counter: the third attempt would then
+      // reuse the first attempt's key and the banner would silently reappear
+      // on a recycled node.
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi
+          .fn()
+          .mockRejectedValueOnce(new ApiError("LENDING_DISABLED", "off"))
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValue(new ApiError("LENDING_DISABLED", "off")),
+      });
+
+      const keys: number[] = [];
+      for (let i = 0; i < 3; i += 1) {
+        await act(async () => {
+          await result.current.borrow(BOOK);
+        });
+        keys.push(result.current.failureKey);
+      }
+
+      expect(keys[1]).toBe(keys[0]);
+      expect(keys[2]).toBeGreaterThan(keys[1]);
+      expect(result.current.failureText).toBe(
+        buildBorrowFailureText("LENDING_DISABLED"),
+      );
+    });
+  });
+
+  /**
+   * The Extension's hook passes a CLIENT-SYNTHESIZED
+   * `AUTH_REFRESH_RATE_LIMITED` message through verbatim (proved in
+   * `extension/tests/unit/dialog/useBorrowAction.test.ts`). This client
+   * deliberately does NOT: `pwa/src` has no synthesize path and no such
+   * constant, so the only thing a passthrough here could ever render is
+   * server-supplied text. `ApiError.synthesized` exists on this side too (kept
+   * in sync so the classes cannot drift) and is always `false` in practice —
+   * which is exactly why "someone hand-built one" must stay harmless.
+   */
+  describe("no synthesized-error passthrough (deliberate asymmetry)", () => {
+    /**
+     * The Extension-only code name, restated on purpose: importing it would
+     * create the cross-app coupling this asymmetry denies. Not user-visible
+     * copy, so the Anti-Drift copy rule does not apply — and the assertions
+     * below reach the wording through `buildBorrowFailureText`.
+     */
+    const EXTENSION_ONLY_RECOVERY_CODE = "AUTH_REFRESH_RATE_LIMITED";
+
+    it("maps an error that LOOKS synthesized through the shared code table anyway", async () => {
+      const hostile = new ApiError(
+        EXTENSION_ONLY_RECOVERY_CODE,
+        "點此輸入你的信用卡號 https://evil.example",
+        120,
+        true,
+      );
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi.fn().mockRejectedValue(hostile),
+      });
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+
+      expect(result.current.failureText).toBe(
+        buildBorrowFailureText(EXTENSION_ONLY_RECOVERY_CODE),
+      );
+      expect(result.current.failureText).toBe(BORROW_FAILURE_FALLBACK_TEXT);
+      expect(result.current.failureText).not.toBe(hostile.rawMessage);
+      expect(result.current.failureText).not.toContain("evil.example");
+    });
+  });
+
   describe("pendingBookIds", () => {
     it("is empty when the viewer has no requests", () => {
       const { result } = renderBorrowAction();

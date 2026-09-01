@@ -437,6 +437,23 @@
   }
 }
 
+/* Borrow-failure banner flash. Failing the same way twice writes the same text
+   in the same place, so without this the screen shows no change at all. The
+   banner's React key is the attempt counter, and a re-mount restarts a CSS
+   animation on its own — so this needs no timer and no state. Fill flashes to
+   the notice's own border colour (opaque, so the content scrolling under the
+   sticky banner never shows through) and drains back to the resting
+   background. Colour only: a transform would create a stacking context and
+   break the banner's sticky layering. */
+@keyframes moo-borrow-failed-flash {
+  from {
+    background-color: var(--moo-danger-border);
+  }
+  to {
+    background-color: var(--moo-danger-bg);
+  }
+}
+
 /* ── Form select ──────────────────────────────────────────────────────── */
 /* `.moo-form-select` is now an alias: its whole chrome (chevron, 40px box,
    border, focus ring, --mobile height, --full width) is provided by the shared
@@ -830,6 +847,16 @@
   color: var(--moo-danger);
   font-size: 12px;
   line-height: 1.4;
+  /* Replays on every failure because the key change re-mounts the node — the
+     sighted counterpart of re-inserting the live region for screen readers. */
+  animation: moo-borrow-failed-flash 400ms ease-out;
+}
+
+/* The flash is an enhancement only: the notice is fully legible without it. */
+@media (prefers-reduced-motion: reduce) {
+  .moo-borrow-failed-notice {
+    animation: none;
+  }
 }
 
 .moo-load-more {

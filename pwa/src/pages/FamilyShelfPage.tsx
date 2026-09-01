@@ -66,6 +66,7 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
   const {
     borrow,
     failureText: borrowFailureText,
+    failureKey: borrowFailureKey,
     pendingBookIds,
   } = useBorrowAction({
     apiClient,
@@ -180,11 +181,15 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
           it stays on screen when the failure happens deep in a long shelf.
           z-[1] = above the book rows' `relative` cover wrappers (z-index auto,
           later in tree order); must stay below FloatingActionBar (z-30) and
-          every dropdown / modal / portalled overflow menu (z-50). */}
+          every dropdown / modal / portalled overflow menu (z-50).
+          key = the attempt counter: failing the same way twice writes the same
+          text, and a reused node means role="alert" stays silent and nothing on
+          screen moves. A new key re-mounts the live region so it speaks. */}
       {borrowFailureText !== "" && (
         <div
+          key={borrowFailureKey}
           role="alert"
-          className="sticky top-0 z-[1] mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs leading-snug text-red-700"
+          className="moo-borrow-failed-flash sticky top-0 z-[1] mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs leading-snug text-red-700"
         >
           {borrowFailureText}
         </div>

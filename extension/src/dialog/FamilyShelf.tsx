@@ -124,6 +124,7 @@ export function FamilyShelf({ userId, pageSize }: FamilyShelfProps) {
   const {
     borrow,
     failureText: borrowFailureText,
+    failureKey: borrowFailureKey,
     pendingBookIds,
   } = useBorrowAction({
     apiClient,
@@ -178,8 +179,15 @@ export function FamilyShelf({ userId, pageSize }: FamilyShelfProps) {
 
       {prefsSyncFailed && <PrefsSyncFailedNotice />}
 
+      {/* key = the attempt counter: failing the same way twice writes the same
+          text, and a reused node means role="alert" stays silent and nothing
+          on screen moves. A new key re-mounts the live region so it speaks. */}
       {borrowFailureText !== "" && (
-        <div role="alert" className="moo-borrow-failed-notice">
+        <div
+          key={borrowFailureKey}
+          role="alert"
+          className="moo-borrow-failed-notice"
+        >
           {borrowFailureText}
         </div>
       )}

@@ -166,6 +166,40 @@ describe("FamilyShelfPage — borrow failure notice", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("re-mounts the alert node when the SAME failure happens a second time", async () => {
+    // The behavioural claim behind the banner's `key`: two presses that fail
+    // identically write the same string, React bails out on it, and a live
+    // region that is never re-mounted never re-announces — the user presses
+    // 申請借閱 again and neither the screen nor the screen reader reacts.
+    // Without `key={borrowFailureKey}` React reuses the element in place and
+    // the identity assertion below fails (verified against this React version).
+    const createBorrowRequest = vi
+      .fn()
+      .mockRejectedValue(new ApiError("DUPLICATE_REQUEST", "already pending"));
+    await renderPage(createApiClient({ createBorrowRequest }));
+
+    await clickBorrow();
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        buildBorrowFailureText("DUPLICATE_REQUEST"),
+      );
+    });
+    const first = screen.getByRole("alert");
+
+    await clickBorrow();
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).not.toBe(first);
+    });
+    // Same sentence, new node — the text must NOT have changed, or the test
+    // would be proving something React does for free.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      buildBorrowFailureText("DUPLICATE_REQUEST"),
+    );
+    expect(first).not.toBeInTheDocument();
+    expect(createBorrowRequest).toHaveBeenCalledTimes(2);
+  });
+
   it("removes the banner once a later borrow succeeds", async () => {
     const createBorrowRequest = vi
       .fn()

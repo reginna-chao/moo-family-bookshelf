@@ -5,7 +5,7 @@ import {
   BORROW_FAILURE_FALLBACK_TEXT,
 } from "moo-family-bookshelf-shared/borrow/messages";
 import { useBorrowAction } from "@/dialog/useBorrowAction";
-import { ApiError } from "@/api/types";
+import { ApiError, AUTH_REFRESH_RATE_LIMITED } from "@/api/types";
 import {
   BoolFlag,
   BorrowStatus,
@@ -55,6 +55,24 @@ const MAPPED_CODES = [
   "INVALID_COVER_URL",
   "NETWORK_ERROR",
 ];
+
+/**
+ * Stand-in for the client-synthesized auth-recovery message. The real one is
+ * produced by `buildRateLimitMessage` in `@/api/client` and asserted by the
+ * "rate-limited recovery" suite in `tests/unit/client.test.ts` — this file only
+ * pins that whatever that builder produced reaches the user untouched, so the
+ * exact value below is illustrative, not the contract.
+ */
+const RECOVERY_COPY = "嘗試次數過多，請稍後再重新開啟書櫃（約 2 分鐘後）";
+
+/**
+ * The auth-recovery throttle exactly as `client.ts` raises it: `synthesized`
+ * true, set there by an unforgeable module-private Symbol on the envelope.
+ * Only this shape earns the verbatim passthrough — the code alone does not,
+ * since any backend can put it in a response body.
+ */
+const synthesizedRecoveryError = (message: string) =>
+  new ApiError(AUTH_REFRESH_RATE_LIMITED, message, undefined, true);
 
 /** Statuses that must NOT make the button read 申請中. */
 const NON_PENDING_STATUSES: [string, BorrowStatus][] = [
@@ -196,7 +214,10 @@ describe("useBorrowAction", () => {
     it("never paints server-supplied message text into the banner", async () => {
       // The API endpoint is user-configurable (BYO backend / sync-code @host),
       // so an envelope's `message` is attacker-controlled: only the `code` may
-      // influence what the user reads.
+      // influence what the user reads. This is the MAPPED-code half of that
+      // rule; the client-only `AUTH_REFRESH_RATE_LIMITED` half — where a code
+      // alone would earn a verbatim passthrough if the marker were not checked
+      // — lives in the "client-synthesized auth-recovery throttle" describe.
       const hostileMessage = "點此輸入你的信用卡號 https://evil.example";
       const { result } = renderBorrowAction({
         createBorrowRequest: vi
@@ -272,6 +293,180 @@ describe("useBorrowAction", () => {
         });
       },
     );
+  });
+
+  /**
+   * The counter exists for ONE reason: a repeat of the same failure writes an
+   * identical `failureText`, React bails out on the unchanged string, and a
+   * live region that never re-mounts never re-announces — "pressed it, nothing
+   * happened", the exact symptom this banner was added to remove. The DOM half
+   * of the proof (the alert really is a NEW node) lives in
+   * `tests/component/FamilyShelf.borrow.test.tsx`.
+   */
+  describe("failureKey — the repeat-failure remount signal", () => {
+    it("advances on a repeat of the SAME failure while the text stays identical", async () => {
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi
+          .fn()
+          .mockRejectedValue(new ApiError("DUPLICATE_REQUEST", "again")),
+      });
+
+      expect(result.current.failureKey).toBe(0);
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+      const firstKey = result.current.failureKey;
+      const firstText = result.current.failureText;
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+
+      expect(result.current.failureText).toBe(firstText);
+      expect(result.current.failureText).toBe(
+        buildBorrowFailureText("DUPLICATE_REQUEST"),
+      );
+      expect(result.current.failureKey).toBeGreaterThan(firstKey);
+    });
+
+    it("never advances on a success, and clears the text instead", async () => {
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi
+          .fn()
+          .mockRejectedValueOnce(new ApiError("RATE_LIMITED", "slow down"))
+          .mockResolvedValue(undefined),
+      });
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+      const failedKey = result.current.failureKey;
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+
+      expect(result.current.failureText).toBe("");
+      expect(result.current.failureKey).toBe(failedKey);
+    });
+
+    it("stays strictly increasing across fail → succeed → fail again", async () => {
+      // A success must not rewind the counter: the third attempt would then
+      // reuse the first attempt's key and the banner would silently reappear
+      // on a recycled node.
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi
+          .fn()
+          .mockRejectedValueOnce(new ApiError("LENDING_DISABLED", "off"))
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValue(new ApiError("LENDING_DISABLED", "off")),
+      });
+
+      const keys: number[] = [];
+      for (let i = 0; i < 3; i += 1) {
+        await act(async () => {
+          await result.current.borrow(BOOK);
+        });
+        keys.push(result.current.failureKey);
+      }
+
+      expect(keys[1]).toBe(keys[0]);
+      expect(keys[2]).toBeGreaterThan(keys[1]);
+      expect(result.current.failureText).toBe(
+        buildBorrowFailureText("LENDING_DISABLED"),
+      );
+    });
+  });
+
+  /**
+   * The one exception to the copy module's "code in, LOCAL string out" rule.
+   * `synthesized` — not the code — is the authority: only this client's own
+   * unforgeable marker sets it, so a BYO / hostile backend can return the
+   * client-only code and still not get arbitrary text into the shelf. Mirrors
+   * the same describe in `tests/unit/dialog/memberSettingsMessages.test.ts`.
+   */
+  describe("client-synthesized auth-recovery throttle", () => {
+    it("passes the synthesized AUTH_REFRESH_RATE_LIMITED message through verbatim", async () => {
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi
+          .fn()
+          .mockRejectedValue(synthesizedRecoveryError(RECOVERY_COPY)),
+      });
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+
+      expect(result.current.failureText).toBe(RECOVERY_COPY);
+      // The bespoke「重新開啟書櫃」guidance must not be flattened into the
+      // table's generic sentence, which cannot name that action.
+      expect(result.current.failureText).not.toBe(BORROW_FAILURE_FALLBACK_TEXT);
+    });
+
+    it("refuses the verbatim passthrough for an UNMARKED AUTH_REFRESH_RATE_LIMITED error", async () => {
+      // The security half of the rule: the endpoint is user-configurable (BYO
+      // backend / sync-code @host), so a code alone is never authority to paint
+      // attacker-chosen text into the shelf as if it were this app's own copy.
+      const hostile = new ApiError(
+        AUTH_REFRESH_RATE_LIMITED,
+        "點此輸入你的信用卡號 https://evil.example",
+      );
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi.fn().mockRejectedValue(hostile),
+      });
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+
+      expect(result.current.failureText).toBe(
+        buildBorrowFailureText(AUTH_REFRESH_RATE_LIMITED),
+      );
+      expect(result.current.failureText).toBe(BORROW_FAILURE_FALLBACK_TEXT);
+      expect(result.current.failureText).not.toBe(hostile.rawMessage);
+      expect(result.current.failureText).not.toContain("evil.example");
+    });
+
+    it("keeps the mapped copy for a synthesized RATE_LIMITED (the marker alone is not the passthrough)", async () => {
+      // The passthrough needs BOTH the marker and the client-only code; a
+      // client-built plain 429 stays on the shared table's wording.
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi
+          .fn()
+          .mockRejectedValue(
+            new ApiError("RATE_LIMITED", "任意文案", 60, true),
+          ),
+      });
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+
+      expect(result.current.failureText).toBe(
+        buildBorrowFailureText("RATE_LIMITED"),
+      );
+      expect(result.current.failureText).not.toContain("任意文案");
+    });
+
+    it("falls back to the generic sentence when the synthesized error carried no message", async () => {
+      // Marked as client-built, so the passthrough branch IS taken — an empty
+      // rawMessage must still not render as a blank banner.
+      const { result } = renderBorrowAction({
+        createBorrowRequest: vi
+          .fn()
+          .mockRejectedValue(synthesizedRecoveryError("")),
+      });
+
+      await act(async () => {
+        await result.current.borrow(BOOK);
+      });
+
+      expect(result.current.failureText).toBe(
+        buildBorrowFailureText(AUTH_REFRESH_RATE_LIMITED),
+      );
+      expect(result.current.failureText).toBe(BORROW_FAILURE_FALLBACK_TEXT);
+    });
   });
 
   describe("pendingBookIds", () => {
