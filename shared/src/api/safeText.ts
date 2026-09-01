@@ -56,7 +56,10 @@
  *    of throwing `TypeError` from render. That whitelist is a separate concern
  *    (domain allowlisting, not type coercion) and stays where it is; if it ever
  *    drops that guard, this exclusion stops being safe and these fields must be
- *    coerced here instead.
+ *    coerced here instead. The `describe` block "isAllowedCoverUrl /
+ *    isAllowedBookUrl on non-string input" in
+ *    `extension/tests/unit/readmooConfig.test.ts` is what turns red if that
+ *    guard goes; this note only records why the loss would reach here.
  *  - Numbers, `BoolFlag` flags and string-literal unions (`status`,
  *    `selectionMode`, `method`) — a plain `string` would break their types, and
  *    their render sites harden them with `ReadonlyMap` lookups instead.

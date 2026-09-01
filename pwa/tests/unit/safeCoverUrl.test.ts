@@ -70,4 +70,47 @@ describe("safeCoverUrl", () => {
       expect(safeCoverUrl(url)).toBe(isAllowedCoverUrl(url) ? url : "");
     }
   });
+
+  /**
+   * Return-type soundness — the mirror, on the way OUT, of the non-string
+   * input rows in extension/tests/unit/readmooConfig.test.ts.
+   *
+   * Why a return already declared `string` still needs a `typeof` assertion:
+   * `coverUrl` is deliberately excluded from the runtime text coercion at the
+   * API-client boundary (see the `Not covered here, deliberately:` block of
+   * `shared/src/api/safeText.ts`), so a hostile or merely buggy BYO backend can
+   * land a non-string in this wrapper. The whitelist then judges the
+   * `String()`-coerced value — `new URL` stringifies its argument, and
+   * `String(["https://cdn.readmoo.com/x.jpg"])` IS that element — so a
+   * one-element array is ACCEPTED, and unless the accept branch coerces too,
+   * that array leaves here wearing a `string` type tag.
+   *
+   * Nothing crashes today: every consumer either drops the result into an
+   * `<img src>`, which the DOM string-coerces, or tests it for truthiness. One
+   * future `.startsWith()` on it would replay the exact white screen the
+   * whitelist was just hardened against on the INPUT side — and with the
+   * declaration already promising `string`, no type error warns anyone first.
+   */
+  describe("return-type soundness", () => {
+    const ALLOWED_COVER = "https://cdn.readmoo.com/x.jpg";
+
+    it("returns a real string, not the array it was handed", () => {
+      // Cast at the call site only: the production signature stays strict, and
+      // the cast is the honest spelling of what the network hands over.
+      const result = safeCoverUrl([ALLOWED_COVER] as unknown as string);
+
+      // Both assertions are load-bearing. `typeof` alone would also be
+      // satisfied by a "fix" that blanked accepted URLs to `""` — the opposite
+      // failure, in which every legitimate cover silently disappears.
+      expect(typeof result).toBe("string");
+      expect(result).toBe(ALLOWED_COVER);
+    });
+
+    it("passes a genuine string through byte-identically, on both verdicts", () => {
+      // Pins that the coercion is an identity on real strings: no trimming, no
+      // normalizing, and no change to either branch's existing answer.
+      expect(safeCoverUrl(ALLOWED_COVER)).toBe(ALLOWED_COVER);
+      expect(safeCoverUrl("https://evil.example/beacon.gif")).toBe("");
+    });
+  });
 });

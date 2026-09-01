@@ -943,18 +943,28 @@ describe("isAllowedBookUrl", () => {
  *     whole family at a self-hosted Worker, which may predate any of these
  *     checks or be modified outright.
  *   - `coverUrl` is DELIBERATELY excluded from the runtime text coercion that
- *     guards its sibling fields — see `shared/src/api/safeText.ts:47-50` ("Cover
- *     URLs … only reach an attribute, which the DOM string-coerces, so they
- *     cannot crash React"). `sanitizeBookText` accordingly coerces `readmooUrl`
- *     but not `coverUrl`, and `sanitizeFamilyBookshelfText` does not touch it
- *     either, so on the family-bookshelf path a non-string `coverUrl` reaches
- *     the render layer verbatim.
+ *     guards its sibling fields. That exclusion is argued under the
+ *     `Not covered here, deliberately:` heading of `shared/src/api/safeText.ts`
+ *     — a block title rather than a line number on purpose, because the
+ *     numbers this reference used to carry went stale inside a single PR. The
+ *     argument there has TWO parts and both are load-bearing: these fields
+ *     only render into an `<img src>` attribute, which the DOM string-coerces,
+ *     AND they run through the Readmoo URL whitelist first, which guards its
+ *     OWN input type. The second part is not a property of that module at all
+ *     — it is a property of the code under test HERE, and this describe block
+ *     is what enforces it. `safeText.ts` says so outright: if the whitelist
+ *     ever drops that guard, the exclusion stops being safe and these fields
+ *     have to be coerced there instead. `sanitizeBookText` accordingly coerces
+ *     `readmooUrl` but not `coverUrl`, and `sanitizeFamilyBookshelfText` does
+ *     not touch it either, so on the family-bookshelf path a non-string
+ *     `coverUrl` reaches the render layer verbatim.
  * A JSON body whose `coverUrl` is `["https://cdn.readmoo.com/x.jpg"]` therefore
  * arrives at `safeCoverUrl` → `isAllowedCoverUrl` (extension/src/dialog/
- * BookCard.tsx:113 and its three twins) as an ARRAY. That premise in
- * `safeText.ts` holds only for the DOM; it does not hold for a whitelist that
- * calls a string method, and neither app mounts an ErrorBoundary — so a throw
- * there is a permanent white screen rather than a blank cover.
+ * BookCard.tsx:113 and its three twins) as an ARRAY. The DOM half of that
+ * argument still holds for such a value; the whitelist half is precisely what
+ * the rows below buy, because a string method on an array throws and neither
+ * app mounts an ErrorBoundary — so a throw there is a permanent white screen
+ * rather than a blank cover.
  *
  * `isAllowedBookUrl` is asserted on the same inputs even though its own field
  * IS coerced today: the two exports are separate trust boundaries over ONE

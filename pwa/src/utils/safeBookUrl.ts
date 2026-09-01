@@ -37,5 +37,16 @@ import { isAllowedBookUrl } from "moo-family-bookshelf-shared/config/readmoo";
  * the personal-shelf rows render no link at all.
  */
 export function safeBookUrl(url: string): string {
-  return isAllowedBookUrl(url) ? url : "";
+  // `String()` is NOT redundant with the `string` parameter type — the same
+  // reason as the `safeCoverUrl` twin, one step removed. `readmooUrl` IS coerced
+  // by `shared/src/api/safeText.ts` today, so this argument should already be a
+  // string; but that is ANOTHER module's decision, and it can be revised without
+  // anyone revisiting this line. Meanwhile the whitelist judges the value AFTER
+  // `new URL` string-coerced it, so `["https://readmoo.com/book/1"]` is ACCEPTED
+  // — and returning `url` on that branch would hand the ARRAY back wearing a
+  // `string` type tag, ready to throw `TypeError` from render at the first
+  // consumer that calls a string method on it. All four `safe*Url` files stay
+  // identical on purpose; for a real string `String()` is the identity, so no
+  // verdict and no returned value changes.
+  return isAllowedBookUrl(url) ? String(url) : "";
 }

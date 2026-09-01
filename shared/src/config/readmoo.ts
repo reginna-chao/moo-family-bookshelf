@@ -205,7 +205,14 @@ const ABSOLUTE_HTTPS_PREFIX = "https://";
  *     render, where no caller `try` can reach it, and with no ErrorBoundary in
  *     either app it is a permanent white screen. Guarded, a non-string simply
  *     falls through to the full comparison and keeps the exact verdict it had
- *     before this fast path existed.
+ *     before this fast path existed. That `safeText.ts` exclusion is only the
+ *     shortest path to DEMONSTRATE a non-string arriving here, not the reason
+ *     the guard is needed: these are EXPORTED boundary functions of `shared/`,
+ *     reached from both API clients and from the Worker's own request-body
+ *     validation, so the `string` annotation is a claim about callers that no
+ *     caller is obliged to honour. Keep the guard even if `coverUrl` is one day
+ *     added to `sanitizeBookText` — that would retire the example, never the
+ *     argument.
  *
  * Measured before adding it (interleaved variants, 200 warm-up rounds, 60 timed
  * rounds, median, 1000 books/member):
@@ -256,7 +263,10 @@ function isAllowedReadmooUrl(url: string): boolean {
   // parameter type: this is the only member call on `url` (both `new URL`
   // stringify instead), so at runtime it is the one place a non-string from a
   // BYO backend could throw. Keeping it makes the fast path purely an
-  // accelerator. See "Fast path" above before removing either half.
+  // accelerator. See "Fast path" above before removing either half. What turns
+  // red the moment either half goes is the `describe` block
+  // "isAllowedCoverUrl / isAllowedBookUrl on non-string input" in
+  // `extension/tests/unit/readmooConfig.test.ts` — not this comment.
   if (typeof url === "string" && url.startsWith(ABSOLUTE_HTTPS_PREFIX)) {
     return true;
   }
