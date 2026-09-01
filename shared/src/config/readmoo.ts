@@ -151,11 +151,14 @@ const ABSOLUTE_HTTPS_PREFIX = "https://";
  *     unparseable one.
  *
  * Fast path — an EARLY-ACCEPT of a provably safe subset, NOT a second
- * criterion. The line reads `url.startsWith(ABSOLUTE_HTTPS_PREFIX)`, which is
- * shaped exactly like the `//` test banned one paragraph up, so the difference
- * is spelled out here rather than left to the reader: the CRITERION is, and
- * stays, base-invariance; the prefix test only recognises inputs for which that
- * invariance is already proven, and skips re-proving it with a second parse.
+ * criterion. The line reads
+ * `typeof url === "string" && url.startsWith(ABSOLUTE_HTTPS_PREFIX)`, whose
+ * second half is shaped exactly like the `//` test banned one paragraph up, so
+ * the difference is spelled out here rather than left to the reader: the
+ * CRITERION is, and stays, base-invariance; the prefix test only recognises
+ * inputs for which that invariance is already proven, and skips re-proving it
+ * with a second parse. The first half is not decoration — see the fourth
+ * "way to break it" below.
  *
  * Why the subset is sound: if the string LITERALLY begins `https://`, the host
  * can only come from the string, so no base can change the verdict. Standalone
@@ -170,7 +173,7 @@ const ABSOLUTE_HTTPS_PREFIX = "https://";
  * means the string is an ordinary absolute Readmoo URL. No false positive
  * exists to find.
  *
- * Three ways to break it, all tempting:
+ * Four ways to break it, all tempting:
  *   - Widening it to `includes("//")`, or any other "has slashes" test.
  *     POSITION carries the whole argument: `https:/readmoo.com//x` contains a
  *     literal `//`, is base-SENSITIVE, and must stay rejected.
@@ -183,6 +186,26 @@ const ABSOLUTE_HTTPS_PREFIX = "https://";
  *   - Promoting it to the criterion. `https:\\readmoo.com/x` carries no `//` at
  *     all yet is a genuine absolute Readmoo URL — the very fact that forbids a
  *     `//` criterion equally forbids this subset from becoming one.
+ *   - Dropping the `typeof url === "string"` guard as redundant, because the
+ *     parameter is DECLARED `string`. It is not redundant: it is the only
+ *     runtime type check on this path, and it is what keeps the fast path from
+ *     CHANGING behaviour for non-strings rather than merely accelerating it.
+ *     The declaration is a compile-time claim that does not survive to runtime
+ *     here — both API clients read their envelope through a bare cast
+ *     (`(await response.json()) as ApiResponse<T>`), the endpoint is
+ *     user-configurable (a sync code's `@host` segment repoints the whole app
+ *     at a self-hosted backend), and `coverUrl` / `bookCoverUrl` are precisely
+ *     the fields deliberately EXCLUDED from the runtime coercion in
+ *     `shared/src/api/safeText.ts`, so a hostile or buggy backend really can
+ *     land a non-string in `safeCoverUrl` → {@link isAllowedCoverUrl} → here.
+ *     Every `new URL` below stringifies its argument instead of throwing on a
+ *     non-string — `new URL(["https://readmoo.com/x"])` parses fine — so an
+ *     unguarded `.startsWith` is the ONE member-called string method on this
+ *     path, and it throws `TypeError` on an array. That throw escapes from
+ *     render, where no caller `try` can reach it, and with no ErrorBoundary in
+ *     either app it is a permanent white screen. Guarded, a non-string simply
+ *     falls through to the full comparison and keeps the exact verdict it had
+ *     before this fast path existed.
  *
  * Measured before adding it (interleaved variants, 200 warm-up rounds, 60 timed
  * rounds, median, 1000 books/member):
@@ -227,8 +250,16 @@ function isAllowedReadmooUrl(url: string): boolean {
   // Early-accept only, never a rejection and never the criterion: a literal
   // `https://` prefix is a subset that is provably base-independent, so the
   // second parse below can be skipped. Everything else falls through to it and
-  // is judged by base-invariance exactly as before. See "Fast path" above.
-  if (url.startsWith(ABSOLUTE_HTTPS_PREFIX)) return true;
+  // is judged by base-invariance exactly as before.
+  //
+  // The `typeof` guard is load-bearing, NOT redundant with the `string`
+  // parameter type: this is the only member call on `url` (both `new URL`
+  // stringify instead), so at runtime it is the one place a non-string from a
+  // BYO backend could throw. Keeping it makes the fast path purely an
+  // accelerator. See "Fast path" above before removing either half.
+  if (typeof url === "string" && url.startsWith(ABSOLUTE_HTTPS_PREFIX)) {
+    return true;
+  }
   return new URL(url, BASE_SENSITIVITY_PROBE).href === parsed.href;
 }
 

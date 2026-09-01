@@ -248,9 +248,12 @@ const SAME_SCHEME_BASES = [
  * deviation is now accepted silently. This test is what would notice.
  *
  * Driven by the caller's own rows, never a fresh whitelist, so every `https://`
- * row anyone adds there is covered automatically. Unparseable inputs are
- * skipped, matching production: the core reaches the prefix test only after
- * `new URL(url)` has already succeeded.
+ * row anyone adds there is covered, once the expected count is bumped. NOT
+ * automatic, and deliberately so: `expectedChecked` is hard-coded at each call
+ * site, so a newly added row turns this test red until someone updates that
+ * number — the friction described under `expectedChecked` below is the price of
+ * the hole it closes. Unparseable inputs are skipped, matching production: the
+ * core reaches the prefix test only after `new URL(url)` has already succeeded.
  *
  * Callers pass BOTH their hand-written matrix and the exhaustive separator
  * table, because the hand-written matrix alone spells only the canonical
@@ -925,6 +928,133 @@ describe("isAllowedBookUrl", () => {
       13 + FAST_PATH_RUN_COUNT,
     );
   });
+});
+
+/**
+ * Runtime robustness of both whitelists against a NON-STRING argument — the
+ * one thing their `url: string` parameter cannot promise.
+ *
+ * Why a `string` parameter still needs runtime rows. The value arrives from the
+ * BACKEND, and nothing on the way narrows its type:
+ *   - Both API clients read the `{ data, error }` envelope through a bare cast
+ *     (`extension/src/api/client.ts`, `pwa/src/api/client.ts`), so the declared
+ *     shape is an assumption about the server, not a checked fact.
+ *   - The server is user-configurable. A sync code's `@host` segment points a
+ *     whole family at a self-hosted Worker, which may predate any of these
+ *     checks or be modified outright.
+ *   - `coverUrl` is DELIBERATELY excluded from the runtime text coercion that
+ *     guards its sibling fields — see `shared/src/api/safeText.ts:47-50` ("Cover
+ *     URLs … only reach an attribute, which the DOM string-coerces, so they
+ *     cannot crash React"). `sanitizeBookText` accordingly coerces `readmooUrl`
+ *     but not `coverUrl`, and `sanitizeFamilyBookshelfText` does not touch it
+ *     either, so on the family-bookshelf path a non-string `coverUrl` reaches
+ *     the render layer verbatim.
+ * A JSON body whose `coverUrl` is `["https://cdn.readmoo.com/x.jpg"]` therefore
+ * arrives at `safeCoverUrl` → `isAllowedCoverUrl` (extension/src/dialog/
+ * BookCard.tsx:113 and its three twins) as an ARRAY. That premise in
+ * `safeText.ts` holds only for the DOM; it does not hold for a whitelist that
+ * calls a string method, and neither app mounts an ErrorBoundary — so a throw
+ * there is a permanent white screen rather than a blank cover.
+ *
+ * `isAllowedBookUrl` is asserted on the same inputs even though its own field
+ * IS coerced today: the two exports are separate trust boundaries over ONE
+ * file-local core, so the guard has to hold on both sides of that split, and
+ * the coercion that currently protects `readmooUrl` is a different module's
+ * decision that may change without anyone revisiting this one.
+ *
+ * What regressed, and why the guard looks deletable. Until the fast path landed
+ * the core only ever fed this parameter to `new URL(...)`, which coerces its
+ * argument with `String()` — an array of one URL string parsed fine and the
+ * base-invariance comparison answered `true`. `url.startsWith(...)` is the
+ * FIRST string method the core has ever called on it, and a string method on an
+ * array throws. The `typeof` guard in front of it therefore reads like dead
+ * weight next to a `string` parameter — this block is what turns red when
+ * someone tidies it away.
+ *
+ * Both assertions per row are load-bearing. `not.toThrow()` alone would also be
+ * satisfied by a guard written as an early `return false`, which does not crash
+ * but silently blanks every legitimate cover and book link on that path — so
+ * each row also pins the verdict the core returned BEFORE the fast path
+ * existed. Inputs are cast at the call site; the production signature stays
+ * strict, and the cast is the honest spelling of what the network hands over.
+ */
+describe("isAllowedCoverUrl / isAllowedBookUrl on non-string input", () => {
+  interface NonStringCase {
+    name: string;
+    /** Deliberately `unknown` — that it is not a `string` is the whole point. */
+    value: unknown;
+  }
+
+  const predicates = [
+    {
+      name: "isAllowedCoverUrl",
+      predicate: isAllowedCoverUrl,
+      allowedUrl: "https://cdn.readmoo.com/x.jpg",
+    },
+    {
+      name: "isAllowedBookUrl",
+      predicate: isAllowedBookUrl,
+      allowedUrl: "https://readmoo.com/book/210001",
+    },
+  ];
+
+  /**
+   * The shapes that actually REACH the string method, and so the ones that
+   * threw: `String()` on a one-element array is that element, recursively, so
+   * both of these coerce to a genuine allowed Readmoo URL while being no string
+   * at all. Every check ahead of the fast path — the parse, the scheme, the
+   * port, the host — passes on the coerced value, which is exactly why the
+   * input survives that far.
+   */
+  function reachingCases(allowedUrl: string): NonStringCase[] {
+    return [
+      {
+        name: "a single-element array wrapping an allowed URL",
+        value: [allowedUrl],
+      },
+      {
+        name: "a nested array wrapping an allowed URL",
+        value: [[allowedUrl]],
+      },
+    ];
+  }
+
+  /**
+   * Non-strings that `String()` turns into something no URL parser accepts, so
+   * `new URL(value)` throws inside the core's own try/catch and the fast path
+   * is never reached. They pin the fail-closed half: a malformed field is
+   * refused, never propagated and never fatal.
+   */
+  const unparseableCases: NonStringCase[] = [
+    { name: "a plain object", value: {} },
+    { name: "a number", value: 42 },
+    { name: "null", value: null },
+    { name: "undefined", value: undefined },
+  ];
+
+  for (const { name: predicateName, predicate, allowedUrl } of predicates) {
+    for (const { name, value } of reachingCases(allowedUrl)) {
+      it(`${predicateName} returns true for ${name} instead of throwing`, () => {
+        // Premise: this is the shape that gets past the parse and the scheme /
+        // port / host checks, i.e. the only kind that reaches the fast path.
+        expect(typeof value).not.toBe("string");
+        expect(String(value)).toBe(allowedUrl);
+        expect(new URL(String(value)).href).toBe(allowedUrl);
+
+        expect(() => predicate(value as string)).not.toThrow();
+        // The verdict the core gave before the fast path existed. Asserted so
+        // a guard written as an early `return false` cannot pass as a fix.
+        expect(predicate(value as string)).toBe(true);
+      });
+    }
+
+    for (const { name, value } of unparseableCases) {
+      it(`${predicateName} returns false for ${name} instead of throwing`, () => {
+        expect(() => predicate(value as string)).not.toThrow();
+        expect(predicate(value as string)).toBe(false);
+      });
+    }
+  }
 });
 
 describe("READMOO_COVER_DOMAINS", () => {
