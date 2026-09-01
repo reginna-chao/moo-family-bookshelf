@@ -61,6 +61,8 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 
 **Decision prompts use AskUserQuestion.** Whenever the stop is a _choice_ (SUGGESTION 取捨、提交方式、方向/範圍選擇…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form stops (e.g. manual verification feedback) stay text-only.
 
+**Autonomous runs (user unreachable).** When the session is non-interactive, or a gate's AskUserQuestion gets no reply: adopt 🟢 TL-recommended SUGGESTIONs and skip 🔴 ones; fold the requirements and verify-before-test gates into their machine-verifiable acceptance checks where the spec already pins them, stating the fold and its reason at the moment of folding. Every folded gate and every decision taken is disclosed with a one-line reason in the final report and re-presented for ratification at the commit gate — which remains an explicit user question in every mode.
+
 ## §3 Agent dispatch quick-reference
 
 | Agent              | Use for                      | Key inputs                                                                                                                                                    |
@@ -71,9 +73,15 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 | `security-auditor` | post-feature security scan   | `scope` (full/secrets/deps/code/extension/crypto/api/publish/invariants), `mode` (repo/changed + `base_ref`) — prefer `mode: changed` for a post-feature scan |
 | `designer`         | UI mockup or brand/SVG asset | `request`, `context`                                                                                                                                          |
 
-Parallelize across file-disjoint scopes (frontend + backend coders run concurrently); never let two concurrent agents own the same file. Independent verification legs also run in parallel — e.g. reviewer dispatch + E2E typecheck, or (small diffs) focused re-review + security scan — issue them in the same message. Re-review only the files changed by a fix, unless the user asks for a full re-review.
+Parallelize across file-disjoint scopes (frontend + backend coders run concurrently); never let two concurrent agents own the same file. Each parallel prompt MUST name the files that agent owns AND the files its sibling is changing — otherwise an agent misreads the sibling's in-flight edits as its own diff. Mirror files (extension/pwa same-named pairs sharing a helper/fixture) go to a single agent, or each prompt carries the shared block verbatim plus an instruction to report cross-file consistency evidence (hash/diff). Independent verification legs also run in parallel — e.g. reviewer dispatch + E2E typecheck, or (small diffs) focused re-review + security scan — issue them in the same message. Re-review only the files changed by a fix, unless the user asks for a full re-review.
 
-If a dispatched agent dies mid-run (API error, connection closed), re-dispatch a FRESH agent with the original prompt plus a one-line "previous attempt was cut off" note — never build on the partial output and never SendMessage-resume the dead agent.
+**Dead agents — forensics before re-dispatch.** When a dispatched agent dies mid-run (API error, session limit, watchdog kill), first run `git status` / `git diff` to see what it left on disk:
+
+- **Edits complete and mechanically verifiable** (diff matches the dispatch spec; the verify commands are runnable) → do NOT re-dispatch. Verify the work yourself (typecheck/lint/test) and adopt it, recording the salvage in the Fix Cycle Log.
+- **Partial or unverifiable edits** → revert the leftovers, then re-dispatch a FRESH agent briefed as audit-and-complete: inventory what landed, finish the gaps, verify, summarize. Never trust the dead agent's unverified claims and never SendMessage-resume it.
+- **Read-only agents** (reviewer / security-auditor / Explore) leave nothing on disk — re-dispatch immediately.
+- Repeated infrastructure deaths (e.g. consecutive 529s) → one long back-off (≥30 min) instead of a tight retry ladder; spend the wait on orchestrator-local work.
+- A role agent type missing from the registry is not a death: dispatch `general-purpose` and have it first `Read .claude/agents/<role>.md` and follow that role definition.
 
 ## §4 References
 

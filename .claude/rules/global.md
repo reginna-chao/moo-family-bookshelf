@@ -18,6 +18,14 @@
 - **Never inherit another task's commits.** Before your first commit, confirm `git log --oneline origin/main..HEAD` contains only your own work. If the current worktree/branch already carries unrelated in-progress commits (another feature, a stale worktree), do NOT stack on it — cut a fresh branch from `origin/main` first. This is what stops an unrelated commit from leaking into your PR diff.
 - **Name branches meaningfully:** `<type>/<short-kebab-slug>`, where `<type>` is a conventional-commit category (`feat` / `fix` / `refactor` / `docs` / `test` / `chore`) and the slug concisely describes the task in English (e.g. `fix/dropdown-scroll-dismiss`, `refactor/security-auditor`). Do NOT keep an opaque auto-generated worktree name like `claude/angry-moore-3651ca` — rename to a meaningful branch before committing / opening the PR.
 
+### Windows Environment Pitfalls
+
+- **CRLF false positives**: with `core.autocrlf=true`, `prettier --check` can flag untouched files. Confirm with `diff --strip-trailing-cr` (or a `git diff` showing no content change) and leave untouched files alone — never "fix" files you didn't edit.
+- **Edit can rewrite EOLs**: the Edit tool intermittently rewrites a whole file to CRLF. After editing, check EOL (git's CRLF warning / `prettier --check` on that file) and convert back to LF if tripped.
+- **CJK files: Edit tool only**: sed/perl one-liners silently corrupt non-ASCII content; reserve stream editors for pure-ASCII mechanical changes.
+- **cwd does not persist**: every git/verify command starts with `cd "<absolute worktree root>" && …` (Bash) or an absolute path (PowerShell) — never rely on a previous call's directory. If the Bash tool's PATH lacks git, run git via PowerShell.
+- **Split long verifications**: run typecheck / lint / test as separate calls so the 2-minute default timeout can't truncate them; when piping test output, capture to a file — `| tail` / `| grep` can swallow the failure status line.
+
 ### Self-Improvement
 
 - When file architecture changes, update corresponding `.claude/rules/*.md` to reflect new structure.

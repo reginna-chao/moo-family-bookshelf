@@ -108,7 +108,7 @@ moo-family-bookshelf/
 - Type check: `pnpm typecheck`
 - Lint/format: `pnpm lint` / `pnpm format` — lint runs ESLint with `--max-warnings 0`, so warnings fail CI, not just errors
 - Tests (extension): `pnpm test`
-- Tests (extension, specific): `pnpm test -- tests/unit/crypto`
+- Tests (specific file, any package): `npx vitest run <path>` from inside `extension/`, `pwa/`, or `worker/` — `pnpm test -- <path>` does NOT filter in ANY package (the `--` is swallowed and the full suite runs)
 - Tests (worker): `cd worker && pnpm test`
 - Tests (e2e): `pnpm test:e2e`
 - Worker dev: `cd worker && wrangler dev`

@@ -19,3 +19,7 @@ These invariants MUST be respected by all security audits and code reviews.
 ### Settings Persistence
 
 **Invariant 5**: Personal sharing preferences (`user:{userId}`) are tied to the user, NOT the family. Unbinding from a family MUST NOT delete or reset the user's sharing settings. Re-joining a different family MUST automatically reflect the user's existing sharing preferences.
+
+### Abuse-Counter Keying
+
+**Invariant 6**: Any counter that can reduce service availability (lockout, quota, rate limit) MUST be keyed on the caller's own identity (authenticated callerId, or caller IP), NEVER on a caller-supplied target identity (a body/path userId or familyId). A counter keyed on someone else's id is a denial-of-service lever aimed at the victim. (Instance detail lives in `.claude/rules/backend.md` — `FAMILY_WRITE_LIMIT` charging the authenticated caller, and the removed per-userId join counter.)
