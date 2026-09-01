@@ -86,6 +86,14 @@ export function isReadmooCoverHost(hostname: string): boolean {
 const BASE_SENSITIVITY_PROBE = "https://base.invalid/a/b";
 
 /**
+ * The canonical absolute-https spelling. Used ONLY by the fast path in
+ * {@link isAllowedReadmooUrl} to early-accept a subset that is provably
+ * base-independent — never as a criterion, and never to reject anything.
+ * Read that function's "Fast path" section before touching this.
+ */
+const ABSOLUTE_HTTPS_PREFIX = "https://";
+
+/**
  * Shared core of the two URL whitelists below: `url` must parse as an https://
  * URL on an allowed Readmoo registrable domain with the default port, AND must
  * mean the same thing with or without a base document.
@@ -142,6 +150,56 @@ const BASE_SENSITIVITY_PROBE = "https://base.invalid/a/b";
  *     succeeded, and supplying a base never turns a parseable string into an
  *     unparseable one.
  *
+ * Fast path — an EARLY-ACCEPT of a provably safe subset, NOT a second
+ * criterion. The line reads `url.startsWith(ABSOLUTE_HTTPS_PREFIX)`, which is
+ * shaped exactly like the `//` test banned one paragraph up, so the difference
+ * is spelled out here rather than left to the reader: the CRITERION is, and
+ * stays, base-invariance; the prefix test only recognises inputs for which that
+ * invariance is already proven, and skips re-proving it with a second parse.
+ *
+ * Why the subset is sound: if the string LITERALLY begins `https://`, the host
+ * can only come from the string, so no base can change the verdict. Standalone
+ * the parser runs scheme → "special authority slashes" → "special authority
+ * ignore slashes" → authority; against a same-scheme base it runs scheme →
+ * "special relative or authority", where c is `/` and the remainder starts with
+ * `/`, which lands on that same "special authority ignore slashes" state. Both
+ * branches reach authority state, and past it nothing consults the base — host,
+ * port, path, query and fragment are all read from the string — so the two
+ * `href`s are equal by construction. Together with the three checks above
+ * (https, default port, allowed host) that already passed, reaching this line
+ * means the string is an ordinary absolute Readmoo URL. No false positive
+ * exists to find.
+ *
+ * Three ways to break it, all tempting:
+ *   - Widening it to `includes("//")`, or any other "has slashes" test.
+ *     POSITION carries the whole argument: `https:/readmoo.com//x` contains a
+ *     literal `//`, is base-SENSITIVE, and must stay rejected.
+ *   - Using it to REJECT. It may only ever return true early; a miss means "not
+ *     provably safe YET", never "unsafe". Every miss falls through to the full
+ *     comparison, which is what keeps `HTTPS://readmoo.com/x`,
+ *     `  https://readmoo.com/x` (leading spaces), `https:\\readmoo.com/x`,
+ *     `https:/\readmoo.com/x` and `https:///readmoo.com/x` allowed, exactly as
+ *     they were before this fast path existed.
+ *   - Promoting it to the criterion. `https:\\readmoo.com/x` carries no `//` at
+ *     all yet is a genuine absolute Readmoo URL — the very fact that forbids a
+ *     `//` criterion equally forbids this subset from becoming one.
+ *
+ * Measured before adding it (interleaved variants, 200 warm-up rounds, 60 timed
+ * rounds, median, 1000 books/member):
+ *   - `JSON.parse` of the whole record    0.213 ms
+ *   - pre-whitelist, cover only, 1 parse  0.540 ms  (0.540 µs/URL)
+ *   - cover + book link, base-invariance  2.615 ms  (1.307 µs/URL)
+ *   - the same, with this fast path       1.075 ms  (0.537 µs/URL)
+ * So the whitelist cost 12.3× the `JSON.parse` of the very record it validates,
+ * and the fast path removes 59% of that, putting the per-URL cost back at the
+ * pre-fix single parse (0.537 vs 0.540 µs). It is worth the paragraphs above
+ * because `GET /api/family/:id/bookshelf` runs this per book per member:
+ * 4 members × 1000 shared books ≈ 10.5 ms of pure whitelist CPU against the
+ * Workers free tier's 10 ms CPU per request, versus ≈ 4 ms with the fast path.
+ * (A re-run on a second machine reproduced every absolute figure and the ~60%
+ * cut, but put the `JSON.parse` multiple nearer 6× — that ratio moves with
+ * record shape and V8 state; the absolute cost does not.)
+ *
  * This deliberately tightens BOTH exports, including the `400 INVALID_COVER_URL`
  * boundary in `worker/src/routes/borrow.ts`. Legitimate clients never emit a
  * base-sensitive URL — the scraper reads already-absolute `href` / `src` values
@@ -165,6 +223,11 @@ function isAllowedReadmooUrl(url: string): boolean {
   ) {
     return false;
   }
+  // Early-accept only, never a rejection and never the criterion: a literal
+  // `https://` prefix is a subset that is provably base-independent, so the
+  // second parse below can be skipped. Everything else falls through to it and
+  // is judged by base-invariance exactly as before. See "Fast path" above.
+  if (url.startsWith(ABSOLUTE_HTTPS_PREFIX)) return true;
   return new URL(url, BASE_SENSITIVITY_PROBE).href === parsed.href;
 }
 

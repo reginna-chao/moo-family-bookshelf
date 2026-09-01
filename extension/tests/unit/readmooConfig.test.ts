@@ -99,6 +99,170 @@ describe("isReadmooCoverHost", () => {
 });
 
 /**
+ * A single backslash, built from its character code so that no escaping layer —
+ * a TypeScript string literal, Prettier, a diff viewer, a reviewer's eye — can
+ * turn one into two. The single/double distinction decides the verdict in the
+ * tables below (`https:\readmoo.com/x` is rejected, `https:\\readmoo.com/x` is
+ * allowed), and it is exactly the kind of detail an escaping slip inverts
+ * silently, so every generated case is also read back and asserted on how many
+ * backslashes actually survived into it.
+ */
+const BACKSLASH = String.fromCharCode(92);
+
+/** The scheme prefix every separator-run case is built on. */
+const HTTPS_SCHEME = "https:";
+
+/**
+ * The canonical absolute spelling that production's fast path early-accepts.
+ * Deliberately re-stated here rather than imported: `ABSOLUTE_HTTPS_PREFIX` is
+ * file-local in `shared/src/config/readmoo.ts` on purpose, and this subset is
+ * the SUBJECT of the tests below, not a rule they inherit.
+ */
+const ABSOLUTE_HTTPS_PREFIX = "https://";
+
+/** Longest separator run the exhaustive table enumerates. */
+const MAX_SEPARATOR_RUN = 4;
+
+/** 2^0 + 2^1 + 2^2 + 2^3 + 2^4 — every run up to {@link MAX_SEPARATOR_RUN}. */
+const SEPARATOR_RUN_COUNT = 31;
+
+/** How many characters of `text` equal `char`. */
+function countChar(text: string, char: string): number {
+  return [...text].filter((c) => c === char).length;
+}
+
+/** Every string of exactly `length` characters drawn from `/` and `\`. */
+function separatorRuns(length: number): string[] {
+  if (length === 0) return [""];
+  return separatorRuns(length - 1).flatMap((run) => [
+    `${run}/`,
+    `${run}${BACKSLASH}`,
+  ]);
+}
+
+/** Spell a run out, so `\` and `\\` cannot be misread in test output. */
+function spellRun(run: string): string {
+  if (run === "") return "no separator";
+  return [...run].map((c) => (c === "/" ? "slash" : "backslash")).join(" + ");
+}
+
+interface SeparatorRunCase {
+  /** The `/`-and-`\` run that follows `https:`. */
+  run: string;
+  length: number;
+  url: string;
+  expected: boolean;
+}
+
+/**
+ * Exhaustive table over the one property these shapes' verdict turns on: how
+ * many slash-ish characters follow `https:`. WHATWG treats `\` like `/` for a
+ * special scheme, so the run is counted over BOTH characters, and the boundary
+ * sits between 1 and 2:
+ *
+ *   - 0 or 1 → base-SENSITIVE. Against a same-scheme base the parser drops into
+ *     "relative" state and takes the host from the BASE, so the string means
+ *     something else in the document it is rendered into ⇒ must be rejected.
+ *   - 2 or more → base-INDEPENDENT. The host is read from the string with or
+ *     without a base ⇒ a genuine absolute Readmoo URL ⇒ must be allowed.
+ *
+ * Enumerating all 31 combinations pins WHERE that boundary is rather than
+ * sampling either side of it, and it exercises both production paths at once:
+ * runs beginning `//` hit the fast path's early-accept, while `\\`, `/\`, `\/`
+ * and `///` miss it and must still be allowed by the full base-invariance
+ * comparison behind it. A fast path that started REJECTING on a miss, or one
+ * promoted from an early-accept to the criterion, turns the second group red.
+ */
+function separatorRunCases(target: string): SeparatorRunCase[] {
+  const cases: SeparatorRunCase[] = [];
+  for (let length = 0; length <= MAX_SEPARATOR_RUN; length += 1) {
+    for (const run of separatorRuns(length)) {
+      cases.push({
+        run,
+        length,
+        url: `${HTTPS_SCHEME}${run}${target}`,
+        expected: length >= 2,
+      });
+    }
+  }
+  return cases;
+}
+
+/**
+ * Escaping tripwire, asserted per case: reads the separator run back off the
+ * exact string that is about to be handed to the predicate. Without it, a slip
+ * anywhere between `String.fromCharCode(92)` and the final URL would quietly
+ * move a case to the other side of the boundary while the suite stayed green.
+ */
+function expectRunEncoding(runCase: SeparatorRunCase, target: string): void {
+  const { url, run, length } = runCase;
+  expect(BACKSLASH).toHaveLength(1);
+  expect(BACKSLASH.charCodeAt(0)).toBe(92);
+  // The run is exactly `length` characters, all of them separators …
+  expect(run).toHaveLength(length);
+  expect(countChar(run, "/") + countChar(run, BACKSLASH)).toBe(length);
+  // … it sits verbatim between the scheme and the target …
+  expect(url.slice(0, HTTPS_SCHEME.length)).toBe(HTTPS_SCHEME);
+  expect(url.slice(HTTPS_SCHEME.length, HTTPS_SCHEME.length + length)).toBe(
+    run,
+  );
+  expect(url.slice(HTTPS_SCHEME.length + length)).toBe(target);
+  // … and every backslash in the URL came from the run, none from the target.
+  expect(countChar(url, BACKSLASH)).toBe(countChar(run, BACKSLASH));
+}
+
+/**
+ * Bases the invariance property is resolved against. The scheme must MATCH the
+ * input's: WHATWG only enters "relative" state for a same-scheme base, so a
+ * base on any other scheme could never disprove invariance. The first is the
+ * document the extension dialog is injected into; the second stands for any
+ * other viewer origin (the PWA renders the same stored values).
+ */
+const SAME_SCHEME_BASES = [
+  "https://next.readmoo.com/read/#/library",
+  "https://moo.example/app/family",
+];
+
+/**
+ * The property production's fast path rests on: a string that LITERALLY begins
+ * `https://` resolves to the same `href` with or without a base document.
+ *
+ * Why this needs pinning in CI now, and did not before. Until the fast path
+ * existed, the core PROVED base-invariance for every accepted string by
+ * comparing the standalone parse against a parse with a base — a runtime that
+ * resolved some `https://` string differently against a base would have been
+ * rejected, fail-closed, without anyone noticing the deviation. The fast path
+ * skips that comparison for this subset, which promotes the WHATWG guarantee
+ * from a convenience to a load-bearing assumption: inside the subset a parser
+ * deviation is now accepted silently. This test is what would notice.
+ *
+ * Driven by the caller's own matrix, never a fresh whitelist, so every
+ * `https://` row anyone adds there is covered automatically. Unparseable inputs
+ * are skipped, matching production: the core reaches the prefix test only after
+ * `new URL(url)` has already succeeded.
+ */
+function expectAbsoluteRowsAreBaseInvariant(
+  cases: readonly { url: string }[],
+): void {
+  let checked = 0;
+  for (const { url } of cases) {
+    if (!url.startsWith(ABSOLUTE_HTTPS_PREFIX)) continue;
+    let standalone: string;
+    try {
+      standalone = new URL(url).href;
+    } catch {
+      continue;
+    }
+    for (const base of SAME_SCHEME_BASES) {
+      expect(new URL(url, base).href).toBe(standalone);
+    }
+    checked += 1;
+  }
+  // The filter must never silently match nothing.
+  expect(checked).toBeGreaterThan(0);
+}
+
+/**
  * `isAllowedCoverUrl` is the Worker's write-time whitelist for
  * `bookCoverUrl` on borrow-create (worker/src/routes/borrow.ts →
  * `400 INVALID_COVER_URL`): a cover URL is rendered into an `<img src>` on
@@ -250,6 +414,26 @@ describe("isAllowedCoverUrl", () => {
       expected: true,
     },
     {
+      /**
+       * Regression tripwire for the ONE widening the production fast path
+       * invites: relaxing its `url.startsWith("https://")` early-accept into
+       * `url.includes("//")`, or any other "there is a `//` in here somewhere"
+       * test. This string DOES carry a literal `//` — in the PATH — while only
+       * ONE slash follows the scheme, so it is base-SENSITIVE and must stay
+       * rejected. The widening would early-accept it and this row alone turns
+       * red: no other rejected row in this matrix contains a literal `//`.
+       *
+       * The criterion is base-INVARIANCE, not the presence or absence of `//`.
+       * POSITION carries the whole argument, in both directions: `//` in the
+       * path proves nothing (this row), and `https:\\cdn.readmoo.com/x.jpg`
+       * above is allowed with no `//` anywhere in it. See the executable
+       * statement of this row further down the describe.
+       */
+      name: "a single-slash scheme whose path happens to contain //",
+      url: "https:/cdn.readmoo.com//x.jpg",
+      expected: false,
+    },
+    {
       // Everything before the `@` is userinfo — the real host is evil.com.
       name: "an allowed host smuggled into the userinfo segment",
       url: "https://cdn.readmoo.com@evil.com/x.jpg",
@@ -318,6 +502,55 @@ describe("isAllowedCoverUrl", () => {
     );
 
     expect(isAllowedCoverUrl(hostile)).toBe(false);
+  });
+
+  /**
+   * Executable form of the `//`-widening tripwire row above, so the row cannot
+   * decay: an edit that dropped the `//` from that URL would leave the row
+   * passing while no longer guarding anything. These assertions pin the two
+   * facts that make it a tripwire at all — the literal `//` is present, and the
+   * string is still NOT of the shape the fast path may early-accept — next to
+   * the parser disagreement that forces the rejection.
+   */
+  it("rejects a base-sensitive cover URL whose path contains a literal //", () => {
+    const readmooPage = "https://next.readmoo.com/read/#/library";
+    const hostile = "https:/cdn.readmoo.com//x.jpg";
+
+    // The `//` is there — in the path, not after the scheme.
+    expect(hostile).toContain("//");
+    expect(hostile.startsWith(ABSOLUTE_HTTPS_PREFIX)).toBe(false);
+
+    // One slash after the scheme, so a same-scheme base still wins the host.
+    expect(new URL(hostile).href).toBe("https://cdn.readmoo.com//x.jpg");
+    expect(new URL(hostile, readmooPage).href).toBe(
+      "https://next.readmoo.com/cdn.readmoo.com//x.jpg",
+    );
+
+    expect(isAllowedCoverUrl(hostile)).toBe(false);
+  });
+
+  const coverRunTarget = "cdn.readmoo.com/x.jpg";
+
+  it("enumerates every slash/backslash run up to the boundary", () => {
+    const runCases = separatorRunCases(coverRunTarget);
+
+    // The table below is exhaustive, not sampled: if the generator ever stops
+    // producing all 31 distinct runs, the boundary is no longer pinned.
+    expect(runCases).toHaveLength(SEPARATOR_RUN_COUNT);
+    expect(new Set(runCases.map((c) => c.url)).size).toBe(SEPARATOR_RUN_COUNT);
+  });
+
+  // Boundary table over the separator run that follows `https:` — see
+  // `separatorRunCases` for what the boundary is and why both sides matter.
+  for (const runCase of separatorRunCases(coverRunTarget)) {
+    it(`returns ${runCase.expected} for a scheme followed by ${spellRun(runCase.run)}`, () => {
+      expectRunEncoding(runCase, coverRunTarget);
+      expect(isAllowedCoverUrl(runCase.url)).toBe(runCase.expected);
+    });
+  }
+
+  it("resolves every absolute https row identically with and without a base", () => {
+    expectAbsoluteRowsAreBaseInvariant(cases);
   });
 });
 
@@ -482,6 +715,26 @@ describe("isAllowedBookUrl", () => {
       expected: true,
     },
     {
+      /**
+       * The `//`-widening tripwire, restated for this export because the two
+       * are separately tightenable and neither matrix may lean on "these two
+       * agree". Relaxing the production fast path's
+       * `url.startsWith("https://")` early-accept into `url.includes("//")` —
+       * or any other "has a `//` somewhere" test — would early-accept this
+       * string, which carries a literal `//` in its PATH while only ONE slash
+       * follows the scheme, i.e. is base-SENSITIVE and must stay rejected.
+       *
+       * The criterion is base-INVARIANCE, not the presence or absence of `//`.
+       * POSITION decides it, in both directions: a `//` in the path proves
+       * nothing (this row), and the doubled-backslash row above is allowed
+       * while containing no `//` at all. This is the only rejected row in the
+       * matrix carrying a literal `//`, so it alone catches that widening.
+       */
+      name: "a single-slash scheme whose path happens to contain //",
+      url: "https:/readmoo.com//x",
+      expected: false,
+    },
+    {
       // Everything before the `@` is userinfo — the real host is evil.com.
       name: "an allowed domain smuggled into the userinfo segment",
       url: "https://readmoo.com@evil.com/book/210001",
@@ -567,6 +820,56 @@ describe("isAllowedBookUrl", () => {
     );
 
     expect(isAllowedBookUrl(hostile)).toBe(false);
+  });
+
+  /**
+   * Executable form of the `//`-widening tripwire row above, so the row cannot
+   * decay: an edit that dropped the `//` from that URL would leave the row
+   * passing while no longer guarding anything. These assertions pin the two
+   * facts that make it a tripwire — the literal `//` is present, and the string
+   * is still NOT of the shape the fast path may early-accept — right next to
+   * the parser disagreement that forces the rejection.
+   */
+  it("rejects a base-sensitive book URL whose path contains a literal //", () => {
+    const viewerPage = "https://moo.example/app/family";
+    const hostile = "https:/readmoo.com//x";
+
+    // The `//` is there — in the path, not after the scheme.
+    expect(hostile).toContain("//");
+    expect(hostile.startsWith(ABSOLUTE_HTTPS_PREFIX)).toBe(false);
+
+    // One slash after the scheme, so a same-scheme base still wins the host:
+    // clicked in the viewer's own page, the link never leaves that origin.
+    expect(new URL(hostile).href).toBe("https://readmoo.com//x");
+    expect(new URL(hostile, viewerPage).href).toBe(
+      "https://moo.example/readmoo.com//x",
+    );
+
+    expect(isAllowedBookUrl(hostile)).toBe(false);
+  });
+
+  const bookRunTarget = "readmoo.com/book/210001";
+
+  it("enumerates every slash/backslash run up to the boundary", () => {
+    const runCases = separatorRunCases(bookRunTarget);
+
+    // The table below is exhaustive, not sampled: if the generator ever stops
+    // producing all 31 distinct runs, the boundary is no longer pinned.
+    expect(runCases).toHaveLength(SEPARATOR_RUN_COUNT);
+    expect(new Set(runCases.map((c) => c.url)).size).toBe(SEPARATOR_RUN_COUNT);
+  });
+
+  // Boundary table over the separator run that follows `https:` — see
+  // `separatorRunCases` for what the boundary is and why both sides matter.
+  for (const runCase of separatorRunCases(bookRunTarget)) {
+    it(`returns ${runCase.expected} for a scheme followed by ${spellRun(runCase.run)}`, () => {
+      expectRunEncoding(runCase, bookRunTarget);
+      expect(isAllowedBookUrl(runCase.url)).toBe(runCase.expected);
+    });
+  }
+
+  it("resolves every absolute https row identically with and without a base", () => {
+    expectAbsoluteRowsAreBaseInvariant(cases);
   });
 });
 
