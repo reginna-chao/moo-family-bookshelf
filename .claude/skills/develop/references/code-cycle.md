@@ -62,31 +62,34 @@ Guarantee the change lands on its own clean branch off `origin/main`, so another
 
 1. `git fetch origin`.
 2. **Base:** unless the user named a base branch or asked to continue an existing branch, base the task on `origin/main`.
-3. **Isolation check:** run `git log --oneline origin/main..HEAD`. If it is non-empty — the current worktree/branch already carries unrelated commits — do NOT commit on top. Cut a fresh branch from `origin/main`: `git checkout -b <type>/<slug> origin/main` (or create a new worktree from `origin/main`).
-4. **Name it meaningfully:** `<type>/<short-kebab-slug>` — conventional type (`feat`/`fix`/`refactor`/`docs`/`test`/`chore`) + a concise English task slug (e.g. `fix/save-before-sync`). Never keep an opaque auto-generated worktree name (`claude/angry-moore-3651ca`) as the PR branch — rename first.
-5. Re-confirm `git log --oneline origin/main..HEAD` is empty before starting Phase 1. See `.claude/rules/global.md` → "Branch & Worktree Hygiene".
-6. **Worktree tasks:** when the task runs in a dedicated worktree, start EVERY agent prompt by restating the worktree's absolute path and forbidding any write to the main checkout.
-7. **Worktrees are only for tasks the user explicitly starts.** A defect or improvement surfaced mid-run never gets a worktree or a follow-up task chip of its own — see `.claude/rules/change-triage.md` → "Disposition of out-of-scope P0/P1".
+3. **Isolation check (ahead):** run `git log --oneline origin/main..HEAD`. If it is non-empty — the current worktree/branch already carries unrelated commits — do NOT commit on top. Cut a fresh branch from `origin/main`: `git checkout -b <type>/<slug> origin/main` (or create a new worktree from `origin/main`).
+4. **Freshness check (behind):** run `git log --oneline HEAD..origin/main`. Non-empty means the base is stale — fast-forward/rebase onto `origin/main` BEFORE Phase 1, and confirm with `git rev-parse` that the branch point equals the freshly fetched tip (a stale local ref silently pins an old base). When a worktree shows unexpected changes, diff against its own base (`git diff HEAD`) and read `git log HEAD..origin/main` before concluding contamination — upstream drift is not another task's dirt.
+5. **Premise check:** whatever the task cites about repo state — a branch that "already has" the work, a `file:line` anchor, a helper that "exists" — is a lead, not a fact. Verify with `git branch -a` / `git cat-file -e` / grep before it shapes the plan or any agent prompt. If the cited work exists only as uncommitted state in another worktree, stop and present options (wait for its commit / import the diff with provenance noted). A worktree that opens with uncommitted changes resembling this task: `git diff` against the spec first — the work may already be done.
+6. **Name it meaningfully:** `<type>/<short-kebab-slug>` — conventional type (`feat`/`fix`/`refactor`/`docs`/`test`/`chore`) + a concise English task slug (e.g. `fix/save-before-sync`). Never keep an opaque auto-generated worktree name (`claude/angry-moore-3651ca`) as the PR branch — rename first.
+7. Re-confirm `git log --oneline origin/main..HEAD` is empty before starting Phase 1. See `.claude/rules/global.md` → "Branch & Worktree Hygiene".
+8. **Worktree tasks:** when the task runs in a dedicated worktree, start EVERY agent prompt by restating the worktree's absolute path, forbidding any write to the main checkout, and requiring the agent to confirm the path prefix before every Read/Edit/Write — stating the boundary alone has proven insufficient.
+9. **Worktrees are only for tasks the user explicitly starts.** A defect or improvement surfaced mid-run never gets a worktree or a follow-up task chip of its own — see `.claude/rules/change-triage.md` → "Disposition of out-of-scope P0/P1".
 
 ## Phase 1: Requirements Analysis (collaborative — iterate until confirmed)
 
 1. Read the requirement carefully.
-2. **Bug / incident intake** (bug-type requests only — skip for features):
+2. **Verify cited specifics.** Externally supplied lists (audit findings, handler or call-site inventories) and quoted concrete examples (URLs, payloads, error strings) are leads, not facts: re-enumerate lists from source — grep BOTH `extension/` and `pwa/` so mirror surfaces are not missed — and execute examples before any of it enters an agent prompt or a doc. What stays unverified is marked unverified, never stated as fact.
+3. **Bug / incident intake** (bug-type requests only — skip for features):
    - **Surface matrix first.** Before reading any code, establish WHICH surface is broken: Extension-Chrome / Extension-Firefox / PWA × device × symptom. Investigate only the broken surface — don't burn context reading an unaffected one.
    - **Delegate broad scans.** Multi-file investigation sweeps go to an `Explore` agent that returns conclusions; you self-read only the 3–5 key files that anchor the diagnosis.
    - **Masked fields are unknowns.** If you asked the user to redact a sensitive field (token, id), record it as "existence unknown" — never treat its absence from pasted output as evidence.
    - **Fast-path** (single scope + root cause already pinned with `file:line` evidence + no API/schema change): you MAY fold the requirements analysis into the Phase 3 verify-before-test gate presentation instead of a separate confirmation stop, and write the pinned root cause into the coder prompt.
-3. Read `docs/project-plan.md` and `docs/architecture.md` for context (skip if absent).
-4. Break the requirement into work-items, each tagged **frontend** (Extension UI, Content Script, crypto, PWA) or **backend** (Worker API, KV schema, middleware), plus **shared concerns** (sync code format, API contract).
-5. **Proactively identify gaps and risks** — present these to the user:
+4. Read `docs/project-plan.md` and `docs/architecture.md` for context (skip if absent).
+5. Break the requirement into work-items, each tagged **frontend** (Extension UI, Content Script, crypto, PWA) or **backend** (Worker API, KV schema, middleware), plus **shared concerns** (sync code format, API contract).
+6. **Proactively identify gaps and risks** — present these to the user:
    - **Assumptions** you are making.
    - **Missing / ambiguous** aspects: edge cases, error/empty/loading states, UX flows, concurrency, data migration, KV key collisions, TTL strategy.
    - **Security concerns** (frontend: XSS, `dangerouslySetInnerHTML`, secrets in client, `chrome.storage` exposure; backend: auth bypass, plaintext exposure, KV key injection, rate-limit evasion).
    - **Performance concerns** (frontend: needless re-renders, bundle size; backend: N+1 KV reads, payload size, cold start).
    - **Lifecycle & resource cost** — for ANY feature with FE polling/auto-refresh, BE scheduled jobs, or background sync: back-of-envelope cost (1 user × 24h × N devices) vs Cloudflare Workers' ~100k req/day free tier. **If realistic worst case > 1,000 req/user/day or polling is unbounded → mandate on-demand or visibility-gated design and flag it now, not at review.** See `.claude/rules/global.md` → "Lifecycle & Resource Cost".
    - **Open questions** needing the user's decision.
-6. **Mockup gate (optional).** If the feature introduces a new screen / dialog / overlay or significantly reshapes one, offer to dispatch the `designer` agent for a Pencil mockup before coding (user decides; skip for string/styling/internal changes). On yes, dispatch `designer` with `request` + `context`, relay its screenshot + annotations, iterate to approval, then continue.
-7. Present the full analysis. **Wait for user confirmation before proceeding.** (Bug fast-path per step 2 may defer this to the verify-before-test gate.)
+7. **Mockup gate (optional).** If the feature introduces a new screen / dialog / overlay or significantly reshapes one, offer to dispatch the `designer` agent for a Pencil mockup before coding (user decides; skip for string/styling/internal changes). On yes, dispatch `designer` with `request` + `context`, relay its screenshot + annotations, iterate to approval, then continue.
+8. Present the full analysis. **Wait for user confirmation before proceeding.** (Bug fast-path per step 3 may defer this to the verify-before-test gate.)
 
 ## Phase 2: API Contract (full-stack features only)
 
@@ -97,23 +100,26 @@ If the feature spans frontend and backend:
 
 ## Phase 3: Development
 
+**Pure-refactor fast path.** When the task is a pure move/equivalence refactor whose acceptance is "existing suite unchanged and green", declare at Phase 1 that the verify-before-test gate and the tester dispatch are N/A: dispatch a `tester` only when tests are to be authored or modified (if a tester prompt would mostly prohibit changes, don't send it). The oracle is the frozen suite — run a baseline test count before coding and compare after (it must not drop) — plus byte-identity verification of every moved block (`git show HEAD:<file>` diffed against the new location, mechanically, never by eye). Hold ONE consolidated stop after the suite runs.
+
 For each scope in play (frontend, backend — parallelize when file-disjoint):
 
 1. Dispatch **`coder`** with `scope`, `requirements`, `files`.
-2. After the coder returns, run the scope's verify: frontend `pnpm typecheck && pnpm lint`; backend `cd worker && pnpm typecheck && pnpm lint`. (NOT the full test suite yet — new behavior isn't test-covered.)
+2. After the coder returns, run the scope's verify: frontend `pnpm typecheck && pnpm lint`; backend `cd worker && pnpm typecheck && pnpm lint`. (NOT the full test suite yet — new behavior isn't test-covered.) Then stage the accepted output (`git add <paths>`) so the index snapshots the delivery; any destructive experiment on tracked files (tripwire, mutation check) requires staged state or a scratchpad copy first — never mutate-then-checkout over unstaged agent work.
 3. **Verify-before-test gate [STOP — manual verification].** Before any test is written, present:
    - a concise summary of what the coder changed (files + behavior + affected states),
    - how the user can verify it (frontend: what to click/observe; backend: a curl example or KV state to inspect),
+   - instructions that run as written: name the execution context (shell, directory, DevTools context), state that the change exists only locally — with the local URL / launch command — and, in a worktree, the worktree path (the main checkout serves different code). For backend scope, default to the orchestrator RUNNING the verification (curl / KV inspection) and presenting observed results; copy-paste commands are the fallback,
    - **any rate limit / quota the tested flow touches** (limit, window, retry interval) — so throttling (e.g. a 429) isn't misread as a functional defect and repeated manual retries don't burn the quota,
 
    then ask the user to confirm it's correct OR point out fixes. **Rationale:** writing tests against unconfirmed behavior forces repeated rewrites. End with the Stop Block.
    - Fixes needed → dispatch `coder` to fix, re-run typecheck/lint, re-present this gate. **Batch feedback:** when one gate round returns several small UI remarks, fold them into ONE coder dispatch (file-disjoint) and one tester pass afterward — never one full round-trip per remark.
    - Confirmed correct → proceed to step 4.
 
-4. Dispatch **`tester`** with `scope`, `target`, `change_summary` (+ the actual diff).
-5. Run full verify: frontend `pnpm typecheck && pnpm lint && pnpm test`; backend `cd worker && pnpm typecheck && pnpm lint && pnpm test`.
+4. Dispatch **`tester`** with `scope`, `target`, `change_summary` (+ the actual diff). Production code is frozen once the gate confirms, so the tester and the Phase 4 `reviewer` MAY be dispatched in parallel — hold any reviewer finding against test code until the tester returns; for small diffs the first-round review may also run parallel with the Phase 6 scan (Fix-Cycle changes then get a re-scan of the changed files).
+5. Run full verify: frontend `pnpm typecheck && pnpm lint && pnpm test`; backend `cd worker && pnpm typecheck && pnpm lint && pnpm test`. Run the full suite ONCE, here — do not re-run it when an agent just reported it green, and never let it overlap an agent's own run (two concurrent full suites cause CPU-contention flakes). Repeated stress runs (flake reproduction, N-times-green acceptance) are the orchestrator's job after the agent returns.
 
-**Gate** — all must pass before Phase 4: coder done + user-confirmed; tester done; typecheck/lint/test green; E2E impact check (below) passes.
+**Gate** — all must pass before Phase 4 acts on findings: coder done + user-confirmed; tester done; typecheck/lint/test green; E2E impact check (below) passes. (The reviewer dispatch itself may start early per step 4 — the gate then blocks Fix-Cycle actions, not the dispatch.)
 
 **E2E Impact Check** (after unit/component tests pass, frontend scope):
 
@@ -125,9 +131,13 @@ For each scope in play (frontend, backend — parallelize when file-disjoint):
 
 Dispatch **`reviewer`** (`scope`, `target` = changed files, `business_logic`) per scope. Then repeat **Review → Fix → Re-review** until clean. Maintain a running **Fix Cycle Log** of every CRITICAL auto-fixed and every SUGGESTION accepted/skipped — present it each round and on exit.
 
+**Base re-check before the first review dispatch:** `git fetch origin` + `git log HEAD..origin/main`. If upstream moved — especially onto files this run touches — rebase/ff first so reviewer and auditor diff against reality: a stale base turns upstream commits into phantom findings. If not yet rebased, point their `base_ref` at the merge-base, never at the moved `origin/main` tip.
+
+**In-round adjudication:** every coder/tester return's Open Questions and in-scope side observations get an explicit disposition THIS round (fix now / accept as residual / route per `.claude/rules/change-triage.md`), recorded in the Fix Cycle Log — never left for a later phase to rediscover. Orchestrator-discovered defects enter the log with the same standing as reviewer findings. Before turning a reviewer coverage/absence claim into a prescription, verify it against the target file yourself.
+
 **Fix-round handoffs:**
 
-- **Rename handoff**: when a fix renames a production export, the coder prompt lists the expected red tests and the new name; the follow-up tester prompt carries that new-name list verbatim — one coder→tester round, no discovery pass.
+- **Behavior handoff** (generalizes the former rename handoff): when a fix renames a production export OR changes behavior that existing tests pin, first grep the affected code path / error code / field across the test trees, then the coder prompt lists the expected-red tests and the new expectation; the follow-up tester prompt carries that list verbatim — one coder→tester round, no discovery pass.
 - **Prescription exception to re-review**: when a fix lands the reviewer's own suggested change verbatim and touches ≤ 5 lines, the orchestrator MAY verify the diff itself instead of dispatching a re-review — record the self-check in the Fix Cycle Log. Any deviation from the prescription, or a larger diff, gets a normal focused re-review.
 
 Findings are **always tables**, never free-form bullets (write "None." in a single row when empty). **All tables ≤ 4 columns** for narrow terminals.
@@ -232,5 +242,7 @@ When the user asks: read `references/retro.md` and follow it in **this session**
 1. Re-present the Fix Cycle 總結 (+ any cross-scope additions + the security-scan verdict). In fix mode, render the security-scan line as 「不適用（fix mode — no scan was run）」 — never drop the line, never state a verdict no scan produced.
 2. List changed files (all scopes) + final verification status.
 3. End with a single **prose headline paragraph** consolidating the outcome.
-4. `git add` changed files (including the retro report, if one was written).
-5. Ask the user about committing. (Commit is ALWAYS an explicit user question — never auto-run.)
+4. **Base re-check:** `git fetch origin` + `git log HEAD..origin/main` — long runs go stale while parallel sessions merge. If main moved, rebase/ff and re-run the scope verify before committing; surface the rebase in the report.
+5. **Diff hygiene:** `git status --short` over the whole tree — the set to stage must equal this feature's expected file list. Stray entries (formatter churn, EOL rewrites, another task's leftovers) are inspected and restored, never swept into the commit.
+6. `git add` explicit paths only (including the retro report, if one was written).
+7. Ask the user about committing. (Commit is ALWAYS an explicit user question — never auto-run.)

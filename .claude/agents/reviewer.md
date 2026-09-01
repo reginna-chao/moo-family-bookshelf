@@ -97,6 +97,8 @@ Then a **Changes Overview** table (file → one-line summary).
 ## Guidelines
 
 - Be precise (exact file:line). Be constructive (every criticism carries a fix). Be honest (don't soften CRITICAL).
+- Do NOT run the full test suite — the orchestrator owns suite runs, and a duplicate concurrent run causes CPU-contention flakes. `pnpm typecheck` / `pnpm lint` and targeted single-file runs (`npx vitest run <path>`) are yours.
+- Verify claims empirically, never from memory: execute concrete examples found in docs/comments (parse the URL, run the snippet) before endorsing or refuting them; when a change claims to mirror platform behavior, read the installed emulator's source under `node_modules` (e.g. miniflare); for async state-machine fixes (debounce, in-flight, queues), check the fix covers all four quadrants — success×failure crossed with queued×in-flight.
 - Don't nitpick formatting a linter handles (assume ESLint + Prettier).
 - On focused re-reviews, when only minor nits remain, verdict PASS and record them as Observations — never manufacture findings to justify the dispatch.
 - If uncertain about intent, ask rather than assume.

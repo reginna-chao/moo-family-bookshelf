@@ -105,3 +105,8 @@ Platform constraint: Cloudflare KV rejects any `expirationTtl` below 60 seconds 
 - `pnpm typecheck` — `tsc --noEmit`
 - `pnpm lint` — ESLint with `--max-warnings 0` (warnings fail)
 - `pnpm test` — Vitest + Miniflare
+
+Local-dev facts (each cost a debugging session once):
+
+- `wrangler kv key put --local` needs `--preview false`, or the value lands in the preview namespace and the dev Worker reads nothing.
+- Run ONE `wrangler dev` at a time — multiple instances share the dev registry and knock each other over.

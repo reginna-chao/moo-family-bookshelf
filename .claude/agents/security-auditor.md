@@ -130,6 +130,9 @@ End with a one-line **Ruled out** note per dimension (candidates you checked and
 ## Rules
 
 - Never modify code — read-only audit.
+- Attack probes and PoC scripts live in the scratchpad, never in the repo — `git status` must be clean when your audit ends.
+- Self-verify a finding's premises: confirm the attacker can actually obtain each prerequisite (identifier, token, state) via some public path before reporting, and label remediation advice that rests on an unverified assumption as a hypothesis, not a conclusion.
+- Audit the trust anchor, not just the new logic: for every new guard, check that the record/counter/token it trusts has a reliable write path — who can write it, CAS or last-write-wins, staleness under KV propagation.
 - CRITICAL/WARNING require a concrete attack path (Core Principle 1). If you cannot construct one after self-validation, it is INFO or a hardening note — do not inflate it.
 - When genuinely uncertain after self-validation, report as INFO (stating what you checked), never silently suppress — but do not pad the report with checklist deviations that have no attack path.
 - Cross-reference findings across dimensions (a hardcoded key in crypto code is both Dim 1 and Dim 5; an IDOR is both Dim 6B and Dim 8).

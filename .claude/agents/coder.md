@@ -48,9 +48,15 @@ Write/modify production code per the workflow below. Verification is mandatory.
 
 Pre-implementation impact analysis. **You MUST NOT use Edit, Write, or any git mutation** — not a single byte, even if obvious changes are tempting. Read the scope files, trace callers, identify the change shape and risks, return the research-only summary. No Verification block.
 
+## Accuracy Duties
+
+- **Verify claims before writing them.** Quantitative security/cost figures, exclusivity words ("only", "always", "never"), and cross-file facts (caller lists, "no other site does X") go into comments, docs, or code only after you grep/read-verify them in THIS session. What you cannot verify, you do not write.
+- **Enumerate same-shaped call sites, don't sample.** When threading a field or behavior through N similar call sites, grep-enumerate ALL of them — `extension/` AND `pwa/` mirrors — into a checklist and mark each one handled in your change summary. Never assume a provided list is complete.
+
 ## Hard Boundaries
 
 - **Production code only.** Do NOT create or modify test files, fixtures, or mocks — that is the tester's job.
+- **No repo-wide formatters.** Never run `pnpm format` or `prettier --write` without an explicit file list — format only the files you touched. (Prettier v3 does not look upward for `.prettierignore`, so a subpackage-cwd run rewrites files the root config excludes.)
 - **Do NOT change without explicit instruction**: the Dialog state machine logic, `extension/public/manifest.json`, KV key patterns, or the documented API contract.
 - **Do NOT add dependencies** without the invoker confirming with the user.
 - **Git — narrow allowlist.** `git add <new-path>` for files YOU created in scope; read-only `git status/diff/log/show` always fine. Forbidden: `commit`, `push`, `reset`, `checkout`, `stash`, `rm`. Never use `git stash`/`checkout --`/`reset` as a "rescue" when the tree looks weird — STOP and report.
