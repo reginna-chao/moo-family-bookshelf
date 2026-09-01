@@ -10,7 +10,36 @@
   --personal-shelf-bottom-clearance: calc(var(--floating-bar-height) + 8px);
 }
 
+/* Borrow-failure banner flash. Failing the same way twice writes the same text
+   in the same place, so without this the screen shows no change at all. The
+   banner's React key is the attempt counter, and a re-mount restarts a CSS
+   animation on its own — so this needs no timer and no state. Fill flashes to
+   the banner's own border colour (opaque, so the content scrolling under the
+   sticky banner never shows through) and drains back to its resting bg-red-50.
+   Colour only: a transform would create a stacking context and break the
+   banner's sticky layering. Declared outside @layer so the keyframes are never
+   tree-shaken with the component layer. */
+@keyframes moo-borrow-failed-flash {
+  from {
+    background-color: theme("colors.red.200");
+  }
+  to {
+    background-color: theme("colors.red.50");
+  }
+}
+
 @layer components {
+  .moo-borrow-failed-flash {
+    animation: moo-borrow-failed-flash 400ms ease-out;
+  }
+
+  /* The flash is an enhancement only: the banner is fully legible without it. */
+  @media (prefers-reduced-motion: reduce) {
+    .moo-borrow-failed-flash {
+      animation: none;
+    }
+  }
+
   .moo-form-select {
     --moo-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
     -webkit-appearance: none;

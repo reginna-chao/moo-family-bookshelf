@@ -26,6 +26,7 @@ extension/src/
 
 shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pwa/ and worker/
 ├── api/            # Endpoint URL validation + sync-code @host classification + backend data-field runtime coercion
+├── borrow/         # Borrow-request failure copy (error code → 繁中文案)
 ├── config/         # Readmoo host/selector config, report links
 ├── hostNote/       # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 ├── icons/          # Inline brand SVG paths

@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
-import { BoolFlag, BorrowStatus } from "@/api/client";
+import { BoolFlag } from "@/api/client";
 import { useSearch } from "@/hooks/useSearch";
 import { useLoadMore } from "@/hooks/useLoadMore";
 import { useFamilyData } from "@/hooks/useFamilyData";
@@ -16,9 +16,9 @@ import { useBookSort } from "@/hooks/useBookSort";
 import { sortBooks } from "@/utils/sortBooks";
 import {
   useFamilyShelfBooks,
-  type BookWithMember,
   type MemberFilterValue,
 } from "@/hooks/useFamilyShelfBooks";
+import { useBorrowAction } from "@/hooks/useBorrowAction";
 
 export interface FamilyShelfPageProps {
   userId: string;
@@ -63,34 +63,18 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
 
   const viewerCanLend = memberCanLendMap.get(userId) ?? true;
 
-  const pendingBookIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of borrowRequests ?? []) {
-      if (r.borrowerId === userId && r.status === BorrowStatus.PENDING) {
-        set.add(r.bookId);
-      }
-    }
-    return set;
-  }, [borrowRequests, userId]);
-
-  const handleBorrowClick = useCallback(
-    async (book: BookWithMember) => {
-      if (!apiClient || !familyId) return;
-      try {
-        await apiClient.createBorrowRequest(familyId, {
-          bookId: book.bookId,
-          bookTitle: book.title,
-          bookAuthor: book.author,
-          bookCoverUrl: book.coverUrl,
-          ownerId: book.ownerId,
-        });
-        await refreshBorrowRequests?.();
-      } catch {
-        // Errors surface via the borrow tab; keep family shelf quiet.
-      }
-    },
-    [apiClient, familyId, refreshBorrowRequests],
-  );
+  const {
+    borrow,
+    failureText: borrowFailureText,
+    failureKey: borrowFailureKey,
+    pendingBookIds,
+  } = useBorrowAction({
+    apiClient,
+    familyId,
+    userId,
+    borrowRequests,
+    refreshBorrowRequests,
+  });
 
   const {
     memberFilteredBooks,
@@ -191,6 +175,26 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
         </div>
       )}
 
+      {/* The request was never created, so the borrow page will never explain
+          this failure — role="alert", not "status". Clears on the next
+          successful borrow. Sticky against the <main> scrollport in App.tsx so
+          it stays on screen when the failure happens deep in a long shelf.
+          z-[1] = above the book rows' `relative` cover wrappers (z-index auto,
+          later in tree order); must stay below FloatingActionBar (z-30) and
+          every dropdown / modal / portalled overflow menu (z-50).
+          key = the attempt counter: failing the same way twice writes the same
+          text, and a reused node means role="alert" stays silent and nothing on
+          screen moves. A new key re-mounts the live region so it speaks. */}
+      {borrowFailureText !== "" && (
+        <div
+          key={borrowFailureKey}
+          role="alert"
+          className="moo-borrow-failed-flash sticky top-0 z-[1] mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs leading-snug text-red-700"
+        >
+          {borrowFailureText}
+        </div>
+      )}
+
       {isFiltering && (
         <p className="text-gray-400 text-xs mb-2">
           找到 {visibleBooks.length} 本
@@ -208,7 +212,7 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
         memberCanLendMap={memberCanLendMap}
         pendingBookIds={pendingBookIds}
         canBorrow={!!apiClient && !!familyId}
-        onBorrow={(book) => void handleBorrowClick(book)}
+        onBorrow={(book) => void borrow(book)}
         onToggleHidden={toggleHidden}
         isHidden={isHidden}
         isFavorite={isFavorite}

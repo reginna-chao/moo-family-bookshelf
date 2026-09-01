@@ -99,8 +99,9 @@ async function createFamilyWithThreeMembers() {
 /**
  * A cover URL that clears the `isAllowedCoverUrl` boundary check in
  * `src/routes/borrow.ts` (https + Readmoo registrable domain + default port).
- * Every fixture that expects to reach the handler's business logic must carry
- * one — an off-Readmoo host now short-circuits at 400 INVALID_COVER_URL.
+ * The field itself is OPTIONAL, but any fixture that SUPPLIES a non-empty cover
+ * and expects to reach the handler's business logic must carry one — an
+ * off-Readmoo host short-circuits at 400 INVALID_COVER_URL.
  */
 const VALID_COVER_URL = "https://cdn.readmoo.com/cover/cover.jpg";
 
@@ -211,18 +212,30 @@ describe("POST /api/family/:id/borrow", () => {
     expect(json.error.code).toBe("MISSING_FIELDS");
   });
 
-  it("should return 400 if missing required fields (bookCoverUrl)", async () => {
+  // Was: "should return 400 if missing required fields (bookCoverUrl)".
+  // `bookCoverUrl` left the required set when it became optional, so the same
+  // slot now pins the OTHER half of that contract — the required-field list
+  // itself. Acceptance of a missing cover is covered by the "optional
+  // bookCoverUrl" describe block below.
+  it("should not name bookCoverUrl among the required fields", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
     const res = await request(
       "POST",
       `/api/family/${familyId}/borrow`,
-      { bookId: "b1", bookTitle: "T", bookAuthor: "A", ownerId: USER1 },
+      { bookTitle: "T", bookAuthor: "A", ownerId: USER1 },
       token2,
     );
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("MISSING_FIELDS");
+    // Pins the production literal in src/routes/borrow.ts. If the falsy guard
+    // ever regains `bookCoverUrl`, this message regains it too and this
+    // assertion fails — the cheapest tripwire against the regression that made
+    // every cover-less book unborrowable.
+    expect(json.error.message).toBe(
+      "bookId, bookTitle, bookAuthor, and ownerId are required",
+    );
   });
 
   it("should return 400 if missing required fields (ownerId)", async () => {
@@ -471,14 +484,113 @@ describe("POST /api/family/:id/borrow", () => {
 });
 
 // ===========================================================================
+// POST /api/family/:id/borrow — bookCoverUrl is OPTIONAL
+// ===========================================================================
+//
+// Regression guard for cover-less books. The family-bookshelf aggregation
+// (src/routes/bookshelf.ts) sanitizes every off-whitelist cover to "" and the
+// clients forward that verbatim, so a borrow request for such a book arrives
+// with an EMPTY bookCoverUrl. While the field sat in the falsy MISSING_FIELDS
+// guard, that request was answered 400 MISSING_FIELDS — which the frontend
+// swallowed silently, leaving the user with a dead borrow button. Absent /
+// null / "" now all mean "no cover" and are stored as "".
+//
+// Note the whitelist cannot wave "" through instead: `isAllowedCoverUrl("")`
+// is false (`new URL("")` throws), so the handler's explicit `!== ""` exemption
+// is what makes these cases pass.
+
+/** The valid body minus the cover — the shape a cover-less book produces. */
+const coverlessBorrowBody = {
+  bookId: validBorrowBody.bookId,
+  bookTitle: validBorrowBody.bookTitle,
+  bookAuthor: validBorrowBody.bookAuthor,
+  ownerId: validBorrowBody.ownerId,
+};
+
+describe("POST /api/family/:id/borrow optional bookCoverUrl", () => {
+  it.each([
+    { label: "the field is absent", cover: {} },
+    { label: "the field is null", cover: { bookCoverUrl: null } },
+    {
+      label:
+        'the field is "" (what the bookshelf aggregation emits for a cover-less book)',
+      cover: { bookCoverUrl: "" },
+    },
+  ])(
+    'should create the borrow request and store "" when $label',
+    async ({ cover }) => {
+      const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+      const res = await request(
+        "POST",
+        `/api/family/${familyId}/borrow`,
+        { ...coverlessBorrowBody, ...cover },
+        token2,
+      );
+      expect(res.status).toBe(201);
+
+      const json = (await res.json()) as Json;
+      expect(json.data.bookCoverUrl).toBe("");
+
+      // The stored record must carry "" — never undefined / null, because
+      // BorrowRequest.bookCoverUrl (src/kv/schema.ts) is a non-optional string
+      // and the list endpoint hands the value straight to the clients.
+      const stored = (await kv.get(
+        kvKeys.borrow(json.data.requestId),
+        "json",
+      )) as BorrowRequest;
+      expect(stored.bookCoverUrl).toBe("");
+      expect("bookCoverUrl" in stored).toBe(true);
+    },
+  );
+
+  // A SUPPLIED value of the wrong type stays a request-format error. `0` and
+  // `false` are the load-bearing rows: they are falsy, so before the fix they
+  // were caught by the MISSING_FIELDS guard. A table without them would still
+  // pass if that guard came back.
+  it.each([
+    { label: "the number 0", coverUrl: 0 },
+    { label: "the boolean false", coverUrl: false },
+    { label: "a number", coverUrl: 123 },
+    { label: "the boolean true", coverUrl: true },
+    { label: "an object", coverUrl: {} },
+    { label: "an empty array", coverUrl: [] },
+    {
+      label: "an array wrapping an otherwise-valid URL",
+      coverUrl: ["https://cdn.readmoo.com/cover/x.jpg"],
+    },
+  ])("should reject $label with 400 INVALID_FIELDS", async ({ coverUrl }) => {
+    const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+    const res = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      { ...coverlessBorrowBody, bookCoverUrl: coverUrl },
+      token2,
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    // Never MISSING_FIELDS (the field is optional) and never
+    // INVALID_COVER_URL (a wrong type is not a whitelist verdict).
+    expect(json.error.code).toBe("INVALID_FIELDS");
+
+    // Nothing was persisted on the rejected path.
+    expect(await kv.get(kvKeys.borrowsByFamily(familyId), "json")).toBeNull();
+  });
+});
+
+// ===========================================================================
 // POST /api/family/:id/borrow — bookCoverUrl whitelist
 // ===========================================================================
 //
 // `bookCoverUrl` is stored verbatim and later rendered into an <img src> by the
 // PWA / Extension, so a family member who plants an attacker-controlled URL
-// turns every viewer's render into a tracking beacon (IP + UA leak). The
-// handler refuses anything `isAllowedCoverUrl` (shared/src/config/readmoo.ts)
-// does not accept: https, a Readmoo registrable domain, and the default port.
+// turns every viewer's render into a tracking beacon (IP + UA leak). Every
+// NON-EMPTY value the handler receives must satisfy `isAllowedCoverUrl`
+// (shared/src/config/readmoo.ts): https, a Readmoo registrable domain, and the
+// default port. Only the empty case is exempt, and it is pinned by the
+// "optional bookCoverUrl" describe block above — making the field optional did
+// not widen what the whitelist accepts.
 
 /** Prefix shared by every per-userId rate-limit counter key. */
 const PER_USER_COUNTER_PREFIX = "ratelimit:user:";
@@ -632,6 +744,25 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
 
     // A format error must not burn quota — otherwise a malformed request is a
     // free lever for exhausting the caller's own borrow budget.
+    expect(await perUserCounterKeys()).toHaveLength(0);
+  });
+
+  it("should not charge the borrow-create counter for a wrong-typed cover URL", async () => {
+    const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+    const res = await prodRequest(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      { ...validBorrowBody, bookCoverUrl: 0 },
+      token2,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Json).error.code).toBe("INVALID_FIELDS");
+
+    // Matched pair with the INVALID_COVER_URL case above: the two guards are
+    // different, so the sibling stays green if the INVALID_FIELDS type guard is
+    // ever moved AFTER `enforcePerUserRateLimit`. This is the case that goes
+    // red — a wrong-typed body must not burn the caller's borrow-create quota.
     expect(await perUserCounterKeys()).toHaveLength(0);
   });
 
