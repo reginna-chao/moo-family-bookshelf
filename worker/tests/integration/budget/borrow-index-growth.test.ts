@@ -159,9 +159,10 @@ describe("KV read growth: GET /api/family/:id/borrow", () => {
   // (@vitest/runner runTest), so the growth assertion must not be the only
   // thing between a broken seed and a green run. Holds before AND after #160.
   it("lists every seeded borrow request", async () => {
-    const { listed } = await measureBorrowList(5);
-
-    expect(listed).toBe(5);
+    // Both sizes the it.fails() case measures — a broken 50-entry path must
+    // fail LOUDLY here, not get swallowed by the .fails inversion below.
+    expect((await measureBorrowList(5)).listed).toBe(5);
+    expect((await measureBorrowList(50)).listed).toBe(50);
   });
 
   // `it.fails` = "this assertion is EXPECTED to throw today". Remove `.fails`
