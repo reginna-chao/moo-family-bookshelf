@@ -313,9 +313,16 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
 
   // NOTE: No atomic CAS in KV. Concurrent POSTs from two members can both
   // read the same index and the second put overwrites the first, dropping
-  // the earlier requestId. Acceptable for 2-person families with low
-  // concurrency. Borrow record at borrow:{requestId} is still written, but
-  // becomes invisible to GET /family/:id/borrow until the index is rebuilt.
+  // the earlier requestId. Acceptable ONLY while the index stays under 20
+  // entries. Enforced by tests/integration/budget/borrow-index-growth.test.ts
+  // — if that test fails, this tradeoff has EXPIRED and must be re-decided,
+  // not re-justified. Read that trigger literally: the test measures the LIST
+  // read fan-out (a 5-entry vs a 50-entry index), not the live index size, and
+  // it ships as it.fails() today — so it turns RED exactly when the fan-out
+  // disappears (issue #160 item 2 lands and it flips to a normal it()). No
+  // check measures the 20-entry bound itself; that one stays a review call.
+  // Borrow record at borrow:{requestId} is still written, but becomes
+  // invisible to GET /family/:id/borrow until the index is rebuilt.
   // For strict correctness, scope index per-borrower or use Durable Objects.
   await Promise.all([
     c.env.KV.put(kvKeys.borrow(requestId), JSON.stringify(borrowRequest)),
