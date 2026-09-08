@@ -1,6 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { swaggerUI } from "@hono/swagger-ui";
 import { cors } from "hono/cors";
+import { withKvOpCounting } from "./middleware/kvOpCounting";
 import { rateLimit } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
 import { userRoutes } from "./routes/user";
@@ -115,6 +116,10 @@ app.use("/api/*", async (c, next) => {
   }
   await next();
 });
+
+// Per-request KV operation logging (middleware/kvOpCounting.ts) — must stay
+// ahead of rateLimit and authMiddleware so their KV operations are counted too.
+app.use("/api/*", withKvOpCounting);
 
 // Rate limiting for API routes
 app.use("/api/*", rateLimit);

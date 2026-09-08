@@ -421,6 +421,28 @@ moo-{family_id_short}@{api_host_encoded}
 - 本服務開始儲存書單與分享偏好以外的資料；
 - 觀察到實際的密鑰猜測流量。
 
+### KV 操作數觀測（per-request kv_ops log）
+
+`worker/src/middleware/kvOpCounting.ts` 為每個 `/api/*` 請求輸出一行結構化 log：`{ event: "kv_ops", method, route, status, reads, writes, deletes }`。計數方式是把 `c.env.KV` 換成一層純轉發的 Proxy——只累加 `get` / `getWithMetadata`（reads）、`put`（writes）、`delete`（deletes），不快取、不合併、不改變任何呼叫語意。它註冊在 `/api/*` 上，且刻意排在 `rateLimit`、`authMiddleware` **之前**，因此 per-IP 與 per-userId 兩道限流計數器的 get+put、以及 auth token 的 get，都與 handler 自身的操作記在同一行——那份固定成本正是需要被看見的部分。
+
+`route` 取 `routePath(c, -1)`，也就是實際命中的**路由樣式**（未命中時為 `/api/*`），永遠不是 `c.req.path`：原始路徑帶著機密與可連結的識別碼（`:shareToken` 即公開書櫃的密鑰本身，`:id` 是 email 推導的 userId），寫進 log 等於把它們留在可長期查詢的欄位裡。
+
+#### 為何 Cloudflare 內建遙測無法取代
+
+- **KV analytics**：維度只有 namespace × actionType × 日期，沒有路由，也看不出單次請求的操作數。
+- **Workers Metrics**：整個 Worker 的彙總數字，同樣分辨不出是哪條路由造成的。
+- **Invocation log**：有請求本身的資訊，但完全不含 KV 操作數。
+
+Workers Logs 在本專案採用的方案上也無法對自訂欄位設定警示，因此這份資料的消費方式是**主動查詢**（拉），而非被動告警（推）。
+
+#### 已接受的殘餘風險：log 量與請求量 1:1
+
+`[observability]` 的 `head_sampling_rate = 1`（`wrangler.toml:5-8`、`:23-25`），加上中介層排在限流之前，被 429 擋下的請求同樣會輸出一行——per-IP 上限節流的是回應，不是 log 事件。免費方案下，Worker 自身的請求上限（約 100k 次/日）會比 log 額度（200k events/日，見 `wrangler.toml:5` 註解）先觸頂，因此代價是「一天的額度有一半被雜訊吃掉，真正重要的 `console.error`（例如 kicked 墓碑寫入失敗的 `KICK_TOMBSTONE_WRITE_FAILED`）被埋在其中」；付費方案下則是一筆 log 帳單。影響僅止於偵測能力下降，不涉及資料揭露、權限繞過，也不改變使用者可感知的可用性。不緩解的理由：調低取樣率會稀釋每一條路由的樣本，而略過 429 只約束得了單一 IP。
+
+#### 後續：部署後的觀測 pass（追蹤於 #163）
+
+正式部署後走一次觀測：每條路由各操作一次，以 `wrangler tail --format=json` 或 Dashboard 收下這些行，把各路由的 reads / writes 與 `worker/tests/integration/budget/` 已釘住的預算逐一對照，並將生產環境的基準值記回本節。是否要再加上「超出預算」的事件（例如額外一行 `console.warn`），等這份基準存在之後再決定，不在之前。
+
 ### PWA 登入驗證機制
 
 #### 問題

@@ -27,6 +27,7 @@ worker/src/
 │   └── publicShelf.ts  # Public-shelf snapshot writes — shared by user/publicShelf routes
 ├── middleware/
 │   ├── auth.ts       # Request authentication
+│   ├── kvOpCounting.ts # Per-request KV op counting Proxy + kv_ops log line
 │   └── rateLimit.ts  # Rate limiting
 ├── schemas/
 │   └── common.ts     # Shared Zod schemas (userId/familyId/shareToken/PIN formats + path params)
