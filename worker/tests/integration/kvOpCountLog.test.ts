@@ -1,5 +1,6 @@
 /**
- * The `kv_ops` telemetry line — `withKvOpCounting` in src/index.ts (issue #163).
+ * The `kv_ops` telemetry line — `withKvOpCounting` in
+ * src/middleware/kvOpCounting.ts (issue #163).
  *
  * WHAT THIS FILE IS. The middleware wraps `c.env.KV` in a counting Proxy and
  * emits ONE `console.log` per `/api/*` request carrying that request's KV
@@ -71,7 +72,10 @@ const IP = {
 
 let kv: KVNamespace;
 
-/** The one log line under test. Mirrors the object literal in src/index.ts. */
+/**
+ * The one log line under test. Mirrors the object literal in
+ * src/middleware/kvOpCounting.ts.
+ */
 interface KvOpsLine {
   event: "kv_ops";
   method: string;

@@ -4,9 +4,10 @@ export default defineConfig({
   test: {
     globals: true,
     include: ["tests/**/*.test.ts"],
-    // The kv_ops telemetry line (src/index.ts withKvOpCounting) fires on every
-    // /api/* request; keep it out of the runner output. Printing only — a
-    // vi.spyOn(console, "log") still sees the call, so assertions on it work
+    // The kv_ops telemetry line (src/middleware/kvOpCounting.ts
+    // withKvOpCounting) fires on every /api/* request; keep it out of the
+    // runner output. Printing only — a vi.spyOn(console, "log") still sees
+    // the call, so assertions on it work
     // (tests/integration/kvOpCountLog.test.ts).
     //
     // Matched on the quoted value alone, NOT on "event: 'kv_ops'": vitest

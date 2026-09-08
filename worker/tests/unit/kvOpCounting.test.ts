@@ -1,5 +1,6 @@
 /**
- * `createCountingKv` — the per-request KV operation counter (src/index.ts).
+ * `createCountingKv` — the per-request KV operation counter
+ * (src/middleware/kvOpCounting.ts).
  *
  * WHY THIS FILE BRINGS ITS OWN KV DOUBLE. The counter is a Proxy, and the one
  * thing a forwarding Proxy can get wrong is the RECEIVER: a real Cloudflare KV
@@ -23,7 +24,10 @@
  * double's own object rather than a re-wrapped one.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { createCountingKv, type KvOpCounts } from "../../src/index";
+import {
+  createCountingKv,
+  type KvOpCounts,
+} from "../../src/middleware/kvOpCounting";
 
 /** One invocation the double saw, receiver verdict included. */
 interface CallRecord {
