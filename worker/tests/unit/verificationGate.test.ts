@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
+import { rateLimitBindings } from "../helpers/rateLimitBindings";
 import { ALICE, BOB } from "../helpers/ids";
 import { seedAuthToken } from "../helpers/auth";
 import {
@@ -92,7 +93,15 @@ async function apiRequest(
       typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
   }
 
-  const env = opts.devMode === false ? { KV: kv } : { KV: kv, DEV_MODE: "1" };
+  // The Rate Limiting bindings a production deploy carries go into BOTH
+  // branches: without them a `devMode: false` request falls back to the per-IP
+  // KV counter — a limiter the cases below do not want in the way, and one that
+  // logs RATE_LIMIT_BINDING_MISSING on every call.
+  const bindings = rateLimitBindings();
+  const env =
+    opts.devMode === false
+      ? { KV: kv, ...bindings }
+      : { KV: kv, DEV_MODE: "1", ...bindings };
   return app.request(path, init, env);
 }
 
@@ -875,11 +884,13 @@ describe("verifySecret format validation", () => {
 // secret is admitted no matter how spent the window is, and charges nothing.
 //
 // These cases run WITHOUT DEV_MODE, which every other suite sets: DEV_MODE
-// short-circuits both limiters, so the ceiling would never fire. Running live
-// also arms the per-IP limits — every sensitive route allows only
-// `rateLimitBucketFor(...).limit` requests per address per minute — hence a
-// fresh source address per request, which is precisely the attacker this
-// ceiling exists to bound.
+// short-circuits both limiters, so the ceiling would never fire. A fresh source
+// address per request models precisely the attacker this ceiling exists to
+// bound — and it is also what keeps the CALLER-scoped lockout
+// (`verifyfail:{userId}:{caller}`) out of the way, so the verdict observed is
+// the account-wide ceiling's. The per-IP tier is a Rate Limiting binding since
+// #160 item 1 and `apiRequest` injects a stub that admits everything, so it
+// cannot answer in the gate's place either.
 // ===========================================================================
 
 let sourceCounter = 0;
@@ -891,32 +902,21 @@ function freshSourceIp(): string {
 }
 
 /**
- * The per-IP limiter's minute bucket, in ms (`BUCKET_MS` in
- * `middleware/rateLimit.ts`, which does not export it).
+ * One live lookup from a FIXED source address — reusing one address is the
+ * whole point of the lockout cases, since `verifyfail:{userId}:{caller}` is
+ * keyed on it.
  *
- * Used ONLY to roll the pinned clock forward, and only by the cases that must
- * reuse ONE source address — reusing an address is the whole point of a lockout
- * case, but the sensitive tier admits just a handful of requests per address per
- * bucket and would refuse them before the gate ever saw them. If the production
- * window ever grows past this value those cases fail loudly with a per-IP
- * RATE_LIMITED where a gate verdict was expected; they cannot silently pass.
+ * These calls used to roll the pinned clock into a fresh per-IP minute bucket
+ * first, because the sensitive tier's KV counter admitted only a handful of
+ * requests per address per bucket and would have refused them before the gate
+ * ever saw them. Since #160 item 1 that tier is a Rate Limiting binding, and
+ * `apiRequest` injects a stub that admits everything — so the clock no longer
+ * has to move, and the pinned time these cases set up stays put.
  */
-const PER_IP_BUCKET_MS = 60_000;
-
-/**
- * One live lookup from a FIXED source address, with the pinned clock rolled into
- * a fresh per-IP bucket first so the per-IP limiter never gets in the way and
- * only the gate's own verdict is observed.
- *
- * Rolling forward a few minutes is safe for everything else these cases depend
- * on: the attempt ceiling's window is an hour and the caller lockout lasts
- * VERIFY_LOCKOUT_MS (15 min).
- */
-function lookupFromPinnedSource(
+function lookupFromSameSource(
   callerIp: string,
   verifySecret: string,
 ): Promise<Response> {
-  vi.setSystemTime(Date.now() + PER_IP_BUCKET_MS);
   return lookup(USER_ID, { verifySecret, callerIp, devMode: false });
 }
 
@@ -1140,13 +1140,10 @@ describe("Per-userId verification attempt ceiling", () => {
   });
 
   it("should not spend the ceiling for a caller who is already locked out", async () => {
-    // One address throughout — that is what a lockout is keyed on. The per-IP
-    // minute limiter would refuse this run long before the lockout arrives, so
-    // every call steps the pinned clock into a fresh per-IP bucket first; the
-    // hour-long ceiling window and the 15-minute lockout both outlive that.
+    // One address throughout — that is what a lockout is keyed on.
     const lockedOutIp = freshSourceIp();
     for (let i = 0; i < VERIFY_MAX_FAILURES; i++) {
-      const res = await lookupFromPinnedSource(lockedOutIp, WRONG_PIN);
+      const res = await lookupFromSameSource(lockedOutIp, WRONG_PIN);
       expect(res.status).toBe(403);
       expect(((await res.json()) as Json).error.code).toBe(
         "VERIFICATION_FAILED",
@@ -1157,7 +1154,7 @@ describe("Per-userId verification attempt ceiling", () => {
     // The ceiling is read AFTER the lockout check, so a locked-out caller can
     // no longer burn the victim's remaining budget.
     for (let i = 0; i < 2; i++) {
-      const res = await lookupFromPinnedSource(lockedOutIp, WRONG_PIN);
+      const res = await lookupFromSameSource(lockedOutIp, WRONG_PIN);
       expect(res.status).toBe(429);
       const json = (await res.json()) as Json;
       expect(json.error.code).toBe("VERIFICATION_LOCKED");
@@ -1172,12 +1169,12 @@ describe("Per-userId verification attempt ceiling", () => {
     // nothing to the account's window.
     const lockedOutIp = freshSourceIp();
     for (let i = 0; i < VERIFY_MAX_FAILURES; i++) {
-      expect(
-        (await lookupFromPinnedSource(lockedOutIp, WRONG_PIN)).status,
-      ).toBe(403);
+      expect((await lookupFromSameSource(lockedOutIp, WRONG_PIN)).status).toBe(
+        403,
+      );
     }
 
-    const res = await lookupFromPinnedSource(lockedOutIp, CORRECT_PIN);
+    const res = await lookupFromSameSource(lockedOutIp, CORRECT_PIN);
     expect(res.status).toBe(429);
     expect(((await res.json()) as Json).error.code).toBe("VERIFICATION_LOCKED");
     expect(await attemptsCharged(USER_ID)).toBe(VERIFY_MAX_FAILURES);

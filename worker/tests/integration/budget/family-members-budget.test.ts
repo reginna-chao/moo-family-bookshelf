@@ -14,34 +14,38 @@
  * a permanent authorisation. #162 exists to stop that repeating.
  *
  * PER-KEY CLASSIFICATION
- * - `ratelimit:{ip}:{minuteBucket}` — 1 get (middleware/rateLimit.ts:232) +
- *   1 put (:257). WASTE. EXPECTED TO DISAPPEAR when issue #160 item 1 lands
- *   (per-IP limiting moves to Cloudflare's native Rate Limiting binding, which
- *   costs no KV op). LOWER the pinned arrays then; do not preserve these — and
- *   note that on THIS endpoint they are the only write of the whole request, so
- *   after #160 item 1 the expected `putKeys()` is the empty array.
+ * - Per-IP counter — REMOVED by #160 item 1. The standard tier is now counted
+ *   by Cloudflare's native Rate Limiting binding (rateLimit.ts:427): zero KV
+ *   operations, so `ratelimit:{ip}:{minuteBucket}` is gone. On THIS endpoint it
+ *   was the only write of the whole request, so `putKeys()` is now the empty
+ *   array. The binding call it was replaced by is pinned in `calls` below.
  * - NO per-userId counter here, unlike every other endpoint in this directory:
  *   the members handler (routes/family.ts:792-827) never calls
- *   `enforcePerUserRateLimit`. So there is no
- *   `ratelimit:user:*:{userId}:{bucket}` pair to remove under #160 item 1, and
- *   none must be added while pinning this budget. If one ever appears in the
- *   arrays below, a rate limit was added to a read-only endpoint — treat that
- *   as the change to justify, not as drift to absorb.
+ *   `enforcePerUserRateLimit`. So `calls` below holds exactly ONE entry, the
+ *   per-IP one, and no `ratelimit:user:*` key may appear in either array. If a
+ *   second binding call ever shows up, a rate limit was added to a read-only
+ *   endpoint — treat that as the change to justify, not as drift to absorb.
  * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
  * - `member:{userId}` (routes/family.ts:810) and `family:{familyId}` (:815) —
  *   membership check then the record itself. Real cost, and FLAT in the member
  *   count: the response is the family record, so there is no per-member
  *   fan-out to remove (contrast the bookshelf aggregation).
  *
- * NO DEV_MODE ON THE MEASURED REQUEST, deliberately: the per-IP rate-limit path
- * short-circuits under it (rateLimit.ts:208), which would hide exactly the two
- * counter ops annotated as waste above. See the scope caveat at the end of
- * tests/helpers/kvOps.ts.
+ * THE RATE LIMITING BINDINGS ARE INJECTED, deliberately: every production
+ * deploy carries all four (worker/wrangler.toml), and a request sent without
+ * them falls back to the KV counters — which would re-pin numbers no deployed
+ * Worker produces. See tests/helpers/rateLimitBindings.ts.
+ *
+ * NO DEV_MODE ON THE MEASURED REQUEST, deliberately: the per-IP rate-limit
+ * layer short-circuits under it (rateLimit.ts:415) ahead of the binding lookup,
+ * which would hide the fixed cost pinned in `calls`. See the scope caveat at
+ * the end of tests/helpers/kvOps.ts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../../src/index";
 import { createMockKV } from "../../helpers/mockKv";
 import { watchKvOps } from "../../helpers/kvOps";
+import { createRateLimitBindings } from "../../helpers/rateLimitBindings";
 import { seedAuthToken } from "../../helpers/auth";
 import { BoolFlag, kvKeys, type FamilyRecord } from "../../../src/kv/schema";
 import { USER1, USER2 } from "../../helpers/ids";
@@ -51,7 +55,6 @@ const PATH = `/api/family/${FAMILY_ID}/members`;
 /** Unique per file so the per-IP counter cannot be shared with another suite. */
 const CALLER_IP = "10.0.0.6";
 const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
-const MINUTE_BUCKET = Math.floor(PINNED_NOW / 60_000);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -77,8 +80,10 @@ async function seedFamily(): Promise<string> {
   return seedAuthToken(kv, USER1);
 }
 
-function measuredRequest(token: string) {
-  return app.request(
+/** The measured request plus the binding calls it made. */
+async function measuredRequest(token: string) {
+  const { bindings, calls } = createRateLimitBindings();
+  const res = await app.request(
     PATH,
     {
       method: "GET",
@@ -88,13 +93,14 @@ function measuredRequest(token: string) {
         "cf-connecting-ip": CALLER_IP,
       },
     },
-    { KV: kv },
+    { KV: kv, ...bindings },
   );
+  return { res, calls };
 }
 
 beforeEach(() => {
   kv = createMockKV();
-  // Pin Date so the rate-limit bucket index in the expected keys is exact.
+  // Pin Date so the seeded timestamps are deterministic.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(PINNED_NOW);
 });
@@ -105,11 +111,11 @@ afterEach(() => {
 });
 
 describe("KV budget: GET /api/family/:id/members", () => {
-  it("performs exactly 4 KV reads and 1 KV write for a 2-member family", async () => {
+  it("performs exactly 3 KV reads and no KV write for a 2-member family", async () => {
     const token = await seedFamily();
 
     const ops = watchKvOps(kv);
-    const res = await measuredRequest(token);
+    const { res, calls } = await measuredRequest(token);
 
     expect(res.status).toBe(200);
     // Flat in the member count: both members come from the one family read.
@@ -117,8 +123,6 @@ describe("KV budget: GET /api/family/:id/members", () => {
     expect(body.data.members).toHaveLength(2);
 
     expect(ops.getKeys()).toEqual([
-      // WASTE (#160 item 1) — per-IP counter read, rateLimit.ts:232
-      `ratelimit:${CALLER_IP}:${MINUTE_BUCKET}`,
       // auth middleware, auth.ts:46
       kvKeys.authToken(token),
       // handler, family.ts:810 / :815 — no per-userId counter on this route
@@ -126,13 +130,16 @@ describe("KV budget: GET /api/family/:id/members", () => {
       kvKeys.family(FAMILY_ID),
     ]);
 
-    expect(ops.putKeys()).toEqual([
-      // WASTE (#160 item 1) — per-IP counter write, rateLimit.ts:257. The ONLY
-      // write of this read-only request; expect [] once #160 item 1 lands.
-      `ratelimit:${CALLER_IP}:${MINUTE_BUCKET}`,
-    ]);
-
-    // A read-only listing deletes nothing.
+    // A read-only listing now writes and deletes nothing at all: the per-IP
+    // counter was this request's ONLY write before #160 item 1.
+    expect(ops.putKeys()).toEqual([]);
     expect(ops.deleteKeys()).toEqual([]);
+
+    // The whole fixed rate-limit cost of this endpoint: ONE per-IP binding
+    // call. A second entry here would mean a per-userId ceiling was added to a
+    // read-only route.
+    expect(calls).toEqual([
+      { name: "RATE_LIMIT_60_PER_MIN", key: `ratelimit:${CALLER_IP}` },
+    ]);
   });
 });

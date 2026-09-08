@@ -35,6 +35,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
+import { createRateLimitBindings } from "../helpers/rateLimitBindings";
 import { seedAuthToken } from "../helpers/auth";
 import {
   BoolFlag,
@@ -152,13 +153,21 @@ async function seedFamilyWithBooks(): Promise<string> {
   return seedAuthToken(kv, USER1);
 }
 
+/**
+ * The Rate Limiting bindings a production deploy carries. Injected on every
+ * request here so the counts this suite compares against the recorder are the
+ * ones a deployed Worker produces, not the KV-fallback ones.
+ */
 function bookshelfRequest(
   ip: string,
   opts?: { token?: string; devMode?: boolean },
 ) {
   const headers: Record<string, string> = { "cf-connecting-ip": ip };
   if (opts?.token) headers["Authorization"] = `Bearer ${opts.token}`;
-  const env = opts?.devMode ? { KV: kv, DEV_MODE: "1" } : { KV: kv };
+  const { bindings } = createRateLimitBindings();
+  const env = opts?.devMode
+    ? { KV: kv, DEV_MODE: "1", ...bindings }
+    : { KV: kv, ...bindings };
   return app.request(BOOKSHELF_PATH, { method: "GET", headers }, env);
 }
 
@@ -196,9 +205,13 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
       deletes: ops.deleteKeys().length,
     });
 
-    // Non-vacuity: without traffic the three equalities above would be 0 === 0.
+    // Non-vacuity for `reads`: without traffic that equality would be 0 === 0.
+    // `writes` and `deletes` genuinely ARE zero here since #160 item 1 moved
+    // both rate-limit counters onto the platform — a read-only aggregation now
+    // writes nothing. Non-zero write/delete counting is pinned directly on
+    // `createCountingKv` in tests/unit/kvOpCounting.test.ts.
     expect(ops.getKeys().length).toBeGreaterThan(0);
-    expect(ops.putKeys().length).toBeGreaterThan(0);
+    expect(ops.putKeys()).toEqual([]);
   });
 
   it("logs the route pattern, never the raw path that carries the familyId", async () => {
@@ -222,10 +235,11 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
     const logSpy = silenceConsoleLog();
 
     // No seed: an unknown-but-well-formed token stops at the snapshot miss.
+    const { bindings } = createRateLimitBindings();
     const res = await app.request(
       `/api/public/${SHARE_TOKEN}`,
       { method: "GET", headers: { "cf-connecting-ip": IP.shareToken } },
-      { KV: kv },
+      { KV: kv, ...bindings },
     );
 
     expect(res.status).toBe(404);
@@ -275,10 +289,11 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
     });
 
     // The point of the case: work already paid for before the throw is still
-    // reported. The family read is the last one the handler reached.
+    // reported. The family read is the last one the handler reached. Only
+    // `reads` can carry that proof — the request performs no write at all now
+    // that #160 item 1 moved both rate-limit counters onto the platform.
     expect(ops.getKeys()).toContain(kvKeys.family(FAMILY_ID));
     expect(lines[0].reads).toBeGreaterThan(0);
-    expect(lines[0].writes).toBeGreaterThan(0);
   });
 
   it("logs the line under DEV_MODE too, with the counts dev mode actually incurs", async () => {
@@ -348,10 +363,14 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
       deletes: ops.deleteKeys().length,
     });
 
-    // Corroborates the comment above: the aggregation never ran, so only the
-    // per-IP counter's get+put was paid for. (Positive companion for this
-    // negative: the error-path case asserts the same key IS read when the
-    // handler does run.)
+    // Corroborates the comment above: the aggregation never ran. Since #160
+    // item 1 the per-IP tier costs no KV operation, and authMiddleware refuses
+    // a request with no Authorization header before its own `token:` read — so
+    // a stranger's rejected request is now logged as a genuine 0/0/0.
+    expect(ops.getKeys()).toEqual([]);
+    expect(ops.putKeys()).toEqual([]);
+    // (Positive companion for that negative: the error-path case asserts the
+    // family key IS read when the handler does run.)
     expect(ops.getKeys()).not.toContain(kvKeys.family(FAMILY_ID));
   });
 });

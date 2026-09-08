@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
+import { rateLimitBindings } from "../helpers/rateLimitBindings";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -11,12 +12,23 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
+/**
+ * Dev env. The Rate Limiting bindings are included even though DEV_MODE
+ * short-circuits both limiters: the cases that override `CF_WORKER` with a
+ * production name turn dev mode OFF, and would otherwise fall back to the KV
+ * counter and log RATE_LIMIT_BINDING_MISSING.
+ */
 function devEnv(overrides: Record<string, unknown> = {}) {
-  return { KV: kv, DEV_MODE: "1", ...overrides };
+  return { KV: kv, DEV_MODE: "1", ...rateLimitBindings(), ...overrides };
 }
 
+/**
+ * Production-shaped env: no DEV_MODE, and the four Rate Limiting bindings a
+ * deployed Worker carries. Without them the per-IP tier falls back to its KV
+ * counter and logs RATE_LIMIT_BINDING_MISSING on every request.
+ */
 function prodEnv(overrides: Record<string, unknown> = {}) {
-  return { KV: kv, ...overrides };
+  return { KV: kv, ...rateLimitBindings(), ...overrides };
 }
 
 describe("GET /api/_openapi.json", () => {

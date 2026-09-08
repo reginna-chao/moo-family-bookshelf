@@ -14,19 +14,16 @@
  * a permanent authorisation. #162 exists to stop that repeating.
  *
  * PER-KEY CLASSIFICATION
- * - `ratelimit:{ip}:{minuteBucket}` — 1 get (middleware/rateLimit.ts:232) +
- *   1 put (:257). WASTE. EXPECTED TO DISAPPEAR when issue #160 item 1 lands
- *   (per-IP limiting moves to Cloudflare's native Rate Limiting binding, which
- *   costs no KV op). LOWER the pinned arrays then; do not preserve these.
- * - `ratelimit:user:borrow-create:{userId}:{minuteBucket}` — 1 get
- *   (peekPerUserRateLimit, rateLimit.ts:325) + 1 put (chargePerUserRateLimit,
- *   rateLimit.ts:364); scope "borrow-create", ceiling 10 per 60s
- *   (routes/borrow.ts:199-204). WASTE, same fate under #160 item 1 — remove
- *   both entries when the KV counter is replaced.
- *   Whatever replaces it MUST stay keyed on the AUTHENTICATED caller, never
- *   on a body/path target id (security-ux Invariant 6) — replace these two
- *   entries with the new mechanism's equivalent assertion; do not simply
- *   delete them, or the keying loses its only automatic check.
+ * - Per-IP counter — REMOVED by #160 item 1. The standard tier is now counted
+ *   by Cloudflare's native Rate Limiting binding (rateLimit.ts:427): zero KV
+ *   operations, so `ratelimit:{ip}:{minuteBucket}` is gone from both arrays.
+ *   The binding call it was replaced by is pinned in `calls` below instead.
+ * - Per-userId `borrow-create` counter — REMOVED by #160 item 1 for the same
+ *   reason (rateLimit.ts:608); scope "borrow-create", ceiling 10 per 60s
+ *   (routes/borrow.ts:199-204), which is what selects RATE_LIMIT_10_PER_MIN.
+ *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
+ *   target id (security-ux Invariant 6): now that the KV key is gone, the
+ *   `calls` assertion below is that rule's only automatic check.
  * - `borrow:{existingRequestId}` — ONE READ PER ENTRY of the family's borrow
  *   index (routes/borrow.ts:267-271), only to answer the DUPLICATE_REQUEST
  *   check. WASTE: this read count grows with the family's borrow history and is
@@ -41,15 +38,21 @@
  *   `Promise.all` under the "No atomic CAS" NOTE) — real cost of creating the
  *   request.
  *
- * NO DEV_MODE ON THE MEASURED REQUEST, deliberately: both rate-limit paths
- * short-circuit under it (rateLimit.ts:208, :407), which would hide exactly the
- * four counter ops annotated as waste above. See the scope caveat at the end of
- * tests/helpers/kvOps.ts.
+ * THE RATE LIMITING BINDINGS ARE INJECTED, deliberately: every production
+ * deploy carries all four (worker/wrangler.toml), and a request sent without
+ * them falls back to the KV counters — which would re-pin numbers no deployed
+ * Worker produces. See tests/helpers/rateLimitBindings.ts.
+ *
+ * NO DEV_MODE ON THE MEASURED REQUEST, deliberately: both rate-limit layers
+ * short-circuit under it (rateLimit.ts:415, :601) ahead of the binding lookup,
+ * which would hide the fixed cost pinned in `calls`. See the scope caveat at
+ * the end of tests/helpers/kvOps.ts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../../src/index";
 import { createMockKV } from "../../helpers/mockKv";
 import { watchKvOps } from "../../helpers/kvOps";
+import { createRateLimitBindings } from "../../helpers/rateLimitBindings";
 import { seedAuthToken } from "../../helpers/auth";
 import {
   BoolFlag,
@@ -65,7 +68,6 @@ const PATH = `/api/family/${FAMILY_ID}/borrow`;
 /** Unique per file so the per-IP counter cannot be shared with another suite. */
 const CALLER_IP = "10.0.0.2";
 const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
-const MINUTE_BUCKET = Math.floor(PINNED_NOW / 60_000);
 
 /** Fixed v4-shaped ids (RequestIdSchema, src/schemas/common.ts) already indexed. */
 const EXISTING_IDS = [
@@ -118,8 +120,10 @@ async function seedFamilyWithBorrowIndex(): Promise<string> {
   return seedAuthToken(kv, USER1);
 }
 
-function measuredRequest(token: string) {
-  return app.request(
+/** The measured request plus the binding calls it made. */
+async function measuredRequest(token: string) {
+  const { bindings, calls } = createRateLimitBindings();
+  const res = await app.request(
     PATH,
     {
       method: "POST",
@@ -135,13 +139,14 @@ function measuredRequest(token: string) {
         ownerId: USER2,
       }),
     },
-    { KV: kv },
+    { KV: kv, ...bindings },
   );
+  return { res, calls };
 }
 
 beforeEach(() => {
   kv = createMockKV();
-  // Pin Date so the rate-limit bucket indexes in the expected keys are exact.
+  // Pin Date so the seeded timestamps are deterministic.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(PINNED_NOW);
 });
@@ -152,11 +157,11 @@ afterEach(() => {
 });
 
 describe("KV budget: POST /api/family/:id/borrow", () => {
-  it("performs exactly 7 KV reads and 4 KV writes against a 2-entry borrow index", async () => {
+  it("performs exactly 5 KV reads and 2 KV writes against a 2-entry borrow index", async () => {
     const token = await seedFamilyWithBorrowIndex();
 
     const ops = watchKvOps(kv);
-    const res = await measuredRequest(token);
+    const { res, calls } = await measuredRequest(token);
 
     expect(res.status).toBe(201);
     // The new record's id is server-generated (crypto.randomUUID, borrow.ts:292),
@@ -165,12 +170,8 @@ describe("KV budget: POST /api/family/:id/borrow", () => {
     const newRequestId = created.data.requestId as string;
 
     expect(ops.getKeys()).toEqual([
-      // WASTE (#160 item 1) — per-IP counter read, rateLimit.ts:232
-      `ratelimit:${CALLER_IP}:${MINUTE_BUCKET}`,
       // auth middleware, auth.ts:46
       kvKeys.authToken(token),
-      // WASTE (#160 item 1) — per-userId counter read, rateLimit.ts:325
-      `ratelimit:user:borrow-create:${USER1}:${MINUTE_BUCKET}`,
       // handler, borrow.ts:208 / :263
       kvKeys.family(FAMILY_ID),
       kvKeys.borrowsByFamily(FAMILY_ID),
@@ -180,10 +181,6 @@ describe("KV budget: POST /api/family/:id/borrow", () => {
     ]);
 
     expect(ops.putKeys()).toEqual([
-      // WASTE (#160 item 1) — per-IP counter write, rateLimit.ts:257
-      `ratelimit:${CALLER_IP}:${MINUTE_BUCKET}`,
-      // WASTE (#160 item 1) — per-userId counter write, rateLimit.ts:364
-      `ratelimit:user:borrow-create:${USER1}:${MINUTE_BUCKET}`,
       // handler, borrow.ts:328 / :329
       kvKeys.borrow(newRequestId),
       kvKeys.borrowsByFamily(FAMILY_ID),
@@ -191,5 +188,17 @@ describe("KV budget: POST /api/family/:id/borrow", () => {
 
     // Creating a request removes nothing.
     expect(ops.deleteKeys()).toEqual([]);
+
+    // The fixed per-request rate-limit cost, in the form it now takes: two
+    // binding calls, zero KV operations. The second key carries the
+    // AUTHENTICATED caller's id (Invariant 6), and the binding NAME encodes the
+    // ceiling routes/borrow.ts asked for.
+    expect(calls).toEqual([
+      { name: "RATE_LIMIT_60_PER_MIN", key: `ratelimit:${CALLER_IP}` },
+      {
+        name: "RATE_LIMIT_10_PER_MIN",
+        key: `ratelimit:user:borrow-create:${USER1}`,
+      },
+    ]);
   });
 });

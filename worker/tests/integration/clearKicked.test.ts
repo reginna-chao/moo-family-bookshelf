@@ -31,6 +31,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
+import { createRateLimitBindings } from "../helpers/rateLimitBindings";
 import { seedAuthToken, tokenFor } from "../helpers/auth";
 import {
   BoolFlag,
@@ -585,13 +586,22 @@ async function buildRequest(
   return app.request(path, { method, headers }, env);
 }
 
-/** Live request: no DEV_MODE, so both limiters run. */
+/**
+ * Live request: no DEV_MODE, so both limiters run — and WITH the Rate Limiting
+ * bindings a production deploy carries, so the per-IP tier is counted by the
+ * platform rather than falling back to its KV counter. The ceiling under test
+ * here is hourly, which has no binding at all and stays on KV by design; the
+ * bindings only keep the per-IP layer out of the KV assertions below.
+ */
 function prodRequest(
   method: string,
   path: string,
   opts: RequestOptions = {},
 ): Promise<Response> {
-  return buildRequest(method, path, opts, { KV: kv });
+  return buildRequest(method, path, opts, {
+    KV: kv,
+    ...createRateLimitBindings().bindings,
+  });
 }
 
 /** DEV_MODE request: every limiter short-circuits — for setup only. */

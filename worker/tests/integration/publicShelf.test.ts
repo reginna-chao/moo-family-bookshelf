@@ -3,6 +3,7 @@ import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { seedAuthToken } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
+import { createRateLimitBindings } from "../helpers/rateLimitBindings";
 import {
   BoolFlag,
   kvKeys,
@@ -1240,7 +1241,11 @@ const PINNED_WRITE_NOW = Date.parse("2026-01-01T00:30:00.000Z");
 
 describe("Public shelf per-userId write ceiling", () => {
   /**
-   * Same as {@link request} but WITHOUT `DEV_MODE`, so the live limiters run.
+   * Same as {@link request} but WITHOUT `DEV_MODE`, so the live limiters run —
+   * and WITH the Rate Limiting bindings a production deploy carries, so the
+   * per-IP tier is counted by the platform instead of falling back to a KV
+   * counter. The `public-shelf` ceiling under test is hourly: it has no binding
+   * at all and stays on KV by design.
    */
   async function prodRequest(
     method: string,
@@ -1253,7 +1258,10 @@ describe("Public shelf per-userId write ceiling", () => {
     if (opts?.token) headers["Authorization"] = `Bearer ${opts.token}`;
     const init: RequestInit = { method, headers };
     if (opts?.body) init.body = opts.body;
-    return app.request(path, init, { KV: kv });
+    return app.request(path, init, {
+      KV: kv,
+      ...createRateLimitBindings().bindings,
+    });
   }
 
   const createBody = (title = "共用額度") =>

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
+import { createRateLimitBindings } from "../helpers/rateLimitBindings";
 import {
   BoolFlag,
   kvKeys,
@@ -916,8 +917,14 @@ describe("PUT /:id/family-prefs per-user rate limit", () => {
     }
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
-    // No DEV_MODE → per-user rate limit is enforced.
-    return app.request(path, init, { KV: kv });
+    // No DEV_MODE → per-user rate limit is enforced. The Rate Limiting
+    // bindings a production deploy carries are injected too, so the per-IP
+    // tier is the platform's business and cannot answer 429 in place of the
+    // hourly `family-prefs` ceiling this suite is about.
+    return app.request(path, init, {
+      KV: kv,
+      ...createRateLimitBindings().bindings,
+    });
   }
 
   it("returns 429 after 60 family-prefs PUTs per user per hour", async () => {
