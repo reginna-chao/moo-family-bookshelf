@@ -32,17 +32,21 @@
  * growth rate. See also the NOTE above the index write in
  * `worker/src/routes/borrow.ts`, which points back at this file.
  *
- * NO DEV_MODE ON THE MEASURED REQUESTS, deliberately: the per-IP and per-userId
- * rate-limit paths short-circuit under it (middleware/rateLimit.ts:208, :407),
- * hiding four of the counted reads/writes. They are a CONSTANT here (they do
- * not scale with the index), so they cancel out of the difference — but the
- * measurement must still see the same pipeline the sibling budget files pin.
- * See the scope caveat at the end of tests/helpers/kvOps.ts.
+ * NO DEV_MODE ON THE MEASURED REQUESTS, and the Rate Limiting bindings ARE
+ * injected: together those two make the measurement see the pipeline a
+ * deployed Worker actually runs (see tests/helpers/rateLimitBindings.ts).
+ * Since #160 item 1 neither rate-limit layer on this route costs a KV
+ * operation at all, so the per-request CONSTANT is now just the auth token
+ * read plus the family and index reads — three, whatever the index size. A
+ * constant cancels out of the difference either way; what matters is that the
+ * pipeline matches the sibling budget files. See the scope caveat at the end
+ * of tests/helpers/kvOps.ts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../../src/index";
 import { createMockKV } from "../../helpers/mockKv";
 import { watchKvOps } from "../../helpers/kvOps";
+import { createRateLimitBindings } from "../../helpers/rateLimitBindings";
 import { seedAuthToken } from "../../helpers/auth";
 import {
   BoolFlag,
@@ -124,6 +128,7 @@ async function measureBorrowList(
 
   // Recorder installed AFTER seeding: only the measured request is counted.
   const ops = watchKvOps(kv);
+  const { bindings } = createRateLimitBindings();
   const res = await app.request(
     PATH,
     {
@@ -134,7 +139,7 @@ async function measureBorrowList(
         "cf-connecting-ip": CALLER_IP,
       },
     },
-    { KV: kv },
+    { KV: kv, ...bindings },
   );
 
   expect(res.status).toBe(200);

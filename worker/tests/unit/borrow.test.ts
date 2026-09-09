@@ -8,6 +8,10 @@ import {
   type BorrowRequest,
 } from "../../src/kv/schema";
 import { NOBODY, USER1, USER2, USER3 } from "../helpers/ids";
+import {
+  createRateLimitBindings,
+  type RateLimitBindingCall,
+} from "../helpers/rateLimitBindings";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -714,14 +718,24 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
   // DEV_MODE short-circuits `enforcePerUserRateLimit`, so the borrow POST below
   // goes through a helper that omits it. Family setup deliberately keeps using
   // the DEV_MODE helper: it must not spend any of the caller's budget.
+  //
+  // The `borrow-create` ceiling is 10 per 60s, so since #160 item 1 it is
+  // counted by a Rate Limiting binding and leaves NO KV key behind. "Was the
+  // caller charged?" is therefore read off the binding call log, not off KV —
+  // and the bindings must be injected, or the request would silently fall back
+  // to the old counter and the assertions would stop describing production.
 
-  /** Same as {@link request} but WITHOUT `DEV_MODE`, so the live limiters run. */
-  function prodRequest(
+  /**
+   * Same as {@link request} but WITHOUT `DEV_MODE` (so the live limiters run)
+   * and WITH the Rate Limiting bindings a production deploy carries. Returns
+   * the response together with every `limit()` call it made.
+   */
+  async function prodRequest(
     method: string,
     path: string,
     body?: unknown,
     authToken?: string,
-  ) {
+  ): Promise<{ res: Response; calls: RateLimitBindingCall[] }> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
@@ -730,10 +744,19 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
     }
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
-    return app.request(path, init, { KV: kv });
+    const { bindings, calls } = createRateLimitBindings();
+    const res = await app.request(path, init, { KV: kv, ...bindings });
+    return { res, calls };
   }
 
-  /** Every per-userId counter key currently in KV, whatever the scope. */
+  /** Per-userId charges among `calls` — the per-IP tier call is not one. */
+  function perUserCharges(calls: RateLimitBindingCall[]): string[] {
+    return calls
+      .map((call) => call.key)
+      .filter((key) => key.startsWith(PER_USER_COUNTER_PREFIX));
+  }
+
+  /** No per-userId counter may survive in KV either, whatever the scope. */
   async function perUserCounterKeys(): Promise<string[]> {
     const listed = await kv.list();
     return listed.keys
@@ -744,7 +767,7 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
   it("should not charge the borrow-create counter for a rejected cover URL", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
-    const res = await prodRequest(
+    const { res, calls } = await prodRequest(
       "POST",
       `/api/family/${familyId}/borrow`,
       {
@@ -758,13 +781,14 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
 
     // A format error must not burn quota — otherwise a malformed request is a
     // free lever for exhausting the caller's own borrow budget.
+    expect(perUserCharges(calls)).toHaveLength(0);
     expect(await perUserCounterKeys()).toHaveLength(0);
   });
 
   it("should not charge the borrow-create counter for a wrong-typed cover URL", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
-    const res = await prodRequest(
+    const { res, calls } = await prodRequest(
       "POST",
       `/api/family/${familyId}/borrow`,
       { ...validBorrowBody, bookCoverUrl: 0 },
@@ -777,13 +801,14 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
     // different, so the sibling stays green if the INVALID_FIELDS type guard is
     // ever moved AFTER `enforcePerUserRateLimit`. This is the case that goes
     // red — a wrong-typed body must not burn the caller's borrow-create quota.
+    expect(perUserCharges(calls)).toHaveLength(0);
     expect(await perUserCounterKeys()).toHaveLength(0);
   });
 
   it("should charge the borrow-create counter once for an accepted cover URL", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
-    const res = await prodRequest(
+    const { res, calls } = await prodRequest(
       "POST",
       `/api/family/${familyId}/borrow`,
       validBorrowBody,
@@ -791,13 +816,14 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
     );
     expect(res.status).toBe(201);
 
-    const keys = await perUserCounterKeys();
-    expect(keys).toEqual([
-      expect.stringContaining(
-        `${PER_USER_COUNTER_PREFIX}${BORROW_CREATE_SCOPE}:${USER2}:`,
-      ),
+    // Positive companion for the two "not charged" cases above: without it a
+    // handler that never charged at all would keep them green. Exactly one
+    // charge, on the AUTHENTICATED caller's own id (security-ux Invariant 6).
+    expect(perUserCharges(calls)).toEqual([
+      `${PER_USER_COUNTER_PREFIX}${BORROW_CREATE_SCOPE}:${USER2}`,
     ]);
-    expect(await kv.get(keys[0])).toBe("1");
+    // …and it cost no KV operation, which is what #160 item 1 bought.
+    expect(await perUserCounterKeys()).toHaveLength(0);
   });
 });
 

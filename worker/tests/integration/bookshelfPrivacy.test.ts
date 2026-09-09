@@ -3,6 +3,10 @@ import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
 import {
+  createRateLimitBindings,
+  type RateLimitDecider,
+} from "../helpers/rateLimitBindings";
+import {
   BoolFlag,
   kvKeys,
   type UserBooksRecord,
@@ -31,13 +35,26 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-/** Non-dev request (rate limits active). */
-function prodRequest(method: string, path: string, authToken?: string) {
+/**
+ * Non-dev request (rate limits active), with the Rate Limiting bindings a
+ * production deploy carries — without them the per-minute limits fall back to
+ * their KV counters, which is not the world this suite is about.
+ *
+ * `decide` lets a case simulate the platform refusing a particular counter;
+ * omitted, every call is admitted.
+ */
+function prodRequest(
+  method: string,
+  path: string,
+  authToken?: string,
+  decide?: RateLimitDecider,
+) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-  return app.request(path, { method, headers }, { KV: kv });
+  const { bindings } = createRateLimitBindings(decide);
+  return app.request(path, { method, headers }, { KV: kv, ...bindings });
 }
 
 function book(
@@ -503,7 +520,20 @@ describe("GET /api/family/:id/bookshelf — readmooUrl read-side sanitize", () =
 // ===========================================================================
 // BE-3: per-user rate limit on the bookshelf endpoint (max 30 / 60s window).
 // Mirrors the borrow-list per-user rate-limit guard.
+//
+// Since #160 item 1 the COUNTING is Cloudflare's, not ours: the handler hands
+// the platform a key and renders whatever verdict comes back. So the stub
+// below plays the platform — it counts calls on the bookshelf key and refuses
+// the 31st — and what is under test here is what the Worker still owns: that
+// every request charges the SAME key (or the platform could not accumulate a
+// count at all), that the key is the AUTHENTICATED caller's own id, and that a
+// refusal is rendered as 429 RATE_LIMITED with a Retry-After.
 // ===========================================================================
+
+/** The counter key routes/bookshelf.ts must charge, spelled out as an oracle. */
+const BOOKSHELF_LIMIT_KEY = `ratelimit:user:bookshelf:${USER1}`;
+/** Ceiling in routes/bookshelf.ts, mirrored here to drive the stub. */
+const BOOKSHELF_LIMIT = 30;
 
 describe("GET /api/family/:id/bookshelf — per-user rate limit", () => {
   it("rate-limits a single authenticated user after 30 requests within the window", async () => {
@@ -511,25 +541,51 @@ describe("GET /api/family/:id/bookshelf — per-user rate limit", () => {
       book("shared-1", BoolFlag.TRUE),
     ]);
 
+    let charged = 0;
+    const decide: RateLimitDecider = (_name, key) => {
+      if (key !== BOOKSHELF_LIMIT_KEY) return true;
+      charged += 1;
+      return charged <= BOOKSHELF_LIMIT;
+    };
+    const shelfRequest = () =>
+      prodRequest("GET", `/api/family/${familyId}/bookshelf`, token, decide);
+
     // 30 requests all succeed.
-    for (let i = 0; i < 30; i++) {
-      const res = await prodRequest(
-        "GET",
-        `/api/family/${familyId}/bookshelf`,
-        token,
-      );
-      expect(res.status).toBe(200);
+    for (let i = 0; i < BOOKSHELF_LIMIT; i++) {
+      expect((await shelfRequest()).status).toBe(200);
     }
+    // Non-vacuity: they only succeeded because all 30 landed on the ONE key
+    // the stub is counting. A per-request key would leave this at 0.
+    expect(charged).toBe(BOOKSHELF_LIMIT);
 
     // 31st request is rate-limited.
-    const blocked = await prodRequest(
-      "GET",
-      `/api/family/${familyId}/bookshelf`,
-      token,
-    );
+    const blocked = await shelfRequest();
     expect(blocked.status).toBe(429);
     const json = (await blocked.json()) as Json;
     expect(json.error.code).toBe("RATE_LIMITED");
     expect(blocked.headers.get("Retry-After")).toBeTruthy();
+  });
+
+  it("charges the ceiling to the authenticated caller, not to the family in the path", async () => {
+    // security-ux Invariant 6: a counter that can deny service must never be
+    // chargeable on a caller-supplied target id. With the KV key gone, this is
+    // the assertion that keeps that honest for this route.
+    const { familyId, token } = await seedSoloFamily([
+      book("shared-1", BoolFlag.TRUE),
+    ]);
+
+    const { bindings, calls } = createRateLimitBindings();
+    const res = await app.request(
+      `/api/family/${familyId}/bookshelf`,
+      { method: "GET", headers: { Authorization: `Bearer ${token}` } },
+      { KV: kv, ...bindings },
+    );
+
+    expect(res.status).toBe(200);
+    expect(calls).toContainEqual({
+      name: "RATE_LIMIT_30_PER_MIN",
+      key: BOOKSHELF_LIMIT_KEY,
+    });
+    expect(calls.every((call) => !call.key.includes(familyId))).toBe(true);
   });
 });

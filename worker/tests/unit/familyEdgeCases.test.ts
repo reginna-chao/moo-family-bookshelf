@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
+import { rateLimitBindings } from "../helpers/rateLimitBindings";
 import { kvKeys } from "../../src/kv/schema";
 import { USER1, USER2 } from "../helpers/ids";
 
@@ -339,7 +340,10 @@ describe("Index fallback routes", () => {
       },
     } as unknown as KVNamespace;
 
-    // POST /api/family is a public route (no auth needed), triggers KV.get which will throw
+    // POST /api/family is a public route (no auth needed), triggers KV.get which
+    // will throw. The Rate Limiting bindings a production deploy carries are
+    // injected, so the throw comes from the HANDLER's own read rather than from
+    // the per-IP counter falling back to KV.
     const res = await app.request(
       "/api/family",
       {
@@ -347,7 +351,7 @@ describe("Index fallback routes", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: USER1 }),
       },
-      { KV: brokenKv },
+      { KV: brokenKv, ...rateLimitBindings() },
     );
     expect(res.status).toBe(500);
     const json = (await res.json()) as Json;

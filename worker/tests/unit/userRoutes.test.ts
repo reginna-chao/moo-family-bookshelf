@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
+import { createRateLimitBindings } from "../helpers/rateLimitBindings";
 import { BoolFlag, kvKeys } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
 import { ALICE, BOB, USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
@@ -243,7 +244,13 @@ describe("PUT /:id/books per-user rate limit", () => {
     }
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
-    return app.request(path, init, { KV: kv });
+    // The Rate Limiting bindings a production deploy carries: without them the
+    // per-IP tier falls back to a KV counter that no deployed Worker writes.
+    // The `put-books` ceiling under test is hourly and stays on KV by design.
+    return app.request(path, init, {
+      KV: kv,
+      ...createRateLimitBindings().bindings,
+    });
   }
 
   async function seedAuth(userId: string): Promise<string> {
@@ -1180,7 +1187,13 @@ describe("PATCH /:id/books per-user rate limit", () => {
     }
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
-    return app.request(path, init, { KV: kv });
+    // The Rate Limiting bindings a production deploy carries: without them the
+    // per-IP tier falls back to a KV counter that no deployed Worker writes.
+    // The `put-books` ceiling under test is hourly and stays on KV by design.
+    return app.request(path, init, {
+      KV: kv,
+      ...createRateLimitBindings().bindings,
+    });
   }
 
   async function seedAuth(userId: string): Promise<string> {

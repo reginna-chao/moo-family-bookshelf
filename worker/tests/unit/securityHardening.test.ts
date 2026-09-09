@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app, { isAllowedOrigin } from "../../src/index";
 import {
   isPublicRoute,
@@ -7,6 +7,10 @@ import {
 } from "../../src/utils/routes";
 import { rateLimitBucketFor } from "../../src/middleware/rateLimit";
 import { createMockKV } from "../helpers/mockKv";
+import {
+  createRateLimitBindings,
+  type RateLimitBindingCall,
+} from "../helpers/rateLimitBindings";
 import {
   USER1,
   USER2,
@@ -22,21 +26,53 @@ type Json = any;
 
 let kv: KVNamespace;
 
-function request(
-  method: string,
-  path: string,
-  opts?: {
-    body?: string;
-    headers?: Record<string, string>;
-  },
-) {
+interface RequestOptions {
+  body?: string;
+  headers?: Record<string, string>;
+}
+
+function buildInit(method: string, opts?: RequestOptions): RequestInit {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...opts?.headers,
   };
   const init: RequestInit = { method, headers };
   if (opts?.body) init.body = opts.body;
-  return app.request(path, init, { KV: kv });
+  return init;
+}
+
+/**
+ * A request in the world a deployed Worker runs in: no DEV_MODE, and the four
+ * Rate Limiting bindings production carries. Without them every per-minute
+ * limit falls back to its KV counter and logs RATE_LIMIT_BINDING_MISSING.
+ *
+ * Returns the response together with the binding calls it made, so a case can
+ * assert what the request was charged for.
+ */
+async function requestWithCalls(
+  method: string,
+  path: string,
+  opts?: RequestOptions,
+): Promise<{ res: Response; calls: RateLimitBindingCall[] }> {
+  const { bindings, calls } = createRateLimitBindings();
+  const res = await app.request(path, buildInit(method, opts), {
+    KV: kv,
+    ...bindings,
+  });
+  return { res, calls };
+}
+
+function request(method: string, path: string, opts?: RequestOptions) {
+  return requestWithCalls(method, path, opts).then(({ res }) => res);
+}
+
+/**
+ * A request from a deployment carrying NO Rate Limiting bindings — the
+ * self-hoster whose wrangler.toml predates them. Used only by the tier suite
+ * below, which is the end-to-end pin of the KV fallback counters.
+ */
+function fallbackRequest(method: string, path: string, opts?: RequestOptions) {
+  return app.request(path, buildInit(method, opts), { KV: kv });
 }
 
 beforeEach(() => {
@@ -408,13 +444,17 @@ describe("rateLimitBucketFor", () => {
   });
 
   it("should not let a crafted caller key alias the lookup counter", () => {
-    // Full key is `{prefix}:{ip}:{minuteBucket}`. The only way an onboarding
-    // caller could reach into the nested lookup namespace is a caller key of
-    // exactly "lookup" — and even then the two keys differ in shape.
+    // Two key shapes to keep apart, because both are live: the KV fallback key
+    // `{prefix}:{ip}:{minuteBucket}` and the Rate Limiting binding key
+    // `{prefix}:{ip}` (the binding owns the window, so it carries no bucket).
+    // The only way an onboarding caller could reach into the nested lookup
+    // namespace is a caller key of exactly "lookup" — and even then the keys
+    // differ in shape.
     const onboarding = rateLimitBucketFor("POST", "/api/family").prefix;
     const lookup = rateLimitBucketFor("POST", "/api/auth/lookup").prefix;
 
     expect(`${onboarding}:lookup:1`).not.toBe(`${lookup}:1.2.3.4:1`);
+    expect(`${onboarding}:lookup`).not.toBe(`${lookup}:1.2.3.4`);
   });
 });
 
@@ -481,7 +521,10 @@ describe("Request body size limit", () => {
     });
     // Remove Content-Length if the runtime auto-sets it
     req.headers.delete("Content-Length");
-    const res = await app.request(req, undefined, { KV: kv });
+    const res = await app.request(req, undefined, {
+      KV: kv,
+      ...createRateLimitBindings().bindings,
+    });
     expect(res.status).toBe(413);
   });
 });
@@ -506,17 +549,39 @@ const STANDARD_LIMIT = rateLimitBucketFor("GET", "/api/user/test/books").limit;
 /** A public, non-sensitive route: the login-time verification-method probe. */
 const PUBLIC_ROUTE = `/api/user/${USER3}/verify`;
 
-describe("Rate limit tiers", () => {
+// Every case below goes through `fallbackRequest`, i.e. a deployment with NO
+// Rate Limiting bindings — deliberately. Since #160 item 1 the per-IP tiers are
+// normally counted by Cloudflare, which no test can drive to a refusal by
+// sending requests; what a request COUNTS AGAINST there is a key, and the
+// tier -> key mapping is pinned in tests/unit/rateLimit.test.ts. This suite is
+// what remains the end-to-end pin of the KV counters the fallback still runs,
+// through the real routes rather than a synthetic app — so the ceilings a
+// self-hoster without the bindings actually gets are not left untested.
+//
+// The fallback logs RATE_LIMIT_BINDING_MISSING once per rate-limit CHECK —
+// one line per request here, because every route below passes only the per-IP
+// middleware; a bookshelf / borrow-* route would add a second line from its
+// per-minute per-userId check. That is correct and would otherwise flood the
+// runner; the spy below silences it without hiding it from an assertion.
+describe("Rate limit tiers — KV fallback (deployment without the bindings)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("should rate-limit sensitive route POST /api/family after 3 requests", async () => {
     // Send 3 requests — all should succeed
     for (let i = 0; i < SENSITIVE_LIMIT; i++) {
-      const res = await request("POST", "/api/family", {
+      const res = await fallbackRequest("POST", "/api/family", {
         body: JSON.stringify({ userId: makeUserId(i) }),
       });
       expect(res.status).not.toBe(429);
     }
     // 4th request should be rate-limited
-    const res = await request("POST", "/api/family", {
+    const res = await fallbackRequest("POST", "/api/family", {
       body: JSON.stringify({ userId: USER4 }),
     });
     expect(res.status).toBe(429);
@@ -535,7 +600,7 @@ describe("Rate limit tiers", () => {
 
   it("should rate-limit sensitive route POST /api/family/:id/join after 3 requests", async () => {
     // Create a family first (uses 1 of the onboarding budget)
-    const createRes = await request("POST", "/api/family", {
+    const createRes = await fallbackRequest("POST", "/api/family", {
       body: JSON.stringify({ userId: OWNER1 }),
     });
     const family = (await createRes.json()) as Json;
@@ -543,13 +608,13 @@ describe("Rate limit tiers", () => {
 
     // Use up the remaining onboarding budget (we already used 1 for create)
     for (let i = 0; i < SENSITIVE_LIMIT - 1; i++) {
-      await request("POST", `/api/family/${familyId}/join`, {
+      await fallbackRequest("POST", `/api/family/${familyId}/join`, {
         body: JSON.stringify({ userId: makeUserId(100 + i) }),
       });
     }
 
     // 4th onboarding request should be rate-limited
-    const res = await request("POST", `/api/family/${familyId}/join`, {
+    const res = await fallbackRequest("POST", `/api/family/${familyId}/join`, {
       body: JSON.stringify({ userId: USER5 }),
     });
     expect(res.status).toBe(429);
@@ -559,13 +624,13 @@ describe("Rate limit tiers", () => {
     // Lookup lets an unauthenticated caller test a verifySecret against someone
     // else's account, so it sits on the sensitive tier, not the public one.
     for (let i = 0; i < LOOKUP_LIMIT; i++) {
-      const res = await request("POST", "/api/auth/lookup", {
+      const res = await fallbackRequest("POST", "/api/auth/lookup", {
         body: JSON.stringify({ userId: makeUserId(i) }),
       });
       expect(res.status).not.toBe(429);
     }
 
-    const res = await request("POST", "/api/auth/lookup", {
+    const res = await fallbackRequest("POST", "/api/auth/lookup", {
       body: JSON.stringify({ userId: USER4 }),
     });
     expect(res.status).toBe(429);
@@ -576,45 +641,45 @@ describe("Rate limit tiers", () => {
   it("should use separate counters for onboarding, lookup, public, and standard routes", async () => {
     // Exhaust the sensitive ONBOARDING counter (family create / join).
     for (let i = 0; i < SENSITIVE_LIMIT; i++) {
-      await request("POST", "/api/family", {
+      await fallbackRequest("POST", "/api/family", {
         body: JSON.stringify({ userId: makeUserId(i) }),
       });
     }
-    const onboardingBlocked = await request("POST", "/api/family", {
+    const onboardingBlocked = await fallbackRequest("POST", "/api/family", {
       body: JSON.stringify({ userId: USER4 }),
     });
     expect(onboardingBlocked.status).toBe(429);
 
     // The sensitive LOOKUP counter is a DIFFERENT key at the same limit, so
     // onboarding cannot crowd it out.
-    const lookupRes = await request("POST", "/api/auth/lookup", {
+    const lookupRes = await fallbackRequest("POST", "/api/auth/lookup", {
       body: JSON.stringify({ userId: USER2 }),
     });
     expect(lookupRes.status).not.toBe(429);
 
     // Public (non-sensitive) tier — its own counter.
-    const publicRes = await request("GET", PUBLIC_ROUTE);
+    const publicRes = await fallbackRequest("GET", PUBLIC_ROUTE);
     expect(publicRes.status).toBe(200);
 
     // Standard tier — its own counter.
-    const res = await request("GET", "/api/user/test/books");
+    const res = await fallbackRequest("GET", "/api/user/test/books");
     expect(res.status).toBe(401); // auth required, not 429
   });
 
   it("should not let an exhausted lookup counter block family create", async () => {
     for (let i = 0; i < LOOKUP_LIMIT; i++) {
-      await request("POST", "/api/auth/lookup", {
+      await fallbackRequest("POST", "/api/auth/lookup", {
         body: JSON.stringify({ userId: makeUserId(i) }),
       });
     }
-    const lookupBlocked = await request("POST", "/api/auth/lookup", {
+    const lookupBlocked = await fallbackRequest("POST", "/api/auth/lookup", {
       body: JSON.stringify({ userId: USER2 }),
     });
     expect(lookupBlocked.status).toBe(429);
 
     // The onboarding budget is untouched — this is the direction that matters:
     // a client that probed lookup can still complete the create it was probing for.
-    const createRes = await request("POST", "/api/family", {
+    const createRes = await fallbackRequest("POST", "/api/family", {
       body: JSON.stringify({ userId: USER1 }),
     });
     expect(createRes.status).toBe(201);
@@ -626,23 +691,23 @@ describe("Rate limit tiers", () => {
     // IP inside one minute. On a shared 3/min counter this would leave zero
     // headroom for a mistyped PIN; split, it costs 2 of 3 and 1 of 3.
     for (let i = 0; i < 2; i++) {
-      const probe = await request("POST", "/api/auth/lookup", {
+      const probe = await fallbackRequest("POST", "/api/auth/lookup", {
         body: JSON.stringify({ userId: USER1 }),
       });
       expect(probe.status).toBe(200);
     }
 
-    const createRes = await request("POST", "/api/family", {
+    const createRes = await fallbackRequest("POST", "/api/family", {
       body: JSON.stringify({ userId: USER1 }),
     });
     expect(createRes.status).toBe(201);
 
     // Headroom left in BOTH counters for a retry.
-    const retryLookup = await request("POST", "/api/auth/lookup", {
+    const retryLookup = await fallbackRequest("POST", "/api/auth/lookup", {
       body: JSON.stringify({ userId: USER1 }),
     });
     expect(retryLookup.status).not.toBe(429);
-    const retryOnboarding = await request("POST", "/api/family", {
+    const retryOnboarding = await fallbackRequest("POST", "/api/family", {
       body: JSON.stringify({ userId: USER2 }),
     });
     expect(retryOnboarding.status).not.toBe(429);
@@ -651,11 +716,11 @@ describe("Rate limit tiers", () => {
   it("should rate-limit public (non-sensitive) routes after 10 requests", async () => {
     // GET /api/user/:id/verify is public but not sensitive.
     for (let i = 0; i < PUBLIC_LIMIT; i++) {
-      const res = await request("GET", PUBLIC_ROUTE);
+      const res = await fallbackRequest("GET", PUBLIC_ROUTE);
       expect(res.status).not.toBe(429);
     }
     // The next request should be rate-limited
-    const res = await request("GET", PUBLIC_ROUTE);
+    const res = await fallbackRequest("GET", PUBLIC_ROUTE);
     expect(res.status).toBe(429);
   });
 
@@ -663,12 +728,12 @@ describe("Rate limit tiers", () => {
     // Standard routes need auth token — but we can verify the counter
     // by sending requests that fail auth (401) but still pass rate-limit.
     for (let i = 0; i < STANDARD_LIMIT; i++) {
-      const res = await request("GET", "/api/user/test/books");
+      const res = await fallbackRequest("GET", "/api/user/test/books");
       expect(res.status).toBe(401); // not 429
     }
 
     // 61st request should be rate-limited
-    const res = await request("GET", "/api/user/test/books");
+    const res = await fallbackRequest("GET", "/api/user/test/books");
     expect(res.status).toBe(429);
   });
 });
@@ -756,30 +821,38 @@ describe("OPTIONS preflight short-circuit", () => {
     expect(res.headers.get("Access-Control-Max-Age")).toBe("86400");
   });
 
-  it("should NOT trigger rate limit KV writes", async () => {
-    // Fire a GET first to create a known rate limit counter
-    await request("GET", "/api/user/test/books");
-    const keysBefore = await kv.list();
-    const rateLimitBefore = keysBefore.keys.filter((k: { name: string }) =>
-      k.name.startsWith("ratelimit"),
+  it("should NOT be charged against any rate-limit counter", async () => {
+    // The CORS middleware answers a preflight before `rateLimit` ever runs, so
+    // a browser's automatic OPTIONS must not eat into the caller's budget.
+    // Asserted on the binding call log, because since #160 item 1 that is where
+    // a per-minute charge shows up; the KV assertion below still covers the
+    // hourly counters and the fallback.
+    const preflight = await requestWithCalls(
+      "OPTIONS",
+      "/api/user/test/books",
+      {
+        headers: {
+          Origin: ALLOWED_ORIGIN,
+          "Access-Control-Request-Method": "PUT",
+          "Access-Control-Request-Headers": "Content-Type, Authorization",
+        },
+      },
     );
-    const countsBefore = new Map<string, string | null>();
-    for (const k of rateLimitBefore) {
-      countsBefore.set(k.name, await kv.get(k.name));
-    }
 
-    // Fire OPTIONS
-    await optionsRequest("/api/user/test/books", ALLOWED_ORIGIN);
+    expect(preflight.res.status).toBe(204);
+    expect(preflight.calls).toEqual([]);
 
-    // Snapshot after — must be identical
-    const keysAfter = await kv.list();
-    const rateLimitAfter = keysAfter.keys.filter((k: { name: string }) =>
-      k.name.startsWith("ratelimit"),
-    );
-    expect(rateLimitAfter.length).toBe(rateLimitBefore.length);
-    for (const k of rateLimitAfter) {
-      expect(await kv.get(k.name)).toBe(countsBefore.get(k.name));
-    }
+    // Positive companion: a real request on the same route IS charged, so the
+    // empty array above cannot pass just because nothing is ever counted.
+    const real = await requestWithCalls("GET", "/api/user/test/books");
+    expect(real.res.status).toBe(401);
+    expect(real.calls).toEqual([
+      { name: "RATE_LIMIT_60_PER_MIN", key: "ratelimit:unknown" },
+    ]);
+
+    // And nothing rate-limit-shaped was written to KV by either.
+    const { keys } = await kv.list();
+    expect(keys.filter((k) => k.name.startsWith("ratelimit"))).toEqual([]);
   });
 
   it("should not require Authorization header (auth middleware skipped)", async () => {

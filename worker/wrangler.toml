@@ -16,6 +16,53 @@ id = "YOUR_DEV_KV_NAMESPACE_ID"
 # KV namespace used during local development (wrangler dev --remote)
 preview_id = "YOUR_DEV_KV_NAMESPACE_ID"
 
+# ---------------------------------------------------------------------------
+# Native Rate Limiting bindings — per-minute limits only; the hourly counters
+# stay on KV. One binding per distinct limit: several counters share a binding
+# and stay isolated by the key the Worker passes to limit(). Mapping lives in
+# src/middleware/rateLimit.ts (BINDING_BY_LIMIT).
+#
+# Declared through `unsafe.bindings`, not the `[[ratelimits]]` blocks in
+# Cloudflare's current docs: this repo pins wrangler 3 (package.json), which
+# reports `ratelimits` as an unexpected top-level field and deploys the Worker
+# WITHOUT the bindings. `unsafe.bindings` with type = "ratelimit" is the form
+# wrangler 3 supports, locally (Miniflare) and on deploy alike. Switch to
+# `[[ratelimits]]` when the wrangler devDependency moves to v4.
+#
+# Self-hosters: namespace_id values are YOURS to choose — any positive integer,
+# unique within your own Cloudflare account. Dev and production must not share
+# one, or the two Workers count into the same namespace. Without these blocks
+# the Worker still runs, on the previous KV counters (see worker/DEPLOY.md).
+# ---------------------------------------------------------------------------
+
+# 60/min — per-IP standard tier + per-userId "borrow-list"
+[[unsafe.bindings]]
+name = "RATE_LIMIT_60_PER_MIN"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
+
+# 30/min — per-userId "bookshelf" + "borrow-update"
+[[unsafe.bindings]]
+name = "RATE_LIMIT_30_PER_MIN"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 30, period = 60 }
+
+# 10/min — per-IP public tier + per-userId "borrow-create"
+[[unsafe.bindings]]
+name = "RATE_LIMIT_10_PER_MIN"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 10, period = 60 }
+
+# 3/min — per-IP sensitive tier, both buckets (onboarding + auth lookup)
+[[unsafe.bindings]]
+name = "RATE_LIMIT_3_PER_MIN"
+type = "ratelimit"
+namespace_id = "1004"
+simple = { limit = 3, period = 60 }
+
 # Production environment
 [env.production]
 name = "moo-family-bookshelf"
@@ -28,6 +75,40 @@ head_sampling_rate = 1
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "YOUR_PROD_KV_NAMESPACE_ID"
+
+# Rate limiting bindings, repeated for production: environments do NOT inherit
+# top-level bindings, so omitting these would deploy the production Worker
+# without them — it would fall back to the KV counters and log
+# RATE_LIMIT_BINDING_MISSING on every request. Separate namespace_id range
+# (2xxx) so dev traffic cannot consume production's budget.
+
+# 60/min — per-IP standard tier + per-userId "borrow-list"
+[[env.production.unsafe.bindings]]
+name = "RATE_LIMIT_60_PER_MIN"
+type = "ratelimit"
+namespace_id = "2001"
+simple = { limit = 60, period = 60 }
+
+# 30/min — per-userId "bookshelf" + "borrow-update"
+[[env.production.unsafe.bindings]]
+name = "RATE_LIMIT_30_PER_MIN"
+type = "ratelimit"
+namespace_id = "2002"
+simple = { limit = 30, period = 60 }
+
+# 10/min — per-IP public tier + per-userId "borrow-create"
+[[env.production.unsafe.bindings]]
+name = "RATE_LIMIT_10_PER_MIN"
+type = "ratelimit"
+namespace_id = "2003"
+simple = { limit = 10, period = 60 }
+
+# 3/min — per-IP sensitive tier, both buckets (onboarding + auth lookup)
+[[env.production.unsafe.bindings]]
+name = "RATE_LIMIT_3_PER_MIN"
+type = "ratelimit"
+namespace_id = "2004"
+simple = { limit = 3, period = 60 }
 
 # DEV_MODE is NOT set in production.
 # For local dev, create .dev.vars with DEV_MODE=1 to enable localhost CORS.

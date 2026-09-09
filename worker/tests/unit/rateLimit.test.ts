@@ -1,37 +1,64 @@
+/**
+ * `middleware/rateLimit.ts` — both counting paths.
+ *
+ * TWO WORLDS, AND EVERY CASE BELOW STATES WHICH ONE IT IS IN. Since #160 item 1
+ * a per-minute limit is normally counted by Cloudflare's native Rate Limiting
+ * binding at zero KV cost; a deployment that carries no binding for the limit
+ * (and every hourly scope, which has none by design) still uses the old KV
+ * counter. `callWithBindings` sends a request through the FIRST world — the one
+ * every production deploy is in — and the bare `callHelper` through the SECOND.
+ *
+ * WHY THE KV CASES ARE KEPT. They are no longer "the" behaviour, they are the
+ * fallback, and the fallback is what a self-hoster whose wrangler.toml predates
+ * the bindings actually runs. Deleting them would leave that path untested.
+ *
+ * A FILE-LEVEL `console.error` SPY IS INSTALLED, because the fallback path logs
+ * `RATE_LIMIT_BINDING_MISSING` on every mapped-limit request and the runner
+ * output would otherwise be unreadable. It is a spy, not a filter: the cases
+ * that care assert on it.
+ */
 import { Hono } from "hono";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import {
+  bindingForWindow,
   enforcePerUserRateLimit,
   getCallerIp,
   normalizeCallerIp,
   rateLimit,
+  RATE_LIMITED_MESSAGE,
   RAW_CALLER_PREFIX,
   UNKNOWN_CALLER_KEY,
+  type PerUserRateLimitOptions,
 } from "../../src/middleware/rateLimit";
-import type { Env } from "../../src/utils/env";
+import type { Env, RateLimitBindingName } from "../../src/utils/env";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
+import { watchKvOps } from "../helpers/kvOps";
+import {
+  createRateLimitBindings,
+  type RateLimitBindingCall,
+  type RateLimitDecider,
+} from "../helpers/rateLimitBindings";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
 let kv: KVNamespace;
+/** Installed for every case; the fallback path logs on each mapped limit. */
+let errorSpy: ReturnType<typeof vi.spyOn>;
 
 const testApp = new Hono<{ Bindings: Env }>();
 testApp.post("/test", async (c) => {
-  const body = await c.req.json<{
-    userId: string;
-    scope: string;
-    max: number;
-    windowSec: number;
-  }>();
+  const body = await c.req.json<PerUserRateLimitOptions>();
   const res = await enforcePerUserRateLimit(c, body);
   return res ?? c.json({ ok: true });
 });
 
-function callHelper(
-  opts: { userId: string; scope: string; max: number; windowSec: number },
-  env?: Partial<Env>,
-) {
+/**
+ * One call with a DELIBERATELY BINDING-LESS env: the KV fallback path.
+ *
+ * Pass `env` to add DEV_MODE or (via `callWithBindings`) the binding stubs.
+ */
+function callHelper(opts: PerUserRateLimitOptions, env?: Partial<Env>) {
   return testApp.request(
     "/test",
     {
@@ -43,11 +70,27 @@ function callHelper(
   );
 }
 
+/** The same call in the world production runs in: all four bindings present. */
+async function callWithBindings(
+  opts: PerUserRateLimitOptions,
+  decide?: RateLimitDecider,
+  env?: Partial<Env>,
+): Promise<{ res: Response; calls: RateLimitBindingCall[] }> {
+  const { bindings, calls } = createRateLimitBindings(decide);
+  const res = await callHelper(opts, { ...bindings, ...env });
+  return { res, calls };
+}
+
 beforeEach(() => {
   kv = createMockKV();
+  errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
-describe("enforcePerUserRateLimit", () => {
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("enforcePerUserRateLimit — KV fallback (no binding configured)", () => {
   it("should bypass in dev mode without writing to KV", async () => {
     const opts = { userId: "u1", scope: "test", max: 1, windowSec: 60 };
 
@@ -167,6 +210,291 @@ describe("enforcePerUserRateLimit", () => {
     // Literal 60 rather than the production constant: this assertion stays an
     // independent oracle for the platform floor instead of a tautology.
     expect(getPutTtl(kv, keys[0].name)).toBe(60);
+  });
+
+  it("should report the missing binding once per check, naming it", async () => {
+    // 30/min IS in the limit -> binding table, so a deployment without the
+    // field is a MISCONFIGURATION, not a design choice: the operator has to be
+    // told which binding their wrangler.toml is missing.
+    //
+    // ONE line per rate-limit CHECK, which is one check here because this
+    // harness calls `enforcePerUserRateLimit` directly. A real request to a
+    // bookshelf / borrow-* route passes the per-IP middleware too and logs
+    // twice.
+    const opts = { userId: "u1", scope: "bookshelf", max: 30, windowSec: 60 };
+
+    const res = await callHelper(opts);
+
+    expect(res.status).toBe(200);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("RATE_LIMIT_BINDING_MISSING", {
+      binding: "RATE_LIMIT_30_PER_MIN",
+    });
+  });
+
+  it("should report a per-minute limit the binding table does not name", async () => {
+    // 5/min is not in the table at all — that is a tier whose number was
+    // changed without adding its binding, and it must be as loud as a binding
+    // missing from `env`, because the request is silently back on KV either
+    // way. The placeholder carries the limit, since there is no name to give.
+    const res = await callHelper({
+      userId: "u1",
+      scope: "test",
+      max: 5,
+      windowSec: 60,
+    });
+
+    expect(res.status).toBe(200);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("RATE_LIMIT_BINDING_MISSING", {
+      binding: "<unmapped:5/min>",
+    });
+  });
+
+  it("should stay silent for an hourly counter, which has no binding by design", async () => {
+    // The one negative companion to the two cases above: a 3600s window can
+    // never be served by a binding (the platform period is 60s), so logging it
+    // would drown the signal the line exists for.
+    await callHelper({
+      userId: "u1",
+      scope: "put-books",
+      max: 30,
+      windowSec: 3600,
+    });
+
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// enforcePerUserRateLimit — native Rate Limiting binding
+//
+// The path every deployed Worker takes for a per-minute scope: no KV counter,
+// no bucket in the key, and `retryAfter` = the whole configured period because
+// the binding exposes no reset time.
+// ===========================================================================
+
+/** Pinned so an hourly bucket index cannot roll over mid-case. */
+const BINDING_NOW = Date.parse("2026-03-01T12:00:00.000Z");
+const BINDING_MINUTE_BUCKET = Math.floor(BINDING_NOW / 60_000);
+const BINDING_HOUR_BUCKET = Math.floor(BINDING_NOW / 3_600_000);
+
+describe("enforcePerUserRateLimit — native Rate Limiting binding", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(BINDING_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    { label: "60 per minute", max: 60, binding: "RATE_LIMIT_60_PER_MIN" },
+    { label: "30 per minute", max: 30, binding: "RATE_LIMIT_30_PER_MIN" },
+    { label: "10 per minute", max: 10, binding: "RATE_LIMIT_10_PER_MIN" },
+    { label: "3 per minute", max: 3, binding: "RATE_LIMIT_3_PER_MIN" },
+  ])(
+    "should count a $label scope on $binding at zero KV cost",
+    async ({ max, binding }) => {
+      const ops = watchKvOps(kv);
+
+      const { res, calls } = await callWithBindings({
+        userId: "u1",
+        scope: "bookshelf",
+        max,
+        windowSec: 60,
+      });
+
+      expect(res.status).toBe(200);
+      // Same key shape the KV counter used, minus the window bucket the
+      // binding owns — and still keyed on the caller's own id (Invariant 6).
+      expect(calls).toEqual([
+        { name: binding, key: "ratelimit:user:bookshelf:u1" },
+      ]);
+      expect(ops.getKeys()).toEqual([]);
+      expect(ops.putKeys()).toEqual([]);
+      expect(errorSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("should answer a refusal with 429 and the whole window as retryAfter", async () => {
+    const ops = watchKvOps(kv);
+
+    const { res, calls } = await callWithBindings(
+      { userId: "u1", scope: "bookshelf", max: 30, windowSec: 60 },
+      () => false,
+    );
+
+    expect(res.status).toBe(429);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("RATE_LIMITED");
+    expect(json.error.message).toBe(RATE_LIMITED_MESSAGE);
+    // The binding reports no reset time, so the hint is the configured period
+    // rather than the time left in a bucket (which is what the KV path sends).
+    expect(json.error.retryAfter).toBe(60);
+    expect(res.headers.get("Retry-After")).toBe("60");
+
+    expect(calls).toHaveLength(1);
+    // A refusal costs no KV operation either — that is the point of #160.
+    expect(ops.getKeys()).toEqual([]);
+    expect(ops.putKeys()).toEqual([]);
+  });
+
+  it("should keep two scopes sharing one binding on separate keys", async () => {
+    // 60/min is shared by the per-IP standard tier and per-userId borrow-list;
+    // isolation comes from the key, never from the binding.
+    const { calls } = await callWithBindings({
+      userId: "u1",
+      scope: "a",
+      max: 60,
+      windowSec: 60,
+    });
+    const second = await callWithBindings({
+      userId: "u1",
+      scope: "b",
+      max: 60,
+      windowSec: 60,
+    });
+
+    expect(calls).toEqual([
+      { name: "RATE_LIMIT_60_PER_MIN", key: "ratelimit:user:a:u1" },
+    ]);
+    expect(second.calls).toEqual([
+      { name: "RATE_LIMIT_60_PER_MIN", key: "ratelimit:user:b:u1" },
+    ]);
+  });
+
+  it("should leave an hourly scope on the KV counter even with every binding present", async () => {
+    // The binding period is 60s; an hourly ceiling has no binding to move to,
+    // so `put-books` and friends deliberately keep paying their get + put.
+    const ops = watchKvOps(kv);
+
+    const { res, calls } = await callWithBindings({
+      userId: "u1",
+      scope: "put-books",
+      max: 30,
+      windowSec: 3600,
+    });
+
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([]);
+    expect(ops.getKeys()).toEqual([
+      `ratelimit:user:put-books:u1:${BINDING_HOUR_BUCKET}`,
+    ]);
+    expect(ops.putKeys()).toEqual([
+      `ratelimit:user:put-books:u1:${BINDING_HOUR_BUCKET}`,
+    ]);
+    // Not a misconfiguration — nothing to warn about.
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("should leave an unmapped per-minute limit on the KV counter and say so", async () => {
+    // Carrying every binding does not help a limit the table never mapped: the
+    // request lands on KV and is reported, so a tier whose number was raised
+    // without adding its binding cannot go unnoticed.
+    const ops = watchKvOps(kv);
+
+    const { res, calls } = await callWithBindings({
+      userId: "u1",
+      scope: "test",
+      max: 5,
+      windowSec: 60,
+    });
+
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([]);
+    expect(ops.putKeys()).toEqual([
+      `ratelimit:user:test:u1:${BINDING_MINUTE_BUCKET}`,
+    ]);
+    expect(errorSpy).toHaveBeenCalledWith("RATE_LIMIT_BINDING_MISSING", {
+      binding: "<unmapped:5/min>",
+    });
+  });
+
+  it("should not touch the binding in dev mode", async () => {
+    const { res, calls } = await callWithBindings(
+      { userId: "u1", scope: "bookshelf", max: 30, windowSec: 60 },
+      () => false,
+      { DEV_MODE: "1" },
+    );
+
+    // DEV_MODE short-circuits before the binding lookup, so even a stub that
+    // refuses everything cannot block a local request.
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([]);
+    const { keys } = await kv.list();
+    expect(keys).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// bindingForWindow — the (limit, window) -> binding lookup
+// ===========================================================================
+
+/** Typed so `bindings[name]` below indexes the Record without a cast. */
+const MAPPED_WINDOWS: {
+  label: string;
+  max: number;
+  windowSec: number;
+  name: RateLimitBindingName;
+}[] = [
+  { label: "60/min", max: 60, windowSec: 60, name: "RATE_LIMIT_60_PER_MIN" },
+  { label: "30/min", max: 30, windowSec: 60, name: "RATE_LIMIT_30_PER_MIN" },
+  { label: "10/min", max: 10, windowSec: 60, name: "RATE_LIMIT_10_PER_MIN" },
+  { label: "3/min", max: 3, windowSec: 60, name: "RATE_LIMIT_3_PER_MIN" },
+];
+
+describe("bindingForWindow", () => {
+  it.each(MAPPED_WINDOWS)(
+    "should resolve $label to $name",
+    ({ max, windowSec, name }) => {
+      const { bindings } = createRateLimitBindings();
+      const env: Env = { KV: kv, ...bindings };
+
+      expect(bindingForWindow(env, max, windowSec)).toBe(bindings[name]);
+    },
+  );
+
+  it.each([
+    // Hourly scopes: the platform period is 60s, so none of them map.
+    { label: "an hourly ceiling at a mapped limit", max: 30, windowSec: 3600 },
+    { label: "an hourly ceiling at 10", max: 10, windowSec: 3600 },
+    // A limit the table does not name, at the right period.
+    { label: "an unmapped per-minute limit", max: 5, windowSec: 60 },
+    // The platform's other permitted period is still not configured here.
+    { label: "a mapped limit on a 10s window", max: 60, windowSec: 10 },
+  ])("should return null for $label", ({ max, windowSec }) => {
+    const { bindings } = createRateLimitBindings();
+    const env: Env = { KV: kv, ...bindings };
+
+    expect(bindingForWindow(env, max, windowSec)).toBeNull();
+  });
+
+  it("should return null for a mapped limit the deployment does not carry", () => {
+    const { bindings } = createRateLimitBindings();
+    // A self-hoster whose wrangler.toml predates one of the bindings.
+    const partial: Env = {
+      KV: kv,
+      RATE_LIMIT_30_PER_MIN: bindings.RATE_LIMIT_30_PER_MIN,
+      RATE_LIMIT_10_PER_MIN: bindings.RATE_LIMIT_10_PER_MIN,
+      RATE_LIMIT_3_PER_MIN: bindings.RATE_LIMIT_3_PER_MIN,
+    };
+
+    expect(bindingForWindow(partial, 60, 60)).toBeNull();
+    // Positive companion: the remaining three still resolve, so the null above
+    // is about the missing field and not about the lookup being broken.
+    expect(bindingForWindow(partial, 30, 60)).toBe(
+      bindings.RATE_LIMIT_30_PER_MIN,
+    );
+  });
+
+  it("should return null for every limit when no binding is configured at all", () => {
+    const bare: Env = { KV: kv };
+
+    for (const max of [60, 30, 10, 3]) {
+      expect(bindingForWindow(bare, max, 60)).toBeNull();
+    }
   });
 });
 
@@ -384,8 +712,11 @@ describe("getCallerIp", () => {
 // Per-IP rateLimit middleware
 //
 // Every other suite runs with DEV_MODE, which short-circuits this middleware.
-// These cases run WITHOUT it, pinning the /64 granularity as the middleware's
-// intended bucketing rather than an accident of normalizeCallerIp.
+// These cases run WITHOUT it. They come in two halves, one per counting path:
+// the KV FALLBACK first (a deployment carrying no binding for the tier's
+// limit — the only place the /64 bucketing can still be observed through the
+// X-RateLimit-Remaining countdown), then the NATIVE BINDING, which is what a
+// deployed Worker actually runs.
 // ===========================================================================
 
 const limitedApp = new Hono<{ Bindings: Env }>();
@@ -395,6 +726,7 @@ limitedApp.use("*", rateLimit);
 // tests survive a change to the configured ceiling.
 limitedApp.post("/api/family", (c) => c.json({ ok: true }));
 
+/** Binding-less env on purpose: these cases pin the KV fallback. */
 function callLimited(ip: string, env?: Partial<Env>) {
   return limitedApp.request(
     "/api/family",
@@ -410,7 +742,7 @@ function rotatedInSameSubnet(n: number): string {
 
 const NEIGHBOUR_SUBNET_IP = "2001:db8:1:3::a";
 
-describe("rateLimit middleware", () => {
+describe("rateLimit middleware — KV fallback (no binding configured)", () => {
   beforeEach(() => {
     // Pin an aligned minute so the bucket cannot roll over mid-test.
     vi.useFakeTimers();
@@ -474,6 +806,183 @@ describe("rateLimit middleware", () => {
       expect(res.headers.get("X-RateLimit-Limit")).toBeNull();
     }
 
+    const { keys } = await kv.list();
+    expect(keys).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Per-IP rateLimit middleware — native Rate Limiting binding
+//
+// One app carrying a route from each of the four counters, so the tier -> key
+// mapping is exercised end to end rather than only through
+// `rateLimitBucketFor` (whose own classification cases live in
+// tests/unit/securityHardening.test.ts).
+// ===========================================================================
+
+const tierApp = new Hono<{ Bindings: Env }>();
+tierApp.use("*", rateLimit);
+tierApp.post("/api/family", (c) => c.json({ ok: true }));
+tierApp.post("/api/auth/lookup", (c) => c.json({ ok: true }));
+tierApp.get("/api/public/:shareToken", (c) => c.json({ ok: true }));
+tierApp.get("/api/family/:id/members", (c) => c.json({ ok: true }));
+
+const TIER_IP = "203.0.113.7";
+
+async function callTier(
+  method: string,
+  path: string,
+  opts: { ip?: string; decide?: RateLimitDecider; env?: Partial<Env> } = {},
+): Promise<{ res: Response; calls: RateLimitBindingCall[] }> {
+  const { bindings, calls } = createRateLimitBindings(opts.decide);
+  const res = await tierApp.request(
+    path,
+    { method, headers: { "cf-connecting-ip": opts.ip ?? TIER_IP } },
+    { KV: kv, ...bindings, ...opts.env },
+  );
+  return { res, calls };
+}
+
+describe("rateLimit middleware — native Rate Limiting binding", () => {
+  // Literal prefixes and limits, deliberately: they are the independent oracle
+  // for what production charges. `rateLimitBucketFor` is where they come from,
+  // so asserting against it here would only restate the implementation.
+  it.each([
+    {
+      label: "standard tier",
+      method: "GET",
+      path: "/api/family/abcd-1234/members",
+      binding: "RATE_LIMIT_60_PER_MIN",
+      prefix: "ratelimit",
+      limit: "60",
+    },
+    {
+      label: "public tier",
+      method: "GET",
+      path: "/api/public/beefcafebeefcafebeefcafebeefcafe",
+      binding: "RATE_LIMIT_10_PER_MIN",
+      prefix: "ratelimit:pub",
+      limit: "10",
+    },
+    {
+      label: "sensitive tier, onboarding bucket",
+      method: "POST",
+      path: "/api/family",
+      binding: "RATE_LIMIT_3_PER_MIN",
+      prefix: "ratelimit:sens",
+      limit: "3",
+    },
+    {
+      label: "sensitive tier, lookup bucket",
+      method: "POST",
+      path: "/api/auth/lookup",
+      binding: "RATE_LIMIT_3_PER_MIN",
+      prefix: "ratelimit:sens:lookup",
+      limit: "3",
+    },
+  ])(
+    "should charge the $label to $binding under $prefix, at zero KV cost",
+    async ({ method, path, binding, prefix, limit }) => {
+      const ops = watchKvOps(kv);
+
+      const { res, calls } = await callTier(method, path);
+
+      expect(res.status).toBe(200);
+      // No minute bucket in the key: the binding owns the window.
+      expect(calls).toEqual([{ name: binding, key: `${prefix}:${TIER_IP}` }]);
+      expect(res.headers.get("X-RateLimit-Limit")).toBe(limit);
+      // The binding exposes no remaining count, so the header is omitted —
+      // unlike the KV fallback, which still sends it.
+      expect(res.headers.get("X-RateLimit-Remaining")).toBeNull();
+      expect(ops.getKeys()).toEqual([]);
+      expect(ops.putKeys()).toEqual([]);
+      expect(errorSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("should keep the two sensitive buckets on separate keys at the same limit", async () => {
+    // One clean onboarding spends two lookups plus one create within a minute
+    // from one address; a shared counter would refuse the first typo retry.
+    const onboarding = await callTier("POST", "/api/family");
+    const lookup = await callTier("POST", "/api/auth/lookup");
+
+    expect(onboarding.calls[0].name).toBe(lookup.calls[0].name);
+    expect(onboarding.calls[0].key).not.toBe(lookup.calls[0].key);
+  });
+
+  it("should answer a refusal with 429, a period-long retryAfter and no KV op", async () => {
+    const ops = watchKvOps(kv);
+
+    const { res, calls } = await callTier("POST", "/api/family", {
+      decide: () => false,
+    });
+
+    expect(res.status).toBe(429);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("RATE_LIMITED");
+    expect(json.error.message).toBe(RATE_LIMITED_MESSAGE);
+    // The configured period, not the time left in a minute bucket: the binding
+    // reports no reset time.
+    expect(json.error.retryAfter).toBe(60);
+    expect(res.headers.get("Retry-After")).toBe("60");
+    expect(res.headers.get("X-RateLimit-Limit")).toBe("3");
+    expect(res.headers.get("X-RateLimit-Remaining")).toBeNull();
+
+    expect(calls).toEqual([
+      { name: "RATE_LIMIT_3_PER_MIN", key: `ratelimit:sens:${TIER_IP}` },
+    ]);
+    // A refused request must not cost anything at all.
+    expect(ops.getKeys()).toEqual([]);
+    expect(ops.putKeys()).toEqual([]);
+  });
+
+  it("should still bucket an IPv6 caller on its /64 in the binding key", async () => {
+    // The rotation bypass the /64 normalization closes exists on this path too
+    // — the binding counts whatever key it is handed.
+    const first = await callTier("POST", "/api/family", {
+      ip: "2001:db8:1:2::a",
+    });
+    const rotated = await callTier("POST", "/api/family", {
+      ip: "2001:db8:1:2:aaaa:bbbb:cccc:dddd",
+    });
+    const neighbour = await callTier("POST", "/api/family", {
+      ip: "2001:db8:1:3::a",
+    });
+
+    expect(first.calls).toEqual([
+      { name: "RATE_LIMIT_3_PER_MIN", key: `ratelimit:sens:${DB8_1_2_BUCKET}` },
+    ]);
+    expect(rotated.calls[0].key).toBe(first.calls[0].key);
+    expect(neighbour.calls[0].key).not.toBe(first.calls[0].key);
+  });
+
+  it("should fall back to the unknown-caller key when no client IP is trusted", async () => {
+    const { bindings, calls } = createRateLimitBindings();
+    const res = await tierApp.request(
+      "/api/family",
+      { method: "POST", headers: { "x-forwarded-for": "203.0.113.10" } },
+      { KV: kv, ...bindings },
+    );
+
+    expect(res.status).toBe(200);
+    // The spoofable header is ignored, so every such caller shares one bucket.
+    expect(calls).toEqual([
+      {
+        name: "RATE_LIMIT_3_PER_MIN",
+        key: `ratelimit:sens:${UNKNOWN_CALLER_KEY}`,
+      },
+    ]);
+  });
+
+  it("should not touch the binding in dev mode", async () => {
+    const { res, calls } = await callTier("POST", "/api/family", {
+      decide: () => false,
+      env: { DEV_MODE: "1" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([]);
+    expect(res.headers.get("X-RateLimit-Limit")).toBeNull();
     const { keys } = await kv.list();
     expect(keys).toHaveLength(0);
   });

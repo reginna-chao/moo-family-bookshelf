@@ -1079,9 +1079,9 @@ jobs:
 ##### 🟢 低優先 — 擴充性（N=2 現在不痛，規模到了再做）
 
 - [ ] **BE-2 書櫃聚合改 snapshot**（現為每成員讀完整 `user:{id}` 記錄後前端過濾）
-- [ ] **BE-4 rate limiter 改用原生 Workers Rate Limiting binding**（現以 KV 計數，限流器本身消耗寫入配額）
+- [x] **BE-4 rate limiter 改用原生 Workers Rate Limiting binding**（完成於 #160 第一項：每分鐘的限制改由 Cloudflare 原生 binding 計數，零 KV 操作；小時級的 per-userId 計數器仍留在 KV，硬上限所需的 Durable Objects 未納入）
 - [ ] **BE-5 borrow index 改增量 / 終態清理**（現為 append-only，每次操作掃全歷史）
-  - **是否需要處理**：三項都是「隨成員數 / 歷史長度放大」的擴充性，目前 2 人家庭 + 低流量不觸發。到 `maxMembers` 調高或流量成長再啟動即可。
+  - **是否需要處理**：剩下的 BE-2 / BE-5 都是「隨成員數 / 歷史長度放大」的擴充性，目前 2 人家庭 + 低流量不觸發。到 `maxMembers` 調高或流量成長再啟動即可。
 
 ##### ⚪ 低優先 — 零星清理與 DX
 

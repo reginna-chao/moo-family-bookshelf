@@ -68,18 +68,27 @@ export function createCountingKv(
  * ONE structured log line per /api/* request carrying its KV operation count —
  * the #160 read amplification was only spotted by chance on the dashboard,
  * months late. `[observability]` is already on at `head_sampling_rate = 1`
- * (wrangler.toml:5-8, :23-25), so this ships as telemetry with nothing else to
+ * (wrangler.toml:5-8, :70-72), so this ships as telemetry with nothing else to
  * configure, and the single object argument keeps its keys queryable as fields
  * in Workers Logs. Cost per request: one Proxy, one console.log, no KV
  * operation and no I/O — far below the free-tier allowance in wrangler.toml:5.
  *
- * Runs BEFORE `rateLimit` so the fixed per-request cost (per-IP counter
- * get+put, auth token get, `enforcePerUserRateLimit` get+put) is counted with
- * the handler's own operations — that fixed cost is what must become visible.
- * DEV_MODE is not excluded: there `rateLimit` (middleware/rateLimit.ts:208) and
- * `enforcePerUserRateLimit` (:407) short-circuit, so a dev line carries one
- * fewer get+put per counter than production for the same route — still correct
- * for what ran. No dev flag is logged: production never runs dev mode.
+ * Runs BEFORE `rateLimit` so whatever the rate-limit layers spend is counted
+ * together with the handler's own operations. With the Rate Limiting bindings
+ * configured they spend nothing: the per-IP tiers and the four per-minute
+ * per-userId scopes resolve to a native binding through `bindingForWindow`
+ * and cost no KV operation (the point of #160 item 1), leaving the auth-token
+ * `get` as the entire fixed per-request cost; only the hourly scopes still
+ * add a counter get+put. On a deployment whose wrangler.toml carries no
+ * bindings the old per-IP and per-minute counters come back at 1 get + 1 put
+ * each and surface in this line — which is exactly how that fallback is
+ * meant to be noticed, alongside its `RATE_LIMIT_BINDING_MISSING` log.
+ * DEV_MODE is not excluded either: the two `isDevMode(c.env)` short-circuits
+ * in `middleware/rateLimit.ts` return before any binding or KV lookup, so a
+ * dev line differs from production only on the hourly scopes (production pays
+ * their get+put, dev does not) and on binding-less deployments — still
+ * correct for what ran. No dev flag is logged: production never runs dev
+ * mode.
  *
  * The proxy replaces `c.env` rather than mutating `c.env.KV`, since the runtime
  * `env` is shared by every request in the isolate. Assignment is safe and
