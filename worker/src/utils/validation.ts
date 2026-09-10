@@ -95,6 +95,34 @@ export function sanitizeVerifySecret(value: unknown): string | null {
 }
 
 /**
+ * Upper bounds for the free-text fields of `POST /api/family/:id/borrow`,
+ * checked at the handler boundary alongside the string-type guard (a format
+ * error must not reach the rate-limit charge).
+ *
+ * Why they exist at all: since the borrow index was denormalised, every record
+ * of a family lives inside ONE KV value (`borrows:family:{familyId}`, which the
+ * platform caps at 25 MiB), and that value is read in full by every family
+ * member on every borrow list and rewritten on every borrow write. Unbounded
+ * fields would therefore let a single member inflate a value the whole family
+ * pays for, on both the read and the write side — the per-borrower PENDING
+ * ceiling (`BORROW_MAX_PENDING_PER_BORROWER`) bounds the record COUNT, these
+ * bound the size of each one.
+ *
+ * They are abuse ceilings, not display bounds: the client sends values it
+ * scraped from a Readmoo book page, and nothing in the UI truncates at these
+ * numbers.
+ */
+export const BORROW_BOOK_ID_MAX_LENGTH = 200;
+export const BORROW_BOOK_TITLE_MAX_LENGTH = 200;
+export const BORROW_BOOK_AUTHOR_MAX_LENGTH = 100;
+/**
+ * Applies to a NON-EMPTY `bookCoverUrl` only — `""` means "no cover" and stays
+ * accepted. 2048 is the conventional practical URL ceiling, comfortably above
+ * any Readmoo cover URL the whitelist admits.
+ */
+export const BORROW_COVER_URL_MAX_LENGTH = 2048;
+
+/**
  * Keep a coverUrl only when it is empty (scraper placeholder) or on the
  * Readmoo cover-host whitelist; anything else is blanked to "". Sanitize
  * instead of reject: one attacker-crafted cover in a sync payload must not

@@ -8,8 +8,11 @@
  *   kicked:{familyId}:{userId} → KickedRecord (owner-initiated removal tombstone, TTL 21600s)
  *   qr:{token}       → QrTokenRecord (one-time QR login bypass, TTL 300s)
  *   verifyfail:{userId}:{callerKey} → VerifyFailRecord (per-caller failure accounting, TTL 900s)
- *   borrow:{requestId} → BorrowRequest (JSON)
- *   borrows:family:{familyId} → string[] (requestId index)
+ *   borrow:{requestId} → BorrowPointer { familyId }
+ *                        (legacy: full BorrowRequest, read for familyId only)
+ *   borrows:family:{familyId} → BorrowRequest[] (all PENDING/LENT + newest
+ *                        BORROW_HISTORY_KEEP terminal PER borrowerId; legacy:
+ *                        string[] of requestIds, migrated on the next write)
  *   publicshelves:{userId} → PublicShelvesRecord (public-shelf pointer list, persistent)
  *   public:{shareToken} → PublicShelfSnapshot (plaintext public bookshelf, optional TTL)
  */
@@ -44,6 +47,81 @@ export interface BorrowRequest {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Value stored at `borrow:{requestId}` since the borrow index was
+ * denormalised: a pointer to the family whose `borrows:family:{familyId}`
+ * index holds the actual record.
+ *
+ * Its only reader is `PATCH /api/borrow/:requestId`, which starts from a bare
+ * requestId and needs the owning family before it can touch the index.
+ *
+ * Legacy values are full `BorrowRequest` objects. They are a SUPERSET of this
+ * shape — `familyId` is present on both — so the pointer read serves them
+ * unchanged, and nothing else on them is ever read. See
+ * `services/borrowIndex.ts` for why they are not rewritten.
+ */
+export interface BorrowPointer {
+  familyId: string;
+}
+
+/**
+ * Borrow statuses that can no longer transition: the request is finished and
+ * only its history value remains. These are the ONLY records `trimBorrowIndex`
+ * (`services/borrowIndex.ts`) may evict — PENDING and LENT are still
+ * actionable and are kept at any count.
+ */
+export const TERMINAL_BORROW_STATUSES: ReadonlySet<BorrowStatus> = new Set([
+  BorrowStatus.RETURNED,
+  BorrowStatus.REJECTED,
+  BorrowStatus.CANCELLED,
+]);
+
+/**
+ * How many TERMINAL borrow records a family's index keeps PER `borrowerId`,
+ * newest first by `updatedAt`.
+ *
+ * The index is a single KV value rewritten on every borrow write, so its size
+ * is both the read cost of `GET /api/family/:id/borrow` and the write cost of
+ * every create / status update. Without a cap it grows forever: before this
+ * bound existed, a family that had borrowed for a year paid for every
+ * historical record on every request.
+ *
+ * PER BORROWER, not per family: a family-wide cap would let the most active
+ * member's finished borrows evict everyone else's history, i.e. one member
+ * silently destroying another's records on shared data. Grouping by borrower
+ * means a member can only ever push out their OWN oldest entries. The
+ * family-level bound is therefore (members × 20) terminal records plus every
+ * live one, not a flat 20.
+ *
+ * 20 is a display bound, not a storage one — it is roughly what a member
+ * scrolls through in the borrow tab's history area, and a household of two to
+ * a handful of members generates that over months, so the cap is invisible in
+ * ordinary use. User-visible consequence, stated in CHANGELOG.md: each member's
+ * finished-borrow history shows at most 20 items and older ones are removed
+ * (their `borrow:{requestId}` keys are deleted with them). Active requests are
+ * never affected.
+ */
+export const BORROW_HISTORY_KEEP = 20;
+
+/**
+ * How many PENDING borrow requests ONE borrower may have open in a family at a
+ * time. Enforced at the create boundary (`409 TOO_MANY_PENDING_REQUESTS` in
+ * `routes/borrow.ts`), never by eviction.
+ *
+ * PENDING records are deliberately exempt from {@link BORROW_HISTORY_KEEP} —
+ * evicting one would strand a request the owner still has to answer — so they
+ * are the one part of the index a single member could otherwise grow without
+ * bound, and that index is ONE KV value every family member reads on every
+ * borrow list. This is the ceiling that closes it.
+ *
+ * Keyed on the CALLER's own pending count (Inv-6): nobody else's traffic can
+ * spend a member's allowance, and clearing it is entirely in the member's own
+ * hands (cancel, or wait for the owner to answer). LENT stays uncapped — each
+ * one required the owner's explicit approval and represents a book actually out
+ * on loan.
+ */
+export const BORROW_MAX_PENDING_PER_BORROWER = 20;
 
 export const kvKeys = {
   user: (userId: string) => `user:${userId}`,

@@ -16,6 +16,10 @@ import {
   resolvePublicShelves,
 } from "../services/publicShelf";
 import {
+  deleteBorrowIndex,
+  settleDepartingBorrower,
+} from "../services/borrowIndex";
+import {
   isValidUserId,
   isJsonObject,
   sanitizeDisplayName,
@@ -872,9 +876,34 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
           );
         }
 
-        // Single-member owner: delete entire family record
+        // Single-member owner: delete entire family record, borrow index
+        // included — nothing is left to visit that index again, so without this
+        // it becomes a permanent orphan. Same shape as the sole-owner dissolve
+        // in routes/family.ts: FAIL-OPEN, because cleanup must never block the
+        // account deletion the user asked for.
+        try {
+          await deleteBorrowIndex(c.env.KV, familyId);
+        } catch (err) {
+          console.error("BORROW_INDEX_DELETE_FAILED", { familyId, err });
+        }
+
         await c.env.KV.delete(kvKeys.family(familyId));
       } else {
+        // Settle this member's borrow records before dropping them from the
+        // family: cancel the PENDING requests they are a party to and remove
+        // their own finished ones from the index (see settleDepartingBorrower —
+        // records where they were the OWNER stay, as the counterparty's own
+        // history). Same call the member-removal handler in routes/family.ts
+        // makes, but FAIL-OPEN here: that handler can answer 500 and leave the
+        // member in place, whereas an account deletion has no equivalent
+        // "nothing happened" answer — the user's data goes either way, so a
+        // failed borrow cleanup is logged and the deletion continues.
+        try {
+          await settleDepartingBorrower(c.env.KV, familyId, userId);
+        } catch (err) {
+          console.error("BORROW_CLEANUP_FAILED", { familyId, userId, err });
+        }
+
         // Remove user from family members
         record.members = record.members.filter((m) => m.userId !== userId);
         await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
