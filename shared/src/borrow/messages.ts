@@ -23,11 +23,14 @@
 
 /**
  * Every failure code `POST /api/family/:id/borrow` can answer with that a user
- * can act on, plus the API clients' own `NETWORK_ERROR` (fetch rejected, no
- * envelope). Codes that only a malformed client request can trigger
- * (`INVALID_FAMILY_ID` / `INVALID_JSON` / `MISSING_FIELDS` / `INVALID_FIELDS` /
- * `INVALID_USER_ID`) and `INTERNAL_ERROR` are deliberately absent — they carry
- * no user-actionable advice and fall back to the generic sentence.
+ * can act on — `DUPLICATE_REQUEST`, `TOO_MANY_PENDING_REQUESTS`,
+ * `RATE_LIMITED`, `LENDING_DISABLED`, `NOT_FAMILY_MEMBER`, `INVALID_OWNER`,
+ * `FAMILY_NOT_FOUND`, `UNAUTHORIZED`, `INVALID_COVER_URL` — plus the API
+ * clients' own `NETWORK_ERROR` (fetch rejected, no envelope). Codes that only a
+ * malformed client request can trigger (`INVALID_FAMILY_ID` / `INVALID_JSON` /
+ * `MISSING_FIELDS` / `INVALID_FIELDS` / `INVALID_USER_ID`) and `INTERNAL_ERROR`
+ * are deliberately absent — they carry no user-actionable advice and fall back
+ * to the generic sentence.
  *
  * A `Map`, not an object literal: `code` is backend-controlled, and an object
  * lookup would resolve `"__proto__"` / `"toString"` through the prototype
@@ -41,6 +44,10 @@
  */
 const BORROW_FAILURE_TEXTS: ReadonlyMap<string, string> = new Map([
   ["DUPLICATE_REQUEST", "這本書已有待處理的借閱申請，請到「借閱」查看"],
+  [
+    "TOO_MANY_PENDING_REQUESTS",
+    "你的待處理借閱申請太多了，請先處理或取消部分申請",
+  ],
   ["RATE_LIMITED", "申請借閱過於頻繁，請稍後再試"],
   ["LENDING_DISABLED", "借閱功能已關閉，請在家庭設定確認你與對方的借閱權限"],
   ["NOT_FAMILY_MEMBER", "你已不在這個家庭，無法申請借閱"],

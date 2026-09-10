@@ -4,8 +4,6 @@ import type { Env } from "../utils/env";
 import {
   kvKeys,
   BoolFlag,
-  BorrowStatus,
-  type BorrowRequest,
   type FamilyMember,
   type KickedRecord,
   type RawFamilyRecord,
@@ -38,6 +36,10 @@ import {
   verificationErrorResponse,
   verifySecretFormatResponse,
 } from "../services/verification";
+import {
+  deleteBorrowIndex,
+  settleDepartingBorrower,
+} from "../services/borrowIndex";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 
@@ -606,12 +608,12 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   // concurrency — the counter is get-then-put, see middleware/rateLimit.ts).
   // It does NOT bound KV writes 1:1 — one admitted DELETE member fans out to
   // the family record put, the member key delete, both auth-token deletes, and
-  // ONE put per cancelled PENDING borrow — and it does not make the daily
-  // 1000-write free tier safe by itself. The per-IP middleware's own counter
-  // write also lands BEFORE auth, so spam that ignores 429s still burns writes
-  // outside this ceiling's reach. A hard global bound needs the edge
-  // (Cloudflare WAF rate limiting, see docs/architecture.md and
-  // worker/DEPLOY.md).
+  // at most ONE borrow-index put plus one pointer delete per evicted record —
+  // and it does not make the daily 1000-write free tier safe by itself. The
+  // per-IP middleware's own counter write also lands BEFORE auth, so spam that
+  // ignores 429s still burns writes outside this ceiling's reach. A hard
+  // global bound needs the edge (Cloudflare WAF rate limiting, see
+  // docs/architecture.md and worker/DEPLOY.md).
   //
   // Placement rule, uniform across all six handlers: the charge sits AFTER
   // every zero-I/O guard (path-format validation, the 401, and displayName's
@@ -643,7 +645,21 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
       return jsonError(c, 403, "OWNER_CANNOT_LEAVE", "請先轉移管理權後再離開");
     }
 
-    // Single-member owner: delete entire family
+    // Single-member owner: delete entire family, borrow index included.
+    //
+    // The index is dropped FAIL-OPEN and BEFORE the dissolve, deliberately: it
+    // is cleanup, not part of the dissolve's meaning, so it must never keep an
+    // owner in a family they asked to leave — a caught throw is logged and the
+    // dissolve proceeds, so the order helps only when the request is cut short
+    // before the family delete: the family key is still there, so the dissolve
+    // can be retried. Without it the index outlives the family as a permanent
+    // orphan — the reclaim gap the departure purge closes on the other side.
+    try {
+      await deleteBorrowIndex(c.env.KV, familyId);
+    } catch (err) {
+      console.error("BORROW_INDEX_DELETE_FAILED", { familyId, err });
+    }
+
     await Promise.all([
       c.env.KV.delete(kvKeys.family(familyId)),
       c.env.KV.delete(kvKeys.member(callerId)),
@@ -682,11 +698,13 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     return jsonError(c, 404, "MEMBER_NOT_FOUND", "目標使用者不是家庭成員");
   }
 
-  // Auto-cancel PENDING borrow requests involving the removed member FIRST,
-  // before mutating the family record. If this throws, the family record is
-  // untouched and the caller can retry safely without leaving partial state.
+  // Settle the departing member's borrow records FIRST, before mutating the
+  // family record: cancel the PENDING requests they are a party to, then drop
+  // their own finished ones from the index (see settleDepartingBorrower). If
+  // this throws, the family record is untouched and the caller can retry safely
+  // without leaving partial state.
   try {
-    await cancelPendingBorrowsForMember(c.env.KV, familyId, targetUserId);
+    await settleDepartingBorrower(c.env.KV, familyId, targetUserId);
   } catch (err) {
     console.error("BORROW_CLEANUP_FAILED", { familyId, targetUserId, err });
     return jsonError(
@@ -1363,42 +1381,6 @@ async function writeKickedTombstone(
       targetUserId,
       err,
     });
-  }
-}
-
-/**
- * Cancel all PENDING borrow requests involving a removed member.
- * LENT requests are left as-is (the book may still be borrowed).
- */
-async function cancelPendingBorrowsForMember(
-  kv: KVNamespace,
-  familyId: string,
-  targetUserId: string,
-): Promise<void> {
-  const indexKey = kvKeys.borrowsByFamily(familyId);
-  const requestIds = await kv.get<string[]>(indexKey, "json");
-  if (!requestIds || requestIds.length === 0) return;
-
-  const requests = await Promise.all(
-    requestIds.map((id) => kv.get<BorrowRequest>(kvKeys.borrow(id), "json")),
-  );
-
-  const now = new Date().toISOString();
-  const writeOps: Promise<void>[] = [];
-
-  for (const req of requests) {
-    if (req === null) continue;
-    if (req.status !== BorrowStatus.PENDING) continue;
-    if (req.borrowerId !== targetUserId && req.ownerId !== targetUserId)
-      continue;
-
-    req.status = BorrowStatus.CANCELLED;
-    req.updatedAt = now;
-    writeOps.push(kv.put(kvKeys.borrow(req.requestId), JSON.stringify(req)));
-  }
-
-  if (writeOps.length > 0) {
-    await Promise.all(writeOps);
   }
 }
 

@@ -5,6 +5,8 @@ import {
   kvKeys,
   BoolFlag,
   BorrowStatus,
+  BORROW_MAX_PENDING_PER_BORROWER,
+  type BorrowPointer,
   type BorrowRequest,
   type FamilyMember,
   type RawFamilyRecord,
@@ -13,9 +15,18 @@ import {
   findMember,
 } from "../kv/schema";
 import {
+  readBorrowIndex,
+  readBorrowPointer,
+  writeBorrowIndex,
+} from "../services/borrowIndex";
+import {
   isValidFamilyId,
   isValidUserId,
   isValidRequestId,
+  BORROW_BOOK_ID_MAX_LENGTH,
+  BORROW_BOOK_TITLE_MAX_LENGTH,
+  BORROW_BOOK_AUTHOR_MAX_LENGTH,
+  BORROW_COVER_URL_MAX_LENGTH,
 } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
@@ -65,6 +76,7 @@ const createBorrowRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
     404: jsonRes("Family not found"),
+    409: jsonRes("Too many pending borrow requests"),
     429: jsonRes("Rate limited"),
     500: jsonRes("Internal error"),
   },
@@ -157,14 +169,28 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   // INVALID_COVER_URL. `null` here means "wrong type", not "no cover".
   const bookCoverUrl = normalizeBookCoverUrl(body.bookCoverUrl);
 
+  // Type AND length in one guard slot. The length half is not cosmetic: every
+  // record of a family now lives inside ONE KV value (borrows:family:{id})
+  // that every member reads on every list, so an unbounded field is a way for
+  // one member to inflate what the whole family pays for. Both halves run
+  // BEFORE the rate-limit charge — a malformed request must not burn quota.
   if (
     typeof body.bookId !== "string" ||
     typeof body.bookTitle !== "string" ||
     typeof body.bookAuthor !== "string" ||
     typeof body.ownerId !== "string" ||
-    bookCoverUrl === null
+    bookCoverUrl === null ||
+    body.bookId.length > BORROW_BOOK_ID_MAX_LENGTH ||
+    body.bookTitle.length > BORROW_BOOK_TITLE_MAX_LENGTH ||
+    body.bookAuthor.length > BORROW_BOOK_AUTHOR_MAX_LENGTH ||
+    bookCoverUrl.length > BORROW_COVER_URL_MAX_LENGTH
   ) {
-    return jsonError(c, 400, "INVALID_FIELDS", "All fields must be strings");
+    return jsonError(
+      c,
+      400,
+      "INVALID_FIELDS",
+      "All fields must be strings within length limits",
+    );
   }
 
   if (!isValidUserId(body.ownerId)) {
@@ -258,34 +284,48 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     );
   }
 
+  // The family's borrow index carries the full records, so the duplicate check
+  // reads ONE key. A legacy string[] index still fans out here, one last time
+  // — the write below rewrites it in the new shape.
+  const { requests } = await readBorrowIndex(c.env.KV, familyId);
+
   // Check for duplicate PENDING request (same borrowerId + bookId)
-  const indexKey = kvKeys.borrowsByFamily(familyId);
-  const existingIndex = await c.env.KV.get<string[]>(indexKey, "json");
-  const requestIds = existingIndex ?? [];
+  const hasDuplicate = requests.some(
+    (req) =>
+      req.borrowerId === userId &&
+      req.bookId === bookId &&
+      req.status === BorrowStatus.PENDING,
+  );
 
-  if (requestIds.length > 0) {
-    const existingRequests = await Promise.all(
-      requestIds.map((id) =>
-        c.env.KV.get<BorrowRequest>(kvKeys.borrow(id), "json"),
-      ),
+  if (hasDuplicate) {
+    return jsonError(
+      c,
+      400,
+      "DUPLICATE_REQUEST",
+      "A pending borrow request already exists for this book",
     );
+  }
 
-    const hasDuplicate = existingRequests.some(
-      (req) =>
-        req !== null &&
-        req.borrowerId === userId &&
-        req.bookId === bookId &&
-        req.status === BorrowStatus.PENDING,
+  // Per-borrower ceiling on OPEN requests. PENDING records are exempt from the
+  // history trim (evicting one would strand a request the owner still has to
+  // answer), so without this they are the one part of the index a single member
+  // can grow without bound — and the index is one KV value the whole family
+  // reads on every list. Counted from the caller's OWN records only, so no one
+  // else's traffic can spend it (Inv-6), and the caller clears it themselves by
+  // cancelling or by the owner answering. Placed after the membership and
+  // duplicate checks: it needs the index that was just read, and it must not
+  // pre-empt the more specific errors above.
+  const openByCaller = requests.filter(
+    (req) => req.status === BorrowStatus.PENDING && req.borrowerId === userId,
+  ).length;
+
+  if (openByCaller >= BORROW_MAX_PENDING_PER_BORROWER) {
+    return jsonError(
+      c,
+      409,
+      "TOO_MANY_PENDING_REQUESTS",
+      "Too many pending borrow requests; resolve or cancel some first",
     );
-
-    if (hasDuplicate) {
-      return jsonError(
-        c,
-        400,
-        "DUPLICATE_REQUEST",
-        "A pending borrow request already exists for this book",
-      );
-    }
   }
 
   // Create the borrow request
@@ -308,26 +348,53 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     updatedAt: now,
   };
 
-  // Write borrow record and update index
-  const updatedIndex = [...requestIds, requestId];
-
-  // NOTE: No atomic CAS in KV. Concurrent POSTs from two members can both
-  // read the same index and the second put overwrites the first, dropping
-  // the earlier requestId. Acceptable ONLY while the index stays under 20
-  // entries. Enforced by tests/integration/budget/borrow-index-growth.test.ts
-  // — if that test fails, this tradeoff has EXPIRED and must be re-decided,
-  // not re-justified. Read that trigger literally: the test measures the LIST
-  // read fan-out (a 5-entry vs a 50-entry index), not the live index size, and
-  // it ships as it.fails() today — so it turns RED exactly when the fan-out
-  // disappears (issue #160 item 2 lands and it flips to a normal it()). No
-  // check measures the 20-entry bound itself; that one stays a review call.
-  // Borrow record at borrow:{requestId} is still written, but becomes
-  // invisible to GET /family/:id/borrow until the index is rebuilt.
+  // NOTE: No atomic CAS in KV. The index is a read-modify-write of ONE key on
+  // every write path — create (here), PATCH, and the departure settlement
+  // (`settleDepartingBorrower`, from member removal in family.ts and account
+  // deletion in user.ts) — so two concurrent writers on the SAME family can
+  // both read the same index and the second put overwrites the first, losing
+  // the earlier update. That lost update is the remaining residual and it is
+  // ACCEPTED: see docs/architecture.md → 已接受的殘餘風險.
+  //
+  // What is NO LONGER a residual: an index that grows with history. The old
+  // form of this note called the tradeoff "acceptable only while the index
+  // stays under 20 entries" and left that bound to a reviewer's judgement.
+  // `trimBorrowIndex` (services/borrowIndex.ts) now enforces it on every write
+  // — the index holds the live requests plus at most BORROW_HISTORY_KEEP
+  // terminal ones PER BORROWER. Live requests are deliberately NOT trimmed
+  // (evicting one would strand a lent book), so the bound is "live + 20 per
+  // borrower", not a constant; the PENDING half of "live" is bounded instead at
+  // the boundary above, by BORROW_MAX_PENDING_PER_BORROWER.
+  //
+  // The cap is not the only thing that shrinks the index, and it could not be:
+  // it is keyed on `borrowerId`, and a sync-code holder can mint fresh
+  // borrowerIds indefinitely (join → open requests → leave → repeat), each
+  // leaving a group under the cap that no later write would ever trim. So
+  // BORROWER COUNT is bounded too, at both exits: `settleDepartingBorrower`
+  // removes a departing member's own terminal records (not LENT — see its
+  // JSDoc tripwire), and `deleteBorrowIndex` drops the key on dissolve.
+  // tests/integration/budget/borrow-index-growth.test.ts remains the
+  // acceptance criterion for the O(1) list read.
+  //
   // For strict correctness, scope index per-borrower or use Durable Objects.
-  await Promise.all([
-    c.env.KV.put(kvKeys.borrow(requestId), JSON.stringify(borrowRequest)),
-    c.env.KV.put(indexKey, JSON.stringify(updatedIndex)),
-  ]);
+  //
+  // Write order is SEQUENTIAL and deliberate, and the POINTER goes FIRST —
+  // the two half-failures are NOT symmetric:
+  //   - index entry without pointer: a PENDING ghost. Both parties SEE it in
+  //     the list, but PATCH cannot resolve its family, so every attempt to
+  //     approve / reject / cancel it answers 404. PENDING is never trimmed, so
+  //     it stays forever, and it permanently blocks re-requesting the same book
+  //     (DUPLICATE_REQUEST matches on borrowerId + bookId + PENDING).
+  //   - pointer without index entry: invisible to every reader and harmless.
+  //     The requestId is a freshly minted UUID nothing else names, a PATCH on
+  //     it gets the same 404 an unknown id gets, and the caller's retry creates
+  //     a clean record under a new id.
+  // So the recoverable half is written first: whichever write fails, no ghost
+  // can exist.
+  const pointer: BorrowPointer = { familyId };
+  await c.env.KV.put(kvKeys.borrow(requestId), JSON.stringify(pointer));
+
+  await writeBorrowIndex(c.env.KV, familyId, [...requests, borrowRequest]);
 
   return c.json({ data: borrowRequest }, 201);
 });
@@ -377,31 +444,20 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
     );
   }
 
-  // Load borrow index
-  const requestIds = await c.env.KV.get<string[]>(
-    kvKeys.borrowsByFamily(familyId),
-    "json",
-  );
-  if (!requestIds || requestIds.length === 0) {
-    return c.json({ data: [] });
-  }
-
-  // Batch load all borrow records, filter out null (defensive)
-  const requests = await Promise.all(
-    requestIds.map((id) =>
-      c.env.KV.get<BorrowRequest>(kvKeys.borrow(id), "json"),
-    ),
-  );
-
-  const validRequests = requests.filter((r): r is BorrowRequest => r !== null);
+  // Load the borrow index. READ-ONLY on purpose, including for a family still
+  // on the legacy string[] index (which fans out here exactly as before):
+  // migration is write-path only, so a listing never writes — see
+  // services/borrowIndex.ts.
+  const { requests } = await readBorrowIndex(c.env.KV, familyId);
 
   // API-layer least privilege: only records the caller is a party to are
   // returned. A family member who is neither borrower nor owner has no claim to
   // someone else's transaction, and this is what keeps FORMER members' data
   // (userId, borrowerName, bookTitle, bookAuthor, bookCoverUrl) out of
-  // uninvolved members' responses — borrow records survive removal in KV, where
-  // family.ts's cancelPendingBorrowsForMember only flips PENDING → CANCELLED
-  // and deletes nothing.
+  // uninvolved members' responses — a departure does not empty the index of
+  // that member: `settleDepartingBorrower` removes only the terminal records
+  // they BORROWED, leaving their LENT ones (still out on loan) and every record
+  // where they were the OWNER, which is the remaining member's own history.
   //
   // Nothing downstream needs third-party records: both clients already bucket
   // exclusively by `ownerId === userId || borrowerId === userId` (extension
@@ -409,7 +465,7 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
   // FamilyShelf pages collect only the caller's own PENDING requests), and the
   // create handler's DUPLICATE_REQUEST check reads KV directly rather than this
   // response.
-  const visibleRequests = validRequests.filter(
+  const visibleRequests = requests.filter(
     (r) => r.borrowerId === userId || r.ownerId === userId,
   );
 
@@ -460,12 +516,33 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  // Load borrow record
-  const borrowRequest = await c.env.KV.get<BorrowRequest>(
-    kvKeys.borrow(requestId),
-    "json",
-  );
+  // A bare requestId cannot name its family, so resolve the pointer first.
+  // It reads a legacy full record for its `familyId` too, and NEVER rewrites
+  // one — the index is the truth for the record's contents.
+  const familyId = await readBorrowPointer(c.env.KV, requestId);
+  if (!familyId) {
+    return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
+  }
+
+  // The entry inside the index IS the record; `borrowRequest` is a reference
+  // into `requests`, so mutating it below updates what gets written back.
+  const { requests } = await readBorrowIndex(c.env.KV, familyId);
+  const borrowRequest = requests.find((r) => r.requestId === requestId);
   if (!borrowRequest) {
+    // The record aged out of its borrower's history cap, or this is an orphan
+    // pointer: either the trim's fail-open delete did not land, or a create
+    // wrote the pointer and then failed to write the index. All of them mean
+    // "no such request" — same 404 as an unknown requestId, so the response
+    // discloses nothing extra.
+    return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
+  }
+
+  // Defence in depth: the pointer and the record must name the SAME family.
+  // They disagree only if one of the two is corrupt, and acting on that would
+  // rewrite this family's whole index from a record that claims to belong to
+  // another one. Refuse with the same 404 an unknown requestId gets — it
+  // discloses nothing extra — and write nothing.
+  if (borrowRequest.familyId !== familyId) {
     return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
   }
 
@@ -500,7 +577,12 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   borrowRequest.status = targetStatus as BorrowStatus;
   borrowRequest.updatedAt = new Date().toISOString();
 
-  await c.env.KV.put(kvKeys.borrow(requestId), JSON.stringify(borrowRequest));
+  // ONE write: the index carries the record. The pointer is untouched — it
+  // holds only `familyId`, which a status change cannot alter. Rewriting the
+  // index may evict OLDER terminal records of the SAME borrower past the
+  // history cap; the record just updated carries the newest `updatedAt` in that
+  // group, so it is never the one evicted.
+  await writeBorrowIndex(c.env.KV, familyId, requests);
 
   return c.json({ data: borrowRequest });
 });

@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { BorrowStatus, kvKeys, type BorrowRequest } from "../../src/kv/schema";
+import {
+  BorrowStatus,
+  kvKeys,
+  type BorrowPointer,
+  type BorrowRequest,
+} from "../../src/kv/schema";
 import { ALICE, BOB, CHARLIE, DAVE } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,8 +80,45 @@ async function createBorrowRequest(
   return json.data.requestId as string;
 }
 
+/**
+ * Read a borrow record the way production resolves one since the index was
+ * denormalised (#160 item 2, `src/services/borrowIndex.ts`): `borrow:{id}` is
+ * only a `{ familyId }` pointer, and the family's index
+ * (`borrows:family:{familyId}`) is the single source of truth for status and
+ * fields. Reading the pointer alone would assert against an object that has
+ * neither, which is exactly the drift this two-step lookup prevents.
+ *
+ * Returns `null` when the pointer is gone (never written / deleted by a trim)
+ * or when the index no longer carries the record.
+ */
 async function readBorrow(requestId: string): Promise<BorrowRequest | null> {
-  return await kv.get<BorrowRequest>(kvKeys.borrow(requestId), "json");
+  const pointer = await kv.get<BorrowPointer>(kvKeys.borrow(requestId), "json");
+  if (!pointer?.familyId) return null;
+  const index = await kv.get<BorrowRequest[]>(
+    kvKeys.borrowsByFamily(pointer.familyId),
+    "json",
+  );
+  return index?.find((r) => r.requestId === requestId) ?? null;
+}
+
+/**
+ * The requestIds the family's stored index currently names, in index order —
+ * readable in EITHER shape (`string[]` legacy, records since #160 item 2).
+ *
+ * Since the departure settlement (`settleDepartingBorrower`) PURGES a leaver's
+ * own terminal records, "was this record cancelled?" and "is this record still
+ * here?" are now two different questions. `readBorrow` answers the first only
+ * while the record survives; this answers the second directly.
+ */
+async function storedIndexIds(familyId: string): Promise<string[]> {
+  const stored = await kv.get<BorrowRequest[] | string[]>(
+    kvKeys.borrowsByFamily(familyId),
+    "json",
+  );
+  if (!stored) return [];
+  return stored.map((entry) =>
+    typeof entry === "string" ? entry : entry.requestId,
+  );
 }
 
 /**
@@ -105,7 +147,7 @@ beforeEach(() => {
 // ===========================================================================
 
 describe("Borrow Cancellation on Member Removal", () => {
-  it("auto-cancels PENDING requests where removed member is borrower OR owner", async () => {
+  it("cancels PENDING requests on both sides and purges the ones the removed member borrowed", async () => {
     // 3-person family: Alice (owner), Bob, Carol
     const { familyId, authToken: aliceToken } = await createFamilyAndGetToken(
       ALICE,
@@ -159,13 +201,23 @@ describe("Borrow Cancellation on Member Removal", () => {
     );
     expect(removeRes.status).toBe(200);
 
-    // Verify Bob's borrow requests are CANCELLED
-    expect((await readBorrow(reqBobBorrows))?.status).toBe(
-      BorrowStatus.CANCELLED,
-    );
+    // (a) Bob was the BORROWER: the request is cancelled AND then purged in the
+    // same settlement — index entry and pointer both gone. That purge is the
+    // fix for security finding F-1: the history cap is keyed on `borrowerId`,
+    // so a leaver's finished records would otherwise sit in the shared index
+    // under an id that never writes again and can never be trimmed.
+    expect(await storedIndexIds(familyId)).not.toContain(reqBobBorrows);
+    expect(await kv.get(kvKeys.borrow(reqBobBorrows))).toBeNull();
+    expect(await readBorrow(reqBobBorrows)).toBeNull();
+
+    // (b) Bob was the OWNER: the record is CAROL's own history, so it survives —
+    // and it is where the CANCELLATION half of the settlement stays observable
+    // now that the borrower-side record is purged before anyone can read it.
+    expect(await storedIndexIds(familyId)).toContain(reqBobOwns);
     expect((await readBorrow(reqBobOwns))?.status).toBe(BorrowStatus.CANCELLED);
 
-    // Unrelated request stays PENDING
+    // (c) Unrelated request stays PENDING
+    expect(await storedIndexIds(familyId)).toContain(reqUnrelated);
     expect((await readBorrow(reqUnrelated))?.status).toBe(BorrowStatus.PENDING);
   });
 
@@ -211,7 +263,7 @@ describe("Borrow Cancellation on Member Removal", () => {
     expect(after?.status).toBe(BorrowStatus.LENT);
   });
 
-  it("only cancels PENDING; leaves LENT and REJECTED unchanged on member removal", async () => {
+  it("purges the removed member's PENDING and REJECTED records but keeps their LENT one", async () => {
     const { familyId, authToken: aliceToken } = await createFamilyAndGetToken(
       ALICE,
       "Alice",
@@ -264,10 +316,19 @@ describe("Borrow Cancellation on Member Removal", () => {
     );
     expect(removeRes.status).toBe(200);
 
-    // Only PENDING should be CANCELLED; others unchanged
-    expect((await readBorrow(pendingId))?.status).toBe(BorrowStatus.CANCELLED);
+    // All three are Bob's OWN borrows, so the settlement judges them by status:
+    // PENDING is cancelled (making it terminal) and REJECTED already was, so
+    // both are purged; LENT is the only survivor — the book may still be
+    // physically out on loan and the counterparty must be able to close it.
+    expect(await storedIndexIds(familyId)).toEqual([lentId]);
+    expect(await kv.get(kvKeys.borrow(pendingId))).toBeNull();
+    expect(await kv.get(kvKeys.borrow(rejectedId))).toBeNull();
+
+    // Positive companion for the two `toBeNull()` lines: the survivor keeps
+    // BOTH halves, so they cannot be green because the removal wiped
+    // everything.
+    expect(await kv.get(kvKeys.borrow(lentId))).not.toBeNull();
     expect((await readBorrow(lentId))?.status).toBe(BorrowStatus.LENT);
-    expect((await readBorrow(rejectedId))?.status).toBe(BorrowStatus.REJECTED);
   });
 
   it("succeeds even when family has no borrow index", async () => {
@@ -357,6 +418,18 @@ describe("Borrow visibility after member removal", () => {
     expect((await readBorrow(reqCarolBorrowsBob))?.status).toBe(
       BorrowStatus.CANCELLED,
     );
+
+    // (a2) It survives specifically in the family INDEX, which the cancellation
+    // rewrote. This is the positive companion for (b) below: the removed
+    // member's data is still there to leak, so an empty/filtered response is
+    // the API-layer least-privilege filter doing its job — not a deletion that
+    // would make (b) pass vacuously.
+    const index = await kv.get<BorrowRequest[]>(
+      kvKeys.borrowsByFamily(familyId),
+      "json",
+    );
+    expect(index?.map((r) => r.requestId)).toContain(reqCarolBorrowsBob);
+    expect(index?.some((r) => r.ownerId === BOB)).toBe(true);
 
     // (b) Dave, a party to neither, sees only his own record — nothing about
     // the removed member reaches him, in any field.

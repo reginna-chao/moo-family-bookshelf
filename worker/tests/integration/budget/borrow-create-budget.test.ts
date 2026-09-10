@@ -20,23 +20,31 @@
  *   The binding call it was replaced by is pinned in `calls` below instead.
  * - Per-userId `borrow-create` counter — REMOVED by #160 item 1 for the same
  *   reason (rateLimit.ts:608); scope "borrow-create", ceiling 10 per 60s
- *   (routes/borrow.ts:199-204), which is what selects RATE_LIMIT_10_PER_MIN.
+ *   (routes/borrow.ts:225-230), which is what selects RATE_LIMIT_10_PER_MIN.
  *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
  *   `calls` assertion below is that rule's only automatic check.
- * - `borrow:{existingRequestId}` — ONE READ PER ENTRY of the family's borrow
- *   index (routes/borrow.ts:267-271), only to answer the DUPLICATE_REQUEST
- *   check. WASTE: this read count grows with the family's borrow history and is
- *   EXPECTED TO DISAPPEAR (or collapse to O(1)) when issue #160 item 2 lands
- *   (borrow index denormalisation — the index itself carries what the check
- *   needs, so there is no per-entry fan-out). Two such reads are pinned below
- *   because the seed holds a 2-entry index; after #160 item 2 they must be
- *   DELETED from the array, not preserved.
+ * - `borrow:{existingRequestId}` — REMOVED by #160 item 2. The duplicate check
+ *   used to read one key PER INDEX ENTRY, so its cost grew with the family's
+ *   borrow history. `borrows:family:{familyId}` now carries the full records
+ *   (services/borrowIndex.ts `readBorrowIndex`), so `readBorrowIndex` at
+ *   routes/borrow.ts:290 answers the check with the ONE index read that was
+ *   already being paid for, and the fan-out is gone from `getKeys()` below.
+ *   Do not re-introduce it: the seed here holds a 2-entry index precisely so a
+ *   returning fan-out would show up as two extra reads. That single read now
+ *   also answers the per-borrower PENDING ceiling
+ *   (`BORROW_MAX_PENDING_PER_BORROWER`, routes/borrow.ts:318-329) — a second
+ *   bound added on top of it, at no extra KV cost.
  * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `family:{familyId}` (routes/borrow.ts:208), `borrows:family:{familyId}`
- *   (get :263, put :329) and the new `borrow:{requestId}` (put :328, the
- *   `Promise.all` under the "No atomic CAS" NOTE) — real cost of creating the
- *   request.
+ * - `family:{familyId}` (routes/borrow.ts:234) and
+ *   `borrows:family:{familyId}` (get :290, put :388 via `writeBorrowIndex`) —
+ *   real cost of creating the request.
+ * - `borrow:{newRequestId}` (put :386) — the new `BorrowPointer`
+ *   (`{ familyId }`, kv/schema.ts), whose only reader is
+ *   `PATCH /api/borrow/:requestId`. It is written FIRST, deliberately, because
+ *   the two half-failures are NOT symmetric — see the create handler's
+ *   rationale (routes/borrow.ts:372-384). That ordering is pinned by
+ *   `writeTrail()` below, which `putKeys()` alone could not see.
  *
  * THE RATE LIMITING BINDINGS ARE INJECTED, deliberately: every production
  * deploy carries all four (worker/wrangler.toml), and a request sent without
@@ -58,6 +66,7 @@ import {
   BoolFlag,
   BorrowStatus,
   kvKeys,
+  type BorrowPointer,
   type BorrowRequest,
   type FamilyRecord,
 } from "../../../src/kv/schema";
@@ -82,7 +91,17 @@ type Json = any;
 
 let kv: KVNamespace;
 
-/** Two-member lending family + a 2-entry borrow index; returns the caller's token. */
+/**
+ * Two-member lending family + a 2-entry borrow index in the CURRENT shape
+ * (#160 item 2): the index holds the full records and each `borrow:{id}` holds
+ * only a `{ familyId }` pointer. Returns the caller's token.
+ *
+ * Seeding the legacy `string[]` index instead would make the handler fan out
+ * one last time and re-pin numbers no migrated family produces — the legacy
+ * read path has its own coverage in
+ * tests/integration/budget/borrow-index-growth.test.ts and
+ * tests/integration/borrowIndexMigration.test.ts.
+ */
 async function seedFamilyWithBorrowIndex(): Promise<string> {
   const family: FamilyRecord = {
     familyId: FAMILY_ID,
@@ -98,24 +117,25 @@ async function seedFamilyWithBorrowIndex(): Promise<string> {
   await kv.put(kvKeys.member(USER1), FAMILY_ID);
   await kv.put(kvKeys.member(USER2), FAMILY_ID);
 
-  for (const [i, requestId] of EXISTING_IDS.entries()) {
-    const record: BorrowRequest = {
-      requestId,
-      familyId: FAMILY_ID,
-      borrowerId: USER1,
-      borrowerName: "Alice",
-      ownerId: USER2,
-      bookId: `book-existing-${i}`,
-      bookTitle: `Existing ${i}`,
-      bookAuthor: "Author",
-      bookCoverUrl: "",
-      status: BorrowStatus.PENDING,
-      createdAt: new Date(PINNED_NOW).toISOString(),
-      updatedAt: new Date(PINNED_NOW).toISOString(),
-    };
-    await kv.put(kvKeys.borrow(requestId), JSON.stringify(record));
+  const records: BorrowRequest[] = EXISTING_IDS.map((requestId, i) => ({
+    requestId,
+    familyId: FAMILY_ID,
+    borrowerId: USER1,
+    borrowerName: "Alice",
+    ownerId: USER2,
+    bookId: `book-existing-${i}`,
+    bookTitle: `Existing ${i}`,
+    bookAuthor: "Author",
+    bookCoverUrl: "",
+    status: BorrowStatus.PENDING,
+    createdAt: new Date(PINNED_NOW).toISOString(),
+    updatedAt: new Date(PINNED_NOW).toISOString(),
+  }));
+  for (const requestId of EXISTING_IDS) {
+    const pointer: BorrowPointer = { familyId: FAMILY_ID };
+    await kv.put(kvKeys.borrow(requestId), JSON.stringify(pointer));
   }
-  await kv.put(kvKeys.borrowsByFamily(FAMILY_ID), JSON.stringify(EXISTING_IDS));
+  await kv.put(kvKeys.borrowsByFamily(FAMILY_ID), JSON.stringify(records));
 
   return seedAuthToken(kv, USER1);
 }
@@ -157,14 +177,14 @@ afterEach(() => {
 });
 
 describe("KV budget: POST /api/family/:id/borrow", () => {
-  it("performs exactly 5 KV reads and 2 KV writes against a 2-entry borrow index", async () => {
+  it("performs exactly 3 KV reads and 2 KV writes against a 2-entry borrow index", async () => {
     const token = await seedFamilyWithBorrowIndex();
 
     const ops = watchKvOps(kv);
     const { res, calls } = await measuredRequest(token);
 
     expect(res.status).toBe(201);
-    // The new record's id is server-generated (crypto.randomUUID, borrow.ts:292),
+    // The new record's id is server-generated (crypto.randomUUID, borrow.ts:332),
     // so it is read back from the response and pinned exactly like the rest.
     const created = (await res.json()) as Json;
     const newRequestId = created.data.requestId as string;
@@ -172,21 +192,32 @@ describe("KV budget: POST /api/family/:id/borrow", () => {
     expect(ops.getKeys()).toEqual([
       // auth middleware, auth.ts:46
       kvKeys.authToken(token),
-      // handler, borrow.ts:208 / :263
+      // handler, borrow.ts:234 / :290
       kvKeys.family(FAMILY_ID),
       kvKeys.borrowsByFamily(FAMILY_ID),
-      // WASTE (#160 item 2) — one read per index entry, borrow.ts:267-271
-      kvKeys.borrow(EXISTING_IDS[0]),
-      kvKeys.borrow(EXISTING_IDS[1]),
+      // No `borrow:{existingRequestId}` entries: the index carries the records
+      // the DUPLICATE_REQUEST check needs (#160 item 2). Two of them would be
+      // here if the fan-out came back — the seed holds a 2-entry index.
     ]);
 
-    expect(ops.putKeys()).toEqual([
-      // handler, borrow.ts:328 / :329
-      kvKeys.borrow(newRequestId),
-      kvKeys.borrowsByFamily(FAMILY_ID),
+    // ORDER IS THE POINT, so this is `writeTrail` rather than `putKeys`: the
+    // POINTER goes first — see the create handler's rationale
+    // (routes/borrow.ts:372-384). The two half-failures are not symmetric. An
+    // index entry with no pointer is a PENDING ghost: both parties see it,
+    // PATCH cannot resolve its family so nobody can approve / reject / cancel
+    // it, PENDING is never trimmed so it stays forever, and DUPLICATE_REQUEST
+    // then blocks re-requesting that book permanently. A pointer with no index
+    // entry is invisible to every reader, answers the same 404 an unknown id
+    // does, and the caller's retry produces a clean record. So the recoverable
+    // half is written first. borrow.ts:386 then :388.
+    expect(ops.writeTrail()).toEqual([
+      `put ${kvKeys.borrow(newRequestId)}`,
+      `put ${kvKeys.borrowsByFamily(FAMILY_ID)}`,
     ]);
 
-    // Creating a request removes nothing.
+    // Creating a request removes nothing. (A create CAN delete — writeBorrowIndex
+    // drops evicted pointers past BORROW_HISTORY_KEEP — but this 2-entry,
+    // all-PENDING index is nowhere near the cap.)
     expect(ops.deleteKeys()).toEqual([]);
 
     // The fixed per-request rate-limit cost, in the form it now takes: two

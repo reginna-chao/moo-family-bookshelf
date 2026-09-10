@@ -21,6 +21,14 @@ import {
 /** code → the exact 繁體中文 sentence production ships today. */
 const COPY_BY_CODE: [string, string][] = [
   ["DUPLICATE_REQUEST", "這本書已有待處理的借閱申請，請到「借閱」查看"],
+  // 409 from the per-borrower PENDING ceiling
+  // (BORROW_MAX_PENDING_PER_BORROWER, worker/src/routes/borrow.ts). Distinct
+  // from DUPLICATE_REQUEST: that one is about THIS book, this one is about how
+  // many requests the member is holding open, so the advice differs.
+  [
+    "TOO_MANY_PENDING_REQUESTS",
+    "你的待處理借閱申請太多了，請先處理或取消部分申請",
+  ],
   ["RATE_LIMITED", "申請借閱過於頻繁，請稍後再試"],
   ["LENDING_DISABLED", "借閱功能已關閉，請在家庭設定確認你與對方的借閱權限"],
   ["NOT_FAMILY_MEMBER", "你已不在這個家庭，無法申請借閱"],
@@ -39,7 +47,7 @@ describe("buildBorrowFailureText", () => {
   it("gives every mapped code a distinct, non-empty sentence", () => {
     const texts = COPY_BY_CODE.map(([code]) => buildBorrowFailureText(code));
 
-    expect(texts).toHaveLength(9);
+    expect(texts).toHaveLength(10);
     for (const text of texts) {
       expect(text.length).toBeGreaterThan(0);
     }

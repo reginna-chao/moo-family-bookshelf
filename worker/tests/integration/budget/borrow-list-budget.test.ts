@@ -20,23 +20,25 @@
  *   The binding call it was replaced by is pinned in `calls` below instead.
  * - Per-userId `borrow-list` counter — REMOVED by #160 item 1 for the same
  *   reason (rateLimit.ts:608); scope "borrow-list", ceiling 60 per 60s
- *   (routes/borrow.ts:353-358), which is what selects RATE_LIMIT_60_PER_MIN —
+ *   (routes/borrow.ts:411-416), which is what selects RATE_LIMIT_60_PER_MIN —
  *   the same binding the per-IP standard tier uses, kept apart by the KEY.
  *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
  *   `calls` assertion below is that rule's only automatic check.
- * - `borrow:{requestId}` — ONE READ PER ENTRY of the family's borrow index
- *   (routes/borrow.ts:390-394). WASTE: the read count grows linearly with the
- *   family's borrow history and is EXPECTED TO DISAPPEAR (or collapse to O(1))
- *   when issue #160 item 2 lands (borrow index denormalisation — the index
- *   itself carries the fields the list response needs). Two such reads are
- *   pinned below because the seed holds a 2-entry index; after #160 item 2 they
- *   must be DELETED from the array, not preserved. The growth RATE this
- *   annotation describes has its own acceptance test in
- *   tests/integration/budget/borrow-index-growth.test.ts.
+ * - `borrow:{requestId}` — REMOVED by #160 item 2. The listing used to read one
+ *   key PER INDEX ENTRY, so its cost grew linearly with the family's borrow
+ *   history. `borrows:family:{familyId}` now carries the full records, so
+ *   `readBorrowIndex` (routes/borrow.ts:442) answers the whole listing from the
+ *   ONE index read and the fan-out is gone from `getKeys()` below. The seed
+ *   holds a 2-entry index precisely so a returning fan-out would show up as two
+ *   extra reads. The growth RATE has its own acceptance test in
+ *   tests/integration/budget/borrow-index-growth.test.ts — which also pins the
+ *   ONE case where the fan-out legitimately survives: a family still on the
+ *   legacy `string[]` index, because migration is write-path only and a GET
+ *   never writes.
  * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `family:{familyId}` (routes/borrow.ts:362, membership check) and
- *   `borrows:family:{familyId}` (:381) — real cost of the listing.
+ * - `family:{familyId}` (routes/borrow.ts:420, membership check) and
+ *   `borrows:family:{familyId}` (:442) — real cost of the listing.
  *
  * THE RATE LIMITING BINDINGS ARE INJECTED, deliberately: every production
  * deploy carries all four (worker/wrangler.toml), and a request sent without
@@ -58,6 +60,7 @@ import {
   BoolFlag,
   BorrowStatus,
   kvKeys,
+  type BorrowPointer,
   type BorrowRequest,
   type FamilyRecord,
 } from "../../../src/kv/schema";
@@ -81,8 +84,15 @@ type Json = any;
 let kv: KVNamespace;
 
 /**
- * Two-member family + a 2-entry borrow index, with the caller (USER1) a party
- * to both records so the response is non-empty. Returns the caller's token.
+ * Two-member family + a 2-entry borrow index in the CURRENT shape (#160
+ * item 2): the index holds the full records and each `borrow:{id}` holds only
+ * a `{ familyId }` pointer. The caller (USER1) is a party to both records, so
+ * the response is non-empty.
+ *
+ * The pointers are seeded even though a listing never reads them — they are
+ * what a real create leaves behind, and their presence proves the 3 reads
+ * below are the handler declining to touch them, not the fixture omitting
+ * them. Returns the caller's token.
  */
 async function seedFamilyWithBorrowIndex(): Promise<string> {
   const family: FamilyRecord = {
@@ -99,24 +109,25 @@ async function seedFamilyWithBorrowIndex(): Promise<string> {
   await kv.put(kvKeys.member(USER1), FAMILY_ID);
   await kv.put(kvKeys.member(USER2), FAMILY_ID);
 
-  for (const [i, requestId] of EXISTING_IDS.entries()) {
-    const record: BorrowRequest = {
-      requestId,
-      familyId: FAMILY_ID,
-      borrowerId: USER1,
-      borrowerName: "Alice",
-      ownerId: USER2,
-      bookId: `book-${i}`,
-      bookTitle: `Book ${i}`,
-      bookAuthor: "Author",
-      bookCoverUrl: "",
-      status: BorrowStatus.PENDING,
-      createdAt: new Date(PINNED_NOW).toISOString(),
-      updatedAt: new Date(PINNED_NOW).toISOString(),
-    };
-    await kv.put(kvKeys.borrow(requestId), JSON.stringify(record));
+  const records: BorrowRequest[] = EXISTING_IDS.map((requestId, i) => ({
+    requestId,
+    familyId: FAMILY_ID,
+    borrowerId: USER1,
+    borrowerName: "Alice",
+    ownerId: USER2,
+    bookId: `book-${i}`,
+    bookTitle: `Book ${i}`,
+    bookAuthor: "Author",
+    bookCoverUrl: "",
+    status: BorrowStatus.PENDING,
+    createdAt: new Date(PINNED_NOW).toISOString(),
+    updatedAt: new Date(PINNED_NOW).toISOString(),
+  }));
+  for (const requestId of EXISTING_IDS) {
+    const pointer: BorrowPointer = { familyId: FAMILY_ID };
+    await kv.put(kvKeys.borrow(requestId), JSON.stringify(pointer));
   }
-  await kv.put(kvKeys.borrowsByFamily(FAMILY_ID), JSON.stringify(EXISTING_IDS));
+  await kv.put(kvKeys.borrowsByFamily(FAMILY_ID), JSON.stringify(records));
 
   return seedAuthToken(kv, USER1);
 }
@@ -152,26 +163,26 @@ afterEach(() => {
 });
 
 describe("KV budget: GET /api/family/:id/borrow", () => {
-  it("performs exactly 5 KV reads and no KV write for a 2-entry borrow index", async () => {
+  it("performs exactly 3 KV reads and no KV write for a 2-entry borrow index", async () => {
     const token = await seedFamilyWithBorrowIndex();
 
     const ops = watchKvOps(kv);
     const { res, calls } = await measuredRequest(token);
 
     expect(res.status).toBe(200);
-    // Non-empty response: the per-entry fan-out below is what produced it.
+    // Non-empty response, from the index read alone: seed health, and what
+    // stops the 3-read pin below from being satisfied by an empty listing.
     const body = (await res.json()) as Json;
     expect(body.data).toHaveLength(EXISTING_IDS.length);
 
     expect(ops.getKeys()).toEqual([
       // auth middleware, auth.ts:46
       kvKeys.authToken(token),
-      // handler, borrow.ts:362 / :381
+      // handler, borrow.ts:420 / :442
       kvKeys.family(FAMILY_ID),
       kvKeys.borrowsByFamily(FAMILY_ID),
-      // WASTE (#160 item 2) — one read per index entry, borrow.ts:390-394
-      kvKeys.borrow(EXISTING_IDS[0]),
-      kvKeys.borrow(EXISTING_IDS[1]),
+      // No `borrow:{requestId}` entries: the index carries the records (#160
+      // item 2). The seeded pointers exist and are deliberately NOT read.
     ]);
 
     // A read-only listing writes nothing at all now that both rate-limit

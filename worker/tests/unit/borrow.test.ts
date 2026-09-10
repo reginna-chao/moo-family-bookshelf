@@ -5,8 +5,15 @@ import {
   kvKeys,
   BorrowStatus,
   BoolFlag,
+  type BorrowPointer,
   type BorrowRequest,
 } from "../../src/kv/schema";
+import {
+  BORROW_BOOK_ID_MAX_LENGTH,
+  BORROW_BOOK_TITLE_MAX_LENGTH,
+  BORROW_BOOK_AUTHOR_MAX_LENGTH,
+  BORROW_COVER_URL_MAX_LENGTH,
+} from "../../src/utils/validation";
 import { NOBODY, USER1, USER2, USER3 } from "../helpers/ids";
 import {
   createRateLimitBindings,
@@ -116,6 +123,39 @@ const validBorrowBody = {
   bookCoverUrl: VALID_COVER_URL,
   ownerId: USER1,
 };
+
+/**
+ * Read the family's borrow index — the SINGLE SOURCE OF TRUTH for borrow
+ * records since the index was denormalised (#160 item 2,
+ * `src/services/borrowIndex.ts`). It holds full `BorrowRequest` objects, NOT a
+ * `string[]` of requestIds.
+ */
+async function readIndex(familyId: string): Promise<BorrowRequest[] | null> {
+  return await kv.get<BorrowRequest[]>(
+    kvKeys.borrowsByFamily(familyId),
+    "json",
+  );
+}
+
+/**
+ * The stored record for `requestId`, read where production now keeps it.
+ *
+ * `borrow:{requestId}` is only a `{ familyId }` pointer, so a test that wants a
+ * record's status or fields must look inside the family index — reading the
+ * pointer would silently assert against an object that carries neither.
+ */
+async function readIndexEntry(
+  familyId: string,
+  requestId: string,
+): Promise<BorrowRequest | undefined> {
+  const index = await readIndex(familyId);
+  return (index ?? []).find((r) => r.requestId === requestId);
+}
+
+/** The `borrow:{requestId}` value: a pointer to the owning family, nothing else. */
+async function readPointer(requestId: string): Promise<BorrowPointer | null> {
+  return await kv.get<BorrowPointer>(kvKeys.borrow(requestId), "json");
+}
 
 beforeEach(() => {
   kv = createMockKV();
@@ -437,21 +477,22 @@ describe("POST /api/family/:id/borrow", () => {
     const json = (await res.json()) as Json;
     const requestId = json.data.requestId;
 
-    // Verify KV storage
-    const stored = (await kv.get(
-      kvKeys.borrow(requestId),
-      "json",
-    )) as BorrowRequest;
-    expect(stored).not.toBeNull();
-    expect(stored.requestId).toBe(requestId);
-    expect(stored.status).toBe(BorrowStatus.PENDING);
+    // Verify KV storage — the RECORD lives in the family index, which since
+    // #160 item 2 carries full BorrowRequest objects rather than requestIds.
+    const stored = await readIndexEntry(familyId, requestId);
+    expect(stored).toBeDefined();
+    expect(stored?.requestId).toBe(requestId);
+    expect(stored?.status).toBe(BorrowStatus.PENDING);
 
-    // Verify index
-    const index = (await kv.get(
-      kvKeys.borrowsByFamily(familyId),
-      "json",
-    )) as string[];
-    expect(index).toContain(requestId);
+    // Verify the index shape itself: objects, not a string[] of ids. Asserting
+    // the mapped ids (rather than `toContain(requestId)`) is what keeps this
+    // from passing again if the index ever regresses to bare strings.
+    const index = await readIndex(familyId);
+    expect(index?.map((r) => r.requestId)).toContain(requestId);
+    expect(typeof index?.[0]).toBe("object");
+
+    // …and `borrow:{requestId}` is now ONLY the pointer PATCH resolves.
+    expect(await readPointer(requestId)).toEqual({ familyId });
   });
 
   it("should return 400 for invalid JSON body", async () => {
@@ -538,13 +579,12 @@ describe("POST /api/family/:id/borrow optional bookCoverUrl", () => {
 
       // The stored record must carry "" — never undefined / null, because
       // BorrowRequest.bookCoverUrl (src/kv/schema.ts) is a non-optional string
-      // and the list endpoint hands the value straight to the clients.
-      const stored = (await kv.get(
-        kvKeys.borrow(json.data.requestId),
-        "json",
-      )) as BorrowRequest;
-      expect(stored.bookCoverUrl).toBe("");
-      expect("bookCoverUrl" in stored).toBe(true);
+      // and the list endpoint hands the value straight to the clients. Read
+      // from the family index: that is where the record now lives.
+      const stored = await readIndexEntry(familyId, json.data.requestId);
+      expect(stored).toBeDefined();
+      expect(stored?.bookCoverUrl).toBe("");
+      expect("bookCoverUrl" in (stored as BorrowRequest)).toBe(true);
     },
   );
 
@@ -609,6 +649,58 @@ const PER_USER_COUNTER_PREFIX = "ratelimit:user:";
  * per-userId counters.
  */
 const BORROW_CREATE_SCOPE = "borrow-create";
+
+// --- Rate-limit accounting (these cases run WITHOUT DEV_MODE) ---
+//
+// DEV_MODE short-circuits `enforcePerUserRateLimit`, so the cases that ask
+// "was the caller charged?" send their borrow POST through a helper that
+// omits it. Family setup deliberately keeps using the DEV_MODE `request`
+// helper: it must not spend any of the caller's budget.
+//
+// The `borrow-create` ceiling is 10 per 60s, so since #160 item 1 it is
+// counted by a Rate Limiting binding and leaves NO KV key behind. "Was the
+// caller charged?" is therefore read off the binding call log, not off KV —
+// and the bindings must be injected, or the request would silently fall back
+// to the old counter and the assertions would stop describing production.
+
+/**
+ * Same as {@link request} but WITHOUT `DEV_MODE` (so the live limiters run)
+ * and WITH the Rate Limiting bindings a production deploy carries. Returns
+ * the response together with every `limit()` call it made.
+ */
+async function prodRequest(
+  method: string,
+  path: string,
+  body?: unknown,
+  authToken?: string,
+): Promise<{ res: Response; calls: RateLimitBindingCall[] }> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const init: RequestInit = { method, headers };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  const { bindings, calls } = createRateLimitBindings();
+  const res = await app.request(path, init, { KV: kv, ...bindings });
+  return { res, calls };
+}
+
+/** Per-userId charges among `calls` — the per-IP tier call is not one. */
+function perUserCharges(calls: RateLimitBindingCall[]): string[] {
+  return calls
+    .map((call) => call.key)
+    .filter((key) => key.startsWith(PER_USER_COUNTER_PREFIX));
+}
+
+/** No per-userId counter may survive in KV either, whatever the scope. */
+async function perUserCounterKeys(): Promise<string[]> {
+  const listed = await kv.list();
+  return listed.keys
+    .map((k: { name: string }) => k.name)
+    .filter((name: string) => name.startsWith(PER_USER_COUNTER_PREFIX));
+}
 
 describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
   it.each([
@@ -705,64 +797,10 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
       const json = (await res.json()) as Json;
       expect(json.data.bookCoverUrl).toBe(coverUrl);
 
-      const stored = (await kv.get(
-        kvKeys.borrow(json.data.requestId),
-        "json",
-      )) as BorrowRequest;
-      expect(stored.bookCoverUrl).toBe(coverUrl);
+      const stored = await readIndexEntry(familyId, json.data.requestId);
+      expect(stored?.bookCoverUrl).toBe(coverUrl);
     },
   );
-
-  // --- Rate-limit accounting (these cases run WITHOUT DEV_MODE) ---
-  //
-  // DEV_MODE short-circuits `enforcePerUserRateLimit`, so the borrow POST below
-  // goes through a helper that omits it. Family setup deliberately keeps using
-  // the DEV_MODE helper: it must not spend any of the caller's budget.
-  //
-  // The `borrow-create` ceiling is 10 per 60s, so since #160 item 1 it is
-  // counted by a Rate Limiting binding and leaves NO KV key behind. "Was the
-  // caller charged?" is therefore read off the binding call log, not off KV —
-  // and the bindings must be injected, or the request would silently fall back
-  // to the old counter and the assertions would stop describing production.
-
-  /**
-   * Same as {@link request} but WITHOUT `DEV_MODE` (so the live limiters run)
-   * and WITH the Rate Limiting bindings a production deploy carries. Returns
-   * the response together with every `limit()` call it made.
-   */
-  async function prodRequest(
-    method: string,
-    path: string,
-    body?: unknown,
-    authToken?: string,
-  ): Promise<{ res: Response; calls: RateLimitBindingCall[] }> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (authToken) {
-      headers["Authorization"] = `Bearer ${authToken}`;
-    }
-    const init: RequestInit = { method, headers };
-    if (body !== undefined) init.body = JSON.stringify(body);
-    const { bindings, calls } = createRateLimitBindings();
-    const res = await app.request(path, init, { KV: kv, ...bindings });
-    return { res, calls };
-  }
-
-  /** Per-userId charges among `calls` — the per-IP tier call is not one. */
-  function perUserCharges(calls: RateLimitBindingCall[]): string[] {
-    return calls
-      .map((call) => call.key)
-      .filter((key) => key.startsWith(PER_USER_COUNTER_PREFIX));
-  }
-
-  /** No per-userId counter may survive in KV either, whatever the scope. */
-  async function perUserCounterKeys(): Promise<string[]> {
-    const listed = await kv.list();
-    return listed.keys
-      .map((k: { name: string }) => k.name)
-      .filter((name: string) => name.startsWith(PER_USER_COUNTER_PREFIX));
-  }
 
   it("should not charge the borrow-create counter for a rejected cover URL", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
@@ -823,6 +861,131 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
       `${PER_USER_COUNTER_PREFIX}${BORROW_CREATE_SCOPE}:${USER2}`,
     ]);
     // …and it cost no KV operation, which is what #160 item 1 bought.
+    expect(await perUserCounterKeys()).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// POST /api/family/:id/borrow — free-text length caps
+// ===========================================================================
+//
+// Since the borrow index was denormalised (#160 item 2) every record of a
+// family lives inside ONE KV value (`borrows:family:{familyId}`) that every
+// member reads in full on every borrow list and that is rewritten on every
+// borrow write. Unbounded free text is therefore a way for one member to
+// inflate what the whole family pays for, on both the read and the write side.
+// The four bounds below are that ceiling; they are imported, never spelled as
+// numbers, so moving one is a deliberate product change rather than a test
+// failure that says nothing.
+
+/**
+ * Build a Readmoo cover URL of EXACTLY `length` characters, so the case that
+ * sits one over the cap is still a URL the whitelist would otherwise accept.
+ * Without that, an over-cap value could be refused for the wrong reason and
+ * the length guard would never be exercised.
+ */
+const COVER_URL_PREFIX = "https://cdn.readmoo.com/cover/";
+function readmooCoverUrlOfLength(length: number): string {
+  return COVER_URL_PREFIX + "a".repeat(length - COVER_URL_PREFIX.length);
+}
+
+/** Each capped field, with a generator for a value of any exact length. */
+const CAPPED_FIELDS = [
+  {
+    field: "bookId",
+    max: BORROW_BOOK_ID_MAX_LENGTH,
+    valueOfLength: (n: number) => "b".repeat(n),
+  },
+  {
+    field: "bookTitle",
+    max: BORROW_BOOK_TITLE_MAX_LENGTH,
+    valueOfLength: (n: number) => "t".repeat(n),
+  },
+  {
+    field: "bookAuthor",
+    max: BORROW_BOOK_AUTHOR_MAX_LENGTH,
+    valueOfLength: (n: number) => "a".repeat(n),
+  },
+  {
+    field: "bookCoverUrl",
+    max: BORROW_COVER_URL_MAX_LENGTH,
+    valueOfLength: readmooCoverUrlOfLength,
+  },
+] as const;
+
+describe("POST /api/family/:id/borrow field length caps", () => {
+  it.each(CAPPED_FIELDS)(
+    "should reject $field one character over its cap with 400 INVALID_FIELDS",
+    async ({ field, max, valueOfLength }) => {
+      const { familyId, token2 } = await createFamilyWithTwoMembers();
+      const value = valueOfLength(max + 1);
+      expect(value).toHaveLength(max + 1);
+
+      const res = await request(
+        "POST",
+        `/api/family/${familyId}/borrow`,
+        { ...validBorrowBody, [field]: value },
+        token2,
+      );
+
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as Json;
+      // Never MISSING_FIELDS (the value is present) and — for the cover URL —
+      // never INVALID_COVER_URL: the over-cap value IS on the whitelist, so
+      // this code is what proves the LENGTH guard refused it.
+      expect(json.error.code).toBe("INVALID_FIELDS");
+
+      // Nothing persisted, so an oversized field cannot reach the shared value
+      // even once.
+      expect(await kv.get(kvKeys.borrowsByFamily(familyId), "json")).toBeNull();
+    },
+  );
+
+  it.each(CAPPED_FIELDS)(
+    "should accept $field at exactly its cap and store it verbatim",
+    async ({ field, max, valueOfLength }) => {
+      const { familyId, token2 } = await createFamilyWithTwoMembers();
+      const value = valueOfLength(max);
+      expect(value).toHaveLength(max);
+
+      const res = await request(
+        "POST",
+        `/api/family/${familyId}/borrow`,
+        { ...validBorrowBody, [field]: value },
+        token2,
+      );
+
+      // The positive companion for the rejections above: without it a guard
+      // that refused every value of this field would keep them all green.
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as Json;
+      expect(json.data[field]).toBe(value);
+
+      const stored = await readIndexEntry(familyId, json.data.requestId);
+      expect(stored?.[field]).toBe(value);
+    },
+  );
+
+  it("should not charge the borrow-create counter for an over-cap field", async () => {
+    const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+    const { res, calls } = await prodRequest(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      {
+        ...validBorrowBody,
+        bookTitle: "t".repeat(BORROW_BOOK_TITLE_MAX_LENGTH + 1),
+      },
+      token2,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Json).error.code).toBe("INVALID_FIELDS");
+
+    // The cap is checked in the same guard slot as the string-type check,
+    // BEFORE `enforcePerUserRateLimit` — a malformed request must not burn the
+    // caller's own borrow quota. The matching "charged once" case lives in the
+    // bookCoverUrl describe above.
+    expect(perUserCharges(calls)).toHaveLength(0);
     expect(await perUserCounterKeys()).toHaveLength(0);
   });
 });
@@ -900,8 +1063,11 @@ describe("GET /api/family/:id/borrow", () => {
     // USER2 borrows USER1's book — USER3 is in the family but not a party.
     const requestId = await createBorrow(familyId, token2, USER1, "book-1");
 
-    // The record really exists; emptiness below must come from the filter.
-    expect(await kv.get(kvKeys.borrow(requestId), "json")).not.toBeNull();
+    // The record really exists IN THE INDEX the list handler reads; emptiness
+    // below must come from the party filter, not from a missing record. Reading
+    // the `borrow:{requestId}` pointer would not prove that — it exists even
+    // for a record the trim has evicted from the index.
+    expect(await readIndexEntry(familyId, requestId)).toBeDefined();
 
     const visible = await listBorrows(familyId, token3);
     expect(visible).toEqual([]);
@@ -1395,11 +1561,13 @@ describe("PATCH /api/borrow/:requestId", () => {
       token1,
     );
 
-    const stored = (await kv.get(
-      kvKeys.borrow(requestId),
-      "json",
-    )) as BorrowRequest;
-    expect(stored.status).toBe(BorrowStatus.LENT);
+    // The status lives in the family index; PATCH rewrites that key only.
+    const stored = await readIndexEntry(familyId, requestId);
+    expect(stored?.status).toBe(BorrowStatus.LENT);
+
+    // The pointer is untouched by a status change — it carries `familyId` and
+    // nothing a transition could alter.
+    expect(await readPointer(requestId)).toEqual({ familyId });
   });
 
   it("should return 422 for invalid target status value", async () => {

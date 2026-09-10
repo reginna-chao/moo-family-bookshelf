@@ -1,46 +1,49 @@
 /**
  * KV read GROWTH RATE — GET /api/family/{id}/borrow.
  *
- * ACCEPTANCE CRITERION FOR ISSUE #160 ITEM 2 (borrow index denormalisation).
- * The sibling budget files in this directory pin the KV bill of ONE request
- * shape; this file pins how that bill GROWS with the family's borrow history.
- * Today `routes/borrow.ts` (the `Promise.all` over the index at :390-394) reads
- * one `borrow:{requestId}` per index entry, so the read count is O(index) — a
- * family that has borrowed for a year pays for every historical record on every
- * list request. Item 2 of #160 moves the fields the list response needs INTO
- * the index, making the cost O(1).
+ * ACCEPTANCE CRITERION FOR ISSUE #160 ITEM 2 (borrow index denormalisation),
+ * now MET. The sibling budget files in this directory pin the KV bill of ONE
+ * request shape; this file pins how that bill GROWS with the family's borrow
+ * history. `routes/borrow.ts` used to read one `borrow:{requestId}` per index
+ * entry, so the read count was O(index) — a family that had borrowed for a year
+ * paid for every historical record on every list request. Item 2 moved the
+ * records INTO `borrows:family:{familyId}`, so `readBorrowIndex`
+ * (services/borrowIndex.ts) answers the whole listing from one key.
  *
- * MERGED AS `it.fails()` ON PURPOSE. Against today's handler the assertion
- * throws (the read count grows by ~45 between a 5-entry and a 50-entry index),
- * and `it.fails` turns that expected throw into a PASS — so this file states
- * the target without turning CI red, which `pnpm test` as the merge gate would
- * not tolerate. The moment the handler stops scaling with the index, the
- * assertion succeeds, `it.fails` reports "expected test to fail", and the run
- * goes RED.
+ * IT WAS AN `it.fails()` UNTIL ITEM 2 LANDED. That inversion existed only so
+ * the target could be stated without turning CI red while the handler still
+ * fanned out. Item 2 has landed, the assertion passes, and the case below is a
+ * plain `it()` — which is the deliberate act that records the criterion as met.
+ * Do not re-add `.fails`, and do not loosen the assertion: it now pins a
+ * DELTA OF EXACTLY 0, not the old `< 3` tolerance. `< 3` was slack for an
+ * unlanded target; the migrated read path costs the same three keys (auth
+ * token, family record, index) whatever the index holds, so anything above 0 is
+ * a real regression and there is no reason to leave room for one.
  *
- * THE PLAIN `it()` COMPANION IS NOT OPTIONAL. `it.fails` inverts ANY throw
- * into a PASS (@vitest/runner `runTest`), including a broken seed, a non-200,
- * or a changed response shape — so on its own this file could stay green
- * forever after its fixture silently broke, and would then ALSO fail to turn
- * red when #160 item 2 lands. The plain `it()` companion below asserts seed
- * health LOUDLY instead. Keep it when `.fails` is eventually removed.
+ * THE LEGACY CASE IS NOT A REGRESSION — it is design decision D3. A family
+ * still on the pre-migration `string[]` index STILL fans out on GET, and the
+ * second case below pins exactly that (delta 45 across 5 vs 50 entries) rather
+ * than pretending it does not happen. Migration is WRITE-PATH ONLY (create,
+ * PATCH, member-removal cancellation), because a GET that rewrote KV would turn
+ * every reader into a writer and hand an unauthenticated-ish read path a write
+ * lever. So an un-migrated family keeps the old read cost until its first
+ * borrow write, and that case also asserts the listing performs NO put or
+ * delete at all — the half of D3 that actually matters.
  *
- * WHEN THAT HAPPENS, REMOVE `.fails` — DO NOT "FIX" THE TEST. A red run here
- * means #160 item 2 has landed and the acceptance criterion is met; the
- * conversion to a plain `it(...)` is the deliberate act that records it. Do not
- * loosen the threshold, do not delete the file, and do not re-pin the old
- * growth rate. See also the NOTE above the index write in
- * `worker/src/routes/borrow.ts`, which points back at this file.
+ * THE PLAIN SEED-HEALTH COMPANION IS NOT OPTIONAL. It asserts LOUDLY that both
+ * fixtures at both sizes really list what they seeded, so neither growth case
+ * can be satisfied by a broken seed, a non-200, or an empty response — a delta
+ * of 0 between two empty listings would otherwise look like success.
  *
  * NO DEV_MODE ON THE MEASURED REQUESTS, and the Rate Limiting bindings ARE
  * injected: together those two make the measurement see the pipeline a
  * deployed Worker actually runs (see tests/helpers/rateLimitBindings.ts).
  * Since #160 item 1 neither rate-limit layer on this route costs a KV
- * operation at all, so the per-request CONSTANT is now just the auth token
- * read plus the family and index reads — three, whatever the index size. A
- * constant cancels out of the difference either way; what matters is that the
- * pipeline matches the sibling budget files. See the scope caveat at the end
- * of tests/helpers/kvOps.ts.
+ * operation at all, so the per-request CONSTANT is just the auth token read
+ * plus the family and index reads — three, whatever the index size. A constant
+ * cancels out of the difference either way; what matters is that the pipeline
+ * matches the sibling budget files. See the scope caveat at the end of
+ * tests/helpers/kvOps.ts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../../src/index";
@@ -52,6 +55,7 @@ import {
   BoolFlag,
   BorrowStatus,
   kvKeys,
+  type BorrowPointer,
   type BorrowRequest,
   type FamilyRecord,
 } from "../../../src/kv/schema";
@@ -62,6 +66,21 @@ const PATH = `/api/family/${FAMILY_ID}/borrow`;
 /** Unique per file so the per-IP counter cannot be shared with another suite. */
 const CALLER_IP = "10.0.0.7";
 const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
+
+/**
+ * Fixed per-request read cost of a migrated listing: the auth token, the family
+ * record, and the index. Pinned as a POSITIVE companion to the delta-of-0
+ * assertion — without it, a fixture that somehow made both measurements read
+ * nothing would satisfy the delta and prove nothing.
+ */
+const MIGRATED_LIST_READS = 3;
+
+/** How the family's borrow index is stored — before vs after #160 item 2. */
+type IndexShape =
+  /** Migrated: `borrows:family:{id}` holds the records, `borrow:{id}` a pointer. */
+  | "new"
+  /** Pre-migration: `borrows:family:{id}` holds requestIds, `borrow:{id}` the record. */
+  | "legacy";
 
 /**
  * Deterministic v4-shaped requestId (RequestIdSchema, src/schemas/common.ts)
@@ -77,14 +96,17 @@ interface BorrowListMeasurement {
   reads: number;
   /** Borrow records the response listed — seed health, stable across #160. */
   listed: number;
+  /** Every `put` / `delete` the measured request performed, in order. */
+  writes: string[];
 }
 
 /**
- * Seed a 2-member family with `count` borrow records plus the index listing
- * them, then measure ONE list request.
+ * Seed a 2-member family with `count` borrow records in the given index
+ * `shape`, then measure ONE list request.
  */
 async function measureBorrowList(
   count: number,
+  shape: IndexShape,
 ): Promise<BorrowListMeasurement> {
   const kv = createMockKV();
 
@@ -102,12 +124,10 @@ async function measureBorrowList(
   await kv.put(kvKeys.member(USER1), FAMILY_ID);
   await kv.put(kvKeys.member(USER2), FAMILY_ID);
 
-  const requestIds: string[] = [];
+  const records: BorrowRequest[] = [];
   for (let i = 0; i < count; i++) {
-    const requestId = requestIdAt(i);
-    requestIds.push(requestId);
-    const record: BorrowRequest = {
-      requestId,
+    records.push({
+      requestId: requestIdAt(i),
       familyId: FAMILY_ID,
       borrowerId: USER1,
       borrowerName: "Alice",
@@ -116,13 +136,26 @@ async function measureBorrowList(
       bookTitle: `Book ${i}`,
       bookAuthor: "Author",
       bookCoverUrl: "",
+      // PENDING throughout: `trimBorrowIndex` never evicts an active request,
+      // so a 50-entry fixture survives intact and the two shapes stay
+      // comparable. (A GET writes nothing either way — see the legacy case.)
       status: BorrowStatus.PENDING,
       createdAt: new Date(PINNED_NOW).toISOString(),
       updatedAt: new Date(PINNED_NOW).toISOString(),
-    };
-    await kv.put(kvKeys.borrow(requestId), JSON.stringify(record));
+    });
   }
-  await kv.put(kvKeys.borrowsByFamily(FAMILY_ID), JSON.stringify(requestIds));
+
+  for (const record of records) {
+    // Migrated: only the pointer. Un-migrated: the full record, which is what
+    // the fan-out below reads one key at a time.
+    const value: BorrowPointer | BorrowRequest =
+      shape === "new" ? { familyId: FAMILY_ID } : record;
+    await kv.put(kvKeys.borrow(record.requestId), JSON.stringify(value));
+  }
+  await kv.put(
+    kvKeys.borrowsByFamily(FAMILY_ID),
+    JSON.stringify(shape === "new" ? records : records.map((r) => r.requestId)),
+  );
 
   const token = await seedAuthToken(kv, USER1);
 
@@ -144,7 +177,11 @@ async function measureBorrowList(
 
   expect(res.status).toBe(200);
   const body = (await res.json()) as { data: unknown[] };
-  return { reads: ops.getKeys().length, listed: body.data.length };
+  return {
+    reads: ops.getKeys().length,
+    listed: body.data.length,
+    writes: ops.writeTrail(),
+  };
 }
 
 beforeEach(() => {
@@ -159,26 +196,50 @@ afterEach(() => {
 });
 
 describe("KV read growth: GET /api/family/:id/borrow", () => {
-  // Plain it(): a broken seed / non-200 / empty response must fail LOUDLY
-  // here. Inside the it.fails() below vitest inverts ANY throw into a pass
-  // (@vitest/runner runTest), so the growth assertion must not be the only
-  // thing between a broken seed and a green run. Holds before AND after #160.
-  it("lists every seeded borrow request", async () => {
-    // Both sizes the it.fails() case measures — a broken 50-entry path must
-    // fail LOUDLY here, not get swallowed by the .fails inversion below.
-    expect((await measureBorrowList(5)).listed).toBe(5);
-    expect((await measureBorrowList(50)).listed).toBe(50);
-  });
-
-  // `it.fails` = "this assertion is EXPECTED to throw today". Remove `.fails`
-  // (do not weaken the assertion) once #160 item 2 makes it pass.
-  it.fails(
-    "does not read more KV keys as the borrow index grows from 5 to 50 entries",
-    async () => {
-      const small = await measureBorrowList(5);
-      const large = await measureBorrowList(50);
-
-      expect(large.reads - small.reads).toBeLessThan(3);
+  // Seed health for every fixture the growth cases below rely on. A broken
+  // seed, a non-200 or an empty response must fail LOUDLY here, so that a
+  // delta assertion can never be satisfied by two equally-broken measurements.
+  it.each([
+    { shape: "new" as const, count: 5 },
+    { shape: "new" as const, count: 50 },
+    { shape: "legacy" as const, count: 5 },
+    { shape: "legacy" as const, count: 50 },
+  ])(
+    "lists every seeded borrow request ($shape index, $count entries)",
+    async ({ shape, count }) => {
+      expect((await measureBorrowList(count, shape)).listed).toBe(count);
     },
   );
+
+  it("reads the same number of KV keys whether the migrated index holds 5 or 50 entries", async () => {
+    const small = await measureBorrowList(5, "new");
+    const large = await measureBorrowList(50, "new");
+
+    // Positive companion: the constant is really being measured, not zero.
+    expect(small.reads).toBe(MIGRATED_LIST_READS);
+    expect(large.reads).toBe(MIGRATED_LIST_READS);
+
+    // #160 item 2's acceptance criterion. Exactly 0 — see the header.
+    expect(large.reads - small.reads).toBe(0);
+  });
+
+  it("still reads one key per entry for an un-migrated legacy index, and writes nothing", async () => {
+    const small = await measureBorrowList(5, "legacy");
+    const large = await measureBorrowList(50, "legacy");
+
+    // Design decision D3, pinned rather than papered over: migration is
+    // write-path only, so a family that has not written since the change keeps
+    // paying the fan-out — one `borrow:{requestId}` read per index entry, on
+    // top of the same 3-key constant.
+    expect(small.reads).toBe(MIGRATED_LIST_READS + 5);
+    expect(large.reads).toBe(MIGRATED_LIST_READS + 50);
+    expect(large.reads - small.reads).toBe(45);
+
+    // …and the listing does NOT migrate the index it just fanned out over. A
+    // GET that wrote would make every reader a writer; `writeTrail()` covers
+    // puts AND deletes, so an "opportunistic migration" added to the read path
+    // fails here.
+    expect(small.writes).toEqual([]);
+    expect(large.writes).toEqual([]);
+  });
 });
