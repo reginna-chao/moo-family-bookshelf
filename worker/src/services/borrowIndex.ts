@@ -445,3 +445,27 @@ export async function readBorrowPointer(
   if (typeof familyId !== "string" || !isValidFamilyId(familyId)) return null;
   return familyId;
 }
+
+/**
+ * Write the `borrow:{requestId}` pointer — the create handler's first write.
+ *
+ * The only `put` on that key: every other site either reads it
+ * (`readBorrowPointer`) or deletes it (`deleteBorrowPointers`), and legacy full
+ * `BorrowRequest` values are deliberately never rewritten. Keeping the pointer
+ * SHAPE here means the create handler cannot accidentally store a different one.
+ *
+ * Persistent (no TTL) — the record's lifetime is bounded by the index trim and
+ * the departure purge, which delete the pointer along with the record.
+ *
+ * Call ORDER is the caller's responsibility and is load-bearing: create writes
+ * this pointer BEFORE `writeBorrowIndex`, so a half-failure leaves an invisible
+ * orphan pointer rather than a PENDING ghost nobody can act on.
+ */
+export async function writeBorrowPointer(
+  kv: KVNamespace,
+  requestId: string,
+  familyId: string,
+): Promise<void> {
+  const pointer: BorrowPointer = { familyId };
+  await kv.put(kvKeys.borrow(requestId), JSON.stringify(pointer));
+}

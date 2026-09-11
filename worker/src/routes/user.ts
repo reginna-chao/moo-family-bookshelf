@@ -1,16 +1,30 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
 import {
-  kvKeys,
   BoolFlag,
-  type RawFamilyRecord,
   normalizeFamilyRecord,
   type UserBooksRecord,
   type PublicShelf,
-  type PublicShelvesRecord,
   type BookEntry,
   MAX_FAMILY_PREF_ENTRIES,
 } from "../kv/schema";
+import {
+  getFamilyRecord,
+  putFamilyRecord,
+  deleteFamilyRecord,
+  getMemberFamilyId,
+  deleteMemberFamilyId,
+} from "../kv/families";
+import {
+  getUserBooksRecord,
+  putUserBooksRecord,
+  deleteUserBooksRecord,
+} from "../kv/users";
+import {
+  getPublicShelves,
+  deletePublicShelves,
+  deletePublicSnapshot,
+} from "../kv/publicShelves";
 import {
   writePublicSnapshot,
   resolvePublicShelves,
@@ -67,10 +81,7 @@ async function resolveDisplayName(
   clientValue: unknown,
 ): Promise<string> {
   if (memberFamilyId) {
-    const familyRaw = await kv.get<RawFamilyRecord>(
-      kvKeys.family(memberFamilyId),
-      "json",
-    );
+    const familyRaw = await getFamilyRecord(kv, memberFamilyId);
     if (familyRaw) {
       const self = normalizeFamilyRecord(familyRaw).members.find(
         (m) => m.userId === userId,
@@ -398,8 +409,7 @@ userRoutes.openapi(getUserBooksRoute, async (c) => {
     return jsonError(c, 403, "FORBIDDEN", "Cannot access another user's data");
   }
 
-  const key = kvKeys.user(userId);
-  const record = await c.env.KV.get<UserBooksRecord>(key, "json");
+  const record = await getUserBooksRecord(c.env.KV, userId);
 
   if (!record) {
     return c.json({ data: null });
@@ -496,9 +506,9 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
   // never write it, which is what keeps a stale-read books save from rolling a
   // revoked share token back to life.
   const [existing, memberFamilyId, publicShelvesPointer] = await Promise.all([
-    c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json"),
-    c.env.KV.get(kvKeys.member(userId)),
-    c.env.KV.get<PublicShelvesRecord>(kvKeys.publicShelves(userId), "json"),
+    getUserBooksRecord(c.env.KV, userId),
+    getMemberFamilyId(c.env.KV, userId),
+    getPublicShelves(c.env.KV, userId),
   ]);
   const publicShelves = resolvePublicShelves(publicShelvesPointer, existing);
 
@@ -532,7 +542,7 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     record.publicSharing = existing.publicSharing;
   }
 
-  await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
+  await putUserBooksRecord(c.env.KV, userId, record);
 
   // Refresh the snapshots of the RESOLVED shelves (pointer key first), never of
   // whatever shelf list this record happens to carry.
@@ -623,9 +633,9 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   // normal path an extra sequential round-trip, and the waste on a no-op PATCH
   // is one small parallel read. Like PUT, this path never WRITES the pointer.
   const [existing, memberFamilyId, publicShelvesPointer] = await Promise.all([
-    c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json"),
-    c.env.KV.get(kvKeys.member(userId)),
-    c.env.KV.get<PublicShelvesRecord>(kvKeys.publicShelves(userId), "json"),
+    getUserBooksRecord(c.env.KV, userId),
+    getMemberFamilyId(c.env.KV, userId),
+    getPublicShelves(c.env.KV, userId),
   ]);
 
   if (!existing) {
@@ -682,7 +692,7 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
     record.publicSharing = legacyPublicSharing;
   }
 
-  await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
+  await putUserBooksRecord(c.env.KV, userId, record);
 
   // Refresh the snapshots of the RESOLVED shelves (pointer key first).
   await updateAllPublicSnapshots(
@@ -766,10 +776,7 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
     return jsonError(c, 400, parsed.code, parsed.message);
   }
 
-  const existing = await c.env.KV.get<UserBooksRecord>(
-    kvKeys.user(userId),
-    "json",
-  );
+  const existing = await getUserBooksRecord(c.env.KV, userId);
   if (!existing) {
     return jsonError(c, 404, "NOT_FOUND", "User record not found");
   }
@@ -808,7 +815,7 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
     familyShelfPrefs: merged,
   };
 
-  await c.env.KV.put(kvKeys.user(userId), JSON.stringify(record));
+  await putUserBooksRecord(c.env.KV, userId, record);
 
   return c.json({
     data: { ok: true, hidden: merged.hidden, favorites: merged.favorites },
@@ -855,13 +862,10 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
   }
 
   // Check family membership
-  const familyId = await c.env.KV.get(kvKeys.member(userId));
+  const familyId = await getMemberFamilyId(c.env.KV, userId);
 
   if (familyId) {
-    const raw = await c.env.KV.get<RawFamilyRecord>(
-      kvKeys.family(familyId),
-      "json",
-    );
+    const raw = await getFamilyRecord(c.env.KV, familyId);
 
     if (raw) {
       const record = normalizeFamilyRecord(raw);
@@ -887,7 +891,7 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
           console.error("BORROW_INDEX_DELETE_FAILED", { familyId, err });
         }
 
-        await c.env.KV.delete(kvKeys.family(familyId));
+        await deleteFamilyRecord(c.env.KV, familyId);
       } else {
         // Settle this member's borrow records before dropping them from the
         // family: cancel the PENDING requests they are a party to and remove
@@ -906,7 +910,7 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
 
         // Remove user from family members
         record.members = record.members.filter((m) => m.userId !== userId);
-        await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+        await putFamilyRecord(c.env.KV, familyId, record);
       }
     }
   }
@@ -915,8 +919,8 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
   // migrated account's snapshots are found via the pointer key and an
   // un-migrated one's via the legacy record field.
   const [publicShelvesPointer, userRecord] = await Promise.all([
-    c.env.KV.get<PublicShelvesRecord>(kvKeys.publicShelves(userId), "json"),
-    c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json"),
+    getPublicShelves(c.env.KV, userId),
+    getUserBooksRecord(c.env.KV, userId),
   ]);
   const publicTokens = resolvePublicShelves(
     publicShelvesPointer,
@@ -925,11 +929,11 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
 
   // Delete all user data in parallel
   await Promise.all([
-    c.env.KV.delete(kvKeys.user(userId)),
-    c.env.KV.delete(kvKeys.publicShelves(userId)),
-    c.env.KV.delete(kvKeys.member(userId)),
+    deleteUserBooksRecord(c.env.KV, userId),
+    deletePublicShelves(c.env.KV, userId),
+    deleteMemberFamilyId(c.env.KV, userId),
     deleteAuthToken(c.env.KV, userId),
-    ...publicTokens.map((token) => c.env.KV.delete(kvKeys.publicShelf(token))),
+    ...publicTokens.map((token) => deletePublicSnapshot(c.env.KV, token)),
   ]);
 
   return c.json({ data: { ok: true } });

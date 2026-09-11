@@ -2,22 +2,21 @@ import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { isAllowedCoverUrl } from "moo-family-bookshelf-shared/config/readmoo";
 import type { Env } from "../utils/env";
 import {
-  kvKeys,
   BoolFlag,
   BorrowStatus,
   BORROW_MAX_PENDING_PER_BORROWER,
-  type BorrowPointer,
   type BorrowRequest,
   type FamilyMember,
-  type RawFamilyRecord,
   normalizeFamilyRecord,
   hasMember,
   findMember,
 } from "../kv/schema";
+import { getFamilyRecord } from "../kv/families";
 import {
   readBorrowIndex,
   readBorrowPointer,
   writeBorrowIndex,
+  writeBorrowPointer,
 } from "../services/borrowIndex";
 import {
   isValidFamilyId,
@@ -231,10 +230,7 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   if (rateLimitResponse) return rateLimitResponse;
 
   // Load family record
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
   }
@@ -391,8 +387,7 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   //     a clean record under a new id.
   // So the recoverable half is written first: whichever write fails, no ghost
   // can exist.
-  const pointer: BorrowPointer = { familyId };
-  await c.env.KV.put(kvKeys.borrow(requestId), JSON.stringify(pointer));
+  await writeBorrowPointer(c.env.KV, requestId, familyId);
 
   await writeBorrowIndex(c.env.KV, familyId, [...requests, borrowRequest]);
 
@@ -426,10 +421,7 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
   if (rateLimitResponse) return rateLimitResponse;
 
   // Verify caller is a family member
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
   }

@@ -1,13 +1,18 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
 import {
-  kvKeys,
   OTP_TTL_SECONDS,
   QR_TOKEN_TTL_SECONDS,
   type VerifyRecord,
   type OtpRecord,
   type QrTokenRecord,
 } from "../kv/schema";
+import {
+  getVerifyRecord,
+  putVerifyRecord,
+  putOtpRecord,
+  putQrTokenRecord,
+} from "../kv/verify";
 import {
   isValidUserId,
   isValidVerifyMethod,
@@ -80,10 +85,7 @@ verifyRoutes.openapi(getVerifyRoute, async (c) => {
     return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
-  const record = await c.env.KV.get<VerifyRecord>(
-    kvKeys.verify(userId),
-    "json",
-  );
+  const record = await getVerifyRecord(c.env.KV, userId);
   const method = record?.method ?? "none";
   const prompted = record?.prompted ?? 0;
 
@@ -193,10 +195,7 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     hash = await hashSecret(salt, body.secret);
   }
 
-  const existing = await c.env.KV.get<VerifyRecord>(
-    kvKeys.verify(userId),
-    "json",
-  );
+  const existing = await getVerifyRecord(c.env.KV, userId);
 
   const record: VerifyRecord = {
     method,
@@ -209,7 +208,7 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     secretUpdatedAt: Date.now(),
   };
 
-  await c.env.KV.put(kvKeys.verify(userId), JSON.stringify(record));
+  await putVerifyRecord(c.env.KV, userId, record);
 
   return c.json({ data: { method: record.method, prompted: record.prompted } });
 });
@@ -252,10 +251,7 @@ verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
   if (rateLimitResponse) return rateLimitResponse;
 
   // Verify user has 'code' method set
-  const verifyRecord = await c.env.KV.get<VerifyRecord>(
-    kvKeys.verify(userId),
-    "json",
-  );
+  const verifyRecord = await getVerifyRecord(c.env.KV, userId);
   if (!verifyRecord || verifyRecord.method !== "code") {
     return jsonError(
       c,
@@ -271,9 +267,7 @@ verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
     createdAt: new Date().toISOString(),
   };
 
-  await c.env.KV.put(kvKeys.otp(userId), JSON.stringify(otpRecord), {
-    expirationTtl: OTP_TTL_SECONDS,
-  });
+  await putOtpRecord(c.env.KV, userId, otpRecord);
 
   const expiresAt = Date.now() + OTP_TTL_SECONDS * 1000;
 
@@ -317,14 +311,11 @@ verifyRoutes.openapi(postVerifyPromptedRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  const existing = await c.env.KV.get<VerifyRecord>(
-    kvKeys.verify(userId),
-    "json",
-  );
+  const existing = await getVerifyRecord(c.env.KV, userId);
   const record: VerifyRecord = existing ?? defaultVerifyRecord();
   record.prompted = 1;
 
-  await c.env.KV.put(kvKeys.verify(userId), JSON.stringify(record));
+  await putVerifyRecord(c.env.KV, userId, record);
 
   return c.json({ data: { method: record.method, prompted: record.prompted } });
 });
@@ -383,9 +374,7 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
   const token = generateQrToken();
   const record: QrTokenRecord = { userId };
 
-  await c.env.KV.put(kvKeys.qrToken(token), JSON.stringify(record), {
-    expirationTtl: QR_TOKEN_TTL_SECONDS,
-  });
+  await putQrTokenRecord(c.env.KV, token, record);
 
   return c.json({ data: { token, expiresIn: QR_TOKEN_TTL_SECONDS } });
 });

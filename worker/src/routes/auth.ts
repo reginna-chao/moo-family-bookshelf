@@ -1,12 +1,11 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
 import {
-  kvKeys,
   BoolFlag,
   TOKEN_TTL_SECONDS,
-  type RawFamilyRecord,
   normalizeFamilyRecord,
 } from "../kv/schema";
+import { getFamilyRecord, getMemberFamilyId } from "../kv/families";
 import {
   isValidFamilyId,
   isValidSha256Hex,
@@ -155,13 +154,10 @@ authRoutes.openapi(lookupRoute, async (c) => {
   let existingFamilyId: string | null = null;
   let memberCount = 0;
 
-  const familyId = await c.env.KV.get(kvKeys.member(userId));
+  const familyId = await getMemberFamilyId(c.env.KV, userId);
   if (familyId) {
     existingFamilyId = familyId;
-    const raw = await c.env.KV.get<RawFamilyRecord>(
-      kvKeys.family(familyId),
-      "json",
-    );
+    const raw = await getFamilyRecord(c.env.KV, familyId);
     if (raw) {
       const record = normalizeFamilyRecord(raw);
       memberCount = record.members.length;
@@ -223,7 +219,7 @@ authRoutes.openapi(refreshRoute, async (c) => {
         "familyId must match format xxxx-xxxx",
       );
     }
-    const storedFamilyId = await c.env.KV.get(kvKeys.member(body.userId));
+    const storedFamilyId = await getMemberFamilyId(c.env.KV, body.userId);
     if (!storedFamilyId || storedFamilyId !== body.familyId) {
       return jsonError(c, 401, "REFRESH_FAILED", "Token refresh failed");
     }

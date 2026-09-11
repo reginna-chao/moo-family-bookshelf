@@ -208,6 +208,7 @@
 - **TTL**：個人開放設定不設過期（持久化）；家庭群組可設定過期時間；公開書櫃依使用者設定（7/30/60/90 天或永久）
 - **家庭人數上限**：`max_members` 預設為 2（配合讀墨官方限制）
 - **管理者**：`owner_id` 記錄家庭建立者，擁有移除成員與轉移管理權的權限
+- **存取層**：上表中 route 會觸及的 key family 都有對應的存取模組（`worker/src/kv/families.ts`、`users.ts`、`publicShelves.ts`、`verify.ts`；函式第一個參數為 `kv: KVNamespace`，一個函式一次 KV 操作並註明 key 與 TTL）。只在 `services/`、`middleware/` 內部使用的 key 刻意沒有存取模組：`verifyfail:{user_id}:{caller}` 與驗證閘對 `otp:{user_id}` 的讀取只存在於 `worker/src/services/verification.ts`，`public:{share_token}` 的寫入只走 `worker/src/services/publicShelf.ts`（該處同時負責網址白名單過濾與動態 TTL）。route 模組一律不直接呼叫 `c.env.KV`、不 import `kvKeys`，改為呼叫這些存取函式或 `worker/src/services/*`；此界線由 `worker/eslint.config.js` 中 `src/routes/**` 的 lint 規則（僅涵蓋靜態寫法）與 `worker/tests/unit/kvAccessBoundary.test.ts` 的原始碼掃描共同把關
 
 ---
 
