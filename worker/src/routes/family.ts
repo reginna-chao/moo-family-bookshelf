@@ -2,19 +2,27 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import type { Env } from "../utils/env";
 import {
-  kvKeys,
   BoolFlag,
   type FamilyMember,
   type KickedRecord,
-  type RawFamilyRecord,
-  type QrTokenRecord,
-  type UserBooksRecord,
   normalizeFamilyRecord,
   hasMember,
   findMember,
-  KICKED_TOMBSTONE_TTL_SECONDS,
   TOKEN_TTL_SECONDS,
 } from "../kv/schema";
+import {
+  getFamilyRecord,
+  putFamilyRecord,
+  deleteFamilyRecord,
+  getMemberFamilyId,
+  putMemberFamilyId,
+  deleteMemberFamilyId,
+  hasKickedTombstone,
+  putKickedTombstone,
+  deleteKickedTombstone,
+} from "../kv/families";
+import { getUserBooksRecord, putUserBooksRecord } from "../kv/users";
+import { getQrTokenRecord, deleteQrToken } from "../kv/verify";
 import {
   isValidUserId,
   isValidFamilyId,
@@ -341,7 +349,7 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
   }
 
   if (membership === "orphaned") {
-    await c.env.KV.delete(kvKeys.member(body.userId));
+    await deleteMemberFamilyId(c.env.KV, body.userId);
   }
 
   const member: FamilyMember = {
@@ -359,8 +367,8 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
   };
 
   await Promise.all([
-    c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
-    c.env.KV.put(kvKeys.member(body.userId), familyId),
+    putFamilyRecord(c.env.KV, familyId, record),
+    putMemberFamilyId(c.env.KV, body.userId, familyId),
   ]);
 
   const authToken = await generateAuthToken(c.env.KV, body.userId);
@@ -422,7 +430,7 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   // gate (same ordering as `POST /api/family`) rather than after it, at the cost
   // of disclosing one boolean — "this userId is in some family" — to an
   // unverified caller. Everything of value stays behind the gate.
-  const existingFamily = await c.env.KV.get(kvKeys.member(body.userId));
+  const existingFamily = await getMemberFamilyId(c.env.KV, body.userId);
   if (existingFamily && existingFamily !== familyId) {
     return jsonError(
       c,
@@ -432,10 +440,7 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     );
   }
 
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
 
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
@@ -455,14 +460,11 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   // QR token bypass: if a valid one-time QR token is provided, skip verification.
   let skipVerification = false;
   if (body.qrToken && typeof body.qrToken === "string") {
-    const qrRecord = await c.env.KV.get<QrTokenRecord>(
-      kvKeys.qrToken(body.qrToken),
-      "json",
-    );
+    const qrRecord = await getQrTokenRecord(c.env.KV, body.qrToken);
     if (qrRecord && qrRecord.userId === body.userId) {
       skipVerification = true;
       // One-time use: delete immediately
-      await c.env.KV.delete(kvKeys.qrToken(body.qrToken));
+      await deleteQrToken(c.env.KV, body.qrToken);
     }
     // If token invalid/expired/wrong-user, fall through to normal verification
   }
@@ -519,8 +521,8 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   //
   // Cost: one extra small KV read per join, post-gate — acceptable on this
   // rate-limited sensitive-tier route.
-  const kicked = await c.env.KV.get(kvKeys.kicked(familyId, body.userId));
-  if (kicked !== null) {
+  const kicked = await hasKickedTombstone(c.env.KV, familyId, body.userId);
+  if (kicked) {
     return jsonError(
       c,
       403,
@@ -534,7 +536,7 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     const member = findMember(record.members, body.userId);
     if (member && displayName !== "" && member.displayName !== displayName) {
       member.displayName = displayName;
-      await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+      await putFamilyRecord(c.env.KV, familyId, record);
     }
 
     const authToken = await getOrGenerateAuthToken(c.env.KV, body.userId);
@@ -556,8 +558,8 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   });
 
   await Promise.all([
-    c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
-    c.env.KV.put(kvKeys.member(body.userId), familyId),
+    putFamilyRecord(c.env.KV, familyId, record),
+    putMemberFamilyId(c.env.KV, body.userId, familyId),
   ]);
 
   const authToken = await generateAuthToken(c.env.KV, body.userId);
@@ -628,10 +630,7 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
 
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
@@ -661,8 +660,8 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     }
 
     await Promise.all([
-      c.env.KV.delete(kvKeys.family(familyId)),
-      c.env.KV.delete(kvKeys.member(callerId)),
+      deleteFamilyRecord(c.env.KV, familyId),
+      deleteMemberFamilyId(c.env.KV, callerId),
       deleteAuthToken(c.env.KV, callerId),
     ]);
 
@@ -718,8 +717,8 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   record.members = record.members.filter((m) => m.userId !== targetUserId);
 
   await Promise.all([
-    c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record)),
-    c.env.KV.delete(kvKeys.member(targetUserId)),
+    putFamilyRecord(c.env.KV, familyId, record),
+    deleteMemberFamilyId(c.env.KV, targetUserId),
     deleteAuthToken(c.env.KV, targetUserId),
   ]);
 
@@ -775,10 +774,7 @@ familyRoutes.openapi(clearKickedRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
 
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
@@ -801,7 +797,7 @@ familyRoutes.openapi(clearKickedRoute, async (c) => {
   //
   // Not a re-add: the user is merely allowed to join again, which they must do
   // themselves with the sync code (Invariant 4 stays intact).
-  await c.env.KV.delete(kvKeys.kicked(familyId, targetUserId));
+  await deleteKickedTombstone(c.env.KV, familyId, targetUserId);
 
   return c.json({ data: { cleared: BoolFlag.TRUE } });
 });
@@ -825,15 +821,12 @@ familyRoutes.openapi(listMembersRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  const memberFamily = await c.env.KV.get(kvKeys.member(userId));
+  const memberFamily = await getMemberFamilyId(c.env.KV, userId);
   if (memberFamily !== familyId) {
     return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
 
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
 
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
@@ -896,10 +889,7 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
     return invalidDisplayNameResponse(c);
   }
 
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
 
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
@@ -914,15 +904,14 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
 
   member.displayName = displayName;
 
-  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+  await putFamilyRecord(c.env.KV, familyId, record);
 
   // Sync displayName to user record so it stays consistent across data stores
-  const userKey = kvKeys.user(targetUserId);
-  const userRec = await c.env.KV.get<UserBooksRecord>(userKey, "json");
+  const userRec = await getUserBooksRecord(c.env.KV, targetUserId);
   if (userRec) {
     userRec.displayName = displayName;
     userRec.lastUpdated = new Date().toISOString();
-    await c.env.KV.put(userKey, JSON.stringify(userRec));
+    await putUserBooksRecord(c.env.KV, targetUserId, userRec);
   }
 
   return c.json({ data: { userId: targetUserId, displayName } });
@@ -1004,10 +993,7 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
     readmooNameAction = { type: "set", value: sanitized };
   }
 
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
   }
@@ -1071,7 +1057,7 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
     }
   }
 
-  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+  await putFamilyRecord(c.env.KV, familyId, record);
 
   return c.json({ data: member });
 });
@@ -1121,10 +1107,7 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
     return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
 
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
@@ -1149,7 +1132,7 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
   if (body.clearEndpoint === 1) {
     delete record.apiEndpoint;
   }
-  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+  await putFamilyRecord(c.env.KV, familyId, record);
 
   return c.json({ data: record });
 });
@@ -1280,7 +1263,7 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  const memberFamily = await c.env.KV.get(kvKeys.member(callerId));
+  const memberFamily = await getMemberFamilyId(c.env.KV, callerId);
   if (memberFamily !== familyId) {
     return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
@@ -1304,10 +1287,7 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
   }
   const normalizedEndpoint = result.normalized;
 
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
 
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
@@ -1325,7 +1305,7 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
     delete record.apiEndpoint;
   }
 
-  await c.env.KV.put(kvKeys.family(familyId), JSON.stringify(record));
+  await putFamilyRecord(c.env.KV, familyId, record);
 
   return c.json({ data: record });
 });
@@ -1370,11 +1350,7 @@ async function writeKickedTombstone(
       removedAt: new Date().toISOString(),
       removedBy,
     };
-    await kv.put(
-      kvKeys.kicked(familyId, targetUserId),
-      JSON.stringify(kickedRecord),
-      { expirationTtl: KICKED_TOMBSTONE_TTL_SECONDS },
-    );
+    await putKickedTombstone(kv, familyId, targetUserId, kickedRecord);
   } catch (err) {
     console.error("KICK_TOMBSTONE_WRITE_FAILED", {
       familyId,
@@ -1400,13 +1376,10 @@ async function classifyMembershipForCreate(
   kv: KVNamespace,
   userId: string,
 ): Promise<"in-family" | "orphaned" | "none"> {
-  const existingFamilyId = await kv.get(kvKeys.member(userId));
+  const existingFamilyId = await getMemberFamilyId(kv, userId);
   if (!existingFamilyId) return "none";
 
-  const oldRaw = await kv.get<RawFamilyRecord>(
-    kvKeys.family(existingFamilyId),
-    "json",
-  );
+  const oldRaw = await getFamilyRecord(kv, existingFamilyId);
   return oldRaw ? "in-family" : "orphaned";
 }
 

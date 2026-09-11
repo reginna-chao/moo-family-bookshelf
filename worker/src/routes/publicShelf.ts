@@ -2,13 +2,19 @@ import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Context, TypedResponse } from "hono";
 import type { Env } from "../utils/env";
 import {
-  kvKeys,
   MAX_PUBLIC_SHELVES,
   type PublicShelf,
   type PublicShelfSnapshot,
   type PublicShelvesRecord,
   type UserBooksRecord,
 } from "../kv/schema";
+import {
+  getPublicShelves,
+  putPublicShelves,
+  getPublicSnapshot,
+  deletePublicSnapshot,
+} from "../kv/publicShelves";
+import { getUserBooksRecord } from "../kv/users";
 import {
   isValidUserId,
   isValidRequestId,
@@ -58,11 +64,14 @@ function authGuard(
 /**
  * Persist the public-shelf list to `publicshelves:{userId}`.
  *
- * Deliberately LOCAL to this module rather than exported from `services/`:
- * that key has exactly one writer domain — the four write handlers below — and
- * keeping the only `put` here makes that property checkable by reading one
- * file. The books / family-prefs paths must never call it, which is why it is
- * not on offer from a shared module.
+ * A shelf-array-shaped wrapper over `putPublicShelves` (`kv/publicShelves.ts`),
+ * and the ONLY call site of it: that key has exactly one writer domain — the
+ * four write handlers below. The books / family-prefs paths must keep READING
+ * the key and never writing it, or a stale-read books save could roll a revoked
+ * share token back to life. Since the accessor is exported from `kv/`, the
+ * property is pinned by a tripwire test asserting this module is its only route
+ * importer (`worker/tests/unit/kvAccessBoundary.test.ts`) rather than by the
+ * put being unreachable.
  */
 async function writePublicShelves(
   kv: KVNamespace,
@@ -70,7 +79,7 @@ async function writePublicShelves(
   shelves: PublicShelf[],
 ): Promise<void> {
   const record: PublicShelvesRecord = { shelves };
-  await kv.put(kvKeys.publicShelves(userId), JSON.stringify(record));
+  await putPublicShelves(kv, userId, record);
 }
 
 /**
@@ -86,12 +95,9 @@ async function readPublicShelves(
   kv: KVNamespace,
   userId: string,
 ): Promise<PublicShelf[]> {
-  const pointer = await kv.get<PublicShelvesRecord>(
-    kvKeys.publicShelves(userId),
-    "json",
-  );
+  const pointer = await getPublicShelves(kv, userId);
   if (pointer) return resolvePublicShelves(pointer, null).shelves;
-  const record = await kv.get<UserBooksRecord>(kvKeys.user(userId), "json");
+  const record = await getUserBooksRecord(kv, userId);
   return resolvePublicShelves(null, record).shelves;
 }
 
@@ -117,8 +123,8 @@ async function findShelf(
   shelfId: string,
 ): Promise<ShelfLookup | null> {
   const [pointer, record] = await Promise.all([
-    kv.get<PublicShelvesRecord>(kvKeys.publicShelves(userId), "json"),
-    kv.get<UserBooksRecord>(kvKeys.user(userId), "json"),
+    getPublicShelves(kv, userId),
+    getUserBooksRecord(kv, userId),
   ]);
   if (!record) return null;
   const { shelves } = resolvePublicShelves(pointer, record);
@@ -365,8 +371,8 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
   // Pointer key + books record in parallel: the shelf list comes from the
   // resolver, the record is still what makes a snapshot possible at all.
   const [pointer, record] = await Promise.all([
-    c.env.KV.get<PublicShelvesRecord>(kvKeys.publicShelves(userId), "json"),
-    c.env.KV.get<UserBooksRecord>(kvKeys.user(userId), "json"),
+    getPublicShelves(c.env.KV, userId),
+    getUserBooksRecord(c.env.KV, userId),
   ]);
   if (!record) {
     return jsonError(
@@ -542,7 +548,7 @@ publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
   shelves[idx] = shelf;
   await writePublicShelves(c.env.KV, userId, shelves);
 
-  await c.env.KV.delete(kvKeys.publicShelf(oldToken));
+  await deletePublicSnapshot(c.env.KV, oldToken);
 
   return c.json({ data: { shelf } });
 });
@@ -601,7 +607,7 @@ publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
   shelves.splice(idx, 1);
   await writePublicShelves(c.env.KV, userId, shelves);
 
-  await c.env.KV.delete(kvKeys.publicShelf(token));
+  await deletePublicSnapshot(c.env.KV, token);
 
   return c.body(null, 204);
 });
@@ -619,10 +625,7 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
     return jsonError(c, 400, "INVALID_TOKEN", "Invalid share token format");
   }
 
-  const snapshot = await c.env.KV.get<PublicShelfSnapshot>(
-    kvKeys.publicShelf(shareToken),
-    "json",
-  );
+  const snapshot = await getPublicSnapshot(c.env.KV, shareToken);
   if (!snapshot) {
     return jsonError(
       c,

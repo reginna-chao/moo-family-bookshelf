@@ -1,12 +1,8 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
-import {
-  kvKeys,
-  BoolFlag,
-  type RawFamilyRecord,
-  type UserBooksRecord,
-  normalizeFamilyRecord,
-} from "../kv/schema";
+import { BoolFlag, normalizeFamilyRecord } from "../kv/schema";
+import { getFamilyRecord, getMemberFamilyId } from "../kv/families";
+import { getUserBooksRecord } from "../kv/users";
 import {
   isValidFamilyId,
   sanitizeCoverUrl,
@@ -73,16 +69,13 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  const memberFamily = await c.env.KV.get(kvKeys.member(userId));
+  const memberFamily = await getMemberFamilyId(c.env.KV, userId);
   if (memberFamily !== familyId) {
     return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
 
   // Get family members
-  const raw = await c.env.KV.get<RawFamilyRecord>(
-    kvKeys.family(familyId),
-    "json",
-  );
+  const raw = await getFamilyRecord(c.env.KV, familyId);
 
   if (!raw) {
     return jsonError(c, 404, "FAMILY_NOT_FOUND", "Family not found");
@@ -93,10 +86,7 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
   // Fetch all members' book data in parallel
   const memberBooks = await Promise.all(
     family.members.map(async (member) => {
-      const record = await c.env.KV.get<UserBooksRecord>(
-        kvKeys.user(member.userId),
-        "json",
-      );
+      const record = await getUserBooksRecord(c.env.KV, member.userId);
       // Read-side twin of the buildSnapshot chokepoint — a dormant pre-whitelist
       // record must not beacon family members (coverUrl) or hand them a
       // phishing link (readmooUrl) via the aggregation.
