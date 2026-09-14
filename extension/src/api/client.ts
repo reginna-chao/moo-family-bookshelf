@@ -62,6 +62,7 @@ import {
   sanitizeFamilyMember,
   sanitizeFamilyMembersResponse,
 } from "moo-family-bookshelf-shared/api/memberValidation";
+import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
 
 // Re-export all types so existing imports from "./client" continue to work
 export {
@@ -563,13 +564,24 @@ export class ApiClient {
 
   // --- Family Bookshelf ---
 
+  /**
+   * `unknown`, not `FamilyBookshelf`: the wire shape is only a claim until
+   * `sanitizeFamilyBookshelfResponse` has checked it. Two deliberate layers, in
+   * this order — the structural pass drops members without a usable `userId`
+   * and books without a usable `bookId` (identities the text layer would
+   * normalize to a COLLIDING `""`), then the shared text layer coerces the
+   * declared-string fields it leaves alone. The envelope is sanitized whole:
+   * callers read `{ data, error }` themselves, so an `error` envelope must
+   * reach them unchanged.
+   */
   async getFamilyBookshelf(
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
-    const res = await this.get<FamilyBookshelf>(
-      `/api/family/${familyId}/bookshelf`,
+    const res = await this.get<unknown>(`/api/family/${familyId}/bookshelf`);
+    return this.sanitizeEnvelope(
+      sanitizeFamilyBookshelfResponse<FamilyBookshelf>(res),
+      sanitizeFamilyBookshelfText,
     );
-    return this.sanitizeEnvelope(res, sanitizeFamilyBookshelfText);
   }
 
   // --- Borrow Requests (v1.1.0) ---

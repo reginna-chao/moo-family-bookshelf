@@ -24,7 +24,7 @@ moo-family-bookshelf/
 │   └── architecture.md
 ├── shared/                      # Cross-app TypeScript library (no build step)
 │   ├── src/
-│   │   ├── api/                # Wire types (BoolFlag / envelope / family records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member payload validation
+│   │   ├── api/                # Wire types (BoolFlag / envelope / family records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf payload validation
 │   │   ├── borrow/             # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中文案)
 │   │   ├── config/             # Readmoo host/selector config, report links
 │   │   ├── hostNote/           # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
