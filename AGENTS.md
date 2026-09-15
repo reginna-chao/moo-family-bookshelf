@@ -201,6 +201,7 @@ GitHub Release 內容：release job 會讀取 `docs/release-notes/v<X.Y.Z>.md`�
     TRUE = 1,
   }
   ```
+  That parity — and the same one for `BorrowStatus` / `BorrowRequest` (`shared/src/borrow/types.ts` vs `worker/src/kv/schema.ts`) — is pinned by the tripwire `worker/tests/unit/sharedEnumParity.test.ts`, which runs in `worker-check` for a change on EITHER side (its path filter covers `worker/**` and `shared/**`). Renumbering or adding a member on one side alone fails CI.
 - This applies to: `isShared`, `isArchived`, `syncArchived`, and any future boolean flags.
 - Type definitions: use `BoolFlag` (not `boolean` or `0 | 1`).
 - Comparisons: use `=== BoolFlag.TRUE` or `=== BoolFlag.FALSE`.
