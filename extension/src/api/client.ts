@@ -36,6 +36,7 @@ import type {
   FamilyBookshelf,
   FamilyGroup,
   FamilyMember,
+  LookupResult,
   MemberSettingsPayload,
   OtpInfo,
   PersonalBooks,
@@ -79,8 +80,10 @@ export type {
   BorrowRequest,
   CreateBorrowPayload,
   FamilyBookshelf,
+  FamilyBookshelfMember,
   FamilyGroup,
   FamilyMember,
+  LookupResult,
   MemberSettingsPayload,
   OtpInfo,
   PersonalBooks,
@@ -94,26 +97,6 @@ export type {
 } from "./types";
 
 import { DEFAULT_PWA_URL } from "../constants";
-
-/**
- * Resolved `POST /api/auth/lookup` payload.
- *
- * `userId` is derived from a publicly guessable email, so an account that has
- * PWA login verification configured only gets its family data back when the
- * request carries the matching secret. Until then the server answers HTTP 200
- * with `requiresVerification: TRUE` and withholds the data
- * (`existingFamilyId: null`, `memberCount: 0`) — informational, not an error.
- */
-export interface LookupResult {
-  existingFamilyId: string | null;
-  memberCount: number;
-  /**
-   * Optional on the wire: Workers predating the verification gate never send
-   * this field, and self-hosted (BYO) backends can lag the Extension by any
-   * number of releases. Absent means "no verification gate on this account".
-   */
-  requiresVerification?: BoolFlag;
-}
 
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;

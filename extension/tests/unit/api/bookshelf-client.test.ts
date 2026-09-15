@@ -15,7 +15,7 @@ const USER_B = "b".repeat(64);
 const BOOK_A = "210012345000";
 const BOOK_B = "210067890000";
 
-/** The Extension's own bookshelf member shape — `lastUpdated` is PWA-only. */
+/** The bookshelf member shape both apps share (`shared/src/api/types.ts`). */
 type BookshelfMember = FamilyBookshelf["members"][number];
 
 function mockFetchSuccess(data: unknown, status = 200) {
@@ -72,6 +72,7 @@ function makeMember(overrides: Partial<BookshelfMember> = {}): BookshelfMember {
     userId: USER_A,
     displayName: "小明",
     books: [makeBook()],
+    lastUpdated: null,
     ...overrides,
   };
 }
@@ -434,8 +435,8 @@ describe("ApiClient getFamilyBookshelf", () => {
     describe("member preservation", () => {
       it("keeps a surviving member by spread rather than rebuilding it from a fixed field list", async () => {
         // The structural layer deliberately does NOT enumerate the member's
-        // fields: the two apps' member shapes differ (`lastUpdated` is
-        // PWA-only), so a fixed list would silently drop one end's field.
+        // fields: the wire shape can gain a field (`lastUpdated` is a
+        // meaningful tri-state), and a fixed list would silently drop it.
         const member = await sanitizedMember({
           ...makeMember(),
           futureField: "kept",

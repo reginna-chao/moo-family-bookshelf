@@ -3,22 +3,30 @@
  */
 
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
+import type { BookEntry } from "moo-family-bookshelf-shared/api/types";
 
 /**
- * The wire contract itself — the `{ data, error }` envelope, `BoolFlag`, and the
- * family / borrow records — lives in `shared/` so the Extension and the PWA
+ * The wire contract itself — the `{ data, error }` envelope, `BoolFlag`, the
+ * family / bookshelf / borrow records, the `POST /api/auth/lookup` payload and
+ * the thrown `ApiError` — lives in `shared/` so the Extension and the PWA
  * cannot describe the same payload differently. Re-exported here because every
  * existing importer reaches for these names through the API layer — new code
  * outside `api/` should import the shared modules directly rather than routing
- * through this file. `BoolFlag` is also imported above as a real binding,
- * because the app-local types below are declared in terms of it.
+ * through this file. `BoolFlag` and `BookEntry` are also imported above as
+ * real bindings, because the app-local types below are declared in terms of
+ * them; `ApiError` is not used here, so it is a plain re-export.
  */
 export { BoolFlag };
+export { ApiError } from "moo-family-bookshelf-shared/api/types";
 export type {
   ApiErrorPayload,
   ApiResponse,
+  BookEntry,
+  FamilyBookshelf,
+  FamilyBookshelfMember,
   FamilyGroup,
   FamilyMember,
+  LookupResult,
 } from "moo-family-bookshelf-shared/api/types";
 export { BorrowStatus } from "moo-family-bookshelf-shared/borrow/types";
 export type {
@@ -36,73 +44,6 @@ export type {
  * can put this string in an envelope. `ApiError.synthesized` is the check.
  */
 export const AUTH_REFRESH_RATE_LIMITED = "AUTH_REFRESH_RATE_LIMITED";
-
-/**
- * Thrown by the client's `unwrap` helpers when an envelope carries `error`.
- *
- * Keeps the machine-readable `code` and the rate-limit wait reachable by
- * callers — a plain `Error` forced the UI to show (or string-parse) the raw
- * `"CODE: message"` text, which is how `retryAfter` used to get dropped on the
- * floor. `message` keeps that exact shape for backward compatibility.
- */
-export class ApiError extends Error {
-  readonly code: string;
-  /**
-   * The message exactly as the envelope carried it, without the `"CODE: "`
-   * prefix `message` prepends. Codes whose server copy is already user-facing
-   * render this instead of string-parsing `message`.
-   */
-  readonly rawMessage: string;
-  /** Seconds to wait before retrying; only sent on 429 responses. */
-  readonly retryAfter?: number;
-  /**
-   * True only when this client built the envelope itself, proven by the
-   * symbol marker in `client.ts` that `JSON.parse` cannot produce. Any UI that
-   * renders `rawMessage` verbatim MUST require this: without it, a self-hosted
-   * (BYO) or hostile backend could return a client-only code and get arbitrary
-   * text painted into the dialog.
-   *
-   * Deliberately a plain `boolean` rather than `BoolFlag` — this is in-memory
-   * provenance, never an API payload or KV field, and keeping it outside the
-   * wire-serializable vocabulary is the whole point.
-   */
-  readonly synthesized: boolean;
-
-  constructor(
-    code: string,
-    message: string,
-    retryAfter?: number,
-    synthesized = false,
-  ) {
-    super(`${code}: ${message}`);
-    this.name = "ApiError";
-    this.code = code;
-    this.rawMessage = message;
-    this.synthesized = synthesized;
-    // Validated at the boundary: a self-hosted (BYO) backend can send anything,
-    // and a NaN / negative / fractional wait would surface as「NaN 秒」in the
-    // back-off copy. Anything unusable is dropped so the UI falls back to its
-    // static wording.
-    this.retryAfter =
-      typeof retryAfter === "number" &&
-      Number.isFinite(retryAfter) &&
-      retryAfter >= 0
-        ? Math.floor(retryAfter)
-        : undefined;
-  }
-}
-
-export interface BookEntry {
-  bookId: string;
-  title: string;
-  author: string;
-  isbn: string;
-  coverUrl: string;
-  readmooUrl: string;
-  category: string;
-  isShared: BoolFlag;
-  isArchived?: BoolFlag; // FALSE = active (default), TRUE = archived
-}
 
 export interface PersonalBooks {
   schemaVersion: number;
@@ -122,14 +63,6 @@ export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 export interface VersionInfo {
   apiVersion: number;
   serverVersion: string;
-}
-
-export interface FamilyBookshelf {
-  members: Array<{
-    userId: string;
-    displayName: string;
-    books: BookEntry[];
-  }>;
 }
 
 export type VerifyMethod = "pin" | "pattern" | "code" | "none";

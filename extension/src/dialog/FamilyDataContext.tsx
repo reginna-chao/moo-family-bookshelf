@@ -168,6 +168,7 @@ export function FamilyDataProvider({
   chipBookIdsRef.current = chipBookIds;
   const rawMembersDataRef = useRef<{
     members: MemberBooks[];
+    raw: FamilyBookshelf["members"];
   } | null>(null);
 
   const updatedBookIds = useMemo(() => {
@@ -268,13 +269,9 @@ export function FamilyDataProvider({
       }));
 
       // --- Update tracking ---
-      // Build raw-like structure for update tracking compatibility
-      const rawMembers = data.members.map((m) => ({
-        userId: m.userId,
-        payload: null as string | null,
-        lastUpdated: null as string | null,
-      }));
-
+      // `data.members` carries each member's `lastUpdated` straight from the
+      // wire; the tracker compares it against the seen baseline, so a
+      // synthesized `null` here would read every existing member as unchanged.
       const sk = seenKey(userId);
       const ck = chipsKey(userId);
       let storageData: Record<string, unknown> = {};
@@ -289,7 +286,7 @@ export function FamilyDataProvider({
 
       const freshIds = computeFreshBookIds(
         parsedMembers,
-        rawMembers,
+        data.members,
         userId,
         seenData,
       );
@@ -301,7 +298,7 @@ export function FamilyDataProvider({
 
       // First use: silently initialize baseline
       if (Object.keys(seenData).length === 0) {
-        const baseline = buildSeenBaseline(parsedMembers, rawMembers);
+        const baseline = buildSeenBaseline(parsedMembers, data.members);
         try {
           void browser.storage.local.set({ [sk]: baseline });
         } catch {
@@ -311,6 +308,7 @@ export function FamilyDataProvider({
 
       rawMembersDataRef.current = {
         members: parsedMembers,
+        raw: data.members,
       };
 
       if (!mountedRef.current) return;
@@ -393,13 +391,9 @@ export function FamilyDataProvider({
     const raw = rawMembersDataRef.current;
     if (!raw) return;
 
-    // Update baseline — build raw-like structure
-    const rawMembers = raw.members.map((m) => ({
-      userId: m.userId,
-      payload: null as string | null,
-      lastUpdated: null as string | null,
-    }));
-    const baseline = buildSeenBaseline(raw.members, rawMembers);
+    // Update baseline from the wire members so each entry records the
+    // `lastUpdated` the next load will be diffed against.
+    const baseline = buildSeenBaseline(raw.members, raw.raw);
 
     // Merge fresh IDs into chips with 24h expiry
     const mergedChips = new Set(chipBookIdsRef.current);

@@ -52,20 +52,21 @@
  * the UI.
  *
  * Parameter and return types are STRUCTURAL and generic, the convention
- * `./entityText.ts` documents for itself: neither app's `FamilyBookshelf`
- * interface is imported here. The two declarations genuinely differ — the PWA's
- * adds `familyId` and a per-member `lastUpdated` — and neither lives in
- * `shared/`; staying structural is what lets ONE module serve both ends.
+ * `./entityText.ts` documents for itself: the single `FamilyBookshelf`
+ * declaration both apps now share (`./types.ts`) is deliberately NOT imported
+ * here. The validator checks the wire shape on its own terms, so it never
+ * depends on the declared type and an edit to that declaration can never
+ * silently weaken what this module enforces.
  *
  * Two deliberate differences from `./memberValidation.ts`:
  *
  *  - A surviving MEMBER is kept by SPREAD (`{ ...element, books }`) instead of
- *    rebuilt as a fresh literal. A rebuild has to enumerate the fields, and the
- *    two ends' member shapes differ as noted above — `lastUpdated` is PWA-only
- *    and is a meaningful tri-state — so a fixed field list would silently drop
- *    it on one end. The hostile-extras risk the rebuild exists to close is
- *    already absent here: both consumers rebuild the member as a fresh 3-field
- *    literal before it reaches React state (`parsedMembers` in
+ *    rebuilt as a fresh literal. A rebuild has to enumerate the fields, so a
+ *    field added to the wire shape (e.g. `lastUpdated`, a meaningful tri-state
+ *    for update tracking) could be silently dropped by a fixed field list. The
+ *    hostile-extras risk the rebuild exists to close is already absent here:
+ *    both consumers rebuild the member as a fresh 3-field literal before it
+ *    reaches React state (`parsedMembers` in
  *    `extension/src/dialog/FamilyDataContext.tsx`, `memberBooks` in
  *    `pwa/src/hooks/useFamilyData.tsx`). Field COERCION stays with the text
  *    layer, which runs second.
@@ -196,8 +197,8 @@ function warnBookLosses(tally: BookLossTally): void {
 /**
  * Validate a `GET /api/family/:id/bookshelf` envelope at the API boundary.
  *
- * Only `data.members` is rebuilt. Every other top-level field — `familyId` on
- * the PWA side, and anything a future payload adds — passes through by spread:
+ * Only `data.members` is rebuilt. Every other top-level field — `familyId`,
+ * and anything a future payload adds — passes through by spread:
  * the text layer already coerces `familyId`, and this module owns structure
  * only. The return type is a claim for the caller's convenience, exactly as in
  * `sanitizeFamilyMembersResponse`; what it actually guarantees is that every

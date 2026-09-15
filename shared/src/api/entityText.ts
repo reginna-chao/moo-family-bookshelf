@@ -104,7 +104,12 @@ export interface BookshelfMemberTextFields {
   userId: string;
   displayName: string;
   books: BookTextFields[];
-  /** PWA-only (`string | null`); the Extension's member shape omits it. */
+  /**
+   * On the wire for BOTH apps — `FamilyBookshelfMember.lastUpdated` in
+   * `./types.ts` declares it as a required `string | null`. Optional HERE only
+   * because this layer is structural and does not import that type (see the
+   * file header), so a caller passing a narrower shape still type-checks.
+   */
   lastUpdated?: string | null;
 }
 
@@ -124,7 +129,11 @@ export function sanitizeBookshelfMemberText<
 
 export interface FamilyBookshelfTextFields {
   members: BookshelfMemberTextFields[];
-  /** PWA-only; the Extension's bookshelf shape omits it. */
+  /**
+   * On the wire for BOTH apps — `FamilyBookshelf.familyId` in `./types.ts`
+   * declares it as a required `string`. Optional HERE only because this layer
+   * is structural and does not import that type (see the file header).
+   */
   familyId?: string;
 }
 

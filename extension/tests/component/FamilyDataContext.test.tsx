@@ -2,7 +2,9 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { useEffect } from "react";
 import { FamilyDataProvider, useFamilyData } from "@/dialog/FamilyDataContext";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag } from "@/api/client";
+import type { ApiClient, BookEntry, FamilyBookshelf } from "@/api/client";
+import { seenKey, chipsKey } from "@/constants";
 
 /**
  * FamilyDataProvider exposes a `reloadSignal` prop: bumping the number re-runs
@@ -270,5 +272,147 @@ describe("FamilyDataProvider hostile error envelopes", () => {
     expect(screen.getByTestId("bookshelf-error").textContent).toBe(
       "帳號不存在",
     );
+  });
+});
+
+/**
+ * The 「更新」 chip is a diff between each member's `lastUpdated` on the wire
+ * and the baseline stored under `seenKey(userId)` (extension/src/dialog/
+ * updateTracking.ts). The provider used to hand the tracker a synthesized
+ * `lastUpdated: null` for every member (the Extension's `FamilyBookshelf` type
+ * lacked the field — issue #169), and `computeFreshBookIds` reads `null` as
+ * "nothing to diff against", so an EXISTING member's newly shared books never
+ * got a chip; only a member absent from the baseline did. The provider now
+ * passes the wire members through on load and keeps them for
+ * `markBookshelfSeen`, mirroring the PWA (`pwa/src/hooks/useFamilyData.tsx`).
+ *
+ * The pure diff is proven in tests/unit/updateTracking.test.ts; these pin the
+ * WIRING — that the real `lastUpdated` reaches the tracker at both call sites.
+ */
+describe("FamilyDataProvider update tracking", () => {
+  const SEEN_AT = "2026-01-01T00:00:00Z";
+  const SYNCED_AT = "2026-02-01T00:00:00Z";
+  const SEEN_KEY = seenKey("user-1");
+  const CHIPS_KEY = chipsKey("user-1");
+
+  function makeBook(bookId: string): BookEntry {
+    return {
+      bookId,
+      title: `書 ${bookId}`,
+      author: "作者",
+      isbn: "",
+      coverUrl: "",
+      readmooUrl: "",
+      category: "",
+      isShared: BoolFlag.TRUE,
+    };
+  }
+
+  /** `user-2` shares b1 + b2; the baseline below has only seen b1. */
+  function bookshelfWith(lastUpdated: string | null): FamilyBookshelf {
+    return {
+      familyId: "fam-1",
+      members: [
+        {
+          userId: "user-2",
+          displayName: "B",
+          lastUpdated,
+          books: [makeBook("b1"), makeBook("b2")],
+        },
+      ],
+    };
+  }
+
+  function clientServing(bookshelf: FamilyBookshelf): ApiClient {
+    return createMockApiClient({
+      getFamilyBookshelf: vi.fn().mockResolvedValue({ data: bookshelf }),
+    });
+  }
+
+  /** Renders the chip set sorted, so the assertion is order-independent. */
+  function UpdatesProbe() {
+    const { bookshelfState, updatedBookIds, markBookshelfSeen } =
+      useFamilyData();
+    return (
+      <div>
+        <span data-testid="bookshelf-state">{bookshelfState}</span>
+        <span data-testid="updated-ids">
+          {[...updatedBookIds].sort().join(",")}
+        </span>
+        <button onClick={markBookshelfSeen}>seen</button>
+      </div>
+    );
+  }
+
+  async function renderWithSeenBaseline(apiClient: ApiClient) {
+    await act(async () => {
+      render(
+        <FamilyDataProvider
+          familyId="fam-1"
+          userId="user-1"
+          apiClient={apiClient}
+        >
+          <UpdatesProbe />
+        </FamilyDataProvider>,
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("bookshelf-state")).toHaveTextContent("ready");
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // A baseline already exists for user-2 (not first use): it last saw b1
+    // when user-2's shelf was stamped SEEN_AT.
+    vi.mocked(chrome.storage.local.get).mockResolvedValue({
+      [SEEN_KEY]: { "user-2": { lastUpdated: SEEN_AT, bookIds: ["b1"] } },
+    } as never);
+  });
+
+  afterEach(async () => {
+    await act(async () => {});
+  });
+
+  it("chips only the books an existing member added since the seen baseline", async () => {
+    await renderWithSeenBaseline(clientServing(bookshelfWith(SYNCED_AT)));
+
+    // b2 is new since SEEN_AT; b1 was already in the baseline.
+    expect(screen.getByTestId("updated-ids").textContent).toBe("b2");
+    // Not first use — the provider must not silently overwrite the baseline.
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it("chips nothing when the member's shelf has not been re-saved since the baseline", async () => {
+    await renderWithSeenBaseline(clientServing(bookshelfWith(SEEN_AT)));
+
+    expect(screen.getByTestId("updated-ids").textContent).toBe("");
+  });
+
+  it("chips nothing for a member who has never synced (null lastUpdated)", async () => {
+    // `null` is the tri-state's "nothing to diff against", not "changed".
+    await renderWithSeenBaseline(clientServing(bookshelfWith(null)));
+
+    expect(screen.getByTestId("updated-ids").textContent).toBe("");
+  });
+
+  it("records the wire lastUpdated in the baseline when the shelf is marked seen", async () => {
+    await renderWithSeenBaseline(clientServing(bookshelfWith(SYNCED_AT)));
+
+    await act(async () => {
+      screen.getByRole("button", { name: "seen" }).click();
+    });
+
+    // The next load diffs against SYNCED_AT — a synthesized null here would
+    // store "" and re-chip b2 on every subsequent load.
+    expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+    const written = vi.mocked(chrome.storage.local.set).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(written[SEEN_KEY]).toEqual({
+      "user-2": { lastUpdated: SYNCED_AT, bookIds: ["b1", "b2"] },
+    });
+    expect(written[CHIPS_KEY]).toMatchObject({ bookIds: ["b2"] });
+    // The chip survives the seen-mark (kept for 24h); the red dot clears.
+    expect(screen.getByTestId("updated-ids").textContent).toBe("b2");
   });
 });

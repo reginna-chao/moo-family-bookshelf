@@ -128,7 +128,7 @@ const NON_ARRAY_CONTAINERS: Array<{ name: string; value: unknown }> = [
  *     elements then collide (duplicate React keys, an empty member label,
  *     collapsed family-shelf preference refs, a collapsed update-tracking
  *     baseline). Survivors are kept by SPREAD, never rebuilt — which is what
- *     leaves the PWA-only `lastUpdated` in place for layer 2.
+ *     leaves the tri-state `lastUpdated` in place for layer 2.
  *  2. `shared/src/api/entityText.ts` — the declared-STRING coercion, which then
  *     blanks a survivor's `displayName` / `title` / `author` / … in place.
  * Where a case can tell the two apart it says so, because a regression in
@@ -432,8 +432,8 @@ describe("ApiClient getFamilyBookshelf (PWA)", () => {
     describe("member preservation", () => {
       it("keeps a surviving member by spread rather than rebuilding it from a fixed field list", async () => {
         // The structural layer deliberately does NOT enumerate the member's
-        // fields: the two apps' member shapes differ (`lastUpdated` is
-        // PWA-only), so a fixed list would silently drop one end's field.
+        // fields: the wire shape can gain a field (`lastUpdated` is a
+        // meaningful tri-state), and a fixed list would silently drop it.
         const member = await sanitizedMember({
           ...makeMember(),
           futureField: "kept",

@@ -313,9 +313,11 @@ const VALID_BOOKSHELF_MEMBER: BookshelfMember = {
   userId: USER_ID,
   displayName: "小明",
   books: [VALID_BOOK],
+  lastUpdated: "2026-04-26T00:00:00Z",
 };
 
 const VALID_BOOKSHELF: FamilyBookshelf = {
+  familyId: "fam-abc123",
   members: [VALID_BOOKSHELF_MEMBER],
 };
 
