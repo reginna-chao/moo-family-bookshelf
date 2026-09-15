@@ -40,14 +40,16 @@
  * SECOND (see the composition comment in each client's `getFamilyBookshelf`).
  *
  * Known residual, deliberately NOT closed here: the rule is "usable", not
- * "unique". A backend that sends two members with the SAME non-empty `userId`,
- * or one member carrying two books with the same `bookId`, still reproduces
- * all four consequences above — the collision is now on a real string instead
- * of `""`. `./memberValidation.ts` carries the identical residual for the
- * member list, and the official Worker does not deduplicate `bookId` either
- * (`parseBooks` in `worker/src/routes/user.ts`), so a dedup rule would be a
- * policy change on both ends rather than a boundary check; none of these
- * collisions can crash the UI.
+ * "unique". Two members sharing one non-empty `userId` reproduce consequences
+ * 1 and 4 outright, and 3 as soon as those members also share a `bookId`; one
+ * member carrying two books with the same `bookId` reproduces 1 and 3. Only
+ * consequence 2 is closed outright — an empty label needs `userId === ""`,
+ * which no surviving member can carry any more. `./memberValidation.ts`
+ * carries the identical residual for the member list, and the official Worker
+ * does not deduplicate `bookId` either (`parseBooks` in
+ * `worker/src/routes/user.ts`), so a dedup rule would be a policy change on
+ * both ends rather than a boundary check; none of these collisions can crash
+ * the UI.
  *
  * Parameter and return types are STRUCTURAL and generic, the convention
  * `./entityText.ts` documents for itself: neither app's `FamilyBookshelf`
