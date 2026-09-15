@@ -341,7 +341,7 @@ describe("POST /api/family/:id/borrow", () => {
     expect(json.error.code).toBe("NOT_FAMILY_MEMBER");
   });
 
-  it("should return 403 INVALID_OWNER if ownerId is the same as caller (can't borrow own book)", async () => {
+  it("should return 403 INVALID_OWNER_SELF if ownerId is the same as caller (can't borrow own book)", async () => {
     const { familyId, token1 } = await createFamilyWithTwoMembers();
 
     const res = await request(
@@ -352,10 +352,10 @@ describe("POST /api/family/:id/borrow", () => {
     );
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("INVALID_OWNER");
+    expect(json.error.code).toBe("INVALID_OWNER_SELF");
   });
 
-  it("should return 403 INVALID_OWNER if ownerId is not a family member", async () => {
+  it("should return 403 INVALID_OWNER if ownerId is someone outside the family", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
     const res = await request(
@@ -367,6 +367,41 @@ describe("POST /api/family/:id/borrow", () => {
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_OWNER");
+  });
+
+  it("should answer self-borrow and non-member-owner with different error codes", async () => {
+    const { familyId, token1, token2 } = await createFamilyWithTwoMembers();
+
+    // Self-borrow: the caller (user1) names themselves as the owner.
+    const selfRes = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      { ...validBorrowBody, ownerId: USER1 },
+      token1,
+    );
+    // Non-member owner: the caller (user2) names an owner outside the family.
+    const nonMemberRes = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      { ...validBorrowBody, ownerId: NOBODY },
+      token2,
+    );
+
+    expect(selfRes.status).toBe(403);
+    expect(nonMemberRes.status).toBe(403);
+
+    const selfCode = ((await selfRes.json()) as Json).error.code as string;
+    const nonMemberCode = ((await nonMemberRes.json()) as Json).error
+      .code as string;
+
+    // Positive companions first: each branch must keep its OWN literal, so the
+    // inequality below cannot pass vacuously by both branches drifting to some
+    // third shared code.
+    expect(selfCode).toBe("INVALID_OWNER_SELF");
+    expect(nonMemberCode).toBe("INVALID_OWNER");
+    // Clients map each code to its own copy — re-merging them turns "you can't
+    // borrow your own book" into "that person isn't in your family".
+    expect(selfCode).not.toBe(nonMemberCode);
   });
 
   it("should return 403 LENDING_DISABLED if owner has canLend = FALSE", async () => {
