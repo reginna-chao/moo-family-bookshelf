@@ -33,6 +33,7 @@ const SHELF_ID = "shelf-1";
 const REQUEST_ID = "req-123";
 const LIST_REQUEST_ID = "req-hostile-1";
 const SHARE_TOKEN = "tok-public-abc";
+const BOOKSHELF_BOOK_ID = "210012345000";
 
 const mockFetch = vi.fn();
 
@@ -120,6 +121,37 @@ const HOSTILE_MEMBERS_GROUP = {
   members: [HOSTILE_MEMBER, HOSTILE_MEMBER_WITH_ID],
 };
 
+/**
+ * The bookshelf BOOK as the composed path sees it. One deliberate difference
+ * from `HOSTILE_BOOK`: a usable `bookId`, because
+ * `sanitizeFamilyBookshelfResponse` (`shared/src/api/bookshelfValidation.ts`)
+ * DROPS a book without one instead of degrading it to `""`. Every other field
+ * stays hostile on purpose — the structural layer passes a surviving book
+ * through UNCHANGED, so the text layer is still what blanks them.
+ */
+const HOSTILE_BOOK_WITH_ID = {
+  ...HOSTILE_BOOK,
+  bookId: BOOKSHELF_BOOK_ID,
+};
+
+/**
+ * The bookshelf member that SURVIVES: a usable `userId`, a hostile
+ * `displayName` and a hostile PWA-only `lastUpdated` for the text layer, and a
+ * books list that pairs an unaddressable book with an addressable one.
+ */
+const HOSTILE_BOOKSHELF_MEMBER_WITH_ID = {
+  userId: OTHER_USER_ID,
+  displayName: ["小明"],
+  books: [HOSTILE_BOOK, HOSTILE_BOOK_WITH_ID],
+  lastUpdated: { seconds: 1 },
+};
+
+/**
+ * The bookshelf payload for `getFamilyBookshelf`, shaped like
+ * `HOSTILE_MEMBERS_GROUP`: the first member's `userId` is an object, so it is
+ * unaddressable and gets DROPPED; `HOSTILE_BOOKSHELF_MEMBER_WITH_ID` survives
+ * and carries the text-layer expectations, `familyId` included.
+ */
 const HOSTILE_BOOKSHELF = {
   familyId: { id: "fam" },
   members: [
@@ -129,6 +161,7 @@ const HOSTILE_BOOKSHELF = {
       books: [HOSTILE_BOOK],
       lastUpdated: { seconds: 1 },
     },
+    HOSTILE_BOOKSHELF_MEMBER_WITH_ID,
   ],
 };
 
@@ -334,23 +367,38 @@ const WIRING_CASES: WiringCase[] = [
     invoke: (client) => client.createFamily(USER_ID, "小明"),
     expected: GROUP_EXPECTATIONS,
   },
+  // Composed exactly like `getFamilyMembers`: the structural layer
+  // (`shared/src/api/bookshelfValidation.ts`) runs FIRST and DROPS what cannot
+  // be addressed, then the shared text layer coerces the survivors' declared
+  // strings. Both halves have to stay visible here — an unusable `userId` /
+  // `bookId` costs the whole element instead of blanking to `""`, which is the
+  // only way two degraded elements stop colliding on the empty string.
   {
     name: "getFamilyBookshelf",
     data: HOSTILE_BOOKSHELF,
     invoke: (client) => client.getFamilyBookshelf(FAMILY_ID),
     expected: [
+      // Layer 2 — the top-level PWA-only field, which layer 1 only spreads.
       { path: "data.familyId", value: "" },
-      { path: "data.members.0.userId", value: "" },
+      // Layer 1 — the member whose `userId` is an object is gone, not blanked.
+      { path: "data.members.length", value: 1 },
+      { path: "data.members.0.userId", value: OTHER_USER_ID },
+      // Layer 1 again — so is the book whose `bookId` is an object.
+      { path: "data.members.0.books.length", value: 1 },
+      { path: "data.members.0.books.0.bookId", value: BOOKSHELF_BOOK_ID },
+      // Layer 2 — the declared-string coercion, on what survived layer 1.
       { path: "data.members.0.displayName", value: "" },
       // PWA-only tri-state: `null` means "never synced", so a hostile value
-      // degrades to null rather than to "".
+      // degrades to null rather than to "". Layer 1 keeps the survivor by
+      // SPREAD, which is what leaves this PWA-only key for layer 2 to find.
       { path: "data.members.0.lastUpdated", value: null },
-      { path: "data.members.0.books.0.bookId", value: "" },
       { path: "data.members.0.books.0.title", value: "" },
       { path: "data.members.0.books.0.author", value: "" },
       { path: "data.members.0.books.0.isbn", value: "" },
       { path: "data.members.0.books.0.readmooUrl", value: "" },
       { path: "data.members.0.books.0.category", value: "" },
+      // Deliberate exclusions — a URL that only ever reaches an attribute, and
+      // the flag the family-shelf filter itself reads.
       {
         path: "data.members.0.books.0.coverUrl",
         value: "https://cdn.readmoo.com/cover/1.jpg",
