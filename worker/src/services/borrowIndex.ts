@@ -314,9 +314,13 @@ export async function writeBorrowIndex(
  * hold BOTH seats of someone else's family with minted ids and approve their
  * own requests. Relax either one (a configurable or larger `maxMembers`, an
  * approval path needing no second member) and two minted ids can approve each
- * other into LENT, leave, and those records stay forever. Revisit
- * `settleDepartingBorrower` first — settle LENT too, or purge by `ownerId` as
- * well — before relaxing them.
+ * other into LENT, leave, and those records stay forever. Precondition (b)
+ * also carries the membership re-check that PATCH performs since #159: with
+ * two seats, whichever party remains is still a member and can settle a LENT
+ * record; with three or more, BOTH parties can leave while the family lives
+ * on, and that record is then stranded — no member is a party, no party is a
+ * member. Revisit `settleDepartingBorrower` first — settle LENT too, or purge
+ * by `ownerId` as well — before relaxing them.
  *
  * Writes NOTHING when neither step changed anything — a family with no records
  * of the departing member stays exactly as it was, legacy shape included.
