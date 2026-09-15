@@ -224,14 +224,16 @@ describe("content script dialog lifecycle", () => {
     getButton().click(); // close: disposeDialogShell removes the host
     expect(hostExists()).toBe(false);
 
-    // Reliable "import resolved" signal instead of a fixed number of ticks:
-    // the content script called `import("@/dialog/main")` during the open click
-    // above, registering its `.then` race-guard callback. Awaiting the SAME
-    // module here queues our continuation strictly after that one (microtask
-    // FIFO), so once this resolves the guard has definitely run. If the import
-    // had NOT resolved, this await would not resolve either — no false green.
-    await import("@/dialog/main");
-    await tick();
+    // Wait for the content script's pending runtime-resolved import (non-literal
+    // `getURL(...)` specifier → resolveId RPC) to settle. A literal
+    // `import("@/dialog/main")` here would NOT do: Vite resolves it at transform
+    // time, so it returns from the module cache without ordering after that RPC.
+    // Clicking the positive control while the first import is still in flight
+    // puts two dynamic imports of the mocked module in flight from one importer,
+    // which can make the second bypass `vi.mock` under CI load (issue #187).
+    // Everything after the resolve (mock lookup → `.then` guard) is microtasks,
+    // so once this returns the guard has definitely run.
+    await vi.dynamicImportSettled();
 
     // Guard skipped mounting because the mount point was detached.
     expect(mockMountDialog).not.toHaveBeenCalled();
