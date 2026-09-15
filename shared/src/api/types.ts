@@ -1,15 +1,17 @@
 /**
  * Wire types both apps must agree on: the `{ data, error }` envelope, the
  * family-group and family-bookshelf records, the `POST /api/auth/lookup`
- * payload, and the `ApiError` each client throws when an envelope carries
- * `error`.
+ * payload, the `ApiError` each client throws when an envelope carries `error`,
+ * the personal-books record, the `GET /api/version` payload, the
+ * `/api/user/:id/verify*` shapes, the member-settings payload, the un-kick
+ * result, and the public-shelf records.
  *
- * Every response of this API travels in the same envelope, and the family
- * endpoints answer the Extension and the PWA with the same records — so a
- * divergent copy of these declarations on one end is a contract break, not a
- * local style choice. They used to be written once per app
- * (`extension/src/api/types.ts` and `pwa/src/api/client.ts`); both now re-export
- * from here, so existing importers are unaffected.
+ * Every response of this API travels in the same envelope, and the endpoints
+ * answer the Extension and the PWA with the same records — so a divergent copy
+ * of these declarations on one end is a contract break, not a local style
+ * choice. They used to be written once per app (`extension/src/api/types.ts`
+ * and `pwa/src/api/client.ts`); both now re-export from here, so existing
+ * importers are unaffected.
  *
  * Declarations only (plus the one thrown class) — a declared `string` is what
  * the backend CLAIMS, not what it sent. The endpoint is user-configurable (BYO /
@@ -183,4 +185,108 @@ export class ApiError extends Error {
         ? Math.floor(retryAfter)
         : undefined;
   }
+}
+
+/**
+ * Personal-books record — the `user:{id}` payload of
+ * `GET` / `PUT` / `PATCH /api/user/:id/books`.
+ */
+
+export interface PersonalBooks {
+  schemaVersion: number;
+  userId: string;
+  displayName: string;
+  books: BookEntry[];
+  lastUpdated: string;
+  /** Viewer-private family-shelf preferences (v1.5.0). */
+  familyShelfPrefs?: { hidden: string[]; favorites: string[] };
+  /** Preserve unknown fields from future schema versions */
+  [key: string]: unknown;
+}
+
+/** Current schema version for PersonalBooks personal books data */
+export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
+
+/** `GET /api/version` payload. */
+
+export interface VersionInfo {
+  apiVersion: number;
+  serverVersion: string;
+}
+
+/**
+ * PWA login verification shapes — `GET` / `PUT /api/user/:id/verify` and
+ * `POST /api/user/:id/verify/otp`.
+ */
+
+export type VerifyMethod = "pin" | "pattern" | "code" | "none";
+
+export interface VerifyInfo {
+  method: VerifyMethod;
+  prompted: number;
+}
+
+export interface SetVerifyBody {
+  method: VerifyMethod;
+  secret?: string;
+  prompted?: number;
+}
+
+export interface OtpInfo {
+  code: string;
+  expiresAt: number;
+}
+
+/** Member settings — `PATCH /api/family/:id/member/:uid`. */
+
+/** Settings updatable on a family member via PATCH /api/family/:id/member/:uid. */
+export interface MemberSettingsPayload {
+  canLend?: BoolFlag;
+  /**
+   * Readmoo display name for lending automation.
+   *  - `string`: set the value
+   *  - `null`: delete the field server-side (NOT `""` — empty string is rejected by the API)
+   *  - omitted: no change
+   */
+  readmooName?: string | null;
+}
+
+/** Un-kick result — `DELETE /api/family/:id/kicked/:uid`. */
+
+/**
+ * `DELETE /api/family/:id/kicked/:uid` payload — the removal's rejoin block was
+ * lifted.
+ *
+ * `cleared` is a `BoolFlag`, not a `boolean`: it travels on the wire (AGENTS.md
+ * → Boolean Convention). Callers must NOT branch on its value — the endpoint is
+ * idempotent, so a userId whose tombstone had already expired is still a 200 and
+ * the user-visible outcome ("the sync code works for them again") is identical
+ * either way. Any 200 is success.
+ */
+export interface UnkickResult {
+  cleared: BoolFlag;
+}
+
+/**
+ * Public-shelf records — `/api/user/:id/public-shelf*` (owner side) and the
+ * `GET /api/public/:shareToken` snapshot a link viewer reads.
+ */
+
+export type SelectionMode = "all-shared";
+
+export interface PublicShelf {
+  shelfId: string;
+  shareToken: string;
+  title: string;
+  expiresDays: number | null;
+  createdAt: number;
+  expiresAt: number | null;
+  selectionMode: SelectionMode;
+}
+
+export interface PublicShelfData {
+  title: string;
+  books: BookEntry[];
+  createdAt: number;
+  expiresAt: number | null;
 }

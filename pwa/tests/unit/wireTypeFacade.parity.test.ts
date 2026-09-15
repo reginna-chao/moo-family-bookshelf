@@ -11,7 +11,11 @@ import { describe, it, expect } from "vitest";
  * `lastUpdated`, so the update tracker was fed a synthesized `null` and an
  * existing member's newly shared books never earned a 「更新」 chip (issue
  * #169). A local re-declaration on either side compiles, passes every test and
- * only diverges from the Worker's real payload at runtime.
+ * only diverges from the Worker's real payload at runtime. Issue #183 then
+ * moved the remaining per-app duplicates the same way — the
+ * `/api/user/:id/books`, `/api/version` and `/api/verify/*` shapes plus the
+ * member-settings, un-kick and public-shelf ones — so the list below grew
+ * with them.
  *
  * This guard reads the façades off disk and fails on any local declaration of
  * a consolidated name. Same CI rationale as
@@ -37,6 +41,20 @@ const CONSOLIDATED_NAMES = [
   "FamilyBookshelf",
   "LookupResult",
   "ApiError",
+  // Issue #183 — personal books, version, verify, member settings, un-kick,
+  // public shelf.
+  "PersonalBooks",
+  "PERSONAL_BOOKS_SCHEMA_VERSION",
+  "VersionInfo",
+  "VerifyMethod",
+  "VerifyInfo",
+  "SetVerifyBody",
+  "OtpInfo",
+  "MemberSettingsPayload",
+  "UnkickResult",
+  "SelectionMode",
+  "PublicShelf",
+  "PublicShelfData",
 ] as const;
 
 interface Facade {
@@ -59,13 +77,16 @@ const THIS_TEST_TWINS = {
 };
 
 /**
- * A declaration (exported or not) of one of the consolidated names. A
- * re-export line (`export type { FamilyBookshelf }`) does not match: the
+ * A declaration (exported or not) of one of the consolidated names — a type
+ * form (`interface` / `type` / `class` / `enum`) or, since the list carries
+ * `PERSONAL_BOOKS_SCHEMA_VERSION`, a value form (`const` / `let` / `var` /
+ * `function`). A re-export line (`export type { FamilyBookshelf }`,
+ * `export { PERSONAL_BOOKS_SCHEMA_VERSION } from`) does not match: the
  * keyword is followed by `{`, not a name.
  */
 function localDeclarationOf(name: string): RegExp {
   return new RegExp(
-    `^(?:export )?(?:declare )?(?:abstract )?(?:interface|type|class|enum) ${name}\\b`,
+    `^(?:export )?(?:declare )?(?:abstract )?(?:interface|type|class|enum|const|let|var|function) ${name}\\b`,
     "m",
   );
 }
@@ -116,10 +137,21 @@ describe("wire-type façades", () => {
       localDeclarationOf("ApiError"),
     );
     expect("export type FamilyBookshelf = {").toMatch(re);
+    // Value form: the list holds a `const` since issue #183.
+    const constRe = localDeclarationOf("PERSONAL_BOOKS_SCHEMA_VERSION");
+    expect("export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;").toMatch(constRe);
+    expect("const PERSONAL_BOOKS_SCHEMA_VERSION = 1;").toMatch(constRe);
     // Word boundary: a differently named type is not the consolidated one.
     expect("export interface FamilyBookshelfMember {").not.toMatch(re);
-    // Re-exports are what the façades are FOR.
+    // Re-exports are what the façades are FOR — type and value alike, in
+    // both the multi-line and single-line forms the façades actually use.
     expect('export type {\n  FamilyBookshelf,\n} from "x";').not.toMatch(re);
+    expect(
+      'export {\n  PERSONAL_BOOKS_SCHEMA_VERSION,\n} from "x";',
+    ).not.toMatch(constRe);
+    expect('export { PERSONAL_BOOKS_SCHEMA_VERSION } from "x";').not.toMatch(
+      constRe,
+    );
   });
 
   it("keeps the two copies of this guard byte-identical", () => {
