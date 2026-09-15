@@ -17,11 +17,14 @@ import {
   sanitizePublicShelfResultText,
   sanitizeVersionInfoText,
 } from "moo-family-bookshelf-shared/api/entityText";
-import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
+import { BoolFlag, ApiError } from "moo-family-bookshelf-shared/api/types";
 import type {
   ApiResponse,
+  BookEntry,
+  FamilyBookshelf,
   FamilyGroup,
   FamilyMember,
+  LookupResult,
 } from "moo-family-bookshelf-shared/api/types";
 import { BorrowStatus } from "moo-family-bookshelf-shared/borrow/types";
 import type {
@@ -42,84 +45,31 @@ import { DEFAULT_API_ENDPOINT } from "../constants";
 export { validateEndpointUrl };
 
 /**
- * The wire contract itself — the `{ data, error }` envelope, `BoolFlag`, and the
- * family / borrow records — lives in `shared/` for the same reason, so the two
+ * The wire contract itself — the `{ data, error }` envelope, `BoolFlag`, the
+ * family / bookshelf / borrow records, the `POST /api/auth/lookup` payload and
+ * the thrown `ApiError` — lives in `shared/` for the same reason, so the two
  * apps cannot describe the same payload differently. Re-exported here because
  * every existing importer reaches for these names through the API client — new
  * code outside `api/` should import the shared modules directly rather than
- * routing through this file.
+ * routing through this file. `BoolFlag`, `ApiError`, `BookEntry`,
+ * `FamilyBookshelf` and `LookupResult` are also imported above as real
+ * bindings, because this file's own declarations and methods use them.
  */
-export { BoolFlag, BorrowStatus };
+export { BoolFlag, BorrowStatus, ApiError };
 export type {
   ApiErrorPayload,
   ApiResponse,
+  BookEntry,
+  FamilyBookshelf,
+  FamilyBookshelfMember,
   FamilyGroup,
   FamilyMember,
+  LookupResult,
 } from "moo-family-bookshelf-shared/api/types";
 export type {
   BorrowRequest,
   CreateBorrowPayload,
 } from "moo-family-bookshelf-shared/borrow/types";
-
-/**
- * Thrown by the client's `unwrap` helpers when an envelope carries `error`.
- *
- * Kept in sync with `extension/src/api/types.ts`. Keeps the machine-readable
- * `code` and the rate-limit wait reachable by callers — a plain `Error` forced
- * the UI to show (or string-parse) the raw `"CODE: message"` text, which is how
- * `retryAfter` used to get dropped on the floor. `message` keeps that exact
- * shape for backward compatibility.
- */
-export class ApiError extends Error {
-  readonly code: string;
-  /**
-   * The message exactly as the envelope carried it, without the `"CODE: "`
-   * prefix `message` prepends. Codes whose server copy is already user-facing
-   * render this instead of string-parsing `message`.
-   */
-  readonly rawMessage: string;
-  /** Seconds to wait before retrying; only sent on 429 responses. */
-  readonly retryAfter?: number;
-  /**
-   * True only when the client built the envelope itself instead of parsing it
-   * out of a response — the guard any UI must pass before rendering
-   * `rawMessage` verbatim, so a self-hosted (BYO) or hostile backend cannot get
-   * arbitrary text painted into the UI by claiming a client-only error code.
-   *
-   * Always `false` here today: the PWA has no envelope-synthesizing path (the
-   * Extension's auth-recovery throttle is the only one). The field exists so
-   * the two kept-in-sync classes cannot drift, and so a future PWA synthesis
-   * site inherits the check instead of re-inventing it.
-   *
-   * Deliberately a plain `boolean` rather than `BoolFlag` — this is in-memory
-   * provenance, never an API payload or KV field, and keeping it outside the
-   * wire-serializable vocabulary is the whole point.
-   */
-  readonly synthesized: boolean;
-
-  constructor(
-    code: string,
-    message: string,
-    retryAfter?: number,
-    synthesized = false,
-  ) {
-    super(`${code}: ${message}`);
-    this.name = "ApiError";
-    this.code = code;
-    this.rawMessage = message;
-    this.synthesized = synthesized;
-    // Validated at the boundary: a self-hosted (BYO) backend can send anything,
-    // and a NaN / negative / fractional wait would surface as「NaN 秒」in the
-    // back-off copy. Anything unusable is dropped so the UI falls back to its
-    // static wording.
-    this.retryAfter =
-      typeof retryAfter === "number" &&
-      Number.isFinite(retryAfter) &&
-      retryAfter >= 0
-        ? Math.floor(retryAfter)
-        : undefined;
-  }
-}
 
 /**
  * The one status this API answers with no body (RFC 9110 §15.3.5):
@@ -146,39 +96,6 @@ async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
   return (await response.json()) as ApiResponse<T>;
 }
 
-/**
- * Resolved `POST /api/auth/lookup` payload.
- *
- * Kept in sync with `extension/src/api/client.ts` — `userId` is derived from a
- * publicly guessable email, so an account with PWA login verification
- * configured only gets its family data back when the request carries the
- * matching secret. Until then the server answers HTTP 200 with
- * `requiresVerification: TRUE` and withholds the data (`existingFamilyId:
- * null`, `memberCount: 0`) — informational, not an error.
- */
-export interface LookupResult {
-  existingFamilyId: string | null;
-  memberCount: number;
-  /**
-   * Optional on the wire: Workers predating the verification gate never send
-   * this field, and self-hosted (BYO) backends can lag the client by any
-   * number of releases. Absent means "no verification gate on this account".
-   */
-  requiresVerification?: BoolFlag;
-}
-
-export interface BookEntry {
-  bookId: string;
-  title: string;
-  author: string;
-  isbn: string;
-  coverUrl: string;
-  readmooUrl: string;
-  category: string;
-  isShared: BoolFlag;
-  isArchived?: BoolFlag;
-}
-
 export interface PersonalBooks {
   schemaVersion: number;
   userId: string;
@@ -197,16 +114,6 @@ export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 export interface VersionInfo {
   apiVersion: number;
   serverVersion: string;
-}
-
-export interface FamilyBookshelf {
-  familyId: string;
-  members: Array<{
-    userId: string;
-    displayName: string;
-    books: BookEntry[];
-    lastUpdated: string | null;
-  }>;
 }
 
 export type VerifyMethod = "pin" | "pattern" | "code" | "none";

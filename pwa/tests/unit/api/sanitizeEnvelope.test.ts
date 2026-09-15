@@ -136,7 +136,7 @@ const HOSTILE_BOOK_WITH_ID = {
 
 /**
  * The bookshelf member that SURVIVES: a usable `userId`, a hostile
- * `displayName` and a hostile PWA-only `lastUpdated` for the text layer, and a
+ * `displayName` and a hostile tri-state `lastUpdated` for the text layer, and a
  * books list that pairs an unaddressable book with an addressable one.
  */
 const HOSTILE_BOOKSHELF_MEMBER_WITH_ID = {
@@ -378,7 +378,7 @@ const WIRING_CASES: WiringCase[] = [
     data: HOSTILE_BOOKSHELF,
     invoke: (client) => client.getFamilyBookshelf(FAMILY_ID),
     expected: [
-      // Layer 2 — the top-level PWA-only field, which layer 1 only spreads.
+      // Layer 2 — the top-level field, which layer 1 only spreads.
       { path: "data.familyId", value: "" },
       // Layer 1 — the member whose `userId` is an object is gone, not blanked.
       { path: "data.members.length", value: 1 },
@@ -388,9 +388,9 @@ const WIRING_CASES: WiringCase[] = [
       { path: "data.members.0.books.0.bookId", value: BOOKSHELF_BOOK_ID },
       // Layer 2 — the declared-string coercion, on what survived layer 1.
       { path: "data.members.0.displayName", value: "" },
-      // PWA-only tri-state: `null` means "never synced", so a hostile value
-      // degrades to null rather than to "". Layer 1 keeps the survivor by
-      // SPREAD, which is what leaves this PWA-only key for layer 2 to find.
+      // Tri-state: `null` means "never synced", so a hostile value degrades
+      // to null rather than to "". Layer 1 keeps the survivor by SPREAD,
+      // which is what leaves this key for layer 2 to find.
       { path: "data.members.0.lastUpdated", value: null },
       { path: "data.members.0.books.0.title", value: "" },
       { path: "data.members.0.books.0.author", value: "" },

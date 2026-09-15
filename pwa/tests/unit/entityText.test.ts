@@ -40,9 +40,9 @@ import type {
  * The sanitizers take structural parameters so `shared/` depends on neither
  * consumer. The fixtures below stay full PWA entity types on purpose — that
  * also pins the PWA's own types as assignable to the shared shapes, which is
- * the drift this file exists to catch. The PWA's bookshelf shape is genuinely
- * wider than the Extension's (`familyId` on the shelf, `lastUpdated` on each
- * member), so those tri-state fields are only covered here.
+ * the drift this file exists to catch. Both apps share `FamilyBookshelf` from
+ * `shared/src/api/types.ts`; the `familyId` / `lastUpdated` tri-state cases
+ * are covered here.
  * `extension/tests/unit/entityText.test.ts` does the same for the Extension's
  * types (and covers `sanitizeOtpInfoText`, which only that client wires).
  *
@@ -401,7 +401,7 @@ describeEntitySanitizer<BookshelfMember>("sanitizeBookshelfMemberText", {
   sanitize: sanitizeBookshelfMemberText,
   valid: VALID_BOOKSHELF_MEMBER,
   textFields: ["userId", "displayName"],
-  // PWA-only: `null` means "this member has never synced", which the shelf
+  // Tri-state: `null` means "this member has never synced", which the shelf
   // renders differently from a timestamp it failed to read.
   nullableTextFields: ["lastUpdated"],
 });
@@ -410,11 +410,12 @@ describeEntitySanitizer<FamilyBookshelf>("sanitizeFamilyBookshelfText", {
   sanitize: sanitizeFamilyBookshelfText,
   valid: VALID_BOOKSHELF,
   /**
-   * PWA-only field — the Extension's bookshelf shape omits it entirely, so the
-   * shared sanitizer declares it OPTIONAL and an omitted `familyId` stays
+   * Required on the wire for both apps (`FamilyBookshelf.familyId` in
+   * `shared/src/api/types.ts`), but the structural sanitizer imports neither
+   * app's type and declares it OPTIONAL, so an omitted `familyId` stays
    * `undefined` rather than becoming `""`. Pinned as optional on purpose: a
-   * required-field rule here would make the sanitizer invent a key the
-   * Extension's payload never had, breaking its byte-identical round-trip. The
+   * required-field rule here would make the sanitizer invent a key a narrower
+   * caller's payload never had, breaking its byte-identical round-trip. The
    * PWA reads the family id from its own auth state, never from this payload,
    * so the `undefined` never reaches a render or a string method.
    */

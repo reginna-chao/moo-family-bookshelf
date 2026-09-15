@@ -14,7 +14,7 @@
  * attacker-controlled text: rendering it verbatim would let a hostile backend
  * paint arbitrary content into the dialog. Only an `ApiError` the client
  * SYNTHESIZED itself is allowed that passthrough — see the
- * `ApiError.synthesized` JSDoc in `extension/src/api/types.ts`. Do not
+ * `ApiError.synthesized` JSDoc in `shared/src/api/types.ts`. Do not
  * "improve" this by adding a `message` / `rawMessage` parameter and falling
  * back to it.
  *
