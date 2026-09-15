@@ -511,9 +511,11 @@ describe("Orphaned borrow records after family dissolution", () => {
     // The refused write left the record untouched.
     expect((await readBorrow(requestId))?.status).toBe(BorrowStatus.PENDING);
 
-    // The borrower CAN still cancel: PATCH /api/borrow/:requestId loads only
-    // `borrow:{requestId}` and never re-reads `family:{familyId}`, so the
-    // orphan stays writable by its parties.
+    // The borrower CAN still cancel: PATCH /api/borrow/:requestId does re-read
+    // `family:{familyId}` for its membership check (#159), but the key is
+    // ABSENT here — that is what makes this an orphan — so the check is
+    // skipped and the party check alone authorises. The orphan stays writable
+    // by its parties (see tests/integration/borrowMembershipRecheck.test.ts).
     const cancelRes = await request(
       "PATCH",
       `/api/borrow/${requestId}`,

@@ -1501,7 +1501,7 @@ describe("PATCH /api/borrow/:requestId", () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
     const requestId = await createPendingBorrowRequest(familyId, token2);
 
-    // Create user3 with their own token
+    // Create user3 with their own token — a valid token from ANOTHER family.
     const { authToken: token3 } = await createFamilyAndGetToken(USER3);
 
     const res = await request(
@@ -1512,7 +1512,12 @@ describe("PATCH /api/borrow/:requestId", () => {
     );
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
-    expect(json.error.code).toBe("FORBIDDEN");
+    // Since #159 the handler re-checks membership of the record's family
+    // BEFORE the party check, so an outsider is refused with the same code the
+    // create / list handlers use. A current member who is merely not a party
+    // still gets FORBIDDEN — pinned in
+    // tests/integration/borrowMembershipRecheck.test.ts.
+    expect(json.error.code).toBe("NOT_FAMILY_MEMBER");
   });
 
   // --- Other error cases ---

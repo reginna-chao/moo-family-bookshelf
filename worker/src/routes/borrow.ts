@@ -472,7 +472,9 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
   return c.json({ data: visibleRequests });
 });
 
-// PATCH /api/borrow/:requestId — update borrow status
+// PATCH /api/borrow/:requestId — update borrow status. Authorization is
+// two-fold: the caller must be a CURRENT member of the record's family (when
+// that family still exists) AND a party to the record (borrower or owner).
 borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   const requestId = c.req.param("requestId");
 
@@ -524,9 +526,15 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
     return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
   }
 
-  // The entry inside the index IS the record; `borrowRequest` is a reference
-  // into `requests`, so mutating it below updates what gets written back.
-  const { requests } = await readBorrowIndex(c.env.KV, familyId);
+  // Family record and borrow index are independent keys resolved from the same
+  // familyId, so they are read in PARALLEL: the membership re-check below costs
+  // one extra KV read, not one extra round trip. The entry inside the index IS
+  // the record; `borrowRequest` is a reference into `requests`, so mutating it
+  // below updates what gets written back.
+  const [rawFamily, { requests }] = await Promise.all([
+    getFamilyRecord(c.env.KV, familyId),
+    readBorrowIndex(c.env.KV, familyId),
+  ]);
   const borrowRequest = requests.find((r) => r.requestId === requestId);
   if (!borrowRequest) {
     // The record aged out of its borrower's history cap, or this is an orphan
@@ -544,6 +552,35 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   // discloses nothing extra — and write nothing.
   if (borrowRequest.familyId !== familyId) {
     return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
+  }
+
+  // Party identity must not outlive membership (issue #159). The record's
+  // borrowerId / ownerId are frozen at create time, while the auth token binds
+  // only a userId — not a familyId — so a member who was kicked or left could
+  // create a NEW family, mint a fresh valid token, and still flip an old LENT
+  // record to RETURNED, a terminal state nothing can leave. Re-checking
+  // `family:{id}` here (read above, in parallel with the index) closes that:
+  // while the family exists, a non-member is refused before the party check,
+  // with the same code the create / list handlers use.
+  //
+  // A MISSING family record is the orphan path, and it deliberately falls
+  // through: the family dissolved but the fail-open `deleteBorrowIndex` in the
+  // sole-owner branch of family.ts did not land (BORROW_INDEX_DELETE_FAILED),
+  // so there is no member list to check against. Either party may still settle
+  // such a record; a non-party is still refused by the party check below.
+  //
+  // Accepted residual: KV cross-colo propagation (~60s). A PATCH racing the
+  // kick on a colo that still holds the pre-kick family record can land once.
+  if (rawFamily !== null) {
+    const family = normalizeFamilyRecord(rawFamily);
+    if (!hasMember(family.members, userId)) {
+      return jsonError(
+        c,
+        403,
+        "NOT_FAMILY_MEMBER",
+        "You are not a member of this family",
+      );
+    }
   }
 
   // Validate caller is either borrower or owner
