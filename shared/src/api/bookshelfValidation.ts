@@ -39,6 +39,16 @@
  * addressed at all. Every other field is left to the text layer, which runs
  * SECOND (see the composition comment in each client's `getFamilyBookshelf`).
  *
+ * Known residual, deliberately NOT closed here: the rule is "usable", not
+ * "unique". A backend that sends two members with the SAME non-empty `userId`,
+ * or one member carrying two books with the same `bookId`, still reproduces
+ * all four consequences above — the collision is now on a real string instead
+ * of `""`. `./memberValidation.ts` carries the identical residual for the
+ * member list, and the official Worker does not deduplicate `bookId` either
+ * (`parseBooks` in `worker/src/routes/user.ts`), so a dedup rule would be a
+ * policy change on both ends rather than a boundary check; none of these
+ * collisions can crash the UI.
+ *
  * Parameter and return types are STRUCTURAL and generic, the convention
  * `./entityText.ts` documents for itself: neither app's `FamilyBookshelf`
  * interface is imported here. The two declarations genuinely differ — the PWA's
@@ -190,7 +200,8 @@ function warnBookLosses(tally: BookLossTally): void {
  * only. The return type is a claim for the caller's convenience, exactly as in
  * `sanitizeFamilyMembersResponse`; what it actually guarantees is that every
  * surviving member has a non-empty string `userId` and an array `books` whose
- * every element has a non-empty string `bookId`.
+ * every element has a non-empty string `bookId` — usable, not unique (see the
+ * "Known residual" note in the module JSDoc).
  */
 export function sanitizeFamilyBookshelfResponse<T>(
   res: ApiResponse<unknown>,
