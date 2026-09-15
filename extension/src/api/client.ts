@@ -41,6 +41,7 @@ import type {
   OtpInfo,
   PersonalBooks,
   PublicShelf,
+  SetVerifyBody,
   UnkickResult,
   VerifyInfo,
   VersionInfo,
@@ -49,7 +50,6 @@ import {
   ApiError,
   AUTH_REFRESH_RATE_LIMITED,
   BorrowStatus,
-  type VerifyMethod,
   type BoolFlag,
 } from "./types";
 import {
@@ -90,6 +90,7 @@ export type {
   PublicShelf,
   PublicShelfData,
   SelectionMode,
+  SetVerifyBody,
   UnkickResult,
   VerifyInfo,
   VerifyMethod,
@@ -643,7 +644,7 @@ export class ApiClient {
 
   async setVerifyMethod(
     userId: string,
-    body: { method: VerifyMethod; secret?: string; prompted?: number },
+    body: SetVerifyBody,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     return this.put(`/api/user/${userId}/verify`, body);
   }

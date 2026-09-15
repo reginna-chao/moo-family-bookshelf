@@ -25,6 +25,14 @@ import type {
   FamilyGroup,
   FamilyMember,
   LookupResult,
+  MemberSettingsPayload,
+  PersonalBooks,
+  PublicShelf,
+  PublicShelfData,
+  SetVerifyBody,
+  UnkickResult,
+  VerifyInfo,
+  VersionInfo,
 } from "moo-family-bookshelf-shared/api/types";
 import { BorrowStatus } from "moo-family-bookshelf-shared/borrow/types";
 import type {
@@ -46,16 +54,19 @@ export { validateEndpointUrl };
 
 /**
  * The wire contract itself — the `{ data, error }` envelope, `BoolFlag`, the
- * family / bookshelf / borrow records, the `POST /api/auth/lookup` payload and
- * the thrown `ApiError` — lives in `shared/` for the same reason, so the two
- * apps cannot describe the same payload differently. Re-exported here because
- * every existing importer reaches for these names through the API client — new
- * code outside `api/` should import the shared modules directly rather than
- * routing through this file. `BoolFlag`, `ApiError`, `BookEntry`,
- * `FamilyBookshelf` and `LookupResult` are also imported above as real
- * bindings, because this file's own declarations and methods use them.
+ * family / bookshelf / borrow records, the `POST /api/auth/lookup` payload,
+ * the thrown `ApiError`, the personal-books record, the `/api/version` and
+ * `/api/user/:id/verify*` shapes, the member-settings payload, the un-kick
+ * result and the public-shelf records — lives in `shared/` for the same
+ * reason, so the two apps cannot describe the same payload differently.
+ * Re-exported here because every existing importer reaches for these names
+ * through the API client — new code outside `api/` should import the shared
+ * modules directly rather than routing through this file. `BoolFlag`,
+ * `ApiError` and the `import type` list above are imported as real bindings
+ * because this file's methods use them; the rest are plain re-exports.
  */
 export { BoolFlag, BorrowStatus, ApiError };
+export { PERSONAL_BOOKS_SCHEMA_VERSION } from "moo-family-bookshelf-shared/api/types";
 export type {
   ApiErrorPayload,
   ApiResponse,
@@ -65,6 +76,17 @@ export type {
   FamilyGroup,
   FamilyMember,
   LookupResult,
+  MemberSettingsPayload,
+  OtpInfo,
+  PersonalBooks,
+  PublicShelf,
+  PublicShelfData,
+  SelectionMode,
+  SetVerifyBody,
+  UnkickResult,
+  VerifyInfo,
+  VerifyMethod,
+  VersionInfo,
 } from "moo-family-bookshelf-shared/api/types";
 export type {
   BorrowRequest,
@@ -94,84 +116,6 @@ const NO_CONTENT_STATUS = 204;
 async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
   if (response.status === NO_CONTENT_STATUS) return {};
   return (await response.json()) as ApiResponse<T>;
-}
-
-export interface PersonalBooks {
-  schemaVersion: number;
-  userId: string;
-  displayName: string;
-  books: BookEntry[];
-  lastUpdated: string;
-  /** Viewer-private family-shelf preferences (v1.5.0). */
-  familyShelfPrefs?: { hidden: string[]; favorites: string[] };
-  /** Preserve unknown fields from future schema versions */
-  [key: string]: unknown;
-}
-
-/** Current schema version for PersonalBooks */
-export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
-
-export interface VersionInfo {
-  apiVersion: number;
-  serverVersion: string;
-}
-
-export type VerifyMethod = "pin" | "pattern" | "code" | "none";
-
-export interface VerifyInfo {
-  method: VerifyMethod;
-  prompted: number;
-}
-
-export interface SetVerifyBody {
-  method: VerifyMethod;
-  secret?: string;
-  prompted?: number;
-}
-
-export type SelectionMode = "all-shared";
-
-export interface PublicShelf {
-  shelfId: string;
-  shareToken: string;
-  title: string;
-  expiresDays: number | null;
-  createdAt: number;
-  expiresAt: number | null;
-  selectionMode: SelectionMode;
-}
-
-export interface PublicShelfData {
-  title: string;
-  books: BookEntry[];
-  createdAt: number;
-  expiresAt: number | null;
-}
-
-/**
- * `DELETE /api/family/:id/kicked/:uid` payload — the removal's rejoin block was
- * lifted. Kept in sync with `extension/src/api/types.ts`.
- *
- * `cleared` is a `BoolFlag`, not a `boolean`: it travels on the wire (AGENTS.md
- * → Boolean Convention). Callers must NOT branch on its value — the endpoint is
- * idempotent, so a userId whose tombstone had already expired is still a 200 and
- * the user-visible outcome ("the sync code works for them again") is identical
- * either way. Any 200 is success.
- */
-export interface UnkickResult {
-  cleared: BoolFlag;
-}
-
-/** Settings updatable on a family member via PATCH /api/family/:id/member/:uid. */
-export interface MemberSettingsPayload {
-  canLend?: BoolFlag;
-  /**
-   * Readmoo display name for lending automation.
-   *  - `string`: set the value
-   *  - `null`: delete the field server-side (NOT `""` — empty string is rejected by the API)
-   *  - omitted: no change
-   */
-  readmooName?: string | null;
 }
 
 export class ApiClient {
