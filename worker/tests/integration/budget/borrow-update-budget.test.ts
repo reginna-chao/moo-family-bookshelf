@@ -20,29 +20,42 @@
  *   The binding call it was replaced by is pinned in `calls` below instead.
  * - Per-userId `borrow-update` counter — REMOVED by #160 item 1 for the same
  *   reason (rateLimit.ts:608); scope "borrow-update", ceiling 30 per 60s
- *   (routes/borrow.ts:503-508), which is what selects RATE_LIMIT_30_PER_MIN.
+ *   (routes/borrow.ts:513-518), which is what selects RATE_LIMIT_30_PER_MIN.
  *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
  *   `calls` assertion below is that rule's only automatic check.
  * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `borrow:{requestId}` — 1 get (routes/borrow.ts:514, `readBorrowPointer`)
+ * - `borrow:{requestId}` — 1 get (routes/borrow.ts:524, `readBorrowPointer`)
  *   and NO put. Since #160 item 2 the key holds a `BorrowPointer`
  *   (`{ familyId }`); a bare requestId cannot name its family, so this read
  *   resolves which index owns the record. A status change cannot alter
  *   `familyId`, so the pointer is never rewritten — that is why `putKeys()`
  *   below no longer contains it.
- * - `borrows:family:{familyId}` — 1 get (:521) + 1 put (:577, via
+ * - `family:{familyId}` — 1 get (routes/borrow.ts:535, `getFamilyRecord`),
+ *   NO put. Added by issue #159: the caller must be a CURRENT member of the
+ *   record's family, not merely a frozen party id, so a kicked / departed
+ *   member holding a fresh token from a new family cannot flip an old LENT
+ *   record to RETURNED. Read in `Promise.all` with the index (:534-537), so
+ *   it costs one KV read but no extra round trip; the `Promise.all` argument
+ *   order is what puts it BEFORE the index in `getKeys()` below.
+ * - `borrows:family:{familyId}` — 1 get (:536) + 1 put (:622, via
  *   `writeBorrowIndex`): the index IS the record, so the read-modify-write
  *   that used to happen on `borrow:{requestId}` happens here instead.
  *
- * THE +1 READ IS DELIBERATE, and it is #160 item 2's price. This handler now
- * pays TWO reads (pointer, then index) where it used to pay one, because the
- * record moved into the index. That is bought on purpose: `GET
+ * THE +1 READ IS DELIBERATE, and it is #160 item 2's price. This handler
+ * pays a pointer read and then an index read where it used to pay one,
+ * because the record moved into the index. That is bought on purpose: `GET
  * /api/family/:id/borrow` went from O(index) reads to a constant 3
  * (tests/integration/budget/borrow-list-budget.test.ts), and listing is the
  * far hotter path — every client poll pays it, while a PATCH happens once per
  * human decision. Do NOT "optimise" this back by making the pointer carry the
  * record again: that is the fan-out, re-introduced one key at a time.
+ *
+ * THE SECOND +1 READ IS ALSO DELIBERATE — #159's price, the `family:{id}`
+ * read above. It is an authorisation read, not a data read: dropping it
+ * re-opens the kicked-member-settles-a-loan hole, so it must not be removed
+ * to win the read back. tests/integration/borrowMembershipRecheck.test.ts is
+ * the behaviour that this read pays for.
  *
  * THE RATE LIMITING BINDINGS ARE INJECTED, deliberately: every production
  * deploy carries all four (worker/wrangler.toml), and a request sent without
@@ -154,7 +167,7 @@ afterEach(() => {
 });
 
 describe("KV budget: PATCH /api/borrow/:requestId", () => {
-  it("performs exactly 3 KV reads and 1 KV write for a PENDING to LENT update", async () => {
+  it("performs exactly 4 KV reads and 1 KV write for a PENDING to LENT update", async () => {
     const token = await seedPendingBorrow();
 
     const ops = watchKvOps(kv);
@@ -165,14 +178,18 @@ describe("KV budget: PATCH /api/borrow/:requestId", () => {
     expect(ops.getKeys()).toEqual([
       // auth middleware, auth.ts:46
       kvKeys.authToken(token),
-      // handler, borrow.ts:514 — the pointer, read for its `familyId` only
+      // handler, borrow.ts:524 — the pointer, read for its `familyId` only
       kvKeys.borrow(REQUEST_ID),
-      // handler, borrow.ts:521 — the index that owns the record
+      // handler, borrow.ts:535 — the family record, for the membership
+      // re-check (#159). FIRST of the Promise.all pair, so it precedes the
+      // index here; a swap of the two arguments is a real change to pin.
+      kvKeys.family(FAMILY_ID),
+      // handler, borrow.ts:536 — the index that owns the record
       kvKeys.borrowsByFamily(FAMILY_ID),
     ]);
 
     expect(ops.putKeys()).toEqual([
-      // handler, borrow.ts:577 — the index carrying the updated record. The
+      // handler, borrow.ts:622 — the index carrying the updated record. The
       // pointer is deliberately NOT rewritten: it holds only `familyId`, which
       // a status change cannot alter.
       kvKeys.borrowsByFamily(FAMILY_ID),
