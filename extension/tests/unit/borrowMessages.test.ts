@@ -33,6 +33,11 @@ const COPY_BY_CODE: [string, string][] = [
   ["LENDING_DISABLED", "借閱功能已關閉，請在家庭設定確認你與對方的借閱權限"],
   ["NOT_FAMILY_MEMBER", "你已不在這個家庭，無法申請借閱"],
   ["INVALID_OWNER", "無法申請借閱這本書，書籍擁有者已不在這個家庭"],
+  // The owner check's OTHER 403 (worker/src/routes/borrow.ts). Distinct from
+  // INVALID_OWNER: that one means the owner has left the family, this one means
+  // the caller IS the owner, so the advice differs — the two must never collapse
+  // onto one sentence, which the distinctness assertion below enforces.
+  ["INVALID_OWNER_SELF", "這是你自己的書，不需要申請借閱"],
   ["FAMILY_NOT_FOUND", "找不到這個家庭，請重新開啟書櫃後再試"],
   ["UNAUTHORIZED", "登入狀態已失效，請重新開啟書櫃後再試"],
   ["INVALID_COVER_URL", "書籍封面網址無效，無法建立借閱申請"],
@@ -47,7 +52,7 @@ describe("buildBorrowFailureText", () => {
   it("gives every mapped code a distinct, non-empty sentence", () => {
     const texts = COPY_BY_CODE.map(([code]) => buildBorrowFailureText(code));
 
-    expect(texts).toHaveLength(10);
+    expect(texts).toHaveLength(11);
     for (const text of texts) {
       expect(text.length).toBeGreaterThan(0);
     }

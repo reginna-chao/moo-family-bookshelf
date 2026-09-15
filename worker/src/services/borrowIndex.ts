@@ -306,16 +306,17 @@ export async function writeBorrowIndex(
  * in another form. Two preconditions OUTSIDE this file keep that state
  * unreachable: (a) PENDING → LENT needs the BOOK OWNER's approval
  * (`validateStatusTransition` in `routes/borrow.ts` demands `isOwner`), and
- * create refuses both a self-borrow and an `ownerId` that is not a family
- * member (`403 INVALID_OWNER`), so borrower and owner are always two DIFFERENT
- * members of the family; (b) `maxMembers` is 2 — hard-coded at family create
- * in `routes/family.ts`, enforced by its join capacity check, defaulted in
- * `kv/schema.ts` — so a sync-code holder cannot hold BOTH seats of someone
- * else's family with minted ids and approve their own requests. Relax either
- * one (a configurable or larger `maxMembers`, an approval path needing no
- * second member) and two minted ids can approve each other into LENT, leave,
- * and those records stay forever. Revisit `settleDepartingBorrower` first —
- * settle LENT too, or purge by `ownerId` as well — before relaxing them.
+ * create refuses both a self-borrow (`403 INVALID_OWNER_SELF`) and an `ownerId`
+ * that is not a family member (`403 INVALID_OWNER`), so borrower and owner are
+ * always two DIFFERENT members of the family; (b) `maxMembers` is 2 —
+ * hard-coded at family create in `routes/family.ts`, enforced by its join
+ * capacity check, defaulted in `kv/schema.ts` — so a sync-code holder cannot
+ * hold BOTH seats of someone else's family with minted ids and approve their
+ * own requests. Relax either one (a configurable or larger `maxMembers`, an
+ * approval path needing no second member) and two minted ids can approve each
+ * other into LENT, leave, and those records stay forever. Revisit
+ * `settleDepartingBorrower` first — settle LENT too, or purge by `ownerId` as
+ * well — before relaxing them.
  *
  * Writes NOTHING when neither step changed anything — a family with no records
  * of the departing member stays exactly as it was, legacy shape included.

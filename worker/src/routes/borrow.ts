@@ -247,9 +247,17 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     );
   }
 
-  // Verify ownerId is a different family member
+  // Verify ownerId is a different family member. The two rejections below carry
+  // DISTINCT codes on purpose: clients see only the `code` and map each to its
+  // own copy. The self branch is unreachable today only because both UIs hide
+  // the borrow button for one's own books — do NOT re-merge the two codes.
   if (ownerId === userId) {
-    return jsonError(c, 403, "INVALID_OWNER", "Cannot borrow your own book");
+    return jsonError(
+      c,
+      403,
+      "INVALID_OWNER_SELF",
+      "Cannot borrow your own book",
+    );
   }
 
   if (!hasMember(family.members, ownerId)) {
