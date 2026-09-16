@@ -108,8 +108,11 @@ const label = ALIAS_PATTERNS[input] ? `${input} (${namespaceId})` : namespaceId;
 
 console.log(`Listing keys in KV namespace: ${label}`);
 
+// Since wrangler 4, `kv key` / `kv bulk` commands default to the local Miniflare
+// store, so `--remote` is required to touch the Cloudflare namespace resolved
+// above. `kv namespace list` is API-only and needs no flag.
 const raw = runWrangler(
-  ["kv", "key", "list", `--namespace-id=${namespaceId}`],
+  ["kv", "key", "list", `--namespace-id=${namespaceId}`, "--remote"],
   { encoding: "utf-8" },
 );
 
@@ -135,6 +138,7 @@ try {
       "delete",
       tmpFile,
       `--namespace-id=${namespaceId}`,
+      "--remote",
       "--force",
     ],
     { stdio: ["pipe", "inherit", "inherit"] },
