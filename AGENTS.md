@@ -176,6 +176,8 @@ Every push/PR triggers:
 
 GitHub Release 內容：release job 會讀取 `docs/release-notes/v<X.Y.Z>.md`（雙語策展內容）放到 Release 正文最上方，並自動把 commit 清單收進 `<details>` 折疊區、補上 Full Changelog。此檔由 `/bump-ver` 產生，必須存在於 tag 指向的 commit；缺檔時 release job 會 fallback 成自動 commit 清單並印 `::warning::`。**先 `/bump-ver` 再打 tag**，順序顛倒會走 fallback。
 
+`CHANGELOG.md` 的寫入時機：兩次 release 之間，每個 `/develop` run 把使用者看得到的變更寫進檔案最上方的 `## 未釋出` 區塊（同一個 commit 內），**絕不**寫進已有 tag 的 `## vX.Y.Z` 條目——版本條目在 tag 打下的那一刻就凍結。`/bump-ver` 是唯一會把 `## 未釋出` 改名成新版本標題的步驟，並只為區塊裡還沒描述到的 commit 補 bullet。細則見 `.claude/rules/user-facing-copy.md` →「Where a change is recorded」。
+
 ### Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 
 ### Dev Script Maintenance Note
