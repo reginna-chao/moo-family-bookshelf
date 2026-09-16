@@ -42,7 +42,7 @@ The conditions are mechanical: check each one, record the answer. Never pick the
 
 ### Fix-mode flow
 
-Phase 0 branch preflight → `coder` → scope verify (`pnpm typecheck && pnpm lint && pnpm test`; backend prefixes `cd worker &&`) → `tester` per the fix-mode tester rule → re-run the scope verify so the new regression test is included → E2E impact check (frontend scope) → `reviewer`, dispatched normally → Phase 8 (completion report + commit gate).
+Phase 0 branch preflight → `coder` → scope verify (`pnpm typecheck && pnpm lint && pnpm test`; backend prefixes `cd worker &&`) → `tester` per the fix-mode tester rule → re-run the scope verify so the new regression test is included → E2E impact check (frontend scope) → `reviewer`, dispatched normally → Phase 8 (completion report + commit gate, with the Phase 7 retro question in that same batch).
 
 - **Phase 1 collapses to a single opening presentation.** Restate the pinned root cause (`file:line`) and the acceptance check in the run's opening message, then continue — there is NO separate confirmation stop. The TodoWrite checklist is still maintained (with the fix-mode steps). Phase 1's **bug fast-path** does not apply here: it defers confirmation to the verify-before-test gate, and fix mode has no such gate — the root-cause restatement above replaces it.
 - **Phase 2 is structurally N/A** — eligibility condition 2 forbids API-contract and KV-schema changes, so there is no contract to define.
