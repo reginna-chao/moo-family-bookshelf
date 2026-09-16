@@ -45,7 +45,7 @@ export default defineConfig({
       env: { WORKER_PORT: String(WORKER_PORT) },
     },
     {
-      command: `cd ../worker && pnpm exec wrangler dev --port ${WORKER_PORT} --var DEV_MODE:1`,
+      command: `cd ../worker && pnpm exec wrangler dev --port ${WORKER_PORT} --var DEV_MODE:1 --env=""`,
       port: WORKER_PORT,
       reuseExistingServer: false,
       cwd: __dirname,
