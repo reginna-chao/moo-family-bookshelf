@@ -18,15 +18,18 @@
  * `wrangler deploy` / `wrangler dev` and the `[env.production]` one, which is a
  * full copy because environments do NOT inherit top-level bindings:
  *
- * - exactly four `type = "ratelimit"` blocks, named exactly the four members of
- *   `RateLimitBindingName` (src/utils/env.ts);
+ * - exactly four `[[ratelimits]]` blocks (the official wrangler-4 form), named
+ *   exactly the four members of `RateLimitBindingName` (src/utils/env.ts);
  * - `simple.limit` equal to the number the binding's own NAME encodes, and
  *   `simple.period` = 60;
  * - that `bindingForWindow` really routes a check at the toml's (limit, period)
  *   to the binding of that name — which ties the shipped number to production's
  *   `BINDING_BY_LIMIT` table without exporting it;
  * - `namespace_id` present, a positive integer, unique inside each set and
- *   disjoint between the two, so dev traffic cannot spend production's budget.
+ *   disjoint between the two, so dev traffic cannot spend production's budget;
+ * - no block left in the wrangler-3 spelling (`[[unsafe.bindings]]` +
+ *   `type = "ratelimit"`), which wrangler 4 still accepts and would deploy
+ *   alongside the new ones.
  *
  * WHAT IT DOES NOT COVER.
  *
@@ -91,7 +94,7 @@ const NAME_RE = /^RATE_LIMIT_(\d+)_PER_MIN$/;
 
 /** One `[[array.of.tables]]` block, before any shape is required of it. */
 interface RawBlock {
-  /** Dotted header path, e.g. `env.production.unsafe.bindings`. */
+  /** Dotted header path, e.g. `env.production.ratelimits`. */
   header: string;
   /** 1-based line of the header, so a failure names the offending block. */
   line: number;
@@ -184,12 +187,13 @@ function requireStringField(block: RawBlock, key: string): string {
 
 const ALL_BLOCKS = readArrayOfTables(readFileSync(WRANGLER_TOML_PATH, "utf8"));
 
-/** The `type = "ratelimit"` blocks declared under one header path. */
+/**
+ * The rate limiting binding blocks declared under one header path. A
+ * `[[ratelimits]]` block carries no `type` field — the header alone is the
+ * discriminator, so every block under it must have the binding shape.
+ */
 function rateLimitBindingBlocks(header: string): RateLimitBindingBlock[] {
-  return ALL_BLOCKS.filter(
-    (block) =>
-      block.header === header && stringField(block, "type") === "ratelimit",
-  ).map((block) => {
+  return ALL_BLOCKS.filter((block) => block.header === header).map((block) => {
     const simple = SIMPLE_RE.exec(block.fields.get("simple") ?? "");
     if (!simple) {
       throw new Error(
@@ -206,10 +210,45 @@ function rateLimitBindingBlocks(header: string): RateLimitBindingBlock[] {
   });
 }
 
-const DEV_BINDINGS = rateLimitBindingBlocks("unsafe.bindings");
-const PRODUCTION_BINDINGS = rateLimitBindingBlocks(
+const DEV_BINDINGS = rateLimitBindingBlocks("ratelimits");
+const PRODUCTION_BINDINGS = rateLimitBindingBlocks("env.production.ratelimits");
+
+/**
+ * The wrangler-3 header paths the bindings USED to live under, as
+ * `[[unsafe.bindings]]` + `type = "ratelimit"`. Kept only so the spelling guard
+ * below can name what it forbids.
+ */
+const LEGACY_HEADERS = new Set([
+  "unsafe.bindings",
   "env.production.unsafe.bindings",
-);
+]);
+
+/** One block still in the wrangler-3 spelling, as the spelling guard reports it. */
+interface LegacyRateLimitBlock {
+  header: string;
+  name: string;
+  line: number;
+}
+
+/**
+ * The selector the spelling guard negates: every block under a legacy header
+ * that declares `type = "ratelimit"`. Shared by the negative guard (over the
+ * real file) and its positive companion (over a fixture) so both pin the SAME
+ * predicate — a drift here is caught by the companion, not hidden by it.
+ */
+function legacyRateLimitBlocks(blocks: RawBlock[]): LegacyRateLimitBlock[] {
+  return blocks
+    .filter(
+      (block) =>
+        LEGACY_HEADERS.has(block.header) &&
+        stringField(block, "type") === "ratelimit",
+    )
+    .map((block) => ({
+      header: block.header,
+      name: stringField(block, "name") ?? "(unnamed)",
+      line: block.line,
+    }));
+}
 
 const BINDING_SETS = [
   { label: "dev (top level)", blocks: DEV_BINDINGS },
@@ -301,5 +340,57 @@ describe("wrangler.toml rate limiting bindings — dev vs production", () => {
 
     // A shared namespace_id lets dev traffic spend production's budget.
     expect(collisions).toEqual([]);
+  });
+});
+
+describe("wrangler.toml rate limiting bindings — spelling", () => {
+  it("leaves no binding in the wrangler-3 [[unsafe.bindings]] form", () => {
+    // wrangler 4 still ACCEPTS `[[unsafe.bindings]]` + `type = "ratelimit"`, so
+    // a stale block surviving next to the `[[ratelimits]]` ones would declare
+    // the same binding name twice and break the deploy — or, if only one set
+    // were reverted, leave dev and production on different spellings.
+    const legacy = legacyRateLimitBlocks(ALL_BLOCKS).map(
+      (block) =>
+        `[[${block.header}]] ${block.name} (wrangler.toml:${block.line})`,
+    );
+
+    expect(legacy).toEqual([]);
+  });
+
+  it("still recognises the wrangler-3 form when it is present", () => {
+    // Positive companion of the guard above. "Zero legacy blocks" is vacuous
+    // if the reader (headers, comment stripping, `type` field) drifts so it no
+    // longer recognises one — this fixture proves the shared selector fires.
+    const fixture = `
+# 3/min — legacy spelling
+[[unsafe.bindings]]
+name = "RATE_LIMIT_3_PER_MIN"
+type = "ratelimit" # trailing comment must not hide the discriminator
+namespace_id = "1004"
+simple = { limit = 3, period = 60 }
+
+[[env.production.unsafe.bindings]]
+name = "RATE_LIMIT_3_PER_MIN"
+type = "ratelimit"
+namespace_id = "2004"
+simple = { limit = 3, period = 60 }
+
+[[ratelimits]]
+name = "RATE_LIMIT_3_PER_MIN"
+namespace_id = "1004"
+simple = { limit = 3, period = 60 }
+`;
+
+    const legacy = legacyRateLimitBlocks(readArrayOfTables(fixture)).map(
+      ({ header, name }) => ({ header, name }),
+    );
+
+    expect(legacy).toEqual([
+      { header: "unsafe.bindings", name: "RATE_LIMIT_3_PER_MIN" },
+      {
+        header: "env.production.unsafe.bindings",
+        name: "RATE_LIMIT_3_PER_MIN",
+      },
+    ]);
   });
 });
