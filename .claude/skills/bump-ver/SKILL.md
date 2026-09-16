@@ -2,8 +2,9 @@
 name: bump-ver
 description: >
   Bump the project version across all 5 version files (extension, pwa, worker, root package.json,
-  extension manifest), append a CHANGELOG entry generated from commits since the last tag, and
-  generate the bilingual GitHub Release notes file the CD workflow reads at tag time.
+  extension manifest), promote the CHANGELOG `## 未釋出` section into the new version entry (filling
+  gaps from commits since the last tag), and generate the bilingual GitHub Release notes file the CD
+  workflow reads at tag time.
   Skips the Fix Cycle — pure release prep, no production code changes.
   TRIGGER when: user explicitly invokes /bump-ver, or asks to bump version / cut a release / update CHANGELOG for a version.
   DO NOT TRIGGER when: user wants to write code, fix bugs, or run tests. Code changes go through /develop, not here.
@@ -16,7 +17,7 @@ model: opus
 
 ## Role
 
-Cut a release: bump version numbers across all packages, draft CHANGELOG entry from commits, run typecheck, commit. **One confirmation gate** — no per-phase checkpoints.
+Cut a release: bump version numbers across all packages, turn the CHANGELOG `## 未釋出` section into the version entry (drafting from commits only what it does not already describe), run typecheck, commit. **One confirmation gate** — no per-phase checkpoints.
 
 ## Why this exists
 
@@ -27,6 +28,7 @@ Pure version bumps don't need the /develop Fix Cycle. This skill encodes the pro
 - **All 5 version files synced** to the same target: `extension/package.json`, `extension/public/manifest.json`, `pwa/package.json`, `worker/package.json`, root `package.json`.
 - **Plain-language copy is mandatory**: `CHANGELOG.md` and `docs/release-notes/v*.md` are user-facing. **Read `.claude/rules/user-facing-copy.md` before drafting any bullet** and apply its checklist before commit. The two failure modes it exists to stop: translating a commit subject into Chinese, and manufacturing a bullet for a change no reader can observe.
 - **CHANGELOG language**: 繁體中文（台灣）, follows existing structure. Heading: `## vX.Y.Z（YYYY-MM-DD）`. Group bullets under sub-section headings (e.g. `### 問題修正`, `### 功能新增`, `### 安全與穩定性`) — match how prior entries are organized.
+- **`## 未釋出` is the source of truth, not the commit list.** Between releases, every /develop run that lands a user-visible change writes its bullet into the `## 未釋出` section at the top of `CHANGELOG.md` (rule: `.claude/rules/user-facing-copy.md` → "Where a change is recorded"). Those bullets were written while the details were fresh and have already passed review, so this skill PROMOTES them: the `## 未釋出` heading becomes `## vX.Y.Z（YYYY-MM-DD）`, and the commit list is only used to find included commits the section does not describe yet. Never draft a second bullet for a change `## 未釋出` already covers, and never leave bullets behind in the previous version's entry — a version entry is frozen the moment its tag exists. `/bump-ver` is the only step that renames the section; a run never renames it.
 - **Excluded from CHANGELOG** (internal, not user-facing): `chore:`, `docs:`, `test:`, `refactor:`, `ci:`, `build:`, `style(<dev-tooling>):`. Internal tooling commits (e.g. `chore(skills): ...`) are always excluded.
 - **Included in CHANGELOG** (user-facing): `feat:`, `fix:`, `perf:`, `security:`. `style(<user-facing>):` (e.g. `style(extension)`, `style(pwa)`) is included as a UI tweak.
 - **Bilingual Release notes file**: every bump also creates `docs/release-notes/v<X.Y.Z>.md` (filename carries the `v` prefix to match the git tag the CD workflow reads via `github.ref_name`). It follows `docs/release-notes/TEMPLATE.md`'s bilingual structure: English section first (public Release faces international readers — intentional, do not flip), 繁體中文 section second. The 繁中 section reuses the CHANGELOG bullets just drafted; the English section is a curated, natural translation (not literal). Drop unused categories. This file must exist in the commit the tag points to, so it is created here, before the user tags.
@@ -51,7 +53,7 @@ Pure version bumps don't need the /develop Fix Cycle. This skill encodes the pro
 1. Current version from `extension/package.json` (canonical source).
 2. Last tag: `git describe --tags --abbrev=0`.
 3. Commits since last tag: `git log --oneline <last-tag>..HEAD`.
-4. Read existing `CHANGELOG.md` to match heading and sub-section style.
+4. Read existing `CHANGELOG.md` to match heading and sub-section style, and read the `## 未釋出` section (everything between that heading and the next `---`). It may be absent — legitimate when nothing user-visible landed since the last tag, see Edge cases.
 5. Resolve target version from arg:
    - explicit `x.y.z` → use as-is, validate it is greater than current
    - `patch` / `minor` / `major` → compute from current
@@ -64,18 +66,22 @@ For each commit since last tag:
 - **Include** if prefix matches: `feat:`, `fix:`, `perf:`, `security:`, or `style:` with a user-facing scope like `(extension)`, `(pwa)`, `(dialog)`, `(ui)`.
 - **Exclude** if prefix matches: `chore:`, `docs:`, `test:`, `refactor:`, `ci:`, `build:`, or `style:` with a dev-tooling scope like `(skills)`, `(eslint)`, `(scripts)`.
 - For ambiguous commits, default to **exclude** and surface them in the plan as "uncertain — confirm if these should be in CHANGELOG".
+- Then match each **included** commit against the `## 未釋出` bullets (by PR number, or by the change the bullet describes — `git show <hash> -- CHANGELOG.md` tells you which bullet a commit wrote). Tag it **described** or **missing**. Only the **missing** ones get a new bullet in Step 3; a described commit still appears in the Step 4 table with its bullet, so the user can see the mapping.
 
 ### Step 3 — Draft CHANGELOG entry
 
-Generate a draft following the project's existing structure:
+Start from the `## 未釋出` section verbatim and produce the version entry:
 
 ```markdown
 ## vX.Y.Z（YYYY-MM-DD）
 
 ### <sub-section heading in 繁體中文>
 
-- <bullet rewritten in 繁體中文, focused on user impact, not commit subject line>
+- <existing 未釋出 bullets, kept as they are>
+- <one new bullet per MISSING commit, rewritten in 繁體中文, focused on user impact, not commit subject line>
 ```
+
+The existing bullets are not re-drafted — they were written while the change was being made and have already been reviewed against `user-facing-copy.md`. Touch one only when it fails that rule's checklist (and say so in the plan). New bullets go under the sub-section that fits; create the sub-section if it does not exist yet, in the order the rules below list.
 
 Sub-section heading rules (pick the headings that fit the included commits):
 
@@ -90,7 +96,7 @@ Bullet style: short, action-oriented sentence describing **what the user notices
 
 ### Step 3b — Draft the bilingual Release notes file
 
-Generate the content for `docs/release-notes/v<X.Y.Z>.md` from the SAME included commits, following `docs/release-notes/TEMPLATE.md`:
+Generate the content for `docs/release-notes/v<X.Y.Z>.md` from the SAME version entry (promoted bullets + new bullets), following `docs/release-notes/TEMPLATE.md`:
 
 - **Order**: `# English` section first, then `# 繁體中文` section, separated by `---`. Do not flip (see encoded conventions).
 - **繁體中文 section**: take the CHANGELOG bullets drafted in Step 3 and curate them — reuse verbatim where the bullet already reads well, shorten where release-note readers do not need the full detail, and drop bullets that only matter to someone tracking every change. This matches `docs/release-notes/TEMPLATE.md`（「直接取用 / 改寫」）: the release notes are a curated summary, not a second copy of the CHANGELOG. The two must not CONTRADICT each other, but they need not match word for word, and the category set may differ (`### 安全與隱私` in the CHANGELOG maps onto `## 改善調整` here).
@@ -105,9 +111,9 @@ Show the user:
 
 1. **Target version**: `<current> → <target>`
 2. **Files to bump**: the 5 version files (always the same list)
-3. **Commits included** (table): hash, subject, "in CHANGELOG"
+3. **Commits included** (table): hash, subject, "described in 未釋出" / "new bullet drafted"
 4. **Commits excluded** (table): hash, subject, reason
-5. **Draft CHANGELOG entry**: rendered as it will appear in the file
+5. **Draft CHANGELOG entry**: rendered as it will appear in the file, with the new bullets marked so the user can tell promoted copy from drafted copy
 6. **Draft Release notes file** (`docs/release-notes/v<X.Y.Z>.md`): rendered bilingual content, so the user can tweak the English curation before commit
 7. **Open questions** ONLY if genuinely ambiguous (e.g. unclassifiable commit, version conflict). Otherwise no questions — convention is encoded.
 
@@ -118,7 +124,7 @@ End with: "確認後我直接套用變更、跑 typecheck、commit。"
 In order:
 
 1. `Edit` each of the 5 version files. Use `replace_all: false` and a precise `old_string` that includes the `"name": "..."` line above the version, so we never match a dependency version by accident.
-2. `Edit` `CHANGELOG.md`: insert the new entry directly above the most recent entry (between `---` separator and `## v<previous>`).
+2. `Edit` `CHANGELOG.md`: replace the `## 未釋出` heading with `## vX.Y.Z（YYYY-MM-DD）` in place and add the new bullets from Step 3 inside that section. Do NOT insert a second entry and do NOT leave an empty `## 未釋出` behind — the next /develop run recreates the section when it has something to record. If the section was absent (Edge cases), insert the new entry directly above the most recent one (between the `---` separator and `## v<previous>`).
 3. `Write` `docs/release-notes/v<X.Y.Z>.md` with the bilingual content from Step 3b (no `<details>`/Full Changelog, no template comment).
 4. Run `pnpm typecheck` from repo root. If it fails, stop and report.
 5. `git add` only the 7 changed files (5 version files + `CHANGELOG.md` + `docs/release-notes/v<X.Y.Z>.md`). Never `git add -A`.
@@ -138,6 +144,8 @@ In order:
 
 - **No commits since last tag**: stop. Tell user there is nothing to release.
 - **Only excluded commits since last tag** (all `chore`/`docs`): warn that there's nothing user-facing, ask whether to proceed (e.g. release purely for tooling reasons).
+- **`## 未釋出` is absent but included commits exist**: the runs that landed them skipped the CHANGELOG step. Draft every included commit as a new bullet (the pre-未釋出 behaviour), and say so in the plan so the user knows this copy was written from commits, not during the runs.
+- **`## 未釋出` has bullets but no included commit maps to them**: someone wrote copy for a change that never merged, or the commit was mis-prefixed. Surface each orphan bullet in the plan and ask whether to keep, move, or drop it — never promote silently.
 - **Target version equals current**: stop with an error.
 - **Target version is lower than current**: stop with an error.
 - **Working tree is dirty before starting**: stop and ask the user to commit or stash first — never bundle unrelated changes into a release commit.

@@ -12,6 +12,23 @@ Does NOT apply to: code comments, `.claude/**`, `docs/architecture.md`, `worker/
 commit messages, PR descriptions, review-bot replies. Those have engineers as their audience and
 technical vocabulary is correct there.
 
+### Where a change is recorded — `## 未釋出`, never a tagged version
+
+`CHANGELOG.md` keeps a `## 未釋出` section at the top (above the first `---`). A /develop run that
+lands a user-visible change (`feat:` / `fix:` / `perf:` / `security:` / user-facing `style:`)
+writes its bullet THERE, under the fitting `### ` sub-section, in the same commit as the change.
+Create the section if it is absent; if the run touches nothing a reader can observe (Rule 2), it
+writes no bullet and does not create the section.
+
+A `## vX.Y.Z（date）` entry is frozen the moment its git tag exists — the GitHub Release for that tag
+lists the commits it actually contains, and a bullet added afterwards describes a change that
+release does not ship. The version bump happens at the END of a development cycle (`/bump-ver`, then
+the user tags), so between tags the current top entry is always a released one; adding to it is the
+failure this section exists to stop (it happened to v1.7.0 four times).
+
+Only `/bump-ver` renames `## 未釋出` to the new version heading. A run never renames it, never opens
+a version heading of its own, and never guesses the next version number.
+
 ### The reader
 
 A Readmoo user who shares books with family. They know what a bookshelf, a sync code, and a PIN are.

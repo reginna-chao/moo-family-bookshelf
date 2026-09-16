@@ -247,5 +247,6 @@ When the user asks: read `references/retro.md` and follow it in **this session**
 3. End with a single **prose headline paragraph** consolidating the outcome.
 4. **Base re-check:** `git fetch origin` + `git log HEAD..origin/main` — long runs go stale while parallel sessions merge. If main moved, rebase/ff and re-run the scope verify before committing; surface the rebase in the report.
 5. **Diff hygiene:** `git status --short` over the whole tree — the set to stage must equal this feature's expected file list. Stray entries (formatter churn, EOL rewrites, another task's leftovers) are inspected and restored, never swept into the commit.
-6. `git add` explicit paths only (including the retro report, if one was written).
-7. Ask the user about committing. (Commit is ALWAYS an explicit user question — never auto-run.)
+6. **CHANGELOG placement:** if the run recorded a user-visible change, `git diff -- CHANGELOG.md` must show additions ONLY inside the `## 未釋出` section (above the first `---`). A bullet under a `## vX.Y.Z` heading is a defect — that version is already tagged and released — move it before committing (`.claude/rules/user-facing-copy.md` → "Where a change is recorded"). A run that touches nothing a reader can observe writes no bullet at all.
+7. `git add` explicit paths only (including the retro report, if one was written).
+8. Ask the user about committing. (Commit is ALWAYS an explicit user question — never auto-run.)
