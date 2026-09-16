@@ -86,8 +86,8 @@ After the `designer` agent(s) return:
 1. **Copy assets** to project (suggest paths, confirm with user): `cp {source} {destination}`.
 2. **Generate integration snippets** — only for approved assets:
    - Favicon + touch icon `<link>` tags; OG `<meta property="og:image" ...>` (1200×630); README banner `<p align="center"><img ...></p>`; PWA manifest `icons` array (192/512/maskable).
-3. **Retro (on explicit user request only)** — the run retrospective is NOT offered by default and MUST NOT be proactively suggested. It runs ONLY when the user explicitly asks for one; when they do, it runs here — before the commit ask — so the report rides along in the same commit: read `references/retro.md` and follow it in this session. Proposals are applied later by `/distill`, never in-run.
-4. **Ask the user about committing** the new assets + retro report, if any. (Designs iterate — never commit without go-ahead.)
+3. **Ask the user about committing** the new assets, and — in the same AskUserQuestion batch — whether to write the run retro (unless one was already requested mid-run). Offered exactly once per run, never auto-run. (Designs iterate — never commit without go-ahead.)
+4. **Retro, if yes** — read `references/retro.md` and follow it in this session, BEFORE the commit runs, so the report rides along in the same commit. Proposals are applied later by `/distill`, never in-run.
 
 ## Rules
 

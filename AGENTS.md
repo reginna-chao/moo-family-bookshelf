@@ -342,7 +342,7 @@ All development and design go through a **single skill entry: `/develop`**. It t
 ├── agents/         # role agents (invisible in the slash menu)
 │   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md
 │   └── references/designer/{pencil-mockup,logo,icon,banner}.md
-├── reports/        # retro reports — written by /develop's retro (only on explicit user request), consumed & cleared by /distill
+├── reports/        # retro reports — written by /develop's retro (offered once per run, at the commit gate), consumed & cleared by /distill
 └── skills/         # slash-menu entries
     ├── develop/        # SKILL.md (router) + references/{code-cycle,design,retro}.md
     ├── distill/        # fold retro reports into durable rules, then clear them
@@ -366,9 +366,12 @@ All development and design go through a **single skill entry: `/develop`**. It t
 
 ### Retro → Distill 自我改善迴圈
 
-- **Retro（產報告）**：只在使用者**明確要求**時才做 retrospective（不再每次 run 收尾主動詢問，
-  也絕不自動跑）。要求後在主 session 依 `develop/references/retro.md` 產出
-  `.claude/reports/<MMDD_HHMM>.md` — 只寫結論（卡點、改進提案 L#/E#、KPI），**不套用任何提案**。
+- **Retro（產報告）**：每次 `/develop` run 收尾**問一次**要不要做 retrospective——問題併在
+  commit gate 那次 AskUserQuestion 裡（fix mode 也會問，不另加停點），絕不自動跑、同一 run 不重複問。
+  使用者同意後在主 session 依 `develop/references/retro.md` 產出
+  `.claude/reports/<MMDD_HHMM>.md`（在 commit 之前寫、隨功能 commit 一起進 git）— 只寫結論
+  （卡點、改進提案 L#/E#、KPI），**不套用任何提案**。改回收尾詢問的原因（2026-09-16）：報告是
+  唯一進 git、跨機器與跨協作者都看得到的流程紀錄，「想到才要求」在實務上就是不會有人要求。
 - **Distill（蒸餾）**：報告累積數份後，由使用者定期呼叫 `/distill` — 彙整所有報告的提案、
   跨報告重現的教訓優先、逐項由使用者決定採納與否，套用到 `.claude/rules/`、skills、agents、
   `AGENTS.md` 等 git-tracked 目標，最後清除已消化的報告。報告是揮發性原料，規則檔才是持久產物。
