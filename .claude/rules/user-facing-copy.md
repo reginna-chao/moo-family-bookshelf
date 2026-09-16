@@ -14,11 +14,14 @@ technical vocabulary is correct there.
 
 ### Where a change is recorded — `## 未釋出`, never a tagged version
 
-`CHANGELOG.md` keeps a `## 未釋出` section at the top (above the first `---`). A /develop run that
-lands a user-visible change (`feat:` / `fix:` / `perf:` / `security:` / user-facing `style:`)
-writes its bullet THERE, under the fitting `### ` sub-section, in the same commit as the change.
-Create the section if it is absent; if the run touches nothing a reader can observe (Rule 2), it
-writes no bullet and does not create the section.
+`CHANGELOG.md` keeps a `## 未釋出` section at the top — the first `## ` heading in the file, above
+the most recent `## vX.Y.Z` entry (the file header and its `---` separator stay above it). A
+/develop run that lands a user-visible change (`feat:` / `fix:` / `perf:` / `security:` /
+user-facing `style:`) MUST write its bullet THERE, under the fitting `### ` sub-section, in the
+same commit as the change — "user-visible" means behaviour a reader can observe, not "a UI string
+changed": a Worker-only fix that changes what a family member can or cannot do is user-visible and
+gets a bullet. Create the section if it is absent; only when the run touches nothing a reader can
+observe (Rule 2) does it write no bullet and leave the section alone.
 
 A `## vX.Y.Z（date）` entry is frozen the moment its git tag exists — the GitHub Release for that tag
 lists the commits it actually contains, and a bullet added afterwards describes a change that
