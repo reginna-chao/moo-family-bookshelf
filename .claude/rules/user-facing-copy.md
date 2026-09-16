@@ -20,8 +20,12 @@ the most recent `## vX.Y.Z` entry (the file header and its `---` separator stay 
 user-facing `style:`) MUST write its bullet THERE, under the fitting `### ` sub-section, in the
 same commit as the change — "user-visible" means behaviour a reader can observe, not "a UI string
 changed": a Worker-only fix that changes what a family member can or cannot do is user-visible and
-gets a bullet. Create the section if it is absent; only when the run touches nothing a reader can
-observe (Rule 2) does it write no bullet and leave the section alone.
+gets a bullet. Create the section if it is absent — insert it directly below the file header's `---`,
+and close it with its own `---` line above the most recent `## vX.Y.Z` entry, so every entry in the
+file stays separated the same way; only when the run touches nothing a reader can observe (Rule 2)
+does it write no bullet and leave the section alone. When a run dispatches coders in parallel, the
+bullet has exactly ONE owner (`.claude/skills/develop/SKILL.md` §3) — it covers the whole change,
+both scopes.
 
 A `## vX.Y.Z（date）` entry is frozen the moment its git tag exists — the GitHub Release for that tag
 lists the commits it actually contains, and a bullet added afterwards describes a change that

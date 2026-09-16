@@ -53,7 +53,7 @@ Pure version bumps don't need the /develop Fix Cycle. This skill encodes the pro
 1. Current version from `extension/package.json` (canonical source).
 2. Last tag: `git describe --tags --abbrev=0`.
 3. Commits since last tag: `git log --oneline <last-tag>..HEAD`.
-4. Read existing `CHANGELOG.md` to match heading and sub-section style, and read the `## 未釋出` section (everything between that heading and the next `---`). It may be absent — legitimate when nothing user-visible landed since the last tag, see Edge cases.
+4. Read existing `CHANGELOG.md` to match heading and sub-section style, and read the `## 未釋出` section (everything between that heading and the NEXT `## ` heading; the `---` line that closes the section is a separator, not part of it). It may be absent — legitimate when nothing user-visible landed since the last tag, see Edge cases.
 5. Resolve target version from arg:
    - explicit `x.y.z` → use as-is, validate it is greater than current
    - `patch` / `minor` / `major` → compute from current
