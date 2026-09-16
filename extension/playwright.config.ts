@@ -36,7 +36,8 @@ export default defineConfig({
       cwd: __dirname,
     },
     {
-      command: "cd ../worker && npx wrangler dev --port 8787 --var DEV_MODE:1",
+      command:
+        'cd ../worker && npx wrangler dev --port 8787 --var DEV_MODE:1 --env=""',
       port: 8787,
       reuseExistingServer: !process.env.CI,
       cwd: __dirname,

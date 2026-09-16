@@ -22,12 +22,14 @@ preview_id = "YOUR_DEV_KV_NAMESPACE_ID"
 # and stay isolated by the key the Worker passes to limit(). Mapping lives in
 # src/middleware/rateLimit.ts (BINDING_BY_LIMIT).
 #
-# Declared through `unsafe.bindings`, not the `[[ratelimits]]` blocks in
-# Cloudflare's current docs: this repo pins wrangler 3 (package.json), which
-# reports `ratelimits` as an unexpected top-level field and deploys the Worker
-# WITHOUT the bindings. `unsafe.bindings` with type = "ratelimit" is the form
-# wrangler 3 supports, locally (Miniflare) and on deploy alike. Switch to
-# `[[ratelimits]]` when the wrangler devDependency moves to v4.
+# Declared as the official `[[ratelimits]]` blocks, which need wrangler 4 (the
+# devDependency in package.json). Wrangler 3 only WARNS (`Unexpected fields
+# found in top-level field: "ratelimits"`) and deploys the Worker WITHOUT the
+# bindings — it still runs, on the KV counters, logging
+# RATE_LIMIT_BINDING_MISSING on every per-minute check. A self-hoster still on
+# wrangler 3 must either upgrade (`pnpm install` in this repo does it) or
+# re-spell each block as `[[unsafe.bindings]]` with an extra
+# `type = "ratelimit"` line.
 #
 # Self-hosters: namespace_id values are YOURS to choose — any positive integer,
 # unique within your own Cloudflare account. Dev and production must not share
@@ -36,30 +38,26 @@ preview_id = "YOUR_DEV_KV_NAMESPACE_ID"
 # ---------------------------------------------------------------------------
 
 # 60/min — per-IP standard tier + per-userId "borrow-list"
-[[unsafe.bindings]]
+[[ratelimits]]
 name = "RATE_LIMIT_60_PER_MIN"
-type = "ratelimit"
 namespace_id = "1001"
 simple = { limit = 60, period = 60 }
 
 # 30/min — per-userId "bookshelf" + "borrow-update"
-[[unsafe.bindings]]
+[[ratelimits]]
 name = "RATE_LIMIT_30_PER_MIN"
-type = "ratelimit"
 namespace_id = "1002"
 simple = { limit = 30, period = 60 }
 
 # 10/min — per-IP public tier + per-userId "borrow-create"
-[[unsafe.bindings]]
+[[ratelimits]]
 name = "RATE_LIMIT_10_PER_MIN"
-type = "ratelimit"
 namespace_id = "1003"
 simple = { limit = 10, period = 60 }
 
 # 3/min — per-IP sensitive tier, both buckets (onboarding + auth lookup)
-[[unsafe.bindings]]
+[[ratelimits]]
 name = "RATE_LIMIT_3_PER_MIN"
-type = "ratelimit"
 namespace_id = "1004"
 simple = { limit = 3, period = 60 }
 
@@ -83,30 +81,26 @@ id = "YOUR_PROD_KV_NAMESPACE_ID"
 # (2xxx) so dev traffic cannot consume production's budget.
 
 # 60/min — per-IP standard tier + per-userId "borrow-list"
-[[env.production.unsafe.bindings]]
+[[env.production.ratelimits]]
 name = "RATE_LIMIT_60_PER_MIN"
-type = "ratelimit"
 namespace_id = "2001"
 simple = { limit = 60, period = 60 }
 
 # 30/min — per-userId "bookshelf" + "borrow-update"
-[[env.production.unsafe.bindings]]
+[[env.production.ratelimits]]
 name = "RATE_LIMIT_30_PER_MIN"
-type = "ratelimit"
 namespace_id = "2002"
 simple = { limit = 30, period = 60 }
 
 # 10/min — per-IP public tier + per-userId "borrow-create"
-[[env.production.unsafe.bindings]]
+[[env.production.ratelimits]]
 name = "RATE_LIMIT_10_PER_MIN"
-type = "ratelimit"
 namespace_id = "2003"
 simple = { limit = 10, period = 60 }
 
 # 3/min — per-IP sensitive tier, both buckets (onboarding + auth lookup)
-[[env.production.unsafe.bindings]]
+[[env.production.ratelimits]]
 name = "RATE_LIMIT_3_PER_MIN"
-type = "ratelimit"
 namespace_id = "2004"
 simple = { limit = 3, period = 60 }
 
