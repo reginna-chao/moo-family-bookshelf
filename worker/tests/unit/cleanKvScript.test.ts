@@ -94,8 +94,9 @@ describe("scripts/clean-kv.mjs", () => {
     );
 
     // The delete branch must have executed, or the flag assertions below
-    // would be vacuous.
-    expect(run.stderr).toBe("");
+    // would be vacuous. Not `toBe("")`: a future Node `ExperimentalWarning`
+    // would land on stderr too, and that is not the script failing.
+    expect(run.stderr).not.toMatch(/Error|cleanKvShim/);
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("Deleted 2 key(s)");
 
