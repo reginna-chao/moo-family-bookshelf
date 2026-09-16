@@ -138,6 +138,13 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # Same dry-run against the TOP-LEVEL environment (`--env=""`), which the
+      # `--env production` build above does not cover. A wrangler release that
+      # changes how an empty `--env` resolves goes red here instead of at the
+      # post-merge `deploy:dev`.
+      - name: Build (dev env)
+        run: pnpm run build:dev
+
   pwa-check:
     name: PWA — Lint, Typecheck, Test, Build
     needs: changes
