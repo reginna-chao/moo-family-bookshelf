@@ -347,7 +347,8 @@ All development and design go through a **single skill entry: `/develop`**. It t
     ├── develop/        # SKILL.md (router) + references/{code-cycle,design,retro}.md
     ├── distill/        # fold retro reports into durable rules, then clear them
     ├── bump-ver/
-    └── project-init/
+    ├── project-init/
+    └── speak-human-tw/ # vendored de-AI pass (MIT, see VENDORED.md) — run AUTOMATICALLY on CHANGELOG / release-notes / UI copy per rules/user-facing-copy.md Rule 9, never by the user
 ```
 
 - **`coder` / `tester` / `reviewer` are abstract.** `/develop` passes `scope` (`frontend` or

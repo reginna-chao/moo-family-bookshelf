@@ -27,7 +27,7 @@ Pure version bumps don't need the /develop Fix Cycle. This skill encodes the pro
 
 - **All 5 version files synced** to the same target: `extension/package.json`, `extension/public/manifest.json`, `pwa/package.json`, `worker/package.json`, root `package.json`.
 - **Plain-language copy is mandatory**: `CHANGELOG.md` and `docs/release-notes/v*.md` are user-facing. **Read `.claude/rules/user-facing-copy.md` before drafting any bullet** and apply its checklist before commit. The two failure modes it exists to stop: translating a commit subject into Chinese, and manufacturing a bullet for a change no reader can observe.
-- **CHANGELOG language**: 繁體中文（台灣）, follows existing structure. Heading: `## vX.Y.Z（YYYY-MM-DD）`. Group bullets under sub-section headings (e.g. `### 問題修正`, `### 功能新增`, `### 安全與穩定性`) — match how prior entries are organized.
+- **CHANGELOG language**: 繁體中文（台灣）, follows existing structure. Heading: `## vX.Y.Z（YYYY-MM-DD）`. Group bullets under the sub-section headings fixed by `.claude/rules/user-facing-copy.md` → Rule 10, in that rule's order (`### 問題修正` first).
 - **`## 未釋出` is the source of truth, not the commit list.** Between releases, every /develop run that lands a user-visible change writes its bullet into the `## 未釋出` section at the top of `CHANGELOG.md` (rule: `.claude/rules/user-facing-copy.md` → "Where a change is recorded"). Those bullets were written while the details were fresh and have already passed review, so this skill PROMOTES them: the `## 未釋出` heading becomes `## vX.Y.Z（YYYY-MM-DD）`, and the commit list is only used to find included commits the section does not describe yet. Never draft a second bullet for a change `## 未釋出` already covers, and never leave bullets behind in the previous version's entry — a version entry is frozen the moment its tag exists. `/bump-ver` is the only step that renames the section; a run never renames it.
 - **Excluded from CHANGELOG** (internal, not user-facing): `chore:`, `docs:`, `test:`, `refactor:`, `ci:`, `build:`, `style(<dev-tooling>):`. Internal tooling commits (e.g. `chore(skills): ...`) are always excluded.
 - **Included in CHANGELOG** (user-facing): `feat:`, `fix:`, `perf:`, `security:`. `style(<user-facing>):` (e.g. `style(extension)`, `style(pwa)`) is included as a UI tweak.
@@ -88,20 +88,23 @@ Sub-section heading rules (pick the headings that fit the included commits):
 - `### 功能新增` for `feat:`
 - `### 問題修正` for `fix:`
 - `### 效能改善` for `perf:`
-- `### 安全與穩定性` for `security:` and stability-flavored fixes
+- `### 安全與隱私` for `security:` and stability-flavored fixes
 - `### 介面調整` for user-facing `style:`
 - If only one category exists, the heading still goes in (matches existing entries).
+- **Order the sections per Rule 10**: `問題修正` → `功能新增` → `效能改善` → `安全與隱私` → `介面調整` → `開發者體驗`. A release whose headline genuinely is a feature may lead with `功能新增` — say so in the Step 4 plan.
 
-Bullet style: short, action-oriented sentence describing **what the user notices**, not the technical change. `.claude/rules/user-facing-copy.md` is the authority here — its banned-vocabulary table and worked examples are binding, and its Rule 2 explicitly permits merging or dropping commits whose effect no reader can observe. Do NOT copy tone from older CHANGELOG entries indiscriminately; entries written before that rule existed contain implementation vocabulary and are not a reference.
+Bullet style: short, action-oriented sentence describing **what the user notices**, not the technical change. `.claude/rules/user-facing-copy.md` is the authority here — its banned-vocabulary table and worked examples are binding, its Rule 2 explicitly permits merging or dropping commits whose effect no reader can observe, and its Rule 8 caps depth (main bullet 1–2 sentences, at most one sub-bullet, deployment steps go to `worker/DEPLOY.md`, security bullets describe the protection not the attack). Do NOT copy tone from older CHANGELOG entries indiscriminately; entries written before that rule existed contain implementation vocabulary and are not a reference.
+
+**De-AI pass (Rule 9, automatic):** after drafting — new bullets AND the promoted ones, plus both halves of the release-notes file from Step 3b — `Read .claude/skills/speak-human-tw/SKILL.md` and run it in 「自動化工作流模式 → 跳過確認、事後摘要」. Do not list items and ask; the Step 4 plan IS the confirmation. Protected: every number / duration / limit, product nouns, `**請更新擴充功能／PWA**` lines, inline code. Put the 事後摘要 (count, then 原句 / 為什麼要改 / 改成了什麼 per item) in the Step 4 plan under its own heading; "沒有需要修改的地方" is a valid result, an absent summary is not.
 
 ### Step 3b — Draft the bilingual Release notes file
 
 Generate the content for `docs/release-notes/v<X.Y.Z>.md` from the SAME version entry (promoted bullets + new bullets), following `docs/release-notes/TEMPLATE.md`:
 
 - **Order**: `# English` section first, then `# 繁體中文` section, separated by `---`. Do not flip (see encoded conventions).
-- **繁體中文 section**: take the CHANGELOG bullets drafted in Step 3 and curate them — reuse verbatim where the bullet already reads well, shorten where release-note readers do not need the full detail, and drop bullets that only matter to someone tracking every change. This matches `docs/release-notes/TEMPLATE.md`（「直接取用 / 改寫」）: the release notes are a curated summary, not a second copy of the CHANGELOG. The two must not CONTRADICT each other, but they need not match word for word, and the category set may differ (`### 安全與隱私` in the CHANGELOG maps onto `## 改善調整` here).
+- **繁體中文 section**: take the CHANGELOG bullets drafted in Step 3 and curate them — reuse verbatim where the bullet already reads well, shorten where release-note readers do not need the full detail, and drop bullets that only matter to someone tracking every change. This matches `docs/release-notes/TEMPLATE.md`（「直接取用 / 改寫」）: the release notes are a curated summary, not a second copy of the CHANGELOG. The two must not CONTRADICT each other and they need not match word for word, but the section names and their order are the SAME in both files (Rule 10) — no mapping.
 - **English section**: a curated, natural translation of the same bullets — not a literal word-for-word rendering; adjust phrasing to read as native English.
-- **Categories**: use the four TEMPLATE pairs (New Features / 功能新增, Improvements / 改善調整, Bug Fixes / 問題修正, Developer Experience / 開發者體驗). Map `perf:` and user-facing `style:` into Improvements; fold `security:`/stability items into Improvements unless there are enough to warrant calling them out. **Delete any category with no items** — never leave an empty heading.
+- **Categories**: the Rule 10 set, same names and same order as the CHANGELOG entry, with the English half mirroring one-for-one — Bug Fixes / 問題修正, New Features / 功能新增, Performance / 效能改善, Security & Privacy / 安全與隱私, UI / 介面調整, Developer Experience / 開發者體驗. **Delete any category with no items** — never leave an empty heading.
 - Do NOT add the `<details>` commit list or the Full Changelog link — the CD workflow appends those automatically at release time.
 - Do NOT include the HTML `<!-- ... -->` instructions from TEMPLATE.md; those are authoring guidance, not release content.
 
@@ -115,7 +118,8 @@ Show the user:
 4. **Commits excluded** (table): hash, subject, reason
 5. **Draft CHANGELOG entry**: rendered as it will appear in the file, with the new bullets marked so the user can tell promoted copy from drafted copy
 6. **Draft Release notes file** (`docs/release-notes/v<X.Y.Z>.md`): rendered bilingual content, so the user can tweak the English curation before commit
-7. **Open questions** ONLY if genuinely ambiguous (e.g. unclassifiable commit, version conflict). Otherwise no questions — convention is encoded.
+7. **speak-human-tw 事後摘要**: the Step 3 de-AI pass result over the CHANGELOG entry and the release-notes file — count first, then one line per item
+8. **Open questions** ONLY if genuinely ambiguous (e.g. unclassifiable commit, version conflict). Otherwise no questions — convention is encoded.
 
 End with: "確認後我直接套用變更、跑 typecheck、commit。"
 

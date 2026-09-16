@@ -9,8 +9,9 @@ Applies to every string a non-technical reader will see:
 - Any GitHub Release body
 
 Does NOT apply to: code comments, `.claude/**`, `docs/architecture.md`, `worker/DEPLOY.md`,
-commit messages, PR descriptions, review-bot replies. Those have engineers as their audience and
-technical vocabulary is correct there.
+commit messages, PR descriptions, GitHub issues, review-bot replies. Those have engineers as their
+audience and technical vocabulary is correct there — and the de-AI pass of Rule 9 is not run on
+them either.
 
 ### Where a change is recorded — `## 未釋出`, never a tagged version
 
@@ -123,6 +124,80 @@ Taiwan usage and full-width punctuation（，。、「」）. Half-width for cod
 Latin units. No mainland vocabulary（用「網路」不用「網絡」，用「軟體」不用「軟件」，
 用「品質」不用「質量」）。
 
+### Rule 8 — Depth cap: one bullet says what changed, not how it works
+
+The v1.7.0 entry passed Rules 1–7 and was still unreadable. The vocabulary was clean; the DEPTH
+was not. A bullet that explains the mechanism, enumerates every edge case, or documents a
+deployment procedure is engineering copy no matter how plain each word is. Hard limits:
+
+- **The main bullet is 1–2 sentences**: what the reader now sees or can do, and — only if it
+  changes what they should do — the one condition that matters. Full stop.
+- **At most ONE nested sub-bullet per bullet**, and only for something the reader must ACT on
+  (`**請更新擴充功能／PWA**`, "自架伺服器的人請看 `worker/DEPLOY.md`"). Never a sub-bullet
+  that merely adds nuance, lists a second edge case, or explains why the change was made. If a
+  change genuinely has two things the reader must act on, it is two bullets (Rule 6).
+- **Self-hosting and deployment steps never go in the CHANGELOG.** Config file names, TOML block
+  names, tool version numbers, warning strings — those belong in `worker/DEPLOY.md`. The bullet
+  says _that_ self-hosters have something to do and points at the section; it does not repeat it.
+- **Security bullets describe the protection, not the attack.** Write what is now safe
+  (`你的 PIN 不會因為別人亂猜而被鎖住`); do not walk the reader through how the attack worked
+  (`避免有人一直換網路來源猜你的 PIN`). The reader cannot act on the attack description, and it
+  reads as a threat.
+- **Do not narrate the old behaviour unless the reader could have hit it.** `先前…現在…` is
+  justified when the reader may have SEEN the old behaviour (a bug they reported); it is padding
+  when the old behaviour was internal. Most bullets should just state the new behaviour.
+- **Numbers stay, explanations of numbers go.** `每小時最多 30 次` is a fact the reader keeps
+  (Rule 5); `這道上限不會把你自己擋在門外：就算有人…` is mechanism and goes.
+
+Self-check: cover the sub-bullets with your hand. Does the reader still know what changed and
+what to do? If yes, the sub-bullets were depth, not information — delete them.
+
+### Rule 9 — De-AI pass with `speak-human-tw` (automatic, no user invocation)
+
+`.claude/skills/speak-human-tw/` is a vendored copy of
+[speak-human-tw](https://github.com/Raymondhou0917/speak-human-tw) (MIT, version pinned in its
+`VENDORED.md`). It catches the sentence-level patterns that Rules 1–8 do not name — the
+`不是 A，而是 B` template on every line, `一律`, bold flooding, `——` used as a colon, three-part
+parallelism, the "先前…現在…不再…" cadence, mainland vocabulary. The user does NOT call it. Every
+writer of copy under "Applies to" runs it as part of writing:
+
+1. `Read .claude/skills/speak-human-tw/SKILL.md` (and `references/patterns.md` when the copy is
+   more than a couple of bullets).
+2. Run it in the skill's own **「自動化工作流模式 → 跳過確認、事後摘要」** — no numbered
+   list, no "以上 N 處…" question, no waiting. The confirmation gate is the /develop commit gate /
+   `/bump-ver` plan gate, where the user sees the diff anyway.
+3. Scene = 辦公文書（公告）, 力度 中: keep the formal register of a release note; do not turn it
+   into a chat message, do not add 「我」 or invented anecdotes (`humanize.md`'s "人味是作者的" —
+   a changelog has no author voice to add).
+4. Protected list, in addition to the skill's own: every number, duration and limit; product nouns
+   from Rule 4; `**請更新擴充功能／PWA**` lines; inline code spans (file names, hosts, commands).
+   The pass may reword around them, never alter or drop them (Rule 5).
+5. Report the 事後摘要 in the agent's structured return / the run report: total count, then per
+   item 原句 / 為什麼要改 / 改成了什麼. "這次沒有需要修改的地方" is a valid summary; an ABSENT
+   summary means the pass was skipped and the copy is not ready to commit.
+
+Fact-preservation is the pass's own step 5 (保真回讀) and is not waived by the automated mode.
+
+### Rule 10 — Section names and order: what the reader must act on comes first
+
+**One set of section names, used by both files.** `CHANGELOG.md` and `docs/release-notes/v*.md`
+(繁中 half) use the SAME 繁體中文 headings — `問題修正` / `功能新增` / `效能改善` /
+`安全與隱私` / `介面調整` / `開發者體驗` — with the English half mirroring them one-for-one
+(`Bug Fixes` / `New Features` / `Performance` / `Security & Privacy` / `UI` /
+`Developer Experience`). There is no CHANGELOG→release-notes category mapping any more: the same
+change filed under two different headings in two files reads as two different changes.
+
+**Order inside an entry: `問題修正` first**, then `功能新增`, then the rest in the order listed
+above. A release whose headline really is a new feature may lead with `功能新增` — say so, don't
+do it by habit. Drop any section with no bullets; never leave an empty heading.
+
+Why: the bullet a reader most needs is the one that stops the product working (v1.7.0's Readmoo
+domain change — "不更新就完全不能用" — sat below two feature bullets). Sections are ordered by
+what the reader must act on, never by the order the work happened in.
+
+Entries already tagged keep their existing order unless they are being rewritten for another
+reason; this is the rule for new entries.
+
 ### Worked examples
 
 Each pair below is a real rewrite from the v1.7.0 release.
@@ -149,3 +224,8 @@ Each pair below is a real rewrite from the v1.7.0 release.
 3. For each bullet: what does the reader _do differently_ now? If nothing, apply Rule 2.
 4. Did any number, duration, or exemption get lost in the rewrite? → put it back.
 5. Does any bullet read like a translated commit subject? → rewrite from the reader's viewpoint.
+6. Is any main bullet longer than two sentences, or does any bullet carry more than one
+   sub-bullet? → apply Rule 8.
+7. Has the `speak-human-tw` pass run, and is its 事後摘要 in the return / report? → if not, run
+   it (Rule 9).
+8. Do the section names match Rule 10's set, and does `問題修正` come first? → fix the order.

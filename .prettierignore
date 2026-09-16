@@ -34,3 +34,7 @@ extension/tests/e2e/fixtures/mock-readmoo.html
 
 # VCS
 .git/
+
+# Vendored third-party skill — kept byte-identical to upstream so it can be
+# re-synced with a plain copy. See .claude/skills/speak-human-tw/VENDORED.md
+.claude/skills/speak-human-tw/

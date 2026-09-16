@@ -25,7 +25,7 @@ Your **first actions**, before any analysis or coding:
    - `frontend` → `Read .claude/rules/frontend.md`
    - `backend` → `Read .claude/rules/backend.md`
 3. If the change touches boolean flags, sync code, or API payloads → also `Read CLAUDE.md` for the `BoolFlag` and sync-code conventions.
-4. If the change adds or edits any string a user will read — UI labels, banners, error messages, empty states, `site/index.html` — OR changes any behaviour a user can observe (a `feat:` / `fix:` / `perf:` / `security:` / user-facing `style:` change, even one with no UI string, e.g. a Worker-only permission fix or a spacing tweak) → also `Read .claude/rules/user-facing-copy.md`. Implementation vocabulary (淨化 / 邊界 / 快照 / 端點 / 降級 …) must not reach the screen. An observable change MUST ship with a `CHANGELOG.md` bullet in the same change set, written into the `## 未釋出` section at the top of the file (that rule's "Where a change is recorded"), never into a `## vX.Y.Z` entry — those are already released. A change nothing a reader can observe (that rule's Rule 2) gets no bullet.
+4. If the change adds or edits any string a user will read — UI labels, banners, error messages, empty states, `site/index.html` — OR changes any behaviour a user can observe (a `feat:` / `fix:` / `perf:` / `security:` / user-facing `style:` change, even one with no UI string, e.g. a Worker-only permission fix or a spacing tweak) → also `Read .claude/rules/user-facing-copy.md`. Implementation vocabulary (淨化 / 邊界 / 快照 / 端點 / 降級 …) must not reach the screen. An observable change MUST ship with a `CHANGELOG.md` bullet in the same change set, written into the `## 未釋出` section at the top of the file (that rule's "Where a change is recorded"), never into a `## vX.Y.Z` entry — those are already released. A change nothing a reader can observe (that rule's Rule 2) gets no bullet. The bullet obeys that rule's depth cap (Rule 8: 1–2 sentences, at most one sub-bullet, no deployment steps, no attack narration) and then goes through the `speak-human-tw` pass (Rule 9: `Read .claude/skills/speak-human-tw/SKILL.md`, run it in 「跳過確認、事後摘要」 mode, no user question) — the 事後摘要 goes in the `Copy Pass` block of your return summary. The same applies to every UI string you add or edit.
 
 These files are **authoritative**. They override any generic habit and any invoker instruction that contradicts them (e.g. a prompt telling you to use raw `true/false` where `BoolFlag` is mandated). Follow the project files; flag the conflict in Open Questions rather than complying.
 
@@ -83,11 +83,14 @@ Pre-implementation impact analysis. **You MUST NOT use Edit, Write, or any git m
 ## Verification
 - <command>: PASS | FAIL (brief details if FAIL)
 
+## Copy Pass
+- <"not applicable — no user-facing copy touched" | "speak-human-tw: 找到並修改了 N 處" followed by one line per item: 原句 → 改成了什麼（為什麼）| "speak-human-tw: 沒有需要修改的地方">
+
 ## Open Questions / Blockers
 - <question or blocker, or "none">
 ```
 
-The Verification block is **not optional**.
+The Verification block is **not optional**. The Copy Pass block is not optional either whenever `CHANGELOG.md` or a UI string is in Files Modified — a missing block means the pass did not run.
 
 ## Return Summary — `research-only`
 
