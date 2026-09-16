@@ -43,6 +43,10 @@ jobs:
             worker:
               - 'worker/**'
               - 'shared/**'
+              # worker/tests/unit/cleanKvScript.test.ts guards scripts/clean-kv.mjs,
+              # which lives outside every package — without this the guard never
+              # runs on the very change class it exists to catch.
+              - 'scripts/**'
               - '.github/workflows/cicd.yml'
             site:
               - 'site/**'
