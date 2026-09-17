@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 - Repo: `moo-family-bookshelf`
-- Language: 繁體中文 for user-facing content (UI, docs, comments, and ALL assistant/bot replies — chat, PR, and issue comments), English for code identifiers and commit messages.
+- Language: 繁體中文 for user-facing content (UI, docs, comments, and ALL assistant/bot replies — chat, PR, and issue comments), English for code identifiers and commit messages. Agent-facing documents — this file and everything under `.claude/` — are English; the 繁中 that legitimately stays in them (strings the agent emits or matches verbatim) is defined in `.claude/rules/global.md` → Language → "The exemption".
 - In chat replies, file references must be repo-root relative only (example: `extension/src/dialog/FamilyShelf.tsx:42`); never absolute paths.
 
 ## Project Overview
@@ -176,7 +176,7 @@ Every push/PR triggers:
 
 Release body: the release job reads `docs/release-notes/v<X.Y.Z>.md` (curated, bilingual) and puts it at the top of the Release, then appends the commit list inside a `<details>` block plus a Full Changelog link. That file is produced by `/bump-ver` and MUST exist in the commit the tag points at; when it is missing, the release job falls back to the auto-generated commit list and prints `::warning::`. **Run `/bump-ver` BEFORE tagging** — the other order takes the fallback.
 
-When `CHANGELOG.md` is written: between releases, every `/develop` run writes its user-observable change into the `## 未釋出` section at the top of the file, in the same commit as the change, and **never** into an already-tagged `## vX.Y.Z` entry — a version entry is frozen the moment its tag exists. `/bump-ver` is the only step that renames `## 未釋出` to the new version heading, and it only adds bullets for commits that section does not describe yet. Full detail: `.claude/rules/user-facing-copy.md` -> "Where a change is recorded".
+When `CHANGELOG.md` is written: between releases, every `/develop` run writes its user-observable change into the `## 未釋出` section at the top of the file, in the same commit as the change, and **never** into an already-tagged `## vX.Y.Z` entry — a version entry is frozen the moment its tag exists. `/bump-ver` is the only step that renames `## 未釋出` to the new version heading, and it only adds bullets for commits that section does not describe yet. Full detail: `.claude/rules/user-facing-copy.md` → "Where a change is recorded".
 
 ### Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 
@@ -348,7 +348,7 @@ All development and design go through a **single skill entry: `/develop`**. It t
     ├── distill/        # fold retro reports into durable rules, then clear them
     ├── bump-ver/
     ├── project-init/
-    └── speak-human-tw/ # vendored de-AI pass (MIT, see VENDORED.md) — run AUTOMATICALLY on CHANGELOG / release-notes / UI copy per rules/user-facing-copy.md Rule 9, never by the user
+    └── speak-human-tw/ # vendored de-AI pass (MIT, see VENDORED.md) — run AUTOMATICALLY on CHANGELOG / release-notes / UI copy per rules/user-facing-copy.md Rule 9 — never invoked by the user as part of this project's process
 ```
 
 - **`coder` / `tester` / `reviewer` are abstract.** `/develop` passes `scope` (`frontend` or

@@ -90,6 +90,7 @@ Sub-section heading rules (pick the headings that fit the included commits):
 - `### 效能改善` for `perf:`
 - `### 安全與隱私` for `security:` and stability-flavored fixes
 - `### 介面調整` for user-facing `style:`
+- `### 開發者體驗` for a developer-facing change that is still worth telling readers about (a dev-only tool or doc, e.g. the dev-only Swagger UI in v1.3.0); ordinary `chore:` / `docs:` / `refactor:` commits stay excluded
 - If only one category exists, the heading still goes in (matches existing entries).
 - **Order the sections per Rule 10**: `問題修正` → `功能新增` → `效能改善` → `安全與隱私` → `介面調整` → `開發者體驗`. A release whose headline genuinely is a feature may lead with `功能新增` — say so in the Step 4 plan.
 
