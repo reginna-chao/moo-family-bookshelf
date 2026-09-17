@@ -59,7 +59,7 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 [the ONE concrete action the user must take now, as explicit options]
 ```
 
-**Decision prompts use AskUserQuestion.** Whenever the stop is a _choice_ (SUGGESTION 取捨、提交方式、方向/範圍選擇…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form stops (e.g. manual verification feedback) stay text-only.
+**Decision prompts use AskUserQuestion.** Whenever the stop is a _choice_ (which SUGGESTIONs to take, how to commit, a direction or scope call…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form stops (e.g. manual verification feedback) stay text-only.
 
 **Autonomous runs (user unreachable).** When the session is non-interactive, or a gate's AskUserQuestion gets no reply: adopt 🟢 TL-recommended SUGGESTIONs and skip 🔴 ones; fold the requirements and verify-before-test gates into their machine-verifiable acceptance checks where the spec already pins them, stating the fold and its reason at the moment of folding. Every folded gate and every decision taken is disclosed with a one-line reason in the final report and re-presented for ratification at the commit gate — which remains an explicit user question in every mode.
 

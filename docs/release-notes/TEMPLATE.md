@@ -6,7 +6,9 @@ GitHub Release 策展式筆記範本。
 2. 參考 CHANGELOG.md 對應版本的繁中內容，填入下方各區段。
    - 繁體中文區段：直接取用 / 改寫 CHANGELOG 的策展敘述。
    - English 區段：策展翻譯（非逐字直譯），調整為自然英文。
-3. 用不到的分類整個刪掉（不要留空標題）。
+3. 用不到的分類整個刪掉（不要留空標題）。分類名稱與順序和 CHANGELOG.md 完全一致
+   （問題修正 → 功能新增 → 效能改善 → 安全與隱私 → 介面調整 → 開發者體驗），
+   English 區段一對一對應；規則見 .claude/rules/user-facing-copy.md → Rule 10。
 4. 不需要手動加 commit 清單與 Full Changelog —— cicd.yml 的 release job
    會自動把 commit 清單收進 <details> 折疊區，並補上 Full Changelog 連結。
 
@@ -19,15 +21,23 @@ CHANGELOG.md 維持全繁體中文，本檔則是雙語對外發佈用。
 
 # English
 
+## Bug Fixes
+
+-
+
 ## New Features
 
 -
 
-## Improvements
+## Performance
 
 -
 
-## Bug Fixes
+## Security & Privacy
+
+-
+
+## UI
 
 -
 
@@ -39,15 +49,23 @@ CHANGELOG.md 維持全繁體中文，本檔則是雙語對外發佈用。
 
 # 繁體中文
 
+## 問題修正
+
+-
+
 ## 功能新增
 
 -
 
-## 改善調整
+## 效能改善
 
 -
 
-## 問題修正
+## 安全與隱私
+
+-
+
+## 介面調整
 
 -
 

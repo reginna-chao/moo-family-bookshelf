@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 - Repo: `moo-family-bookshelf`
-- Language: 繁體中文 for user-facing content (UI, docs, comments, and ALL assistant/bot replies — chat, PR, and issue comments), English for code identifiers and commit messages.
+- Language: 繁體中文 for user-facing content (UI, docs, comments, and ALL assistant/bot replies — chat, PR, and issue comments), English for code identifiers and commit messages. Agent-facing documents — this file and everything under `.claude/` — are English; the 繁中 that legitimately stays in them (strings the agent emits or matches verbatim) is defined in `.claude/rules/global.md` → Language → "The exemption".
 - In chat replies, file references must be repo-root relative only (example: `extension/src/dialog/FamilyShelf.tsx:42`); never absolute paths.
 
 ## Project Overview
@@ -25,7 +25,7 @@ moo-family-bookshelf/
 ├── shared/                      # Cross-app TypeScript library (no build step)
 │   ├── src/
 │   │   ├── api/                # Wire types (BoolFlag / envelope / family / personal-books / public-shelf / verify records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf payload validation
-│   │   ├── borrow/             # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中文案)
+│   │   ├── borrow/             # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中 string)
 │   │   ├── config/             # Readmoo host/selector config, report links
 │   │   ├── hostNote/           # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 │   │   ├── icons/              # Inline brand SVG paths
@@ -73,19 +73,19 @@ moo-family-bookshelf/
 ├── .github/
 │   └── workflows/
 │       ├── cicd.yml            # CI (lint/typecheck/test/build) + CD (Worker/PWA/Pages deploy, Release)
-│       ├── claude-code-review.yml # Claude 自動審查：每個 PR 開啟/ready/reopen 時觸發
-│       └── claude.yml          # @claude 手動觸發：留言/issue 中 tag 後複審與問答
+│       ├── claude-code-review.yml # Automatic Claude review on every PR open / ready / reopen
+│       └── claude.yml          # Manual @claude trigger: re-review and Q&A from a comment / issue
 ├── AGENTS.md                    # This file
 └── CLAUDE.md                    # → AGENTS.md
 ```
 
 ### The `shared/` package
 
-`moo-family-bookshelf-shared` 是 workspace 內的純 TypeScript 原始碼套件，沒有 build 步驟——`extension/`、`pwa/` 與 `worker/` 都直接以 `moo-family-bookshelf-shared/<entry>` import 原始碼，前兩者由各自的 Vite 打包，`worker/` 則由 wrangler 的 esbuild 打包（三者的 `tsconfig.json` 都以 `paths` 指向 `../shared/src/*`）。存放多端必須完全一致的邏輯（Readmoo 設定與封面網址白名單、邀請訊息、個人書櫃儲存策略、API 端點位址驗證與同步碼 `@host` 分類、API wire 型別（`BoolFlag`／`{ data, error }` 信封／家庭與借閱紀錄）與其邊界驗證等），避免同一份規則在各端各寫一次而漂移。
+`moo-family-bookshelf-shared` is a source-only TypeScript package inside the workspace with NO build step — `extension/`, `pwa/` and `worker/` all import the sources directly as `moo-family-bookshelf-shared/<entry>`; the first two bundle them with their own Vite config, `worker/` with wrangler's esbuild (all three map the package via `paths` → `../shared/src/*` in their `tsconfig.json`). It holds the logic that MUST behave identically on every surface — Readmoo config and the cover-URL whitelist, invite messages, the personal-shelf save strategy, API endpoint validation and sync-code `@host` classification, API wire types (`BoolFlag` / the `{ data, error }` envelope / family and borrow records) and their boundary validation — so that one rule is never written once per surface and left to drift apart.
 
-- **不得依賴任何 runtime 專屬 API。** `shared/` 除了被瀏覽器端 import，也被 `extension/scripts/` 底下以 `tsx` 執行的 Node 腳本 import。`tsconfig.json` 雖含 `DOM` lib（`URLSearchParams` 型別所需），但 `eslint.config.js` 以 `no-restricted-globals` 擋掉 `document` / `window` / `localStorage` / `sessionStorage` / `navigator`，讓這條界線由靜態檢查保證。
-- **CI 覆蓋**：`shared/` 有自己的 `lint` / `typecheck` script，在 CI 的 `extension-check` job 內執行（`shared/**` 已在該 job 的 path filter 內）。新增檔案不需額外設定即被檢查。`worker-check` 的 path filter 同樣含 `shared/**`，因此改動 `shared/` 也會跑 worker 檢查，壞掉的 import 不會靜默通過。
-- **測試**：`shared/` 本身沒有 test script，其行為由 `extension/tests/`、`pwa/tests/` 與 `worker/tests/` 涵蓋。
+- **No runtime-specific API may be relied on.** Besides the browser-side importers, `shared/` is imported by the Node scripts under `extension/scripts/` that run under `tsx`. `tsconfig.json` does include the `DOM` lib (needed for `URLSearchParams` typing), so `eslint.config.js` blocks `document` / `window` / `localStorage` / `sessionStorage` / `navigator` with `no-restricted-globals` — the boundary is guaranteed by static checking, not by convention.
+- **CI coverage**: `shared/` has its own `lint` / `typecheck` scripts, run inside CI's `extension-check` job (`shared/**` is already in that job's path filter), so a new file is checked with no extra wiring. `worker-check`'s path filter covers `shared/**` too, so a change to `shared/` also runs the Worker checks and a broken import cannot pass silently.
+- **Tests**: `shared/` has no test script of its own; its behaviour is covered by `extension/tests/`, `pwa/tests/` and `worker/tests/`.
 
 ## Tech Stack
 
@@ -154,7 +154,7 @@ moo-family-bookshelf/
 
 Every push/PR triggers:
 
-- `extension-check`: lint → typecheck → test → build。**也負責 `shared/` 的 lint 與 typecheck**（`shared/**` 已在此 job 的 paths-filter 內；掛在既有 job 可避免動到 `ci-success` 的 `needs` 而讓 gate 靜默放行）
+- `extension-check`: lint → typecheck → test → build. **It also owns `shared/`'s lint and typecheck** (`shared/**` is in this job's paths filter; hanging them off an existing job avoids touching `ci-success`'s `needs`, which would let the gate pass silently)
 - `worker-check`: lint → typecheck → test → build
 - `pwa-check`: lint → typecheck → test → build
 - `e2e` (PR to `main` only): build extension + start Miniflare + Playwright E2E
@@ -162,8 +162,8 @@ Every push/PR triggers:
 
 ### Claude Review (GitHub Actions)
 
-- `claude-code-review.yml`：每個 PR（`opened` / `ready_for_review` / `reopened`，非 draft、非 fork）自動觸發 Claude 審查，**無 paths 過濾**——文件與設定變更也會被審（六個維度，第六維度專審 docs/config diff）。模型使用 `opus` 家族別名（永遠解析為最新一代 Opus），實際 model id 由 workflow 在執行後回填到審查留言 footer。審查 bot 只能留言：`--disallowedTools` 封鎖 `gh pr review` / `gh pr merge` / `gh pr close` 與 Write / Edit，approve 與合併一律由人類決定。
-- `claude.yml`：在 PR / Issue 留言（含 inline review comment 回覆）tag `@claude` 觸發，用於修正後複審與問答；同樣以 `--model opus` 跑最新一代 Opus。程式碼建議直接寫在留言內——job 為 `contents: read`，不會 commit/push。
+- `claude-code-review.yml`: fires a Claude review automatically on every PR (`opened` / `ready_for_review` / `reopened`; not draft, not fork), with **no paths filter** — doc and config changes are reviewed too (six dimensions; the sixth reviews the docs/config diff specifically). The model is the `opus` family alias (always the latest Opus generation); the workflow writes the resolved model id back into the review comment's footer afterwards. The review bot can only comment: `--disallowedTools` blocks `gh pr review` / `gh pr merge` / `gh pr close` plus Write / Edit, so approving and merging stay human decisions.
+- `claude.yml`: triggered by tagging `@claude` in a PR / issue comment (including a reply to an inline review comment), for re-review after fixes and for questions; it runs the latest Opus through `--model opus` as well. Code suggestions go inline in the comment — the job is `contents: read` and never commits or pushes.
 
 ### CD (GitHub Actions)
 
@@ -174,15 +174,15 @@ Every push/PR triggers:
 | Merge to `main` + `pwa/` changed    | Deploy PWA to Cloudflare Pages            |
 | Git tag `v*`                        | Build Extension → `.zip` → GitHub Release |
 
-GitHub Release 內容：release job 會讀取 `docs/release-notes/v<X.Y.Z>.md`（雙語策展內容）放到 Release 正文最上方，並自動把 commit 清單收進 `<details>` 折疊區、補上 Full Changelog。此檔由 `/bump-ver` 產生，必須存在於 tag 指向的 commit；缺檔時 release job 會 fallback 成自動 commit 清單並印 `::warning::`。**先 `/bump-ver` 再打 tag**，順序顛倒會走 fallback。
+Release body: the release job reads `docs/release-notes/v<X.Y.Z>.md` (curated, bilingual) and puts it at the top of the Release, then appends the commit list inside a `<details>` block plus a Full Changelog link. That file is produced by `/bump-ver` and MUST exist in the commit the tag points at; when it is missing, the release job falls back to the auto-generated commit list and prints `::warning::`. **Run `/bump-ver` BEFORE tagging** — the other order takes the fallback.
 
-`CHANGELOG.md` 的寫入時機：兩次 release 之間，每個 `/develop` run 把使用者看得到的變更寫進檔案最上方的 `## 未釋出` 區塊（同一個 commit 內），**絕不**寫進已有 tag 的 `## vX.Y.Z` 條目——版本條目在 tag 打下的那一刻就凍結。`/bump-ver` 是唯一會把 `## 未釋出` 改名成新版本標題的步驟，並只為區塊裡還沒描述到的 commit 補 bullet。細則見 `.claude/rules/user-facing-copy.md` →「Where a change is recorded」。
+When `CHANGELOG.md` is written: between releases, every `/develop` run writes its user-observable change into the `## 未釋出` section at the top of the file, in the same commit as the change, and **never** into an already-tagged `## vX.Y.Z` entry — a version entry is frozen the moment its tag exists. `/bump-ver` is the only step that renames `## 未釋出` to the new version heading, and it only adds bullets for commits that section does not describe yet. Full detail: `.claude/rules/user-facing-copy.md` → "Where a change is recorded".
 
 ### Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 
 ### Dev Script Maintenance Note
 
-`extension/package.json` 的 `dev` 和 `dev:remote` 使用明確的 `concurrently` 列表而非 `pnpm:dev:*` 通配符，以避免 `dev:remote:*` 子腳本被重複抓取。新增 Vite 入口（新的 content script 或 vite config 檔案）時，需同步更新 `dev` 和 `dev:remote` 兩個腳本的列表。
+`extension/package.json`'s `dev` and `dev:remote` use an explicit `concurrently` list rather than the `pnpm:dev:*` wildcard, so the `dev:remote:*` sub-scripts are not picked up twice. When adding a Vite entry (a new content script or vite config file), update the list in BOTH scripts.
 
 ## Coding Style
 
@@ -347,7 +347,8 @@ All development and design go through a **single skill entry: `/develop`**. It t
     ├── develop/        # SKILL.md (router) + references/{code-cycle,design,retro}.md
     ├── distill/        # fold retro reports into durable rules, then clear them
     ├── bump-ver/
-    └── project-init/
+    ├── project-init/
+    └── speak-human-tw/ # vendored de-AI pass (MIT, see VENDORED.md) — run AUTOMATICALLY on CHANGELOG / release-notes / UI copy per rules/user-facing-copy.md Rule 9 — never invoked by the user as part of this project's process
 ```
 
 - **`coder` / `tester` / `reviewer` are abstract.** `/develop` passes `scope` (`frontend` or
@@ -364,17 +365,23 @@ All development and design go through a **single skill entry: `/develop`**. It t
 - `.claude/rules/` is **not deprecated** and not a remote-magic feature — it is load-bearing because
   the agents explicitly read it. `.claude/settings.json` is gitignored (personal, per-developer).
 
-### Retro → Distill 自我改善迴圈
+### Retro → Distill self-improvement loop
 
-- **Retro（產報告）**：每次 `/develop` run 收尾**問一次**要不要做 retrospective——問題併在
-  commit gate 那次 AskUserQuestion 裡（fix mode 也會問，不另加停點），絕不自動跑、同一 run 不重複問。
-  使用者同意後在主 session 依 `develop/references/retro.md` 產出
-  `.claude/reports/<MMDD_HHMM>.md`（在 commit 之前寫、隨功能 commit 一起進 git）— 只寫結論
-  （卡點、改進提案 L#/E#、KPI），**不套用任何提案**。改回收尾詢問的原因（2026-09-16）：報告是
-  唯一進 git、跨機器與跨協作者都看得到的流程紀錄，「想到才要求」在實務上就是不會有人要求。
-- **Distill（蒸餾）**：報告累積數份後，由使用者定期呼叫 `/distill` — 彙整所有報告的提案、
-  跨報告重現的教訓優先、逐項由使用者決定採納與否，套用到 `.claude/rules/`、skills、agents、
-  `AGENTS.md` 等 git-tracked 目標，最後清除已消化的報告。報告是揮發性原料，規則檔才是持久產物。
+- **Retro (produce the report)**: every `/develop` run ASKS ONCE, at the end, whether to write a
+  retrospective — the question rides in the commit-gate AskUserQuestion batch (fix mode included, no
+  extra stop). Never automatic, never asked twice in one run. On a yes, the main session follows
+  `develop/references/retro.md` and writes `.claude/reports/<MMDD_HHMM>.md` — written BEFORE the
+  commit so it rides along in git with the feature. It records conclusions only (friction points,
+  L#/E# proposals, KPIs) and **applies no proposal**. Why the question came back to the run's end
+  (2026-09-16): the report is the only process record that reaches git, and therefore the only one
+  visible across machines and collaborators — "ask for it when you think of it" means, in practice,
+  nobody ever does.
+  The report file itself is 繁體中文; these instructions are not.
+- **Distill**: once several reports have accumulated, the user periodically invokes `/distill`. It
+  aggregates the proposals across all reports (a lesson recurring in more than one report ranks
+  highest), takes a per-item adoption decision from the user, applies the adopted ones to
+  git-tracked targets (`.claude/rules/`, skills, agents, `AGENTS.md`), and finally clears the
+  consumed reports. Reports are volatile raw material; the rule files are the durable product.
 
 ## Local Agent Hooks (optional)
 
