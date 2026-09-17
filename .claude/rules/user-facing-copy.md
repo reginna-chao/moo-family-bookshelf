@@ -124,6 +124,13 @@ Taiwan usage and full-width punctuation（，。、「」）. Half-width for cod
 Latin units. No mainland vocabulary（用「網路」不用「網絡」，用「軟體」不用「軟件」，
 用「品質」不用「質量」）。
 
+**End every bullet that is a sentence with `。`** — a bullet is a sentence whenever it has a verb,
+which in practice is nearly all of them, sub-bullets included. The full stop goes OUTSIDE a closing
+bracket, quote or code span（`…第 5 步。`，`…（附加元件商店上架合規）。`）. Three exceptions take
+no full stop: a bullet that is a bare item name or noun phrase (`Chrome Extension`), a bullet
+ending in `：` that introduces its own sub-list, and any heading. A bullet already ending in
+`！`, `？` or `…` keeps that mark and gains nothing.
+
 ### Rule 8 — Depth cap: one bullet says what changed, not how it works
 
 The v1.7.0 entry passed Rules 1–7 and was still unreadable. The vocabulary was clean; the DEPTH

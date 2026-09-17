@@ -5,6 +5,35 @@
 - Code identifiers, commit messages, branch names: English.
 - User-facing content (UI, docs, comments in docs, and ALL assistant/bot replies in chat / PR / issue comments): 繁體中文.
 - Code comments: English for technical, 繁體中文 acceptable for business logic explanations.
+- **Agent-facing documents are written in English**: everything under `.claude/` (`rules/`,
+  `agents/`, `skills/`) plus `AGENTS.md`, including the comments inside their tree diagrams. Their
+  reader is an agent, not a user, and the long-standing rule files are English — a Chinese rule file
+  is inconsistent with the ones around it. Human-facing text keeps 繁體中文: PR bodies, issue bodies,
+  review-bot replies, and chat. PR and issue TITLES are English.
+
+#### The exemption: 繁中 that is data, not instruction
+
+An agent-facing document legitimately contains 繁體中文 whenever that text is a VALUE the agent must
+emit or match character-for-character, rather than prose telling the agent what to do. Never
+translate these — translating them silently breaks the thing they configure:
+
+- Output the agent prints verbatim: Stop Block headings (`## 📍 目前進度`), AskUserQuestion labels,
+  a skill's closing line, status tags (`作廢`, `TL 建議`, `不適用`).
+- Literal strings written into a file: the `## 未釋出` heading and the `### 問題修正` /
+  `### 功能新增` / `### 效能改善` / `### 安全與隱私` / `### 介面調整` / `### 開發者體驗` section
+  names (`.claude/rules/user-facing-copy.md` Rule 10 and `/bump-ver` both depend on these).
+- Strings the agent matches against: the banned-vocabulary table in `user-facing-copy.md`, its
+  ✅/❌ copy examples, the AI-tell patterns of Rule 9.
+- Anchors into a 繁中 human document: section names of `docs/architecture.md`
+  (e.g. `→ 已接受的殘餘風險`) — translate the anchor and the agent can no longer find the section.
+- Names of languages and products: 繁體中文, 台灣, 讀墨.
+- Whole files whose subject IS 繁中 writing: `.claude/rules/user-facing-copy.md` and the vendored
+  `.claude/skills/speak-human-tw/` (third-party, keep byte-identical to upstream).
+- `.claude/reports/` — retro reports are 繁體中文 by `develop/references/retro.md`; they are a record
+  for humans, and are consumed and deleted by `/distill`.
+
+When it is genuinely unclear which side a passage falls on, leave it and raise it — a wrong
+translation of a matched string fails silently, at the next run, far from the edit.
 
 ### Git Hygiene
 

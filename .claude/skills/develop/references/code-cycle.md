@@ -6,7 +6,7 @@ The full development lifecycle for a code change. You (the `/develop` orchestrat
 
 Every code change runs the Code Modification Workflow, in ONE of two sanctioned forms. **Full cycle** (Phases 0–8 below) is the default. **Fix mode** is the lightweight form — the same workflow with reduced ceremony — and is allowed ONLY when EVERY condition below holds.
 
-The conditions are mechanical: check each one, record the answer. Never pick the mode "by judgment" / 視情況 — a condition that is unmet **or unknown** means full cycle.
+The conditions are mechanical: check each one, record the answer. Never pick the mode "by judgment" — a condition that is unmet **or unknown** means full cycle.
 
 ### Fix-mode eligibility (ALL four must hold)
 
