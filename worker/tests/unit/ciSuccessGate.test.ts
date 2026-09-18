@@ -242,8 +242,25 @@ function resultRefs(block: string): string[] {
 // The `changes` job: outputs, path filters, and how they are referenced
 // ===========================================================================
 
-/** The output names the `changes` job publishes, in file order. */
-function outputKeys(changesBlock: string): string[] {
+/** One `<key>: ${{ steps.<stepId>.outputs.<name> }}` line of a job's outputs. */
+interface OutputBinding {
+  /** The name the output is published under — what `needs.changes.outputs.X` reads. */
+  key: string;
+  /** The step the value is taken from; must be the paths-filter step. */
+  stepId: string;
+  /** The step output the value is taken from; must equal `key`. */
+  name: string;
+}
+
+/**
+ * The `changes` job's `outputs:` block, parsed WHOLE — key, source step and
+ * source output. Reading only the key left of the colon is not enough: the
+ * value is a second, independent spelling of the same name, and a typo there
+ * (`steps.filter.outputs.extensoin`) resolves to the empty string, skips the
+ * job, and shows up nowhere. Deliberately STRICT, like `pathFilters`: an
+ * unparsable line throws instead of being skipped.
+ */
+function outputBindings(changesBlock: string): OutputBinding[] {
   const block = keyBlock(changesBlock, 4, "outputs");
   if (block === null) {
     throw new Error(
@@ -251,16 +268,55 @@ function outputKeys(changesBlock: string): string[] {
         `check job's \`if:\` reads can no longer be enumerated.`,
     );
   }
-  const keys = [...block.matchAll(/^ {6}([A-Za-z0-9_-]+):/gm)].map(
-    (match) => match[1],
-  );
-  if (keys.length === 0) {
+  const bindings: OutputBinding[] = [];
+  for (const line of block.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) {
+      continue;
+    }
+    const match =
+      /^ {6}([A-Za-z0-9_-]+):[ \t]*\$\{\{[ \t]*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)[ \t]*\}\}[ \t]*$/.exec(
+        line,
+      );
+    if (!match) {
+      throw new Error(
+        `Unparsable line in the \`${CHANGES_JOB_ID}\` outputs block: ` +
+          `${JSON.stringify(line)}. The parser expects ` +
+          `\`<key>: \${{ steps.<id>.outputs.<name> }}\`; fix the parser rather ` +
+          `than letting an output go unchecked.`,
+      );
+    }
+    bindings.push({ key: match[1], stepId: match[2], name: match[3] });
+  }
+  if (bindings.length === 0) {
     throw new Error(
       `\`${CHANGES_JOB_ID}.outputs\` parsed to zero names — the scan drifted ` +
         `and every comparison against it would be vacuous.`,
     );
   }
-  return keys;
+  return bindings;
+}
+
+/** The `id:` of the `dorny/paths-filter` step — what its outputs are read under. */
+function pathsFilterStepId(changesBlock: string): string {
+  const start = /^ {6}- uses: dorny\/paths-filter@.*$/m.exec(changesBlock);
+  if (!start) {
+    throw new Error(
+      `No \`dorny/paths-filter\` step in the \`${CHANGES_JOB_ID}\` job — the ` +
+        `step its outputs are read from can no longer be identified.`,
+    );
+  }
+  const rest = changesBlock.slice(start.index + start[0].length);
+  const next = /^ {6}- /m.exec(rest);
+  const step = next ? rest.slice(0, next.index) : rest;
+  const id = /^ {8}id:[ \t]*([A-Za-z0-9_-]+)[ \t]*$/m.exec(step);
+  if (!id) {
+    throw new Error(
+      `The \`dorny/paths-filter\` step has no \`id:\` — every ` +
+        `\`steps.<id>.outputs.*\` reference in \`outputs:\` is then dead.`,
+    );
+  }
+  return id[1];
 }
 
 /**
@@ -402,7 +458,9 @@ const JOBS_WITH_OWN_PERMISSIONS = JOB_IDS_WITH_CHECKOUT.filter(
 const CHANGES_BLOCK = jobBlock(WORKFLOW, CHANGES_JOB_ID);
 const PATH_FILTERS = pathFilters(CHANGES_BLOCK);
 const FILTER_NAMES = nameSet([...PATH_FILTERS.keys()]);
-const OUTPUT_KEYS = nameSet(outputKeys(CHANGES_BLOCK));
+const OUTPUT_BINDINGS = outputBindings(CHANGES_BLOCK);
+const OUTPUT_KEYS = nameSet(OUTPUT_BINDINGS.map((binding) => binding.key));
+const PATHS_FILTER_STEP_ID = pathsFilterStepId(CHANGES_BLOCK);
 const OUTPUT_REF_NAMES = nameSet(outputRefNames(WORKFLOW));
 
 /**
@@ -505,12 +563,18 @@ describe("ci-success gate in .github/workflows/cicd.yml", () => {
 
 describe("ci-success gate enforcement step", () => {
   it("fails the run on a failure or cancelled result", () => {
-    // Reading the results is not enforcing them. Both comparisons and the
-    // non-zero exit are the whole of the enforcement: drop either branch and
-    // that outcome passes silently; turn `exit 1` into `exit 0` and EVERY
-    // outcome does, with `needs` and `results` still perfectly correct above.
-    expect(GATE_BLOCK).toMatch(/\[\s*"\$r"\s*=\s*"failure"\s*\]/);
-    expect(GATE_BLOCK).toMatch(/\[\s*"\$r"\s*=\s*"cancelled"\s*\]/);
+    // Reading the results is not enforcing them. The COMBINED condition is
+    // pinned as one whole line, not as two fragments that happen to be
+    // present: `||` silently rewritten to `&&` leaves both comparisons in the
+    // file and satisfies any fragment match, while no result is ever both
+    // `failure` and `cancelled`, so the gate can never exit non-zero. Dropping
+    // either branch, or turning `exit 1` into `exit 0`, has the same effect
+    // with `needs` and `results` still perfectly correct above. Whitespace is
+    // tolerated only where the shell allows it — inside the test brackets,
+    // around the `=`, around the `||`, and around the `;`.
+    expect(GATE_BLOCK).toMatch(
+      /^[ \t]*if[ \t]+\[[ \t]+"\$r"[ \t]+=[ \t]+"failure"[ \t]+\][ \t]*\|\|[ \t]*\[[ \t]+"\$r"[ \t]+=[ \t]+"cancelled"[ \t]+\][ \t]*;[ \t]*then[ \t]*$/m,
+    );
     expect(GATE_BLOCK).toMatch(/^\s*exit 1[ \t]*$/m);
   });
 
@@ -577,6 +641,33 @@ describe("changes job name consistency", () => {
         OUTPUT_KEYS,
       ),
     ).toEqual(OUTPUT_KEYS);
+  });
+
+  it("wires every output to the paths-filter step's matching output", () => {
+    // The set equality above compares only the names LEFT of the colon. The
+    // value is a fourth spelling: `${{ steps.filter.outputs.extension }}`. A
+    // typo on that side (`…outputs.extensoin`, or a step id that no step
+    // carries) resolves to the empty string, so the output is published as ""
+    // and every job gated on it skips — with nothing red anywhere.
+    expect(
+      PATHS_FILTER_STEP_ID.length,
+      "No usable `id:` on the dorny/paths-filter step; the assertions below " +
+        "would compare every output against an empty step id.",
+    ).toBeGreaterThan(0);
+    expect(OUTPUT_BINDINGS.length).toBeGreaterThan(0);
+    for (const binding of OUTPUT_BINDINGS) {
+      expect(
+        binding.name,
+        `\`${CHANGES_JOB_ID}.outputs.${binding.key}\` reads the step output ` +
+          `\`${binding.name}\`, which is not the filter of the same name.`,
+      ).toBe(binding.key);
+      expect(
+        binding.stepId,
+        `\`${CHANGES_JOB_ID}.outputs.${binding.key}\` reads from step ` +
+          `\`${binding.stepId}\`, but the paths-filter step's id is ` +
+          `\`${PATHS_FILTER_STEP_ID}\` — the reference resolves to "".`,
+      ).toBe(PATHS_FILTER_STEP_ID);
+    }
   });
 });
 
