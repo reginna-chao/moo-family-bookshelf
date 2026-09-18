@@ -5,7 +5,7 @@
 ## 前置需求
 
 - [Cloudflare 帳號](https://dash.cloudflare.com/sign-up)（免費方案即可）
-- Node.js 20+
+- Node.js 22+（wrangler 4.132 以上的硬性需求，Node.js 20 會直接失敗）
 - pnpm 9+
 
 ## 步驟

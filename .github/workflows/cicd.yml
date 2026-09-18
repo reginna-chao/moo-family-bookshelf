@@ -43,6 +43,10 @@ jobs:
             worker:
               - 'worker/**'
               - 'shared/**'
+              # worker/tests/unit/nodeEngineFloor.test.ts guards the root engines.node
+              # floor — without these the guard never runs on a lockfile-only bump.
+              - 'pnpm-lock.yaml'
+              - 'package.json'
               # worker/tests/unit/cleanKvScript.test.ts guards scripts/clean-kv.mjs,
               # which lives outside every package — without this the guard never
               # runs on the very change class it exists to catch.

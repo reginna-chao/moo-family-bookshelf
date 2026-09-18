@@ -98,7 +98,7 @@ moo-family-bookshelf/
 
 ## Build & Development Commands
 
-- Runtime: Node 20+
+- Runtime: Node 22+ (wrangler 4.132+ hard requirement)
 - Install deps: `pnpm install`
 - Dev (extension + PWA, local wrangler): `pnpm dev`
 - Dev (extension + PWA, deployed dev worker): `pnpm dev:remote`
