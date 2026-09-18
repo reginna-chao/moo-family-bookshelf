@@ -1,0 +1,24 @@
+# Every `uses:` in .github/workflows/ is pinned to a full commit SHA (a mutable
+# major tag can be force-pushed onto attacker code, and pnpm/action-setup runs
+# before the secret-bearing step in every deploy/release job). A pinned SHA is
+# frozen, so it needs a bumper: Dependabot opens a weekly PR that moves the SHA
+# to the newest release AND rewrites the trailing `# v<tag>` comment, which is
+# how that comment stays truthful.
+#
+# github-actions only. npm/pnpm dependency bumps go through a /develop run, not
+# Dependabot — they need the full coder -> tester -> reviewer cycle.
+#
+# All actions are grouped into ONE weekly PR (anthropics/claude-code-action
+# releases almost daily, which would otherwise mean up to five separate PRs a
+# week), and the commit subject carries the repo's conventional-commit prefix.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      github-actions:
+        patterns: ["*"]
