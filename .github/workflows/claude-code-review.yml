@@ -31,9 +31,13 @@ jobs:
     # Skip fork PRs: a `pull_request` run from a fork receives no secrets and a
     # read-only token, so the review can never post — it would only fail and
     # leave a red X on an outside contributor's PR.
+    # Skip Dependabot PRs for the same reason: its `pull_request` events read no
+    # Actions secrets and get a forced read-only token, so the review can neither
+    # run nor post. The weekly action-pin bumps still go through human review.
     if: >-
       github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
 
     # Optional: Filter by PR author
     # if: |
@@ -67,13 +71,17 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0 # full history is needed to diff the PR against its base branch
+          # Same opt-out as every checkout in cicd.yml: this job runs no git
+          # network command after checkout (the action takes its token as an
+          # input), so the credential has no reason to stay in .git/config.
+          persist-credentials: false
 
       - name: Run Claude Code Review
         id: claude-review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@a4f54ef2c58884867281bd8e2f8d63352ad019a9 # v1.0.229
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
