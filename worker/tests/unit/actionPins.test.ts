@@ -28,6 +28,14 @@
  * comment records the tag the SHA was resolved from, which is what makes a
  * later `@v6` bump a one-line reviewable diff.
  *
+ * CROSS-REFERENCE CONSISTENCY, a property the per-reference rule cannot see.
+ * `actions/checkout` appears eleven times in `cicd.yml`; a bump that updates
+ * ten of them, or moves a SHA without rewriting its comment, leaves every
+ * individual line well-formed and the FILE self-contradictory — one SHA
+ * carrying two different tags, or one (action, tag) pair resolving to two
+ * SHAs. That is the normal failure mode of a hand-edited bump, and it turns
+ * the comment into a lie, so it is checked across the whole scan.
+ *
  * THE SECOND PROPERTY, and why it lives in this file. A frozen SHA needs a
  * bumper, so `.github/dependabot.yml` opens a weekly `github-actions` PR that
  * moves each SHA and rewrites its `# v<tag>` comment. Those PRs arrive as
@@ -88,10 +96,13 @@
  * workflows — a ref back to `@v5` goes RED naming file and line, a 40-hex ref
  * whose `# v…` comment was removed goes RED, a 39-character and an uppercase
  * ref go RED, an added `uses: ./local-action` stays GREEN, and deleting every
- * `uses:` line goes RED on the count floor. For the Dependabot half: dropping
- * the author condition goes RED even when a COMMENTED-OUT copy of it is left
- * behind in the file, and removing `dependabot.yml` from the fixture's parent
- * goes RED on the companion.
+ * `uses:` line goes RED on the count floor. For the cross-reference half: one
+ * SHA under two tags goes RED naming both sites, and one tag over two SHAs
+ * goes RED. For the Dependabot half: dropping the author condition goes RED
+ * even when a COMMENTED-OUT copy of it is left behind in the file, removing
+ * `dependabot.yml` from the fixture's parent goes RED on the companion, and a
+ * fixture whose FIRST job carries the condition while `claude-review:` does
+ * not goes RED — the case that anchoring to the job by name is what fixes.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -169,8 +180,13 @@ const USES_LINE_PATTERN = /^[ \t]*(?:-[ \t]+)?uses:[ \t]*(\S+)[ \t]*(.*)$/;
 /** `<owner>/<repo>[/<path>]@<40 lowercase hex>` — the only accepted shape. */
 const PINNED_REF_PATTERN = /^[^@\s]+@[0-9a-f]{40}$/;
 
-/** The tag the SHA was resolved from, as a trailing comment. */
-const VERSION_COMMENT_PATTERN = /^#[ \t]*v\d+(?:\.\d+)*\b/;
+/**
+ * The tag the SHA was resolved from, as a trailing comment. Group 1 is the tag
+ * alone — a PREFIX match, so trailing prose (`# v5.1.0 — bumped 2026-09`) is
+ * allowed and the cross-reference rule below can compare tags rather than
+ * whole comments.
+ */
+const VERSION_COMMENT_PATTERN = /^#[ \t]*(v\d+(?:\.\d+)*)\b/;
 
 /** An action stored in this repository — reviewed here, nothing to pin. */
 const LOCAL_REF_PATTERN = /^\.{1,2}\//;
@@ -198,6 +214,14 @@ const DEPENDABOT_SKIP_PATTERN = /user\.login\s*!=\s*['"]dependabot\[bot\]['"]/;
 
 /** A block-scalar `if:` key — `if: >-`, `if: |`, `if: >`. */
 const BLOCK_IF_PATTERN = /^([ \t]*)if:[ \t]*[>|][-+]?[ \t]*$/m;
+
+/** The review job, whose `if:` carries the condition — anchored by name. */
+const REVIEW_JOB_ID = "claude-review";
+
+const REVIEW_JOB_PATTERN = new RegExp(`^ {2}${REVIEW_JOB_ID}:[ \\t]*$`, "m");
+
+/** Any 2-space job key — where the review job's block ends. */
+const JOB_KEY_PATTERN = /^ {2}[A-Za-z0-9_-]+:[ \t]*$/m;
 
 /** One `uses:` reference, located precisely enough to name in a failure. */
 interface UsesReference {
@@ -271,6 +295,19 @@ function actionName(value: string): string {
 }
 
 /**
+ * The version tag inside a `# v…` comment, ignoring any trailing prose. The
+ * cross-reference rule compares THIS rather than the raw comment: the header
+ * documents prose after the tag as allowed, so `# v5.1.0` and
+ * `# v5.1.0 (dependabot)` on two lines pinning the same SHA agree and must not
+ * be reported as a contradiction. A comment with no tag at all falls back to
+ * itself — it is already red in the per-reference rule, so nothing is masked.
+ */
+function versionTag(comment: string): string {
+  const match = VERSION_COMMENT_PATTERN.exec(comment);
+  return match ? match[1] : comment;
+}
+
+/**
  * One of the scanned workflow files, as text. Throws when the file is not in
  * the scan: a renamed or deleted workflow must surface as a broken guard, not
  * as a rule with nothing left to check.
@@ -289,20 +326,43 @@ function readScannedWorkflow(file: string, scanned: string[]): string {
 }
 
 /**
- * The FIRST block-scalar `if:` of a workflow — the job-level condition — with
- * its commentary stripped. Both halves matter: scoping to the block keeps the
- * commented-out `# if: |` example that sits BELOW it out of the match, and
- * dropping `#` lines keeps a commented copy of the condition from satisfying
- * the rule. The block ends at the first non-blank line indented no further
- * than the `if:` key itself.
+ * The lines of the review job, from its key up to the next 2-space job key (or
+ * EOF). Anchoring to the job by NAME is what stops the `if:` lookup below from
+ * reading some OTHER job's condition: "the first block-scalar `if:` in the
+ * file" is only the review job's while the review job happens to be first, and
+ * a workflow that later grows a preflight job in front of it would go on
+ * passing while the review job itself lost the condition.
+ */
+function reviewJobBlock(text: string, file: string): string {
+  const start = REVIEW_JOB_PATTERN.exec(text);
+  if (!start) {
+    throw new Error(
+      `Job \`${REVIEW_JOB_ID}\` not found in ${file}. This guard reads that ` +
+        `job's condition — rename the anchor deliberately, never leave the ` +
+        `rule reading a job that no longer exists.`,
+    );
+  }
+  const rest = text.slice(start.index + start[0].length);
+  const next = JOB_KEY_PATTERN.exec(rest);
+  return next ? rest.slice(0, next.index) : rest;
+}
+
+/**
+ * The block-scalar `if:` of one job — its condition — with the commentary
+ * stripped. Both halves matter: scoping to the block keeps the commented-out
+ * `# if: |` example that sits BELOW it out of the match, and dropping `#`
+ * lines keeps a commented copy of the condition from satisfying the rule. The
+ * block ends at the first non-blank line indented no further than the `if:`
+ * key itself.
  */
 function jobLevelIfBlock(text: string, file: string): string {
   const start = BLOCK_IF_PATTERN.exec(text);
   if (!start) {
     throw new Error(
-      `No block-scalar \`if:\` found in ${file}. This guard reads the job's ` +
-        `condition out of that block — respell the condition there, or teach ` +
-        `this helper the new shape; never leave the rule reading nothing.`,
+      `No block-scalar \`if:\` found in ${REVIEW_JOB_ID} of ${file}. This ` +
+        `guard reads the job's condition out of that block — respell the ` +
+        `condition there, or teach this helper the new shape; never leave the ` +
+        `rule reading nothing.`,
     );
   }
   const indent = start[1].length;
@@ -414,6 +474,46 @@ describe("action pins across .github/workflows", () => {
       ).toMatch(VERSION_COMMENT_PATTERN);
     },
   );
+
+  it("never spells one pin two ways", () => {
+    // A half-finished bump — SHA moved but the comment did not, or 10 of 11
+    // occurrences updated — leaves exactly this shape: the same ref carrying two
+    // different version comments, or one (action, version) resolving to two SHAs.
+    // Neither is reachable from the per-reference rule above, and both make the
+    // `# v<tag>` comment a lie, which is what the comment exists to prevent.
+    //
+    // Compared on the version TAG, not the raw comment: the header allows prose
+    // after the tag, so two lines pinning one SHA as `# v5.1.0` and
+    // `# v5.1.0 (dependabot)` agree and must not be called a contradiction.
+    const commentByRef = new Map<string, UsesReference>();
+    const refByVersion = new Map<string, UsesReference>();
+    for (const reference of PINNED_REFERENCES) {
+      const priorRef = commentByRef.get(reference.value);
+      if (priorRef) {
+        expect(
+          versionTag(reference.comment),
+          `${reference.file}:${reference.line} pins \`${reference.value}\` as ` +
+            `\`${reference.comment}\`, but ${priorRef.file}:${priorRef.line} ` +
+            `calls the same SHA \`${priorRef.comment}\`. One of the two is wrong.`,
+        ).toBe(versionTag(priorRef.comment));
+      } else {
+        commentByRef.set(reference.value, reference);
+      }
+      const versionKey = `${actionName(reference.value)} ${versionTag(reference.comment)}`;
+      const priorVersion = refByVersion.get(versionKey);
+      if (priorVersion) {
+        expect(
+          reference.value,
+          `${reference.file}:${reference.line} and ` +
+            `${priorVersion.file}:${priorVersion.line} both claim ` +
+            `\`${versionKey}\` but pin different SHAs — a bump that stopped ` +
+            `halfway through the file.`,
+        ).toBe(priorVersion.value);
+      } else {
+        refByVersion.set(versionKey, reference);
+      }
+    }
+  });
 });
 
 describe("dependabot and the review workflow", () => {
@@ -436,9 +536,10 @@ describe("dependabot and the review workflow", () => {
     ).toContain(GITHUB_ACTIONS_ECOSYSTEM);
 
     const workflow = readScannedWorkflow(REVIEW_WORKFLOW_FILE, WORKFLOW_FILES);
+    const reviewJob = reviewJobBlock(workflow, REVIEW_WORKFLOW_FILE);
     expect(
-      jobLevelIfBlock(workflow, REVIEW_WORKFLOW_FILE),
-      `${REVIEW_WORKFLOW_FILE}'s job-level \`if:\` does not exclude ` +
+      jobLevelIfBlock(reviewJob, REVIEW_WORKFLOW_FILE),
+      `${REVIEW_WORKFLOW_FILE}'s ${REVIEW_JOB_ID} \`if:\` does not exclude ` +
         `dependabot[bot], so every weekly Dependabot pull request triggers a ` +
         `review that cannot run: GitHub gives a bot-authored pull_request ` +
         `event no Actions secrets and a read-only token, so the job dies ` +
