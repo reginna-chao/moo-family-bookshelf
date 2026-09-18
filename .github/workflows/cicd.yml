@@ -7,6 +7,14 @@ on:
   pull_request:
     branches: [main]
 
+# Default token scope for the whole workflow: every job inherits read-only, so a
+# fork or self-hoster gets the same guarantee without touching repository
+# settings. A job that needs more declares its own `permissions:` block, which
+# REPLACES this one wholesale rather than adding to it — `deploy-pages`,
+# `release-extension` and `release-extension-firefox` already do.
+permissions:
+  contents: read
+
 jobs:
   # ── Change detection ────────────────────────────────
   # Per-package path filter. Tag pushes ignore these outputs
@@ -15,6 +23,13 @@ jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
+    # On `pull_request`, dorny/paths-filter lists the changed files through the
+    # GitHub REST API, which needs `pull-requests: read` (its README, "Supported
+    # workflows"). A job-level block replaces the top-level one, so `contents:
+    # read` has to be repeated here.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       extension: ${{ steps.filter.outputs.extension }}
       pwa: ${{ steps.filter.outputs.pwa }}
@@ -22,7 +37,21 @@ jobs:
       site: ${{ steps.filter.outputs.site }}
 
     steps:
+      # Every `actions/checkout` in this workflow opts out of credential
+      # persistence: no job runs a git network command after checkout, so the
+      # token has no reason to stay in .git/config, where a compromised
+      # dependency's install script could read it during `pnpm install`. It
+      # matters most in the two release jobs, which hold `contents: write` and
+      # then run the whole build toolchain (vite, tsx, web-ext). The `gh
+      # release` calls there are unaffected: they authenticate with GH_TOKEN
+      # from the step env, and the remote URL gh reads for owner/repo is not
+      # what gets dropped. `git describe --tags` stays local too — checkout
+      # fetches the tags (fetch-depth: 0) before dropping the credential.
+      # Caveat: on push/tag events paths-filter falls back to `git fetch origin`
+      # instead of the API — unauthenticated, which this public repo allows.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: dorny/paths-filter@v3
         id: filter
@@ -73,6 +102,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -119,6 +150,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -164,6 +197,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -203,6 +238,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -256,6 +293,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -338,6 +377,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -365,6 +406,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -391,6 +434,7 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.site == 'true' }}
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
@@ -399,6 +443,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: actions/configure-pages@v5
 
@@ -424,6 +470,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -451,6 +499,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -483,6 +533,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
@@ -588,6 +639,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v5
 
