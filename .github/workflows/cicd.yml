@@ -434,6 +434,7 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.site == 'true' }}
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:

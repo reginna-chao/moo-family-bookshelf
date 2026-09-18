@@ -46,7 +46,11 @@
  *      credential rule is workflow-wide, not CI-only: EVERY
  *      `actions/checkout` step in the file must opt out, CD jobs and second
  *      checkouts of the same job included, because a leaked credential does
- *      not care which job's `.git/config` it was left in.
+ *      not care which job's `.git/config` it was left in. The mirror image is
+ *      pinned too: a job-level `permissions:` block REPLACES the top-level
+ *      one rather than extending it, so any job that declares its own must
+ *      restate `contents:` or its checkout runs with no repository read at
+ *      all — which only passes today because this repository is public.
  *
  * HOW IT AVOIDS PASSING VACUOUSLY. The scan is parsed out of the file by
  * regex, so a drifted pattern (or a moved file) could match nothing and make
@@ -386,6 +390,15 @@ const JOB_IDS_WITH_CHECKOUT = JOB_IDS.filter(
   (id) => checkoutSteps(jobBlock(WORKFLOW, id)).length > 0,
 );
 
+/**
+ * The checkout jobs that declare their OWN `permissions:` block, and so no
+ * longer inherit the top-level `contents: read`. A job without a block is
+ * exempt by construction: it gets the top-level scope unchanged.
+ */
+const JOBS_WITH_OWN_PERMISSIONS = JOB_IDS_WITH_CHECKOUT.filter(
+  (id) => keyBlock(jobBlock(WORKFLOW, id), 4, "permissions") !== null,
+);
+
 const CHANGES_BLOCK = jobBlock(WORKFLOW, CHANGES_JOB_ID);
 const PATH_FILTERS = pathFilters(CHANGES_BLOCK);
 const FILTER_NAMES = nameSet([...PATH_FILTERS.keys()]);
@@ -426,6 +439,19 @@ const EXPECTED_FILTER_NAMES = ["extension", "pwa", "worker"];
  * not an equality: adding a job is legitimate, and the rule then covers it.
  */
 const EXPECTED_CHECKOUT_COUNT = 13;
+
+/**
+ * The checkout jobs that override the token scope today. Positive companion to
+ * the "restate contents:" rule — a `keyBlock` that stopped matching would
+ * empty the list and the rule would assert nothing. Containment, not equality:
+ * a new job may legitimately declare a block, and the rule then covers it.
+ */
+const EXPECTED_JOBS_WITH_OWN_PERMISSIONS = [
+  "changes",
+  "deploy-pages",
+  "release-extension",
+  "release-extension-firefox",
+];
 
 describe("ci-success gate in .github/workflows/cicd.yml", () => {
   it("reads the workflow from a path that exists", () => {
@@ -587,6 +613,31 @@ describe("workflow token permissions", () => {
     // no read access to the repository at all and the checkout above fails.
     expect(block).toMatch(/^ {6}contents:[ \t]*read[ \t]*$/m);
   });
+
+  it("finds the checkout jobs that declare their own permissions block", () => {
+    // Positive companion to the rule below: if `keyBlock` stopped matching a
+    // job-level `permissions:`, the list would empty and the rule would run
+    // zero cases while staying green.
+    for (const jobId of EXPECTED_JOBS_WITH_OWN_PERMISSIONS) {
+      expect(JOBS_WITH_OWN_PERMISSIONS).toContain(jobId);
+    }
+  });
+
+  it.each(JOBS_WITH_OWN_PERMISSIONS)(
+    "keeps repository read in %s's own permissions block",
+    (jobId) => {
+      // The general form of the `changes` case above. A job-level block
+      // REPLACES the top-level one wholesale, so a job that declares only what
+      // it additionally needs (`pages: write`, `contents: write`, …) silently
+      // drops to `contents: none` — and its checkout then works only because
+      // this repository is public. On a private repo, or a fork made private,
+      // the same workflow fails at checkout. `write` satisfies this: it
+      // implies read, and the two release jobs legitimately need it.
+      const block = keyBlock(jobBlock(WORKFLOW, jobId), 4, "permissions");
+      expect(block).not.toBeNull();
+      expect(block).toMatch(/^ {6}contents:[ \t]*(read|write)[ \t]*$/m);
+    },
+  );
 
   it("finds a checkout step in every CI job and across the whole workflow", () => {
     // Cross-check FIRST, so a step the slicer cannot see reports as itself
