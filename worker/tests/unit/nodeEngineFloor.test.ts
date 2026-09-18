@@ -20,6 +20,12 @@
  * never via `process.cwd()`), so a dependency bump that raises wrangler's
  * requirement fails here instead of in a self-hoster's terminal.
  *
+ * KNOWN BOUNDARY. The comparison is root `engines.node` vs the INSTALLED
+ * wrangler, nothing else: `vitest`, `typescript`, `@cloudflare/workers-types`
+ * and the extension / PWA devDependencies go uncompared, so a bump raising one
+ * of THEIR Node floors still relies on a human reading `engines` afterwards.
+ * Extending means iterating a list of packages -- deliberately left out.
+ *
  * NO `semver` DEPENDENCY. `semver` is not a direct dependency of `worker/`, and
  * a transitive package can vanish on the next bump. Both strings are simple
  * `>=X[.Y[.Z]]` ranges today, so `parseMinimumVersion()` handles exactly that
