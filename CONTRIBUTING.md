@@ -6,8 +6,8 @@ Thank you for your interest in contributing! This guide covers the development s
 
 ### Prerequisites
 
-- **Node.js** 20+
-- **pnpm** 9+
+- **Node.js** 22+ (wrangler 4.132+ hard requirement)
+- **pnpm** 11+
 - **Git**
 
 ### Clone & Install
