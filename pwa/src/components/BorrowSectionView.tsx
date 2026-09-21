@@ -6,6 +6,8 @@ export interface BorrowSectionProps {
   title: string;
   active: BorrowRequest[];
   archived: BorrowRequest[];
+  /** Shown above the expanded history list; states how many records are kept. */
+  historyHint: string;
   renderActions: (request: BorrowRequest) => BorrowAction[];
   resolveOtherPartyName: (request: BorrowRequest) => string;
 }
@@ -14,6 +16,7 @@ export function BorrowSectionView({
   title,
   active,
   archived,
+  historyHint,
   renderActions,
   resolveOtherPartyName,
 }: BorrowSectionProps) {
@@ -58,16 +61,19 @@ export function BorrowSectionView({
               : `顯示歷史紀錄 (${archived.length})`}
           </button>
           {showArchived && (
-            <div className="flex flex-col gap-2 mt-2">
-              {archived.map((req) => (
-                <BorrowCard
-                  key={req.requestId}
-                  request={req}
-                  otherPartyName={resolveOtherPartyName(req)}
-                  actions={renderActions(req)}
-                />
-              ))}
-            </div>
+            <>
+              <p className="text-xs text-gray-400 mt-2 mb-2">{historyHint}</p>
+              <div className="flex flex-col gap-2 mt-2">
+                {archived.map((req) => (
+                  <BorrowCard
+                    key={req.requestId}
+                    request={req}
+                    otherPartyName={resolveOtherPartyName(req)}
+                    actions={renderActions(req)}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}

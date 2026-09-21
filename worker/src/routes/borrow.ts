@@ -366,9 +366,10 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
   // `trimBorrowIndex` (services/borrowIndex.ts) now enforces it on every write
   // — the index holds the live requests plus at most BORROW_HISTORY_KEEP
   // terminal ones PER BORROWER. Live requests are deliberately NOT trimmed
-  // (evicting one would strand a lent book), so the bound is "live + 20 per
-  // borrower", not a constant; the PENDING half of "live" is bounded instead at
-  // the boundary above, by BORROW_MAX_PENDING_PER_BORROWER.
+  // (evicting one would strand a lent book), so the bound is "live +
+  // BORROW_HISTORY_KEEP per borrower", not a constant; the PENDING half of
+  // "live" is bounded instead at the boundary above, by
+  // BORROW_MAX_PENDING_PER_BORROWER.
   //
   // The cap is not the only thing that shrinks the index, and it could not be:
   // it is keyed on `borrowerId`, and a sync-code holder can mint fresh
