@@ -26,7 +26,7 @@ extension/src/
 
 shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pwa/ and worker/
 ├── api/            # Wire types (BoolFlag / envelope / family / personal-books / public-shelf / verify records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf payload validation
-├── borrow/         # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中 string)
+├── borrow/         # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中 string) + borrow-history cap and its UI hints
 ├── config/         # Readmoo host/selector config, report links
 ├── hostNote/       # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 ├── icons/          # Inline brand SVG paths

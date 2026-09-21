@@ -9,6 +9,10 @@ import { useFamilyData } from "./FamilyDataContext";
 import { BorrowAction } from "./BorrowRequestCard";
 import { BorrowSection } from "./BorrowSection";
 import {
+  BORROW_HISTORY_HINT_INCOMING,
+  BORROW_HISTORY_HINT_OUTGOING,
+} from "moo-family-bookshelf-shared/borrow/history";
+import {
   ReadmooLendError,
   ReadmooMember,
   closeLendDialog,
@@ -433,6 +437,7 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
         title="收件匣"
         active={incoming.active}
         archived={incoming.archived}
+        historyHint={BORROW_HISTORY_HINT_INCOMING}
         renderActions={renderIncomingActions}
         resolveOtherPartyName={resolveIncomingOtherParty}
       />
@@ -440,6 +445,7 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
         title="寄件匣"
         active={outgoing.active}
         archived={outgoing.archived}
+        historyHint={BORROW_HISTORY_HINT_OUTGOING}
         renderActions={renderOutgoingActions}
         resolveOtherPartyName={resolveOutgoingOtherParty}
       />

@@ -2208,6 +2208,16 @@
   font-size: 12px;
 }
 
+/* Sits above the expanded history list, so the reader meets the retention rule
+   before the records. Mirrors the PWA's `text-xs text-gray-400 mt-2 mb-2`; the
+   top margin restores the gap the list's own 8px top margin used to give the
+   toggle button, and the bottom margin collapses with that same 8px. */
+.moo-borrow-section__history-hint {
+  color: var(--moo-text-faint);
+  font-size: 12px;
+  margin: 8px 0 8px 0;
+}
+
 .moo-borrow-section__archived-list {
   display: flex;
   flex-direction: column;

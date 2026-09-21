@@ -53,6 +53,13 @@ import {
   type BorrowRequest,
   BorrowStatus,
 } from "@/api/client";
+// Production-anchored copy: the hint sentences and the cap they quote come from
+// the shared module the UI renders, never retyped here.
+import {
+  BORROW_HISTORY_HINT_INCOMING,
+  BORROW_HISTORY_HINT_OUTGOING,
+  BORROW_HISTORY_KEEP,
+} from "moo-family-bookshelf-shared/borrow/history";
 
 const OWNER_ID = "user-owner123";
 const BORROWER_ID = "user-borrower456";
@@ -1162,6 +1169,116 @@ describe("BorrowTab", () => {
         );
       });
       expect(mockRestoreLibrarySearch).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * History cap hint: each box states how many finished records it keeps, and
+   * 收件匣 / 寄件匣 say DIFFERENT things (the cap is per borrower, so the
+   * outbox as a whole is bounded while the inbox holds one allowance per
+   * family member). The two sentences share substrings, so every assertion
+   * uses `getByText` / `queryByText` with the imported constant — RTL matches
+   * a string matcher against the node's FULL normalized text — plus a negative
+   * assertion on the sibling variant (.claude/rules/test.md → "Substring copy
+   * variants need exact equality").
+   */
+  describe("history cap hint", () => {
+    /**
+     * 收件匣 gets 2 archived records (the user owns the books), 寄件匣 gets 1
+     * (the user is the borrower), so each section's toggle label is unique.
+     */
+    function archivedOnBothSidesClient(): ApiClient {
+      return createMockApiClient({
+        listBorrowRequests: vi.fn().mockResolvedValue([
+          makeRequest({
+            requestId: "req-in-returned",
+            status: BorrowStatus.RETURNED,
+          }),
+          makeRequest({
+            requestId: "req-in-rejected",
+            status: BorrowStatus.REJECTED,
+          }),
+          makeRequest({
+            requestId: "req-out-cancelled",
+            ownerId: BORROWER_ID,
+            borrowerId: OWNER_ID,
+            status: BorrowStatus.CANCELLED,
+          }),
+        ]),
+      });
+    }
+
+    it("shows neither cap hint while both history lists are collapsed", async () => {
+      renderBorrowTab(archivedOnBothSidesClient(), { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("顯示歷史紀錄 (2)")).toBeInTheDocument();
+      });
+      expect(screen.getByText("顯示歷史紀錄 (1)")).toBeInTheDocument();
+
+      expect(
+        screen.queryByText(BORROW_HISTORY_HINT_INCOMING),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(BORROW_HISTORY_HINT_OUTGOING),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows only the 收件匣 cap hint after expanding the 收件匣 history", async () => {
+      renderBorrowTab(archivedOnBothSidesClient(), { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("顯示歷史紀錄 (2)")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("顯示歷史紀錄 (2)"));
+
+      const hint = await screen.findByText(BORROW_HISTORY_HINT_INCOMING);
+      expect(hint).toBeInTheDocument();
+      // The hint must quote the cap the Worker actually enforces: a sentence
+      // that stops interpolating the constant goes red here.
+      expect(hint).toHaveTextContent(String(BORROW_HISTORY_KEEP));
+      expect(
+        screen.queryByText(BORROW_HISTORY_HINT_OUTGOING),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows only the 寄件匣 cap hint after expanding the 寄件匣 history", async () => {
+      renderBorrowTab(archivedOnBothSidesClient(), { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("顯示歷史紀錄 (1)")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("顯示歷史紀錄 (1)"));
+
+      const hint = await screen.findByText(BORROW_HISTORY_HINT_OUTGOING);
+      expect(hint).toBeInTheDocument();
+      expect(hint).toHaveTextContent(String(BORROW_HISTORY_KEEP));
+      expect(
+        screen.queryByText(BORROW_HISTORY_HINT_INCOMING),
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides the cap hint again after clicking 隱藏歷史紀錄", async () => {
+      renderBorrowTab(archivedOnBothSidesClient(), { userId: OWNER_ID });
+
+      await waitFor(() => {
+        expect(screen.getByText("顯示歷史紀錄 (2)")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("顯示歷史紀錄 (2)"));
+
+      expect(
+        await screen.findByText(BORROW_HISTORY_HINT_INCOMING),
+      ).toBeInTheDocument();
+
+      // Only the 收件匣 section is expanded, so this label is unambiguous.
+      fireEvent.click(screen.getByText("隱藏歷史紀錄"));
+
+      await waitFor(() => {
+        expect(
+          screen.queryByText(BORROW_HISTORY_HINT_INCOMING),
+        ).not.toBeInTheDocument();
+      });
+      expect(screen.getByText("顯示歷史紀錄 (2)")).toBeInTheDocument();
     });
   });
 });

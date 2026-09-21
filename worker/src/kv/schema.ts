@@ -81,6 +81,12 @@ export const TERMINAL_BORROW_STATUSES: ReadonlySet<BorrowStatus> = new Set([
  * How many TERMINAL borrow records a family's index keeps PER `borrowerId`,
  * newest first by `updatedAt`.
  *
+ * Re-exported from `shared/src/borrow/history.ts`, which owns the value: the
+ * same number is rendered in the Extension / PWA borrow tabs
+ * (`BORROW_HISTORY_HINT_OUTGOING` / `BORROW_HISTORY_HINT_INCOMING` in that
+ * module), and a hint that disagreed with the trim would promise the user
+ * history that is already deleted. Importers here keep this path.
+ *
  * The index is a single KV value rewritten on every borrow write, so its size
  * is both the read cost of `GET /api/family/:id/borrow` and the write cost of
  * every create / status update. Without a cap it grows forever: before this
@@ -91,18 +97,18 @@ export const TERMINAL_BORROW_STATUSES: ReadonlySet<BorrowStatus> = new Set([
  * member's finished borrows evict everyone else's history, i.e. one member
  * silently destroying another's records on shared data. Grouping by borrower
  * means a member can only ever push out their OWN oldest entries. The
- * family-level bound is therefore (members × 20) terminal records plus every
- * live one, not a flat 20.
+ * family-level bound is therefore (members × 50) terminal records plus every
+ * live one, not a flat 50.
  *
- * 20 is a display bound, not a storage one — it is roughly what a member
+ * 50 is a display bound, not a storage one — it is roughly what a member
  * scrolls through in the borrow tab's history area, and a household of two to
  * a handful of members generates that over months, so the cap is invisible in
- * ordinary use. User-visible consequence, stated in CHANGELOG.md: each member's
- * finished-borrow history shows at most 20 items and older ones are removed
- * (their `borrow:{requestId}` keys are deleted with them). Active requests are
- * never affected.
+ * ordinary use. User-visible consequence, stated in CHANGELOG.md and now shown
+ * in the borrow tab itself: each member's finished-borrow history shows at most
+ * 50 items and older ones are removed (their `borrow:{requestId}` keys are
+ * deleted with them). Active requests are never affected.
  */
-export const BORROW_HISTORY_KEEP = 20;
+export { BORROW_HISTORY_KEEP } from "moo-family-bookshelf-shared/borrow/history";
 
 /**
  * How many PENDING borrow requests ONE borrower may have open in a family at a

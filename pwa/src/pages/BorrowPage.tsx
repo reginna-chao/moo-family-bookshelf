@@ -10,6 +10,10 @@ import { useManualLendNotice } from "@/hooks/useManualLendNotice";
 import { ManualLendDialog } from "@/components/ManualLendDialog";
 import { type BorrowAction } from "@/components/BorrowCard";
 import { BorrowSectionView } from "@/components/BorrowSectionView";
+import {
+  BORROW_HISTORY_HINT_INCOMING,
+  BORROW_HISTORY_HINT_OUTGOING,
+} from "moo-family-bookshelf-shared/borrow/history";
 
 export interface BorrowPageProps {
   userId: string;
@@ -229,6 +233,7 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
         title="收件匣"
         active={buckets.incoming.active}
         archived={buckets.incoming.archived}
+        historyHint={BORROW_HISTORY_HINT_INCOMING}
         renderActions={(req) => buildActions(req, "incoming")}
         resolveOtherPartyName={resolveIncomingOtherParty}
       />
@@ -236,6 +241,7 @@ export function BorrowPage({ userId, apiClient }: BorrowPageProps) {
         title="寄件匣"
         active={buckets.outgoing.active}
         archived={buckets.outgoing.archived}
+        historyHint={BORROW_HISTORY_HINT_OUTGOING}
         renderActions={(req) => buildActions(req, "outgoing")}
         resolveOtherPartyName={resolveOutgoingOtherParty}
       />

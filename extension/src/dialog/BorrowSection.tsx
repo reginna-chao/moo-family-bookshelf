@@ -6,6 +6,8 @@ export interface BorrowSectionProps {
   title: string;
   active: BorrowRequest[];
   archived: BorrowRequest[];
+  /** Shown above the expanded history list; states how many records are kept. */
+  historyHint: string;
   renderActions: (request: BorrowRequest) => BorrowAction[];
   resolveOtherPartyName: (request: BorrowRequest) => string;
 }
@@ -14,6 +16,7 @@ export function BorrowSection({
   title,
   active,
   archived,
+  historyHint,
   renderActions,
   resolveOtherPartyName,
 }: BorrowSectionProps) {
@@ -58,16 +61,19 @@ export function BorrowSection({
               : `顯示歷史紀錄 (${archived.length})`}
           </button>
           {showArchived && (
-            <div className="moo-borrow-section__archived-list">
-              {archived.map((req) => (
-                <BorrowRequestCard
-                  key={req.requestId}
-                  request={req}
-                  otherPartyName={resolveOtherPartyName(req)}
-                  actions={renderActions(req)}
-                />
-              ))}
-            </div>
+            <>
+              <p className="moo-borrow-section__history-hint">{historyHint}</p>
+              <div className="moo-borrow-section__archived-list">
+                {archived.map((req) => (
+                  <BorrowRequestCard
+                    key={req.requestId}
+                    request={req}
+                    otherPartyName={resolveOtherPartyName(req)}
+                    actions={renderActions(req)}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
