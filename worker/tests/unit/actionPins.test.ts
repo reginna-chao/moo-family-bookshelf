@@ -37,12 +37,12 @@
  * the comment into a lie, so it is checked across the whole scan.
  *
  * THE SECOND PROPERTY, and why it lives in this file. A frozen SHA needs a
- * bumper, so `.github/dependabot.yml` opens a weekly `github-actions` PR that
+ * bumper, so `.github/dependabot.yml` opens a monthly `github-actions` PR that
  * moves each SHA and rewrites its `# v<tag>` comment. Those PRs arrive as
  * `pull_request` events from `dependabot[bot]`, which GitHub deliberately
  * starves: no Actions secrets, a forced read-only `GITHUB_TOKEN`. The Claude
  * review workflow needs both, so on a Dependabot PR it fails before the model
- * call and leaves a red X on every weekly bump — noise on exactly the PRs that
+ * call and leaves a red X on every monthly bump — noise on exactly the PRs that
  * keep the pins fresh, until someone starts ignoring the X. The review job's
  * `if:` must therefore exclude that author. It is pinned HERE rather than in a
  * file of its own because it is the same feature: the pin rule creates the
@@ -200,7 +200,7 @@ const DOCKER_REF_PATTERN = /^docker:\/\//;
  */
 const DEPENDABOT_CONFIG = resolve(WORKFLOWS_DIR, "../dependabot.yml");
 
-/** The ecosystem whose weekly PRs the review job must skip. */
+/** The ecosystem whose monthly PRs the review job must skip. */
 const GITHUB_ACTIONS_ECOSYSTEM = 'package-ecosystem: "github-actions"';
 
 /** The workflow whose job-level `if:` carries the author condition. */
@@ -526,7 +526,7 @@ describe("dependabot and the review workflow", () => {
       existsSync(DEPENDABOT_CONFIG),
       `No dependabot.yml at ${DEPENDABOT_CONFIG}. The SHA pins above are ` +
         `frozen by design and Dependabot is what bumps them — without it they ` +
-        `silently age instead of being reviewed weekly.`,
+        `silently age instead of being reviewed monthly.`,
     ).toBe(true);
     expect(
       readFileSync(DEPENDABOT_CONFIG, "utf8"),
@@ -540,7 +540,7 @@ describe("dependabot and the review workflow", () => {
     expect(
       jobLevelIfBlock(reviewJob, REVIEW_WORKFLOW_FILE),
       `${REVIEW_WORKFLOW_FILE}'s ${REVIEW_JOB_ID} \`if:\` does not exclude ` +
-        `dependabot[bot], so every weekly Dependabot pull request triggers a ` +
+        `dependabot[bot], so every monthly Dependabot pull request triggers a ` +
         `review that cannot run: GitHub gives a bot-authored pull_request ` +
         `event no Actions secrets and a read-only token, so the job dies ` +
         `before the model call and leaves a red X on the very PRs that keep ` +
