@@ -33,7 +33,7 @@ jobs:
     # leave a red X on an outside contributor's PR.
     # Skip Dependabot PRs for the same reason: its `pull_request` events read no
     # Actions secrets and get a forced read-only token, so the review can neither
-    # run nor post. The weekly action-pin bumps still go through human review.
+    # run nor post. The monthly action-pin bumps still go through human review.
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
