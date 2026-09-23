@@ -441,9 +441,24 @@ Workers Logs 在本專案採用的方案上也無法對自訂欄位設定警示�
 
 `[observability]` 的 `head_sampling_rate = 1`（`wrangler.toml:5-8`、`:70-72`），加上中介層排在限流之前，被 429 擋下的請求同樣會輸出一行——per-IP 上限節流的是回應，不是 log 事件。免費方案下，Worker 自身的請求上限（約 100k 次/日）會比 log 額度（200k events/日，見 `wrangler.toml:5` 註解）先觸頂，因此代價是「一天的額度有一半被雜訊吃掉，真正重要的 `console.error`（例如 kicked 墓碑寫入失敗的 `KICK_TOMBSTONE_WRITE_FAILED`）被埋在其中」；付費方案下則是一筆 log 帳單。影響僅止於偵測能力下降，不涉及資料揭露、權限繞過，也不改變使用者可感知的可用性。不緩解的理由：調低取樣率會稀釋每一條路由的樣本，而略過 429 只約束得了單一 IP。
 
-#### 後續：部署後的觀測 pass（追蹤於 #163）
+#### 生產環境基準（2026-09-23，v1.7.1，#178）
 
-正式部署後走一次觀測：每條路由各操作一次，以 `wrangler tail --format=json` 或 Dashboard 收下這些行，把各路由的 reads / writes 與 `worker/tests/integration/budget/` 已釘住的預算逐一對照，並將生產環境的基準值記回本節。是否要再加上「超出預算」的事件（例如額外一行 `console.warn`），等這份基準存在之後再決定，不在之前。
+以 `wrangler tail --env production --format=json` 接住 `kv_ops` 行，由一個 2 人家庭用擴充功能與 PWA 把每條路由各走一次。有預算測試的六條路由，生產數字與 `worker/tests/integration/budget/` 釘住的值完全一致；唯一的差異是借閱索引的一次性遷移，屬設計行為：
+
+| 路由                            | 預算（reads / writes） | 生產實測                                                                     |
+| ------------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| `GET /api/family/:id/bookshelf` | 5 / 0                  | 5 / 0                                                                        |
+| `PUT /api/user/:id/books`       | 6 / 2                  | 6 / 2（當下沒有公開書櫃；每多一個公開書櫃 +1 write）                         |
+| `GET /api/family/:id/borrow`    | 3 / 0                  | 遷移前 14 / 0（舊形狀索引 11 筆，逐筆 fan-out）；遷移後 3 / 0                |
+| `POST /api/family/:id/borrow`   | 3 / 2                  | 14 / 2（這一次寫入同時完成遷移，讀取端仍付了最後一次 fan-out；之後為 3 / 2） |
+| `PATCH /api/borrow/:requestId`  | 4 / 1                  | 4 / 1                                                                        |
+| `GET /api/family/:id/members`   | 3 / 0                  | 3 / 0                                                                        |
+
+沒有預算測試、同一次觀測順帶記下的路由：`GET /api/user/:id/books` 2 / 0、`PATCH /api/user/:id/books` 5 / 2、`GET /api/user/:id/verify` 1 / 0、`GET /api/user/:id/public-shelf` 3 / 0、`POST /api/user/:id/public-shelf` 4 / 3、`GET /api/public/:shareToken` 2 / 0。整段觀測沒有出現 `RATE_LIMIT_BINDING_MISSING` 或任何 `*_FAILED` 行，每分鐘限流確實走原生 binding。
+
+遷移那一段值得留著當證據：v1.7.0 時期建立的家庭，其 `borrows:family:{id}` 仍是舊的 `string[]` 形狀，v1.7.1 上線後第一次列表付了 3 + 11 次讀取，下一個寫入（建立借閱）把索引改寫成新形狀，之後的列表立刻回到 3 次——與 `.claude/rules/backend.md` 所述「lazy、只在寫入路徑遷移、GET 不寫 KV」逐字相符。
+
+是否再加上「超出預算」的事件（例如額外一行 `console.warn`）：基準已存在，且六條路由零偏差，暫不加；下一次預算數字改變時再回頭評估。
 
 ### PWA 登入驗證機制
 
