@@ -2,6 +2,13 @@
 
 > 透過 Chrome Extension 在讀墨 (Readmoo) 網頁介面中注入 Dialog，讓家庭帳號成員瀏覽彼此開放的書籍。
 
+> 📌 **這份文件怎麼用**
+>
+> - **記的是設計決策**：每個 Phase 為什麼這樣做、考慮過哪些方案、哪些決定不做。
+> - **待辦事項放 GitHub issue**：還沒做的事開 issue 追蹤，不在這裡逐項勾選。
+> - **現行架構以其他文件為準**：[`docs/architecture.md`](./architecture.md)、`AGENTS.md`、`.claude/rules/`。本文件中的結構、schema、CI 範例是規劃當時的樣貌，可能已經過時。
+> - **Phase 發布後就不再更新**：標上 ✅ 之後當作歷史紀錄保留。只有開工前需要先討論設計的大功能才新增 Phase；小功能與修正開 issue 即可。
+
 ---
 
 ## 一、專案背景與目標
@@ -437,6 +444,8 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 
 每次 Push / PR 自動觸發：
 
+> 以下為規劃初期的預計結構。實際 workflow 已合併為 `.github/workflows/cicd.yml`（Node 22，另有 `pwa-check`、`pwa-e2e` 與 `ci-success` 總閘門），現況以 `AGENTS.md` →「CI/CD」為準。
+
 ```yaml
 # .github/workflows/ci.yml 預計結構
 
@@ -544,7 +553,7 @@ jobs:
 - [x] 借入書籍過濾（不爬取他人借出的書）
 - [x] 開發/正式環境分離（Vite env vars + preview-kv / prod-kv）
 
-### Phase 2：安全性強化與測試補齊
+### Phase 2：安全性強化與測試補齊 ✅ 已完成
 
 - [x] 家庭解綁/重新綁定流程處理（chrome.storage 清理 + 重新引導）
 - [x] Rate Limiting 中介層（防濫用）（60 req/min/IP，worker/src/middleware/rateLimit.ts）
@@ -646,7 +655,7 @@ jobs:
 - [x] PWA CD 設定（Cloudflare Pages，merge to main 自動部署）
 - [x] Extension release CD 已設定（git tag `v*` → build → zip → GitHub Release）
 
-### Phase 4：開源與社群
+### Phase 4：開源與社群 ✅ 已完成
 
 - [x] Contributing Guide（`CONTRIBUTING.md`）
 - [x] GitHub Pages 說明頁面上線驗證（品牌 Logo、OG 標籤、SVG 圖示替換 emoji、正確 GitHub URL）
@@ -728,7 +737,7 @@ jobs:
 #### KV Schema 擴充
 
 - [x] `public:{share_token}` → `{ userId, shelfId, title, books[], createdAt, expiresAt }` （明文快照，KV TTL 管理過期）
-- [x] `user:{id}` 擴充 `publicSharing` 欄位（array 結構）：
+- [x] `user:{id}` 擴充 `publicSharing` 欄位（array 結構）（**後續變更**：書櫃清單已搬到獨立的 `publicshelves:{user_id}`，舊欄位僅作為未遷移使用者的讀取來源；現行設計見 [`docs/architecture.md`](./architecture.md)）：
   ```typescript
   publicSharing?: {
     shelves: PublicShelf[];  // v1.2.0 強制 length <= 1
@@ -765,7 +774,7 @@ jobs:
 - 啟用 `selectionMode: "explicit"` + `bookIds[]` 支援自選書籍
 - 既有 API 路由形狀無需變更
 
-### Phase 7：v1.3.0 — 簡易修正 + 影響現有使用者的修正 + 開發者體驗（規劃中）
+### Phase 7：v1.3.0 — 簡易修正 + 影響現有使用者的修正 + 開發者體驗 ✅ 已完成
 
 > 正式上線（v1.0.0 / v1.2.x）後使用者回饋。**v1.3 範圍只放三類**：
 >
@@ -775,7 +784,7 @@ jobs:
 >
 > 「新增功能」類項目延後到 v1.4 / v1.5 / v1.6 漸進釋出（見 Phase 8–10），避免一次塞太多在同一個 minor。
 >
-> **狀態**：僅完成計畫，**尚未開始實作**。
+> **狀態**：已隨 v1.3.0 發布（2026-05-29）。Wave E（#1）延後，不在此版範圍。
 
 #### 7.1 簡易修正與驗證
 
@@ -799,7 +808,7 @@ jobs:
   - **現況**：[`worker/src/index.ts:68-78`](../worker/src/index.ts#L68-L78) 已套用 Hono `cors` middleware，並設定 `maxAge: 86400`，與外部建議的「方法①」等價 → **此項主要為驗證、無立即工作**
   - 待辦：
     - 觀察 production preflight log，確認 24h max-age 對使用者連續操作生效（Chromium 上限 7200s，但仍能達到「短時間連續操作只發一次 OPTIONS」效果）
-    - 文件記錄此設計決策（避免未來誤改）
+    - 文件記錄此設計決策（避免未來誤改）— 已記錄於 [`docs/cors-design.md`](./cors-design.md)
   - **中期選項（非 v1.3 必做）**：申請自有 domain 將 Worker 從 `*.workers.dev` 移至 `api.<own-domain>`；同源化是長期解，但前端寄生於 `next.readmoo.com` / `read.readmoo.com`，本質上仍跨來源，僅是中期收斂選項。優先級 **低**。
   - **不採用**：
     - 改用 cookie / form-encoded body 規避 preflight（API 設計受損，得不償失）
@@ -870,7 +879,7 @@ jobs:
   - PWA 無 content script，本就無法跑借出自動化；此 Wave 主要影響 Extension
   - PWA MemberList readmooName 欄位：`<= 2 人` 不顯示；`>= 3 人` 唯讀顯示（**不開放刪除 / 編輯**，使用者需到 Extension 才能刪）
 
-- **完成狀態**：實作完成 2026-05-27（PR 待 merge）
+- **完成狀態**：實作完成 2026-05-27，已隨 v1.3.0 發布
 
 ##### Wave K — 儲存路徑的 re-render 防爆（補 Wave G 之後的尾巴）
 
@@ -921,10 +930,10 @@ jobs:
 
 - **完成狀態**：實作完成 2026-05-29（PR #25）；handler 邏輯不動，既有 445 個 Worker 測試全綠，加上 8 個 dev-only routes 測試共 453 個；worker bundle 維持 128KB gzipped。
 
-### Phase 8：v1.4.0 — 顯示偏好、借閱流程提示、書本 PATCH API（規劃中）
+### Phase 8：v1.4.0 — 顯示偏好、借閱流程提示、書本 PATCH API ✅ 已完成
 
 > 新增使用者可控的設定項、PWA 借閱手動流程的 UX 改善，以及後端書本 PATCH API（接續 v1.3 Wave K 解決上行流量）。資料模型不動。
-> **狀態**：規劃中，待 v1.3 釋出後再啟動。
+> **狀態**：已隨 v1.4.0 發布（2026-06-11）。#7 不做；#33 目前沒有換 DB 的計畫，暫不進行。
 
 ##### Wave B — 顯示模式與本地偏好（純前端持久化，無 API 變更）
 
@@ -968,7 +977,8 @@ jobs:
   - 首次同步（爬完全部書單）仍用 PUT
   - **智慧 fallback（非單純切換）**：dirty 含「server 上不存在的新爬書」/ 無 server record / dirty > 1000 時，該次自動 fallback 整包 PUT，避免 PATCH 靜默丟失新書；PATCH body 不帶 displayName（書櫃儲存不改名）
   - 註：Wave K #24 已確認「fetch-then-put」折衷邏輯實際不存在（原假設不成立），故無可移除之程式碼
-- [ ] **#33 觀察與決策點：是否需要換 DB**（待 PATCH 上線後啟動）
+- [ ] **#33 觀察與決策點：是否需要換 DB**（暫不進行：目前沒有換 DB 的計畫）
+  - **現況（2026-09-23）**：觀測工具已上線——每個請求輸出 `kv_ops` log（#173），正式環境基準值已記錄於 [`docs/architecture.md`](./architecture.md) →「KV 操作數觀測」（#206）。日後要重新評估時可直接沿用。
   - 在 PATCH 上線後加上匿名 telemetry：使用者書本數分佈、單次儲存 dirty count、KV write latency p50 / p95
   - 收集一個 minor 週期（約 4-6 週）後評估
   - **僅在實測證明 KV 整包寫真的吃緊**（例如 p95 > 500ms 或常態觸發 quota 警告）才討論 D1 遷移，否則延後到 v2.0
@@ -976,7 +986,7 @@ jobs:
 
 - **完成狀態**：#31 / #32 實作完成 2026-06-03（branch `feat/wave-l-book-patch-api`，commits `aa7462f` BE + `dc81f79` FE）；FE 1 輪 + BE 1 輪 Fix Cycle，修復 1 項 CRITICAL（連續儲存 server-known 污染致資料遺失）+ 採納 3 項 SUGGESTION；三端 typecheck/test/E2E 全綠（Worker 478 / Extension 1077 / PWA 403），security scan（full）PASS。#33 待上線後啟動。
 
-### Phase 9：v1.5.0 — 隱藏書籍可逆 + Firefox 跨瀏覽器支援（實作中）
+### Phase 9：v1.5.0 — 隱藏書籍可逆 + Firefox 跨瀏覽器支援 ✅ 已完成（2026-06-18）
 
 > 讓使用者把家庭書櫃中不想看到的書「隱藏」，且可逆、可重新顯示；並讓擴充功能跨瀏覽器（含 Firefox for Android™）。
 > **本版本含兩大塊**：Wave D（隱藏書籍）+ Wave M（Firefox 跨瀏覽器支援），兩者同 release 發布。
@@ -1028,7 +1038,7 @@ jobs:
 > ⚠️ E2E（Playwright）目前僅載入 Chrome；Firefox E2E 視成本決定，**預設先不擴充**，列為後續追蹤。
 > ⚠️ 版號與 CHANGELOG 不在 Wave M 內手動處理 — 於 release 前以 `/bump-ver` 統一 bump 至 `v1.5.0` 並自動產生涵蓋隱藏書籍 + Firefox 的條目。
 
-### Phase 10：v1.6.0 — 我的最愛（規劃中，與隱藏對稱）
+### Phase 10：v1.6.0 — 我的最愛（與隱藏對稱）✅ 已完成（2026-07-09）
 
 > **設計已於 2026-06-12 重新定調**：我的最愛改為**觀看者私有**，與 Phase 9 隱藏功能**同構**，
 > 直接複用隱藏的基礎建設（`familyShelfPrefs` 容器 + copy-scoped key + 同一套成員變更孤兒語意）。
@@ -1069,27 +1079,38 @@ jobs:
 
 #### 待評估 backlog（經評估暫緩，**非待辦**，依需要再啟動）
 
+> **追蹤方式（2026-09-23 起）**：尚未完成的項目已改開 GitHub issue 追蹤，後續進度以 issue 為準，本節不再逐項更新。
+
 ##### 🟡 中優先 — 維護性（drift 風險；雙平台長期並行才值得）
 
-- [ ] **FE-1 抽取 extension↔pwa 重複邏輯至 `shared/`**（~530 行逐字重複：`useFamilyShelfPrefs` / `useFamilyShelfBooks` / `updateTracking` / `sortBooks` / API 型別）
-  - **是否需要處理**：視產品路線。#67（排序降冪）已示範重複會持續 drift（兩版 `sortBooks` 變數名已分岔）。若 Extension 與 PWA 都長期維護 → 值得；若一邊為次要 → 不划算。**大型重構、有回歸風險，建議獨立批次進行。**
-- [ ] **S3 / FE-3 / BE-6 / BE-7 分層與拆分**：`useOnboardingFlow`（525 行 god-hook）、`FamilyDataContext`（500 行）、Worker 缺資料存取層（`KV.get`+normalize 複製 10+ 處）、`join` handler（~120 行）
-  - **是否需要處理**：非 bug，純可維護性。可隨相關檔案下次改動時**漸進處理**，不必專門開工。
+- [ ] **FE-1 抽取 extension↔pwa 重複邏輯至 `shared/`** → [#208](https://github.com/reginna-chao/moo-family-bookshelf/issues/208)
+  - **已完成部分**：wire type、payload 驗證、錯誤文案已搬進 `shared/`（#170 / #183 / #184 / #186）。
+  - **剩餘**：`useFamilyShelfPrefs`、`sortBooks`、`updateTracking` 仍兩端各一份。大型重構、有回歸風險，建議獨立批次進行。
+- [x] **BE-6 Worker 資料存取層**：已完成（#177）。所有路由改經 `worker/src/kv/*` 存取 KV，並有 ESLint 規則與 grep 測試把關。
+- [ ] **S3 / FE-3 / BE-7 分層與拆分**：非 bug，純可維護性，可隨相關檔案下次改動時**漸進處理**。
+  - 前端大檔（`useOnboardingFlow` 890 行、`FamilyDataContext` 529 行等）→ [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)
+  - `join` handler（約 190 行）→ [#211](https://github.com/reginna-chao/moo-family-bookshelf/issues/211)
 
 ##### 🟢 低優先 — 擴充性（N=2 現在不痛，規模到了再做）
 
-- [ ] **BE-2 書櫃聚合改 snapshot**（現為每成員讀完整 `user:{id}` 記錄後前端過濾）
+- [ ] **BE-2 書櫃聚合改 snapshot**（現為每成員讀完整 `user:{id}` 記錄後過濾）→ [#214](https://github.com/reginna-chao/moo-family-bookshelf/issues/214)
+  - **是否需要處理**：「隨成員數放大」的擴充性，目前 2 人家庭 + 低流量不觸發。到 `maxMembers` 調高或流量成長再啟動即可。
 - [x] **BE-4 rate limiter 改用原生 Workers Rate Limiting binding**（完成於 #160 第一項：每分鐘的限制改由 Cloudflare 原生 binding 計數，零 KV 操作；小時級的 per-userId 計數器仍留在 KV，硬上限所需的 Durable Objects 未納入）
-- [ ] **BE-5 borrow index 改增量 / 終態清理**（現為 append-only，每次操作掃全歷史）
-  - **是否需要處理**：剩下的 BE-2 / BE-5 都是「隨成員數 / 歷史長度放大」的擴充性，目前 2 人家庭 + 低流量不觸發。到 `maxMembers` 調高或流量成長再啟動即可。
+- [x] **BE-5 borrow index 改增量 / 終態清理**：已完成（#176）。索引改為直接存完整借閱紀錄，終態紀錄每位借閱人只保留最近 50 筆，成員離開時一併清理。
 
 ##### ⚪ 低優先 — 零星清理與 DX
 
-- [ ] **BE-10/11** 統一驗證錯誤碼（`defaultHook` 現一律回 `INVALID_JSON`）+ 接上 zod-openapi 實際驗證；**BE-12** 補 publicShelf / OTP / QR 的 per-user 限流；**BE-13** 非原子多鍵寫入的部分失敗清理
-- [ ] **FE-6** 拆 >200 行大檔（`SettingsPage` 557 行等）；**FE-7** 收斂 props drilling；**FE-8** 抽共用 `useDismissable`（點外關閉重複 8 次）
-- [ ] **TEST-5/6/7** 補測：PWA 驗證 UI（`PatternLock` / `PinInput`）+ `pwa/src/crypto/hash`、`scraper-archive.ts`、`useQrLinkState.ts`
-- [ ] **SEC-3** dev 相依套件 bump（vitest / vite / shell-quote 等；皆 `devDependencies`，不入 production bundle，對使用者零影響）
-- [ ] **文件不一致**：integration 測試實際使用 in-memory `createMockKV()`，而非 `test.md` / 本計畫書第八章所述的 Miniflare。擇一收斂：改用 Miniflare，或更新文件（`test.md` + 本計畫書 + `CLAUDE.md`）反映實情。
+- [ ] **BE-10/11** 統一驗證錯誤碼（`defaultHook` 現一律回 `INVALID_JSON`）+ 接上 zod-openapi 實際驗證 → [#212](https://github.com/reginna-chao/moo-family-bookshelf/issues/212)
+- [x] **BE-12** 補 publicShelf / OTP / QR 的 per-user 限流：已完成（`public-shelf`、`verify-write` 兩個每小時 scope）。
+- [ ] **BE-13** 非原子多鍵寫入的部分失敗清理 → [#213](https://github.com/reginna-chao/moo-family-bookshelf/issues/213)
+- [ ] **FE-6** 拆 >200 行大檔；**FE-7** 收斂 props drilling → 併入 [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)
+- [ ] **FE-8** 抽共用 `useDismissable` → [#209](https://github.com/reginna-chao/moo-family-bookshelf/issues/209)
+  - **已完成部分**：Extension 已有 `useDismissableMenu`；PWA 四個下拉元件仍各自手寫。
+- [ ] **TEST-5/6/7** 補測 → [#215](https://github.com/reginna-chao/moo-family-bookshelf/issues/215)
+  - **已完成部分**：`PatternLock` / `PinInput` 已補測；`useQrLinkState` 由 `QrCodeLink` 元件測試間接覆蓋。
+  - **剩餘**：`pwa/src/crypto/hash.ts`、`scraper-archive.ts`。
+- [x] **SEC-3** dev 相依套件 bump：已完成（#198 更新 lockfile，Node 下限提高到 22；GitHub Actions 改由 Dependabot 每月檢查）。
+- [ ] **文件不一致**：integration 測試實際使用 in-memory `createMockKV()`，而非 `test.md` / 本計畫書第八章所述的 Miniflare → [#216](https://github.com/reginna-chao/moo-family-bookshelf/issues/216)
 
 ##### 不修（設計固有 / 已評估接受）
 
@@ -1101,6 +1122,8 @@ jobs:
 ---
 
 ## 十一、專案結構（預覽）
+
+> 以下為規劃初期的預覽，與現況已有差異（例如新增 `shared/`、Worker 分為 `routes/` / `services/` / `kv/`）。現行結構以 `AGENTS.md` →「Project Structure」與 `.claude/rules/backend.md` 為準。
 
 ```
 moo-family-bookshelf/
@@ -1161,4 +1184,4 @@ moo-family-bookshelf/
 
 ---
 
-_最後更新：2026-07-09（新增 Phase 11：技術債與稽核改善 backlog — 記錄 2026-07 雙模型稽核的 Batch 1–3 已修復項目（#68/#69/#70）與經評估暫緩的 backlog）_
+_最後更新：2026-09-23（同步 Phase 2、4、7～10 的完成狀態；Phase 11 backlog 勾選已完成項目，剩餘項目改開 GitHub issue 追蹤（#208～#216）；#33 標為暫不進行；第六、九、十一章過時處加註現行文件位置）_
