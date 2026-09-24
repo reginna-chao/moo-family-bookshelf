@@ -1,62 +1,25 @@
-import type { ApiResponse, PersonalBooks } from "../api/types";
+import {
+  emptyRefsByKind,
+  hasAnyRef,
+  mergeLoadedRefs,
+  toggledRef,
+  type FamilyPrefKind,
+  type FamilyPrefsSyncOptions,
+  type FamilyShelfPrefsRecord,
+  type RefsByKind,
+} from "./prefsModel";
+
+export type {
+  FamilyPrefKind,
+  FamilyPrefsApi,
+  FamilyPrefsIo,
+  FamilyPrefsSyncOptions,
+  FamilyShelfPrefs,
+  FamilyShelfPrefsRecord,
+} from "./prefsModel";
 
 /** Debounce window before flushing family-pref changes to the server. */
 export const FLUSH_DEBOUNCE_MS = 600;
-
-/** Independent viewer-private preference kinds sharing one KV record. */
-export type FamilyPrefKind = "hidden" | "favorites";
-
-/** Complete ref arrays for every kind — the full-replace body a flush sends. */
-export type FamilyShelfPrefsRecord = NonNullable<
-  PersonalBooks["familyShelfPrefs"]
->;
-
-/**
- * The two API calls the controller needs. Structural, so both apps' `ApiClient`
- * satisfy it without a cast.
- */
-export interface FamilyPrefsApi {
-  getPersonalBooks(
-    userId: string,
-  ): Promise<ApiResponse<Pick<PersonalBooks, "familyShelfPrefs">>>;
-  updateFamilyPrefs(
-    userId: string,
-    prefs: FamilyShelfPrefsRecord,
-  ): Promise<ApiResponse<unknown>>;
-}
-
-/** Who the controller acts for, and through which client. */
-export interface FamilyPrefsIo {
-  userId: string;
-  api: FamilyPrefsApi;
-}
-
-export interface FamilyPrefsSyncOptions {
-  /**
-   * Read at call time, never cached: a flush — including the one `detach()`
-   * fires on unmount — must use the CURRENT userId/client, not the values
-   * the controller was created with.
-   */
-  getIo: () => FamilyPrefsIo;
-  /** Publishes a kind's current ref set (after a load, after each toggle). */
-  onRefs: (kind: FamilyPrefKind, refs: Set<string>) => void;
-  /** Publishes the latest flush outcome. Never called while detached. */
-  onSyncFailed: (failed: boolean) => void;
-}
-
-/** What each app's `useFamilyShelfPrefs` hook returns. */
-export interface FamilyShelfPrefs {
-  hiddenRefs: Set<string>;
-  isHidden: (ownerId: string, bookId: string) => boolean;
-  toggleHidden: (ownerId: string, bookId: string) => void;
-  favoriteRefs: Set<string>;
-  isFavorite: (ownerId: string, bookId: string) => boolean;
-  toggleFavorite: (ownerId: string, bookId: string) => void;
-  /** True when the latest debounced flush failed (network or `{ error }`). */
-  syncFailed: boolean;
-}
-
-type RefsByKind = Record<FamilyPrefKind, Set<string>>;
 
 /**
  * Lifecycle of the viewer-private family-shelf preferences (v1.5.0).
@@ -65,6 +28,13 @@ type RefsByKind = Record<FamilyPrefKind, Set<string>>;
  * be both) from a SINGLE personal-books load. Toggling is optimistic, and the
  * COMPLETE current arrays for every kind (full replace) are flushed to the
  * server on ONE shared debounced, user-action-triggered timer. No polling.
+ *
+ * Invariant: NO full-replace flush before a load has succeeded. The server
+ * replaces each list wholesale, so a flush on top of a failed or unfinished
+ * load would carry only this session's toggles and wipe every earlier mark
+ * (issue #219). Pre-load toggles are kept as a per-kind delta that the load's
+ * success path replays as ADDITIONS ONLY (`mergeLoadedRefs`) and flushes; a
+ * flush due before that retries the load instead — on demand, never polled.
  *
  * Why a framework-agnostic controller: the Extension and the PWA used to carry
  * a copy each of this load-once / debounce / flush-on-unmount logic, which is
@@ -78,17 +48,21 @@ type RefsByKind = Record<FamilyPrefKind, Set<string>>;
  * disposes anything beyond the pending timer. Results that settle while
  * detached (a load, a flush outcome) are dropped.
  *
- * Adding a future kind = extend `FamilyPrefKind`, the `pending` initialiser and
- * the flush body here, then one state + thin public wrapper trio per adapter.
+ * Adding a future kind = extend the kind helpers in `./prefsModel.ts` and the
+ * flush body here, then one state + thin public wrapper trio per adapter.
  */
 export class FamilyPrefsSync {
   private readonly options: FamilyPrefsSyncOptions;
   private attached = false;
   /** Set only by a load that succeeded while attached; guards the load body so it never re-clobbers pending edits. */
   private didLoad = false;
+  /** A load request is in flight; a second `load()` waits on its outcome. */
+  private loading = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   /** Latest desired arrays per kind — read by the debounced flush. */
-  private pending: RefsByKind = { hidden: new Set(), favorites: new Set() };
+  private pending: RefsByKind = emptyRefsByKind();
+  /** Refs toggled an odd number of times before the first successful load, per kind; replayed as additions. */
+  private preLoadDelta: RefsByKind = emptyRefsByKind();
 
   constructor(options: FamilyPrefsSyncOptions) {
     this.options = options;
@@ -99,81 +73,113 @@ export class FamilyPrefsSync {
   }
 
   /**
-   * Flush any pending change before clearing the timer, so a toggle made
-   * inside the debounce window is not silently lost. No pending timer → no
-   * request.
+   * A toggle still inside the debounce window is flushed now rather than lost
+   * — once a load has succeeded; before that nothing is safe to send.
    */
   detach(): void {
     this.attached = false;
-    if (this.flushTimer === null) return;
-    this.flush();
-    clearTimeout(this.flushTimer);
-    this.flushTimer = null;
+    if (this.cancelFlushTimer() && this.didLoad) this.sendFlush();
   }
 
   /**
-   * Load the viewer's own refs (single GET). Tolerates errors: a failed load
-   * leaves both sets empty and does NOT mark the load done, so a later call
-   * retries it. Once a load has succeeded this is a no-op, so an API-client
-   * identity change never clobbers unsaved optimistic edits.
+   * Load the viewer's own refs (single GET). A load that rejects OR resolves
+   * `{ error }` changes nothing, publishes the sync failure, and is retried by
+   * a later call. At most one in flight; once one has succeeded this is a
+   * no-op, so an API-client identity change never clobbers optimistic edits.
    */
   load(): void {
-    if (this.didLoad) return;
+    if (this.didLoad || this.loading) return;
+    this.loading = true;
     void this.runLoad();
   }
 
   /** Optimistically flip `ref` in `kind`'s set and restart the debounce. */
   toggle(kind: FamilyPrefKind, ref: string): void {
-    const next = new Set(this.pending[kind]);
-    if (next.has(ref)) {
-      next.delete(ref);
-    } else {
-      next.add(ref);
-    }
+    const next = toggledRef(this.pending[kind], ref);
     this.pending[kind] = next;
+    if (!this.didLoad) {
+      this.preLoadDelta[kind] = toggledRef(this.preLoadDelta[kind], ref);
+    }
     this.options.onRefs(kind, next);
     this.scheduleFlush();
   }
 
   private async runLoad(): Promise<void> {
+    const loaded = await this.fetchPrefs();
+    this.loading = false;
+    if (!this.attached) return;
+    if (loaded === null) {
+      this.options.onSyncFailed(true);
+      return;
+    }
+    this.applyLoaded(loaded);
+  }
+
+  /** One GET; `null` = failed. `{ data: null }` (user has no record yet) is a valid empty load. */
+  private async fetchPrefs(): Promise<FamilyShelfPrefsRecord | null> {
     try {
       const { userId, api } = this.options.getIo();
       const response = await api.getPersonalBooks(userId);
-      if (!this.attached) return;
-      const hidden = response.data?.familyShelfPrefs?.hidden ?? [];
-      const favorites = response.data?.familyShelfPrefs?.favorites ?? [];
-      this.pending = {
-        hidden: new Set(hidden),
-        favorites: new Set(favorites),
-      };
-      this.options.onRefs("hidden", new Set(hidden));
-      this.options.onRefs("favorites", new Set(favorites));
-      this.didLoad = true;
+      if (response.error) return null;
+      const prefs = response.data?.familyShelfPrefs;
+      return { hidden: prefs?.hidden ?? [], favorites: prefs?.favorites ?? [] };
     } catch {
-      // Non-critical preferences — start empty on failure.
+      return null;
     }
   }
 
-  private scheduleFlush(): void {
-    if (this.flushTimer !== null) {
-      clearTimeout(this.flushTimer);
+  /** Merge pre-load toggles onto the loaded lists, publish, and save them. */
+  private applyLoaded(loaded: FamilyShelfPrefsRecord): void {
+    const hadDelta = hasAnyRef(this.preLoadDelta);
+    this.pending = mergeLoadedRefs(loaded, this.preLoadDelta);
+    this.preLoadDelta = emptyRefsByKind();
+    this.didLoad = true;
+    this.options.onRefs("hidden", this.pending.hidden);
+    this.options.onRefs("favorites", this.pending.favorites);
+    // A pre-load timer would only resend these lists and spend the PUT quota.
+    this.cancelFlushTimer();
+    if (!hadDelta) {
+      // Clears a notice left by an earlier failed load.
+      this.options.onSyncFailed(false);
+      return;
     }
+    this.sendFlush();
+  }
+
+  private scheduleFlush(): void {
+    this.cancelFlushTimer();
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
       this.flush();
     }, FLUSH_DEBOUNCE_MS);
   }
 
+  /** Clears the debounce timer; true when one was pending. */
+  private cancelFlushTimer(): boolean {
+    if (this.flushTimer === null) return false;
+    clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    return true;
+  }
+
+  /** Debounce target: save, or — before a successful load — retry the load. */
+  private flush(): void {
+    if (this.didLoad) {
+      this.sendFlush();
+      return;
+    }
+    if (this.attached) this.load();
+  }
+
   /**
-   * Fire-and-forget full-replace flush.
-   *
+   * Fire-and-forget full-replace flush; callers ensure `didLoad` is true.
    * `updateFamilyPrefs` never throws for HTTP/network errors — it resolves with
    * an `{ error }` envelope — but we also catch defensively. Either signal marks
    * the sync as failed; a later successful flush clears it. Nothing is
    * published once detached, so the unmount flush cannot set state after
    * unmount.
    */
-  private flush(): void {
+  private sendFlush(): void {
     const { userId, api } = this.options.getIo();
     void api
       .updateFamilyPrefs(userId, {
