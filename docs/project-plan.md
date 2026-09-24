@@ -1086,9 +1086,9 @@ jobs:
 
 ##### 🟡 中優先 — 維護性（drift 風險；雙平台長期並行才值得）
 
-- [ ] **FE-1 抽取 extension↔pwa 重複邏輯至 `shared/`** → [#208](https://github.com/reginna-chao/moo-family-bookshelf/issues/208)
+- [x] **FE-1 抽取 extension↔pwa 重複邏輯至 `shared/`** → [#208](https://github.com/reginna-chao/moo-family-bookshelf/issues/208)
   - **已完成部分**：wire type、payload 驗證、錯誤文案已搬進 `shared/`（#170 / #183 / #184 / #186）。
-  - **剩餘**：`useFamilyShelfPrefs`、`sortBooks`、`updateTracking` 仍兩端各一份。大型重構、有回歸風險，建議獨立批次進行。
+  - **剩餘**：無。原本兩端各一份的 `useFamilyShelfPrefs`、`sortBooks`、`updateTracking` 已合併進 `shared/src/familyShelf/`（#208）；`useFamilyShelfPrefs` 的載入與同步流程移到共用的控制器，兩端只留一層很薄的 React hook。
 - [x] **BE-6 Worker 資料存取層**：已完成（#177）。所有路由改經 `worker/src/kv/*` 存取 KV，並有 ESLint 規則與 grep 測試把關。
 - [ ] **S3 / FE-3 / BE-7 分層與拆分**：非 bug，純可維護性，可隨相關檔案下次改動時**漸進處理**。
   - 前端大檔（`useOnboardingFlow` 890 行、`FamilyDataContext` 529 行等）→ [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)

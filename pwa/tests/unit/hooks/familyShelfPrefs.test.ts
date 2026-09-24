@@ -4,7 +4,7 @@ import {
   countHidden,
   countFavorites,
   countRefs,
-} from "@/hooks/familyShelfPrefs";
+} from "moo-family-bookshelf-shared/familyShelf/prefRefs";
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import { BoolFlag } from "@/api/client";
 

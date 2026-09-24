@@ -8,6 +8,7 @@
     "./borrow/*": "./src/borrow/*",
     "./config/*": "./src/config/*",
     "./crypto/*": "./src/crypto/*",
+    "./familyShelf/*": "./src/familyShelf/*",
     "./hostNote/*": "./src/hostNote/*",
     "./icons/*": "./src/icons/*",
     "./invite/*": "./src/invite/*",

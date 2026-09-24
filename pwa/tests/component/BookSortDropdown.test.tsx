@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import React from "react";
 import { BookSortDropdown } from "@/components/BookSortDropdown";
-import type { BookSortMode } from "@/utils/sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 
 afterEach(cleanup);
 
