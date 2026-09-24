@@ -1109,9 +1109,9 @@ jobs:
 - [ ] **FE-6** 拆 >200 行大檔；**FE-7** 收斂 props drilling → 併入 [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)
 - [ ] **FE-8** 抽共用 `useDismissable` → [#209](https://github.com/reginna-chao/moo-family-bookshelf/issues/209)
   - **已完成部分**：Extension 已有 `useDismissableMenu`；PWA 四個下拉元件仍各自手寫。
-- [ ] **TEST-5/6/7** 補測 → [#215](https://github.com/reginna-chao/moo-family-bookshelf/issues/215)
+- [x] **TEST-5/6/7** 補測 → [#215](https://github.com/reginna-chao/moo-family-bookshelf/issues/215)
   - **已完成部分**：`PatternLock` / `PinInput` 已補測；`useQrLinkState` 由 `QrCodeLink` 元件測試間接覆蓋。
-  - **剩餘**：`pwa/src/crypto/hash.ts`、`scraper-archive.ts`。
+  - **已完成**：`deriveUserId` 已搬進 `shared/src/crypto/hash.ts`，兩端共用同一組跨平台測試向量；`scraper-archive.ts` 既有測試補上結束後還原書櫃的斷言（#215）。
 - [x] **SEC-3** dev 相依套件 bump：已完成（#198 更新 lockfile，Node 下限提高到 22；GitHub Actions 改由 Dependabot 每月檢查）。
 - [x] **文件不一致**：已完成（#216）。`test.md`、`AGENTS.md`、`backend.md`、`CONTRIBUTING.md`、`site/technical.html` 與本計畫書第八章改為描述實際使用的 in-memory `createMockKV()`，Miniflare 只保留在 `wrangler dev`（本機開發、E2E）的說明。`docs/v1.1.0-borrow-feature.md` 等歷史設計文件維持原樣。
 

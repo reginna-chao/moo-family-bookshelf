@@ -38,7 +38,7 @@ import { API_ENDPOINT_KEY, DEFAULT_API_ENDPOINT } from "@/constants";
 // mock in tests/component/Onboarding.test.tsx). The value only has to satisfy
 // ApiClient's 64-char-hex guard.
 const USER_ID = "a".repeat(64);
-vi.mock("@/crypto/hash", () => ({
+vi.mock("moo-family-bookshelf-shared/crypto/hash", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
   sha256Hex: vi.fn().mockResolvedValue("b".repeat(64)),
 }));
@@ -179,6 +179,11 @@ describe("App dialog close discards the in-memory API endpoint", () => {
     // challenge discloses that server to the user about to type a PIN into it.
     expect(calls.map((c) => c.url)).toContain(
       `${CUSTOM_ENDPOINT}/api/family/${FAMILY_ID}/join`,
+    );
+    // The challenge probed the verify method for the MOCKED userId on that same
+    // host — which also proves the module-level hash mock really intercepts.
+    expect(calls.map((c) => c.url)).toContain(
+      `${CUSTOM_ENDPOINT}/api/user/${USER_ID}/verify`,
     );
     expect(screen.getByTestId("sync-code-host-note")).toHaveTextContent(
       CUSTOM_ENDPOINT,

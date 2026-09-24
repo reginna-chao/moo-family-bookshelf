@@ -130,6 +130,7 @@
 
 - **職責**：使用者識別碼雜湊（deriveUserId）
 - **技術**：Web Crypto API（SHA-256）
+- **位置**：實作只有一份，位於 `shared/src/crypto/hash.ts`，擴充功能與 PWA 共用；輸出就是既有使用者的 userId，演算法不可更動
 - **流程**：
   ```
   使用者 Email → 加鹽 SHA-256 雜湊 → userId → 用於 API 識別

@@ -27,6 +27,7 @@ moo-family-bookshelf/
 │   │   ├── api/                # Wire types (BoolFlag / envelope / family / personal-books / public-shelf / verify records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf payload validation
 │   │   ├── borrow/             # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中 string) + borrow-history cap and its UI hints
 │   │   ├── config/             # Readmoo host/selector config, report links
+│   │   ├── crypto/             # deriveUserId / sha256Hex — the single userId hashing implementation for Extension and PWA
 │   │   ├── familyShelf/        # Family-shelf sort, update tracking, pref refs + pref-sync controller
 │   │   ├── hostNote/           # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 │   │   ├── icons/              # Inline brand SVG paths
@@ -47,7 +48,7 @@ moo-family-bookshelf/
 │   │   ├── settings/            # Extension settings (custom API endpoint, etc.)
 │   │   ├── content/             # Content Script (scrape book list + inject Dialog)
 │   │   ├── background/         # Service Worker
-│   │   ├── crypto/             # Hashing utilities (SHA-256)
+│   │   ├── crypto/             # Sync code encode/decode (userId hashing lives in shared/src/crypto/)
 │   │   └── api/                # API client (configurable endpoint)
 │   ├── tests/
 │   │   ├── unit/              # Unit tests (crypto, api, utils)
@@ -82,7 +83,7 @@ moo-family-bookshelf/
 
 ### The `shared/` package
 
-`moo-family-bookshelf-shared` is a source-only TypeScript package inside the workspace with NO build step — `extension/`, `pwa/` and `worker/` all import the sources directly as `moo-family-bookshelf-shared/<entry>`; the first two bundle them with their own Vite config, `worker/` with wrangler's esbuild (all three map the package via `paths` → `../shared/src/*` in their `tsconfig.json`). It holds the logic that MUST behave identically on every surface — Readmoo config and the cover-URL whitelist, invite messages, the personal-shelf save strategy, family-shelf sorting / update tracking / viewer-private preference sync, API endpoint validation and sync-code `@host` classification, API wire types (`BoolFlag` / the `{ data, error }` envelope / family and borrow records) and their boundary validation — so that one rule is never written once per surface and left to drift apart.
+`moo-family-bookshelf-shared` is a source-only TypeScript package inside the workspace with NO build step — `extension/`, `pwa/` and `worker/` all import the sources directly as `moo-family-bookshelf-shared/<entry>`; the first two bundle them with their own Vite config, `worker/` with wrangler's esbuild (all three map the package via `paths` → `../shared/src/*` in their `tsconfig.json`). It holds the logic that MUST behave identically on every surface — Readmoo config and the cover-URL whitelist, the email → userId hash (`deriveUserId`), invite messages, the personal-shelf save strategy, family-shelf sorting / update tracking / viewer-private preference sync, API endpoint validation and sync-code `@host` classification, API wire types (`BoolFlag` / the `{ data, error }` envelope / family and borrow records) and their boundary validation — so that one rule is never written once per surface and left to drift apart.
 
 - **No runtime-specific API may be relied on.** Besides the browser-side importers, `shared/` is imported by the Node scripts under `extension/scripts/` that run under `tsx`. `tsconfig.json` does include the `DOM` lib (needed for `URLSearchParams` typing), so `eslint.config.js` blocks `document` / `window` / `localStorage` / `sessionStorage` / `navigator` with `no-restricted-globals` — the boundary is guaranteed by static checking, not by convention.
 - **CI coverage**: `shared/` has its own `lint` / `typecheck` scripts, run inside CI's `extension-check` job (`shared/**` is already in that job's path filter), so a new file is checked with no extra wiring. `worker-check`'s path filter covers `shared/**` too, so a change to `shared/` also runs the Worker checks and a broken import cannot pass silently.
