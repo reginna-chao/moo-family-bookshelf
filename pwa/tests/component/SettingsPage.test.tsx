@@ -530,6 +530,37 @@ describe("SettingsPage", () => {
     });
   });
 
+  /**
+   * A retried, half-failed self-leave: the Worker finishes the cleanup and
+   * answers 404 MEMBER_NOT_FOUND. That is a completed leave — keeping the
+   * session would let the next request's recovery re-join it. The opposite
+   * case (a real refusal renders its error and does NOT call onLogout) is
+   * pinned by "shows the localized back-off copy when leave family is rate
+   * limited" below.
+   */
+  it("treats MEMBER_NOT_FOUND on self-leave as a completed leave", async () => {
+    const serverMessage = "目標使用者不是家庭成員";
+    mockLeaveFamily.mockResolvedValue({
+      error: { code: "MEMBER_NOT_FOUND", message: serverMessage },
+    });
+    renderWithMembers([defaultProps.userId], defaultProps.userId);
+
+    await waitFor(() => {
+      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
+
+    await waitFor(() => {
+      expect(defaultProps.onLogout).toHaveBeenCalledOnce();
+    });
+    expect(screen.queryByText(serverMessage)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("離開家庭失敗，請稍後再試"),
+    ).not.toBeInTheDocument();
+  });
+
   // --- Rate-limited writes ---
 
   /**

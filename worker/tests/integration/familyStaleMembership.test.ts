@@ -2,9 +2,11 @@
  * A `member:{uid}` pointer is NOT membership on its own (#213, Fix Cycle 1).
  *
  * A STALE pointer names a live family whose record no longer lists the user.
- * It comes from a stale pointer read at the removal site (KV ~60s
- * propagation), a reconnect that healed the pointer during a kick whose
- * tombstone put failed open, or a pre-#213 half-failed removal.
+ * It comes from a removal whose revoke failed after its member-list put (the
+ * list put comes first — tests/integration/familyPartialWrite.test.ts), a
+ * stale pointer read at the removal site (KV ~60s propagation), a reconnect
+ * that healed the pointer during a kick whose tombstone put failed open, or a
+ * pre-#213 half-failed removal.
  *
  * It USED to come from a same-colo race too: with a tombstone written LAST, a
  * kicked member's auto-join landing between the owner's revoke deletes and the
@@ -231,8 +233,8 @@ async function kickWithReconnectBefore(
 /**
  * Worst-case interleaving (#213, Fix Cycles 2 and 3): kick USER2 while USER2's
  * reconnect joins start one after another from inside the owner's `family:{id}`
- * put — i.e. after the owner's revoke deletes — each carrying the listed
- * displayName (`undefined` = none sent).
+ * put — i.e. after the owner's tombstone, before its list put lands and before
+ * its revoke — each carrying the listed displayName (`undefined` = none sent).
  *
  * The owner's put is held back until each join has either finished or reached
  * a `family:{id}` put of its own; any family put a join makes is then held
@@ -241,10 +243,14 @@ async function kickWithReconnectBefore(
  * wait is a `Promise.race` against "the join reached its put", so a join that
  * blocks there cannot deadlock the owner's request.
  *
- * With `[undefined, "Renamed"]` this is the reviewer's two-request race: J_a
- * (no displayName) would HEAL the revoked pointer, which turns J_b into a
- * NON-healing reconnect whose displayName change writes the stale list — still
- * listing USER2 — back after the owner's put: listed + pointer + token.
+ * With `[undefined, "Renamed"]` this is the reviewer's two-request race. It was
+ * found against the former revoke-first order, where this put came after the
+ * revoke: J_a (no displayName) HEALED the revoked pointer, which turned J_b
+ * into a NON-healing reconnect whose displayName change wrote the stale list —
+ * still listing USER2 — back after the owner's put: listed + pointer + token.
+ * Under the list-first order the pointer is still in place here, so both joins
+ * are plain reconnects; either one reaching its own `family:{id}` put would
+ * still be a stale-list write-back, and the tombstone gate must refuse both.
  */
 async function kickWithReconnectsInsideFamilyPut(
   familyId: string,
@@ -270,7 +276,8 @@ async function kickWithReconnectsInsideFamilyPut(
         return async (k: string, ...rest: unknown[]): Promise<unknown> => {
           if (k !== familyKey) return real(k, ...rest);
           if (ownerPutArmed) {
-            // The owner's removal put: its revoke deletes have already run.
+            // The owner's removal put: its tombstone has landed, its revoke
+            // has not started.
             ownerPutArmed = false;
             for (const displayName of displayNames) {
               const reached = nextJoinReachedPut();
@@ -311,13 +318,18 @@ async function kickWithReconnectsInsideFamilyPut(
  * 1. J_a starts from inside the owner's `kicked:` put, i.e. BEFORE it lands,
  *    and runs until its heal `member:` put, which is held. J_a's tombstone gate
  *    read therefore saw no tombstone.
- * 2. The owner's tombstone put lands, then its target-pointer read sees null
- *    and deletes nothing.
- * 3. At the owner's `family:` put — after that pointer read — the heal put is
- *    released and J_a runs to completion; only then does the owner's put land.
+ * 2. The owner's tombstone put lands, then its member-list put, then its
+ *    target-pointer read — which sees null, so the revoke deletes nothing.
+ * 3. Right AFTER that pointer read resolves, the heal put is released and J_a
+ *    runs to completion; only then is the read's (null) result handed back to
+ *    the owner.
  *
  * Ordering alone let that heal survive (pointer back, token minted); only the
  * join's post-put tombstone re-check catches it.
+ *
+ * The owner's pointer read is told apart from J_a's own `member:` read (the
+ * first thing its join does) by timing: J_a's read happens before its heal
+ * put is reached, the owner's only after.
  */
 async function kickWithHealStraddlingTombstone(
   familyId: string,
@@ -325,10 +337,10 @@ async function kickWithHealStraddlingTombstone(
 ) {
   const tombstoneKey = kvKeys.kicked(familyId, USER2);
   const pointerKey = kvKeys.member(USER2);
-  const familyKey = kvKeys.family(familyId);
   let phase: "armed" | "holdingHeal" | "released" = "armed";
   let joinRes: Promise<Response> | undefined;
   let healReached = false;
+  let ownerPointerRead: unknown;
   let signalHealReached!: () => void;
   const healReachedP = new Promise<void>((r) => (signalHealReached = r));
   let releaseHeal!: () => void;
@@ -356,12 +368,23 @@ async function kickWithHealStraddlingTombstone(
             await healReleased;
             return real(k, ...rest);
           }
-          if (phase === "holdingHeal" && k === familyKey) {
-            // (3) The owner's list put: its pointer read is behind it.
+          return real(k, ...rest);
+        };
+      }
+      if (prop === "get") {
+        const real = Reflect.get(target, "get") as (
+          k: string,
+          ...r: unknown[]
+        ) => Promise<unknown>;
+        return async (k: string, ...rest: unknown[]): Promise<unknown> => {
+          if (phase === "holdingHeal" && healReached && k === pointerKey) {
+            // (3) The owner's revoke read: resolve it FIRST, then let the heal
+            // land behind it.
             phase = "released";
+            ownerPointerRead = await real(k, ...rest);
             releaseHeal();
             await joinRes;
-            return real(k, ...rest);
+            return ownerPointerRead;
           }
           return real(k, ...rest);
         };
@@ -372,12 +395,14 @@ async function kickWithHealStraddlingTombstone(
   });
 
   const kick = await removeMember(familyId, USER2, ownerToken);
-  // Never leave J_a parked if the kick bailed out before its list put.
+  // Never leave J_a parked if the kick bailed out before its pointer read.
   releaseHeal();
   envKv = kv;
 
   expect(healReached).toBe(true);
   expect(phase).toBe("released");
+  // The owner's read really did precede the heal: it saw no pointer.
+  expect(ownerPointerRead).toBeNull();
   expect(joinRes).toBeDefined();
   return { kick, raceJoin: await joinRes! };
 }
@@ -424,14 +449,14 @@ afterEach(() => {
 describe("Kick racing the kicked member's reconnect", () => {
   it.each([
     {
-      label: "after the tombstone, before the pointer revoke",
-      op: "delete" as const,
-      keyFor: () => kvKeys.member(USER2),
-    },
-    {
-      label: "after the pointer revoke, before the member-list put",
+      label: "after the tombstone, before the member-list put",
       op: "put" as const,
       keyFor: (familyId: string) => kvKeys.family(familyId),
+    },
+    {
+      label: "after the member-list put, before the pointer revoke",
+      op: "delete" as const,
+      keyFor: () => kvKeys.member(USER2),
     },
   ])(
     "should refuse a reconnect landing $label with 403 MEMBER_REMOVED",
@@ -448,8 +473,11 @@ describe("Kick racing the kicked member's reconnect", () => {
       );
 
       expect(kick.status).toBe(200);
-      // The second window is the one tombstone-last left open: the join saw
-      // the pointer gone and itself still listed, and healed the pointer.
+      // Only the tombstone stands between either window and a re-admission:
+      // in the first the target is still listed (a reconnect); in the second
+      // they are unlisted but their pointer still names this family — a stale
+      // pointer, which join ignores — so they would be re-listed as a new
+      // member.
       await expectErrorCode(raceJoin, 403, "MEMBER_REMOVED");
       await expectKickStuck(familyId, memberToken, ops);
     },
@@ -473,8 +501,9 @@ describe("Kick racing the kicked member's reconnect", () => {
   });
 
   it("should not re-admit the kicked member through a healing reconnect followed by a renaming one", async () => {
-    // The reviewer's two-request race (Fix Cycle 3). Under tombstone-last,
-    // J_a healed the pointer inside the revoke → list-put gap, J_b then saw
+    // The reviewer's two-request race (Fix Cycle 3). Under tombstone-last and
+    // the former revoke-first order, J_a healed the pointer inside the
+    // revoke → list-put gap, J_b then saw
     // the healed pointer, took the NON-healing branch and wrote its stale
     // list (still listing USER2, now "Renamed") back after the owner's put —
     // listed + pointer + token: a full re-admission with bookshelf access.
@@ -512,9 +541,11 @@ describe("POST /api/family/:id/join tombstone re-check after the pointer put", (
   it("should retract a heal whose pointer put lands after the kick's pointer read, for an already-pointerless member", async () => {
     const { familyId, ownerToken, memberToken } =
       await createFamilyWithTwoMembers();
-    // Pre-existing half-state: listed, no pointer, no session — an earlier
-    // self-leave that failed after its revoke, or a join whose pointer put
-    // failed after its record put.
+    // Pre-existing half-state: listed, no pointer, no session — a join whose
+    // pointer put failed after its record put, or a pre-#213 removal that
+    // half-failed. (A failed removal no longer leaves it: the member-list put
+    // now precedes the revoke, so a revoke-side failure leaves an UNLISTED
+    // target instead.)
     await Promise.all([
       kv.delete(kvKeys.member(USER2)),
       kv.delete(kvKeys.auth(USER2)),
@@ -530,12 +561,13 @@ describe("POST /api/family/:id/join tombstone re-check after the pointer put", (
     expect(kick.status).toBe(200);
     await expectErrorCode(raceJoin, 403, "MEMBER_REMOVED");
     // The interleaving really happened: J_a's heal put landed AFTER the
-    // tombstone, and J_a retracted it before the owner's list put.
+    // tombstone, the owner's list put AND the owner's pointer read (which
+    // therefore revoked nothing), and J_a retracted it itself.
     expect(ops.writeTrail()).toEqual([
       `put ${kvKeys.kicked(familyId, USER2)}`,
+      `put ${kvKeys.family(familyId)}`,
       `put ${kvKeys.member(USER2)}`,
       `delete ${kvKeys.member(USER2)}`,
-      `put ${kvKeys.family(familyId)}`,
     ]);
     // End state: the kick stuck.
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
@@ -638,7 +670,8 @@ describe("POST /api/family/:id/join tombstone re-check after the pointer put", (
 describe("POST /api/family/:id/join reconnect displayName update", () => {
   it("should heal the pointer without writing the family record when the pointer is missing", async () => {
     const { familyId } = await createFamilyWithTwoMembers();
-    // Listed but pointerless — the shape a removal's revoke leaves behind.
+    // Listed but pointerless — the shape a join whose pointer put failed after
+    // its record put leaves behind.
     await kv.delete(kvKeys.member(USER2));
     const nameBefore = await displayNameOf(familyId, USER2);
     expect(nameBefore).not.toBe("Renamed");

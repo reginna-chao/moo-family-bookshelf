@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { MemberList, MemberListProps } from "@/dialog/MemberList";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
@@ -302,6 +308,59 @@ describe("MemberList", () => {
         expect(screen.getByText("權限不足")).toBeInTheDocument();
       });
       expect(onMemberRemoved).not.toHaveBeenCalled();
+    });
+
+    /**
+     * An owner's retried kick after a half-failed first attempt (member list
+     * written, revoke failed) is answered 404 MEMBER_NOT_FOUND by the Worker —
+     * which has by then finished the kick server-side. The client must treat it
+     * as a completed removal. The contrast case — a non-404 refusal still
+     * surfaces its message and reports nothing — is the FORBIDDEN test above.
+     */
+    it("treats MEMBER_NOT_FOUND as a completed removal", async () => {
+      const apiClient = createMockApiClient({
+        removeMember: vi.fn().mockResolvedValue({
+          error: {
+            code: "MEMBER_NOT_FOUND",
+            message: "目標使用者不是家庭成員",
+          },
+        }),
+      });
+      const onMembersChanged = vi.fn();
+      const onMemberRemoved = vi.fn();
+      const { container } = renderMemberList({
+        apiClient,
+        onMembersChanged,
+        onMemberRemoved,
+      });
+
+      fireEvent.click(screen.getByText("移除"));
+      await act(async () => {
+        fireEvent.click(screen.getByText("確定"));
+      });
+
+      expect(apiClient.removeMember).toHaveBeenCalledWith(
+        "fam-123",
+        "user-member456",
+      );
+      expect(onMemberRemoved).toHaveBeenCalledWith({
+        userId: "user-member456",
+        displayName: "user-mem",
+        removedAt: expect.any(Number),
+      });
+      expect(onMemberRemoved).toHaveBeenCalledTimes(1);
+      expect(onMembersChanged).toHaveBeenCalledTimes(1);
+      // Confirm closed, no error shown.
+      expect(screen.queryByText("確定要移除此成員？")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("目標使用者不是家庭成員"),
+      ).not.toBeInTheDocument();
+      expect(
+        container.querySelector(".moo-member-list__error"),
+      ).not.toBeInTheDocument();
+      // Loading was reset: a fresh confirm offers an enabled 確定, not 處理中...
+      fireEvent.click(screen.getByText("移除"));
+      expect(screen.getByRole("button", { name: "確定" })).toBeEnabled();
     });
 
     it("does not report when the removal request throws", async () => {

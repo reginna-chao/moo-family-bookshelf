@@ -11,15 +11,18 @@
  *   create cleans up and join ignores.
  * - join (new member): family, THEN pointer → at worst "listed, no pointer",
  *   which the retry's existing-member branch heals.
- * - remove (non-dissolve): [owner kick only: tombstone,] revoke pointer +
- *   token, THEN family put → at worst "listed, no access" (plus, on a kick, a
- *   tombstone that refuses the target's reconnect), which the owner's retry
- *   finishes — or, for a kick, the owner's un-kick lifts.
+ * - remove (non-dissolve): [owner kick only: tombstone,] family put, THEN
+ *   revoke pointer + token. A failed family put changes nothing but (on a
+ *   kick) the tombstone, which the owner's retry finishes or un-kick lifts. A
+ *   failed revoke leaves "unlisted, stray pointer (+ token)", which reads
+ *   nothing family-scoped, and which any retry — the owner's re-kick or the
+ *   target's own retried leave — clears on the MEMBER_NOT_FOUND branch.
  * - dissolve: family delete, THEN pointer + token → at worst an orphan pointer.
  *
  * Every case here drives the real Hono app over `app.request` with a
- * `createMockKV()` store (TTL floor intact) and makes exactly ONE write to ONE
- * key throw ONCE. The assertions are on the FINAL KV state after the retry,
+ * `createMockKV()` store (TTL floor intact) and makes exactly ONE KV operation
+ * on ONE key throw ONCE (a write, or — to stop a revoke before it starts — the
+ * read in front of it). The assertions are on the FINAL KV state after the retry,
  * plus `writeTrail()` pins on the success paths so a reordering fails loudly
  * even when the retry happens to still converge.
  */
@@ -27,6 +30,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
+import { seedAuthToken } from "../helpers/auth";
 import { kvKeys, type AuthRecord } from "../../src/kv/schema";
 import { USER1, USER2, USER3 } from "../helpers/ids";
 
@@ -142,6 +146,16 @@ async function expectInternalError(res: Response) {
   expect(((await res.json()) as Json).error.code).toBe("INTERNAL_ERROR");
 }
 
+/**
+ * Let KV operations orphaned by a rejected `Promise.all` finish. A fault on
+ * one member of a parallel group rejects the group at once, while its siblings
+ * keep running after the 500 is returned. `createMockKV()` resolves on
+ * microtasks only, so one macrotask turn drains them.
+ */
+function settleOrphanedKvOps(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 /** Sort a slice of a write trail so a parallel group compares as a SET. */
 function asSet(entries: string[]): string[] {
   return [...entries].sort();
@@ -171,9 +185,13 @@ interface InjectedFault {
  *
  * Callers MUST assert `fired()` — otherwise a handler that stopped writing the
  * key at all would pass every "after the failure" assertion vacuously.
+ *
+ * `"get"` is supported for the one case a write fault cannot reach: a revoke
+ * that never starts (its pointer read fails), so neither the pointer nor the
+ * token delete runs.
  */
-function failNextWrite(
-  op: "put" | "delete",
+function failNextKvOp(
+  op: "get" | "put" | "delete",
   match: string | ((key: string) => boolean),
 ): InjectedFault {
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -243,7 +261,7 @@ describe("POST /api/family partial-write convergence", () => {
   it("should leave only an orphan pointer when the family put fails, and converge on retry", async () => {
     const ops = watchKvOps(kv);
     // The familyId is minted inside the handler, so match on the prefix.
-    const fault = failNextWrite("put", (key) =>
+    const fault = failNextKvOp("put", (key) =>
       key.startsWith(FAMILY_KEY_PREFIX),
     );
 
@@ -339,7 +357,7 @@ describe("POST /api/family/:id/join partial-write convergence", () => {
 
   it("should heal the missing pointer when the same join is retried after the pointer put failed", async () => {
     const { familyId, authToken: ownerToken } = await createFamily(USER1);
-    const fault = failNextWrite("put", kvKeys.member(USER2));
+    const fault = failNextKvOp("put", kvKeys.member(USER2));
 
     const first = await join(familyId, USER2);
 
@@ -417,7 +435,7 @@ describe("POST /api/family/:id/join partial-write convergence", () => {
 // ===========================================================================
 
 describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
-  it("should tombstone an owner kick first, then revoke pointer and token, then update the member list", async () => {
+  it("should tombstone an owner kick first, then update the member list, then revoke pointer and token", async () => {
     const { familyId, ownerToken, memberToken } =
       await createFamilyWithTwoMembers();
     const ops = watchKvOps(kv);
@@ -428,39 +446,63 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     const trail = ops.writeTrail();
     // Tombstone strictly FIRST: a join that observes the revoked pointer must
     // also observe the tombstone, or it heals the pointer back (#213, Fix
-    // Cycle 3 — see familyStaleMembership.test.ts for the race itself).
-    expect(trail[0]).toBe(`put ${kvKeys.kicked(familyId, USER2)}`);
-    // The three revoke deletes run in parallel — compared as a set — and ALL
-    // precede the family put, which is the last write.
-    expect(asSet(trail.slice(1, 4))).toEqual(
+    // Cycle 3 — see familyStaleMembership.test.ts for the race itself). The
+    // list put comes next: once it lands the removal has taken effect, and a
+    // revoke that fails after it leaves only a stray pointer that reads nothing.
+    expect(trail.slice(0, 2)).toEqual([
+      `put ${kvKeys.kicked(familyId, USER2)}`,
+      `put ${kvKeys.family(familyId)}`,
+    ]);
+    // The three revoke deletes run in parallel — compared as a set — and are
+    // the last writes.
+    expect(asSet(trail.slice(2))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
         `delete ${kvKeys.authToken(memberToken)}`,
       ]),
     );
-    expect(trail.slice(4)).toEqual([`put ${kvKeys.family(familyId)}`]);
   });
 
-  it("should leave the target listed, without access and unable to reconnect when the family put fails, and converge on the owner's retry", async () => {
+  it("should update the member list before revoking pointer and token on a self-leave, with no tombstone", async () => {
+    const { familyId, memberToken } = await createFamilyWithTwoMembers();
+    const ops = watchKvOps(kv);
+
+    const res = await removeMember(familyId, USER2, memberToken);
+
+    expect(res.status).toBe(200);
+    const trail = ops.writeTrail();
+    // List first: a revoke that fails after it leaves the leaver's own token
+    // alive, so they can retry the leave (see the self-leave cases below).
+    expect(trail[0]).toBe(`put ${kvKeys.family(familyId)}`);
+    expect(asSet(trail.slice(1))).toEqual(
+      asSet([
+        `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.auth(USER2)}`,
+        `delete ${kvKeys.authToken(memberToken)}`,
+      ]),
+    );
+  });
+
+  it("should revoke nothing when the kick's family put fails, refuse the still-listed target's reconnect, and converge on the owner's retry", async () => {
     const { familyId, ownerToken, memberToken } =
       await createFamilyWithTwoMembers();
-    const fault = failNextWrite("put", kvKeys.family(familyId));
+    const fault = failNextKvOp("put", kvKeys.family(familyId));
 
     const first = await removeMember(familyId, USER2, ownerToken);
 
     await expectInternalError(first);
     expect(fault.fired()).toBe(true);
-    // Revoked, but still listed — the owner can see them and retry.
-    expect(await kv.get(kvKeys.member(USER2))).toBeNull();
-    expect(await readAuthRecord(USER2)).toBeNull();
-    expect(await kv.get(kvKeys.authToken(memberToken))).toBeNull();
+    // The revoke never started: still listed, pointer and session intact —
+    // the kick simply did not happen, and the owner (answered 500) still sees
+    // them and can retry.
     expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
-    // No read access with the old session.
-    expect((await getMembers(familyId, memberToken)).status).toBe(401);
+    expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
+    expect((await readAuthRecord(USER2))?.token).toBe(memberToken);
+    expect(await kv.get(kvKeys.authToken(memberToken))).toBe(USER2);
     // The accepted trade-off of tombstone-first: the kick failed, yet its
     // tombstone stands, so the still-listed target's reconnect is refused
-    // (fail-closed) instead of healing the pointer back.
+    // (fail-closed) for up to the tombstone TTL.
     expect(await kv.get(kvKeys.kicked(familyId, USER2))).not.toBeNull();
     envKv = kv;
     const reconnect = await join(familyId, USER2);
@@ -468,84 +510,125 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(((await reconnect.json()) as Json).error.code).toBe(
       "MEMBER_REMOVED",
     );
-    // Refused with nothing healed and no session minted.
-    expect(await kv.get(kvKeys.member(USER2))).toBeNull();
-    expect(await readAuthRecord(USER2)).toBeNull();
+    // Refused with no second list entry and no new session minted.
+    expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
+    expect((await readAuthRecord(USER2))?.token).toBe(memberToken);
 
     const ops = watchKvOps(kv);
     const retry = await removeMember(familyId, USER2, ownerToken);
 
     expect(retry.status).toBe(200);
-    // Pointer already gone ⇒ no revoke deletes this time; the re-written
-    // tombstone and the list update finish the job, in that order.
-    expect(ops.writeTrail()).toEqual([
+    // The retry is a complete removal in the pinned order.
+    const trail = ops.writeTrail();
+    expect(trail.slice(0, 2)).toEqual([
       `put ${kvKeys.kicked(familyId, USER2)}`,
       `put ${kvKeys.family(familyId)}`,
     ]);
+    expect(asSet(trail.slice(2))).toEqual(
+      asSet([
+        `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.auth(USER2)}`,
+        `delete ${kvKeys.authToken(memberToken)}`,
+      ]),
+    );
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
+    expect(await readAuthRecord(USER2)).toBeNull();
     expect(await kv.get(kvKeys.kicked(familyId, USER2))).not.toBeNull();
+    expect((await getMembers(familyId, memberToken)).status).toBe(401);
     expect((await getMembers(familyId, ownerToken)).status).toBe(200);
   });
 
-  it("should keep the target listed when the pointer delete fails, so the owner's retry still finds them", async () => {
+  it("should unlist the target even when the pointer delete fails, leave a stray pointer that reads nothing, and clear it on the owner's retry", async () => {
     const { familyId, ownerToken } = await createFamilyWithTwoMembers();
-    const fault = failNextWrite("delete", kvKeys.member(USER2));
+    const fault = failNextKvOp("delete", kvKeys.member(USER2));
 
     const first = await removeMember(familyId, USER2, ownerToken);
 
     await expectInternalError(first);
     expect(fault.fired()).toBe(true);
-    // The hazard revoke-first exists for: had the family put landed alongside
-    // the failed delete, USER2 would be unlisted yet still point here — a
-    // removed member keeping read access. Instead the list is untouched.
+    // The list put landed BEFORE the failed revoke: the removal took effect
+    // (Inv-4) and only a stray pointer is left behind.
+    expect(await listedMemberIds(familyId)).toEqual([USER1]);
     expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
-    expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
-    // Tombstone-first trade-off: it landed before the failed revoke, so even
-    // with the pointer still in place the reconnect is refused.
     expect(await kv.get(kvKeys.kicked(familyId, USER2))).not.toBeNull();
+
+    // Worst case beside that pointer: a live session. The token delete may not
+    // have run, and `POST /api/auth/refresh` checks the pointer only, so it
+    // can renew one — seed it directly rather than depend on either. The
+    // parallel token delete outlives the rejected `Promise.all`, so let it
+    // settle first (the mock KV is microtask-only) or it could land on the seed.
+    await settleOrphanedKvOps();
+    const strayToken = await seedAuthToken(kv, USER2);
     envKv = kv;
+    // It reads nothing family-scoped: the same 404 as any non-member.
+    for (const read of [getBookshelf, getMembers]) {
+      const res = await read(familyId, strayToken);
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as Json).error.code).toBe("NOT_FOUND");
+    }
+    // ...and the ban still refuses the unlisted target's rejoin.
     const reconnect = await join(familyId, USER2);
     expect(reconnect.status).toBe(403);
     expect(((await reconnect.json()) as Json).error.code).toBe(
       "MEMBER_REMOVED",
     );
+    expect(await listedMemberIds(familyId)).toEqual([USER1]);
 
+    const ops = watchKvOps(kv);
     const retry = await removeMember(familyId, USER2, ownerToken);
 
-    expect(retry.status).toBe(200);
-    expect(await listedMemberIds(familyId)).toEqual([USER1]);
+    // The owner's re-kick lands on MEMBER_NOT_FOUND, which re-asserts the ban
+    // and clears the stray pointer together with its token.
+    expect(retry.status).toBe(404);
+    expect(((await retry.json()) as Json).error.code).toBe("MEMBER_NOT_FOUND");
+    const trail = ops.writeTrail();
+    expect(trail[0]).toBe(`put ${kvKeys.kicked(familyId, USER2)}`);
+    expect(asSet(trail.slice(1))).toEqual(
+      asSet([
+        `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.auth(USER2)}`,
+        `delete ${kvKeys.authToken(strayToken)}`,
+      ]),
+    );
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     expect(await readAuthRecord(USER2)).toBeNull();
+    expect(await kv.get(kvKeys.authToken(strayToken))).toBeNull();
     expect(await kv.get(kvKeys.kicked(familyId, USER2))).not.toBeNull();
+    expect(await listedMemberIds(familyId)).toEqual([USER1]);
   });
 
   it.each([
     {
-      label: "the family put",
-      fault: (familyId: string) =>
-        failNextWrite("put", kvKeys.family(familyId)),
+      label: "the family put (still listed)",
+      fault: (familyId: string) => failNextKvOp("put", kvKeys.family(familyId)),
+      listedAfterFailure: [USER1, USER2],
     },
     {
-      label: "the pointer delete",
-      fault: () => failNextWrite("delete", kvKeys.member(USER2)),
+      label: "the pointer delete (unlisted, stray pointer)",
+      fault: () => failNextKvOp("delete", kvKeys.member(USER2)),
+      listedAfterFailure: [USER1],
     },
   ])(
     "should let the owner's un-kick restore a target whose kick failed at $label",
-    async ({ fault: inject }) => {
+    async ({ fault: inject, listedAfterFailure }) => {
       const { familyId, ownerToken } = await createFamilyWithTwoMembers();
       const fault = inject(familyId);
       await expectInternalError(
         await removeMember(familyId, USER2, ownerToken),
       );
       expect(fault.fired()).toBe(true);
+      await settleOrphanedKvOps();
       envKv = kv;
-      // Precondition: the failed kick left them listed but banned.
-      expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
+      // Precondition: the failed kick left its half-state, and the ban.
+      expect(await listedMemberIds(familyId)).toEqual(listedAfterFailure);
+      expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
       expect((await join(familyId, USER2)).status).toBe(403);
 
       // The other documented way out of the trade-off: the owner changes their
-      // mind instead of retrying, and lifts the ban.
+      // mind instead of retrying, and lifts the ban. Still listed ⇒ the
+      // reconnect takes the existing-member branch; unlisted ⇒ the stray
+      // pointer does not count as membership, so it rejoins as a new member.
       const unkick = await request(
         "DELETE",
         `/api/family/${familyId}/kicked/${USER2}`,
@@ -555,8 +638,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
       expect(unkick.status).toBe(200);
       expect(await kv.get(kvKeys.kicked(familyId, USER2))).toBeNull();
 
-      // The still-listed member reconnects as an existing member — no second
-      // list entry — with a working session.
+      // Either way: listed exactly once, with a working session.
       const token = await joinOk(familyId, USER2);
       expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
       expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
@@ -565,39 +647,107 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     },
   );
 
-  it("should let a member whose self-leave half-failed reconnect and leave again", async () => {
+  it("should revoke nothing when a self-leave's family put fails, so the same session can retry the leave at once", async () => {
     const { familyId, memberToken } = await createFamilyWithTwoMembers();
-    const fault = failNextWrite("put", kvKeys.family(familyId));
+    const fault = failNextKvOp("put", kvKeys.family(familyId));
 
     await expectInternalError(await removeMember(familyId, USER2, memberToken));
     expect(fault.fired()).toBe(true);
-    // Their own token is gone, so they cannot retry the DELETE directly...
-    expect((await getMembers(familyId, memberToken)).status).toBe(401);
-
-    // ...but a plain reconnect heals the pointer (no tombstone: self-leave)...
-    const newToken = await joinOk(familyId, USER2);
+    envKv = kv;
+    // Nothing happened: still listed, pointer and session intact, no ban.
+    expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
     expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
+    expect(await kv.get(kvKeys.kicked(familyId, USER2))).toBeNull();
+    expect((await getMembers(familyId, memberToken)).status).toBe(200);
 
-    // ...and the second leave completes.
-    const leave = await removeMember(familyId, USER2, newToken);
-    expect(leave.status).toBe(200);
+    // The leaver's own token still works, so their retry completes the leave.
+    const retry = await removeMember(familyId, USER2, memberToken);
+
+    expect(retry.status).toBe(200);
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
+    expect(await readAuthRecord(USER2)).toBeNull();
+    expect(await kv.get(kvKeys.authToken(memberToken))).toBeNull();
+    expect(await kv.get(kvKeys.kicked(familyId, USER2))).toBeNull();
+  });
+
+  it("should let a member whose self-leave failed before its revoke retry the leave, clearing the stray pointer and token without a tombstone", async () => {
+    const { familyId, memberToken } = await createFamilyWithTwoMembers();
+    // The revoke's pointer read fails AFTER the list put landed, so neither
+    // the pointer nor the token delete runs.
+    const fault = failNextKvOp("get", kvKeys.member(USER2));
+
+    await expectInternalError(await removeMember(familyId, USER2, memberToken));
+    expect(fault.fired()).toBe(true);
+    envKv = kv;
+    // Unlisted — the leave took effect — with a stray pointer and a live token.
+    expect(await listedMemberIds(familyId)).toEqual([USER1]);
+    expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
+    expect(await kv.get(kvKeys.authToken(memberToken))).toBe(USER2);
+    // That leftover reads nothing family-scoped: the same 404 as a non-member.
+    for (const read of [getBookshelf, getMembers]) {
+      const res = await read(familyId, memberToken);
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as Json).error.code).toBe("NOT_FOUND");
+    }
+
+    const ops = watchKvOps(kv);
+    const retry = await removeMember(familyId, USER2, memberToken);
+
+    // The retried leave lands on MEMBER_NOT_FOUND, which clears the stray
+    // pointer and the caller's own token — and, a self-leave, bans nothing.
+    expect(retry.status).toBe(404);
+    expect(((await retry.json()) as Json).error.code).toBe("MEMBER_NOT_FOUND");
+    expect(asSet(ops.writeTrail())).toEqual(
+      asSet([
+        `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.auth(USER2)}`,
+        `delete ${kvKeys.authToken(memberToken)}`,
+      ]),
+    );
+    expect(await kv.get(kvKeys.member(USER2))).toBeNull();
+    expect(await readAuthRecord(USER2)).toBeNull();
+    expect(await kv.get(kvKeys.authToken(memberToken))).toBeNull();
+    expect(await kv.get(kvKeys.kicked(familyId, USER2))).toBeNull();
+    expect(await listedMemberIds(familyId)).toEqual([USER1]);
+  });
+
+  it("should not count a self-leave's stray pointer as membership when only its pointer delete failed", async () => {
+    const { familyId, memberToken } = await createFamilyWithTwoMembers();
+    const fault = failNextKvOp("delete", kvKeys.member(USER2));
+
+    await expectInternalError(await removeMember(familyId, USER2, memberToken));
+    expect(fault.fired()).toBe(true);
+    await settleOrphanedKvOps();
+    envKv = kv;
+    // Unlisted with a stray pointer; the parallel token delete did land, so
+    // the leaver cannot retry the DELETE themselves...
+    expect(await listedMemberIds(familyId)).toEqual([USER1]);
+    expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
+    expect((await removeMember(familyId, USER2, memberToken)).status).toBe(401);
+
+    // ...but the stray pointer blocks nothing: rejoining works (a new-member
+    // join — no ALREADY_IN_FAMILY, no tombstone from a self-leave), listed
+    // exactly once, with a session that reads the family.
+    const newToken = await joinOk(familyId, USER2);
+    expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
+    expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
+    expect((await getMembers(familyId, newToken)).status).toBe(200);
     expect(await kv.get(kvKeys.kicked(familyId, USER2))).toBeNull();
   });
 
   it("should not delete the target's pointer or token when the pointer names ANOTHER family", async () => {
-    const { familyId, ownerToken } = await createFamilyWithTwoMembers();
-    // Reach "listed here, pointer elsewhere" the way production can: a removal
-    // that half-failed after its revoke, then the target joins another family.
-    const fault = failNextWrite("put", kvKeys.family(familyId));
-    await expectInternalError(await removeMember(familyId, USER2, ownerToken));
+    const { familyId, authToken: ownerToken } = await createFamily(USER1);
+    // Reach "listed here, pointer elsewhere" the way production can: a join
+    // whose pointer put failed after its record put (listed, no pointer, no
+    // session), then the target joins another family instead of retrying.
+    const fault = failNextKvOp("put", kvKeys.member(USER2));
+    await expectInternalError(await join(familyId, USER2));
     expect(fault.fired()).toBe(true);
     envKv = kv;
+    expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
+    expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     const { familyId: otherFamilyId } = await createFamily(USER3);
-    // The failed kick's tombstone is scoped to (familyId, USER2): it bans
-    // nothing elsewhere, so this join succeeds.
-    expect(await kv.get(kvKeys.kicked(familyId, USER2))).not.toBeNull();
     const otherToken = await joinOk(otherFamilyId, USER2);
     expect(await kv.get(kvKeys.member(USER2))).toBe(otherFamilyId);
     expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
@@ -614,11 +764,12 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect((await readAuthRecord(USER2))?.token).toBe(otherToken);
     expect((await getMembers(otherFamilyId, otherToken)).status).toBe(200);
     // Positive companion: the tombstone and the list update did land, in
-    // tombstone-first order.
+    // tombstone-first order, and the revoke did read the target's pointer.
     expect(ops.writeTrail()).toEqual([
       `put ${kvKeys.kicked(familyId, USER2)}`,
       `put ${kvKeys.family(familyId)}`,
     ]);
+    expect(ops.getKeys()).toContain(kvKeys.member(USER2));
   });
 });
 
@@ -647,7 +798,7 @@ describe("Sole-owner dissolve partial-write convergence", () => {
 
   it("should keep the owner's pointer and token when the family delete fails, so the same session can retry", async () => {
     const { familyId, authToken } = await createFamily(USER1);
-    const fault = failNextWrite("delete", kvKeys.family(familyId));
+    const fault = failNextKvOp("delete", kvKeys.family(familyId));
 
     const first = await removeMember(familyId, USER1, authToken);
 
@@ -700,7 +851,7 @@ describe("Sole-owner dissolve partial-write convergence", () => {
   it.each(cases)("should not leave the owner stuck: $name", async (tc) => {
     const { familyId } = await createFamily(USER1);
     const token = (await readAuthRecord(USER1))!.token;
-    const fault = failNextWrite("delete", tc.failingKey);
+    const fault = failNextKvOp("delete", tc.failingKey);
 
     const first = await removeMember(familyId, USER1, token);
 

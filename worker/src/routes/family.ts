@@ -573,7 +573,7 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     // A heal must not land for a member whose removal is in flight — combined
     // with any concurrent stale-list write re-listing them, it would be a full
     // re-admission. The tombstone gate above cannot guarantee that alone: when
-    // the target was ALREADY pointerless (an earlier half-failed self-leave or
+    // the target was ALREADY listed-but-pointerless (an earlier half-failed
     // join), this handler can pass the gate before the owner's tombstone lands,
     // the owner's pointer read then sees null and deletes nothing, and the heal
     // put lands after it. So the guarantee is a PAIR of mirrored orders: the
@@ -772,13 +772,14 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   if (!hasMember(record.members, targetUserId)) {
     // Idempotent re-kick path, tombstone FIRST — before the stray-pointer
     // delete below, for the same reason the removal below writes it before its
-    // revoke: a join that observes the deleted pointer must also observe the
-    // tombstone, so it answers 403 MEMBER_REMOVED instead of healing the
+    // pointer read: a join that observes the deleted pointer must also observe
+    // the tombstone, so it answers 403 MEMBER_REMOVED instead of healing the
     // pointer back. The member is already gone from the record, but that does
     // NOT mean a tombstone exists: a previous removal's tombstone put may have
-    // failed open while its revoke and family put landed, or the tombstone has
-    // expired. Without this write the owner's retry would 404 here — ahead of
-    // the removal's tombstone write — and the ban could never be applied.
+    // failed open while its member-list put (and revoke) landed, or the
+    // tombstone has expired. Without this write the owner's retry would 404
+    // here — ahead of the removal's tombstone write — and the ban could never
+    // be applied.
     //
     // Yes, this permits an owner to pre-tombstone a userId that never joined
     // their family. Scoped to their own familyId and squarely within their
@@ -792,12 +793,14 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     }
 
     // Stray-pointer cleanup. The record no longer lists the target, yet
-    // `member:{uid}` may still name this family: a stale pointer read at the
-    // removal's revoke (KV ~60s propagation), a join that healed the pointer
-    // during a removal whose tombstone put failed open, or a pre-#213 removal
-    // that half-failed. The read-side list checks already deny that pointer any
-    // bookshelf / members read; deleting it here is what makes the owner's
-    // re-kick — or the target's own retried leave — converge. Runs for BOTH
+    // `member:{uid}` may still name this family: a removal whose revoke failed
+    // after its member-list put landed, a stale pointer read at the removal's
+    // revoke (KV ~60s propagation), a join that healed the pointer during a
+    // removal whose tombstone put failed open, or a pre-#213 removal that
+    // half-failed. The read-side list checks already deny that pointer any
+    // bookshelf / members / borrow read; deleting it (and the token beside it)
+    // here is what makes the owner's re-kick — or the target's own retried
+    // leave — converge. Runs for BOTH
     // callers: the NOT_OWNER guard above already proved the caller is the owner
     // or the target is themself. One extra read, on this rare branch only; a
     // pointer naming another family is left alone.
@@ -831,36 +834,37 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   record.members = record.members.filter((m) => m.userId !== targetUserId);
 
   // Owner kick: tombstone FIRST — after the borrow settlement (whose 500 must
-  // leave nothing written) and BEFORE the revoke. Discriminator: this branch is
-  // shared by "voluntary self-leave" and "owner removes another member";
-  // the NOT_OWNER guard above already proved that when `targetUserId !==
-  // callerId` the caller IS the owner. A voluntary self-leave is never
-  // tombstoned (leave-then-rejoin is legitimate), and the sole-member
+  // leave nothing written) and BEFORE the member-list put and the revoke.
+  // Discriminator: this branch is shared by "voluntary self-leave" and "owner
+  // removes another member"; the NOT_OWNER guard above already proved that when
+  // `targetUserId !== callerId` the caller IS the owner. A voluntary self-leave
+  // is never tombstoned (leave-then-rejoin is legitimate), and the sole-member
   // owner-dissolve path early-returns above and never reaches here.
   //
   // Why first: the join handler reads `member:{uid}` BEFORE it checks the
   // tombstone. With the tombstone landed before the pointer delete, any join
   // that observes the deleted pointer — the only kind that would HEAL it —
   // also observes the tombstone and answers 403 MEMBER_REMOVED. Tombstone-last
-  // left a window (pointer gone, list not yet written, no tombstone) in which
-  // a join saw itself listed and healed the pointer, and any concurrent
-  // full-record write carrying the stale list (a displayName reconnect, the
-  // displayName / member-settings endpoints) could then re-list the target
-  // after our put: listed + pointer + token = a full re-admission. Ordering
-  // alone does not cover a target who was ALREADY pointerless (a join can pass
-  // its gate before our tombstone, our pointer read below sees null, and its
-  // heal lands after that read), so the join handler mirrors this order — it
-  // re-reads the tombstone AFTER writing the pointer and retracts it
-  // (`retractPointerIfKicked`); the pair means one side always sees the other.
-  // This holds under same-colo read-your-writes; across colos KV
-  // propagates each key independently, which is the ~60s propagation residual
-  // documented in docs/architecture.md.
+  // left a window (pointer gone, no tombstone) in which a join that still saw
+  // itself listed healed the pointer, and any concurrent full-record write
+  // carrying the stale list (a displayName reconnect, the displayName /
+  // member-settings endpoints) could then re-list the target: listed + pointer
+  // + token = a full re-admission. Ordering alone does not cover a target who
+  // was ALREADY pointerless (a join can pass its gate before our tombstone, our
+  // pointer read below sees null, and its heal lands after that read), so the
+  // join handler mirrors this order — it re-reads the tombstone AFTER writing
+  // the pointer and retracts it (`retractPointerIfKicked`); the pair
+  // (tombstone put → pointer read here, pointer put → tombstone read there)
+  // means one side always sees the other. The member-list put sitting between
+  // our two steps does not disturb that pair. This holds under same-colo
+  // read-your-writes; across colos KV propagates each key independently, which
+  // is the ~60s propagation residual documented in docs/architecture.md.
   //
   // Trade-off, deliberately accepted: this reverses the former "tombstone only
-  // after the removal writes succeed" rule. If the revoke or the family put
-  // below throws (500), the target is still listed but cannot reconnect for
-  // up to KICKED_TOMBSTONE_TTL_SECONDS. That protected a still-live member,
-  // but a member the owner is actively kicking is not one the owner wants
+  // after the removal writes succeed" rule. If the member-list put below throws
+  // (500), the target is still listed but cannot reconnect for up to
+  // KICKED_TOMBSTONE_TTL_SECONDS. That protected a still-live member, but a
+  // member the owner is actively kicking is not one the owner wants
   // reconnecting — the owner still sees them listed, and either a retried
   // removal converges or `DELETE /api/family/:id/kicked/:uid` lifts the ban.
   // The helper stays fail-open: a failed tombstone put must not stop the
@@ -870,33 +874,49 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     await writeKickedTombstone(c.env.KV, familyId, targetUserId, callerId);
   }
 
-  // Revoke, then update the member list. `member:{uid}` is what
-  // `POST /api/auth/refresh` checks, so the old order (all three writes in
-  // parallel) could leave a pointer at a family that no longer lists the target
-  // — a removed member who keeps refreshing tokens. With revoke-first, a
-  // failure after the deletes leaves the target with no pointer and no token
-  // but still listed: the owner still sees them, and a retry finds them a
-  // member and converges. A stray pointer that survives anyway (a stale read
-  // below) grants no family read — the bookshelf / members reads re-check the
-  // list — and the MEMBER_NOT_FOUND branch above deletes it on the re-kick.
+  // Member-list put FIRST, then the revoke. The list is what every family
+  // read now authorizes against: the bookshelf / members GETs and the borrow
+  // routes require the caller to be LISTED, the bookshelf aggregation only
+  // gathers listed members' books, and create / join / lookup treat a pointer
+  // at a family that no longer lists the user as stale (`isLiveMembership`).
+  // So once this put lands the removal has taken effect (Inv-4), and what a
+  // failed revoke after it leaves behind — a stray `member:{uid}` pointer, and
+  // the target's token — reads nothing family-scoped and blocks nothing.
+  // (`POST /api/auth/refresh` still checks the pointer only, so it can renew
+  // that token; the renewed token reads nothing family-scoped either.) Any
+  // retry converges: the target is no longer listed, so the owner's re-kick
+  // AND the target's own retried leave land on the MEMBER_NOT_FOUND branch
+  // above, which deletes a stray pointer naming this family together with its
+  // token. If the token delete landed and the pointer delete did not, the
+  // target cannot retry the leave, but the stray pointer still reads nothing
+  // and no longer counts as membership.
+  //
+  // The reverse order (revoke, then list put) left a worse half-state when the
+  // put failed: the target still listed — their shared books still in the
+  // others' bookshelf aggregation until someone retried — and, on a
+  // self-leave, their own token already gone, so they could not retry the
+  // leave themselves.
   //
   // What this ordering does NOT close: `family:{id}` is a read-modify-write
   // with no CAS, so a concurrent full-record write that read the list before
   // our put (a non-healing reconnect carrying a new displayName, the
   // displayName / member-settings endpoints — started before the tombstone
-  // landed) can still re-list the target after it. That member has no pointer,
-  // so the bookshelf / members reads stay closed, but a reconnect that read the
-  // pointer before the revoke still mints a fresh token, and the borrow routes
-  // and member-settings check the member list only — such a hollow member can
-  // read the family borrow list, and their shared books appear in the others'
-  // bookshelf aggregation, until the owner removes them again. This race
-  // predates #213; see docs/architecture.md → 已接受的殘餘風險.
-  //
-  // The pointer is read first and the deletes run only when it names THIS
-  // family. Anything else (null, or another family) means the target's session
-  // belongs elsewhere — e.g. they were left listed-but-pointerless by an earlier
-  // half-failed removal and have since created or joined another family — and
-  // must not be clobbered.
+  // landed) can still re-list the target after it. Once the revoke below lands
+  // that member has no pointer, so the bookshelf / members reads stay closed,
+  // but a reconnect that read the pointer before the revoke still mints a fresh
+  // token, and the borrow routes and member-settings check the member list
+  // only — such a hollow member can read the family borrow list, and their
+  // shared books appear in the others' bookshelf aggregation, until the owner
+  // removes them again. This race predates #213; see docs/architecture.md →
+  // 已接受的殘餘風險 (#222).
+  await putFamilyRecord(c.env.KV, familyId, record);
+
+  // Revoke: the pointer is read first and the deletes run only when it names
+  // THIS family. Anything else (null, or another family) means the target's
+  // session belongs elsewhere — e.g. they were left listed-but-pointerless by
+  // an earlier half-failed join and have since created or joined another
+  // family — and must not be clobbered. The tombstone (owner kick) was written
+  // before this read, which is the removal's half of the kick pairing above.
   const targetPointer = await getMemberFamilyId(c.env.KV, targetUserId);
   if (targetPointer === familyId) {
     await Promise.all([
@@ -904,7 +924,6 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
       deleteAuthToken(c.env.KV, targetUserId),
     ]);
   }
-  await putFamilyRecord(c.env.KV, familyId, record);
 
   return c.json({ data: record });
 });
@@ -1508,9 +1527,11 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
  * handler deletes the same key, so a removal made by mistake is undone on demand
  * instead of being waited out.
  *
- * Both call sites write it BEFORE revoking the target's pointer (see the removal
- * handler for why), so a failed kick can leave a tombstone for a member who is
- * still listed — accepted: the owner retries or lifts it via the un-kick route.
+ * Both call sites write it BEFORE reading and revoking the target's pointer
+ * (see the removal handler for why); the removal also writes it before its
+ * member-list put, so a kick whose list put fails can leave a tombstone for a
+ * member who is still listed — accepted: the owner retries or lifts it via the
+ * un-kick route.
  *
  * FAIL-OPEN by design: a failed put is logged and swallowed, never surfaced as a
  * 500. On the removal call site a failed tombstone must not stop the removal
