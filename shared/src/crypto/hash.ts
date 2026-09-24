@@ -1,6 +1,10 @@
 /**
  * Hashing utilities for user identity derivation.
  * Uses Web Crypto API (SHA-256) — no encryption involved.
+ *
+ * This is the single implementation shared by the Extension and the PWA. Its
+ * output IS every existing user's userId, so it must never change — including
+ * the double normalization (deriveUserId and sha256Hex each lowercase + trim).
  */
 
 /**

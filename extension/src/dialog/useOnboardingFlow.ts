@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClient } from "../api/client";
-import { deriveUserId } from "../crypto/hash";
+import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import { SyncCodeError, encodeSyncCode } from "../crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { readSyncFamilyIdRemnant } from "../storage/familyId";

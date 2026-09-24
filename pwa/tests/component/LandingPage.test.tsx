@@ -301,7 +301,12 @@ describe("LandingPage", () => {
 
       await waitFor(() => {
         expect(mockOnAuth).toHaveBeenCalledWith({
-          userId: expect.stringMatching(/^[a-f0-9]{64}$/),
+          // Literal cross-platform vector (= deriveUserId("  User@Example.com  ")
+          // in extension/tests/unit/hash.test.ts). Pins that the PWA login
+          // derives the SAME userId the Extension does — never compute this
+          // in the test by calling deriveUserId, that would be tautological.
+          userId:
+            "89f7e39cc90a4bf90502af2f6862d07bcd3dbe9f08cb6dcc96e8a0fd1f404da1",
           familyId: "fam-1",
           apiHost: CUSTOM_ENDPOINT,
           authToken: "tok-123",
@@ -322,7 +327,9 @@ describe("LandingPage", () => {
 
       await waitFor(() => {
         expect(mockOnAuth).toHaveBeenCalledWith({
-          userId: expect.stringMatching(/^[a-f0-9]{64}$/),
+          // sha256("moo:test@test.com") — hard-coded literal, see the test above.
+          userId:
+            "fb665feb4ce879ca70bcd4bb4358b56daceb33815ef832461ced74b23c3c25eb",
           familyId: "fam-1",
           apiHost: undefined,
           authToken: "tok-123",

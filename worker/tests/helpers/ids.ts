@@ -2,7 +2,7 @@
  * Shared test userId fixtures.
  *
  * Production userIds are SHA-256 hex digests derived from the account email
- * (see `extension/src/crypto/hash.ts`). Since BE-8, `isValidUserId` enforces
+ * (see `shared/src/crypto/hash.ts`). Since BE-8, `isValidUserId` enforces
  * the strict 64-hex rule (`^[a-f0-9]{64}$`) on EVERY route, so tests must use
  * real 64-char lowercase-hex ids — the old non-hex placeholders ("user1",
  * "alice", …) are now rejected with 400 INVALID_USER_ID.

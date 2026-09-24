@@ -2,7 +2,7 @@ import { z } from "@hono/zod-openapi";
 
 export const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
 // userIds are SHA-256 hex digests derived from the account email (see
-// extension crypto/hash.ts). Enforce the strict 64-hex rule everywhere,
+// shared/src/crypto/hash.ts). Enforce the strict 64-hex rule everywhere,
 // matching the auth routes' Sha256HexSchema — there is no legitimate
 // non-hex userId.
 export const UserIdSchema = Sha256HexSchema;
