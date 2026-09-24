@@ -14,7 +14,7 @@ import { usePersonalBooks } from "./usePersonalBooks";
 import { PublicShareDialog } from "./PublicShareDialog";
 import { useFamilyData } from "./FamilyDataContext";
 import { useBookSort } from "./useBookSort";
-import { sortBooks } from "./sortBooks";
+import { sortBooks } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import { BookSortDropdown } from "./BookSortDropdown";
 import { useIsMobile } from "../hooks/useIsMobile";
 

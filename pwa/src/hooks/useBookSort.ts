@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import type { BookSortMode } from "@/utils/sortBooks";
-import { normalizeSortMode } from "@/utils/sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
+import { normalizeSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import { namespacedKey } from "@/hooks/useAuth";
 
 export type BookSortShelf = "family" | "personal";

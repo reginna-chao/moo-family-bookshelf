@@ -3,7 +3,7 @@ import { SearchBar } from "./SearchBar";
 import { CategoryFilter } from "./CategoryDropdown";
 import { ViewModeToggle } from "./ViewModeToggle";
 import { BookSortDropdown } from "./BookSortDropdown";
-import type { BookSortMode } from "./sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import type { MemberBooks } from "./FamilyDataContext";
 import type { FamilyShelfBook } from "./useFamilyShelfBooks";
 

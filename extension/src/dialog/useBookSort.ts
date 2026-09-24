@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import browser from "webextension-polyfill";
-import type { BookSortMode } from "./sortBooks";
-import { normalizeSortMode } from "./sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
+import { normalizeSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 
 export type BookSortShelf = "family" | "personal";
 

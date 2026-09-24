@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import React from "react";
 import { BookSortDropdown } from "@/dialog/BookSortDropdown";
-import type { BookSortMode } from "@/dialog/sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 
 /**
  * BookSortDropdown is a custom listbox dropdown (no native <select>):

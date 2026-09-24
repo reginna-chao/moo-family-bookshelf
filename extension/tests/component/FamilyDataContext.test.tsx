@@ -277,7 +277,7 @@ describe("FamilyDataProvider hostile error envelopes", () => {
 
 /**
  * The 「更新」 chip is a diff between each member's `lastUpdated` on the wire
- * and the baseline stored under `seenKey(userId)` (extension/src/dialog/
+ * and the baseline stored under `seenKey(userId)` (shared/src/familyShelf/
  * updateTracking.ts). The provider used to hand the tracker a synthesized
  * `lastUpdated: null` for every member (the Extension's `FamilyBookshelf` type
  * lacked the field — issue #169), and `computeFreshBookIds` reads `null` as

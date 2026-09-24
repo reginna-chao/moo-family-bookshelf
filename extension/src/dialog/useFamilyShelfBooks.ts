@@ -2,7 +2,10 @@ import { useMemo } from "react";
 import { BoolFlag } from "../api/client";
 import type { BookWithMember } from "./BookCard";
 import type { MemberBooks } from "./FamilyDataContext";
-import { countHidden, countFavorites } from "./familyShelfPrefs";
+import {
+  countHidden,
+  countFavorites,
+} from "moo-family-bookshelf-shared/familyShelf/prefRefs";
 import {
   HIDDEN_FILTER_VALUE,
   FAVORITE_FILTER_VALUE,
