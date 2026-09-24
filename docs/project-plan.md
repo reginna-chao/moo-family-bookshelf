@@ -378,7 +378,7 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 │  │                     │    │                            │ │
 │  │  • Unit Tests       │    │  • Unit Tests              │ │
 │  │  • Component Tests  │    │  • Integration Tests       │ │
-│  │  • E2E Tests        │    │    (Miniflare local KV)    │ │
+│  │  • E2E Tests        │    │    (in-memory mock KV)     │ │
 │  │  • Lint + Typecheck │    │  • Lint + Typecheck        │ │
 │  │  • Build            │    │  • Build                   │ │
 │  └─────────────────────┘    └────────────────────────────┘ │
@@ -404,10 +404,12 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 
 ### 後端測試（Worker）
 
-| 測試層級        | 工具               | 測試範圍                         | 範例                                               |
-| --------------- | ------------------ | -------------------------------- | -------------------------------------------------- |
-| **Unit**        | Vitest             | 路由處理、資料驗證、權限檢查邏輯 | `routes/family.test.ts`、`middleware/auth.test.ts` |
-| **Integration** | Vitest + Miniflare | 完整 API 流程搭配本地模擬 KV     | `integration/family-lifecycle.test.ts`             |
+| 測試層級        | 工具                      | 測試範圍                                                             | 範例                                               |
+| --------------- | ------------------------- | -------------------------------------------------------------------- | -------------------------------------------------- |
+| **Unit**        | Vitest                    | 路由處理、資料驗證、權限檢查邏輯                                     | `routes/family.test.ts`、`middleware/auth.test.ts` |
+| **Integration** | Vitest + `createMockKV()` | 在測試行程內直接呼叫 Hono app，搭配記憶體內的模擬 KV 跑完整 API 流程 | `integration/familyLifecycle.test.ts`              |
+
+> 後端測試不經過 Miniflare：Vitest 用預設的 Node 環境執行，KV 都換成 `worker/tests/helpers/mockKv.ts` 的 `createMockKV()`。這個模擬 KV 會檢查 TTL 下限，但不會讓資料真的過期，也沒有跨機房同步延遲，需要這兩種行為的情境無法在這裡重現。Miniflare 只在 `wrangler dev` 背後執行（本機開發與 E2E）。
 
 #### 後端測試重點
 
@@ -419,13 +421,14 @@ PWA 與 Chrome Extension 呼叫同一組 Cloudflare Workers API，資料完全�
 
 ### 共用測試工具
 
-| 工具                      | 用途                                  |
-| ------------------------- | ------------------------------------- |
-| **Vitest**                | 前後端統一測試框架                    |
-| **Miniflare**             | 本地模擬 Cloudflare Workers + KV 環境 |
-| **React Testing Library** | Dialog UI 元件測試                    |
-| **Playwright**            | Extension E2E 測試                    |
-| **c8 / istanbul**         | 程式碼覆蓋率（透過 Vitest 內建）      |
+| 工具                      | 用途                                       |
+| ------------------------- | ------------------------------------------ |
+| **Vitest**                | 前後端統一測試框架                         |
+| **`createMockKV()`**      | Worker 測試用的記憶體內 KV                 |
+| **Miniflare**             | `wrangler dev` 的本地執行環境（開發、E2E） |
+| **React Testing Library** | Dialog UI 元件測試                         |
+| **Playwright**            | Extension E2E 測試                         |
+| **c8 / istanbul**         | 程式碼覆蓋率（透過 Vitest 內建）           |
 
 ### 覆蓋率目標
 
@@ -467,7 +470,7 @@ jobs:
       - cd worker && pnpm install
       - pnpm lint
       - pnpm typecheck
-      - pnpm test # Vitest + Miniflare (unit + integration)
+      - pnpm test # Vitest + in-memory mock KV (unit + integration)
       - pnpm build # wrangler build 驗證
 
   e2e:
@@ -502,7 +505,7 @@ jobs:
 | `CLOUDFLARE_API_TOKEN`  | Worker / Pages 部署 |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 帳號識別 |
 
-> 不需要額外的 secrets 做測試 — Miniflare 在 CI 中模擬完整 KV 環境，不連接真實 Cloudflare。
+> 不需要額外的 secrets 做測試：Worker 測試用記憶體內的模擬 KV，E2E 用本地 `wrangler dev`（Miniflare），都不連接真實 Cloudflare。
 
 ---
 
@@ -1110,7 +1113,7 @@ jobs:
   - **已完成部分**：`PatternLock` / `PinInput` 已補測；`useQrLinkState` 由 `QrCodeLink` 元件測試間接覆蓋。
   - **剩餘**：`pwa/src/crypto/hash.ts`、`scraper-archive.ts`。
 - [x] **SEC-3** dev 相依套件 bump：已完成（#198 更新 lockfile，Node 下限提高到 22；GitHub Actions 改由 Dependabot 每月檢查）。
-- [ ] **文件不一致**：integration 測試實際使用 in-memory `createMockKV()`，而非 `test.md` / 本計畫書第八章所述的 Miniflare → [#216](https://github.com/reginna-chao/moo-family-bookshelf/issues/216)
+- [x] **文件不一致**：已完成（#216）。`test.md`、`AGENTS.md`、`backend.md`、`CONTRIBUTING.md` 與本計畫書第八章改為描述實際使用的 in-memory `createMockKV()`，Miniflare 只保留在 `wrangler dev`（本機開發、E2E）的說明。
 
 ##### 不修（設計固有 / 已評估接受）
 
@@ -1157,7 +1160,7 @@ moo-family-bookshelf/
 │   │   └── index.ts         # Worker 入口
 │   ├── tests/               # 後端測試
 │   │   ├── unit/            # Unit tests (routes, middleware)
-│   │   └── integration/     # Integration tests (Miniflare + KV)
+│   │   └── integration/     # Integration tests (Hono app + in-memory mock KV)
 │   ├── vitest.config.ts     # Vitest 設定
 │   ├── wrangler.toml        # Cloudflare 設定
 │   └── DEPLOY.md            # 自建部署教學

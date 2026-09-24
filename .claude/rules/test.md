@@ -2,12 +2,12 @@
 
 ### Framework & Tools
 
-| Tool                  | Scope              | Purpose                         |
-| --------------------- | ------------------ | ------------------------------- |
-| Vitest                | Extension + Worker | Unit & integration tests        |
-| React Testing Library | Extension          | Component tests                 |
-| Playwright            | Extension          | E2E tests with loaded Extension |
-| Miniflare             | Worker             | Local KV simulation             |
+| Tool                  | Scope              | Purpose                                                                    |
+| --------------------- | ------------------ | -------------------------------------------------------------------------- |
+| Vitest                | Extension + Worker | Unit & integration tests                                                   |
+| React Testing Library | Extension          | Component tests                                                            |
+| Playwright            | Extension          | E2E tests with loaded Extension                                            |
+| `createMockKV()`      | Worker             | In-memory KV for unit/integration tests (`worker/tests/helpers/mockKv.ts`) |
 
 ### Test Locations
 
@@ -20,7 +20,7 @@
 - Test business behavior, not implementation details.
 - Table-driven tests preferred for functions with multiple input scenarios.
 - Tests must clean up state (no leaked timers, mocks, listeners, KV entries).
-- Integration tests use Miniflare — never connect to real Cloudflare in tests.
+- Worker integration tests call the Hono app in-process — `app.request(path, init, { KV: createMockKV(), … })` — on Vitest's default Node pool. There is no Miniflare / workerd runtime in `pnpm test`: `@cloudflare/vitest-pool-workers` sits in `worker/package.json` but no pool is configured in `worker/vitest.config.ts`. Miniflare only runs behind `wrangler dev` (local dev and the E2E webServer). Never connect to real Cloudflare in tests.
 - E2E tests load the built Extension into Chrome via Playwright.
 - Single-file runs: `pnpm test -- <path>` does NOT filter in ANY package — the `--` is swallowed and the full suite runs. Use `npx vitest run <path>` from inside `extension/`, `pwa/`, or `worker/`.
 
@@ -43,7 +43,8 @@
 ### Mock Policy
 
 - **Mock**: external API calls, `chrome.storage`, `fetch` to Worker.
-- **Do NOT mock**: React hooks, internal utility functions, KV in integration tests (use Miniflare).
+- **Do NOT mock**: React hooks, internal utility functions.
+- **KV goes through the shared mock**: every Worker suite that needs a KV store, unit and integration alike, uses `createMockKV()` (`worker/tests/helpers/mockKv.ts`) as its store — never write a second in-memory KV implementation (the sub-minimum-TTL case below is the one exception). Wrapping it to inject a failure or record operations (`worker/tests/integration/kickedTombstone.test.ts`, `worker/tests/unit/verificationGate.test.ts`) or an always-throwing stub for a KV-outage case is fine — those delegate to or replace the store, they do not re-implement it. It models a single, instantly consistent store: TTLs are validated and recorded (`getPutTtl`) but never expire, and there is no cross-colo propagation lag. A test that needs "the entry expired" deletes the key itself; a race that depends on stale reads cannot be reproduced here.
 - **Prod-mode rate-limit tests share the per-IP counter**: `prodRequest` without a `cf-connecting-ip` header lands every case on `ratelimit:unknown:*` — bulk cases isolate with a unique IP per case.
 - **KV write-order tripwire exists**: `worker/tests/helpers/kvOps.ts` (`watchKvOps` / `writeTrail()`) — reuse it, don't reinvent.
 - **KV mock enforces the TTL floor**: `createMockKV()` (`worker/tests/helpers/mockKv.ts`) throws on `expirationTtl < 60` or a non-integer value, mirroring real Cloudflare KV's minimum (stricter on non-integers, which the platform would truncate). A test that genuinely needs a sub-minimum TTL must build its own stub instead of weakening the shared mock — and such a stub is for KV-behaviour tests only; tests exercising production write paths must keep going through `createMockKV()` so the tripwire stays live.
