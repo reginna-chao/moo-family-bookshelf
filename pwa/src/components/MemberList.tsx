@@ -112,7 +112,17 @@ export function MemberList({
           familyId,
           confirmAction.targetId,
         );
-        if (res.error) {
+        // Owner kick, so MEMBER_NOT_FOUND can only mean "already off the
+        // list": an earlier kick half-failed server-side (member list updated,
+        // revoke failed) — or the target left on their own — and the Worker's
+        // 404 branch has now re-attempted the rejoin block and cleared the
+        // leftover pointer and token. Treat it as a completed removal: showing
+        // the error and skipping the refresh keeps a removed member on screen
+        // until the list is next loaded. Mirrored in
+        // extension/src/dialog/MemberList.tsx handleRemove; keep the two
+        // identical. Self-leave twin: pages/SettingsPage.tsx handleLeave.
+        const alreadyRemoved = res.error?.code === "MEMBER_NOT_FOUND";
+        if (res.error && !alreadyRemoved) {
           setError(
             rateLimitedEnvelopeMessage(res.error) ??
               safeErrorText(res.error.message, "移除成員失敗，請稍後再試"),

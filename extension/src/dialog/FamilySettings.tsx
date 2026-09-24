@@ -211,6 +211,16 @@ export function FamilySettings({
     setLeaveError("");
     try {
       const response = await apiClient.leaveFamily(familyId, userId);
+      // Self-leave, so MEMBER_NOT_FOUND can only mean "already not a member":
+      // an earlier leave half-failed server-side (member list updated, revoke
+      // failed) and this retry has now finished it. Treat it as success —
+      // showing an error and keeping the local family lets silent recovery
+      // re-join the family the user just left. Mirrored in
+      // pwa/src/pages/SettingsPage.tsx handleLeave; keep the two identical.
+      if (response.error?.code === "MEMBER_NOT_FOUND") {
+        onLeave();
+        return;
+      }
       if (response.error) {
         // 429 shows the localized back-off copy (with the wait when the server
         // sent one) instead of the server's English message.
