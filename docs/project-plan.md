@@ -1113,7 +1113,7 @@ jobs:
   - **已完成部分**：`PatternLock` / `PinInput` 已補測；`useQrLinkState` 由 `QrCodeLink` 元件測試間接覆蓋。
   - **剩餘**：`pwa/src/crypto/hash.ts`、`scraper-archive.ts`。
 - [x] **SEC-3** dev 相依套件 bump：已完成（#198 更新 lockfile，Node 下限提高到 22；GitHub Actions 改由 Dependabot 每月檢查）。
-- [x] **文件不一致**：已完成（#216）。`test.md`、`AGENTS.md`、`backend.md`、`CONTRIBUTING.md` 與本計畫書第八章改為描述實際使用的 in-memory `createMockKV()`，Miniflare 只保留在 `wrangler dev`（本機開發、E2E）的說明。
+- [x] **文件不一致**：已完成（#216）。`test.md`、`AGENTS.md`、`backend.md`、`CONTRIBUTING.md`、`site/technical.html` 與本計畫書第八章改為描述實際使用的 in-memory `createMockKV()`，Miniflare 只保留在 `wrangler dev`（本機開發、E2E）的說明。`docs/v1.1.0-borrow-feature.md` 等歷史設計文件維持原樣。
 
 ##### 不修（設計固有 / 已評估接受）
 
