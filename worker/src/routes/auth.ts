@@ -1,11 +1,7 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
-import {
-  BoolFlag,
-  TOKEN_TTL_SECONDS,
-  normalizeFamilyRecord,
-} from "../kv/schema";
-import { getFamilyRecord, getMemberFamilyId } from "../kv/families";
+import { BoolFlag, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { getMemberFamilyId } from "../kv/families";
 import {
   isValidFamilyId,
   isValidSha256Hex,
@@ -22,6 +18,7 @@ import {
   verificationErrorResponse,
   verifySecretFormatResponse,
 } from "../services/verification";
+import { readLiveMembers } from "../services/membership";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 
@@ -150,17 +147,21 @@ authRoutes.openapi(lookupRoute, async (c) => {
     }
   }
 
-  // Look up family membership
+  // Look up family membership. A `member:{userId}` pointer counts ONLY when the
+  // family record it names exists AND still lists the user — the live-membership
+  // rule create / join also apply (`services/membership.ts`). An orphan or
+  // stale pointer (a half-failed write, a join racing a kick) answers the
+  // no-family shape, so the client does not believe it still has a family and
+  // attempt a reconnect. Two reads: pointer, then record.
   let existingFamilyId: string | null = null;
   let memberCount = 0;
 
   const familyId = await getMemberFamilyId(c.env.KV, userId);
   if (familyId) {
-    existingFamilyId = familyId;
-    const raw = await getFamilyRecord(c.env.KV, familyId);
-    if (raw) {
-      const record = normalizeFamilyRecord(raw);
-      memberCount = record.members.length;
+    const members = await readLiveMembers(c.env.KV, familyId, userId);
+    if (members) {
+      existingFamilyId = familyId;
+      memberCount = members.length;
     }
   }
 

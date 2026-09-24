@@ -1105,7 +1105,7 @@ jobs:
 
 - [ ] **BE-10/11** 統一驗證錯誤碼（`defaultHook` 現一律回 `INVALID_JSON`）+ 接上 zod-openapi 實際驗證 → [#212](https://github.com/reginna-chao/moo-family-bookshelf/issues/212)
 - [x] **BE-12** 補 publicShelf / OTP / QR 的 per-user 限流：已完成（`public-shelf`、`verify-write` 兩個每小時 scope）。
-- [ ] **BE-13** 非原子多鍵寫入的部分失敗清理 → [#213](https://github.com/reginna-chao/moo-family-bookshelf/issues/213)
+- [x] **BE-13** 非原子多鍵寫入的部分失敗清理：已完成（家庭建立／加入／移除成員／解散改為重試可收斂的寫入順序）→ [#213](https://github.com/reginna-chao/moo-family-bookshelf/issues/213)
 - [ ] **FE-6** 拆 >200 行大檔；**FE-7** 收斂 props drilling → 併入 [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)
 - [ ] **FE-8** 抽共用 `useDismissable` → [#209](https://github.com/reginna-chao/moo-family-bookshelf/issues/209)
   - **已完成部分**：Extension 已有 `useDismissableMenu`；PWA 四個下拉元件仍各自手寫。
