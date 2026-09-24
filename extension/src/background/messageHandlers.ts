@@ -13,7 +13,7 @@
 import browser from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import { BoolFlag } from "../api/client";
-import { normalizeSortMode } from "../dialog/sortBooks";
+import { normalizeSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import { readFamilyId } from "../storage/familyId";
 import { showSyncErrorBadge, clearSyncErrorBadge } from "./badge";
 import {

@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import { useBookSort } from "@/hooks/useBookSort";
 import { namespacedKey } from "@/hooks/useAuth";
 import type { BookSortShelf } from "@/hooks/useBookSort";
-import type { BookSortMode } from "@/utils/sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 
 const USER_ID = "test-user-123";
 

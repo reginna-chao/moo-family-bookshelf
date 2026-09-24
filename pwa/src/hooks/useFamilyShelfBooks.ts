@@ -2,7 +2,10 @@ import { useMemo } from "react";
 import { BoolFlag } from "@/api/client";
 import type { BookEntry } from "@/api/client";
 import { MemberBooks } from "@/hooks/useFamilyData";
-import { countHidden, countFavorites } from "@/hooks/familyShelfPrefs";
+import {
+  countHidden,
+  countFavorites,
+} from "moo-family-bookshelf-shared/familyShelf/prefRefs";
 
 export interface BookWithMember extends BookEntry {
   memberName: string;

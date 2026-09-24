@@ -5,7 +5,7 @@ import {
   buildSeenBaseline,
   type BookshelfSeenRecord,
   type BookshelfChipsRecord,
-} from "@/dialog/updateTracking";
+} from "moo-family-bookshelf-shared/familyShelf/updateTracking";
 import type { MemberBooks } from "@/dialog/FamilyDataContext";
 import { BoolFlag } from "@/api/client";
 

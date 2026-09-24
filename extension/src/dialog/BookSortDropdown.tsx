@@ -1,7 +1,7 @@
 import React, { useId, useRef, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDownWideNarrow } from "lucide-react";
-import type { BookSortMode } from "./sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
 import { useDismissableMenu } from "../hooks/useDismissableMenu";
 import { useIsMobile } from "../hooks/useIsMobile";

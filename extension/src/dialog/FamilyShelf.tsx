@@ -8,7 +8,7 @@ import { filterByCategory } from "./CategoryDropdown";
 import { LoadingState } from "./LoadingState";
 import { useFamilyShelfViewMode } from "./useFamilyShelfViewMode";
 import { useBookSort } from "./useBookSort";
-import { sortBooks } from "./sortBooks";
+import { sortBooks } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import { useFamilyShelfBooks } from "./useFamilyShelfBooks";
 import { useBorrowAction } from "./useBorrowAction";
 import { FamilyShelfBookList } from "./FamilyShelfBookList";

@@ -30,7 +30,7 @@ import {
   buildSeenBaseline,
   type BookshelfSeenRecord,
   type BookshelfChipsRecord,
-} from "./updateTracking";
+} from "moo-family-bookshelf-shared/familyShelf/updateTracking";
 import { useFamilyShelfPrefs } from "./useFamilyShelfPrefs";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 

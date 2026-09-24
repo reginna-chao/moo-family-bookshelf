@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ArrowDownWideNarrow } from "lucide-react";
-import type { BookSortMode } from "@/utils/sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 
 export interface BookSortDropdownProps {
   value: BookSortMode;

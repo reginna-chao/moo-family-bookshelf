@@ -13,7 +13,7 @@ import {
   FamilyShelfEmpty,
 } from "@/components/FamilyShelfStatus";
 import { useBookSort } from "@/hooks/useBookSort";
-import { sortBooks } from "@/utils/sortBooks";
+import { sortBooks } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import {
   useFamilyShelfBooks,
   type MemberFilterValue,

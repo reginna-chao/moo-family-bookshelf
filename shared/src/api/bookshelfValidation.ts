@@ -25,14 +25,14 @@
  *  2. An empty member label: both halves of `displayName || userId.slice(0, 8)`
  *     degrade to `""` (`MemberDropdown.tsx:92` / `:83`).
  *  3. Collapsed viewer-private family-shelf preferences — `familyPrefRef` builds
- *     `` `${ownerId}:${bookId}` `` (`extension/src/dialog/familyShelfPrefs.ts:4`,
- *     `pwa/src/hooks/familyShelfPrefs.ts:4`), so hiding or favouriting one
- *     degraded card hits every degraded card — and that collapsed ref is
- *     PERSISTED to the server through `updateFamilyPrefs`.
+ *     `` `${ownerId}:${bookId}` `` (`shared/src/familyShelf/prefRefs.ts:13`,
+ *     used by both apps), so hiding or favouriting one degraded card hits
+ *     every degraded card — and that collapsed ref is PERSISTED to the server
+ *     through `updateFamilyPrefs`.
  *  4. A corrupted update-tracking baseline — `baseline[member.userId]`
- *     (`extension/src/dialog/updateTracking.ts:85`,
- *     `pwa/src/hooks/updateTracking.ts:102`) collapses every degraded member
- *     onto one `""` key, persisted to `chrome.storage.local` / `localStorage`.
+ *     (`shared/src/familyShelf/updateTracking.ts:93`, used by both apps)
+ *     collapses every degraded member onto one `""` key, persisted to
+ *     `chrome.storage.local` / `localStorage`.
  *
  * Hence DROP rather than normalize, for those two identity fields only — the
  * same verdict `sanitizeFamilyMember` reaches for an element that cannot be

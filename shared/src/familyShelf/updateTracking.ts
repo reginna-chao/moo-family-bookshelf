@@ -1,7 +1,12 @@
-import type { MemberBooks } from "./FamilyDataContext";
+import type { FamilyShelfMemberBooks } from "./prefRefs";
 
-// Re-export dynamic key builders from constants for backward compatibility
-export { seenKey, chipsKey } from "../constants";
+/**
+ * Pure "what is new on the family shelf" rules, shared so the Extension and
+ * the PWA flag the same books. Persistence stays on each surface: the
+ * Extension keeps these records in `chrome.storage.local` (keys from
+ * `extension/src/constants.ts`), the PWA in `localStorage` (keys and helpers in
+ * `pwa/src/hooks/updateTracking.ts`).
+ */
 
 export interface BookshelfSeenRecord {
   [userId: string]: {
@@ -15,7 +20,10 @@ export interface BookshelfChipsRecord {
   expiresAt: string;
 }
 
-/** Raw member metadata used for update tracking */
+/**
+ * Raw member metadata used for update tracking — structurally the subset of
+ * the wire `FamilyBookshelfMember` this module reads.
+ */
 interface RawMemberInfo {
   userId: string;
   lastUpdated: string | null;
@@ -23,15 +31,15 @@ interface RawMemberInfo {
 
 /** Compare current bookshelf with stored baseline to find newly added bookIds. */
 export function computeFreshBookIds(
-  decryptedMembers: MemberBooks[],
-  rawMembers: RawMemberInfo[],
+  members: readonly FamilyShelfMemberBooks[],
+  rawMembers: readonly RawMemberInfo[],
   currentUserId: string,
   seenData: BookshelfSeenRecord,
 ): Set<string> {
   if (Object.keys(seenData).length === 0) return new Set(); // first use
 
   const freshIds = new Set<string>();
-  for (const member of decryptedMembers) {
+  for (const member of members) {
     if (member.userId === currentUserId) continue; // exclude self
 
     const rawMember = rawMembers.find((m) => m.userId === member.userId);
@@ -76,11 +84,11 @@ export function loadValidChipBookIds(
  * Only includes current members — stale entries from departed members are dropped.
  */
 export function buildSeenBaseline(
-  decryptedMembers: MemberBooks[],
-  rawMembers: RawMemberInfo[],
+  members: readonly FamilyShelfMemberBooks[],
+  rawMembers: readonly RawMemberInfo[],
 ): BookshelfSeenRecord {
   const baseline: BookshelfSeenRecord = {};
-  for (const member of decryptedMembers) {
+  for (const member of members) {
     const rawMember = rawMembers.find((m) => m.userId === member.userId);
     baseline[member.userId] = {
       lastUpdated: rawMember?.lastUpdated ?? "",

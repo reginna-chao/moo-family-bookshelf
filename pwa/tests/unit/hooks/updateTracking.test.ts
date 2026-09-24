@@ -4,12 +4,14 @@ import {
   chipsKey,
   readLocalJson,
   writeLocalJson,
+} from "@/hooks/updateTracking";
+import {
   computeFreshBookIds,
   loadValidChipBookIds,
   buildSeenBaseline,
   type BookshelfSeenRecord,
   type BookshelfChipsRecord,
-} from "@/hooks/updateTracking";
+} from "moo-family-bookshelf-shared/familyShelf/updateTracking";
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import { BoolFlag } from "@/api/client";
 import type { FamilyBookshelf } from "@/api/client";

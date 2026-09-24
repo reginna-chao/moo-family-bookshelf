@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { sortBooks, normalizeSortMode } from "@/dialog/sortBooks";
-import type { BookSortMode } from "@/dialog/sortBooks";
+import {
+  sortBooks,
+  normalizeSortMode,
+} from "moo-family-bookshelf-shared/familyShelf/sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 
 interface TestBook {
   title: string;

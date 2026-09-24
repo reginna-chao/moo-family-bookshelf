@@ -2,7 +2,7 @@ import { CategoryFilter } from "@/components/CategoryFilter";
 import { ViewModeToggle } from "@/components/ViewModeToggle";
 import { BookSortDropdown } from "@/components/BookSortDropdown";
 import { MemberDropdown } from "@/components/MemberDropdown";
-import type { BookSortMode } from "@/utils/sortBooks";
+import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import {
   type BookWithMember,
