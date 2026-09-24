@@ -1,7 +1,8 @@
-import React, { useRef, useEffect, useLayoutEffect, useState } from "react";
+import React, { useRef, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { useAnchoredPosition } from "@/hooks/useAnchoredPosition";
+import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 
 export interface OverflowMenuItem {
   label: string;
@@ -19,8 +20,8 @@ export interface OverflowMenuProps {
  *
  * The panel is portaled to `document.body` and positioned with `position: fixed`
  * from the trigger's bounding rect, so no ancestor `overflow: hidden` can clip
- * it. Closes on outside click, Escape, item select, scroll, or resize. All
- * listeners are attached only while open and removed on cleanup.
+ * it. Closes on outside click, Escape, item select, page scroll, or resize
+ * (dismissal via useDismissableMenu, whose listeners exist only while open).
  */
 export function OverflowMenu({ items, onOpenChange }: OverflowMenuProps) {
   const [open, setOpen] = useState(false);
@@ -44,30 +45,15 @@ export function OverflowMenu({ items, onOpenChange }: OverflowMenuProps) {
     place(triggerRef.current, menuRef.current);
   }, [open, place, reset]);
 
-  useEffect(() => {
-    if (!open) return;
-
-    function handlePointerDown(e: MouseEvent) {
-      if (isInsideMenu(e.target, triggerRef.current, menuRef.current)) return;
-      close();
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      close();
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, onOpenChange]);
+  // The fixed-position panel detaches from its trigger when the page moves, so
+  // this menu (unlike the inline dropdowns) also closes on scroll and resize.
+  useDismissableMenu({
+    isOpen: open,
+    onClose: close,
+    triggerRef,
+    menuRef,
+    dismissOnScroll: true,
+  });
 
   const handleTriggerClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -125,15 +111,4 @@ export function OverflowMenu({ items, onOpenChange }: OverflowMenuProps) {
         )}
     </div>
   );
-}
-
-function isInsideMenu(
-  target: EventTarget | null,
-  trigger: HTMLElement | null,
-  menu: HTMLElement | null,
-): boolean {
-  if (!(target instanceof Node)) return false;
-  if (trigger?.contains(target)) return true;
-  if (menu?.contains(target)) return true;
-  return false;
 }

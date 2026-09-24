@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { ArrowDownWideNarrow } from "lucide-react";
 import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
+import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 
 export interface BookSortDropdownProps {
   value: BookSortMode;
@@ -18,28 +19,18 @@ const OPTIONS: Array<{ value: BookSortMode; label: string }> = [
 /**
  * Sort dropdown (PWA): icon-button trigger + popover listbox, mirroring the
  * Extension BookSortDropdown behavior with Tailwind styling. Closes on outside
- * click — the mousedown listener is attached only while open and cleaned up.
+ * click or Escape via useDismissableMenu.
  */
 export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   const [open, setOpen] = useState(false);
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const isActive = value !== "default";
 
   const handleToggle = useCallback(() => setOpen((prev) => !prev), []);
+  const close = useCallback(() => setOpen(false), []);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open]);
+  useDismissableMenu({ isOpen: open, onClose: close, triggerRef, menuRef });
 
   function handleSelect(mode: BookSortMode) {
     onChange(mode);
@@ -47,8 +38,9 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   }
 
   return (
-    <div ref={popoverRef} className="relative flex-shrink-0">
+    <div className="relative flex-shrink-0">
       <button
+        ref={triggerRef}
         onClick={handleToggle}
         aria-label="排序方式"
         aria-expanded={open}
@@ -62,6 +54,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
       </button>
       {open && (
         <div
+          ref={menuRef}
           className="absolute top-12 right-0 min-w-[160px] max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-50"
           role="listbox"
           aria-label="排序方式選單"
