@@ -1,6 +1,6 @@
 ---
 name: tester
-description: Writes or updates tests for the moo-family-bookshelf project — frontend (Vitest + React Testing Library) or backend (Vitest + Miniflare). Reads the scope's test rules before working, runs the test command, returns a structured summary. Does NOT modify production code. Dispatched by /develop.
+description: Writes or updates tests for the moo-family-bookshelf project — frontend (Vitest + React Testing Library) or backend (Vitest + in-memory mock KV). Reads the scope's test rules before working, runs the test command, returns a structured summary. Does NOT modify production code. Dispatched by /develop.
 tools: Read, Edit, Write, Bash, Glob, Grep
 model: opus
 ---
@@ -30,7 +30,7 @@ These files are authoritative.
 | scope      | test dir                             | command                  | stack                          | locations                                                                                                        |
 | ---------- | ------------------------------------ | ------------------------ | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | `frontend` | `extension/tests/` (or `pwa/tests/`) | `pnpm test`              | Vitest + React Testing Library | `unit/` (crypto, api, sync-code, utils), `component/` (Dialog views, toggles, forms), `e2e/` (FIX existing only) |
-| `backend`  | `worker/tests/`                      | `cd worker && pnpm test` | Vitest + Miniflare             | `unit/` (validation, helpers, key gen, rate-limit logic), `integration/` (HTTP → handler → KV → response)        |
+| `backend`  | `worker/tests/`                      | `cd worker && pnpm test` | Vitest + `createMockKV()`      | `unit/` (validation, helpers, key gen, rate-limit logic), `integration/` (HTTP → handler → KV → response)        |
 
 ## Workflow
 
@@ -52,7 +52,7 @@ These files are authoritative.
 ## Mock Policy
 
 - **Frontend** — Mock: `chrome.storage`, `fetch` (Worker API), `chrome.tabs`. Do NOT mock: React hooks, internal utils, component internals. Use `@testing-library/react` `render`.
-- **Backend** — Use Miniflare to simulate Workers + KV (never connect to real Cloudflare). Each suite starts clean and cleans up its KV entries. Do NOT test client-side hashing (that's the frontend crypto module).
+- **Backend** — Drive the Hono app in-process (`app.request(path, init, { KV: createMockKV(), … })`) with the shared in-memory KV from `worker/tests/helpers/mockKv.ts` (never connect to real Cloudflare; no Miniflare in `pnpm test`). Each suite starts from a fresh `createMockKV()`. The mock never expires keys — see `.claude/rules/test.md` → Mock Policy. Do NOT test client-side hashing (that's the frontend crypto module).
 
 ## Key Scenarios (reference)
 

@@ -63,7 +63,7 @@ moo-family-bookshelf/
 │   │   └── index.ts
 │   ├── tests/
 │   │   ├── unit/              # Unit tests (routes, middleware)
-│   │   └── integration/      # Integration tests (Miniflare + KV)
+│   │   └── integration/      # Integration tests (Hono app + in-memory mock KV)
 │   ├── vitest.config.ts
 │   ├── wrangler.toml
 │   └── DEPLOY.md               # Self-hosting guide
@@ -118,12 +118,13 @@ moo-family-bookshelf/
 
 ### Framework & Tools
 
-| Tool                  | Scope              | Purpose                                  |
-| --------------------- | ------------------ | ---------------------------------------- |
-| Vitest                | Extension + Worker | Unit & integration tests                 |
-| React Testing Library | Extension          | Component tests for Dialog UI            |
-| Playwright            | Extension          | E2E tests with Chrome Extension loaded   |
-| Miniflare             | Worker             | Local Cloudflare Workers + KV simulation |
+| Tool                  | Scope              | Purpose                                                                         |
+| --------------------- | ------------------ | ------------------------------------------------------------------------------- |
+| Vitest                | Extension + Worker | Unit & integration tests                                                        |
+| React Testing Library | Extension          | Component tests for Dialog UI                                                   |
+| Playwright            | Extension          | E2E tests with Chrome Extension loaded                                          |
+| `createMockKV()`      | Worker             | In-memory KV for unit & integration tests                                       |
+| Miniflare             | Worker             | Local runtime behind `wrangler dev` (dev server, E2E) — not used by `pnpm test` |
 
 ### Test Structure
 
@@ -137,7 +138,7 @@ moo-family-bookshelf/
 - Run `pnpm test` before pushing; CI will gate on this.
 - Coverage targets: api/worker ≥ 80%, dialog ≥ 70%, overall ≥ 70%.
 - Tests must clean up state (no leaked timers, mocks, or KV entries).
-- Integration tests use Miniflare to simulate KV locally — never connect to real Cloudflare in CI.
+- Worker integration tests run the Hono app in-process against the in-memory `createMockKV()` (`worker/tests/helpers/mockKv.ts`) — never connect to real Cloudflare in CI. Details and the mock's limits: `.claude/rules/test.md`.
 - E2E tests load the built Extension into a real Chrome instance via Playwright.
 
 ### Key Test Scenarios
@@ -157,7 +158,7 @@ Every push/PR triggers:
 - `extension-check`: lint → typecheck → test → build. **It also owns `shared/`'s lint and typecheck** (`shared/**` is in this job's paths filter; hanging them off an existing job avoids touching `ci-success`'s `needs`, which would let the gate pass silently)
 - `worker-check`: lint → typecheck → test → build
 - `pwa-check`: lint → typecheck → test → build
-- `e2e` (PR to `main` only): build extension + start Miniflare + Playwright E2E
+- `e2e` (PR to `main` only): build extension + start a local `wrangler dev` Worker (Miniflare) + Playwright E2E
 - `pwa-e2e` (PR to `main` only): PWA Playwright E2E
 
 ### Claude Review (GitHub Actions)

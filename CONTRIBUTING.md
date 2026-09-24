@@ -78,7 +78,7 @@ pnpm dev          # Local dev (Miniflare local KV)
 pnpm dev:remote   # Local dev (remote dev KV)
 pnpm build        # Build (dry-run, prod config)
 pnpm typecheck    # Type check
-pnpm test         # Unit + integration tests (Vitest + Miniflare)
+pnpm test         # Unit + integration tests (Vitest + in-memory mock KV)
 ```
 
 ### PWA
@@ -147,7 +147,7 @@ The first run opens Chromium and requires manual Readmoo login. Login state is p
 - Test **business behavior**, not implementation details.
 - New features must include corresponding tests.
 - Tests must clean up state (no leaked timers, mocks, listeners, or KV entries).
-- Integration tests use Miniflare to simulate KV — never connect to real Cloudflare in tests.
+- Worker integration tests run the app in-process against the in-memory `createMockKV()` (`worker/tests/helpers/mockKv.ts`) — never connect to real Cloudflare in tests.
 - E2E tests load the built Extension into a real Chrome instance via Playwright.
 
 ### Coverage Targets

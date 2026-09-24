@@ -7,7 +7,7 @@ Applies to: `worker/src/`
 - Cloudflare Workers (TypeScript)
 - Cloudflare KV for storage
 - Hono (lightweight web framework for Workers)
-- Vitest + Miniflare for testing
+- Vitest for testing — Node pool, in-memory `createMockKV()` (see `.claude/rules/test.md`); Miniflare only runs behind `wrangler dev`
 
 ### Project Structure
 
@@ -118,7 +118,7 @@ Platform constraint: Cloudflare KV rejects any `expirationTtl` below 60 seconds 
 - `pnpm build` — `wrangler deploy --dry-run`
 - `pnpm typecheck` — `tsc --noEmit`
 - `pnpm lint` — ESLint with `--max-warnings 0` (warnings fail)
-- `pnpm test` — Vitest + Miniflare
+- `pnpm test` — Vitest (in-memory mock KV, no Miniflare)
 
 Local-dev facts (each cost a debugging session once):
 
