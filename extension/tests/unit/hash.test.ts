@@ -1,6 +1,13 @@
 import { webcrypto } from "node:crypto";
 import { describe, it, expect, beforeAll } from "vitest";
-import { sha256Hex, deriveUserId } from "@/crypto/hash";
+import {
+  sha256Hex,
+  deriveUserId,
+} from "moo-family-bookshelf-shared/crypto/hash";
+
+// Covers `shared/src/crypto/hash.ts` — the single implementation both the
+// Extension and the PWA import. `shared/` has no test script of its own; this
+// file lives here because CI's extension-check job also runs on `shared/**`.
 
 // Polyfill Web Crypto API for Node/jsdom test environment
 beforeAll(() => {
@@ -57,9 +64,10 @@ describe("sha256Hex", () => {
     expect(hash1).not.toBe(hash2);
   });
 
-  // Cross-platform test vectors: these exact values MUST match in both
-  // Extension and PWA tests. If a test fails here, the other platform's
-  // userId derivation is out of sync — do NOT change the expected values.
+  // Cross-platform test vectors: sha256Hex feeds deriveUserId, the one userId
+  // derivation shared by the Extension and the PWA. These values pin the
+  // userId every existing account already has — they must never change. If a
+  // test fails here, fix the implementation, NOT the expected values.
   it.each([
     [
       "test@example.com",
@@ -107,9 +115,13 @@ describe("deriveUserId", () => {
     expect(id).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  // Cross-platform test vectors: these exact values MUST match in both
-  // Extension and PWA tests. If a test fails here, the other platform's
-  // userId derivation is out of sync — do NOT change the expected values.
+  // Cross-platform test vectors: there is a single deriveUserId, shared by the
+  // Extension and the PWA, and these values pin the userId every existing
+  // account already has — they must never change (a different value means
+  // every user is locked out of their family and personal shelf). If a test
+  // fails here, fix the implementation, NOT the expected values.
+  // pwa/tests/component/LandingPage.test.tsx pins the PWA login wiring to the
+  // "  User@Example.com  " vector's value.
   it.each([
     [
       "test@example.com",

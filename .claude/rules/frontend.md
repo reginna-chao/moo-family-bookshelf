@@ -21,13 +21,14 @@ extension/src/
 ├── settings/        # Extension settings page
 ├── content/         # Content Script (scrape + inject)
 ├── background/      # Service Worker
-├── crypto/          # Hashing utilities (SHA-256)
+├── crypto/          # Sync code encode/decode (userId hashing lives in shared/src/crypto/)
 └── api/             # API client (configurable endpoint)
 
 shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pwa/ and worker/
 ├── api/            # Wire types (BoolFlag / envelope / family / personal-books / public-shelf / verify records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf payload validation
 ├── borrow/         # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中 string) + borrow-history cap and its UI hints
 ├── config/         # Readmoo host/selector config, report links
+├── crypto/         # deriveUserId / sha256Hex — the single userId hashing implementation for Extension and PWA
 ├── hostNote/       # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 ├── icons/          # Inline brand SVG paths
 ├── invite/         # Invite message templates

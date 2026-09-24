@@ -41,9 +41,10 @@ beforeAll(() => {
   }
 });
 
-// Mock crypto/hash — deriveUserId uses crypto.subtle which competes with
-// fake timers in the test environment, causing CI flakes.
-vi.mock("@/crypto/hash", () => ({
+// Mock the shared crypto/hash module (the single deriveUserId the Extension
+// and the PWA both import) — deriveUserId uses crypto.subtle which competes
+// with fake timers in the test environment, causing CI flakes.
+vi.mock("moo-family-bookshelf-shared/crypto/hash", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
   sha256Hex: vi.fn().mockResolvedValue("b".repeat(64)),
 }));
@@ -832,9 +833,11 @@ describe("Onboarding", () => {
         expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
       });
 
-      // Migration should have called updatePersonalBooks with userId and a PersonalBooks object
+      // Migration should have called updatePersonalBooks with userId and a PersonalBooks object.
+      // The exact userId is the mocked deriveUserId value — this also proves the
+      // module-level hash mock above really intercepts the production import.
       expect(mockApi.updatePersonalBooks).toHaveBeenCalledWith(
-        expect.any(String), // userId (hashed)
+        "a".repeat(64), // userId (from the mocked deriveUserId)
         expect.objectContaining({
           schemaVersion: 1,
           books: expect.any(Array),

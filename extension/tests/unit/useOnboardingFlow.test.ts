@@ -12,7 +12,7 @@ beforeAll(() => {
 });
 
 // Mock crypto.deriveUserId — deterministic hex for tests
-vi.mock("@/crypto/hash", () => ({
+vi.mock("moo-family-bookshelf-shared/crypto/hash", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
 }));
 
@@ -54,7 +54,7 @@ vi.mock("@/crypto/syncCode", () => ({
 
 import { waitFor } from "@testing-library/react";
 import { useOnboardingFlow } from "@/dialog/useOnboardingFlow";
-import { deriveUserId } from "@/crypto/hash";
+import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import {
   CreateFamilyError,

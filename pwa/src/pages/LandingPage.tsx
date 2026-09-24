@@ -3,7 +3,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
-import { deriveUserId } from "@/crypto/hash";
+import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
