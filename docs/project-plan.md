@@ -477,7 +477,7 @@ jobs:
     needs: [extension-check, worker-check]
     steps:
       - Build extension
-      - Start Miniflare local worker
+      - Start local wrangler dev worker (Miniflare)
       - Playwright E2E tests with Chrome + Extension loaded
 ```
 
