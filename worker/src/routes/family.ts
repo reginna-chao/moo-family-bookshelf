@@ -13,7 +13,6 @@ import {
 import {
   getFamilyRecord,
   putFamilyRecord,
-  deleteFamilyRecord,
   getMemberFamilyId,
   putMemberFamilyId,
   deleteMemberFamilyId,
@@ -44,11 +43,9 @@ import {
   verificationErrorResponse,
   verifySecretFormatResponse,
 } from "../services/verification";
-import {
-  deleteBorrowIndex,
-  settleDepartingBorrower,
-} from "../services/borrowIndex";
-import { isLiveMembership } from "../services/membership";
+import { settleDepartingBorrower } from "../services/borrowIndex";
+import { dissolveFamily } from "../services/familyDissolve";
+import { isActiveMember, isLiveMembership } from "../services/membership";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 
@@ -729,32 +726,53 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Owner trying to leave: allow only when they are the sole member
-  if (callerId === record.ownerId && targetUserId === callerId) {
-    if (record.members.length > 1) {
-      return jsonError(c, 403, "OWNER_CANNOT_LEAVE", "請先轉移管理權後再離開");
-    }
+  // The recorded owner may not leave while anyone else is listed. Decided by
+  // `ownerId` + the list ALONE — deliberately no pointer read (INFO-2): gating
+  // it on an ACTIVE owner let a real owner whose pointer read missed (cross-colo
+  // lag, a cached miss) — or a hollow ex-owner — fall through to the ordinary
+  // self-leave and drop off the list while `ownerId` still named them, leaving
+  // a family with no listed owner. The cost is borne by the hollow ex-owner
+  // (see `callerIsOwner` below): in a multi-member family they stay listed but
+  // inert until they rejoin, which is the documented "no active owner" residual.
+  // `hasMember` keeps an UNLISTED caller named by `ownerId` off this refusal:
+  // their leave changes no list, so it takes the MEMBER_NOT_FOUND stray-pointer
+  // cleanup below instead (#213 convergence).
+  if (
+    callerId === record.ownerId &&
+    targetUserId === callerId &&
+    record.members.length > 1 &&
+    hasMember(record.members, callerId)
+  ) {
+    return jsonError(c, 403, "OWNER_CANNOT_LEAVE", "請先轉移管理權後再離開");
+  }
 
-    // Single-member owner: delete entire family, borrow index included.
+  // Every other owner power needs `ownerId` AND an ACTIVE caller (#222): a
+  // stale full-record write that read the record before an ownership transfer
+  // can land after the new owner kicked the ex-owner, setting `ownerId` back to
+  // the ex-owner and re-listing them without a pointer. Such a hollow ex-owner
+  // gets exactly what a non-owner gets below: `403 NOT_OWNER` on a kick, and —
+  // when they are the SOLE listed member — no sole-owner dissolve with its
+  // unconditional pointer delete; their self-leave instead reaches the
+  // empty-list dissolve below (see `remainingMembers`), whose pointer delete is
+  // conditional. An unlisted caller still reaches the MEMBER_NOT_FOUND
+  // stray-pointer cleanup. The `&&` keeps the pointer read (one) off every call
+  // whose caller is not the recorded owner, and the refusal above already
+  // answered the owner's multi-member self-leave without it; `isActiveMember`
+  // also skips it when the caller is not listed.
+  const callerIsOwner =
+    callerId === record.ownerId &&
+    (await isActiveMember(c.env.KV, familyId, callerId, record.members));
+
+  // Active sole owner leaving (the multi-member case was refused above)
+  if (callerIsOwner && targetUserId === callerId) {
+    // Single-member owner: delete entire family, borrow index included
+    // (`dissolveFamily`: fail-open index delete, then the family record).
     //
-    // The index is dropped FAIL-OPEN and BEFORE the dissolve, deliberately: it
-    // is cleanup, not part of the dissolve's meaning, so it must never keep an
-    // owner in a family they asked to leave — a caught throw is logged and the
-    // dissolve proceeds, so the order helps only when the request is cut short
-    // before the family delete: the family key is still there, so the dissolve
-    // can be retried. Without it the index outlives the family as a permanent
-    // orphan — the reclaim gap the departure purge closes on the other side.
-    try {
-      await deleteBorrowIndex(c.env.KV, familyId);
-    } catch (err) {
-      console.error("BORROW_INDEX_DELETE_FAILED", { familyId, err });
-    }
-
     // Family record FIRST, then the caller's pointer and token. A failure after
     // the family delete leaves only an orphan pointer, which create cleans up
     // ("orphaned") and join treats as no membership. The reverse order could
     // leave a `family:{id}` that nobody points at, permanently.
-    await deleteFamilyRecord(c.env.KV, familyId);
+    await dissolveFamily(c.env.KV, familyId);
     await Promise.all([
       deleteMemberFamilyId(c.env.KV, callerId),
       deleteAuthToken(c.env.KV, callerId),
@@ -763,8 +781,8 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     return c.json({ data: { ok: true } });
   }
 
-  // Non-owner cannot remove others
-  if (callerId !== record.ownerId && targetUserId !== callerId) {
+  // Non-owner (hollow ex-owner included) cannot remove others
+  if (!callerIsOwner && targetUserId !== callerId) {
     return jsonError(c, 403, "NOT_OWNER", "只有管理者可以移除其他成員");
   }
 
@@ -814,6 +832,36 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     return jsonError(c, 404, "MEMBER_NOT_FOUND", "目標使用者不是家庭成員");
   }
 
+  const remainingMembers = record.members.filter(
+    (m) => m.userId !== targetUserId,
+  );
+
+  // A removal NEVER writes an empty member list — it dissolves instead (#222).
+  // `normalizeFamilyRecord` throws on `members: []`, so such a record would
+  // answer 500 on every later read (join with the sync code, members,
+  // bookshelf, borrow) with no way back. Reachable only by a SELF-leave: an
+  // active owner is listed, so a kick always leaves them behind. The case this
+  // branch exists for is a hollow ex-owner — `ownerId` restored by a stale
+  // full-record write — leaving as the last listed member: they are not
+  // `callerIsOwner`, so they skip the sole-owner dissolve above and would
+  // otherwise land on the list put below. Same steps and order as that
+  // dissolve (borrow index fail-open, family record, then pointer + token), so
+  // no borrow settlement and no tombstone (a self-leave is never a kick). The
+  // one difference: the pointer is read first and the deletes run only when it
+  // names THIS family, as in the revoke below — a hollow leaver's pointer is
+  // by definition not this family's, and may be another family's session.
+  if (remainingMembers.length === 0) {
+    await dissolveFamily(c.env.KV, familyId);
+    const leaverPointer = await getMemberFamilyId(c.env.KV, targetUserId);
+    if (leaverPointer === familyId) {
+      await Promise.all([
+        deleteMemberFamilyId(c.env.KV, targetUserId),
+        deleteAuthToken(c.env.KV, targetUserId),
+      ]);
+    }
+    return c.json({ data: { ok: true } });
+  }
+
   // Settle the departing member's borrow records FIRST, before mutating the
   // family record: cancel the PENDING requests they are a party to, then drop
   // their own finished ones from the index (see settleDepartingBorrower). If
@@ -831,15 +879,16 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     );
   }
 
-  record.members = record.members.filter((m) => m.userId !== targetUserId);
+  record.members = remainingMembers;
 
   // Owner kick: tombstone FIRST — after the borrow settlement (whose 500 must
   // leave nothing written) and BEFORE the member-list put and the revoke.
   // Discriminator: this branch is shared by "voluntary self-leave" and "owner
   // removes another member"; the NOT_OWNER guard above already proved that when
   // `targetUserId !== callerId` the caller IS the owner. A voluntary self-leave
-  // is never tombstoned (leave-then-rejoin is legitimate), and the sole-member
-  // owner-dissolve path early-returns above and never reaches here.
+  // is never tombstoned (leave-then-rejoin is legitimate), and both dissolve
+  // paths (sole-member owner, last listed member) early-return above and never
+  // reach here.
   //
   // Why first: the join handler reads `member:{uid}` BEFORE it checks the
   // tombstone. With the tombstone landed before the pointer delete, any join
@@ -908,13 +957,16 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   // our put (a non-healing reconnect carrying a new displayName, the
   // displayName / member-settings endpoints — started before the tombstone
   // landed) can still re-list the target after it. Once the revoke below lands
-  // that member has no pointer, so the bookshelf / members reads stay closed,
-  // but a reconnect that read the pointer before the revoke still mints a fresh
-  // token, and the borrow routes and member-settings check the member list
-  // only — such a hollow member can read the family borrow list, and their
-  // shared books appear in the others' bookshelf aggregation, until the owner
-  // removes them again. This race predates #213; see docs/architecture.md →
-  // 已接受的殘餘風險 (#222).
+  // that member has no pointer, and a reconnect that read the pointer before
+  // the revoke still mints a fresh token — but since #222 such a hollow member
+  // is inert: every family-scoped check requires an ACTIVE member (listed AND
+  // pointed, `isActiveMember`), owner-only checks included, so they read no
+  // bookshelf / borrow data, their books leave the aggregation, and a re-listed
+  // ex-owner holds no owner power. The owner still sees them in the members
+  // GET and removes them again — except when that write also restored
+  // `ownerId` to the kicked ex-owner, which leaves the family with no active
+  // owner at all. This race predates #213; see docs/architecture.md →
+  // 已接受的殘餘風險.
   await putFamilyRecord(c.env.KV, familyId, record);
 
   // Revoke: the pointer is read first and the deletes run only when it names
@@ -977,7 +1029,14 @@ familyRoutes.openapi(clearKickedRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  if (callerId !== record.ownerId) {
+  // Owner = `ownerId` AND an ACTIVE caller (#222) — a hollow ex-owner whose
+  // `ownerId` a stale full-record write restored gets the non-owner 403, same
+  // as in the DELETE member handler. One pointer read, only for the recorded
+  // owner.
+  if (
+    callerId !== record.ownerId ||
+    !(await isActiveMember(c.env.KV, familyId, callerId, record.members))
+  ) {
     return jsonError(c, 403, "NOT_OWNER", "只有管理者可以解除移除限制");
   }
 
@@ -1037,6 +1096,9 @@ familyRoutes.openapi(listMembersRoute, async (c) => {
     return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
 
+  // The list is returned UNFILTERED on purpose — a hollow member (#222) stays
+  // visible so the owner can re-kick it; see `isActiveMember` in
+  // services/membership.ts.
   return c.json({ data: record });
 });
 
@@ -1100,8 +1162,16 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
+  // The caller IS the target here (checked above), so this one check covers
+  // both. ACTIVE, not merely listed (#222): a kicked member re-listed by a
+  // stale full-record write has no pointer, and letting them write the whole
+  // record back would make them one more re-listing writer. Same 404 as an
+  // unlisted caller. One pointer read.
   const member = findMember(record.members, targetUserId);
-  if (!member) {
+  if (
+    !member ||
+    !(await isActiveMember(c.env.KV, familyId, callerId, record.members))
+  ) {
     return jsonError(c, 404, "MEMBER_NOT_FOUND", "不是此家庭的成員");
   }
 
@@ -1203,8 +1273,16 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Verify caller is a member
-  if (!hasMember(record.members, callerId)) {
+  // Verify caller is an ACTIVE member — listed AND pointed at this family
+  // (#222): a kicked member re-listed by a stale full-record write must not
+  // write the whole record back. One pointer read.
+  //
+  // The TARGET only has to be listed, as before: the owner editing a hollow
+  // member's canLend / readmooName is harmless — the hollow member is inert on
+  // every read and borrow path anyway — and the re-listing risk comes from the
+  // WRITER's stale read, not from whom it edits. Requiring an active target
+  // would cost a second read for nothing.
+  if (!(await isActiveMember(c.env.KV, familyId, callerId, record.members))) {
     return jsonError(
       c,
       403,
@@ -1223,7 +1301,9 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
     );
   }
 
-  // Permission checks
+  // Permission checks. The caller was proven ACTIVE above, so
+  // `callerId === record.ownerId` below already means an active owner (#222) —
+  // no further pointer read is needed for the owner-only branches.
   // canLend: only owner can change
   if (body.canLend !== undefined && callerId !== record.ownerId) {
     return jsonError(
@@ -1318,7 +1398,14 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  if (callerUserId !== record.ownerId) {
+  // Owner = `ownerId` AND an ACTIVE caller (#222), as in the DELETE member
+  // handler: a hollow ex-owner must not hand the family on. One pointer read,
+  // only for the recorded owner — so a successful transfer costs two (caller
+  // here, `newOwnerId` below).
+  if (
+    callerUserId !== record.ownerId ||
+    !(await isActiveMember(c.env.KV, familyId, callerUserId, record.members))
+  ) {
     return jsonError(c, 403, "NOT_OWNER", "只有管理者可以轉移管理權");
   }
 
@@ -1327,7 +1414,12 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
     return jsonError(c, 400, "SAME_OWNER", "不能轉移給自己");
   }
 
-  if (!hasMember(record.members, body.newOwnerId)) {
+  // The new owner must be ACTIVE (#222): handing ownership to a kicked member
+  // re-listed by a stale full-record write would give the family to someone
+  // who can no longer read it. One pointer read.
+  if (
+    !(await isActiveMember(c.env.KV, familyId, body.newOwnerId, record.members))
+  ) {
     return jsonError(c, 400, "INVALID_MEMBER", "目標使用者不是家庭成員");
   }
 
@@ -1498,6 +1590,14 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
+  // The pointer check above is only half of an ACTIVE member (#222): a stray
+  // pointer can outlive its listing (#213), so the caller must also be listed.
+  // Zero extra reads — the record is already in hand. Same answer as the
+  // pointer miss: to an unlisted caller this family does not exist.
+  if (!hasMember(record.members, callerId)) {
+    return jsonError(c, 404, "NOT_FOUND", "Family not found");
+  }
+
   if (callerId !== record.ownerId) {
     return jsonError(c, 403, "NOT_OWNER", "只有管理者可以修改 API 端點");
   }
@@ -1525,8 +1625,8 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
  *
  * Only ever called for `targetUserId !== callerId` — an owner removing ANOTHER
  * member. A voluntary self-leave must NOT be tombstoned (leave-then-rejoin is a
- * legitimate flow), and the sole-member owner-dissolve path never reaches a call
- * site. Enforcing that discriminator is the CALLER's job; this helper writes
+ * legitimate flow), and neither dissolve path (sole-member owner, last listed
+ * member) reaches a call site. Enforcing that discriminator is the CALLER's job; this helper writes
  * unconditionally.
  *
  * Reversible before its TTL: the owner-only `DELETE /api/family/:id/kicked/:uid`

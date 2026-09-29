@@ -25,9 +25,19 @@
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
  *   `calls` assertion below is that rule's only automatic check.
  * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `member:{userId}` (routes/bookshelf.ts:76), `family:{familyId}` (:82) and
- *   one `user:{memberId}` per member (:96) — the aggregation itself. Inherent
+ * - `member:{userId}` (routes/bookshelf.ts:74), `family:{familyId}` (:80) and
+ *   one `user:{memberId}` per member (:107) — the aggregation itself. Inherent
  *   to this endpoint, NOT part of #160; a change here is a real design change.
+ * - `member:{otherMemberId}` — one pointer read per listed member OTHER than
+ *   the caller (routes/bookshelf.ts:104, `filterActiveMembers`), added by #222:
+ *   a kicked member re-listed by a stale full-record write is listed but
+ *   pointerless, and their shared books must not reach the rest of the family
+ *   (Inv-4). An AUTHORISATION read, not waste — dropping it re-opens that
+ *   leak (tests/integration/hollowMember.test.ts). It runs in `Promise.all`
+ *   alongside the book reads, so it adds reads but no round trip; being the
+ *   FIRST argument of that pair is what puts it before the `user:` reads in
+ *   `getKeys()` below. The caller's own pointer (already read at :74) is NOT
+ *   read a second time — a duplicate `member:{USER1}` here is a regression.
  *
  * THE RATE LIMITING BINDINGS ARE INJECTED, deliberately: every production
  * deploy carries all four (worker/wrangler.toml), and a request sent without
@@ -133,7 +143,7 @@ afterEach(() => {
 });
 
 describe("KV budget: GET /api/family/:id/bookshelf", () => {
-  it("performs exactly 5 KV reads and no KV write for a 2-member family", async () => {
+  it("performs exactly 6 KV reads and no KV write for a 2-member family", async () => {
     const token = await seedFamilyWithBooks();
 
     const ops = watchKvOps(kv);
@@ -144,9 +154,14 @@ describe("KV budget: GET /api/family/:id/bookshelf", () => {
     expect(ops.getKeys()).toEqual([
       // auth middleware, auth.ts:46
       kvKeys.authToken(token),
-      // handler, bookshelf.ts:76 / :82 / :96 (one per member)
+      // handler, bookshelf.ts:74 / :80 — the caller's pointer and the record
       kvKeys.member(USER1),
       kvKeys.family(FAMILY_ID),
+      // handler, bookshelf.ts:104 — the OTHER member's pointer, for the
+      // active-member filter (#222). Only USER2: the caller's pointer was
+      // confirmed above and is not re-read.
+      kvKeys.member(USER2),
+      // handler, bookshelf.ts:107 (one per member)
       kvKeys.user(USER1),
       kvKeys.user(USER2),
     ]);

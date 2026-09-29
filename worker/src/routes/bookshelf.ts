@@ -8,6 +8,7 @@ import {
   sanitizeCoverUrl,
   sanitizeReadmooUrl,
 } from "../utils/validation";
+import { filterActiveMembers } from "../services/membership";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
@@ -58,8 +59,9 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Per-userId rate limit: this is the most expensive endpoint (N KV reads,
-  // one per family member). Layered on top of the per-IP limit to cap fan-out
+  // Per-userId rate limit: this is the most expensive endpoint (2N - 1 KV
+  // reads: one books read per family member plus one pointer read per member
+  // other than the caller). Layered on top of the per-IP limit to cap fan-out
   // cost from a single authenticated caller. Mirrors the borrow-list guard.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId,
@@ -92,10 +94,26 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
     return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
 
-  // Fetch all members' book data in parallel
-  const memberBooks = await Promise.all(
-    family.members.map(async (member) => {
-      const record = await getUserBooksRecord(c.env.KV, member.userId);
+  // Only ACTIVE members are aggregated (#222): a kicked member re-listed by a
+  // stale full-record write has no pointer here, and their shared books must
+  // not reach the rest of the family (Inv-4). The pointer reads run in
+  // PARALLEL with the book reads, so latency is unchanged; the caller's own
+  // pointer was confirmed above and is not read again. A hollow member's book
+  // read is wasted — the price of not serializing the two rounds.
+  const [activeMembers, records] = await Promise.all([
+    filterActiveMembers(c.env.KV, familyId, family.members, userId),
+    Promise.all(
+      family.members.map((member) =>
+        getUserBooksRecord(c.env.KV, member.userId),
+      ),
+    ),
+  ]);
+  const activeIds = new Set(activeMembers.map((member) => member.userId));
+
+  const memberBooks = family.members
+    .map((member, index) => ({ member, record: records[index] }))
+    .filter(({ member }) => activeIds.has(member.userId))
+    .map(({ member, record }) => {
       // Read-side twin of the buildSnapshot chokepoint — a dormant pre-whitelist
       // record must not beacon family members (coverUrl) or hand them a
       // phishing link (readmooUrl) via the aggregation.
@@ -112,8 +130,7 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
         books: sharedBooks,
         lastUpdated: record?.lastUpdated ?? null,
       };
-    }),
-  );
+    });
 
   return c.json(
     {

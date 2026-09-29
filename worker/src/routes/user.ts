@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
 import {
   BoolFlag,
+  hasMember,
   normalizeFamilyRecord,
   type UserBooksRecord,
   type PublicShelf,
@@ -11,7 +12,6 @@ import {
 import {
   getFamilyRecord,
   putFamilyRecord,
-  deleteFamilyRecord,
   getMemberFamilyId,
   deleteMemberFamilyId,
 } from "../kv/families";
@@ -29,10 +29,8 @@ import {
   writePublicSnapshot,
   resolvePublicShelves,
 } from "../services/publicShelf";
-import {
-  deleteBorrowIndex,
-  settleDepartingBorrower,
-} from "../services/borrowIndex";
+import { settleDepartingBorrower } from "../services/borrowIndex";
+import { dissolveFamily } from "../services/familyDissolve";
 import {
   isValidUserId,
   isJsonObject,
@@ -870,7 +868,17 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     if (raw) {
       const record = normalizeFamilyRecord(raw);
 
-      if (record.ownerId === userId) {
+      // Owner = `ownerId` AND listed. The pointer already names this family,
+      // so "listed" here is the whole ACTIVE-member rule (#222) at zero extra
+      // reads. Without it a caller named by `ownerId` but no longer listed
+      // (`family:{id}` is rewritten whole with no CAS, so `ownerId` and the
+      // list need not agree) would be refused deletion as OWNER_CANNOT_DELETE
+      // of a family they are not in — or, as the "sole owner", dissolve the
+      // family of the one member who IS listed. Such a caller takes the
+      // non-owner branch instead, where the filter below removes nothing.
+      const isListed = hasMember(record.members, userId);
+
+      if (record.ownerId === userId && isListed) {
         if (record.members.length > 1) {
           return jsonError(
             c,
@@ -882,35 +890,56 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
 
         // Single-member owner: delete entire family record, borrow index
         // included — nothing is left to visit that index again, so without this
-        // it becomes a permanent orphan. Same shape as the sole-owner dissolve
-        // in routes/family.ts: FAIL-OPEN, because cleanup must never block the
-        // account deletion the user asked for.
-        try {
-          await deleteBorrowIndex(c.env.KV, familyId);
-        } catch (err) {
-          console.error("BORROW_INDEX_DELETE_FAILED", { familyId, err });
-        }
-
-        await deleteFamilyRecord(c.env.KV, familyId);
+        // it becomes a permanent orphan. Same `dissolveFamily` as the sole-owner
+        // dissolve in routes/family.ts; its index delete is FAIL-OPEN, because
+        // cleanup must never block the account deletion the user asked for.
+        await dissolveFamily(c.env.KV, familyId);
       } else {
-        // Settle this member's borrow records before dropping them from the
-        // family: cancel the PENDING requests they are a party to and remove
-        // their own finished ones from the index (see settleDepartingBorrower —
-        // records where they were the OWNER stay, as the counterparty's own
-        // history). Same call the member-removal handler in routes/family.ts
-        // makes, but FAIL-OPEN here: that handler can answer 500 and leave the
-        // member in place, whereas an account deletion has no equivalent
-        // "nothing happened" answer — the user's data goes either way, so a
-        // failed borrow cleanup is logged and the deletion continues.
-        try {
-          await settleDepartingBorrower(c.env.KV, familyId, userId);
-        } catch (err) {
-          console.error("BORROW_CLEANUP_FAILED", { familyId, userId, err });
-        }
+        const remainingMembers = record.members.filter(
+          (m) => m.userId !== userId,
+        );
 
-        // Remove user from family members
-        record.members = record.members.filter((m) => m.userId !== userId);
-        await putFamilyRecord(c.env.KV, familyId, record);
+        if (remainingMembers.length === 0) {
+          // Never write an empty member list — dissolve instead (#222 C1'),
+          // the same rule as the removal handler in routes/family.ts.
+          // `normalizeFamilyRecord` throws on `members: []`, so such a record
+          // would answer 500 on every later read (join with the sync code,
+          // members, bookshelf, borrow) with no way back. Reachable only when
+          // `ownerId` names someone who is no longer listed and the caller is
+          // the last listed member. The handlers' own removals do not produce
+          // that record — the listed owner's leave is refused while others are
+          // listed, and their account deletion likewise — so this is the
+          // guard for a record whose `ownerId` and list were written apart
+          // (no CAS on `family:{id}`), not a routine path. No borrow
+          // settlement: the whole index goes with the family. The caller's
+          // pointer (it named this family) and token are deleted by the
+          // teardown below.
+          await dissolveFamily(c.env.KV, familyId);
+        } else {
+          // Settle this member's borrow records before dropping them from the
+          // family: cancel the PENDING requests they are a party to and remove
+          // their own finished ones from the index (see settleDepartingBorrower
+          // — records where they were the OWNER stay, as the counterparty's own
+          // history). Same call the member-removal handler in routes/family.ts
+          // makes, but FAIL-OPEN here: that handler can answer 500 and leave
+          // the member in place, whereas an account deletion has no equivalent
+          // "nothing happened" answer — the user's data goes either way, so a
+          // failed borrow cleanup is logged and the deletion continues.
+          try {
+            await settleDepartingBorrower(c.env.KV, familyId, userId);
+          } catch (err) {
+            console.error("BORROW_CLEANUP_FAILED", { familyId, userId, err });
+          }
+
+          // Remove user from family members — only when they were listed. An
+          // unlisted caller (a stray pointer) filtered nothing out, and writing
+          // the unchanged record back would be a pointless put that can also
+          // clobber a concurrent write to it (no CAS on `family:{id}`).
+          if (isListed) {
+            record.members = remainingMembers;
+            await putFamilyRecord(c.env.KV, familyId, record);
+          }
+        }
       }
     }
   }
