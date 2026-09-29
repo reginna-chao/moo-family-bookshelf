@@ -170,7 +170,7 @@ const emptyTitle = (record: LooseRecord): LooseRecord => ({
  *
  * PR #149's review is why the last branch exists: `data: []` and `data: "x"`
  * from `GET /api/family/:id/members` reach `setMembers(response.data.members)`
- * (`extension/src/dialog/FamilyDataContext.tsx:217`) as `undefined`, and
+ * (`extension/src/dialog/useFamilyDataMembers.ts:89`) as `undefined`, and
  * `members.length` (`extension/src/dialog/MemberList.tsx:82`) then throws from
  * RENDER — where no caller `try/catch` can reach it, and with no ErrorBoundary
  * in either app that is a permanent white screen.
@@ -256,7 +256,7 @@ describe("sanitizeRecord", () => {
  *
  * PR #149's review filed the two reproductions this block pins:
  * `GET /api/family/:id/members` answering `members: [null]` used to be stored
- * verbatim by `setMembers` (`extension/src/dialog/FamilyDataContext.tsx:217`,
+ * verbatim by `setMembers` (`extension/src/dialog/useFamilyDataMembers.ts:89`,
  * outside any `try`) and detonate on the NEXT render at `members.map` +
  * `member.displayName` (`extension/src/dialog/MemberList.tsx:295` / `:49`);
  * `members: "oops"` did the same at `members.length`

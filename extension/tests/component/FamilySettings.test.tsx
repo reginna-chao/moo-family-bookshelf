@@ -1446,8 +1446,9 @@ describe("FamilySettings", () => {
       });
       // getBy, not findBy: a load that failed to settle must fail loudly right
       // here. The member-count suffix is the production tell that membersState
-      // reached "ready" (src/dialog/FamilySettings.tsx) — unlike the display
-      // name, which also renders from chrome.storage while members still load.
+      // reached "ready" (src/dialog/FamilySettingsMembersBlock.tsx) — unlike
+      // the display name, which also renders from chrome.storage while members
+      // still load.
       expect(screen.getByText("家庭成員 (1)")).toBeInTheDocument();
       return apiClient;
     }

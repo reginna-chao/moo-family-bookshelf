@@ -857,7 +857,7 @@ describe("ApiClient getFamilyMembers", () => {
  * suite above pins — one function, one contract — but the verdict for a payload
  * that has to be dropped differs: an unusable element of a list is skipped
  * silently, while an unusable PATCH response becomes an `ApiError`. It has to be
- * one: `updateMember` in `dialog/FamilyDataContext.tsx` splices this object
+ * one: `updateMember` in `dialog/useFamilyDataMembers.ts` splices this object
  * straight into `members` state, so "skip it" is not an available outcome, and
  * all three call sites (`dialog/BorrowTab.tsx`'s picker write-back,
  * `dialog/MemberList.tsx`'s canLend toggle and readmooName delete) already catch

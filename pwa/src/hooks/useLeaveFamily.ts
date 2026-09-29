@@ -45,8 +45,8 @@ export function useLeaveFamily({
       // record (its retries keep answering this 404), or a family dissolved
       // meanwhile — and keeping the session would strand the user on a family
       // that no longer exists. Mirrored in
-      // extension/src/dialog/FamilySettings.tsx handleLeaveConfirm; keep the
-      // two identical.
+      // extension/src/dialog/useFamilySettingsLeave.ts handleLeaveConfirm;
+      // keep the two identical.
       const code = res.error?.code;
       const alreadyLeft =
         code === "MEMBER_NOT_FOUND" || code === "FAMILY_NOT_FOUND";

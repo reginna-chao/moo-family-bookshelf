@@ -67,7 +67,7 @@
  *    hostile-extras risk the rebuild exists to close is already absent here:
  *    both consumers rebuild the member as a fresh 3-field literal before it
  *    reaches React state (`parsedMembers` in
- *    `extension/src/dialog/FamilyDataContext.tsx`, `memberBooks` in
+ *    `extension/src/dialog/useFamilyDataBookshelf.ts`, `memberBooks` in
  *    `pwa/src/hooks/useFamilyData.tsx`). Field COERCION stays with the text
  *    layer, which runs second.
  *  - A surviving BOOK passes through completely unchanged. `isShared`,

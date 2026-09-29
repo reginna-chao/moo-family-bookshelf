@@ -2888,8 +2888,8 @@
 
 /* Own variable (not .moo-button's --moo-btn-hover-color: this is an <a>, not a
    button) with a primary fallback, so an unmapped service name — the brand
-   modifier comes from a JS name match in FamilySettings.tsx — still gets a
-   visible hover/focus color instead of an undefined var. */
+   modifier comes from a JS name match in FamilySettingsReportLinks.tsx —
+   still gets a visible hover/focus color instead of an undefined var. */
 .moo-settings__report-link:focus-visible {
   color: var(--moo-link-hover-color, var(--moo-primary));
   outline: none;

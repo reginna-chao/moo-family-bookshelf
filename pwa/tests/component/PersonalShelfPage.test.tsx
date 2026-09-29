@@ -11,10 +11,11 @@ import { PersonalShelfPage } from "@/pages/PersonalShelfPage";
 
 import { BoolFlag, type PersonalBooks, type ApiClient } from "@/api/client";
 
-// PersonalShelfPage now pulls `refreshBookshelf` from the FamilyData context to
-// refresh the aggregated family shelf after a save (replaces the removed
-// `personalShelfSaved` window CustomEvent). Mock the context hook to isolate the
-// page and spy on the direct call — mirrors BorrowPage.test.tsx's approach.
+// PersonalShelfPage (via hooks/usePersonalShelfSave.ts) pulls `refreshBookshelf`
+// from the FamilyData context to refresh the aggregated family shelf after a
+// save (replaces the removed `personalShelfSaved` window CustomEvent). Mock the
+// context hook to isolate the page and spy on the direct call — mirrors
+// BorrowPage.test.tsx's approach.
 const mockRefreshBookshelf = vi.fn(async () => {});
 vi.mock("@/hooks/useFamilyData", () => ({
   useFamilyData: () => ({ refreshBookshelf: mockRefreshBookshelf }),
@@ -772,8 +773,8 @@ describe("PersonalShelfPage", () => {
         render(<PersonalShelfPage {...defaultProps} />);
       });
 
-      // Literal from PersonalShelfPage.tsx (loadBooks). `getByText` matches the
-      // node's whole text, so a hostile value that reached state would fail.
+      // Literal from usePersonalShelfEditor.ts (loadBooks). `getByText` matches
+      // the node's whole text, so a hostile value that reached state would fail.
       expect(screen.getByText("載入失敗，請稍後再試")).toBeInTheDocument();
       // A thrown render tears the tree down; a page that still offers 重試 is
       // what the regression is really about.
@@ -799,7 +800,7 @@ describe("PersonalShelfPage", () => {
       fireEvent.click(screen.getByText("設為開放"));
       fireEvent.click(screen.getByText("儲存變更"));
 
-      // Literal from PersonalShelfPage.tsx (handleSave).
+      // Literal from usePersonalShelfSave.ts (handleSave).
       await waitFor(() => {
         expect(screen.getByText("儲存失敗，請稍後再試")).toBeInTheDocument();
       });
