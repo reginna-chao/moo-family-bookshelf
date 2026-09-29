@@ -114,4 +114,56 @@ describe("BookSortDropdown", () => {
     fireEvent.mouseDown(screen.getByText("outside"));
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
+
+  it("closes the popover on Escape", () => {
+    render(<BookSortDropdown value="default" onChange={vi.fn()} />);
+
+    openListbox();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("排序方式")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  // Inline popover: it scrolls along with its trigger, and mobile address-bar
+  // collapse fires resize, so neither may dismiss it.
+  it("stays open on page scroll and window resize", () => {
+    render(<BookSortDropdown value="default" onChange={vi.fn()} />);
+
+    openListbox();
+    fireEvent.scroll(window);
+    fireEvent.scroll(document);
+    fireEvent(window, new Event("resize"));
+
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    // Positive companion: the dismissal listeners are live — Escape still works.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("closes when the trigger is pressed again (mousedown on the trigger is not an outside click)", () => {
+    render(<BookSortDropdown value="default" onChange={vi.fn()} />);
+
+    openListbox();
+    const trigger = screen.getByLabelText("排序方式");
+    fireEvent.mouseDown(trigger);
+    fireEvent.click(trigger);
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("selects an option on a real mousedown + click sequence", () => {
+    const onChange = vi.fn();
+    render(<BookSortDropdown value="default" onChange={onChange} />);
+
+    const listbox = openListbox();
+    const option = within(listbox).getByRole("option", { name: "書名 A → Z" });
+    fireEvent.mouseDown(option);
+    fireEvent.click(option);
+
+    expect(onChange).toHaveBeenCalledWith("title-asc");
+  });
 });

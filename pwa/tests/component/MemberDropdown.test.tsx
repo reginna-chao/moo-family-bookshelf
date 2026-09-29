@@ -180,4 +180,44 @@ describe("MemberDropdown", () => {
     fireEvent.mouseDown(screen.getByText("outside"));
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
+
+  it("closes the popover on Escape", () => {
+    renderDropdown();
+
+    openListbox();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("篩選成員")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  // Inline popover: it scrolls along with its trigger, and mobile address-bar
+  // collapse fires resize, so neither may dismiss it.
+  it("stays open on page scroll and window resize", () => {
+    renderDropdown();
+
+    openListbox();
+    fireEvent.scroll(window);
+    fireEvent.scroll(document);
+    fireEvent(window, new Event("resize"));
+
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    // Positive companion: the dismissal listeners are live — Escape still works.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("closes when the trigger is pressed again (mousedown on the trigger is not an outside click)", () => {
+    renderDropdown();
+
+    openListbox();
+    const trigger = screen.getByLabelText("篩選成員");
+    fireEvent.mouseDown(trigger);
+    fireEvent.click(trigger);
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
 });
