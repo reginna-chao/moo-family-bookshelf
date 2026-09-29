@@ -156,6 +156,77 @@ describe("OverflowMenu", () => {
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
   });
 
+  // The panel is portaled and `position: fixed`, so unlike the inline dropdowns
+  // it detaches from its trigger when the page moves — scroll and resize close
+  // it, and every dismissal path must report onOpenChange(false).
+  it.each<{ name: string; fire: () => void }>([
+    {
+      name: "outside mousedown",
+      fire: () => fireEvent.mouseDown(document.body),
+    },
+    {
+      name: "Escape",
+      fire: () => fireEvent.keyDown(document, { key: "Escape" }),
+    },
+    { name: "window scroll", fire: () => fireEvent.scroll(window) },
+    { name: "document scroll", fire: () => fireEvent.scroll(document) },
+    {
+      name: "window resize",
+      fire: () => fireEvent(window, new Event("resize")),
+    },
+  ])("closes on $name and notifies onOpenChange(false)", ({ fire }) => {
+    const onOpenChange = vi.fn();
+    render(
+      <OverflowMenu
+        items={[{ label: "隱藏書籍", onSelect: () => {} }]}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    onOpenChange.mockClear();
+
+    fire();
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.getByRole("button", { name: "更多選項" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it.each<{ name: string; target: () => HTMLElement; bubbles: boolean }>([
+    {
+      name: "on the menu panel",
+      target: () => screen.getByRole("menu"),
+      bubbles: false,
+    },
+    {
+      name: "bubbling up from a menu item",
+      target: () => screen.getByRole("menuitem", { name: "隱藏書籍" }),
+      bubbles: true,
+    },
+  ])("stays open on a scroll starting $name", ({ target, bubbles }) => {
+    const onOpenChange = vi.fn();
+    render(
+      <OverflowMenu
+        items={[{ label: "隱藏書籍", onSelect: () => {} }]}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+    onOpenChange.mockClear();
+
+    fireEvent(target(), new Event("scroll", { bubbles }));
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
   it("removes document listeners on unmount (no error on later events)", () => {
     const { unmount } = render(
       <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,

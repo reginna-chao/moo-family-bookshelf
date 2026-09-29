@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useMemo, useCallback } from "react";
 import type { ReactNode } from "react";
 import {
   Users,
@@ -14,6 +14,7 @@ import {
   type MemberFilterValue,
 } from "@/hooks/useFamilyShelfBooks";
 import type { MemberBooks } from "@/hooks/useFamilyData";
+import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 
 export interface MemberDropdownProps {
   members: MemberBooks[];
@@ -101,7 +102,10 @@ function buildOptions(
   ];
 }
 
-/** Custom member-filter dropdown (PWA): icon + label trigger, popover listbox with counts. */
+/**
+ * Custom member-filter dropdown (PWA): icon + label trigger, popover listbox
+ * with counts. Closes on outside click or Escape via useDismissableMenu.
+ */
 export function MemberDropdown({
   members,
   userId,
@@ -111,7 +115,8 @@ export function MemberDropdown({
   hiddenCount,
 }: MemberDropdownProps) {
   const [open, setOpen] = useState(false);
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const options = useMemo(
     () => buildOptions(members, userId, favoriteCount, hiddenCount),
@@ -120,21 +125,9 @@ export function MemberDropdown({
   const current = options.find((o) => o.value === value) ?? options[0];
 
   const handleToggle = useCallback(() => setOpen((prev) => !prev), []);
+  const close = useCallback(() => setOpen(false), []);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClickOutside(e: MouseEvent) {
-      // PWA is not in a Shadow DOM, so e.target is not retargeted — contains() is correct here (unlike the Extension dialog, which needs composedPath()).
-      if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open]);
+  useDismissableMenu({ isOpen: open, onClose: close, triggerRef, menuRef });
 
   function handleSelect(next: MemberFilterValue) {
     onChange(next);
@@ -142,8 +135,9 @@ export function MemberDropdown({
   }
 
   return (
-    <div ref={popoverRef} className="relative flex-1">
+    <div className="relative flex-1">
       <button
+        ref={triggerRef}
         onClick={handleToggle}
         aria-label="篩選成員"
         aria-expanded={open}
@@ -161,6 +155,7 @@ export function MemberDropdown({
       </button>
       {open && (
         <div
+          ref={menuRef}
           className="absolute top-12 left-0 min-w-full max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-50"
           role="listbox"
           aria-label="成員選單"
