@@ -220,7 +220,7 @@ export function FamilySettings({
       // a sole-owner dissolve that half-failed after deleting the record (its
       // retries keep answering this 404), or a family dissolved meanwhile —
       // and keeping the local family would strand the user on a family that
-      // no longer exists. Mirrored in pwa/src/pages/SettingsPage.tsx
+      // no longer exists. Mirrored in pwa/src/hooks/useLeaveFamily.ts
       // handleLeave; keep the two identical.
       const code = response.error?.code;
       const alreadyLeft =

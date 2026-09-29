@@ -674,7 +674,8 @@ describe("MemberList", () => {
       startRemoval(0);
       await confirmRemoval();
 
-      // Rendered by SettingsPage, never here — see SettingsPage.test.tsx.
+      // Rendered by SettingsFamilyMembers (under SettingsPage), never here —
+      // see SettingsPage.test.tsx.
       expect(
         screen.queryByText(buildRemovedNoticeText("小明")),
       ).not.toBeInTheDocument();

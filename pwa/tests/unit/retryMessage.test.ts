@@ -96,9 +96,10 @@ describe("buildRetryMessage", () => {
 });
 
 /**
- * The envelope variant, used by the SettingsPage write paths that read
- * `res.error` instead of catching a thrown `ApiError` (save display name, leave
- * family). Those call sites used to render the Worker's English `error.message`
+ * The envelope variant, used by the Settings page write paths that read
+ * `res.error` instead of catching a thrown `ApiError` (save display name in
+ * hooks/useDisplayNameEditor.ts, leave family in hooks/useLeaveFamily.ts).
+ * Those call sites used to render the Worker's English `error.message`
  * verbatim on a 429.
  */
 describe("rateLimitedEnvelopeMessage", () => {

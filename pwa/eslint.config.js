@@ -25,7 +25,6 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/pages/LandingPage.tsx": 581,
   "src/pages/PersonalShelfPage.tsx": 540,
   "src/pages/PublicShelfPage.tsx": 202,
-  "src/pages/SettingsPage.tsx": 650,
 };
 
 export default tseslint.config(
