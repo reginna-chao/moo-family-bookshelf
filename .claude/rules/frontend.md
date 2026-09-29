@@ -50,7 +50,7 @@ shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pw
 
 - Functional components with hooks. No class components.
 - Props defined as `interface`, named `{Component}Props`.
-- Keep files under 200 lines. Split large components.
+- Keep files at 200 lines or fewer. Split large components. Enforced by ESLint `max-lines` (`error`, raw lines — blank lines and comments count, so it matches `wc -l`) on `src/**/*.{ts,tsx}` in `extension/`, `pwa/` and `shared/`; tests, scripts and configs are exempt. Files that already exceeded 200 lines when the rule landed are pinned in `MAX_LINES_LEGACY_CEILINGS` in that package's `eslint.config.js` at their line count then, so they may shrink but never grow. When a listed file shrinks, lower its number in the same change; once it is at or under 200, delete its entry. Never raise a number or add an entry — split the file instead.
 - Extract shared logic into custom hooks (`use*.ts`).
 - Max 3 levels of nesting. Use early return.
 - No nested ternary operators.

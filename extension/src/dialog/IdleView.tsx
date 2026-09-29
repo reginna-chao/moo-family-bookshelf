@@ -1,7 +1,7 @@
 import React from "react";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
 // Type-only: keeps the runtime module graph a single edge (OnboardingViews →
-// IdleView) despite useOnboardingFlow's type dependency on OnboardingViews.
+// IdleView) despite onboardingFlowTypes' type dependency on OnboardingViews.
 import type { OnboardingState } from "./useOnboardingFlow";
 import { useSyncCodeHostVerdict } from "./useSyncCodeHostVerdict";
 

@@ -16,6 +16,21 @@ const BROWSER_ONLY_GLOBALS = [
   "navigator",
 ];
 
+// Production files (src/) are capped at MAX_LINES raw lines — blank lines and
+// comments count, so the number matches `wc -l` (issue #210). The files below
+// already exceeded the cap when it was introduced; each is pinned to its line
+// count at that time, so it may shrink but never grow. Maintenance: when a
+// listed file shrinks, lower its number in the same change; once it is at or
+// under MAX_LINES, delete its entry. Never raise a number and never add an
+// entry — split the file instead. Keys are relative to this directory.
+const MAX_LINES = 200;
+const MAX_LINES_LEGACY_CEILINGS = {
+  "src/api/bookshelfValidation.ts": 233,
+  "src/api/entityText.ts": 280,
+  "src/api/types.ts": 292,
+  "src/config/readmoo.ts": 412,
+};
+
 export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.strict,
@@ -43,6 +58,16 @@ export default tseslint.config(
       ],
     },
   },
+  // Later flat-config blocks win for a file they match, so each legacy
+  // ceiling below overrides the base cap for that one file only.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: { "max-lines": ["error", { max: MAX_LINES }] },
+  },
+  ...Object.entries(MAX_LINES_LEGACY_CEILINGS).map(([file, max]) => ({
+    files: [file],
+    rules: { "max-lines": ["error", { max }] },
+  })),
   {
     ignores: ["dist/", "node_modules/", "*.config.js", "*.config.ts"],
   },

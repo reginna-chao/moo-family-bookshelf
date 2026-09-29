@@ -388,7 +388,7 @@ export function restoreApiEndpoint(
  * challenge is a continuation of this attempt, not its end: the prompt asks
  * that same server for the account's verification method and then retries the
  * join against it. Releasing it is therefore the caller's job — see
- * `restoreApiEndpoint` in useOnboardingFlow.handleJoin, which hands the
+ * `restoreApiEndpoint` in useOnboardingJoinFlow.handleJoin, which hands the
  * endpoint back on every exit that ends the attempt without a join. Nothing is
  * written to storage until a join succeeds, so an abandoned attempt cannot
  * survive a reload either way.

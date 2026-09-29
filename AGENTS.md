@@ -192,7 +192,7 @@ When `CHANGELOG.md` is written: between releases, every `/develop` run writes it
 - Language: TypeScript (ESM). Strict typing; avoid `any`.
 - UI components: React functional components with hooks.
 - Naming: `camelCase` for variables/functions, `PascalCase` for components/types, `UPPER_SNAKE` for constants.
-- Keep files concise; aim for under 300 LOC per file. Split when it improves clarity.
+- Keep files concise. Production sources under `extension/src/`, `pwa/src/` and `shared/src/` are capped at 200 lines by ESLint `max-lines` (error); files that were already longer are pinned in each package's `eslint.config.js` allowlist and may only shrink — see `.claude/rules/frontend.md` → Coding Conventions. `worker/` is not under that rule: aim for under 300 LOC per file there. Split when it improves clarity.
 - Add brief comments for non-obvious logic only; do not over-comment.
 - CSS: Tailwind CSS utility classes preferred. Avoid inline styles for complex layouts.
 
