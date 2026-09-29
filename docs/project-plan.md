@@ -1103,7 +1103,8 @@ jobs:
 
 ##### ⚪ 低優先 — 零星清理與 DX
 
-- [ ] **BE-10/11** 統一驗證錯誤碼（`defaultHook` 現一律回 `INVALID_JSON`）+ 接上 zod-openapi 實際驗證 → [#212](https://github.com/reginna-chao/moo-family-bookshelf/issues/212)
+- [x] **BE-10** 統一驗證錯誤碼：已完成（`defaultHook` 依來源回不同錯誤碼：body 欄位 `INVALID_FIELDS`、路徑參數 `INVALID_PARAMS`、查詢參數 `INVALID_QUERY`，其餘 `INVALID_REQUEST`）→ [#212](https://github.com/reginna-chao/moo-family-bookshelf/issues/212)
+- [ ] **BE-11** 接上 zod-openapi 實際驗證 → [#227](https://github.com/reginna-chao/moo-family-bookshelf/issues/227)
 - [x] **BE-12** 補 publicShelf / OTP / QR 的 per-user 限流：已完成（`public-shelf`、`verify-write` 兩個每小時 scope）。
 - [x] **BE-13** 非原子多鍵寫入的部分失敗清理：已完成（家庭建立／加入／移除成員／解散改為重試可收斂的寫入順序）→ [#213](https://github.com/reginna-chao/moo-family-bookshelf/issues/213)
 - [ ] **FE-6** 拆 >200 行大檔；**FE-7** 收斂 props drilling → 併入 [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)
