@@ -43,7 +43,7 @@ worker/src/
     ├── crypto.ts     # hashSecret / timingSafeEqual primitives
     ├── env.ts        # Env bindings type + isDevMode() production-name guard
     ├── errors.ts     # jsonError() — typed { error: { code, message } } envelope
-    ├── openapi.ts    # OpenAPI route helpers (jsonRes, INVALID_JSON defaultHook)
+    ├── openapi.ts    # OpenAPI route helpers (jsonRes, defaultHook — 400 coded by validation target)
     ├── routes.ts     # Route classification (isPublicRoute / sensitiveBucketFor)
     └── validation.ts # Input validation helpers
 ```
@@ -62,6 +62,7 @@ One honest caveat, so the rule is not read as more than it is:
 - Prefix: `/api/`
 - Authentication: token-based (issued on family create/join).
 - All data stored as plaintext JSON in KV; access controlled by auth tokens.
+- **Route schemas are OpenAPI docs only; handler-level validation is authoritative.** Every `createRoute` declares at most `params`, with bare `z.string()` fields, so zod never rejects anything and each handler validates its own input with its own codes (`INVALID_FAMILY_ID`, `INVALID_USER_ID`, `INVALID_JSON` …). The shared `defaultHook` in `utils/openapi.ts` is therefore unreachable today; it codes a zod failure by its target — `json` ⇒ `INVALID_FIELDS`, `param` ⇒ `INVALID_PARAMS`, `query` ⇒ `INVALID_QUERY`, anything else ⇒ `INVALID_REQUEST` (all `400`, no zod detail echoed). An unparsable JSON body never reaches the hook — Hono's validator throws `HTTPException(400)` first, which the root `app.onError` currently turns into `500 INTERNAL_ERROR` — so the first route that declares a `request.body` schema must handle that. Moving validation into the schemas is tracked in #227.
 - **userId is NOT a credential.** It is `sha256("moo:" + email)` — email-derived and publicly guessable. Any public endpoint that mints a token for a userId or reveals data bound to it (`POST /api/family`, `POST /api/family/:id/join`, `POST /api/auth/lookup`) MUST run the shared verification gate — `validateVerification(...)` + `verificationErrorResponse(...)` from `services/verification.ts` — before any KV write, token mint, or disclosure of family data (familyId, member count, member list). Accounts with no `verify:{user_id}` record (or `method: "none"`) pass through unchanged; that is a documented residual risk, not an oversight.
   - One deliberate exception: the terminal `409 ALREADY_IN_FAMILY` conflict is answered BEFORE the gate in both create and join. It discloses a single boolean ("this userId is in some family") to an unverified caller. Rationale — no secret can make such a request succeed, so gating first would only prompt for a PIN and burn the account's attempt ceiling before refusing anyway. Keep create and join in the same order; do not add further pre-gate disclosures.
 - `POST /api/auth/lookup` reports the requirement instead of erroring: verification configured + no `verifySecret` ⇒ HTTP 200 with `{ existingFamilyId: null, memberCount: 0, requiresVerification: BoolFlag.TRUE }`. Use `isVerificationConfigured()` for that probe so only ONE verify-record read happens per request.
