@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { SlidersHorizontal } from "lucide-react";
+import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 
 const UNCATEGORIZED = "未分類";
 
@@ -36,24 +37,15 @@ export function CategoryFilter({
   onChange,
 }: CategoryFilterProps) {
   const [open, setOpen] = useState(false);
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const categories = useMemo(() => buildCategories(books), [books]);
 
   const handleToggle = useCallback(() => setOpen((prev) => !prev), []);
+  const close = useCallback(() => setOpen(false), []);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open]);
+  // Must stay above the early return below (rules of hooks).
+  useDismissableMenu({ isOpen: open, onClose: close, triggerRef, menuRef });
 
   // Reset open state when value is cleared externally
   useEffect(() => {
@@ -65,8 +57,9 @@ export function CategoryFilter({
   const isActive = value !== "";
 
   return (
-    <div ref={popoverRef} className="relative flex-shrink-0">
+    <div className="relative flex-shrink-0">
       <button
+        ref={triggerRef}
         onClick={handleToggle}
         aria-label="篩選分類"
         aria-expanded={open}
@@ -80,6 +73,7 @@ export function CategoryFilter({
       </button>
       {open && (
         <div
+          ref={menuRef}
           className="absolute top-12 right-0 min-w-[180px] max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-50"
           role="listbox"
           aria-label="分類選單"

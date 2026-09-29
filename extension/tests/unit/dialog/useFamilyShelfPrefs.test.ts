@@ -455,6 +455,67 @@ describe("useFamilyShelfPrefs", () => {
     });
   });
 
+  describe("failed load never wipes the saved lists (issue #219)", () => {
+    it("retries the load instead of saving after an { error } load, then saves the server lists plus the toggle once", async () => {
+      const getPersonalBooks = vi
+        .fn()
+        .mockResolvedValueOnce({
+          error: { code: "NETWORK_ERROR", message: "x" },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            familyShelfPrefs: {
+              hidden: ["owner-0:existing"],
+              favorites: ["owner-f:fav"],
+            },
+          },
+        });
+      const apiClient = createMockApiClient({}, { getPersonalBooks });
+      const { result } = renderHook(() =>
+        useFamilyShelfPrefs("user-1", apiClient),
+      );
+      await waitFor(() => {
+        expect(result.current.syncFailed).toBe(true);
+      });
+      expect(result.current.hiddenRefs.size).toBe(0);
+
+      vi.useFakeTimers();
+      act(() => {
+        result.current.toggleHidden("owner-1", "b1");
+      });
+      expect(result.current.isHidden("owner-1", "b1")).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
+      });
+      // The full-replace PUT here is what wiped the saved lists.
+      expect(apiClient.updateFamilyPrefs).not.toHaveBeenCalled();
+      expect(getPersonalBooks).toHaveBeenCalledTimes(2);
+
+      // Fake timers are installed, so drain the retry's promise chain inside
+      // act instead of using waitFor.
+      await act(async () => {
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+      });
+
+      expect(apiClient.updateFamilyPrefs).toHaveBeenCalledTimes(1);
+      const { userId, prefs } = flushArgs(apiClient);
+      expect(userId).toBe("user-1");
+      expect([...prefs.hidden].sort()).toEqual(
+        ["owner-0:existing", "owner-1:b1"].sort(),
+      );
+      expect(prefs.favorites).toEqual(["owner-f:fav"]);
+      expect(result.current.isHidden("owner-0", "existing")).toBe(true);
+      expect(result.current.isHidden("owner-1", "b1")).toBe(true);
+      expect(result.current.syncFailed).toBe(false);
+
+      act(() => {
+        vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS * 3);
+      });
+      expect(apiClient.updateFamilyPrefs).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("cleanup", () => {
     it("flushes a pending favorite change (with hidden) on unmount within the debounce window", async () => {
       const apiClient = createMockApiClient({ hidden: ["owner-0:hid"] });
