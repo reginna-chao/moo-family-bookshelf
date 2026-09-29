@@ -822,6 +822,37 @@ describe("Sole-owner dissolve partial-write convergence", () => {
     expect(await readAuthRecord(USER1)).toBeNull();
   });
 
+  it("should answer the retried leave with 404 FAMILY_NOT_FOUND when the token revoke's auth-record read fails after the family delete", async () => {
+    const { familyId, authToken } = await createFamily(USER1);
+    // The dissolve's only read of `auth:{uid}` is inside deleteAuthToken (auth
+    // middleware resolves the bearer via `token:{token}`), so this stops the
+    // token revoke before either of its deletes starts.
+    const fault = failNextKvOp("get", kvKeys.auth(USER1));
+
+    const first = await removeMember(familyId, USER1, authToken);
+
+    await expectInternalError(first);
+    expect(fault.fired()).toBe(true);
+    await settleOrphanedKvOps();
+    expect(await allFamilyRecordKeys()).toEqual([]);
+    // The session survived the failed revoke.
+    expect((await readAuthRecord(USER1))?.token).toBe(authToken);
+
+    const retry = await removeMember(familyId, USER1, authToken);
+
+    // Pinned code: clients treat exactly this answer as a completed leave.
+    expect(retry.status).toBe(404);
+    expect(((await retry.json()) as Json).error.code).toBe("FAMILY_NOT_FOUND");
+
+    // Not stuck: create succeeds (no 409 ALREADY_IN_FAMILY).
+    const created = await createRequest(USER1);
+    expect(created.status).toBe(201);
+    const nextFamilyId = ((await created.json()) as Json).data
+      .familyId as string;
+    expect(await kv.get(kvKeys.member(USER1))).toBe(nextFamilyId);
+    expect(await listedMemberIds(nextFamilyId)).toEqual([USER1]);
+  });
+
   const failingKeys = [
     { label: "pointer", key: kvKeys.member(USER1) },
     { label: "auth record", key: kvKeys.auth(USER1) },

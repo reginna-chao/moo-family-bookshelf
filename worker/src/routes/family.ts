@@ -1572,7 +1572,7 @@ async function writeKickedTombstone(
 /**
  * Join-side half of the kick ordering: called right AFTER the join handler has
  * put `member:{userId}` → familyId (heal or new member). Re-reads the kicked
- * tombstone; if one has landed since the join's tombstone gate, deletes the
+ * tombstone; if one has landed since the join's tombstone gate, retracts the
  * pointer this request just wrote and returns `true` so the caller answers
  * 403 MEMBER_REMOVED without minting a token.
  *
@@ -1581,7 +1581,19 @@ async function writeKickedTombstone(
  * one of the two reads observes the other side's write, so a pointer can no
  * longer be healed back past an in-flight kick unnoticed.
  *
- * Side effects: one KV get; plus one KV delete only when the tombstone exists.
+ * The retraction only deletes a pointer that STILL names `familyId`. Between
+ * this request's pointer put and its tombstone re-read, the owner's kick can
+ * complete (deleting that pointer and the token) and the same user can join
+ * ANOTHER family, whose pointer then occupies the key — an unconditional delete
+ * would strand that other family's session (404 on members / bookshelf). The
+ * `true` return does not depend on the pointer: the tombstone alone is what
+ * refuses this join. This is read-then-delete, not an atomic compare-and-delete
+ * — KV has no CAS, so a pointer write landing between the read and the delete
+ * can still be clobbered (same class as the documented no-CAS / ~60s
+ * residuals in `docs/architecture.md` → 已接受的殘餘風險).
+ *
+ * Side effects: one KV get (tombstone); when it exists, one more KV get
+ * (pointer) and at most one KV delete.
  */
 async function retractPointerIfKicked(
   kv: KVNamespace,
@@ -1591,7 +1603,9 @@ async function retractPointerIfKicked(
   if (!(await hasKickedTombstone(kv, familyId, userId))) {
     return false;
   }
-  await deleteMemberFamilyId(kv, userId);
+  if ((await getMemberFamilyId(kv, userId)) === familyId) {
+    await deleteMemberFamilyId(kv, userId);
+  }
   return true;
 }
 

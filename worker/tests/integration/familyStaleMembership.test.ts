@@ -207,6 +207,38 @@ function runBeforeNext(op: KvWriteOp, key: string, hook: () => Promise<void>) {
 }
 
 /**
+ * Mirror of {@link runBeforeNext}: run `hook` once, immediately AFTER the next
+ * `put` on `key` has landed in the store and before the handler that issued it
+ * resumes. Same contract — callers MUST assert `fired()`.
+ */
+function runAfterNextPut(key: string, hook: () => Promise<void>) {
+  let armed = true;
+  let fired = false;
+  envKv = new Proxy(kv, {
+    get(target, prop, receiver) {
+      if (prop === "put") {
+        return async (k: string, ...rest: unknown[]): Promise<unknown> => {
+          const real = Reflect.get(target, "put") as (
+            k: string,
+            ...r: unknown[]
+          ) => Promise<unknown>;
+          const result = await real(k, ...rest);
+          if (armed && k === key) {
+            armed = false;
+            await hook();
+            fired = true;
+          }
+          return result;
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { fired: () => fired };
+}
+
+/**
  * Kick USER2 while ONE plain reconnect join by USER2 (no displayName) runs to
  * completion immediately before the owner's `op` on `key`. Returns both
  * responses; the caller asserts on the join's.
@@ -613,6 +645,58 @@ describe("POST /api/family/:id/join tombstone re-check after the pointer put", (
     expect(ops.putKeys().filter((k) => k.startsWith(TOKEN_KEY_PREFIX))).toEqual(
       [],
     );
+  });
+
+  it("should not retract a pointer that names ANOTHER family the user joined after the kick completed", async () => {
+    // External review of PR #223. The case above is the positive companion:
+    // there the retraction DOES delete the pointer, because it still names
+    // the kicking family.
+    const { familyId: familyA, authToken: ownerToken } =
+      await createFamily(USER1);
+    const { familyId: familyB } = await createFamily(USER4);
+    const pointerKey = kvKeys.member(USER3);
+    const ops = watchKvOps(kv);
+
+    // USER3's join of A pauses right after its pointer put. Meanwhile A's
+    // owner completes the kick (tombstone → list put → pointer read = A →
+    // pointer + token deleted), and USER3 joins B (pointer = B, B token).
+    const raced: { kick?: Response; joinB?: Response } = {};
+    const race = runAfterNextPut(pointerKey, async () => {
+      raced.kick = await removeMember(familyA, USER3, ownerToken);
+      raced.joinB = await join(familyB, USER3);
+    });
+
+    // The paused A join resumes and sees A's tombstone.
+    const joinA = await join(familyA, USER3);
+
+    expect(race.fired()).toBe(true);
+    envKv = kv;
+    expect(raced.kick?.status).toBe(200);
+    await expectErrorCode(joinA, 403, "MEMBER_REMOVED");
+    expect(raced.joinB?.status).toBe(200);
+    const tokenB = ((await raced.joinB!.json()) as Json).data
+      .authToken as string;
+
+    // The interleaving really happened, and the resumed A join wrote nothing
+    // to the pointer: A's put, the owner's revoke, B's put — B's is last.
+    expect(
+      ops.writeTrail().filter((entry) => entry.endsWith(` ${pointerKey}`)),
+    ).toEqual([
+      `put ${pointerKey}`,
+      `delete ${pointerKey}`,
+      `put ${pointerKey}`,
+    ]);
+
+    // The B session survives: pointer, token, and both family-scoped reads.
+    expect(await kv.get(pointerKey)).toBe(familyB);
+    expect((await readAuthRecord(USER3))?.token).toBe(tokenB);
+    expect(await listedMemberIds(familyB)).toContain(USER3);
+    expect((await getMembers(familyB, tokenB)).status).toBe(200);
+    expect((await getBookshelf(familyB, tokenB)).status).toBe(200);
+
+    // The kick of A still stuck.
+    expect(await listedMemberIds(familyA)).toEqual([USER1]);
+    expect(await kv.get(kvKeys.kicked(familyA, USER3))).not.toBeNull();
   });
 
   it.each([

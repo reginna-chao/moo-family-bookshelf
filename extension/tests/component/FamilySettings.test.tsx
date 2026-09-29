@@ -536,36 +536,45 @@ describe("FamilySettings", () => {
   /**
    * A retried, half-failed self-leave: the Worker finishes the cleanup and
    * answers 404 MEMBER_NOT_FOUND. That is a completed leave — keeping the
-   * local family would let silent recovery re-join it. The opposite case (a
-   * real refusal renders its error and does NOT call onLeave) is pinned by
-   * "shows the localized back-off copy when leaving is rate limited" below.
+   * local family would let silent recovery re-join it. 404 FAMILY_NOT_FOUND
+   * is the same outcome: a sole-owner dissolve that half-failed after
+   * deleting the family record answers it on every retry, and keeping the
+   * local family would strand the user on a family that no longer exists.
+   * The opposite case (a real refusal renders its error and does NOT call
+   * onLeave) is pinned by "shows the localized back-off copy when leaving is
+   * rate limited" below.
    */
-  it("treats MEMBER_NOT_FOUND on self-leave as a completed leave", async () => {
-    const serverMessage = "目標使用者不是家庭成員";
-    const apiClient = createMockApiClient({
-      leaveFamily: vi.fn().mockResolvedValue({
-        error: { code: "MEMBER_NOT_FOUND", message: serverMessage },
-      }),
-    });
-    const onLeave = vi.fn();
-    renderFamilySettings({ apiClient, onLeave });
+  it.each([
+    ["MEMBER_NOT_FOUND", "目標使用者不是家庭成員"],
+    ["FAMILY_NOT_FOUND", "Family not found"],
+  ])(
+    "treats %s on self-leave as a completed leave",
+    async (code, serverMessage) => {
+      const apiClient = createMockApiClient({
+        leaveFamily: vi.fn().mockResolvedValue({
+          error: { code, message: serverMessage },
+        }),
+      });
+      const onLeave = vi.fn();
+      renderFamilySettings({ apiClient, onLeave });
 
-    fireEvent.click(screen.getByText("離開家庭"));
+      fireEvent.click(screen.getByText("離開家庭"));
 
-    await waitFor(() => {
-      expect(screen.getByText("確定離開")).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(screen.getByText("確定離開")).toBeInTheDocument();
+      });
 
-    fireEvent.click(screen.getByText("確定離開"));
+      fireEvent.click(screen.getByText("確定離開"));
 
-    await waitFor(() => {
-      expect(onLeave).toHaveBeenCalledOnce();
-    });
-    expect(screen.queryByText(serverMessage)).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("離開家庭失敗，請稍後再試"),
-    ).not.toBeInTheDocument();
-  });
+      await waitFor(() => {
+        expect(onLeave).toHaveBeenCalledOnce();
+      });
+      expect(screen.queryByText(serverMessage)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("離開家庭失敗，請稍後再試"),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it("cancel confirmation hides confirm dialog in member list", async () => {
     renderFamilySettings();
