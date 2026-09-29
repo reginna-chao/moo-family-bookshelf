@@ -883,19 +883,25 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   // failed revoke after it leaves behind — a stray `member:{uid}` pointer, and
   // the target's token — reads nothing family-scoped and blocks nothing.
   // (`POST /api/auth/refresh` still checks the pointer only, so it can renew
-  // that token; the renewed token reads nothing family-scoped either.) Any
-  // retry converges: the target is no longer listed, so the owner's re-kick
-  // AND the target's own retried leave land on the MEMBER_NOT_FOUND branch
-  // above, which deletes a stray pointer naming this family together with its
-  // token. If the token delete landed and the pointer delete did not, the
-  // target cannot retry the leave, but the stray pointer still reads nothing
-  // and no longer counts as membership.
+  // that token; the renewed token reads nothing family-scoped either.) A
+  // retry converges: the target is no longer listed, so the owner's re-kick —
+  // and the target's own retried leave while their token is still alive —
+  // land on the MEMBER_NOT_FOUND branch above, which deletes a stray pointer
+  // naming this family together with its token. If the token delete landed
+  // and the pointer delete did not (`Promise.all` does not cancel the
+  // sibling), the target's next request answers 401, not 404, so the client's
+  // own recovery join runs first: a self-leave writes no tombstone and the
+  // stray pointer names THIS family (so no ALREADY_IN_FAMILY), and the
+  // recovery re-lists them. A retried leave therefore still succeeds —
+  // through that transient rejoin — and a user who does not retry stays
+  // listed, consistent with the 500 they were shown. Either way the stray
+  // pointer reads nothing until it is cleared.
   //
   // The reverse order (revoke, then list put) left a worse half-state when the
   // put failed: the target still listed — their shared books still in the
   // others' bookshelf aggregation until someone retried — and, on a
-  // self-leave, their own token already gone, so they could not retry the
-  // leave themselves.
+  // self-leave, their own token already gone, so even retrying the leave had
+  // to wait on the client's recovery rejoin for a new session.
   //
   // What this ordering does NOT close: `family:{id}` is a read-modify-write
   // with no CAS, so a concurrent full-record write that read the list before

@@ -15,8 +15,11 @@
  *   revoke pointer + token. A failed family put changes nothing but (on a
  *   kick) the tombstone, which the owner's retry finishes or un-kick lifts. A
  *   failed revoke leaves "unlisted, stray pointer (+ token)", which reads
- *   nothing family-scoped, and which any retry — the owner's re-kick or the
- *   target's own retried leave — clears on the MEMBER_NOT_FOUND branch.
+ *   nothing family-scoped, and which the owner's re-kick — or the target's
+ *   own retried leave while their token is alive — clears on the
+ *   MEMBER_NOT_FOUND branch. (If only the token delete landed, a self-leaver's
+ *   next request is 401 and the client's recovery join re-lists them first;
+ *   their retried leave then completes through that rejoin.)
  * - dissolve: family delete, THEN pointer + token → at worst an orphan pointer.
  *
  * Every case here drives the real Hono app over `app.request` with a
@@ -472,8 +475,9 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
 
     expect(res.status).toBe(200);
     const trail = ops.writeTrail();
-    // List first: a revoke that fails after it leaves the leaver's own token
-    // alive, so they can retry the leave (see the self-leave cases below).
+    // List first: a revoke that fails before its token delete leaves the
+    // leaver's own token alive, so they can retry the leave (see the
+    // self-leave cases below).
     expect(trail[0]).toBe(`put ${kvKeys.family(familyId)}`);
     expect(asSet(trail.slice(1))).toEqual(
       asSet([
@@ -721,7 +725,8 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     await settleOrphanedKvOps();
     envKv = kv;
     // Unlisted with a stray pointer; the parallel token delete did land, so
-    // the leaver cannot retry the DELETE themselves...
+    // the old session's retried DELETE answers 401, not 404 — the client's
+    // recovery join (below) runs before any retried leave...
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
     expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
     expect((await removeMember(familyId, USER2, memberToken)).status).toBe(401);
