@@ -117,7 +117,17 @@ export function MemberList({
     setActionError("");
     try {
       const response = await apiClient.removeMember(familyId, targetId);
-      if (response.error) {
+      // Owner kick, so MEMBER_NOT_FOUND can only mean "already off the list":
+      // an earlier kick half-failed server-side (member list updated, revoke
+      // failed) — or the target left on their own — and the Worker's 404
+      // branch has now re-attempted the rejoin block and cleared the leftover
+      // pointer and token. Treat it as a completed removal: showing the error
+      // and skipping the refresh keeps a removed member on screen until the
+      // list is next loaded. Mirrored in pwa/src/components/MemberList.tsx
+      // handleConfirm; keep the two identical. Self-leave twin:
+      // FamilySettings.tsx handleLeaveConfirm.
+      const alreadyRemoved = response.error?.code === "MEMBER_NOT_FOUND";
+      if (response.error && !alreadyRemoved) {
         setActionError(
           rateLimitedEnvelopeMessage(response.error) ??
             safeErrorText(response.error.message, "移除成員失敗，請稍後再試"),

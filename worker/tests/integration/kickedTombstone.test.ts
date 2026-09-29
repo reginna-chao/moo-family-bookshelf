@@ -216,23 +216,26 @@ describe("DELETE /api/family/:id/member/:uid tombstone write", () => {
     );
   });
 
-  it("should write the tombstone only after the removal writes have landed", async () => {
+  it("should write the tombstone before the pointer revoke and the member-list put", async () => {
     const { familyId, ownerToken } = await createFamilyWithTwoMembers();
     const ops = watchKvOps(kv);
 
     await removeMember(familyId, USER2, ownerToken);
 
-    // Ordering is a safety property, not a style choice: a tombstone that
-    // outran a FAILED removal would lock a still-live member out of
-    // reconnecting for the whole TTL. It must therefore be the LAST write.
+    // Ordering is a safety property, not a style choice (#213, Fix Cycle 3):
+    // the join reads `member:{uid}` BEFORE it checks the tombstone, so only a
+    // tombstone that lands ahead of the pointer delete guarantees that a join
+    // seeing the pointer gone is refused rather than healing it back. The
+    // accepted cost — a kick that fails after this write leaves a still-listed
+    // member banned — is pinned in familyPartialWrite.test.ts.
     const trail = ops.writeTrail();
     const kickedAt = trail.indexOf(`put ${kvKeys.kicked(familyId, USER2)}`);
     const familyAt = trail.indexOf(`put ${kvKeys.family(familyId)}`);
     const memberAt = trail.indexOf(`delete ${kvKeys.member(USER2)}`);
     expect(familyAt).toBeGreaterThanOrEqual(0);
     expect(memberAt).toBeGreaterThanOrEqual(0);
-    expect(kickedAt).toBe(trail.length - 1);
-    expect(kickedAt).toBeGreaterThan(Math.max(familyAt, memberAt));
+    expect(kickedAt).toBe(0);
+    expect(kickedAt).toBeLessThan(Math.min(familyAt, memberAt));
   });
 
   it("should write NO tombstone when a member leaves voluntarily", async () => {
@@ -388,9 +391,10 @@ describe("POST /api/family/:id/join kicked tombstone gate", () => {
 // ===========================================================================
 // DELETE /api/family/:id/member/:uid — idempotent re-kick on MEMBER_NOT_FOUND
 //
-// The removal writes are a `Promise.all`, so an attempt can half-fail: the
-// member is dropped from the family record while the tombstone never lands.
-// The owner's retry then finds nobody to remove and, before this branch
+// A member can be gone from the family record with NO tombstone in place: the
+// removal's tombstone put is fail-open, so it can fail while the revoke and the
+// family put still land — and a tombstone also expires or is lifted by the
+// owner. The owner's retry then finds nobody to remove and, before this branch
 // existed, 404'd AHEAD of the tombstone block — the ban became unappliable and
 // the silent auto-rejoin loop stayed open. Writing the tombstone on the way out
 // of the 404 makes a kick re-assertable; the RESPONSE stays exactly as it was.

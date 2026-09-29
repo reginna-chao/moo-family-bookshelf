@@ -573,6 +573,58 @@ describe("MemberList", () => {
       expect(onMemberRemoved).not.toHaveBeenCalled();
     });
 
+    /**
+     * An owner's retried kick after a half-failed first attempt (member list
+     * written, revoke failed) is answered 404 MEMBER_NOT_FOUND by the Worker —
+     * which has by then finished the kick server-side. The client must treat it
+     * as a completed removal. The contrast case — a non-404 refusal still
+     * surfaces its message and reports nothing — is the FORBIDDEN test above
+     * (and the SERVER_ERROR cases under "hostile error envelopes").
+     */
+    it("treats MEMBER_NOT_FOUND as a completed removal", async () => {
+      mockRemoveMember.mockResolvedValue({
+        error: { code: "MEMBER_NOT_FOUND", message: "目標使用者不是家庭成員" },
+      });
+      const onMembersChanged = vi.fn();
+      const onMemberRemoved = vi.fn();
+      render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          onMembersChanged={onMembersChanged}
+          onMemberRemoved={onMemberRemoved}
+        />,
+      );
+
+      startRemoval(0); // 小明
+      await confirmRemoval();
+
+      expect(mockRemoveMember).toHaveBeenCalledWith(
+        defaultProps.familyId,
+        USER_ID,
+      );
+      expect(onMemberRemoved).toHaveBeenCalledWith({
+        userId: USER_ID,
+        displayName: "小明",
+        removedAt: expect.any(Number),
+      });
+      expect(onMemberRemoved).toHaveBeenCalledTimes(1);
+      expect(onMembersChanged).toHaveBeenCalledTimes(1);
+      // Confirm closed, no error shown (the error node is role="alert", as
+      // the hostile-envelope cases pin).
+      expect(
+        screen.queryByText("確定要移除成員 小明？"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("目標使用者不是家庭成員"),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      // Loading was reset: a fresh confirm offers an enabled 確定, not 處理中...
+      startRemoval(0);
+      expect(screen.getByRole("button", { name: "確定" })).toBeEnabled();
+    });
+
     it("does not report when the removal request throws", async () => {
       mockRemoveMember.mockRejectedValue(new Error("Failed to fetch"));
       const onMemberRemoved = vi.fn();

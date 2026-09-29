@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Env } from "../utils/env";
-import { BoolFlag, normalizeFamilyRecord } from "../kv/schema";
+import { BoolFlag, hasMember, normalizeFamilyRecord } from "../kv/schema";
 import { getFamilyRecord, getMemberFamilyId } from "../kv/families";
 import { getUserBooksRecord } from "../kv/users";
 import {
@@ -82,6 +82,15 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
   }
 
   const family = normalizeFamilyRecord(raw);
+
+  // The pointer alone is not proof of membership: a join racing a kick (or a
+  // stale pointer read at the removal site) can leave `member:{uid}` naming a
+  // family whose record no longer lists the caller. Re-check against the record
+  // already read above — zero extra reads — and answer byte-identically to the
+  // pointer-mismatch 404, so the response discloses nothing new.
+  if (!hasMember(family.members, userId)) {
+    return jsonError(c, 404, "NOT_FOUND", "Family not found");
+  }
 
   // Fetch all members' book data in parallel
   const memberBooks = await Promise.all(

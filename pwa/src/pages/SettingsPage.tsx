@@ -203,6 +203,25 @@ export function SettingsPage({
     setLeaveError(null);
     try {
       const res = await apiClient.leaveFamily(familyId, userId);
+      // Self-leave, so MEMBER_NOT_FOUND can only mean "already not a member":
+      // an earlier leave half-failed server-side (member list updated, revoke
+      // failed) and this retry has now finished it. Treat it as success —
+      // showing an error and keeping the session lets the next request's
+      // recovery re-join the family the user just left. FAMILY_NOT_FOUND is
+      // the same outcome: with the family record gone there is nothing left
+      // to leave — a sole-owner dissolve that half-failed after deleting the
+      // record (its retries keep answering this 404), or a family dissolved
+      // meanwhile — and keeping the session would strand the user on a family
+      // that no longer exists. Mirrored in
+      // extension/src/dialog/FamilySettings.tsx handleLeaveConfirm; keep the
+      // two identical.
+      const code = res.error?.code;
+      const alreadyLeft =
+        code === "MEMBER_NOT_FOUND" || code === "FAMILY_NOT_FOUND";
+      if (alreadyLeft) {
+        onLogout();
+        return;
+      }
       if (res.error) {
         // 429 shows the localized back-off copy (with the wait when the server
         // sent one) instead of the server's English message.
