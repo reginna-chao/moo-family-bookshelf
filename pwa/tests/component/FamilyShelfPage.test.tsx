@@ -638,7 +638,8 @@ describe("FamilyShelfPage", () => {
     // The current user's display name "Me" appears on their book card
     expect(screen.getByText("Me")).toBeInTheDocument();
 
-    // Invoke the context method (as SettingsPage does after a name save).
+    // Invoke the context method (as hooks/useDisplayNameEditor.ts does after
+    // a name save on the Settings page).
     fireEvent.click(screen.getByText("rename-self"));
 
     // Verify the current user's name updates on the family shelf
