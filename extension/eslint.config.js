@@ -2,6 +2,46 @@ import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 
+// Production files (src/) are capped at MAX_LINES raw lines — blank lines and
+// comments count, so the number matches `wc -l` (issue #210). The files below
+// already exceeded the cap when it was introduced; each is pinned to its line
+// count at that time, so it may shrink but never grow. Maintenance: when a
+// listed file shrinks, lower its number in the same change; once it is at or
+// under MAX_LINES, delete its entry. Never raise a number and never add an
+// entry — split the file instead. Keys are relative to this directory.
+const MAX_LINES = 200;
+const MAX_LINES_LEGACY_CEILINGS = {
+  "src/api/auth-refresh.ts": 425,
+  "src/api/client.ts": 866,
+  "src/background/messageHandlers.ts": 301,
+  "src/content/index.ts": 584,
+  "src/content/mobileLayout.ts": 292,
+  "src/content/readmoo-lend.ts": 423,
+  "src/content/scraper.ts": 220,
+  "src/dialog/App.tsx": 484,
+  "src/dialog/BorrowTab.tsx": 475,
+  "src/dialog/FamilyDataContext.tsx": 529,
+  "src/dialog/FamilySettings.tsx": 575,
+  "src/dialog/FamilyShelf.tsx": 220,
+  "src/dialog/MemberDropdown.tsx": 205,
+  "src/dialog/MemberList.tsx": 392,
+  "src/dialog/Onboarding.tsx": 281,
+  "src/dialog/OverflowMenu.tsx": 214,
+  "src/dialog/PatternLock.tsx": 255,
+  "src/dialog/PersonalShelf.tsx": 414,
+  "src/dialog/PublicShareDialog.tsx": 418,
+  "src/dialog/VerificationPrompt.tsx": 211,
+  "src/dialog/VerificationSettings.tsx": 304,
+  "src/dialog/onboardingFlow.ts": 489,
+  "src/dialog/useAutoSetup.ts": 224,
+  "src/dialog/useEndpointSwitch.ts": 234,
+  "src/dialog/usePersonalBooks.ts": 306,
+  "src/dialog/usePublicShelfActions.ts": 286,
+  "src/dialog/useReauth.ts": 205,
+  "src/dialog/useVerificationPrompt.ts": 345,
+  "src/sync/syncBooks.ts": 290,
+};
+
 export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.strict,
@@ -28,6 +68,16 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "error",
     },
   },
+  // Later flat-config blocks win for a file they match, so each legacy
+  // ceiling below overrides the base cap for that one file only.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: { "max-lines": ["error", { max: MAX_LINES }] },
+  },
+  ...Object.entries(MAX_LINES_LEGACY_CEILINGS).map(([file, max]) => ({
+    files: [file],
+    rules: { "max-lines": ["error", { max }] },
+  })),
   // Test files opt out of production-hygiene rules, NOT of correctness rules.
   // Rules that catch real defects (no-unused-vars, no-empty, no-explicit-any,
   // ...) stay enforced here exactly as they are for src/.

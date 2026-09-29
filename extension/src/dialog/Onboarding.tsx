@@ -56,7 +56,7 @@ function rendersTypedSyncCodeNote(state: OnboardingState): boolean {
  * the view below is already showing: same screen, same address. Two amber lines
  * about one fact is what teaches a user to skim past the whole note family —
  * guaranteed in the sync-remnant prefill path, where the prefilled code's
- * `@host` IS the adopted endpoint (useOnboardingFlow.ts).
+ * `@host` IS the adopted endpoint (useOnboardingFlowState.ts).
  *
  * Suppression fires ONLY on byte-equality of two ALREADY-VALIDATED canonical
  * endpoints — `kind: "valid"` means the string came out of `validateEndpointUrl`

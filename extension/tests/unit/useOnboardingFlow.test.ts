@@ -956,8 +956,9 @@ describe("useOnboardingFlow", () => {
 
       /**
        * COPY PIN: START_VERIFY_CANCELLED_MESSAGE and its 「重新驗證」 action label
-       * are module-private in src/dialog/useOnboardingFlow.ts. This is the single
-       * place the literals are asserted — a wording change fails HERE.
+       * are module-private in src/dialog/useOnboardingStartFlow.ts. This is
+       * the single place the literals are asserted — a wording change fails
+       * HERE.
        */
       it("shows the retryable 「重新驗證」 error when the user cancels the challenge", async () => {
         const lookupUser = vi.fn().mockResolvedValue(WITHHELD);
@@ -1154,8 +1155,8 @@ describe("useOnboardingFlow", () => {
 
       /**
        * COPY PIN: VERIFY_CANCELLED_MESSAGE and its 「重新驗證」 action label are
-       * module-private in src/dialog/useOnboardingFlow.ts. This is the single
-       * place the literals are asserted — a wording change fails HERE.
+       * module-private in src/dialog/useOnboardingCreateFlow.ts. This is the
+       * single place the literals are asserted — a wording change fails HERE.
        */
       it("shows the create-cancelled message with a 「重新驗證」 action on cancel", async () => {
         const lookupUser = vi
@@ -1522,8 +1523,8 @@ describe("useOnboardingFlow", () => {
 
     /**
      * COPY PIN: FAMILY_GONE_FALLBACK_MESSAGE is module-private in
-     * src/dialog/useOnboardingFlow.ts. This is the single place the literal is
-     * asserted — a wording change fails HERE.
+     * src/dialog/useRecoveryVerificationBridge.ts. This is the single place
+     * the literal is asserted — a wording change fails HERE.
      *
      * The recovery bridges reach it structurally: `RecoveryResult` carries no
      * `errorMessage`, so an auto-recovery refusal never has server wording to
