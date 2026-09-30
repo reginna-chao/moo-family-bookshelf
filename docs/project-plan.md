@@ -1090,9 +1090,9 @@ jobs:
   - **已完成部分**：wire type、payload 驗證、錯誤文案已搬進 `shared/`（#170 / #183 / #184 / #186）。
   - **剩餘**：無。原本兩端各一份的 `useFamilyShelfPrefs`、`sortBooks`、`updateTracking` 已合併進 `shared/src/familyShelf/`（#208）；`useFamilyShelfPrefs` 的載入與同步流程移到共用的控制器，兩端只留一層很薄的 React hook。
 - [x] **BE-6 Worker 資料存取層**：已完成（#177）。所有路由改經 `worker/src/kv/*` 存取 KV，並有 ESLint 規則與 grep 測試把關。
-- [ ] **S3 / FE-3 / BE-7 分層與拆分**：非 bug，純可維護性，可隨相關檔案下次改動時**漸進處理**。
+- [x] **S3 / FE-3 / BE-7 分層與拆分**：非 bug，純可維護性，可隨相關檔案下次改動時**漸進處理**。
   - 前端大檔（`useOnboardingFlow` 890 行、`FamilyDataContext` 529 行等）→ [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)：已完成，issue 列出的六個大檔都已拆到 200 行以內。
-  - `join` handler（約 190 行）→ [#211](https://github.com/reginna-chao/moo-family-bookshelf/issues/211)
+  - `join` handler（約 190 行）→ [#211](https://github.com/reginna-chao/moo-family-bookshelf/issues/211)：已完成，驗證閘門、既有成員重連、新成員加入拆成三個具名步驟，handler 只保留順序編排。
 
 ##### 🟢 低優先 — 擴充性（N=2 現在不痛，規模到了再做）
 
