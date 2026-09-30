@@ -8,10 +8,10 @@ import {
   type BorrowRequest,
   type FamilyMember,
   normalizeFamilyRecord,
-  hasMember,
   findMember,
 } from "../kv/schema";
 import { getFamilyRecord } from "../kv/families";
+import { isActiveMember } from "../services/membership";
 import {
   readBorrowIndex,
   readBorrowPointer,
@@ -237,8 +237,21 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
 
   const family = normalizeFamilyRecord(raw);
 
+  // Both parties must be ACTIVE members — listed AND pointed at this family
+  // (#222: a kicked member re-listed by a stale full-record write is listed
+  // but pointerless, and must neither borrow nor be borrowed from). The two
+  // pointer reads run in parallel; the verdicts are checked in the original
+  // order below, so every rejection keeps its precedence. No owner read when
+  // the caller names themselves — that request is refused either way.
+  const [callerActive, ownerActive] = await Promise.all([
+    isActiveMember(c.env.KV, familyId, userId, family.members),
+    ownerId === userId
+      ? false
+      : isActiveMember(c.env.KV, familyId, ownerId, family.members),
+  ]);
+
   // Verify caller is a family member
-  if (!hasMember(family.members, userId)) {
+  if (!callerActive) {
     return jsonError(
       c,
       403,
@@ -260,7 +273,7 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     );
   }
 
-  if (!hasMember(family.members, ownerId)) {
+  if (!ownerActive) {
     return jsonError(
       c,
       403,
@@ -436,7 +449,9 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
   }
 
   const family = normalizeFamilyRecord(raw);
-  if (!hasMember(family.members, userId)) {
+  // ACTIVE membership, not the list alone (#222): a kicked member re-listed by
+  // a stale full-record write keeps no pointer and must not read the index.
+  if (!(await isActiveMember(c.env.KV, familyId, userId, family.members))) {
     return jsonError(
       c,
       403,
@@ -570,11 +585,16 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   // so there is no member list to check against. Either party may still settle
   // such a record; a non-party is still refused by the party check below.
   //
+  // "Member" means ACTIVE (#222): listed AND pointed at this family. A kicked
+  // member re-listed by a stale full-record write is listed but pointerless,
+  // and is refused here like any non-member. One pointer read, only on this
+  // branch — the orphan path below still reads nothing extra.
+  //
   // Accepted residual: KV cross-colo propagation (~60s). A PATCH racing the
   // kick on a colo that still holds the pre-kick family record can land once.
   if (rawFamily !== null) {
     const family = normalizeFamilyRecord(rawFamily);
-    if (!hasMember(family.members, userId)) {
+    if (!(await isActiveMember(c.env.KV, familyId, userId, family.members))) {
       return jsonError(
         c,
         403,

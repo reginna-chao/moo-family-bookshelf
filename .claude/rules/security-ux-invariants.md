@@ -14,7 +14,7 @@ These invariants MUST be respected by all security audits and code reviews.
 
 ### Unbind Isolation
 
-**Invariant 4**: When a user leaves a family, their userId MUST be removed from the family member list immediately. Subsequent family bookshelf queries MUST NOT include the former member's books. This removal is non-reversible without re-joining.
+**Invariant 4**: When a user leaves a family, their userId MUST be removed from the family member list immediately. Subsequent family bookshelf queries MUST NOT include the former member's books. This removal is non-reversible without re-joining. (A stale no-CAS write can re-list a removed member without a `member:{uid}` pointer; the invariant holds because member-level authorization requires listed AND pointed — see "Family-scoped authorization is BIDIRECTIONAL" in `.claude/rules/backend.md`.)
 
 ### Settings Persistence
 

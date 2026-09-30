@@ -376,7 +376,8 @@ export async function settleDepartingBorrower(
 
 /**
  * Delete a family's whole borrow index and every pointer it names — the
- * dissolve path (sole-owner leave, sole-member account deletion), where the
+ * dissolve path (`dissolveFamily` in `services/familyDissolve.ts`: the last
+ * listed member leaving or deleting their account), where the
  * family key itself is going away and the index would otherwise become an
  * orphan no write path ever visits again.
  *

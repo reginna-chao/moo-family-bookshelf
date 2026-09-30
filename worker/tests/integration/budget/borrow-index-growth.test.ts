@@ -16,8 +16,8 @@
  * plain `it()` — which is the deliberate act that records the criterion as met.
  * Do not re-add `.fails`, and do not loosen the assertion: it now pins a
  * DELTA OF EXACTLY 0, not the old `< 3` tolerance. `< 3` was slack for an
- * unlanded target; the migrated read path costs the same three keys (auth
- * token, family record, index) whatever the index holds, so anything above 0 is
+ * unlanded target; the migrated read path costs the same four keys (auth
+ * token, family record, the caller's pointer, index) whatever the index holds, so anything above 0 is
  * a real regression and there is no reason to leave room for one.
  *
  * THE LEGACY CASE IS NOT A REGRESSION — it is design decision D3. A family
@@ -40,7 +40,8 @@
  * deployed Worker actually runs (see tests/helpers/rateLimitBindings.ts).
  * Since #160 item 1 neither rate-limit layer on this route costs a KV
  * operation at all, so the per-request CONSTANT is just the auth token read
- * plus the family and index reads — three, whatever the index size. A constant
+ * plus the family, caller-pointer (#222 active-member check) and index reads —
+ * four, whatever the index size. A constant
  * cancels out of the difference either way; what matters is that the pipeline
  * matches the sibling budget files. See the scope caveat at the end of
  * tests/helpers/kvOps.ts.
@@ -69,11 +70,12 @@ const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
 
 /**
  * Fixed per-request read cost of a migrated listing: the auth token, the family
- * record, and the index. Pinned as a POSITIVE companion to the delta-of-0
+ * record, the caller's `member:` pointer (#222 active-member check), and the
+ * index. Pinned as a POSITIVE companion to the delta-of-0
  * assertion — without it, a fixture that somehow made both measurements read
  * nothing would satisfy the delta and prove nothing.
  */
-const MIGRATED_LIST_READS = 3;
+const MIGRATED_LIST_READS = 4;
 
 /** How the family's borrow index is stored — before vs after #160 item 2. */
 type IndexShape =
@@ -230,7 +232,7 @@ describe("KV read growth: GET /api/family/:id/borrow", () => {
     // Design decision D3, pinned rather than papered over: migration is
     // write-path only, so a family that has not written since the change keeps
     // paying the fan-out — one `borrow:{requestId}` read per index entry, on
-    // top of the same 3-key constant.
+    // top of the same 4-key constant.
     expect(small.reads).toBe(MIGRATED_LIST_READS + 5);
     expect(large.reads).toBe(MIGRATED_LIST_READS + 50);
     expect(large.reads - small.reads).toBe(45);

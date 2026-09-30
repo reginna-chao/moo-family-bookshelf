@@ -20,7 +20,7 @@
  *   The binding call it was replaced by is pinned in `calls` below instead.
  * - Per-userId `borrow-list` counter — REMOVED by #160 item 1 for the same
  *   reason (rateLimit.ts:608); scope "borrow-list", ceiling 60 per 60s
- *   (routes/borrow.ts:411-416), which is what selects RATE_LIMIT_60_PER_MIN —
+ *   (routes/borrow.ts:437-442), which is what selects RATE_LIMIT_60_PER_MIN —
  *   the same binding the per-IP standard tier uses, kept apart by the KEY.
  *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
@@ -28,7 +28,7 @@
  * - `borrow:{requestId}` — REMOVED by #160 item 2. The listing used to read one
  *   key PER INDEX ENTRY, so its cost grew linearly with the family's borrow
  *   history. `borrows:family:{familyId}` now carries the full records, so
- *   `readBorrowIndex` (routes/borrow.ts:442) answers the whole listing from the
+ *   `readBorrowIndex` (routes/borrow.ts:467) answers the whole listing from the
  *   ONE index read and the fan-out is gone from `getKeys()` below. The seed
  *   holds a 2-entry index precisely so a returning fan-out would show up as two
  *   extra reads. The growth RATE has its own acceptance test in
@@ -37,8 +37,15 @@
  *   legacy `string[]` index, because migration is write-path only and a GET
  *   never writes.
  * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `family:{familyId}` (routes/borrow.ts:420, membership check) and
- *   `borrows:family:{familyId}` (:442) — real cost of the listing.
+ * - `family:{familyId}` (routes/borrow.ts:446, membership check) and
+ *   `borrows:family:{familyId}` (:467) — real cost of the listing.
+ * - `member:{callerId}` (routes/borrow.ts:454, `isActiveMember`) — added by
+ *   #222. An AUTHORISATION read, not waste: the caller must be an ACTIVE
+ *   member (listed AND pointed at this family), because a kicked member
+ *   re-listed by a stale full-record write is listed but pointerless and must
+ *   not read the family's borrow index. Dropping it re-opens that hole
+ *   (tests/integration/hollowMember.test.ts). Sequential — it gates the index
+ *   read — so it costs one round trip as well as one read.
  *
  * THE RATE LIMITING BINDINGS ARE INJECTED, deliberately: every production
  * deploy carries all four (worker/wrangler.toml), and a request sent without
@@ -163,7 +170,7 @@ afterEach(() => {
 });
 
 describe("KV budget: GET /api/family/:id/borrow", () => {
-  it("performs exactly 3 KV reads and no KV write for a 2-entry borrow index", async () => {
+  it("performs exactly 4 KV reads and no KV write for a 2-entry borrow index", async () => {
     const token = await seedFamilyWithBorrowIndex();
 
     const ops = watchKvOps(kv);
@@ -171,15 +178,19 @@ describe("KV budget: GET /api/family/:id/borrow", () => {
 
     expect(res.status).toBe(200);
     // Non-empty response, from the index read alone: seed health, and what
-    // stops the 3-read pin below from being satisfied by an empty listing.
+    // stops the 4-read pin below from being satisfied by an empty listing.
     const body = (await res.json()) as Json;
     expect(body.data).toHaveLength(EXISTING_IDS.length);
 
     expect(ops.getKeys()).toEqual([
       // auth middleware, auth.ts:46
       kvKeys.authToken(token),
-      // handler, borrow.ts:420 / :442
+      // handler, borrow.ts:446 — the family record
       kvKeys.family(FAMILY_ID),
+      // handler, borrow.ts:454 — the caller's pointer, for the active-member
+      // check (#222)
+      kvKeys.member(USER1),
+      // handler, borrow.ts:467 — the index
       kvKeys.borrowsByFamily(FAMILY_ID),
       // No `borrow:{requestId}` entries: the index carries the records (#160
       // item 2). The seeded pointers exist and are deliberately NOT read.
