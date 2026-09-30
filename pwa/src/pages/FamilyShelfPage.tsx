@@ -76,22 +76,17 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
     refreshBorrowRequests,
   });
 
-  const {
-    memberFilteredBooks,
-    totalBooks,
-    headingCount,
-    favoriteCount,
-    hiddenCount,
-  } = useFamilyShelfBooks({
-    members,
-    filterMember,
-    userId,
-    updatedBookIds,
-    hiddenRefs,
-    isHidden,
-    favoriteRefs,
-    isFavorite,
-  });
+  const { memberFilteredBooks, totalBooks, favoriteCount, hiddenCount } =
+    useFamilyShelfBooks({
+      members,
+      filterMember,
+      userId,
+      updatedBookIds,
+      hiddenRefs,
+      isHidden,
+      favoriteRefs,
+      isFavorite,
+    });
 
   const categoryFilteredBooks = useMemo(
     () => filterByCategory(memberFilteredBooks, categoryFilter),
@@ -148,7 +143,6 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
   return (
     <div className="p-4">
       <FamilyShelfToolbar
-        headingCount={headingCount}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         categoryBooks={memberFilteredBooks}
@@ -164,6 +158,7 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
         onSortChange={setSort}
         favoriteCount={favoriteCount}
         hiddenCount={hiddenCount}
+        hiddenRefs={hiddenRefs}
       />
 
       {prefsSyncFailed && (

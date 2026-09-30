@@ -1,0 +1,45 @@
+import { fireEvent, screen, within } from "@testing-library/react";
+
+/**
+ * DOM probes for the member-filter counts in `src/components/MemberDropdown.tsx`.
+ *
+ * The collapsed trigger renders `label · count` and each menu option
+ * `label count`. The count spans carry only Tailwind classes, so they are
+ * found as the one element whose own text is a bare number. Both probes
+ * return that EXACT text so a caller compares with `toBe` (a substring match
+ * would accept `12` for `120`). Fixture labels must therefore not be numeric.
+ */
+
+const BARE_NUMBER = /^\d+$/;
+
+/** The member-filter trigger button (its accessible name is the aria-label). */
+export function memberFilterTrigger(): HTMLElement {
+  return screen.getByLabelText("篩選成員");
+}
+
+/** Exact text of the count shown on the (collapsed or open) trigger. */
+export function triggerCount(): string {
+  return within(memberFilterTrigger()).getByText(BARE_NUMBER).textContent ?? "";
+}
+
+/** Exact text of the count inside one menu option element. */
+export function optionCount(option: HTMLElement): string {
+  return within(option).getByText(BARE_NUMBER).textContent ?? "";
+}
+
+/**
+ * Read the menu count of the option whose text starts with `label`. Opens the
+ * menu when it is closed and closes it again afterwards, so the caller's
+ * collapsed / open state is preserved.
+ */
+export function menuOptionCount(label: string): string {
+  const wasOpen = screen.queryByRole("listbox", { name: "成員選單" }) !== null;
+  if (!wasOpen) fireEvent.click(memberFilterTrigger());
+  const option = screen
+    .getAllByRole("option")
+    .find((el) => el.textContent?.startsWith(label));
+  if (!option) throw new Error(`member option not found: ${label}`);
+  const count = optionCount(option);
+  if (!wasOpen) fireEvent.click(memberFilterTrigger());
+  return count;
+}

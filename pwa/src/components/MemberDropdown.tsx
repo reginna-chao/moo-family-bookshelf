@@ -15,6 +15,7 @@ import {
 } from "@/hooks/useFamilyShelfBooks";
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import { useDismissableMenu } from "@/hooks/useDismissableMenu";
+import { countVisibleByMemberScope } from "moo-family-bookshelf-shared/familyShelf/memberScopeCounts";
 
 export interface MemberDropdownProps {
   members: MemberBooks[];
@@ -25,6 +26,8 @@ export interface MemberDropdownProps {
   favoriteCount: number;
   /** Total hidden shared cards across everyone (from useFamilyShelfBooks). */
   hiddenCount: number;
+  /** Viewer's hidden refs; member-scope counts leave these books out. */
+  hiddenRefs: ReadonlySet<string>;
 }
 
 interface MemberOption {
@@ -32,26 +35,23 @@ interface MemberOption {
   value: MemberFilterValue;
   label: string;
   icon: ReactNode;
-  /** TOTAL book count for this scope, INCLUDING hidden books. */
+  /** Books this option will show (before category / search); hidden excluded. */
   count: number;
 }
 
 /**
  * Build the member-filter options. Ordering is fixed:
  * all / all-except-self / self / each other member with books / favorite / hidden.
- * Counts are totals (hidden books are NOT excluded).
+ * Member-scope counts exclude hidden books; favorite / hidden keep their totals.
  */
 function buildOptions(
   members: MemberBooks[],
   userId: string,
   favoriteCount: number,
   hiddenCount: number,
+  hiddenRefs: ReadonlySet<string>,
 ): MemberOption[] {
-  const allCount = members.reduce((sum, m) => sum + m.books.length, 0);
-  const othersCount = members
-    .filter((m) => m.userId !== userId)
-    .reduce((sum, m) => sum + m.books.length, 0);
-  const self = members.find((m) => m.userId === userId);
+  const counts = countVisibleByMemberScope(members, userId, hiddenRefs);
   const othersWithBooks = members.filter(
     (m) => m.userId !== userId && m.books.length > 0,
   );
@@ -62,28 +62,28 @@ function buildOptions(
       value: "all",
       label: "所有人的書",
       icon: <Users size={16} aria-hidden="true" />,
-      count: allCount,
+      count: counts.all,
     },
     {
       key: "all-except-self",
       value: "all-except-self",
       label: "其他家人的書",
       icon: <UsersRound size={16} aria-hidden="true" />,
-      count: othersCount,
+      count: counts.allExceptSelf,
     },
     {
       key: "self",
       value: userId,
       label: "自己的書",
       icon: <User size={16} aria-hidden="true" />,
-      count: self ? self.books.length : 0,
+      count: counts.byMember.get(userId) ?? 0,
     },
     ...othersWithBooks.map((m) => ({
       key: m.userId,
       value: m.userId,
       label: m.displayName || m.userId.slice(0, 8),
       icon: <User size={16} aria-hidden="true" />,
-      count: m.books.length,
+      count: counts.byMember.get(m.userId) ?? 0,
     })),
     {
       key: FAVORITE_FILTER_VALUE,
@@ -113,14 +113,15 @@ export function MemberDropdown({
   onChange,
   favoriteCount,
   hiddenCount,
+  hiddenRefs,
 }: MemberDropdownProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const options = useMemo(
-    () => buildOptions(members, userId, favoriteCount, hiddenCount),
-    [members, userId, favoriteCount, hiddenCount],
+    () => buildOptions(members, userId, favoriteCount, hiddenCount, hiddenRefs),
+    [members, userId, favoriteCount, hiddenCount, hiddenRefs],
   );
   const current = options.find((o) => o.value === value) ?? options[0];
 
@@ -135,7 +136,7 @@ export function MemberDropdown({
   }
 
   return (
-    <div className="relative flex-1">
+    <div className="relative flex-1 min-w-0">
       <button
         ref={triggerRef}
         onClick={handleToggle}
@@ -143,9 +144,16 @@ export function MemberDropdown({
         aria-expanded={open}
         className="flex items-center justify-between w-full rounded-lg border border-gray-300 bg-white pl-3 pr-3 py-2.5 text-sm text-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
       >
-        <span className="flex items-center gap-2 min-w-0">
+        <span className="flex items-center gap-2 min-w-0 [&>svg]:flex-shrink-0">
           {current.icon}
           <span className="truncate">{current.label}</span>
+          {/* Label truncates on narrow widths; the count stays whole. */}
+          <span aria-hidden="true" className="text-gray-400 flex-shrink-0">
+            ·
+          </span>
+          <span className="text-gray-400 text-xs flex-shrink-0">
+            {current.count}
+          </span>
         </span>
         <ChevronDown
           size={16}

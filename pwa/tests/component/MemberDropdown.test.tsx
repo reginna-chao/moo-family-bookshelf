@@ -7,7 +7,7 @@ import {
   cleanup,
   within,
 } from "@testing-library/react";
-import React from "react";
+import React, { useState } from "react";
 import { MemberDropdown } from "@/components/MemberDropdown";
 import {
   FAVORITE_FILTER_VALUE,
@@ -16,6 +16,13 @@ import {
 } from "@/hooks/useFamilyShelfBooks";
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import { BoolFlag, type BookEntry } from "@/api/client";
+import { familyPrefRef } from "moo-family-bookshelf-shared/familyShelf/prefRefs";
+import {
+  memberFilterTrigger,
+  menuOptionCount,
+  optionCount,
+  triggerCount,
+} from "./helpers/memberFilter";
 
 afterEach(cleanup);
 
@@ -23,7 +30,7 @@ const SELF_ID = "user-self";
 const ALICE_ID = "user-alice";
 const BOB_ID = "user-bob";
 
-/** Minimal book stubs — MemberDropdown only reads `books.length`. */
+/** Minimal book stubs with ids b0..b{n-1} (hidden refs key on `bookId`). */
 function books(n: number): BookEntry[] {
   return Array.from({ length: n }, (_, i) => ({
     bookId: `b${i}`,
@@ -48,15 +55,17 @@ interface RenderArgs {
   onChange?: (value: MemberFilterValue) => void;
   favoriteCount?: number;
   hiddenCount?: number;
+  hiddenRefs?: ReadonlySet<string>;
 }
 
-function renderDropdown({
+function dropdownElement({
   value = "all",
   onChange = vi.fn(),
   favoriteCount = 5,
   hiddenCount = 4,
+  hiddenRefs = new Set<string>(),
 }: RenderArgs = {}) {
-  return render(
+  return (
     <MemberDropdown
       members={members}
       userId={SELF_ID}
@@ -64,8 +73,19 @@ function renderDropdown({
       onChange={onChange}
       favoriteCount={favoriteCount}
       hiddenCount={hiddenCount}
-    />,
+      hiddenRefs={hiddenRefs}
+    />
   );
+}
+
+function renderDropdown(args: RenderArgs = {}) {
+  return render(dropdownElement(args));
+}
+
+/** Owns `value` the way FamilyShelfPage does, so a click really switches scope. */
+function StatefulDropdown({ initial }: { initial: MemberFilterValue }) {
+  const [value, setValue] = useState<MemberFilterValue>(initial);
+  return dropdownElement({ value, onChange: setValue });
 }
 
 function openListbox(): HTMLElement {
@@ -106,7 +126,7 @@ describe("MemberDropdown", () => {
     expect(options).toHaveLength(expected.length);
     options.forEach((opt, i) => {
       expect(opt).toHaveTextContent(expected[i].label);
-      expect(opt).toHaveTextContent(expected[i].count);
+      expect(optionCount(opt)).toBe(expected[i].count);
     });
     // Bob is never rendered as an option.
     expect(within(listbox).queryByText("Bob")).not.toBeInTheDocument();
@@ -170,6 +190,7 @@ describe("MemberDropdown", () => {
           onChange={vi.fn()}
           favoriteCount={0}
           hiddenCount={0}
+          hiddenRefs={new Set<string>()}
         />
       </div>,
     );
@@ -219,5 +240,117 @@ describe("MemberDropdown", () => {
     fireEvent.click(trigger);
 
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  describe("trigger count", () => {
+    it("shows the selected scope's count on the collapsed trigger", () => {
+      renderDropdown({ value: "all-except-self" });
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(memberFilterTrigger()).toHaveTextContent("其他家人的書");
+      expect(triggerCount()).toBe("3");
+    });
+
+    it("keeps the separator out of the accessibility tree and the trigger name unchanged", () => {
+      renderDropdown();
+      const sep = within(memberFilterTrigger()).getByText("·");
+      expect(sep).toHaveAttribute("aria-hidden", "true");
+      // Positive companion: the button is still found by its aria-label.
+      expect(memberFilterTrigger()).toHaveAccessibleName("篩選成員");
+    });
+
+    // Trigger and menu must show the same number for the same option.
+    it.each<{ value: MemberFilterValue; expected: string }>([
+      { value: "all", expected: "5" },
+      { value: "all-except-self", expected: "3" },
+      { value: SELF_ID, expected: "2" },
+      { value: ALICE_ID, expected: "3" },
+      { value: FAVORITE_FILTER_VALUE, expected: "5" },
+      { value: HIDDEN_FILTER_VALUE, expected: "4" },
+    ])(
+      "shows $expected on the trigger for $value, equal to the selected option's menu count",
+      ({ value, expected }) => {
+        renderDropdown({ value });
+        expect(triggerCount()).toBe(expected);
+
+        const listbox = openListbox();
+        const selected = within(listbox)
+          .getAllByRole("option")
+          .find((o) => o.getAttribute("aria-selected") === "true");
+        if (!selected) throw new Error("no selected option");
+        expect(optionCount(selected)).toBe(expected);
+      },
+    );
+
+    it("updates the trigger count when the user switches to 自己的書", () => {
+      render(<StatefulDropdown initial="all-except-self" />);
+      expect(triggerCount()).toBe("3");
+
+      const listbox = openListbox();
+      const self = within(listbox)
+        .getAllByRole("option")
+        .find((o) => o.textContent?.startsWith("自己的書"));
+      if (!self) throw new Error("self option not found");
+      fireEvent.click(self);
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(memberFilterTrigger()).toHaveTextContent("自己的書");
+      expect(triggerCount()).toBe("2");
+    });
+  });
+
+  describe("hidden books", () => {
+    // Hide Alice's b1 and the viewer's b0.
+    const HIDDEN = new Set([
+      familyPrefRef(ALICE_ID, "b1"),
+      familyPrefRef(SELF_ID, "b0"),
+    ]);
+
+    it.each<{ label: string; expected: string }>([
+      { label: "所有人的書", expected: "3" },
+      { label: "其他家人的書", expected: "2" },
+      { label: "自己的書", expected: "1" },
+      { label: "Alice", expected: "2" },
+      // Favorite / hidden come from their props, untouched by hiddenRefs.
+      { label: "我的最愛", expected: "5" },
+      { label: "隱藏的書", expected: "2" },
+    ])("leaves hidden books out of the $label count", ({ label, expected }) => {
+      renderDropdown({ hiddenRefs: HIDDEN, hiddenCount: 2 });
+      expect(menuOptionCount(label)).toBe(expected);
+    });
+
+    it("lowers the trigger and the selected option by 1 when a book in scope is hidden", () => {
+      const { rerender } = renderDropdown({
+        value: "all-except-self",
+        hiddenCount: 0,
+      });
+      expect(triggerCount()).toBe("3");
+      expect(menuOptionCount("其他家人的書")).toBe("3");
+      expect(menuOptionCount("隱藏的書")).toBe("0");
+
+      rerender(
+        dropdownElement({
+          value: "all-except-self",
+          hiddenCount: 1,
+          hiddenRefs: new Set([familyPrefRef(ALICE_ID, "b2")]),
+        }),
+      );
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(triggerCount()).toBe("2");
+      expect(menuOptionCount("其他家人的書")).toBe("2");
+      expect(menuOptionCount("Alice")).toBe("2");
+      expect(menuOptionCount("隱藏的書")).toBe("1");
+    });
+
+    it("keeps a member whose every book is hidden in the list, with a 0 count", () => {
+      renderDropdown({
+        hiddenRefs: new Set(
+          ["b0", "b1", "b2"].map((id) => familyPrefRef(ALICE_ID, id)),
+        ),
+        hiddenCount: 3,
+      });
+      expect(menuOptionCount("Alice")).toBe("0");
+    });
   });
 });

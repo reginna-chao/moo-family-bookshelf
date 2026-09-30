@@ -11,6 +11,11 @@ import {
 import React from "react";
 import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
 import { FamilyDataProvider } from "@/hooks/useFamilyData";
+import {
+  memberFilterTrigger,
+  menuOptionCount,
+  triggerCount,
+} from "./helpers/memberFilter";
 
 /** Walks up from the book title to the nearest card root that holds its overflow trigger. */
 function cardOf(title: string): HTMLElement {
@@ -58,6 +63,12 @@ function selectMemberOption(optionLabel: string) {
 /** Switches the member dropdown to the cross-everyone favorites view. */
 function enterFavoriteView() {
   selectMemberOption("我的最愛");
+}
+
+/** The favorites view is selected and its trigger shows `count` favorites. */
+function expectFavoriteTrigger(count: string) {
+  expect(memberFilterTrigger()).toHaveTextContent("我的最愛");
+  expect(triggerCount()).toBe(count);
 }
 
 vi.mock("@/api/client", async (importOriginal) => {
@@ -202,7 +213,7 @@ describe("FamilyShelfPage — favorite feature", () => {
     enterFavoriteView();
 
     await waitFor(() => {
-      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
+      expectFavoriteTrigger("1");
     });
     expect(screen.getByText("書一")).toBeInTheDocument();
     expect(screen.queryByText("書二")).not.toBeInTheDocument();
@@ -225,7 +236,7 @@ describe("FamilyShelfPage — favorite feature", () => {
     enterFavoriteView();
 
     await waitFor(() => {
-      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
+      expectFavoriteTrigger("1");
     });
     // Even though hidden, the favorited b1 shows in the favorites view.
     expect(screen.getByText("書一")).toBeInTheDocument();
@@ -271,25 +282,26 @@ describe("FamilyShelfPage — favorite feature", () => {
     enterFavoriteView();
 
     await waitFor(() => {
-      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
+      expectFavoriteTrigger("1");
     });
     expect(hideMenuLabelOf("書一")).toBe("隱藏書籍");
   });
 
-  it("favoriting a book updates the 最愛 heading count in the favorites view", async () => {
+  it("favoriting a book raises the 我的最愛 count shown on the trigger", async () => {
     const apiClient = createApiClient(aliceTwoBooks());
     renderPage(apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("書一")).toBeInTheDocument();
     });
+    expect(menuOptionCount("我的最愛")).toBe("0");
 
     toggleFavorite("書一", "加入最愛");
 
     enterFavoriteView();
 
     await waitFor(() => {
-      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
+      expectFavoriteTrigger("1");
     });
     expect(screen.getByText("書一")).toBeInTheDocument();
   });
@@ -337,7 +349,7 @@ describe("FamilyShelfPage — favorite feature", () => {
     // Favorites view → only b1.
     enterFavoriteView();
     await waitFor(() => {
-      expect(screen.getByText("(最愛 1 本)")).toBeInTheDocument();
+      expectFavoriteTrigger("1");
     });
     expect(screen.getByText("書一")).toBeInTheDocument();
     expect(screen.queryByText("書二")).not.toBeInTheDocument();

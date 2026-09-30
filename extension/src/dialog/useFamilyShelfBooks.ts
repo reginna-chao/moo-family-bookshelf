@@ -70,10 +70,6 @@ export interface UseFamilyShelfBooksResult {
   hiddenCount: number;
   /** Count of currently-favorited shared cards (orphan refs excluded). */
   favoriteCount: number;
-  /** totalBooks - hiddenCount. */
-  visibleCount: number;
-  /** Localized heading suffix; favorite view shows "(最愛 N 本)". */
-  headingCount: string;
 }
 
 /** Apply the active view's pre-category/search filter to the flattened books. */
@@ -95,7 +91,8 @@ function applyViewFilter(
 }
 
 /**
- * Family-shelf heading counts + the member/hidden/favorite filter pipeline stage.
+ * Family-shelf hidden / favorite counts + the member/hidden/favorite filter
+ * pipeline stage.
  *
  * The view filter is applied FIRST, before category/search/sort/load-more
  * downstream. Counts are member/search-filter-independent.
@@ -122,7 +119,6 @@ export function useFamilyShelfBooks({
     () => countFavorites(members, favoriteRefs),
     [members, favoriteRefs],
   );
-  const visibleCount = totalBooks - hiddenCount;
 
   const memberFilteredBooks = useMemo(() => {
     const selected = selectMembers(members, filterMember, userId);
@@ -140,35 +136,10 @@ export function useFamilyShelfBooks({
     showFavorite,
   ]);
 
-  const headingCount = buildHeadingCount(
-    showFavorite,
-    favoriteCount,
-    visibleCount,
-    hiddenCount,
-  );
-
   return {
     memberFilteredBooks,
     totalBooks,
     hiddenCount,
     favoriteCount,
-    visibleCount,
-    headingCount,
   };
-}
-
-/** Build the localized heading suffix for the active view. */
-function buildHeadingCount(
-  showFavorite: boolean,
-  favoriteCount: number,
-  visibleCount: number,
-  hiddenCount: number,
-): string {
-  if (showFavorite) {
-    return `(最愛 ${favoriteCount} 本)`;
-  }
-  if (hiddenCount > 0) {
-    return `(可見 ${visibleCount} 本，隱藏 ${hiddenCount} 本)`;
-  }
-  return `(可見 ${visibleCount} 本)`;
 }

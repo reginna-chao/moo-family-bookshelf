@@ -874,13 +874,6 @@
   margin-top: 6px;
 }
 
-.moo-toolbar__count {
-  font-weight: 400;
-  color: var(--moo-text-faint);
-  margin-left: 8px;
-  font-size: 13px;
-}
-
 .moo-toolbar__row {
   display: flex;
   gap: 8px;
@@ -889,6 +882,8 @@
 
 .moo-toolbar__grow {
   flex: 1;
+  /* Lets the member-filter label shrink and truncate instead of overflowing the row. */
+  min-width: 0;
 }
 
 /* ── FamilyShelfBookList ──────────────────────────────────────────────── */
@@ -1444,6 +1439,22 @@
 .moo-member-filter__current-label {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The current option's count (same muted look as the menu counts). It and
+   its separator never shrink: on a narrow trigger the label truncates, the
+   number stays whole. The icon is pinned too so it is not squeezed. */
+.moo-member-filter__current > svg,
+.moo-member-filter__sep,
+.moo-member-filter__count {
+  flex-shrink: 0;
+}
+
+.moo-member-filter__sep,
+.moo-member-filter__count {
+  color: var(--moo-text-faint);
+  font-size: 12px;
   white-space: nowrap;
 }
 

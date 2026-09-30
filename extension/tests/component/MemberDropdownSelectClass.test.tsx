@@ -32,6 +32,7 @@ const baseProps = {
   onChange: vi.fn(),
   favoriteCount: 0,
   hiddenCount: 0,
+  hiddenRefs: new Set<string>(),
 };
 
 describe("MemberDropdown responsive class contract", () => {

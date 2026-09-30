@@ -1,11 +1,20 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import {
   MemberDropdown,
   MemberDropdownProps,
   HIDDEN_FILTER_VALUE,
   FAVORITE_FILTER_VALUE,
+  type MemberFilterValue,
 } from "@/dialog/MemberDropdown";
+import { familyPrefRef } from "moo-family-bookshelf-shared/familyShelf/prefRefs";
+import {
+  memberFilterTrigger,
+  menuOptionCount,
+  optionCount,
+  triggerCount,
+} from "./helpers/memberFilter";
 
 // Alice has 1 book, Bob has 2 books, Carol has none (and no displayName).
 const MEMBERS = [
@@ -31,12 +40,29 @@ function renderDropdown(overrides: Partial<MemberDropdownProps> = {}) {
     onChange: vi.fn(),
     favoriteCount: 4,
     hiddenCount: 3,
+    hiddenRefs: new Set<string>(),
     ...overrides,
   };
   return {
     ...render(<MemberDropdown {...defaultProps} />),
     onChange: defaultProps.onChange,
   };
+}
+
+/** Owns `value` the way FamilyShelf does, so a click really switches scope. */
+function StatefulDropdown({ initial }: { initial: MemberFilterValue }) {
+  const [value, setValue] = useState<MemberFilterValue>(initial);
+  return (
+    <MemberDropdown
+      members={MEMBERS}
+      userId="user-self"
+      value={value}
+      onChange={setValue}
+      favoriteCount={4}
+      hiddenCount={3}
+      hiddenRefs={new Set<string>()}
+    />
+  );
 }
 
 /** Open the dropdown and return its listbox element. */
@@ -128,7 +154,7 @@ describe("MemberDropdown", () => {
     expect(options[3]).toHaveTextContent("abcdefgh");
   });
 
-  describe("option counts (totals, including hidden)", () => {
+  describe("option counts (nothing hidden)", () => {
     // Fixture totals: everyone = 2 (self) + 1 (Alice) + 2 (Bob) + 0 (Carol) = 5;
     // others = 1 + 2 = 3; self = 2; Alice = 1; Bob = 2; favorite/hidden from props.
     const cases: Array<{
@@ -172,9 +198,118 @@ describe("MemberDropdown", () => {
       renderDropdown();
       openMenu();
       const option = screen.getByRole("option", { name: optionLabel });
-      const count = option.querySelector(".moo-category__option-count");
-      expect(count).not.toBeNull();
-      expect(count).toHaveTextContent(expected);
+      expect(optionCount(option)).toBe(expected);
+    });
+  });
+
+  describe("trigger count", () => {
+    it("shows the selected scope's count on the collapsed trigger", () => {
+      renderDropdown({ value: "all-except-self" });
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(memberFilterTrigger()).toHaveTextContent("其他家人的書");
+      expect(triggerCount()).toBe("3");
+    });
+
+    it("keeps the separator out of the accessibility tree and the trigger name unchanged", () => {
+      renderDropdown();
+      const sep = within(memberFilterTrigger()).getByText("·");
+      expect(sep).toHaveAttribute("aria-hidden", "true");
+      // Positive companion: the button is still found by its aria-label.
+      expect(memberFilterTrigger()).toHaveAccessibleName("篩選成員");
+    });
+
+    // Trigger and menu must show the same number for the same option.
+    it.each<{ value: MemberFilterValue; expected: string }>([
+      { value: "all", expected: "5" },
+      { value: "all-except-self", expected: "3" },
+      { value: "user-self", expected: "2" },
+      { value: "user-a", expected: "1" },
+      { value: FAVORITE_FILTER_VALUE, expected: "4" },
+      { value: HIDDEN_FILTER_VALUE, expected: "3" },
+    ])(
+      "shows $expected on the trigger for $value, equal to the selected option's menu count",
+      ({ value, expected }) => {
+        renderDropdown({ value });
+        expect(triggerCount()).toBe(expected);
+
+        fireEvent.click(memberFilterTrigger());
+        const selected = screen
+          .getAllByRole("option")
+          .find((o) => o.getAttribute("aria-selected") === "true");
+        if (!selected) throw new Error("no selected option");
+        expect(optionCount(selected)).toBe(expected);
+      },
+    );
+
+    it("updates the trigger count when the user switches to 自己的書", () => {
+      render(<StatefulDropdown initial="all-except-self" />);
+      expect(triggerCount()).toBe("3");
+
+      fireEvent.click(memberFilterTrigger());
+      fireEvent.click(screen.getByRole("option", { name: /自己的書/ }));
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(memberFilterTrigger()).toHaveTextContent("自己的書");
+      expect(triggerCount()).toBe("2");
+    });
+  });
+
+  describe("hidden books", () => {
+    // Hide Bob's b2 and the viewer's s1; Alice's only book b1 stays visible.
+    const HIDDEN = new Set([
+      familyPrefRef("user-b", "b2"),
+      familyPrefRef("user-self", "s1"),
+    ]);
+
+    it.each<{ label: string; expected: string }>([
+      { label: "所有人的書", expected: "3" },
+      { label: "其他家人的書", expected: "2" },
+      { label: "自己的書", expected: "1" },
+      { label: "Alice", expected: "1" },
+      { label: "Bob", expected: "1" },
+      // Favorite / hidden come from their props, untouched by hiddenRefs.
+      { label: "我的最愛", expected: "4" },
+      { label: "隱藏的書", expected: "2" },
+    ])("leaves hidden books out of the $label count", ({ label, expected }) => {
+      renderDropdown({ hiddenRefs: HIDDEN, hiddenCount: 2 });
+      expect(menuOptionCount(label)).toBe(expected);
+    });
+
+    it("lowers the trigger and the selected option by 1 when a book in scope is hidden", () => {
+      const { rerender } = renderDropdown({
+        value: "all-except-self",
+        hiddenCount: 0,
+      });
+      expect(triggerCount()).toBe("3");
+      expect(menuOptionCount("其他家人的書")).toBe("3");
+      expect(menuOptionCount("隱藏的書")).toBe("0");
+
+      rerender(
+        <MemberDropdown
+          members={MEMBERS}
+          userId="user-self"
+          value="all-except-self"
+          onChange={vi.fn()}
+          favoriteCount={4}
+          hiddenCount={1}
+          hiddenRefs={new Set([familyPrefRef("user-b", "b2")])}
+        />,
+      );
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(triggerCount()).toBe("2");
+      expect(menuOptionCount("其他家人的書")).toBe("2");
+      expect(menuOptionCount("Bob")).toBe("1");
+      expect(menuOptionCount("隱藏的書")).toBe("1");
+    });
+
+    it("keeps a member whose every book is hidden in the list, with a 0 count", () => {
+      renderDropdown({
+        hiddenRefs: new Set([familyPrefRef("user-a", "b1")]),
+        hiddenCount: 1,
+      });
+      expect(menuOptionCount("Alice")).toBe("0");
     });
   });
 

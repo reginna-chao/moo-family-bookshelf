@@ -11,6 +11,11 @@ import React from "react";
 import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { BoolFlag, type ApiClient } from "@/api/client";
+import {
+  memberFilterTrigger,
+  menuOptionCount,
+  triggerCount,
+} from "./helpers/memberFilter";
 
 /**
  * Walks up from the book title to the nearest card root that contains its
@@ -188,15 +193,15 @@ describe("FamilyShelf — hide feature", () => {
     await act(async () => {});
   });
 
-  it("hides a book from the default view and updates the heading count", async () => {
+  it("hides a book from the default view and lowers the scope count", async () => {
     const apiClient = createMockApiClient(aliceTwoBooks());
     renderShelf(apiClient);
 
     await waitFor(() => {
       expect(screen.getByText("書一")).toBeInTheDocument();
     });
-    // No hidden yet → only 可見 count, no 隱藏 half.
-    expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
+    // Default scope 其他家人的書: both books counted on the collapsed trigger.
+    expect(triggerCount()).toBe("2");
 
     // Open 書一's overflow menu and hide it.
     triggerHideAction("書一", "隱藏書籍");
@@ -205,25 +210,45 @@ describe("FamilyShelf — hide feature", () => {
       // The first card (書一) is removed from the default view.
       expect(screen.queryByText("書一")).not.toBeInTheDocument();
     });
-    // Heading now N-1 / M+1, and the 隱藏 half appears.
-    expect(screen.getByText("(可見 1 本，隱藏 1 本)")).toBeInTheDocument();
+    // Trigger and the selected option both drop by 1.
+    expect(triggerCount()).toBe("1");
+    expect(menuOptionCount("其他家人的書")).toBe("1");
     expect(screen.getByText("書二")).toBeInTheDocument();
   });
 
-  it("omits the 隱藏 half when M is 0 and shows it once M>0", async () => {
+  it("starts 隱藏的書 at 0 and counts a book once it is hidden", async () => {
     const apiClient = createMockApiClient(aliceTwoBooks());
     renderShelf(apiClient);
 
     await waitFor(() => {
-      expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
+      expect(screen.getByText("書一")).toBeInTheDocument();
     });
-    expect(screen.queryByText(/隱藏 \d+ 本/)).not.toBeInTheDocument();
+    expect(menuOptionCount("隱藏的書")).toBe("0");
 
     triggerHideAction("書一", "隱藏書籍");
 
     await waitFor(() => {
-      expect(screen.getByText("(可見 1 本，隱藏 1 本)")).toBeInTheDocument();
+      expect(screen.queryByText("書一")).not.toBeInTheDocument();
     });
+    expect(menuOptionCount("隱藏的書")).toBe("1");
+    // The member scopes leave the hidden book out.
+    expect(menuOptionCount("所有人的書")).toBe("1");
+    expect(menuOptionCount("Alice")).toBe("1");
+  });
+
+  it("does not show a book count in the heading", async () => {
+    const apiClient = createMockApiClient({
+      ...aliceTwoBooks(),
+      hidden: ["user-2:b1"],
+    });
+    renderShelf(apiClient);
+
+    await waitFor(() => {
+      expect(screen.getByText("書二")).toBeInTheDocument();
+    });
+    const heading = screen.getByRole("heading", { name: "家庭開放書櫃" });
+    expect(heading.textContent).toBe("家庭開放書櫃");
+    expect(screen.queryByText(/隱藏 \d+ 本/)).not.toBeInTheDocument();
   });
 
   it("「隱藏的書」view lists ONLY hidden cards, and 取消隱藏 returns them to default view", async () => {
@@ -238,7 +263,8 @@ describe("FamilyShelf — hide feature", () => {
       expect(screen.getByText("書二")).toBeInTheDocument();
     });
     expect(screen.queryByText("書一")).not.toBeInTheDocument();
-    expect(screen.getByText("(可見 1 本，隱藏 1 本)")).toBeInTheDocument();
+    expect(triggerCount()).toBe("1");
+    expect(menuOptionCount("隱藏的書")).toBe("1");
 
     // Switch dropdown to 隱藏的書 → only hidden cards (書一) shown.
     enterHiddenView();
@@ -247,6 +273,8 @@ describe("FamilyShelf — hide feature", () => {
       expect(screen.getByText("書一")).toBeInTheDocument();
     });
     expect(screen.queryByText("書二")).not.toBeInTheDocument();
+    expect(memberFilterTrigger()).toHaveTextContent("隱藏的書");
+    expect(triggerCount()).toBe("1");
 
     // 取消隱藏 via overflow menu → 書一 leaves the hidden view.
     triggerHideAction("書一", "取消隱藏");
@@ -254,8 +282,9 @@ describe("FamilyShelf — hide feature", () => {
     await waitFor(() => {
       expect(screen.queryByText("書一")).not.toBeInTheDocument();
     });
-    // Heading reflects nothing hidden now.
-    expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
+    // Nothing hidden now: the hidden view counts 0, the member scope is whole again.
+    expect(triggerCount()).toBe("0");
+    expect(menuOptionCount("其他家人的書")).toBe("2");
   });
 
   it("flushes the complete hidden array to updateFamilyPrefs after the debounce", async () => {
@@ -298,8 +327,9 @@ describe("FamilyShelf — hide feature", () => {
     await waitFor(() => {
       expect(screen.getByText("書一")).toBeInTheDocument();
     });
-    // Orphan does not count → N=2, M=0.
-    expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
+    // Orphan does not count → scope keeps both books, 隱藏的書 stays 0.
+    expect(triggerCount()).toBe("2");
+    expect(menuOptionCount("隱藏的書")).toBe("0");
     expect(screen.getByText("書二")).toBeInTheDocument();
   });
 

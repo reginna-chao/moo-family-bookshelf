@@ -299,6 +299,7 @@ describe("MemberDropdown duplicate-key detector", () => {
         onChange={vi.fn()}
         favoriteCount={0}
         hiddenCount={0}
+        hiddenRefs={new Set<string>()}
       />,
     );
 
