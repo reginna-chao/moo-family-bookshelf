@@ -2,15 +2,33 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { HTTPException } from "hono/http-exception";
 import { describe, it, expect } from "vitest";
 import { defaultHook, jsonRes } from "../../src/utils/openapi";
+import {
+  FamilyIdParam,
+  FamilyMemberParams,
+  RequestIdParam,
+  ShareTokenParam,
+  UserIdParam,
+  UserShelfParams,
+  paramErrorFor,
+} from "../../src/schemas/common";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
 /**
- * `defaultHook` is unreachable through the real routes today (every route
- * schema is a bare `z.string()` param that cannot fail on a matched path — see
- * the hook's JSDoc), so it is driven through a SYNTHETIC OpenAPIHono app whose
- * schemas CAN fail, one route per validation target.
+ * `defaultHook` is driven here through a SYNTHETIC OpenAPIHono app whose
+ * schemas can fail, one route per validation target, so every branch is
+ * reachable in isolation.
+ *
+ * Through the real routes only the `param` branch is reachable today: since
+ * #227 every route declares tagged path-param schemas (`schemas/common.ts`)
+ * and the hook answers their registry copy — that end-to-end contract is
+ * pinned by `tests/integration/paramValidation.test.ts`. No real route
+ * declares a body / query / header schema yet (request bodies are still
+ * validated by the handlers; moving them into the schemas is #239), so the
+ * other branches are exercised only here. The last two describe blocks cover
+ * the tag lookup: the production param schemas map to their registry copy,
+ * and an unregistered tag falls back to INVALID_PARAMS.
  */
 
 // Distinctive value placed in every failing field: it must never come back.
@@ -351,4 +369,207 @@ describe("defaultHook", () => {
     expect(thrown[0]).toBeInstanceOf(HTTPException);
     expect((thrown[0] as HTTPException).status).toBe(400);
   });
+});
+
+// ===========================================================================
+// Tagged path params (#227)
+// ===========================================================================
+
+// Contract copy — the registry in src/schemas/common.ts (not exported). These
+// are the pre-#227 handler responses; written out, not derived, so a reworded
+// registry turns this red instead of passing by construction.
+const FAMILY_ID_COPY = {
+  code: "INVALID_FAMILY_ID",
+  message: "Family ID format is invalid",
+};
+const USER_ID_COPY = {
+  code: "INVALID_USER_ID",
+  message: "userId format is invalid",
+};
+const SHELF_ID_COPY = {
+  code: "INVALID_SHELF_ID",
+  message: "shelfId format is invalid",
+};
+const REQUEST_ID_COPY = {
+  code: "INVALID_REQUEST_ID",
+  message: "Request ID format is invalid",
+};
+const TOKEN_COPY = {
+  code: "INVALID_TOKEN",
+  message: "Invalid share token format",
+};
+
+const VALID_FAMILY_ID = "abcd-1234";
+const VALID_USER_ID = "a".repeat(64);
+const VALID_UUID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const VALID_SHARE_TOKEN = "b".repeat(32);
+
+/**
+ * Tags that are NOT registered codes. `constructor` / `__proto__` /
+ * `toString` / `hasOwnProperty` / `valueOf` live on every object's prototype
+ * chain, so a plain `in` or bracket lookup would "find" them; the rest belong
+ * to other targets or differ from a registered code only by case / whitespace.
+ */
+const UNREGISTERED_TAGS = [
+  "constructor",
+  "__proto__",
+  "toString",
+  "hasOwnProperty",
+  "valueOf",
+  "INVALID_PARAMS",
+  "INVALID_FIELDS",
+  "INVALID_JSON",
+  "invalid_family_id",
+  "INVALID_FAMILY_ID ",
+  "",
+];
+
+function buildTaggedApp(): OpenAPIHono {
+  const app = new OpenAPIHono({ defaultHook });
+  const mount = (path: string, params: z.ZodObject) =>
+    app.openapi(
+      createRoute({
+        method: "get",
+        path,
+        request: { params },
+        responses: { 200: jsonRes("ok") },
+      }),
+      (c) => c.json({ reached: path }, 200),
+    );
+
+  mount("/fam/{id}", FamilyIdParam);
+  mount("/user/{id}", UserIdParam);
+  mount("/member/{id}/{uid}", FamilyMemberParams);
+  mount("/shelf/{id}/{shelfId}", UserShelfParams);
+  mount("/req/{requestId}", RequestIdParam);
+  mount("/tok/{shareToken}", ShareTokenParam);
+  UNREGISTERED_TAGS.forEach((tag, i) =>
+    mount(
+      `/tag${i}/{id}`,
+      z.object({ id: z.string().regex(HEX8, { error: tag }) }),
+    ),
+  );
+
+  // A production tagged schema used on the QUERY target: the tag must be
+  // ignored there — only a `param` failure is looked up in the registry.
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/query-tagged",
+      request: { query: FamilyIdParam },
+      responses: { 200: jsonRes("ok") },
+    }),
+    (c) => c.json({ reached: "query-tagged" }, 200),
+  );
+  return app;
+}
+
+interface TaggedCase {
+  name: string;
+  path: string;
+  expected: { code: string; message: string };
+}
+
+const taggedCases: TaggedCase[] = [
+  {
+    name: "FamilyIdParam",
+    path: `/fam/${SENTINEL}`,
+    expected: FAMILY_ID_COPY,
+  },
+  { name: "UserIdParam", path: `/user/${SENTINEL}`, expected: USER_ID_COPY },
+  {
+    name: "FamilyMemberParams, bad id",
+    path: `/member/${SENTINEL}/${VALID_USER_ID}`,
+    expected: FAMILY_ID_COPY,
+  },
+  {
+    name: "FamilyMemberParams, bad uid",
+    path: `/member/${VALID_FAMILY_ID}/${SENTINEL}`,
+    expected: USER_ID_COPY,
+  },
+  {
+    name: "FamilyMemberParams, both bad (id is the first key)",
+    path: `/member/${SENTINEL}/${SENTINEL}`,
+    expected: FAMILY_ID_COPY,
+  },
+  {
+    name: "UserShelfParams, bad id",
+    path: `/shelf/${SENTINEL}/${VALID_UUID}`,
+    expected: USER_ID_COPY,
+  },
+  {
+    name: "UserShelfParams, bad shelfId",
+    path: `/shelf/${VALID_USER_ID}/${SENTINEL}`,
+    expected: SHELF_ID_COPY,
+  },
+  {
+    name: "UserShelfParams, both bad (id is the first key)",
+    path: `/shelf/${SENTINEL}/${SENTINEL}`,
+    expected: USER_ID_COPY,
+  },
+  {
+    name: "RequestIdParam",
+    path: `/req/${SENTINEL}`,
+    expected: REQUEST_ID_COPY,
+  },
+  { name: "ShareTokenParam", path: `/tok/${SENTINEL}`, expected: TOKEN_COPY },
+  ...UNREGISTERED_TAGS.map((tag, i) => ({
+    name: `a param schema tagged ${JSON.stringify(tag)}`,
+    path: `/tag${i}/${SENTINEL}`,
+    expected: INVALID_PARAMS,
+  })),
+  {
+    name: "a tagged schema on the query target",
+    path: `/query-tagged?id=${SENTINEL}`,
+    expected: INVALID_QUERY,
+  },
+];
+
+describe("defaultHook — tagged path params", () => {
+  const app = buildTaggedApp();
+
+  it.each(taggedCases)("$name ⇒ $expected.code", async ({ path, expected }) => {
+    const res = await app.request(path);
+
+    expect(res.status).toBe(400);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({ error: expected });
+    expect(text).not.toContain(SENTINEL);
+  });
+
+  it.each([
+    `/fam/${VALID_FAMILY_ID}`,
+    `/user/${VALID_USER_ID}`,
+    `/member/${VALID_FAMILY_ID}/${VALID_USER_ID}`,
+    `/shelf/${VALID_USER_ID}/${VALID_UUID}`,
+    `/shelf/${VALID_USER_ID}/${VALID_UUID.toUpperCase()}`,
+    `/req/${VALID_UUID}`,
+    `/req/${VALID_UUID.toUpperCase()}`,
+    `/tok/${VALID_SHARE_TOKEN}`,
+    "/tag0/abcdef01",
+    `/query-tagged?id=${VALID_FAMILY_ID}`,
+  ])("lets %s reach the handler", async (path) => {
+    const res = await app.request(path);
+
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("paramErrorFor", () => {
+  it.each([
+    ["INVALID_FAMILY_ID", FAMILY_ID_COPY],
+    ["INVALID_USER_ID", USER_ID_COPY],
+    ["INVALID_SHELF_ID", SHELF_ID_COPY],
+    ["INVALID_REQUEST_ID", REQUEST_ID_COPY],
+    ["INVALID_TOKEN", TOKEN_COPY],
+  ])("maps the registered tag %s to its copy", (tag, expected) => {
+    expect(paramErrorFor(tag)).toEqual(expected);
+  });
+
+  it.each(UNREGISTERED_TAGS)(
+    "returns null for the unregistered tag %j",
+    (tag) => {
+      expect(paramErrorFor(tag)).toBeNull();
+    },
+  );
 });
