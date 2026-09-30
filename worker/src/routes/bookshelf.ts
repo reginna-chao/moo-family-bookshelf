@@ -3,11 +3,7 @@ import type { Env } from "../utils/env";
 import { BoolFlag, hasMember, normalizeFamilyRecord } from "../kv/schema";
 import { getFamilyRecord, getMemberFamilyId } from "../kv/families";
 import { getUserBooksRecord } from "../kv/users";
-import {
-  isValidFamilyId,
-  sanitizeCoverUrl,
-  sanitizeReadmooUrl,
-} from "../utils/validation";
+import { sanitizeCoverUrl, sanitizeReadmooUrl } from "../utils/validation";
 import { filterActiveMembers } from "../services/membership";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
@@ -42,16 +38,8 @@ const getFamilyBookshelfRoute = createRoute({
 
 // GET /api/family/:id/bookshelf
 bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
-  const familyId = c.req.param("id");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
+  // Format already enforced by FamilyIdParam (400 INVALID_FAMILY_ID).
+  const { id: familyId } = c.req.valid("param");
 
   // Verify caller is authenticated and a member of this family
   const userId = getAuthenticatedUserId(c);

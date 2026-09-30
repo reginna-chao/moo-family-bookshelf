@@ -16,9 +16,6 @@ import {
 } from "../kv/publicShelves";
 import { getUserBooksRecord } from "../kv/users";
 import {
-  isValidUserId,
-  isValidRequestId,
-  isValidShareToken,
   sanitizePublicShelfTitle,
   isValidExpiresDays,
   sanitizeCoverUrl,
@@ -28,7 +25,11 @@ import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError, type ErrorBody } from "../utils/errors";
-import { UserIdParam, ShelfIdParam, ShareTokenParam } from "../schemas/common";
+import {
+  UserIdParam,
+  UserShelfParams,
+  ShareTokenParam,
+} from "../schemas/common";
 import {
   writePublicSnapshot,
   resolvePublicShelves,
@@ -232,7 +233,7 @@ const updatePublicShelfRoute = createRoute({
   tags: ["PublicShelf"],
   summary: "Update a public shelf",
   request: {
-    params: ShelfIdParam,
+    params: UserShelfParams,
   },
   responses: {
     200: jsonRes("Updated public shelf"),
@@ -250,7 +251,7 @@ const resetTokenRoute = createRoute({
   tags: ["PublicShelf"],
   summary: "Reset public shelf share token",
   request: {
-    params: ShelfIdParam,
+    params: UserShelfParams,
   },
   responses: {
     200: jsonRes("Token reset successfully"),
@@ -268,7 +269,7 @@ const deletePublicShelfRoute = createRoute({
   tags: ["PublicShelf"],
   summary: "Delete a public shelf",
   request: {
-    params: ShelfIdParam,
+    params: UserShelfParams,
   },
   responses: {
     204: { description: "Shelf deleted" },
@@ -305,10 +306,8 @@ export const publicShelfRoutes = new OpenAPIHono<{ Bindings: Env }>({
 
 // GET /api/user/:id/public-shelf
 publicShelfRoutes.openapi(getPublicShelvesRoute, async (c) => {
-  const userId = c.req.param("id");
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const denied = authGuard(c, userId);
   if (denied) return denied;
@@ -320,10 +319,8 @@ publicShelfRoutes.openapi(getPublicShelvesRoute, async (c) => {
 
 // POST /api/user/:id/public-shelf
 publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
-  const userId = c.req.param("id");
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const denied = authGuard(c, userId);
   if (denied) return denied;
@@ -415,15 +412,9 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
 
 // PUT /api/user/:id/public-shelf/:shelfId
 publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
-  const userId = c.req.param("id");
-  const shelfId = c.req.param("shelfId");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
-  if (!isValidRequestId(shelfId)) {
-    return jsonError(c, 400, "INVALID_SHELF_ID", "shelfId format is invalid");
-  }
+  // Format already enforced by UserShelfParams (400 INVALID_USER_ID, then
+  // INVALID_SHELF_ID).
+  const { id: userId, shelfId } = c.req.valid("param");
 
   const denied = authGuard(c, userId);
   if (denied) return denied;
@@ -504,15 +495,9 @@ publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
 
 // POST /api/user/:id/public-shelf/:shelfId/reset-token
 publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
-  const userId = c.req.param("id");
-  const shelfId = c.req.param("shelfId");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
-  if (!isValidRequestId(shelfId)) {
-    return jsonError(c, 400, "INVALID_SHELF_ID", "shelfId format is invalid");
-  }
+  // Format already enforced by UserShelfParams (400 INVALID_USER_ID, then
+  // INVALID_SHELF_ID).
+  const { id: userId, shelfId } = c.req.valid("param");
 
   const denied = authGuard(c, userId);
   if (denied) return denied;
@@ -555,15 +540,9 @@ publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
 
 // DELETE /api/user/:id/public-shelf/:shelfId
 publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
-  const userId = c.req.param("id");
-  const shelfId = c.req.param("shelfId");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
-  if (!isValidRequestId(shelfId)) {
-    return jsonError(c, 400, "INVALID_SHELF_ID", "shelfId format is invalid");
-  }
+  // Format already enforced by UserShelfParams (400 INVALID_USER_ID, then
+  // INVALID_SHELF_ID).
+  const { id: userId, shelfId } = c.req.valid("param");
 
   const denied = authGuard(c, userId);
   if (denied) return denied;
@@ -620,10 +599,8 @@ export const publicQueryRoutes = new OpenAPIHono<{ Bindings: Env }>({
 
 // GET /api/public/:shareToken
 publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
-  const shareToken = c.req.param("shareToken");
-  if (!isValidShareToken(shareToken)) {
-    return jsonError(c, 400, "INVALID_TOKEN", "Invalid share token format");
-  }
+  // Format already enforced by ShareTokenParam (400 INVALID_TOKEN).
+  const { shareToken } = c.req.valid("param");
 
   const snapshot = await getPublicSnapshot(c.env.KV, shareToken);
   if (!snapshot) {

@@ -19,9 +19,7 @@ import {
   writeBorrowPointer,
 } from "../services/borrowIndex";
 import {
-  isValidFamilyId,
   isValidUserId,
-  isValidRequestId,
   BORROW_BOOK_ID_MAX_LENGTH,
   BORROW_BOOK_TITLE_MAX_LENGTH,
   BORROW_BOOK_AUTHOR_MAX_LENGTH,
@@ -31,7 +29,7 @@ import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError, type ErrorBody } from "../utils/errors";
-import { FamilyIdParam, RequestIdParamObj } from "../schemas/common";
+import { FamilyIdParam, RequestIdParam } from "../schemas/common";
 
 export const borrowRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
@@ -105,7 +103,7 @@ const updateBorrowRoute = createRoute({
   tags: ["Borrow"],
   summary: "Update borrow request status",
   request: {
-    params: RequestIdParamObj,
+    params: RequestIdParam,
   },
   responses: {
     200: jsonRes("Updated borrow request"),
@@ -122,16 +120,8 @@ const updateBorrowRoute = createRoute({
 
 // POST /api/family/:id/borrow — create borrow request
 borrowRoutes.openapi(createBorrowRoute, async (c) => {
-  const familyId = c.req.param("id");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
+  // Format already enforced by FamilyIdParam (400 INVALID_FAMILY_ID).
+  const { id: familyId } = c.req.valid("param");
 
   const userId = getAuthenticatedUserId(c);
   if (!userId) {
@@ -418,16 +408,8 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
 
 // GET /api/family/:id/borrow — list family borrow requests
 borrowRoutes.openapi(listBorrowRoute, async (c) => {
-  const familyId = c.req.param("id");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
+  // Format already enforced by FamilyIdParam (400 INVALID_FAMILY_ID).
+  const { id: familyId } = c.req.valid("param");
 
   const userId = getAuthenticatedUserId(c);
   if (!userId) {
@@ -492,16 +474,8 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
 // two-fold: the caller must be a CURRENT member of the record's family (when
 // that family still exists) AND a party to the record (borrower or owner).
 borrowRoutes.openapi(updateBorrowRoute, async (c) => {
-  const requestId = c.req.param("requestId");
-
-  if (!isValidRequestId(requestId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_REQUEST_ID",
-      "Request ID format is invalid",
-    );
-  }
+  // Format already enforced by RequestIdParam (400 INVALID_REQUEST_ID).
+  const { requestId } = c.req.valid("param");
 
   const userId = getAuthenticatedUserId(c);
   if (!userId) {

@@ -1,4 +1,4 @@
-import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import type { Env } from "../utils/env";
 import {
@@ -24,7 +24,6 @@ import { getUserBooksRecord, putUserBooksRecord } from "../kv/users";
 import { getQrTokenRecord, deleteQrToken } from "../kv/verify";
 import {
   isValidUserId,
-  isValidFamilyId,
   isJsonObject,
   sanitizeDisplayName,
   sanitizeVerifySecret,
@@ -48,6 +47,7 @@ import { dissolveFamily } from "../services/familyDissolve";
 import { isActiveMember, isLiveMembership } from "../services/membership";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
+import { FamilyIdParam, FamilyMemberParams } from "../schemas/common";
 
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
 
@@ -112,7 +112,7 @@ const joinFamilyRoute = createRoute({
   tags: ["Family"],
   summary: "Join an existing family",
   request: {
-    params: z.object({ id: z.string() }),
+    params: FamilyIdParam,
   },
   responses: {
     200: jsonRes("Joined family successfully"),
@@ -141,7 +141,7 @@ const removeMemberRoute = createRoute({
     "mistake does not have to be waited out: the owner can lift the ban at any " +
     "time with `DELETE /{id}/kicked/{uid}`.",
   request: {
-    params: z.object({ id: z.string(), uid: z.string() }),
+    params: FamilyMemberParams,
   },
   responses: {
     200: jsonRes("Member removed"),
@@ -172,7 +172,7 @@ const clearKickedRoute = createRoute({
     "key deleted is derived from the path `id`, and the caller must be the " +
     "owner OF THAT `id`, so no caller can clear a tombstone of another family.",
   request: {
-    params: z.object({ id: z.string(), uid: z.string() }),
+    params: FamilyMemberParams,
   },
   responses: {
     200: jsonRes("Kicked tombstone cleared"),
@@ -190,7 +190,7 @@ const listMembersRoute = createRoute({
   tags: ["Family"],
   summary: "List family members",
   request: {
-    params: z.object({ id: z.string() }),
+    params: FamilyIdParam,
   },
   responses: {
     200: jsonRes("Family members list"),
@@ -206,7 +206,7 @@ const updateDisplayNameRoute = createRoute({
   tags: ["Family"],
   summary: "Update member display name",
   request: {
-    params: z.object({ id: z.string(), uid: z.string() }),
+    params: FamilyMemberParams,
   },
   responses: {
     200: jsonRes("Display name updated"),
@@ -224,7 +224,7 @@ const updateMemberSettingsRoute = createRoute({
   tags: ["Family"],
   summary: "Update member settings (canLend, readmooName)",
   request: {
-    params: z.object({ id: z.string(), uid: z.string() }),
+    params: FamilyMemberParams,
   },
   responses: {
     200: jsonRes("Member settings updated"),
@@ -242,7 +242,7 @@ const transferOwnershipRoute = createRoute({
   tags: ["Family"],
   summary: "Transfer family ownership",
   request: {
-    params: z.object({ id: z.string() }),
+    params: FamilyIdParam,
   },
   responses: {
     200: jsonRes("Ownership transferred"),
@@ -260,7 +260,7 @@ const updateEndpointRoute = createRoute({
   tags: ["Family"],
   summary: "Update family API endpoint",
   request: {
-    params: z.object({ id: z.string() }),
+    params: FamilyIdParam,
   },
   responses: {
     200: jsonRes("Endpoint updated"),
@@ -394,16 +394,8 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
 
 // POST /api/family/:id/join
 familyRoutes.openapi(joinFamilyRoute, async (c) => {
-  const familyId = c.req.param("id");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
+  // Format already enforced by FamilyIdParam (400 INVALID_FAMILY_ID).
+  const { id: familyId } = c.req.valid("param");
 
   let body: {
     userId: string;
@@ -658,26 +650,14 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
 
 // DELETE /api/family/:id/member/:uid
 familyRoutes.openapi(removeMemberRoute, async (c) => {
-  const familyId = c.req.param("id");
-  const targetUserId = c.req.param("uid");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
+  // Format already enforced by FamilyMemberParams (400 INVALID_FAMILY_ID, then
+  // INVALID_USER_ID).
+  const { id: familyId, uid: targetUserId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
 
   if (!callerId) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
-  }
-
-  if (!isValidUserId(targetUserId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   // Per-userId write ceiling: 30 family-domain writes per userId per hour,
@@ -988,26 +968,14 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
 
 // DELETE /api/family/:id/kicked/:uid — owner lifts a removal ban (un-kick)
 familyRoutes.openapi(clearKickedRoute, async (c) => {
-  const familyId = c.req.param("id");
-  const targetUserId = c.req.param("uid");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
+  // Format already enforced by FamilyMemberParams (400 INVALID_FAMILY_ID, then
+  // INVALID_USER_ID).
+  const { id: familyId, uid: targetUserId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
 
   if (!callerId) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
-  }
-
-  if (!isValidUserId(targetUserId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
 
   // Shared "family-write" per-userId write ceiling (30/hr across the six family
@@ -1058,16 +1026,8 @@ familyRoutes.openapi(clearKickedRoute, async (c) => {
 
 // GET /api/family/:id/members
 familyRoutes.openapi(listMembersRoute, async (c) => {
-  const familyId = c.req.param("id");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
+  // Format already enforced by FamilyIdParam (400 INVALID_FAMILY_ID).
+  const { id: familyId } = c.req.valid("param");
 
   // Verify caller is authenticated and a member of this family
   const userId = getAuthenticatedUserId(c);
@@ -1104,21 +1064,9 @@ familyRoutes.openapi(listMembersRoute, async (c) => {
 
 // PUT /api/family/:id/member/:uid/displayName — update display name
 familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
-  const familyId = c.req.param("id");
-  const targetUserId = c.req.param("uid");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
-
-  if (!isValidUserId(targetUserId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by FamilyMemberParams (400 INVALID_FAMILY_ID, then
+  // INVALID_USER_ID).
+  const { id: familyId, uid: targetUserId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId) {
@@ -1192,21 +1140,9 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
 
 // PATCH /api/family/:id/member/:uid — update member settings (canLend, readmooName)
 familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
-  const familyId = c.req.param("id");
-  const targetUserId = c.req.param("uid");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
-
-  if (!isValidUserId(targetUserId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by FamilyMemberParams (400 INVALID_FAMILY_ID, then
+  // INVALID_USER_ID).
+  const { id: familyId, uid: targetUserId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId) {
@@ -1347,16 +1283,8 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
 
 // PUT /api/family/:id/transfer — transfer ownership
 familyRoutes.openapi(transferOwnershipRoute, async (c) => {
-  const familyId = c.req.param("id");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
+  // Format already enforced by FamilyIdParam (400 INVALID_FAMILY_ID).
+  const { id: familyId } = c.req.valid("param");
 
   const callerUserId = getAuthenticatedUserId(c);
   if (!callerUserId) {
@@ -1534,16 +1462,8 @@ function validateApiEndpoint(
 
 // PUT /api/family/:id/endpoint — update family API endpoint
 familyRoutes.openapi(updateEndpointRoute, async (c) => {
-  const familyId = c.req.param("id");
-
-  if (!isValidFamilyId(familyId)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_FAMILY_ID",
-      "Family ID format is invalid",
-    );
-  }
+  // Format already enforced by FamilyIdParam (400 INVALID_FAMILY_ID).
+  const { id: familyId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId) {

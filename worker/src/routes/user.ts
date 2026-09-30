@@ -32,7 +32,6 @@ import {
 import { settleDepartingBorrower } from "../services/borrowIndex";
 import { dissolveFamily } from "../services/familyDissolve";
 import {
-  isValidUserId,
   isJsonObject,
   sanitizeDisplayName,
   sanitizeCoverUrl,
@@ -393,11 +392,8 @@ const getUserBooksRoute = createRoute({
 });
 
 userRoutes.openapi(getUserBooksRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
@@ -435,11 +431,8 @@ const putUserBooksRoute = createRoute({
 });
 
 userRoutes.openapi(putUserBooksRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
@@ -579,11 +572,8 @@ const patchUserBooksRoute = createRoute({
 });
 
 userRoutes.openapi(patchUserBooksRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
@@ -731,11 +721,8 @@ const putFamilyPrefsRoute = createRoute({
 });
 
 userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const authUserId = getAuthenticatedUserId(c);
   if (!authUserId) {
@@ -838,11 +825,8 @@ const deleteUserRoute = createRoute({
 });
 
 userRoutes.openapi(deleteUserRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
 

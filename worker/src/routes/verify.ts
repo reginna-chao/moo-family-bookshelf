@@ -14,7 +14,6 @@ import {
   putQrTokenRecord,
 } from "../kv/verify";
 import {
-  isValidUserId,
   isValidVerifyMethod,
   isValidPin,
   isValidPattern,
@@ -79,11 +78,8 @@ const getVerifyRoute = createRoute({
 });
 
 verifyRoutes.openapi(getVerifyRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const record = await getVerifyRecord(c.env.KV, userId);
   const method = record?.method ?? "none";
@@ -110,11 +106,8 @@ const putVerifyRoute = createRoute({
 });
 
 verifyRoutes.openapi(putVerifyRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId || callerId !== userId) {
@@ -231,11 +224,8 @@ const postVerifyOtpRoute = createRoute({
 });
 
 verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId || callerId !== userId) {
@@ -292,11 +282,8 @@ const postVerifyPromptedRoute = createRoute({
 });
 
 verifyRoutes.openapi(postVerifyPromptedRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId || callerId !== userId) {
@@ -348,11 +335,8 @@ const postQrTokenRoute = createRoute({
 });
 
 verifyRoutes.openapi(postQrTokenRoute, async (c) => {
-  const userId = c.req.param("id");
-
-  if (!isValidUserId(userId)) {
-    return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
-  }
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
   if (!callerId) {
