@@ -9,6 +9,7 @@
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BoolFlag } from "../api/client";
+import { isRealBookId } from "../sync/legacyBooks";
 import { requestFiberData } from "./fiber-data";
 import { queryWithLegacyFallback, warnOnce } from "./readmoo-dom";
 import {
@@ -75,15 +76,14 @@ function extractBookIdFromHref(href: string): string | null {
  *     namespace. Accepting it would upload a book keyed by an id that matches
  *     no real book — a ghost entry in the user's shelf that never resolves.
  *
- * So we only accept 12+ digits and otherwise return null, skipping the book.
- * A skipped book reappears on the next sync once a real id is available;
- * a ghost book has to be cleaned up by hand. Skipping is the safer failure.
+ * So we only accept 12+ digits (`isRealBookId`), else skip the book (null): it
+ * reappears on the next sync once a real id exists — the safer failure.
  */
 function extractFallbackId(item: Element): string | null {
   const privacy = item.querySelector<HTMLElement>(READMOO_SELECTORS.privacyId);
   if (!privacy) return null;
-  const match = privacy.id.match(/^privacy-(\d{12,})$/);
-  if (match) return match[1];
+  const match = privacy.id.match(/^privacy-(\d+)$/);
+  if (match && isRealBookId(match[1])) return match[1];
 
   warnOnce(
     "scraper:privacy-id-rejected",

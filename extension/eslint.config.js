@@ -32,7 +32,7 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/dialog/onboardingFlow.ts": 489,
   "src/dialog/useAutoSetup.ts": 224,
   "src/dialog/useEndpointSwitch.ts": 234,
-  "src/dialog/usePersonalBooks.ts": 306,
+  "src/dialog/usePersonalBooks.ts": 303,
   "src/dialog/usePublicShelfActions.ts": 286,
   "src/dialog/useReauth.ts": 205,
   "src/dialog/useVerificationPrompt.ts": 345,

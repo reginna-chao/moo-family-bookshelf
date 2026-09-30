@@ -18,6 +18,23 @@ import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { scrapeBooks } from "@/content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
 
+/**
+ * Realistic 15-digit book ids. A real Readmoo id is 12+ digits (the scraper
+ * refuses shorter ones), and the load path drops a CACHE-ONLY entry with a
+ * short id as a stale legacy record — so fixtures that seed the cache must use
+ * real-shaped ids or the entry vanishes before the test can observe it.
+ */
+const bookIdOf = (n: number): string => `21${String(n).padStart(13, "0")}`;
+const C1 = bookIdOf(1);
+const B1 = bookIdOf(2);
+const B2 = bookIdOf(3);
+const B3 = bookIdOf(4);
+const BOOK_1 = bookIdOf(5);
+const BOOK_2 = bookIdOf(6);
+const BOOK_3 = bookIdOf(7);
+const NEW_1 = bookIdOf(8);
+const API_1 = bookIdOf(9);
+
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
@@ -126,7 +143,7 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
     setupStorage(
       setCache([
         {
-          bookId: "c1",
+          bookId: C1,
           title: "快取書一",
           author: "A",
           isbn: "",
@@ -148,7 +165,7 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
     setupStorage(
       setCache([
         {
-          bookId: "c1",
+          bookId: C1,
           title: "快取書一",
           author: "A",
           isbn: "",
@@ -164,7 +181,7 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
     await waitForReady(result);
 
     expect(result.current.books).toHaveLength(1);
-    expect(result.current.books[0].bookId).toBe("c1");
+    expect(result.current.books[0].bookId).toBe(C1);
     expect(result.current.books[0].isShared).toBe(BoolFlag.TRUE);
     expect(scrapeBooks).not.toHaveBeenCalled();
   });
@@ -174,7 +191,7 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
     setupStorage(
       setCache([
         {
-          bookId: "c1",
+          bookId: C1,
           title: "快取書一",
           author: "A",
           isbn: "",
@@ -190,7 +207,7 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
         data: {
           books: [
             {
-              bookId: "c1",
+              bookId: C1,
               title: "快取書一",
               author: "A",
               isbn: "",
@@ -218,7 +235,7 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
         data: {
           books: [
             {
-              bookId: "api-1",
+              bookId: API_1,
               title: "API 書",
               author: "B",
               isbn: "",
@@ -236,7 +253,7 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
     await waitForReady(result);
 
     expect(result.current.books).toHaveLength(1);
-    expect(result.current.books[0].bookId).toBe("api-1");
+    expect(result.current.books[0].bookId).toBe(API_1);
     expect(scrapeBooks).not.toHaveBeenCalled();
   });
 
@@ -281,6 +298,229 @@ describe("usePersonalBooks — load flow (cache-first, no scrape)", () => {
   });
 });
 
+// #234: short-id (7–8 digit) entries uploaded by early versions sit next to the
+// real 15-digit entry for the same book. The baseline must not show both.
+describe("usePersonalBooks — legacy short-id entries in the baseline", () => {
+  const REAL_ID = "210180801000101";
+  const LEGACY_ID = "14563038";
+  const book = (bookId: string, isShared: BoolFlag): BookEntry => ({
+    ...makeBook(bookId, isShared),
+    title: "三體",
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupStorage();
+  });
+
+  it("drops a cache-only legacy duplicate the server no longer has", async () => {
+    setupStorage(
+      setCache([
+        book(LEGACY_ID, BoolFlag.FALSE),
+        book(REAL_ID, BoolFlag.FALSE),
+      ]),
+    );
+    const client = clientWithServerBooks([book(REAL_ID, BoolFlag.TRUE)]);
+
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.books[0].bookId).toBe(REAL_ID);
+    // API still wins on the share flag for the surviving real entry.
+    expect(result.current.books[0].isShared).toBe(BoolFlag.TRUE);
+    expect(result.current.isDirty).toBe(false);
+  });
+
+  it("drops a server-side legacy duplicate when there is no cache", async () => {
+    const client = clientWithServerBooks([
+      book(LEGACY_ID, BoolFlag.TRUE),
+      book(REAL_ID, BoolFlag.FALSE),
+    ]);
+
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.books[0].bookId).toBe(REAL_ID);
+    expect(result.current.books[0].isShared).toBe(BoolFlag.TRUE);
+  });
+
+  it("keeps a legacy entry that has no real-id twin", async () => {
+    const client = clientWithServerBooks([
+      book(LEGACY_ID, BoolFlag.TRUE),
+      { ...makeBook(REAL_ID), title: "別本書" },
+    ]);
+
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    expect(result.current.books.map((b) => b.bookId)).toEqual([
+      LEGACY_ID,
+      REAL_ID,
+    ]);
+  });
+
+  it("never carries a stale cache-only legacy share flag onto the real twin (server FALSE wins)", async () => {
+    // The cache still remembers the legacy entry as SHARED; the server only
+    // knows the real entry, NOT shared. The cache-only legacy entry is stale,
+    // so its flag must not resurrect sharing on the real book.
+    setupStorage(
+      setCache([book(LEGACY_ID, BoolFlag.TRUE), book(REAL_ID, BoolFlag.FALSE)]),
+    );
+    const client = clientWithServerBooks([book(REAL_ID, BoolFlag.FALSE)]);
+
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.books[0].bookId).toBe(REAL_ID);
+    expect(result.current.books[0].isShared).toBe(BoolFlag.FALSE);
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.dirtyBookIds.size).toBe(0);
+  });
+
+  it("saves via a PATCH that also unshares the server-side legacy entry after the real twin is unshared", async () => {
+    // Server holds both copies; the legacy one is shared. The baseline folds it
+    // into the real entry (carried flag), so the user sees one shared book.
+    const client = clientWithServerBooks([
+      book(LEGACY_ID, BoolFlag.TRUE),
+      book(REAL_ID, BoolFlag.FALSE),
+    ]);
+
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.books[0].bookId).toBe(REAL_ID);
+    expect(result.current.books[0].isShared).toBe(BoolFlag.TRUE);
+
+    act(() => {
+      result.current.handleToggle(REAL_ID);
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    // Flipping R alone would leave the shared legacy copy on the server — the
+    // book would stay shared. The PATCH carries an explicit unshare for L too.
+    expect(client.updatePersonalBooks).not.toHaveBeenCalled();
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(client.patchPersonalBooks).mock.calls[0][1]).toEqual([
+      { bookId: REAL_ID, isShared: BoolFlag.FALSE },
+      { bookId: LEGACY_ID, isShared: BoolFlag.FALSE },
+    ]);
+  });
+
+  it("sends the promoted twin's inherited share once, then folds it into the snapshot", async () => {
+    const OTHER_ID = "210000000000003";
+    const client = clientWithServerBooks([
+      book(LEGACY_ID, BoolFlag.TRUE),
+      book(REAL_ID, BoolFlag.FALSE),
+      { ...makeBook(OTHER_ID), title: "別本書" },
+    ]);
+
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    // Baseline: R inherited L's share (promoted), nothing is dirty.
+    expect(result.current.books.map((b) => [b.bookId, b.isShared])).toEqual([
+      [REAL_ID, BoolFlag.TRUE],
+      [OTHER_ID, BoolFlag.FALSE],
+    ]);
+    expect(result.current.isDirty).toBe(false);
+
+    // First save touches only X, yet R's inherited share must reach the server.
+    act(() => {
+      result.current.handleToggle(OTHER_ID);
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.updatePersonalBooks).not.toHaveBeenCalled();
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(client.patchPersonalBooks).mock.calls[0][1]).toEqual([
+      { bookId: OTHER_ID, isShared: BoolFlag.TRUE },
+      { bookId: REAL_ID, isShared: BoolFlag.TRUE },
+      { bookId: LEGACY_ID, isShared: BoolFlag.FALSE },
+    ]);
+
+    // Second save: the first PATCH was folded into the snapshot — R is recorded
+    // as shared and L's unshare as FALSE — so neither R nor L is re-sent.
+    act(() => {
+      result.current.handleToggle(OTHER_ID);
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.updatePersonalBooks).not.toHaveBeenCalled();
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(2);
+    const secondChanges = vi.mocked(client.patchPersonalBooks).mock.calls[1][1];
+    expect(secondChanges).toEqual([
+      { bookId: OTHER_ID, isShared: BoolFlag.FALSE },
+    ]);
+  });
+
+  it("keeps an unsaved unshare when a shared legacy entry resolves mid-session via sync", async () => {
+    // Different titles → L is unresolved at load, so the baseline shows both.
+    const client = clientWithServerBooks([
+      { ...makeBook(LEGACY_ID, BoolFlag.TRUE), title: "A" },
+      { ...makeBook(REAL_ID, BoolFlag.TRUE), title: "B" },
+    ]);
+
+    const { result, rerender } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+    expect(result.current.books.map((b) => [b.bookId, b.isShared])).toEqual([
+      [LEGACY_ID, BoolFlag.TRUE],
+      [REAL_ID, BoolFlag.TRUE],
+    ]);
+
+    // The user unshares R but has not saved yet.
+    act(() => {
+      result.current.handleToggle(REAL_ID);
+    });
+    expect(result.current.dirtyBookIds.has(REAL_ID)).toBe(true);
+
+    // A sync renames R to "A", so L now resolves to R for the first time.
+    act(() => {
+      rerender({
+        lastSyncBooks: [{ ...makeBook(REAL_ID), title: "A" }],
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.books.map((b) => b.bookId)).toEqual([REAL_ID]),
+    );
+
+    // Display: L dropped, R NOT re-shared by L's inherited flag.
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.books[0].title).toBe("A");
+    expect(result.current.books[0].isShared).toBe(BoolFlag.FALSE);
+    expect(result.current.dirtyBookIds.has(REAL_ID)).toBe(true);
+    // Cancel baseline holds no unsaved toggle, so promotion still applies there.
+    expect(
+      result.current.originalBooks.current.map((b) => [b.bookId, b.isShared]),
+    ).toEqual([[REAL_ID, BoolFlag.TRUE]]);
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.updatePersonalBooks).not.toHaveBeenCalled();
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+    const changes = vi.mocked(client.patchPersonalBooks).mock.calls[0][1];
+    expect(changes).toEqual([
+      { bookId: REAL_ID, isShared: BoolFlag.FALSE },
+      { bookId: LEGACY_ID, isShared: BoolFlag.FALSE },
+    ]);
+    expect(changes).not.toContainEqual({
+      bookId: REAL_ID,
+      isShared: BoolFlag.TRUE,
+    });
+  });
+});
+
 describe("usePersonalBooks — lastSyncBooks merge effect", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -291,7 +531,7 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     setupStorage(
       setCache([
         {
-          bookId: "c1",
+          bookId: C1,
           title: "快取書一",
           author: "A",
           isbn: "",
@@ -312,7 +552,7 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
       rerender({
         lastSyncBooks: [
           {
-            bookId: "new-1",
+            bookId: NEW_1,
             title: "新書",
             author: "C",
             isbn: "",
@@ -326,7 +566,7 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     });
 
     await waitFor(() => expect(result.current.books).toHaveLength(2));
-    expect(result.current.books.map((b) => b.bookId)).toContain("new-1");
+    expect(result.current.books.map((b) => b.bookId)).toContain(NEW_1);
   });
 
   it("new synced books default to not-shared", async () => {
@@ -338,7 +578,7 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
       rerender({
         lastSyncBooks: [
           {
-            bookId: "new-1",
+            bookId: NEW_1,
             title: "新書",
             author: "C",
             isbn: "",
@@ -360,7 +600,7 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     setupStorage(
       setCache([
         {
-          bookId: "b1",
+          bookId: B1,
           title: "書一",
           author: "A",
           isbn: "",
@@ -377,10 +617,10 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
 
     // User toggles b1 to shared locally but has NOT saved yet → dirty.
     act(() => {
-      result.current.handleToggle("b1");
+      result.current.handleToggle(B1);
     });
-    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
-    expect(result.current.books.find((b) => b.bookId === "b1")?.isShared).toBe(
+    expect(result.current.dirtyBookIds.has(B1)).toBe(true);
+    expect(result.current.books.find((b) => b.bookId === B1)?.isShared).toBe(
       BoolFlag.TRUE,
     );
 
@@ -391,7 +631,7 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
       rerender({
         lastSyncBooks: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "書一（同步版）",
             author: "A",
             isbn: "",
@@ -405,16 +645,16 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     });
 
     await waitFor(() =>
-      expect(result.current.books.find((b) => b.bookId === "b1")?.title).toBe(
+      expect(result.current.books.find((b) => b.bookId === B1)?.title).toBe(
         "書一（同步版）",
       ),
     );
 
     // Critical: the unsaved toggle is preserved (still TRUE), and b1 stays dirty.
-    expect(result.current.books.find((b) => b.bookId === "b1")?.isShared).toBe(
+    expect(result.current.books.find((b) => b.bookId === B1)?.isShared).toBe(
       BoolFlag.TRUE,
     );
-    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
+    expect(result.current.dirtyBookIds.has(B1)).toBe(true);
   });
 
   it("keeps synced-in new books after handleCancel, but reverts the unsaved toggle (S1 behaviour a)", async () => {
@@ -422,7 +662,7 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     setupStorage(
       setCache([
         {
-          bookId: "b1",
+          bookId: B1,
           title: "書一",
           author: "A",
           isbn: "",
@@ -445,7 +685,7 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
       rerender({
         lastSyncBooks: [
           {
-            bookId: "b2",
+            bookId: B2,
             title: "新書",
             author: "C",
             isbn: "",
@@ -458,15 +698,15 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
       });
     });
     await waitFor(() =>
-      expect(result.current.books.map((b) => b.bookId)).toContain("b2"),
+      expect(result.current.books.map((b) => b.bookId)).toContain(B2),
     );
 
     // User toggles b1 to shared locally but does NOT save → dirty.
     act(() => {
-      result.current.handleToggle("b1");
+      result.current.handleToggle(B1);
     });
-    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
-    expect(result.current.books.find((b) => b.bookId === "b1")?.isShared).toBe(
+    expect(result.current.dirtyBookIds.has(B1)).toBe(true);
+    expect(result.current.books.find((b) => b.bookId === B1)?.isShared).toBe(
       BoolFlag.TRUE,
     );
 
@@ -476,9 +716,9 @@ describe("usePersonalBooks — lastSyncBooks merge effect", () => {
     });
 
     // b2 (synced-in new book) must SURVIVE the cancel — it lives in the baseline.
-    expect(result.current.books.map((b) => b.bookId)).toContain("b2");
+    expect(result.current.books.map((b) => b.bookId)).toContain(B2);
     // b1's unsaved toggle must be reverted to its clean baseline value (FALSE).
-    expect(result.current.books.find((b) => b.bookId === "b1")?.isShared).toBe(
+    expect(result.current.books.find((b) => b.bookId === B1)?.isShared).toBe(
       BoolFlag.FALSE,
     );
     // Dirty state fully cleared.
@@ -495,7 +735,7 @@ describe("usePersonalBooks — dirty Set", () => {
     setupStorage(
       setCache([
         {
-          bookId: "book-1",
+          bookId: BOOK_1,
           title: "書一",
           author: "作者A",
           isbn: "",
@@ -505,7 +745,7 @@ describe("usePersonalBooks — dirty Set", () => {
           isShared: BoolFlag.FALSE,
         },
         {
-          bookId: "book-2",
+          bookId: BOOK_2,
           title: "書二",
           author: "作者B",
           isbn: "",
@@ -515,7 +755,7 @@ describe("usePersonalBooks — dirty Set", () => {
           isShared: BoolFlag.FALSE,
         },
         {
-          bookId: "book-3",
+          bookId: BOOK_3,
           title: "書三",
           author: "作者C",
           isbn: "",
@@ -541,10 +781,10 @@ describe("usePersonalBooks — dirty Set", () => {
     await waitForReady(result);
 
     act(() => {
-      result.current.handleToggle("book-1");
+      result.current.handleToggle(BOOK_1);
     });
 
-    expect(result.current.dirtyBookIds.has("book-1")).toBe(true);
+    expect(result.current.dirtyBookIds.has(BOOK_1)).toBe(true);
     expect(result.current.isDirty).toBe(true);
   });
 
@@ -553,13 +793,13 @@ describe("usePersonalBooks — dirty Set", () => {
     await waitForReady(result);
 
     act(() => {
-      result.current.handleToggle("book-1");
+      result.current.handleToggle(BOOK_1);
     });
     act(() => {
-      result.current.handleToggle("book-1");
+      result.current.handleToggle(BOOK_1);
     });
 
-    expect(result.current.dirtyBookIds.has("book-1")).toBe(true);
+    expect(result.current.dirtyBookIds.has(BOOK_1)).toBe(true);
     expect(result.current.isDirty).toBe(true);
   });
 
@@ -598,12 +838,12 @@ describe("usePersonalBooks — dirty Set", () => {
     await waitForReady(result);
 
     act(() => {
-      result.current.markDirty("book-1");
+      result.current.markDirty(BOOK_1);
     });
     const firstRef = result.current.dirtyBookIds;
 
     act(() => {
-      result.current.markDirty("book-1");
+      result.current.markDirty(BOOK_1);
     });
     const secondRef = result.current.dirtyBookIds;
 
@@ -615,8 +855,8 @@ describe("usePersonalBooks — dirty Set", () => {
     await waitForReady(result);
 
     act(() => {
-      result.current.handleToggle("book-1");
-      result.current.handleToggle("book-2");
+      result.current.handleToggle(BOOK_1);
+      result.current.handleToggle(BOOK_2);
     });
     expect(result.current.dirtyBookIds.size).toBe(2);
 
@@ -643,14 +883,14 @@ describe("usePersonalBooks — dirty Set", () => {
     await waitForReady(result);
 
     act(() => {
-      result.current.handleToggle("book-1");
+      result.current.handleToggle(BOOK_1);
     });
 
     await act(async () => {
       await result.current.handleSave();
     });
 
-    expect(result.current.dirtyBookIds.has("book-1")).toBe(true);
+    expect(result.current.dirtyBookIds.has(BOOK_1)).toBe(true);
     expect(result.current.isDirty).toBe(true);
     expect(result.current.status).toBe("error");
   });
@@ -665,12 +905,12 @@ describe("usePersonalBooks — dirty Set", () => {
     }));
 
     act(() => {
-      result.current.handleToggle("book-1");
-      result.current.handleToggle("book-2");
+      result.current.handleToggle(BOOK_1);
+      result.current.handleToggle(BOOK_2);
     });
     expect(result.current.dirtyBookIds.size).toBe(2);
     expect(
-      result.current.books.find((b) => b.bookId === "book-1")?.isShared,
+      result.current.books.find((b) => b.bookId === BOOK_1)?.isShared,
     ).toBe(BoolFlag.TRUE);
 
     act(() => {
@@ -680,7 +920,7 @@ describe("usePersonalBooks — dirty Set", () => {
     expect(result.current.dirtyBookIds.size).toBe(0);
     expect(result.current.isDirty).toBe(false);
     expect(
-      result.current.books.find((b) => b.bookId === "book-1")?.isShared,
+      result.current.books.find((b) => b.bookId === BOOK_1)?.isShared,
     ).toBe(originalSnapshot[0].isShared);
   });
 });
@@ -695,15 +935,15 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
 
   it("PATCHes only the dirty book when all dirty books are server-known", async () => {
     const client = clientWithServerBooks([
-      makeBook("b1"),
-      makeBook("b2"),
-      makeBook("b3"),
+      makeBook(B1),
+      makeBook(B2),
+      makeBook(B3),
     ]);
     const { result } = renderUsePersonalBooks(client);
     await waitForReady(result);
 
     act(() => {
-      result.current.handleToggle("b1");
+      result.current.handleToggle(B1);
     });
     await act(async () => {
       await result.current.handleSave();
@@ -711,23 +951,23 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
 
     expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
     expect(client.patchPersonalBooks).toHaveBeenCalledWith("user-abc", [
-      { bookId: "b1", isShared: BoolFlag.TRUE },
+      { bookId: B1, isShared: BoolFlag.TRUE },
     ]);
     expect(client.updatePersonalBooks).not.toHaveBeenCalled();
   });
 
   it("PATCH changes array contains only dirty books (not untouched ones)", async () => {
     const client = clientWithServerBooks([
-      makeBook("b1"),
-      makeBook("b2"),
-      makeBook("b3"),
+      makeBook(B1),
+      makeBook(B2),
+      makeBook(B3),
     ]);
     const { result } = renderUsePersonalBooks(client);
     await waitForReady(result);
 
     act(() => {
-      result.current.handleToggle("b1");
-      result.current.handleToggle("b3");
+      result.current.handleToggle(B1);
+      result.current.handleToggle(B3);
     });
     await act(async () => {
       await result.current.handleSave();
@@ -736,20 +976,20 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
     expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
     const changes = vi.mocked(client.patchPersonalBooks).mock.calls[0][1];
     const ids = changes.map((c) => c.bookId).sort();
-    expect(ids).toEqual(["b1", "b3"]);
-    expect(ids).not.toContain("b2");
+    expect(ids).toEqual([B1, B3]);
+    expect(ids).not.toContain(B2);
   });
 
   it("falls back to PUT when a dirty book is not yet on the server (new scraped book)", async () => {
     // Server knows only b1; cache carries a new un-synced book b2.
-    setupStorage(setCache([makeBook("b1"), makeBook("b2")]));
-    const client = clientWithServerBooks([makeBook("b1")]);
+    setupStorage(setCache([makeBook(B1), makeBook(B2)]));
+    const client = clientWithServerBooks([makeBook(B1)]);
     const { result } = renderUsePersonalBooks(client);
     await waitForReady(result);
 
     // Toggle the new (server-unknown) book.
     act(() => {
-      result.current.handleToggle("b2");
+      result.current.handleToggle(B2);
     });
     await act(async () => {
       await result.current.handleSave();
@@ -764,14 +1004,14 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
     // list as server-known. Otherwise a later save of an un-synced scraped book
     // would wrongly PATCH (backend silently drops unknown bookIds) instead of PUT.
     // Server knows only b1; cache carries a new un-synced book b2.
-    setupStorage(setCache([makeBook("b1"), makeBook("b2")]));
-    const client = clientWithServerBooks([makeBook("b1")]);
+    setupStorage(setCache([makeBook(B1), makeBook(B2)]));
+    const client = clientWithServerBooks([makeBook(B1)]);
     const { result } = renderUsePersonalBooks(client);
     await waitForReady(result);
 
     // First save: toggle the server-known book b1 → PATCH.
     act(() => {
-      result.current.handleToggle("b1");
+      result.current.handleToggle(B1);
     });
     await act(async () => {
       await result.current.handleSave();
@@ -780,7 +1020,7 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
 
     // Second save: toggle the new (server-unknown) book b2 → must fall back to PUT.
     act(() => {
-      result.current.handleToggle("b2");
+      result.current.handleToggle(B2);
     });
     await act(async () => {
       await result.current.handleSave();
@@ -790,11 +1030,11 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
     expect(client.updatePersonalBooks).toHaveBeenCalledTimes(1);
     expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
     const putPayload = vi.mocked(client.updatePersonalBooks).mock.calls[0][1];
-    expect(putPayload.books.some((b) => b.bookId === "b2")).toBe(true);
+    expect(putPayload.books.some((b) => b.bookId === B2)).toBe(true);
   });
 
   it("makes no API call when there are no dirty books", async () => {
-    const client = clientWithServerBooks([makeBook("b1")]);
+    const client = clientWithServerBooks([makeBook(B1)]);
     const { result } = renderUsePersonalBooks(client);
     await waitForReady(result);
 
@@ -807,7 +1047,7 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
   });
 
   it("keeps dirty state and surfaces error when PATCH fails", async () => {
-    const client = clientWithServerBooks([makeBook("b1")], {
+    const client = clientWithServerBooks([makeBook(B1)], {
       patchPersonalBooks: vi.fn().mockResolvedValue({
         error: { code: "BOOM", message: "patch failed" },
       }),
@@ -816,7 +1056,7 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
     await waitForReady(result);
 
     act(() => {
-      result.current.handleToggle("b1");
+      result.current.handleToggle(B1);
     });
     await act(async () => {
       await result.current.handleSave();
@@ -824,7 +1064,7 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
 
     expect(result.current.status).toBe("error");
     expect(result.current.errorMessage).toBe("patch failed");
-    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
+    expect(result.current.dirtyBookIds.has(B1)).toBe(true);
   });
 });
 
@@ -884,7 +1124,7 @@ describe("usePersonalBooks — stale reset-timer supersede", () => {
   it("keeps status 'saving' when the previous save's reset timer fires mid-flight", async () => {
     // b1 is server-known, so the second save goes out as a PATCH — and that
     // request never answers, holding the save in flight past the old deadline.
-    const client = clientWithServerBooks([makeBook("b1")], {
+    const client = clientWithServerBooks([makeBook(B1)], {
       patchPersonalBooks: vi.fn().mockReturnValue(new Promise(() => undefined)),
     });
     const { result } = renderUsePersonalBooks(client);
@@ -902,7 +1142,7 @@ describe("usePersonalBooks — stale reset-timer supersede", () => {
 
     // Second save, still inside that window.
     act(() => {
-      result.current.handleToggle("b1");
+      result.current.handleToggle(B1);
     });
     await act(async () => {
       void result.current.handleSave();
@@ -920,7 +1160,7 @@ describe("usePersonalBooks — stale reset-timer supersede", () => {
   });
 
   it("keeps the error state when the previous save's reset timer fires after a failure", async () => {
-    const client = clientWithServerBooks([makeBook("b1")], {
+    const client = clientWithServerBooks([makeBook(B1)], {
       patchPersonalBooks: vi.fn().mockResolvedValue({
         error: { code: "BOOM", message: "patch failed" },
       }),
@@ -936,7 +1176,7 @@ describe("usePersonalBooks — stale reset-timer supersede", () => {
     expect(result.current.status).toBe("saved");
 
     act(() => {
-      result.current.handleToggle("b1");
+      result.current.handleToggle(B1);
     });
     await act(async () => {
       await result.current.handleSave();
@@ -952,7 +1192,7 @@ describe("usePersonalBooks — stale reset-timer supersede", () => {
     // hides the banner while the toggle is still unsaved (dirty).
     expect(result.current.status).toBe("error");
     expect(result.current.errorMessage).toBe("patch failed");
-    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
+    expect(result.current.dirtyBookIds.has(B1)).toBe(true);
   });
 });
 
@@ -976,7 +1216,7 @@ describe("usePersonalBooks — hostile save error envelope", () => {
   });
 
   it("falls back to the local save-failure copy for an object message", async () => {
-    const client = clientWithServerBooks([makeBook("b1")], {
+    const client = clientWithServerBooks([makeBook(B1)], {
       patchPersonalBooks: vi.fn().mockResolvedValue({
         error: { code: "SERVER_ERROR", message: { zh: "壞掉了" } },
       }),
@@ -985,7 +1225,7 @@ describe("usePersonalBooks — hostile save error envelope", () => {
     await waitForReady(result);
 
     act(() => {
-      result.current.handleToggle("b1");
+      result.current.handleToggle(B1);
     });
     await act(async () => {
       await result.current.handleSave();
@@ -997,6 +1237,6 @@ describe("usePersonalBooks — hostile save error envelope", () => {
     expect(result.current.errorMessage).toBe("儲存失敗，請稍後再試");
     expect(result.current.status).toBe("error");
     // A refused save keeps the toggle staged (save-before-sync, invariant 3).
-    expect(result.current.dirtyBookIds.has("b1")).toBe(true);
+    expect(result.current.dirtyBookIds.has(B1)).toBe(true);
   });
 });

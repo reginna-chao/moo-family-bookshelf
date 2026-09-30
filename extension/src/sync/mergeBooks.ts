@@ -1,15 +1,20 @@
 import { BookEntry, BoolFlag } from "../api/client";
 import { ScrapedBook } from "../content/scraper";
+import { dropResolvedLegacyBooks } from "./legacyBooks";
 
 /**
  * Merge scraped books with saved book entries.
  * - Books in both: use scraped metadata, keep saved isShared setting
  * - Scraped-only: default isShared = 0
- * - Saved-only: keep as-is (user may be on a different page)
+ * - Saved-only: keep as-is (user may be on a different page), EXCEPT
+ *   legacy entries resolved to a real one, which are dropped by
+ *   `dropResolvedLegacyBooks` (#234); ids in `keepFlagsFor` (the user's
+ *   unsaved toggles) are never promoted by that step
  */
 export function mergeBooks(
   scraped: ScrapedBook[],
   saved: BookEntry[],
+  keepFlagsFor?: ReadonlySet<string>,
 ): BookEntry[] {
   const savedMap = new Map(saved.map((b) => [b.bookId, b]));
   const merged = new Map<string, BookEntry>();
@@ -35,5 +40,5 @@ export function mergeBooks(
     }
   }
 
-  return Array.from(merged.values());
+  return dropResolvedLegacyBooks(Array.from(merged.values()), keepFlagsFor);
 }

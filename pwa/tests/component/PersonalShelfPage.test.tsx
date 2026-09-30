@@ -434,6 +434,41 @@ describe("PersonalShelfPage", () => {
     });
   });
 
+  it("save PATCH carries exactly the toggled book, never a boolean-true server book as promoted", async () => {
+    // b2 is stored as boolean `true` (an Extension-era record). The PWA
+    // normalizes it to BoolFlag.TRUE locally while the snapshot keeps the raw
+    // `true`, which the save strategy coerces to FALSE — so with
+    // `includePromoted: true` b2 would read as a promoted twin and be shared
+    // without an opt-in. The PWA must send the toggled book alone.
+    await renderWithBooks([
+      {
+        bookId: "b1",
+        title: "書籍一",
+        author: "作者A",
+        isShared: BoolFlag.FALSE,
+      },
+      {
+        bookId: "b2",
+        title: "書籍二",
+        author: "作者B",
+        isShared: true as unknown as BoolFlag,
+      },
+    ]);
+
+    fireEvent.click(screen.getByLabelText("選取 書籍一"));
+    fireEvent.click(screen.getByText("設為開放"));
+    fireEvent.click(screen.getByText("儲存變更"));
+
+    await waitFor(() => {
+      expect(mockPatchPersonalBooks).toHaveBeenCalledTimes(1);
+    });
+    // Exact array equality: no promoted entries, no unshares.
+    expect(mockPatchPersonalBooks.mock.calls[0][1]).toEqual([
+      { bookId: "b1", isShared: BoolFlag.TRUE },
+    ]);
+    expect(mockUpdatePersonalBooks).not.toHaveBeenCalled();
+  });
+
   it("refreshes the family bookshelf via context after a successful PATCH save", async () => {
     await renderWithBooks([
       {

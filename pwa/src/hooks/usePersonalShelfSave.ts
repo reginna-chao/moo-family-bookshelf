@@ -2,7 +2,10 @@ import { useEffect, useCallback, useRef } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
 import type { ApiClient, BookEntry } from "@/api/client";
-import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
+import {
+  applyPatchChanges,
+  decideSaveStrategy,
+} from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { useFamilyData } from "@/hooks/useFamilyData";
 
@@ -65,10 +68,10 @@ export function usePersonalShelfSave({
 
     setState("saving");
 
-    // PATCH only the dirty books, unless the diff can't be safely expressed as
-    // a partial update (new un-synced books, no server record, or over the cap)
-    // — those fall back to a full PUT so nothing is silently dropped.
-    const { usePut, dirtyBooks } = decideSaveStrategy({
+    // PATCH `patchChanges` (dirty books, server-only unshares)
+    // unless the diff can't be safely expressed as a partial update — those
+    // fall back to a full PUT so nothing is silently dropped (see saveStrategy).
+    const { usePut, patchChanges } = decideSaveStrategy({
       books,
       dirtyBookIds,
       savedRawPayload: savedRawPayload.current,
@@ -85,10 +88,7 @@ export function usePersonalShelfSave({
             books,
             lastUpdated: new Date().toISOString(),
           })
-        : await apiClient.patchPersonalBooks(
-            userId,
-            dirtyBooks.map((b) => ({ bookId: b.bookId, isShared: b.isShared })),
-          );
+        : await apiClient.patchPersonalBooks(userId, patchChanges);
       if (response.error) {
         setErrorMessage(
           safeErrorText(response.error.message, "儲存失敗，請稍後再試"),
@@ -98,12 +98,13 @@ export function usePersonalShelfSave({
       }
       originalBooksRef.current = books;
       // Only a PUT persists the full local list; a PATCH leaves the server's
-      // book set unchanged (it can only update isShared of existing books).
-      // Marking PATCH-time books as server-known would wrongly classify
-      // un-synced scraped books as known and silently drop them on a later PATCH.
-      if (usePut) {
-        savedRawPayload.current = { ...(savedRawPayload.current ?? {}), books };
-      }
+      // book set unchanged (it can only update isShared of existing books), so
+      // it only folds the sent flags into the snapshot. Marking PATCH-time
+      // books as server-known would wrongly classify un-synced scraped books
+      // as known and silently drop them on a later PATCH.
+      const prev = savedRawPayload.current ?? {};
+      const next = usePut ? books : applyPatchChanges(prev.books, patchChanges);
+      savedRawPayload.current = { ...prev, books: next };
       clearDirty();
       setState("saved");
       // Refresh the aggregated family bookshelf so it reflects the saved shares
