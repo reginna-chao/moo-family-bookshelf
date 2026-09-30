@@ -89,21 +89,21 @@ function StatefulDropdown({ initial }: { initial: MemberFilterValue }) {
 }
 
 function openListbox(): HTMLElement {
-  fireEvent.click(screen.getByLabelText("篩選成員"));
+  fireEvent.click(memberFilterTrigger());
   return screen.getByRole("listbox", { name: "成員選單" });
 }
 
 describe("MemberDropdown", () => {
   it("shows the label of the currently selected option on the trigger", () => {
     renderDropdown({ value: SELF_ID });
-    const trigger = screen.getByLabelText("篩選成員");
+    const trigger = memberFilterTrigger();
     expect(trigger).toHaveTextContent("自己的書");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
   it("falls back to the first option's label when value matches no option", () => {
     renderDropdown({ value: "unknown-user" });
-    expect(screen.getByLabelText("篩選成員")).toHaveTextContent("所有人的書");
+    expect(memberFilterTrigger()).toHaveTextContent("所有人的書");
   });
 
   it("lists options in the fixed order with correct counts, excluding members with no books", () => {
@@ -195,7 +195,7 @@ describe("MemberDropdown", () => {
       </div>,
     );
 
-    fireEvent.click(screen.getByLabelText("篩選成員"));
+    fireEvent.click(memberFilterTrigger());
     expect(screen.getByRole("listbox")).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByText("outside"));
@@ -209,10 +209,7 @@ describe("MemberDropdown", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("篩選成員")).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
+    expect(memberFilterTrigger()).toHaveAttribute("aria-expanded", "false");
   });
 
   // Inline popover: it scrolls along with its trigger, and mobile address-bar
@@ -235,7 +232,7 @@ describe("MemberDropdown", () => {
     renderDropdown();
 
     openListbox();
-    const trigger = screen.getByLabelText("篩選成員");
+    const trigger = memberFilterTrigger();
     fireEvent.mouseDown(trigger);
     fireEvent.click(trigger);
 
@@ -251,12 +248,14 @@ describe("MemberDropdown", () => {
       expect(triggerCount()).toBe("3");
     });
 
-    it("keeps the separator out of the accessibility tree and the trigger name unchanged", () => {
+    it("keeps the separator out of the accessibility tree and names the trigger by its label and count", () => {
       renderDropdown();
       const sep = within(memberFilterTrigger()).getByText("·");
       expect(sep).toHaveAttribute("aria-hidden", "true");
-      // Positive companion: the button is still found by its aria-label.
-      expect(memberFilterTrigger()).toHaveAccessibleName("篩選成員");
+      // Positive companion: the aria-label carries the label and count, not "·".
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：所有人的書，5 本",
+      );
     });
 
     // Trigger and menu must show the same number for the same option.
@@ -295,6 +294,86 @@ describe("MemberDropdown", () => {
 
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       expect(memberFilterTrigger()).toHaveTextContent("自己的書");
+      expect(triggerCount()).toBe("2");
+    });
+  });
+
+  // The aria-label replaces the button text for assistive tech, so it must
+  // announce the same label and count the trigger shows. Literal strings pin the
+  // production copy (memberFilterAccessibleName in shared/src/familyShelf/).
+  describe("trigger accessible name", () => {
+    it("announces the default selection's label and count, not the bare prefix", () => {
+      renderDropdown();
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：所有人的書，5 本",
+      );
+      // Sibling variant: the old static name must be gone.
+      expect(memberFilterTrigger()).not.toHaveAccessibleName("篩選成員");
+    });
+
+    it.each<{ value: MemberFilterValue; expected: string }>([
+      { value: "all-except-self", expected: "篩選成員：其他家人的書，3 本" },
+      { value: SELF_ID, expected: "篩選成員：自己的書，2 本" },
+      { value: ALICE_ID, expected: "篩選成員：Alice，3 本" },
+      { value: FAVORITE_FILTER_VALUE, expected: "篩選成員：我的最愛，5 本" },
+      { value: HIDDEN_FILTER_VALUE, expected: "篩選成員：隱藏的書，4 本" },
+    ])("is exactly $expected for $value", ({ value, expected }) => {
+      renderDropdown({ value });
+      expect(memberFilterTrigger()).toHaveAccessibleName(expected);
+    });
+
+    it("announces a 0 count as 0 本", () => {
+      renderDropdown({ value: HIDDEN_FILTER_VALUE, hiddenCount: 0 });
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：隱藏的書，0 本",
+      );
+    });
+
+    it("follows the user's selection to the new label and count", () => {
+      render(<StatefulDropdown initial="all-except-self" />);
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：其他家人的書，3 本",
+      );
+
+      const pick = (label: string) => {
+        const option = within(openListbox())
+          .getAllByRole("option")
+          .find((o) => o.textContent?.startsWith(label));
+        if (!option) throw new Error(`option not found: ${label}`);
+        fireEvent.click(option);
+      };
+
+      pick("自己的書");
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：自己的書，2 本",
+      );
+
+      pick("我的最愛");
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：我的最愛，5 本",
+      );
+    });
+
+    it("drops the announced count by 1, in step with the visible count, when a book in scope is hidden", () => {
+      const { rerender } = renderDropdown({
+        value: "all-except-self",
+        hiddenCount: 0,
+      });
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：其他家人的書，3 本",
+      );
+
+      rerender(
+        dropdownElement({
+          value: "all-except-self",
+          hiddenCount: 1,
+          hiddenRefs: new Set([familyPrefRef(ALICE_ID, "b2")]),
+        }),
+      );
+
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：其他家人的書，2 本",
+      );
       expect(triggerCount()).toBe("2");
     });
   });

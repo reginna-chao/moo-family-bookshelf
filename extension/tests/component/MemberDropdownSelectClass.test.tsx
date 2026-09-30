@@ -24,6 +24,7 @@ vi.mock("@/hooks/useIsMobile", () => ({
 
 // Imported AFTER the mock so the component picks up the mocked hook.
 import { MemberDropdown } from "@/dialog/MemberDropdown";
+import { memberFilterTrigger } from "./helpers/memberFilter";
 
 const baseProps = {
   members: [],
@@ -40,7 +41,7 @@ describe("MemberDropdown responsive class contract", () => {
     isMobileMock.mockReturnValue(false);
     render(<MemberDropdown {...baseProps} />);
 
-    const trigger = screen.getByRole("button", { name: "篩選成員" });
+    const trigger = memberFilterTrigger();
     expect(trigger).toHaveClass("moo-member-filter__trigger");
     expect(trigger).not.toHaveClass("moo-member-filter__trigger--mobile");
   });
@@ -49,7 +50,7 @@ describe("MemberDropdown responsive class contract", () => {
     isMobileMock.mockReturnValue(false);
     render(<MemberDropdown {...baseProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+    fireEvent.click(memberFilterTrigger());
     const menu = screen.getByRole("listbox", { name: "成員選單" });
     expect(menu).toHaveClass("moo-member-filter__menu");
     expect(menu).not.toHaveClass("moo-member-filter__menu--mobile");
@@ -59,7 +60,7 @@ describe("MemberDropdown responsive class contract", () => {
     isMobileMock.mockReturnValue(true);
     render(<MemberDropdown {...baseProps} />);
 
-    const trigger = screen.getByRole("button", { name: "篩選成員" });
+    const trigger = memberFilterTrigger();
     expect(trigger).toHaveClass("moo-member-filter__trigger");
     expect(trigger).toHaveClass("moo-member-filter__trigger--mobile");
   });
@@ -68,7 +69,7 @@ describe("MemberDropdown responsive class contract", () => {
     isMobileMock.mockReturnValue(true);
     render(<MemberDropdown {...baseProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+    fireEvent.click(memberFilterTrigger());
     const menu = screen.getByRole("listbox", { name: "成員選單" });
     expect(menu).toHaveClass("moo-member-filter__menu");
     expect(menu).toHaveClass("moo-member-filter__menu--mobile");

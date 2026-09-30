@@ -9,9 +9,17 @@ import { fireEvent, screen } from "@testing-library/react";
  * a caller compares with `toBe` (a substring match would accept `12` for `120`).
  */
 
+/**
+ * Matches the trigger's accessible name, `篩選成員：{label}，{count} 本`. It
+ * varies with the selection, so the lookup anchors on the fixed prefix plus
+ * its full-width colon (no other control's name starts that way). The exact
+ * copy is pinned with literal strings in `MemberDropdown.test.tsx`.
+ */
+export const MEMBER_FILTER_TRIGGER_NAME = /^篩選成員：/;
+
 /** The member-filter trigger button (its accessible name is the aria-label). */
 export function memberFilterTrigger(): HTMLElement {
-  return screen.getByRole("button", { name: "篩選成員" });
+  return screen.getByRole("button", { name: MEMBER_FILTER_TRIGGER_NAME });
 }
 
 /** Exact text of the count shown on the (collapsed or open) trigger. */

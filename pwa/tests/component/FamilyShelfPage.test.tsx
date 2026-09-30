@@ -88,7 +88,7 @@ function renderWithProvider(
  * Options render as `label + count`, so we match the label substring.
  */
 function selectMemberOption(optionLabel: string) {
-  fireEvent.click(screen.getByLabelText("篩選成員"));
+  fireEvent.click(memberFilterTrigger());
   const listbox = screen.getByRole("listbox", { name: "成員選單" });
   const option = within(listbox)
     .getAllByRole("option")

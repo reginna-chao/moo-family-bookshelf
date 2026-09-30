@@ -11,6 +11,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useDismissableMenu } from "../hooks/useDismissableMenu";
 import type { FamilyShelfMemberBooks } from "moo-family-bookshelf-shared/familyShelf/prefRefs";
 import { countVisibleByMemberScope } from "moo-family-bookshelf-shared/familyShelf/memberScopeCounts";
+import { memberFilterAccessibleName } from "moo-family-bookshelf-shared/familyShelf/memberFilterLabel";
 
 /** Sentinel filter value for the cross-everyone hidden-books view. */
 export const HIDDEN_FILTER_VALUE = "__hidden__";
@@ -44,10 +45,9 @@ interface MemberOption {
 }
 
 /**
- * Build the member-filter options (each `value` is unique: it is the React key).
- * Fixed order: all / all-except-self / self / other members with books / favorite / hidden.
- * Member-scope counts exclude hidden books; favorite / hidden keep their totals.
- */
+ * Options in fixed order (each `value` is unique: the React key): all / all-except-
+ * self / self / others with books / favorite / hidden. Member-scope counts exclude
+ * hidden books; favorite / hidden keep their totals. */
 function buildOptions(
   members: MemberInfo[],
   userId: string,
@@ -149,7 +149,7 @@ export function MemberDropdown({
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        aria-label="篩選成員"
+        aria-label={memberFilterAccessibleName(current.label, current.count)}
         aria-haspopup="listbox"
         aria-expanded={open}
         className={triggerClass}

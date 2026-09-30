@@ -12,6 +12,7 @@ import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
 import { FamilyDataProvider } from "@/hooks/useFamilyData";
 import { MemberDropdown } from "@/components/MemberDropdown";
 import { ApiClient, BoolFlag } from "@/api/client";
+import { memberFilterTrigger } from "./helpers/memberFilter";
 
 const ENDPOINT = "https://api.example.com";
 const FAMILY_ID = "fam-1";
@@ -125,7 +126,7 @@ function renderShelf(apiClient: ApiClient) {
 
 /** Open the member filter and return its option buttons. */
 function openMemberFilter(): HTMLElement[] {
-  fireEvent.click(screen.getByLabelText("篩選成員"));
+  fireEvent.click(memberFilterTrigger());
   return screen.getAllByRole("option");
 }
 
@@ -189,7 +190,7 @@ describe("FamilyShelfPage member filter with a hostile bookshelf payload", () =>
     renderShelf(createClient(HOSTILE_BOOKSHELF));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
 
     const labels = openMemberFilter().map(optionLabel);
@@ -206,7 +207,7 @@ describe("FamilyShelfPage member filter with a hostile bookshelf payload", () =>
     renderShelf(createClient(HOSTILE_BOOKSHELF));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
 
     const options = openMemberFilter();
@@ -222,7 +223,7 @@ describe("FamilyShelfPage member filter with a hostile bookshelf payload", () =>
     renderShelf(createClient(HOSTILE_BOOKSHELF));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
 
     openMemberFilter();
@@ -236,7 +237,7 @@ describe("FamilyShelfPage member filter with a hostile bookshelf payload", () =>
     renderShelf(createClient(HOSTILE_BOOKSHELF));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
 
     expect(warnSpy).toHaveBeenCalledWith(
@@ -290,7 +291,7 @@ describe("MemberDropdown duplicate-key detector", () => {
       />,
     );
 
-    fireEvent.click(screen.getByLabelText("篩選成員"));
+    fireEvent.click(memberFilterTrigger());
 
     expect(duplicateKeyCalls(errorSpy).length).toBeGreaterThan(0);
   });

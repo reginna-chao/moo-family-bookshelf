@@ -16,6 +16,7 @@ import {
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 import { countVisibleByMemberScope } from "moo-family-bookshelf-shared/familyShelf/memberScopeCounts";
+import { memberFilterAccessibleName } from "moo-family-bookshelf-shared/familyShelf/memberFilterLabel";
 
 export interface MemberDropdownProps {
   members: MemberBooks[];
@@ -140,7 +141,7 @@ export function MemberDropdown({
       <button
         ref={triggerRef}
         onClick={handleToggle}
-        aria-label="篩選成員"
+        aria-label={memberFilterAccessibleName(current.label, current.count)}
         aria-expanded={open}
         className="flex items-center justify-between w-full rounded-lg border border-gray-300 bg-white pl-3 pr-3 py-2.5 text-sm text-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
       >

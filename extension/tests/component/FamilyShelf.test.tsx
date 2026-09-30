@@ -86,7 +86,7 @@ function makeMemberBooks(
  * old `fireEvent.change(select, { target: { value } })` interaction.
  */
 function selectMemberFilter(optionName: RegExp) {
-  fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+  fireEvent.click(memberFilterTrigger());
   fireEvent.click(screen.getByRole("option", { name: optionName }));
 }
 
@@ -471,7 +471,7 @@ describe("FamilyShelf", () => {
     renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
-      expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
   });
 
@@ -779,7 +779,7 @@ describe("FamilyShelf", () => {
     renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
-      expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
     selectMemberFilter(/所有人的書/);
 

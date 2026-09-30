@@ -44,7 +44,7 @@ function triggerHideAction(title: string, itemName: string) {
  * open the trigger, then click the option matching `optionName`.
  */
 function selectMemberFilter(optionName: RegExp) {
-  fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+  fireEvent.click(memberFilterTrigger());
   fireEvent.click(screen.getByRole("option", { name: optionName }));
 }
 
