@@ -1104,8 +1104,9 @@ jobs:
 ##### ⚪ 低優先 — 零星清理與 DX
 
 - [x] **BE-10** 統一驗證錯誤碼：已完成（`defaultHook` 依來源回不同錯誤碼：body 欄位 `INVALID_FIELDS`、路徑參數 `INVALID_PARAMS`、查詢參數 `INVALID_QUERY`，其餘 `INVALID_REQUEST`）→ [#212](https://github.com/reginna-chao/moo-family-bookshelf/issues/212)
-- [ ] **BE-11** 接上 zod-openapi 實際驗證 → [#227](https://github.com/reginna-chao/moo-family-bookshelf/issues/227)（路徑參數）、[#239](https://github.com/reginna-chao/moo-family-bookshelf/issues/239)（request body）
-  - **已完成部分**：路徑參數已改由 route schema 驗證（#227），回傳的錯誤碼與訊息和先前 handler 自行檢查時完全相同；request body 仍由各 handler 驗證，移進 schema 的工作見 #239。
+- [x] **BE-11** 接上 zod-openapi 實際驗證 → [#227](https://github.com/reginna-chao/moo-family-bookshelf/issues/227)（路徑參數）、[#239](https://github.com/reginna-chao/moo-family-bookshelf/issues/239)（request body）
+  - **路徑參數**：已改由 route schema 驗證（#227），回傳的錯誤碼與訊息和先前 handler 自行檢查時完全相同。
+  - **request body**：評估後決定不搬進 schema，維持由各 handler 驗證（#239）。16 個會讀 body 的 handler 裡，有 10 個先扣每位使用者的次數再解析 body，不少檢查也要看 KV 資料或呼叫者身分；改用 schema 會改變扣次數的時機、錯誤的先後順序，還會開始拒絕非 JSON 的 Content-Type。根層 `onError` 已先學會處理 Hono 的 `HTTPException`（無法解析的 JSON 回 `400 INVALID_JSON`、Content-Type 不符回 `415 UNSUPPORTED_MEDIA_TYPE`），日後真的宣告 body schema 也不會變成 500。
 - [x] **BE-12** 補 publicShelf / OTP / QR 的 per-user 限流：已完成（`public-shelf`、`verify-write` 兩個每小時 scope）。
 - [x] **BE-13** 非原子多鍵寫入的部分失敗清理：已完成（家庭建立／加入／移除成員／解散改為重試可收斂的寫入順序）→ [#213](https://github.com/reginna-chao/moo-family-bookshelf/issues/213)
 - [x] **FE-6** 拆 >200 行大檔；**FE-7** 收斂 props drilling → 併入 [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)：已完成。issue 列出的六個大檔都拆到 200 行以內，拆檔時只傳各子元件實際用到的 props；其餘超過 200 行的檔案列在各套件 `eslint.config.js` 的行數上限清單，只能變短。

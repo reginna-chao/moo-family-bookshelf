@@ -1364,6 +1364,7 @@ describe("Public shelf per-userId write ceiling", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("charges one slot per write and keeps the counter self-expiring", async () => {
@@ -1517,6 +1518,90 @@ describe("Public shelf per-userId write ceiling", () => {
     expect(((await res.json()) as Json).error.code).toBe("INVALID_TITLE");
     expect(await writesCharged(USER_ID)).toBe(1);
   });
+
+  // A JSON body that parses but is not an object carries no fields, so create
+  // and update read it as `{}` (#239) — before that, a bare `null` threw on
+  // `body.title` and answered 500. The rows are the JSON spellings of every
+  // non-object value; the response must equal the `{}` body's, exactly.
+  const NON_OBJECT_BODIES: [string, string][] = [
+    ["null", "null"],
+    ["a number", "5"],
+    ["a string", '"x"'],
+    ["a boolean", "true"],
+    ["an empty array", "[]"],
+    ["an array holding a would-be body", '[{"title":"陣列裡的書櫃"}]'],
+  ];
+
+  // Contract copy — the missing-title / no-fields answers in
+  // src/routes/publicShelf.ts (en dash in "1–60").
+  const MISSING_TITLE = {
+    error: { code: "INVALID_TITLE", message: "Title must be 1–60 characters" },
+  };
+  const NO_FIELDS = {
+    error: {
+      code: "INVALID_PAYLOAD",
+      message: "At least one of title or expiresDays is required",
+    },
+  };
+
+  it.each(NON_OBJECT_BODIES)(
+    "answers create with %s body like an empty object: 400 INVALID_TITLE, charged",
+    async (_label, body) => {
+      await seedUser(USER_ID, AUTH_TOKEN);
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const res = await prodRequest(
+        "POST",
+        `/api/user/${USER_ID}/public-shelf`,
+        {
+          body,
+          token: AUTH_TOKEN,
+        },
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual(MISSING_TITLE);
+      // Charge-before-parse is unchanged: the ceiling ran first.
+      expect(await writesCharged(USER_ID)).toBe(1);
+      expect(errorLog).not.toHaveBeenCalled();
+      expect(await pointerShelves(USER_ID)).toBeNull();
+
+      // Positive companion: the `{}` body gets the very same answer.
+      const empty = await prodRequest(
+        "POST",
+        `/api/user/${USER_ID}/public-shelf`,
+        { body: "{}", token: AUTH_TOKEN },
+      );
+      expect(empty.status).toBe(400);
+      expect(await empty.json()).toEqual(MISSING_TITLE);
+    },
+  );
+
+  it.each(NON_OBJECT_BODIES)(
+    "answers update with %s body like an empty object: 400 INVALID_PAYLOAD, charged",
+    async (_label, body) => {
+      const shelf = await seedUserWithShelf();
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      const path = `/api/user/${USER_ID}/public-shelf/${shelf.shelfId}`;
+
+      const res = await prodRequest("PUT", path, { body, token: AUTH_TOKEN });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual(NO_FIELDS);
+      // Charge-before-parse is unchanged: the ceiling ran first.
+      expect(await writesCharged(USER_ID)).toBe(1);
+      expect(errorLog).not.toHaveBeenCalled();
+      expect((await pointerShelves(USER_ID))?.[0].title).toBe(shelf.title);
+
+      // Positive companion: the `{}` body gets the very same answer.
+      const empty = await prodRequest("PUT", path, {
+        body: "{}",
+        token: AUTH_TOKEN,
+      });
+      expect(empty.status).toBe(400);
+      expect(await empty.json()).toEqual(NO_FIELDS);
+    },
+  );
 
   it("answers 429 rather than 400 for a malformed body once the window is spent", async () => {
     await seedUser(USER_ID, AUTH_TOKEN);

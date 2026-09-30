@@ -24,11 +24,11 @@ type Json = any;
  * #227 every route declares tagged path-param schemas (`schemas/common.ts`)
  * and the hook answers their registry copy — that end-to-end contract is
  * pinned by `tests/integration/paramValidation.test.ts`. No real route
- * declares a body / query / header schema yet (request bodies are still
- * validated by the handlers; moving them into the schemas is #239), so the
- * other branches are exercised only here. The last two describe blocks cover
- * the tag lookup: the production param schemas map to their registry copy,
- * and an unregistered tag falls back to INVALID_PARAMS.
+ * declares a body / query / header schema: request bodies are validated by the
+ * handlers BY DESIGN (#239 decided against moving them into the schemas), so
+ * the other branches are exercised only here. The last two describe blocks
+ * cover the tag lookup: the production param schemas map to their registry
+ * copy, and an unregistered tag falls back to INVALID_PARAMS.
  */
 
 // Distinctive value placed in every failing field: it must never come back.
@@ -345,10 +345,12 @@ describe("defaultHook", () => {
     },
   );
 
-  // Documents the caveat in the hook's JSDoc — NOT desired behaviour to
-  // preserve: an unparsable JSON body never reaches `defaultHook`. Hono's
-  // validator throws HTTPException(400) before zod runs, so it lands on the
-  // app's onError instead of becoming an INVALID_FIELDS envelope.
+  // Documents the note in the hook's JSDoc: an unparsable JSON body never
+  // reaches `defaultHook`. Hono's validator throws HTTPException(400) before
+  // zod runs, so it lands on the app's onError instead of becoming an
+  // INVALID_FIELDS envelope. This synthetic app's onError is a stand-in; the
+  // PRODUCTION onError maps that throw to 400 INVALID_JSON via `clientErrorFor`
+  // (src/utils/errors.ts) — pinned in tests/integration/appOnError.test.ts.
   it("is bypassed by an unparsable JSON body (hono throws HTTPException 400)", async () => {
     const caveatApp = buildApp();
     const thrown: unknown[] = [];
