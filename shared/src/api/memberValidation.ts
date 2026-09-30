@@ -70,7 +70,7 @@ function toBoolFlagField(value: unknown): BoolFlag | undefined {
  * Exported because the list is not the only door into `members` state: the
  * single member object returned by `PATCH /api/family/:id/member/:uid` is
  * spliced into it verbatim by `updateMember` in
- * `extension/src/dialog/FamilyDataContext.tsx`, so that client's
+ * `extension/src/dialog/useFamilyDataMembers.ts`, so that client's
  * `updateMemberSettings` puts the payload through the same drop/normalize rules.
  * The drop criterion needs no adjustment there: every consumer of the result
  * already has the `|| userId.slice(0, 8)` fallback a normalized `displayName`

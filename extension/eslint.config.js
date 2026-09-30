@@ -20,8 +20,6 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/content/scraper.ts": 220,
   "src/dialog/App.tsx": 484,
   "src/dialog/BorrowTab.tsx": 475,
-  "src/dialog/FamilyDataContext.tsx": 529,
-  "src/dialog/FamilySettings.tsx": 593,
   "src/dialog/FamilyShelf.tsx": 220,
   "src/dialog/MemberDropdown.tsx": 205,
   "src/dialog/MemberList.tsx": 402,

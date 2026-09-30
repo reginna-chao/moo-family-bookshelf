@@ -1,30 +1,12 @@
-import { useState, useEffect, useRef } from "react";
-import { Eye, EyeOff } from "lucide-react";
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
-import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
-import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
-import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
-import { ApiClient } from "@/api/client";
-import type { VerifyMethod } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
-import { REMEMBERED_LOGOUT_KEY, REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
-import { getAppEnv } from "@/utils/appEnv";
-import { isUnsafeApiHost, UNSAFE_API_HOST_ERROR } from "@/utils/apiHostGuard";
-import { FAMILY_FULL_MESSAGE } from "@/utils/joinErrorMessages";
-import { useRetryCountdown } from "@/hooks/useRetryCountdown";
-import { useSyncCodeHostVerdict } from "@/hooks/useSyncCodeHostVerdict";
-import { useQrJoin } from "@/hooks/useQrJoin";
-import type { JoinOrigin, PendingAuth } from "@/hooks/joinState";
-import {
-  buildRetryMessage,
-  buildStaticRetryMessage,
-} from "@/utils/retryMessage";
-import type { RetryErrorCode } from "@/utils/retryMessage";
-import { PinInput } from "@/components/PinInput";
-import { PatternLock } from "@/components/PatternLock";
-import { ErrorAlert } from "@/components/ErrorAlert";
-import { SyncCodeHostNote } from "@/components/SyncCodeHostNote";
+import { useLandingFormFields } from "@/hooks/useLandingFormFields";
+import { useLandingJoin } from "@/hooks/useLandingJoin";
+import { useLandingSubmit } from "@/hooks/useLandingSubmit";
 import { CustomHostConsent } from "@/components/CustomHostConsent";
+import { LandingVerifyScreen } from "@/components/LandingVerifyScreen";
+import { LandingBrandHeader } from "@/components/LandingBrandHeader";
+import { LandingForm } from "@/components/LandingForm";
 
 interface LandingPageProps {
   onAuth: (data: AuthState) => void;
@@ -38,9 +20,11 @@ interface LandingPageProps {
   externalError?: string;
 }
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const APP_ENV = getAppEnv();
-
+/**
+ * The PWA sign-in page. Every piece of state lives in the hooks called here —
+ * this component is always mounted while signed out — and the screens below
+ * only render it: custom-host consent, verification, QR busy, or the form.
+ */
 export function LandingPage({
   onAuth,
   initialSyncCode = "",
@@ -48,301 +32,61 @@ export function LandingPage({
   qrToken = "",
   externalError = "",
 }: LandingPageProps) {
-  // Seeded from the prop so an invite-link / QR prefill is already in the field
-  // at FIRST render: the verdict hook counts a never-typed value as settled, so
-  // its `@host` note lands at once instead of waiting out the settle delay. The
-  // effect below still covers a later `initialSyncCode` change.
-  const [syncCodeInput, setSyncCodeInput] = useState(initialSyncCode);
-  // Holds the `@host` warning back until the typed code settles, so it cannot
-  // flash on every intermediate keystroke.
-  const hostVerdict = useSyncCodeHostVerdict(syncCodeInput);
-  const [showCode, setShowCode] = useState(false);
-  const [email, setEmail] = useState("");
-  const [rememberSyncCode, setRememberSyncCode] = useState(() => {
-    return localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0";
+  const {
+    syncCodeInput,
+    setSyncCodeInput,
+    hostVerdict,
+    showCode,
+    setShowCode,
+    email,
+    setEmail,
+    rememberSyncCode,
+    setRememberSyncCode,
+    syncCodeError,
+    setSyncCodeError,
+    emailError,
+    setEmailError,
+  } = useLandingFormFields(initialSyncCode);
+
+  const {
+    getJoinClient,
+    generalError,
+    setGeneralError,
+    joinOrigin,
+    setJoinOrigin,
+    isSubmitting,
+    pendingAuth,
+    setPendingAuth,
+    verifyError,
+    codeInput,
+    setCodeInput,
+    retryMessage,
+    retryAnnouncement,
+    retryBlocked,
+    clearRetryLock,
+    completeJoin,
+    handleVerifyComplete,
+    handleVerifyCancel,
+    hostConsent,
+    handleHostConsentConfirm,
+    handleHostConsentCancel,
+  } = useLandingJoin({ onAuth, initialSyncCode, qrUserId, qrToken });
+
+  const handleSubmit = useLandingSubmit({
+    syncCodeInput,
+    email,
+    rememberSyncCode,
+    hostVerdict,
+    retryBlocked,
+    setSyncCodeError,
+    setEmailError,
+    setGeneralError,
+    clearRetryLock,
+    setJoinOrigin,
+    getJoinClient,
+    setPendingAuth,
+    completeJoin,
   });
-
-  // Cache join client per apiHost to avoid re-creating on each submit
-  const joinClientRef = useRef<{
-    host: string | undefined;
-    client: ApiClient;
-  } | null>(null);
-  function getJoinClient(host: string | undefined): ApiClient {
-    if (joinClientRef.current !== null && joinClientRef.current.host === host) {
-      return joinClientRef.current.client;
-    }
-    const client = new ApiClient(host);
-    joinClientRef.current = { host, client };
-    return client;
-  }
-
-  // Pick up remembered sync code from localStorage (logout with "remember" enabled)
-  useEffect(() => {
-    const remembered = localStorage.getItem(REMEMBERED_LOGOUT_KEY);
-    if (remembered) {
-      localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
-      setSyncCodeInput(remembered);
-    }
-  }, []);
-
-  // Update field if initialSyncCode changes (QR code, invite link, or remembered logout via state)
-  useEffect(() => {
-    if (initialSyncCode) {
-      setSyncCodeInput(initialSyncCode);
-    }
-  }, [initialSyncCode]);
-
-  const [syncCodeError, setSyncCodeError] = useState("");
-  const [emailError, setEmailError] = useState("");
-  const [generalError, setGeneralError] = useState("");
-  const [joinOrigin, setJoinOrigin] = useState<JoinOrigin | null>(null);
-  /** Derived: "something is in flight" has exactly one owner, `joinOrigin`. */
-  const isSubmitting = joinOrigin !== null;
-
-  // Verification state
-  const [pendingAuth, setPendingAuth] = useState<PendingAuth | null>(null);
-  const [verifyError, setVerifyError] = useState("");
-  const [codeInput, setCodeInput] = useState("");
-
-  // Back-off state (429): the code drives the copy, the countdown the seconds.
-  const [retryCode, setRetryCode] = useState<RetryErrorCode | null>(null);
-  const retryCountdown = useRetryCountdown(() => setRetryCode(null));
-  const retryMessage =
-    retryCode === null
-      ? ""
-      : buildRetryMessage(retryCode, retryCountdown.remaining);
-  /** Countdown-free twin of `retryMessage`, announced once instead of per tick.
-   *  Undefined when no back-off notice is showing, so any other error copy —
-   *  which never ticks — keeps announcing itself. */
-  const retryAnnouncement =
-    retryCode === null ? undefined : buildStaticRetryMessage(retryCode);
-  /** True only while a countdown is running — blocks submit/verify actions. */
-  const retryBlocked = retryCode !== null && retryCountdown.remaining > 0;
-
-  /** Show a back-off notice; a positive `retryAfter` starts the live countdown. */
-  function startRetryLock(code: RetryErrorCode, retryAfter?: number) {
-    setRetryCode(code);
-    retryCountdown.start(retryAfter ?? 0);
-  }
-
-  function clearRetryLock() {
-    setRetryCode(null);
-    retryCountdown.clear();
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    // Submitting ends the editing session, so the warning must not wait.
-    hostVerdict.settleNow();
-    if (retryBlocked) return;
-    setSyncCodeError("");
-    setEmailError("");
-    setGeneralError("");
-    clearRetryLock();
-
-    const trimmedCode = syncCodeInput.trim();
-
-    if (!trimmedCode) {
-      setSyncCodeError("請輸入同步碼。");
-      return;
-    }
-
-    // Decode sync code
-    let decoded;
-    try {
-      decoded = decodeSyncCode(trimmedCode);
-    } catch (err) {
-      if (err instanceof SyncCodeError) {
-        setSyncCodeError("同步碼格式不正確，請確認後重新輸入。");
-      } else {
-        setSyncCodeError("同步碼解析失敗，請重試。");
-      }
-      return;
-    }
-
-    // Refuse an unsafe `@host` before anything reaches it — the verify-method
-    // probe below already goes to that server.
-    if (isUnsafeApiHost(decoded.apiHost)) {
-      setSyncCodeError(UNSAFE_API_HOST_ERROR);
-      return;
-    }
-
-    // Validate email
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      setEmailError("請輸入 Email。");
-      return;
-    }
-    if (!EMAIL_REGEX.test(trimmedEmail)) {
-      setEmailError("Email 格式不正確。");
-      return;
-    }
-
-    // Persist remember preference
-    localStorage.setItem(REMEMBER_SYNC_CODE_KEY, rememberSyncCode ? "1" : "0");
-
-    setJoinOrigin("form");
-
-    try {
-      const userId = await deriveUserId(trimmedEmail);
-      const joinClient = getJoinClient(decoded.apiHost);
-
-      // Check verification method before joining
-      const verifyRes = await joinClient.getVerifyMethod(userId);
-      const method: VerifyMethod = verifyRes.data?.method ?? "none";
-
-      if (method !== "none") {
-        setPendingAuth({
-          userId,
-          familyId: decoded.familyId,
-          apiHost: decoded.apiHost,
-          verifyMethod: method,
-        });
-        setJoinOrigin(null);
-        return;
-      }
-
-      // No verification needed — join directly
-      await completeJoin(decoded.familyId, userId, decoded.apiHost);
-    } catch {
-      setGeneralError("處理失敗，請重試。");
-      setJoinOrigin(null);
-    }
-  }
-
-  async function completeJoin(
-    familyId: string,
-    userId: string,
-    apiHost?: string,
-    verifySecret?: string,
-    tokenFromQr?: string,
-  ) {
-    // Single choke point for every join path (form, verification prompt, QR):
-    // an address the client would refuse never gets a request, a token, or a
-    // localStorage entry.
-    if (isUnsafeApiHost(apiHost)) {
-      setPendingAuth(null);
-      setGeneralError(UNSAFE_API_HOST_ERROR);
-      setJoinOrigin(null);
-      return;
-    }
-
-    // An attempt already in flight keeps the origin it started with (the QR
-    // path sets "qr" before calling in); a fresh entry from the verification
-    // prompt is user-driven, so it counts as form-shaped.
-    setJoinOrigin((prev) => prev ?? "form");
-    try {
-      const joinClient = getJoinClient(apiHost);
-      const joinRes = await joinClient.joinFamily(familyId, userId, {
-        verifySecret,
-        qrToken: tokenFromQr,
-      });
-      if (joinRes.error) {
-        const code = joinRes.error.code;
-        const retryAfter = joinRes.error.retryAfter;
-        const hasRetryHint = typeof retryAfter === "number" && retryAfter > 0;
-        if (code === "FAMILY_FULL") {
-          // Same entry the token-recovery path shows (App.tsx reads it out of
-          // JOIN_BLOCKED_MESSAGES, which is built from this constant), so the
-          // two join paths cannot report a full family differently.
-          setGeneralError(FAMILY_FULL_MESSAGE);
-        } else if (
-          code === "VERIFICATION_REQUIRED" ||
-          code === "VERIFICATION_FAILED"
-        ) {
-          // If QR token was used but rejected, fall back to verification UI
-          if (tokenFromQr && !pendingAuth) {
-            const verifyRes = await joinClient.getVerifyMethod(userId);
-            const method: VerifyMethod = verifyRes.data?.method ?? "none";
-            if (method !== "none") {
-              setPendingAuth({
-                userId,
-                familyId,
-                apiHost,
-                verifyMethod: method,
-              });
-              if (code === "VERIFICATION_FAILED") {
-                setVerifyError("QR 驗證碼已過期，請手動驗證。");
-              }
-              setJoinOrigin(null);
-              return;
-            }
-          }
-          if (code === "VERIFICATION_REQUIRED") {
-            setVerifyError("需要驗證才能登入。");
-          } else {
-            setVerifyError("驗證失敗，請重新輸入。");
-          }
-        } else if (code === "VERIFICATION_LOCKED") {
-          // Lockout is server-side, so drop the challenge UI and surface the
-          // wait on the form. Without `retryAfter` the copy stays static.
-          setVerifyError("");
-          startRetryLock("VERIFICATION_LOCKED", retryAfter);
-          setPendingAuth(null);
-          // Drop the rejected OTP so a re-opened prompt starts empty.
-          setCodeInput("");
-        } else if (code === "RATE_LIMITED" && hasRetryHint) {
-          // Keep the challenge UI mounted: the user may retry once the window
-          // clears. Quota errors without a hint fall through to generic copy.
-          setVerifyError("");
-          startRetryLock("RATE_LIMITED", retryAfter);
-        } else {
-          setGeneralError(
-            safeErrorText(joinRes.error.message, "加入家庭失敗，請重試。"),
-          );
-        }
-        setJoinOrigin(null);
-        return;
-      }
-
-      // Deliberately no `setJoinOrigin(null)` on this exit: the parent swaps
-      // this page out on `onAuth`, and "still working" is the honest screen
-      // until it does. Every exit that stays on this page clears the origin.
-      setPendingAuth(null);
-      onAuth({
-        userId,
-        familyId,
-        apiHost,
-        authToken: joinRes.data?.authToken,
-      });
-    } catch {
-      setGeneralError("處理失敗，請重試。");
-      setJoinOrigin(null);
-    }
-  }
-
-  function handleVerifyComplete(secret: string) {
-    if (!pendingAuth || retryBlocked) return;
-    setVerifyError("");
-    clearRetryLock();
-    void completeJoin(
-      pendingAuth.familyId,
-      pendingAuth.userId,
-      pendingAuth.apiHost,
-      secret,
-    );
-  }
-
-  function handleVerifyCancel() {
-    setPendingAuth(null);
-    setVerifyError("");
-    setCodeInput("");
-  }
-
-  // The QR arrival's own machinery: consent gate + one-shot auto-trigger. It
-  // keeps its distance from the state the form path shares (`joinOrigin`,
-  // `pendingAuth`, `generalError`), which is why the raw setters go in.
-  const { hostConsent, handleHostConsentConfirm, handleHostConsentCancel } =
-    useQrJoin({
-      qrUserId,
-      initialSyncCode,
-      qrToken,
-      completeJoin,
-      getJoinClient,
-      setJoinOrigin,
-      setGeneralError,
-      setPendingAuth,
-    });
 
   // Back-off copy wins over the per-attempt error: it carries the live
   // countdown. `generalError` is last so non-verification failures (a 429 with
@@ -366,70 +110,18 @@ export function LandingPage({
   if (pendingAuth) {
     return (
       <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
-        {/* QR / invite arrivals never see the form, so this is their only
-            chance to learn which server they are about to authenticate to. */}
-        <SyncCodeHostNote
-          result={classifySyncCodeApiHost(pendingAuth.apiHost)}
-          variant="verify"
-          className="mb-4 w-full max-w-xs"
+        <LandingVerifyScreen
+          apiHost={pendingAuth.apiHost}
+          verifyMethod={pendingAuth.verifyMethod}
+          promptError={promptError}
+          retryAnnouncement={retryAnnouncement}
+          retryBlocked={retryBlocked}
+          isSubmitting={isSubmitting}
+          codeInput={codeInput}
+          setCodeInput={setCodeInput}
+          onVerifyComplete={handleVerifyComplete}
+          onVerifyCancel={handleVerifyCancel}
         />
-        {pendingAuth.verifyMethod === "pin" && (
-          <PinInput
-            mode="verify"
-            error={promptError}
-            errorAnnouncement={retryAnnouncement}
-            disabled={retryBlocked || isSubmitting}
-            onComplete={handleVerifyComplete}
-            onCancel={handleVerifyCancel}
-          />
-        )}
-        {pendingAuth.verifyMethod === "pattern" && (
-          <PatternLock
-            mode="verify"
-            error={promptError}
-            errorAnnouncement={retryAnnouncement}
-            disabled={retryBlocked || isSubmitting}
-            onComplete={handleVerifyComplete}
-            onCancel={handleVerifyCancel}
-          />
-        )}
-        {pendingAuth.verifyMethod === "code" && (
-          <div className="flex flex-col items-center w-full max-w-xs mx-auto">
-            <h2 className="text-lg font-bold text-gray-900 mb-2">輸入驗證碼</h2>
-            <p className="text-sm text-gray-500 mb-4 text-center">
-              請在電腦版 Extension 查看驗證碼
-            </p>
-            <ErrorAlert
-              message={promptError}
-              announcement={retryAnnouncement}
-              className="mb-3"
-            />
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={6}
-              value={codeInput}
-              onChange={(e) => setCodeInput(e.target.value.replace(/\D/g, ""))}
-              placeholder="6 位數驗證碼"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-center text-2xl tracking-widest focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none mb-4"
-            />
-            <button
-              type="button"
-              onClick={() => handleVerifyComplete(codeInput)}
-              disabled={codeInput.length !== 6 || isSubmitting || retryBlocked}
-              className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSubmitting ? "驗證中..." : "確認"}
-            </button>
-            <button
-              type="button"
-              onClick={handleVerifyCancel}
-              className="mt-3 text-sm text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              取消
-            </button>
-          </div>
-        )}
       </div>
     );
   }
@@ -454,121 +146,28 @@ export function LandingPage({
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center px-6 bg-white">
-      <img
-        src={APP_ENV !== "prod" ? "/dev/icon.svg" : "/icon.svg"}
-        alt="墨家書櫃"
-        className="w-16 h-16 rounded-2xl mb-4"
+      <LandingBrandHeader />
+
+      <LandingForm
+        onSubmit={handleSubmit}
+        formError={formError}
+        retryAnnouncement={retryAnnouncement}
+        syncCodeInput={syncCodeInput}
+        setSyncCodeInput={setSyncCodeInput}
+        syncCodeError={syncCodeError}
+        setSyncCodeError={setSyncCodeError}
+        showCode={showCode}
+        setShowCode={setShowCode}
+        hostVerdict={hostVerdict}
+        email={email}
+        setEmail={setEmail}
+        emailError={emailError}
+        setEmailError={setEmailError}
+        rememberSyncCode={rememberSyncCode}
+        setRememberSyncCode={setRememberSyncCode}
+        isSubmitting={isSubmitting}
+        retryBlocked={retryBlocked}
       />
-      <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-        墨家書櫃
-        {APP_ENV !== "prod" && (
-          <span
-            className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-              APP_ENV === "local"
-                ? "bg-red-100 text-red-700 border border-red-300"
-                : "bg-blue-100 text-blue-700 border border-blue-300"
-            }`}
-          >
-            {APP_ENV === "local" ? "LOCAL" : "DEV"}
-          </span>
-        )}
-      </h1>
-      <p className="text-gray-500 mb-8 text-center">
-        家庭共享書櫃 — 與家人分享你的讀墨藏書
-      </p>
-
-      <form onSubmit={handleSubmit} className="w-full space-y-4 mt-8">
-        <ErrorAlert message={formError} announcement={retryAnnouncement} />
-
-        <div>
-          <label
-            htmlFor="sync-code"
-            className="block text-sm font-medium text-gray-700 mb-1"
-          >
-            同步碼
-          </label>
-          <div className="relative">
-            <input
-              id="sync-code"
-              type={showCode ? "text" : "password"}
-              autoComplete="off"
-              value={syncCodeInput}
-              onChange={(e) => {
-                setSyncCodeInput(e.target.value);
-                if (syncCodeError) setSyncCodeError("");
-              }}
-              onPaste={hostVerdict.settleOnNextChange}
-              onBlur={hostVerdict.settleNow}
-              placeholder="moo-xxxxxxxx-xxxxxxxxxxxx"
-              aria-invalid={!!syncCodeError || undefined}
-              aria-describedby={syncCodeError ? "sync-code-error" : undefined}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 pr-10 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-            />
-            <button
-              type="button"
-              onClick={() => setShowCode(!showCode)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5"
-              aria-label={showCode ? "隱藏同步碼" : "顯示同步碼"}
-            >
-              {showCode ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-          {syncCodeError && (
-            <p id="sync-code-error" className="text-red-500 text-xs mt-1">
-              {syncCodeError}
-            </p>
-          )}
-        </div>
-
-        {/* Covers both the typed code and an invite link's pre-filled one. */}
-        <SyncCodeHostNote result={hostVerdict.result} />
-
-        <div>
-          <label
-            htmlFor="email"
-            className="block text-sm font-medium text-gray-700 mb-1"
-          >
-            讀墨帳號 Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-              if (emailError) setEmailError("");
-            }}
-            placeholder="your@email.com"
-            aria-invalid={!!emailError || undefined}
-            aria-describedby={emailError ? "email-error" : undefined}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-          />
-          {emailError && (
-            <p id="email-error" className="text-red-500 text-xs mt-1">
-              {emailError}
-            </p>
-          )}
-        </div>
-
-        <label className="flex items-center gap-2 text-sm text-gray-600">
-          <input
-            type="checkbox"
-            checked={rememberSyncCode}
-            onChange={(e) => setRememberSyncCode(e.target.checked)}
-            className="rounded border-gray-300"
-          />
-          記住同步碼
-        </label>
-
-        <button
-          type="submit"
-          disabled={isSubmitting || retryBlocked}
-          aria-busy={isSubmitting || undefined}
-          className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isSubmitting ? "處理中..." : "開始使用"}
-        </button>
-      </form>
 
       <p className="text-xs text-gray-400 mt-6 text-center">
         建議使用桌面版 Chrome 擴充功能掃描 QR Code，更快完成設定。

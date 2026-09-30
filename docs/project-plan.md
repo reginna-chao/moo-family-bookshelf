@@ -1091,7 +1091,7 @@ jobs:
   - **剩餘**：無。原本兩端各一份的 `useFamilyShelfPrefs`、`sortBooks`、`updateTracking` 已合併進 `shared/src/familyShelf/`（#208）；`useFamilyShelfPrefs` 的載入與同步流程移到共用的控制器，兩端只留一層很薄的 React hook。
 - [x] **BE-6 Worker 資料存取層**：已完成（#177）。所有路由改經 `worker/src/kv/*` 存取 KV，並有 ESLint 規則與 grep 測試把關。
 - [ ] **S3 / FE-3 / BE-7 分層與拆分**：非 bug，純可維護性，可隨相關檔案下次改動時**漸進處理**。
-  - 前端大檔（`useOnboardingFlow` 890 行、`FamilyDataContext` 529 行等）→ [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)
+  - 前端大檔（`useOnboardingFlow` 890 行、`FamilyDataContext` 529 行等）→ [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)：已完成，issue 列出的六個大檔都已拆到 200 行以內。
   - `join` handler（約 190 行）→ [#211](https://github.com/reginna-chao/moo-family-bookshelf/issues/211)
 
 ##### 🟢 低優先 — 擴充性（N=2 現在不痛，規模到了再做）
@@ -1107,7 +1107,7 @@ jobs:
 - [ ] **BE-11** 接上 zod-openapi 實際驗證 → [#227](https://github.com/reginna-chao/moo-family-bookshelf/issues/227)
 - [x] **BE-12** 補 publicShelf / OTP / QR 的 per-user 限流：已完成（`public-shelf`、`verify-write` 兩個每小時 scope）。
 - [x] **BE-13** 非原子多鍵寫入的部分失敗清理：已完成（家庭建立／加入／移除成員／解散改為重試可收斂的寫入順序）→ [#213](https://github.com/reginna-chao/moo-family-bookshelf/issues/213)
-- [ ] **FE-6** 拆 >200 行大檔；**FE-7** 收斂 props drilling → 併入 [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)
+- [x] **FE-6** 拆 >200 行大檔；**FE-7** 收斂 props drilling → 併入 [#210](https://github.com/reginna-chao/moo-family-bookshelf/issues/210)：已完成。issue 列出的六個大檔都拆到 200 行以內，拆檔時只傳各子元件實際用到的 props；其餘超過 200 行的檔案列在各套件 `eslint.config.js` 的行數上限清單，只能變短。
 - [ ] **FE-8** 抽共用 `useDismissable` → [#209](https://github.com/reginna-chao/moo-family-bookshelf/issues/209)
   - **已完成部分**：Extension 已有 `useDismissableMenu`；PWA 四個下拉元件仍各自手寫。
 - [x] **TEST-5/6/7** 補測 → [#215](https://github.com/reginna-chao/moo-family-bookshelf/issues/215)

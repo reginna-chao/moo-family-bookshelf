@@ -1,7 +1,8 @@
 /**
- * State shapes of the landing-page join flow, shared by `LandingPage` and
- * `useQrJoin`. They live beside the hook rather than in the page because the
- * page imports the hook — the dependency only ever points this way.
+ * State shapes of the landing-page join flow, shared by the `useLanding*`
+ * hooks and `useQrJoin`. They live beside the hooks rather than in the page
+ * because the page imports the hooks — the dependency only ever points this
+ * way.
  */
 
 import type { VerifyMethod } from "@/api/client";

@@ -22,8 +22,6 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/hooks/usePublicShelfActions.ts": 286,
   "src/pages/BorrowPage.tsx": 259,
   "src/pages/FamilyShelfPage.tsx": 224,
-  "src/pages/LandingPage.tsx": 581,
-  "src/pages/PersonalShelfPage.tsx": 540,
   "src/pages/PublicShelfPage.tsx": 202,
 };
 

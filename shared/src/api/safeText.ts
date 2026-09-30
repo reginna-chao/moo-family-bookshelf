@@ -139,7 +139,7 @@ export function sanitizeRecord<T>(value: T, sanitize: (record: T) => T): T {
  * materializes as `[]` here, because a list is consumed differently.
  * `GET /api/family/:id/members` answering
  * `members: [null]` is stored straight into React state (`setMembers` in
- * `extension/src/dialog/FamilyDataContext.tsx`, outside any `try`) and only
+ * `extension/src/dialog/useFamilyDataMembers.ts`, outside any `try`) and only
  * detonates on the NEXT render, at `members.map` + `member.displayName` in
  * `extension/src/dialog/MemberList.tsx`; `members: "oops"` does the same at
  * `members.length`. A throw from render is unreachable to every caller

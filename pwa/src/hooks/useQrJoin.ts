@@ -42,14 +42,15 @@ export interface UseQrJoinResult {
  * The QR-arrival half of the landing page: decode the scanned sync code, take
  * consent when it carries a custom `@host`, and start that join.
  *
- * Ownership split — the page keeps the join machinery (`completeJoin`, the
- * `ApiClient` cache) and, deliberately, the `joinOrigin` state: the manual FORM
- * path sets and reads it too, and there must be exactly one owner of "something
- * is in flight" (see `JoinOrigin` in `joinState.ts` for why that is one field
- * and not two flags). This hook owns only what exists for the QR path alone —
- * the consent gate and the one-shot auto-trigger. It receives the RAW state
- * setters, so a QR-driven transition is the same assignment the page would
- * have made inline.
+ * Ownership split — the page's join hooks keep the join machinery
+ * (`completeJoin` in `useLandingCompleteJoin.ts`, the `ApiClient` cache in
+ * `useLandingJoinClient.ts`) and, deliberately, the `joinOrigin` state in
+ * `useLandingJoin.ts`: the manual FORM path sets and reads it too, and there
+ * must be exactly one owner of "something is in flight" (see `JoinOrigin` in
+ * `joinState.ts` for why that is one field and not two flags). This hook owns
+ * only what exists for the QR path alone — the consent gate and the one-shot
+ * auto-trigger. It receives the RAW state setters, so a QR-driven transition
+ * is the same assignment `useLandingJoin` would have made inline.
  */
 export function useQrJoin({
   qrUserId,

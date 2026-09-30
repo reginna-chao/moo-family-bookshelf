@@ -35,8 +35,9 @@ import {
  * (and the copy it carries) unverified — and a factory that simply forgets it
  * makes the whole page throw on render.
  *
- * `classifySyncCodeApiHost` (imported by LandingPage straight from `shared/`)
- * is never mocked, so the endpoint-refusal guards run the production rules.
+ * `classifySyncCodeApiHost` (imported by LandingPage and LandingVerifyScreen
+ * straight from `shared/`) is never mocked, so the endpoint-refusal guards run
+ * the production rules.
  */
 vi.mock("@/crypto/syncCode", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/crypto/syncCode")>()),

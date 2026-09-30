@@ -461,7 +461,7 @@ describeEntitySanitizer<OtpInfo>("sanitizeOtpInfoText", {
  * one — becomes `[]`, and an element that cannot carry fields is DROPPED. That
  * is the container half of the white-screen gap the review filed: a `members`
  * list stored by `setMembers`
- * (`extension/src/dialog/FamilyDataContext.tsx:217`, outside any `try`) only
+ * (`extension/src/dialog/useFamilyDataMembers.ts:89`, outside any `try`) only
  * detonates on the NEXT render — `members.map` + `member.displayName`
  * (`extension/src/dialog/MemberList.tsx:295` / `:49`) for a `null` element,
  * `members.length` (`extension/src/dialog/MemberList.tsx:82`) for a non-array —

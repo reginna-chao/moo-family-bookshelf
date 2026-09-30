@@ -190,7 +190,10 @@ describe("FamilyDataProvider reloadSignal", () => {
  * wiring and the copy.
  */
 describe("FamilyDataProvider hostile error envelopes", () => {
-  /** Literal from FamilyDataContext.tsx — same copy at both call sites. */
+  /**
+   * Literal from useFamilyDataMembers.ts and useFamilyDataBookshelf.ts — same
+   * copy at both call sites.
+   */
   const LOAD_FAILED = "載入失敗，請稍後再試";
 
   const HOSTILE_MESSAGES = [

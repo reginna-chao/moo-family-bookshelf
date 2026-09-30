@@ -700,7 +700,7 @@ describe("ApiClient backend-text sanitization", () => {
    * tab stays blank until the user reloads:
    *
    *   - `members: [null]` → stored by `setMembers`
-   *     (`extension/src/dialog/FamilyDataContext.tsx:217`), then `members.map` +
+   *     (`extension/src/dialog/useFamilyDataMembers.ts:89`), then `members.map` +
    *     `member.displayName` (`extension/src/dialog/MemberList.tsx:295` / `:49`)
    *     throws a TypeError.
    *   - `members: "not-an-array"` → same store, then `members.length`
@@ -794,8 +794,8 @@ describe("ApiClient backend-text sanitization", () => {
 
     // The pass-through branch that must NOT change: `sanitizeEnvelope`
     // short-circuits on `undefined` and `sanitizeRecord` returns `null`
-    // untouched, so `if (response.data)` in `FamilyDataContext` keeps its "the
-    // backend sent nothing" branch instead of rendering an invented family.
+    // untouched, so `if (response.data)` in `useFamilyDataMembers` keeps its
+    // "the backend sent nothing" branch instead of rendering an invented family.
     it("leaves a null data payload as null instead of inventing a family", async () => {
       globalThis.fetch = mockFetchSuccess(null);
 

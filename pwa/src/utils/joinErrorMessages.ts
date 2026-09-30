@@ -4,7 +4,7 @@
  *
  * Shared by the two paths that can hit them so the wording cannot drift: the
  * token-recovery join in `pwa/src/App.tsx` (`acquireNewToken`) and the manual
- * join in `pwa/src/pages/LandingPage.tsx` (`completeJoin`).
+ * join in `pwa/src/hooks/useLandingCompleteJoin.ts` (`completeJoin`).
  */
 
 /**
