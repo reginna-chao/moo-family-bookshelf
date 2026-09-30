@@ -18,6 +18,9 @@ import {
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 import { API_ENDPOINT_KEY } from "../../src/constants";
+// Relative path, not the `moo-family-bookshelf-shared/*` alias: Playwright's
+// runtime resolution of that alias is unproven in this suite.
+import { MEMBER_FILTER_NAME_PREFIX } from "../../../shared/src/familyShelf/memberFilterLabel";
 
 /**
  * Helper: go through the full onboarding flow to get to main view.
@@ -147,28 +150,32 @@ test.describe("Book Sharing", () => {
 
     // The default filter is "其他家人的書" which excludes our own books.
     // Change the filter to "所有人的書" to see our own shared books.
-    const dropdown = dialog.getByLabel("篩選成員");
-    if (await dropdown.isVisible()) {
-      // Member filter is now a custom dropdown (button + listbox), not a <select>:
-      // open the trigger, then pick the option.
-      await dropdown.click();
-      await dialog.getByRole("option", { name: "所有人的書" }).click();
+    // Books were just shared, so the family shelf has books and the member
+    // filter must render — a missing trigger is a failure, not a skip.
+    // getByLabel substring-matches the prefix of the dynamic accessible name
+    // `篩選成員：{label}，{count} 本`.
+    const dropdown = dialog.getByLabel(MEMBER_FILTER_NAME_PREFIX);
+    await expect(dropdown).toBeVisible({ timeout: 10_000 });
 
-      // Wait for re-render after filter change — use BookCard's <a> tag to avoid
-      // strict mode violation from hidden PersonalShelf tab's <span> elements
-      await expect(
-        dialog.locator("a", { hasText: "被討厭的勇氣" }).first(),
-      ).toBeVisible({
-        timeout: 10_000,
-      });
+    // Member filter is a custom dropdown (button + listbox), not a <select>:
+    // open the trigger, then pick the option.
+    await dropdown.click();
+    await dialog.getByRole("option", { name: "所有人的書" }).click();
 
-      // Assert that the shared books are visible
-      await expect(
-        dialog.locator("a", { hasText: "原子習慣" }).first(),
-      ).toBeVisible({
-        timeout: 5_000,
-      });
-    }
+    // Wait for re-render after filter change — use BookCard's <a> tag to avoid
+    // strict mode violation from hidden PersonalShelf tab's <span> elements
+    await expect(
+      dialog.locator("a", { hasText: "被討厭的勇氣" }).first(),
+    ).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Assert that the shared books are visible
+    await expect(
+      dialog.locator("a", { hasText: "原子習慣" }).first(),
+    ).toBeVisible({
+      timeout: 5_000,
+    });
 
     await page.close();
   });

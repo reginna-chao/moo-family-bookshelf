@@ -5,6 +5,14 @@ export interface DismissableMenuOptions {
   onClose: () => void;
   triggerRef: RefObject<HTMLElement | null>;
   menuRef: RefObject<HTMLElement | null>;
+  /**
+   * On Escape, move focus back to the trigger after closing, so keyboard and
+   * screen-reader users land on it (and hear its current name) instead of on
+   * `<body>` when the focused option unmounts. Outside click, scroll and resize
+   * never move focus — the user went elsewhere. Default false. Keep the name
+   * and semantics identical to `pwa/src/hooks/useDismissableMenu.ts`.
+   */
+  returnFocusOnEscape?: boolean;
 }
 
 /**
@@ -47,11 +55,14 @@ export function useDismissableMenu({
   onClose,
   triggerRef,
   menuRef,
+  returnFocusOnEscape = false,
 }: DismissableMenuOptions): void {
-  // Store the latest onClose so listeners always call the current callback
-  // without re-subscribing on every render.
+  // Store the latest onClose / returnFocusOnEscape so listeners always read
+  // the current values without re-subscribing on every render.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const returnFocusRef = useRef(returnFocusOnEscape);
+  returnFocusRef.current = returnFocusOnEscape;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -64,6 +75,7 @@ export function useDismissableMenu({
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       onCloseRef.current();
+      if (returnFocusRef.current) triggerRef.current?.focus();
     }
     function handleClose() {
       onCloseRef.current();

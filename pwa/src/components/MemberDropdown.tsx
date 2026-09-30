@@ -1,21 +1,9 @@
 import { useState, useRef, useMemo, useCallback } from "react";
-import type { ReactNode } from "react";
-import {
-  Users,
-  UsersRound,
-  User,
-  Heart,
-  EyeOff,
-  ChevronDown,
-} from "lucide-react";
-import {
-  FAVORITE_FILTER_VALUE,
-  HIDDEN_FILTER_VALUE,
-  type MemberFilterValue,
-} from "@/hooks/useFamilyShelfBooks";
+import { ChevronDown } from "lucide-react";
+import type { MemberFilterValue } from "@/hooks/useFamilyShelfBooks";
 import type { MemberBooks } from "@/hooks/useFamilyData";
 import { useDismissableMenu } from "@/hooks/useDismissableMenu";
-import { countVisibleByMemberScope } from "moo-family-bookshelf-shared/familyShelf/memberScopeCounts";
+import { buildOptions } from "@/components/memberFilterOptions";
 import { memberFilterAccessibleName } from "moo-family-bookshelf-shared/familyShelf/memberFilterLabel";
 
 export interface MemberDropdownProps {
@@ -31,81 +19,11 @@ export interface MemberDropdownProps {
   hiddenRefs: ReadonlySet<string>;
 }
 
-interface MemberOption {
-  key: string;
-  value: MemberFilterValue;
-  label: string;
-  icon: ReactNode;
-  /** Books this option will show (before category / search); hidden excluded. */
-  count: number;
-}
-
-/**
- * Build the member-filter options. Ordering is fixed:
- * all / all-except-self / self / each other member with books / favorite / hidden.
- * Member-scope counts exclude hidden books; favorite / hidden keep their totals.
- */
-function buildOptions(
-  members: MemberBooks[],
-  userId: string,
-  favoriteCount: number,
-  hiddenCount: number,
-  hiddenRefs: ReadonlySet<string>,
-): MemberOption[] {
-  const counts = countVisibleByMemberScope(members, userId, hiddenRefs);
-  const othersWithBooks = members.filter(
-    (m) => m.userId !== userId && m.books.length > 0,
-  );
-
-  return [
-    {
-      key: "all",
-      value: "all",
-      label: "所有人的書",
-      icon: <Users size={16} aria-hidden="true" />,
-      count: counts.all,
-    },
-    {
-      key: "all-except-self",
-      value: "all-except-self",
-      label: "其他家人的書",
-      icon: <UsersRound size={16} aria-hidden="true" />,
-      count: counts.allExceptSelf,
-    },
-    {
-      key: "self",
-      value: userId,
-      label: "自己的書",
-      icon: <User size={16} aria-hidden="true" />,
-      count: counts.byMember.get(userId) ?? 0,
-    },
-    ...othersWithBooks.map((m) => ({
-      key: m.userId,
-      value: m.userId,
-      label: m.displayName || m.userId.slice(0, 8),
-      icon: <User size={16} aria-hidden="true" />,
-      count: counts.byMember.get(m.userId) ?? 0,
-    })),
-    {
-      key: FAVORITE_FILTER_VALUE,
-      value: FAVORITE_FILTER_VALUE,
-      label: "我的最愛",
-      icon: <Heart size={16} aria-hidden="true" />,
-      count: favoriteCount,
-    },
-    {
-      key: HIDDEN_FILTER_VALUE,
-      value: HIDDEN_FILTER_VALUE,
-      label: "隱藏的書",
-      icon: <EyeOff size={16} aria-hidden="true" />,
-      count: hiddenCount,
-    },
-  ];
-}
-
 /**
  * Custom member-filter dropdown (PWA): icon + label trigger, popover listbox
  * with counts. Closes on outside click or Escape via useDismissableMenu.
+ * Choosing an option or pressing Escape returns focus to the trigger, whose
+ * accessible name then announces the new scope and count.
  */
 export function MemberDropdown({
   members,
@@ -129,11 +47,19 @@ export function MemberDropdown({
   const handleToggle = useCallback(() => setOpen((prev) => !prev), []);
   const close = useCallback(() => setOpen(false), []);
 
-  useDismissableMenu({ isOpen: open, onClose: close, triggerRef, menuRef });
+  useDismissableMenu({
+    isOpen: open,
+    onClose: close,
+    triggerRef,
+    menuRef,
+    returnFocusOnEscape: true,
+  });
 
   function handleSelect(next: MemberFilterValue) {
     onChange(next);
     setOpen(false);
+    // The option unmounts with the menu; land focus back on the trigger.
+    triggerRef.current?.focus();
   }
 
   return (
@@ -143,7 +69,7 @@ export function MemberDropdown({
         onClick={handleToggle}
         aria-label={memberFilterAccessibleName(current.label, current.count)}
         aria-expanded={open}
-        className="flex items-center justify-between w-full rounded-lg border border-gray-300 bg-white pl-3 pr-3 py-2.5 text-sm text-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+        className="flex items-center justify-between w-full rounded-lg border border-gray-300 bg-white pl-3 pr-3 py-2.5 text-sm text-gray-700 focus-visible:border-blue-500 focus-visible:ring-1 focus-visible:ring-blue-500 outline-none"
       >
         <span className="flex items-center gap-2 min-w-0 [&>svg]:flex-shrink-0">
           {current.icon}

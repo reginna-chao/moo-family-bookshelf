@@ -12,12 +12,19 @@ import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 interface HarnessProps {
   isOpen: boolean;
   onClose: () => void;
+  returnFocusOnEscape?: boolean;
 }
 
-function Harness({ isOpen, onClose }: HarnessProps) {
+function Harness({ isOpen, onClose, returnFocusOnEscape }: HarnessProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  useDismissableMenu({ isOpen, onClose, triggerRef, menuRef });
+  useDismissableMenu({
+    isOpen,
+    onClose,
+    triggerRef,
+    menuRef,
+    returnFocusOnEscape,
+  });
   return (
     <>
       <button ref={triggerRef} data-testid="trigger">
@@ -208,6 +215,98 @@ describe("useDismissableMenu", () => {
     });
   });
 
+  // Focus starts on an option inside the menu (where a keyboard user is while
+  // the menu is open). onClose is a mock, so the menu stays mounted and a
+  // focus that was NOT moved remains observable on that option.
+  describe("returnFocusOnEscape", () => {
+    function focusMenuItem(): HTMLElement {
+      const item = screen.getByTestId("menu-item");
+      item.focus();
+      expect(item).toHaveFocus();
+      return item;
+    }
+
+    it("moves focus to the trigger on Escape when enabled", () => {
+      const onClose = vi.fn();
+      render(<Harness isOpen onClose={onClose} returnFocusOnEscape />);
+      focusMenuItem();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("trigger")).toHaveFocus();
+    });
+
+    it.each<{ name: string; flag: boolean | undefined }>([
+      { name: "the option is omitted (default)", flag: undefined },
+      { name: "the option is false", flag: false },
+    ])(
+      "closes on Escape but leaves focus where it was when $name",
+      ({ flag }) => {
+        const onClose = vi.fn();
+        render(<Harness isOpen onClose={onClose} returnFocusOnEscape={flag} />);
+        const item = focusMenuItem();
+
+        fireEvent.keyDown(document, { key: "Escape" });
+
+        // Positive companion: Escape was handled, only the focus move is off.
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(item).toHaveFocus();
+        expect(screen.getByTestId("trigger")).not.toHaveFocus();
+      },
+    );
+
+    // Only Escape returns focus: every other dismissal means the user went
+    // elsewhere, so the hook must not pull focus back to the trigger.
+    it.each<{ name: string; fire: () => void }>([
+      {
+        name: "an outside mousedown",
+        fire: () => fireEvent.mouseDown(screen.getByTestId("outside")),
+      },
+      {
+        name: "a window scroll",
+        fire: () => window.dispatchEvent(new Event("scroll")),
+      },
+      {
+        name: "a scroll of a container outside the menu",
+        fire: () =>
+          fireEvent(
+            screen.getByTestId("outside"),
+            new Event("scroll", { bubbles: true }),
+          ),
+      },
+      {
+        name: "a window resize",
+        fire: () => window.dispatchEvent(new Event("resize")),
+      },
+    ])(
+      "closes on $name without moving focus, even when enabled",
+      ({ fire }) => {
+        const onClose = vi.fn();
+        render(<Harness isOpen onClose={onClose} returnFocusOnEscape />);
+        const item = focusMenuItem();
+
+        fire();
+
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(item).toHaveFocus();
+        expect(screen.getByTestId("trigger")).not.toHaveFocus();
+      },
+    );
+
+    it("honours the option when it is turned on while the menu is already open", () => {
+      const onClose = vi.fn();
+      const { rerender } = render(<Harness isOpen onClose={onClose} />);
+
+      rerender(<Harness isOpen onClose={onClose} returnFocusOnEscape />);
+      focusMenuItem();
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("trigger")).toHaveFocus();
+    });
+  });
+
   describe("latest callback via ref", () => {
     it("invokes the most recent onClose without needing to re-subscribe", () => {
       const onCloseA = vi.fn();
@@ -235,7 +334,10 @@ describe("useDismissableMenu", () => {
     // shadow tree (and any listeners the hook attached to it) be released.
     let hosts: HTMLElement[] = [];
 
-    function mountInShadowRoot(onClose: () => void) {
+    function mountInShadowRoot(
+      onClose: () => void,
+      returnFocusOnEscape = false,
+    ) {
       const host = document.createElement("div");
       document.body.appendChild(host);
       hosts.push(host);
@@ -262,12 +364,49 @@ describe("useDismissableMenu", () => {
 
       const view = renderHook(
         ({ isOpen }: { isOpen: boolean }) =>
-          useDismissableMenu({ isOpen, onClose, triggerRef, menuRef }),
+          useDismissableMenu({
+            isOpen,
+            onClose,
+            triggerRef,
+            menuRef,
+            returnFocusOnEscape,
+          }),
         { initialProps: { isOpen: true } },
       );
 
-      return { view, shadowRoot, innerScrollContainer, innerMenuItem };
+      return {
+        view,
+        host,
+        shadowRoot,
+        trigger,
+        innerScrollContainer,
+        innerMenuItem,
+      };
     }
+
+    // The production dialog lives in this shadow root, so the trigger the
+    // Escape handler focuses is a shadow-tree node, not a light-DOM one.
+    it("returns focus to a trigger inside the shadow root on Escape when enabled", () => {
+      const onClose = vi.fn();
+      const { host, shadowRoot, trigger, innerMenuItem } = mountInShadowRoot(
+        onClose,
+        true,
+      );
+      innerMenuItem.focus();
+      expect(shadowRoot.activeElement).toBe(innerMenuItem);
+
+      innerMenuItem.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          composed: true,
+        }),
+      );
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(shadowRoot.activeElement).toBe(trigger);
+      expect(document.activeElement).toBe(host);
+    });
 
     afterEach(() => {
       for (const host of hosts) host.remove();

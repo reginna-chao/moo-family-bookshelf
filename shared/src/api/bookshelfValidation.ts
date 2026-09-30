@@ -16,14 +16,14 @@
  * an unusable one to `""` KEEPS the element, so two such elements then collide
  * on the empty string. Four observable consequences today, none of them a crash:
  *
- *  1. Duplicate React keys — `key: m.userId` in both member filter dropdowns
- *     (`extension/src/dialog/MemberDropdown.tsx:90`,
- *     `pwa/src/components/MemberDropdown.tsx:81`), and the card key
- *     `` `${memberName}-${bookId}` `` on the book half
+ *  1. Duplicate React keys — both member filter dropdowns key each option on
+ *     `m.userId` (`extension/src/dialog/memberFilterOptions.tsx:62`, rendered
+ *     as `key={opt.value}`; `pwa/src/components/memberFilterOptions.tsx:60`),
+ *     and the card key `` `${memberName}-${bookId}` `` on the book half
  *     (`extension/src/dialog/FamilyShelfBookList.tsx:45`,
  *     `pwa/src/components/FamilyBookList.tsx:66`).
  *  2. An empty member label: both halves of `displayName || userId.slice(0, 8)`
- *     degrade to `""` (`MemberDropdown.tsx:92` / `:83`).
+ *     degrade to `""` (`memberFilterOptions.tsx:63` / `:62`).
  *  3. Collapsed viewer-private family-shelf preferences — `familyPrefRef` builds
  *     `` `${ownerId}:${bookId}` `` (`shared/src/familyShelf/prefRefs.ts:13`,
  *     used by both apps), so hiding or favouriting one degraded card hits

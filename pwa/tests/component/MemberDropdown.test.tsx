@@ -239,6 +239,62 @@ describe("MemberDropdown", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  // The focused option unmounts with the menu; without an explicit focus move a
+  // keyboard / screen-reader user would be dropped on <body>.
+  describe("focus return", () => {
+    function focusOption(listbox: HTMLElement, label: string): HTMLElement {
+      const option = within(listbox)
+        .getAllByRole("option")
+        .find((o) => o.textContent?.startsWith(label));
+      if (!option) throw new Error(`option not found: ${label}`);
+      option.focus();
+      expect(option).toHaveFocus();
+      return option;
+    }
+
+    it("moves focus to the trigger after an option is chosen, which then names the new scope", () => {
+      render(<StatefulDropdown initial="all-except-self" />);
+      const option = focusOption(openListbox(), "自己的書");
+
+      fireEvent.click(option);
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(memberFilterTrigger()).toHaveFocus();
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：自己的書，2 本",
+      );
+    });
+
+    it("moves focus to the trigger when the menu is closed with Escape", () => {
+      renderDropdown();
+      focusOption(openListbox(), "所有人的書");
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(memberFilterTrigger()).toHaveFocus();
+    });
+
+    it("leaves focus on the outside element when the menu is closed by an outside mousedown", () => {
+      render(
+        <div>
+          <button type="button">outside</button>
+          {dropdownElement()}
+        </div>,
+      );
+      openListbox();
+      const outside = screen.getByRole("button", { name: "outside" });
+      outside.focus();
+
+      fireEvent.mouseDown(outside);
+
+      // Positive companion: the mousedown did dismiss the menu.
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(outside).toHaveFocus();
+      expect(memberFilterTrigger()).not.toHaveFocus();
+    });
+  });
+
   describe("trigger count", () => {
     it("shows the selected scope's count on the collapsed trigger", () => {
       renderDropdown({ value: "all-except-self" });

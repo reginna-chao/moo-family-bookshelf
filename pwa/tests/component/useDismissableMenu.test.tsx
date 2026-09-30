@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { useRef } from "react";
 import { useDismissableMenu } from "@/hooks/useDismissableMenu";
@@ -7,6 +8,7 @@ interface HarnessProps {
   isOpen: boolean;
   onClose: () => void;
   dismissOnScroll?: boolean;
+  returnFocusOnEscape?: boolean;
 }
 
 /**
@@ -14,10 +16,22 @@ interface HarnessProps {
  * like every PWA consumer; the "outside" node is a sibling scroll container
  * that lives outside both the trigger and the menu subtree.
  */
-function Harness({ isOpen, onClose, dismissOnScroll }: HarnessProps) {
+function Harness({
+  isOpen,
+  onClose,
+  dismissOnScroll,
+  returnFocusOnEscape,
+}: HarnessProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  useDismissableMenu({ isOpen, onClose, triggerRef, menuRef, dismissOnScroll });
+  useDismissableMenu({
+    isOpen,
+    onClose,
+    triggerRef,
+    menuRef,
+    dismissOnScroll,
+    returnFocusOnEscape,
+  });
   return (
     <>
       <button ref={triggerRef} data-testid="trigger">
@@ -283,6 +297,84 @@ describe("useDismissableMenu", () => {
       // Mousedown / Escape listeners are re-attached, not lost.
       escapeKey.fire();
       expect(onClose).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // Focus starts on an option inside the menu (where a keyboard user is while
+  // the menu is open). onClose is a mock, so the menu stays mounted and a
+  // focus that was NOT moved remains observable on that option.
+  describe("returnFocusOnEscape", () => {
+    function focusMenuItem(): HTMLElement {
+      const item = screen.getByTestId("menu-item");
+      item.focus();
+      expect(item).toHaveFocus();
+      return item;
+    }
+
+    it("moves focus to the trigger on Escape when enabled", () => {
+      const onClose = vi.fn();
+      render(<Harness isOpen onClose={onClose} returnFocusOnEscape />);
+      focusMenuItem();
+
+      escapeKey.fire();
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("trigger")).toHaveFocus();
+    });
+
+    it.each<{ name: string; flag: boolean | undefined }>([
+      { name: "the option is omitted (default)", flag: undefined },
+      { name: "the option is false", flag: false },
+    ])(
+      "closes on Escape but leaves focus where it was when $name",
+      ({ flag }) => {
+        const onClose = vi.fn();
+        render(<Harness isOpen onClose={onClose} returnFocusOnEscape={flag} />);
+        const item = focusMenuItem();
+
+        escapeKey.fire();
+
+        // Positive companion: Escape was handled, only the focus move is off.
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(item).toHaveFocus();
+        expect(screen.getByTestId("trigger")).not.toHaveFocus();
+      },
+    );
+
+    // Only Escape returns focus: every other dismissal means the user went
+    // elsewhere, so the hook must not pull focus back to the trigger.
+    it.each(ALL_DISMISSING.filter((c) => c !== escapeKey))(
+      "closes on $name without moving focus, even when enabled",
+      ({ fire }) => {
+        const onClose = vi.fn();
+        render(
+          <Harness
+            isOpen
+            onClose={onClose}
+            dismissOnScroll
+            returnFocusOnEscape
+          />,
+        );
+        const item = focusMenuItem();
+
+        fire();
+
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(item).toHaveFocus();
+        expect(screen.getByTestId("trigger")).not.toHaveFocus();
+      },
+    );
+
+    it("honours the option when it is turned on while the menu is already open", () => {
+      const onClose = vi.fn();
+      const { rerender } = render(<Harness isOpen onClose={onClose} />);
+
+      rerender(<Harness isOpen onClose={onClose} returnFocusOnEscape />);
+      focusMenuItem();
+      escapeKey.fire();
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("trigger")).toHaveFocus();
     });
   });
 

@@ -1,27 +1,21 @@
-import React, { useState, useRef, useMemo } from "react";
-import {
-  Users,
-  UsersRound,
-  User,
-  Heart,
-  EyeOff,
-  ChevronDown,
-} from "lucide-react";
+import { useState, useRef, useMemo } from "react";
+import { ChevronDown } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDismissableMenu } from "../hooks/useDismissableMenu";
-import type { FamilyShelfMemberBooks } from "moo-family-bookshelf-shared/familyShelf/prefRefs";
-import { countVisibleByMemberScope } from "moo-family-bookshelf-shared/familyShelf/memberScopeCounts";
 import { memberFilterAccessibleName } from "moo-family-bookshelf-shared/familyShelf/memberFilterLabel";
+import {
+  buildOptions,
+  type MemberFilterValue,
+  type MemberInfo,
+} from "./memberFilterOptions";
 
-/** Sentinel filter value for the cross-everyone hidden-books view. */
-export const HIDDEN_FILTER_VALUE = "__hidden__";
-
-/** Sentinel filter value for the cross-everyone favorites view. */
-export const FAVORITE_FILTER_VALUE = "__favorite__";
-
-export type MemberFilterValue = "all-except-self" | "all" | string;
-
-type MemberInfo = FamilyShelfMemberBooks & { displayName: string };
+// The option model moved to ./memberFilterOptions; re-exported so existing
+// importers of "./MemberDropdown" / "@/dialog/MemberDropdown" keep working.
+export {
+  HIDDEN_FILTER_VALUE,
+  FAVORITE_FILTER_VALUE,
+  type MemberFilterValue,
+} from "./memberFilterOptions";
 
 export interface MemberDropdownProps {
   members: MemberInfo[];
@@ -36,70 +30,11 @@ export interface MemberDropdownProps {
   hiddenRefs: ReadonlySet<string>;
 }
 
-interface MemberOption {
-  value: MemberFilterValue;
-  label: string;
-  icon: React.ReactNode;
-  /** Books this option will show (before category / search); hidden excluded. */
-  count: number;
-}
-
 /**
- * Options in fixed order (each `value` is unique: the React key): all / all-except-
- * self / self / others with books / favorite / hidden. Member-scope counts exclude
- * hidden books; favorite / hidden keep their totals. */
-function buildOptions(
-  members: MemberInfo[],
-  userId: string,
-  favoriteCount: number,
-  hiddenCount: number,
-  hiddenRefs: ReadonlySet<string>,
-): MemberOption[] {
-  const counts = countVisibleByMemberScope(members, userId, hiddenRefs);
-  const othersWithBooks = members.filter(
-    (m) => m.userId !== userId && m.books.length > 0,
-  );
-
-  return [
-    {
-      value: "all",
-      label: "所有人的書",
-      icon: <Users size={16} aria-hidden="true" />,
-      count: counts.all,
-    },
-    {
-      value: "all-except-self",
-      label: "其他家人的書",
-      icon: <UsersRound size={16} aria-hidden="true" />,
-      count: counts.allExceptSelf,
-    },
-    {
-      value: userId,
-      label: "自己的書",
-      icon: <User size={16} aria-hidden="true" />,
-      count: counts.byMember.get(userId) ?? 0,
-    },
-    ...othersWithBooks.map((m) => ({
-      value: m.userId,
-      label: m.displayName || m.userId.slice(0, 8),
-      icon: <User size={16} aria-hidden="true" />,
-      count: counts.byMember.get(m.userId) ?? 0,
-    })),
-    {
-      value: FAVORITE_FILTER_VALUE,
-      label: "我的最愛",
-      icon: <Heart size={16} aria-hidden="true" />,
-      count: favoriteCount,
-    },
-    {
-      value: HIDDEN_FILTER_VALUE,
-      label: "隱藏的書",
-      icon: <EyeOff size={16} aria-hidden="true" />,
-      count: hiddenCount,
-    },
-  ];
-}
-
+ * Custom member-filter dropdown (Extension): icon + label trigger, popover
+ * listbox with counts. Choosing an option or pressing Escape returns focus to
+ * the trigger, whose accessible name then announces the new scope and count.
+ */
 export function MemberDropdown({
   members,
   userId,
@@ -125,11 +60,14 @@ export function MemberDropdown({
     onClose: () => setOpen(false),
     triggerRef,
     menuRef,
+    returnFocusOnEscape: true,
   });
 
   function handleSelect(next: MemberFilterValue) {
     onChange(next);
     setOpen(false);
+    // The option unmounts with the menu; land focus back on the trigger.
+    triggerRef.current?.focus();
   }
 
   const triggerClass = isMobile

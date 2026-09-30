@@ -446,6 +446,68 @@ describe("MemberDropdown", () => {
     });
   });
 
+  // The focused option unmounts with the menu; without an explicit focus move a
+  // keyboard / screen-reader user would be dropped on <body>. Assertions target
+  // the trigger element itself (production mounts it in a shadow root, where
+  // document.activeElement would be the host).
+  describe("focus return", () => {
+    it("moves focus to the trigger after an option is chosen, which then names the new scope", () => {
+      render(<StatefulDropdown initial="all-except-self" />);
+      openMenu();
+      const option = screen.getByRole("option", { name: /自己的書/ });
+      option.focus();
+      expect(option).toHaveFocus();
+
+      fireEvent.click(option);
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(memberFilterTrigger()).toHaveFocus();
+      expect(memberFilterTrigger()).toHaveAccessibleName(
+        "篩選成員：自己的書，2 本",
+      );
+    });
+
+    it("moves focus to the trigger when the menu is closed with Escape", () => {
+      renderDropdown();
+      openMenu();
+      const option = screen.getByRole("option", { name: /所有人的書/ });
+      option.focus();
+      expect(option).toHaveFocus();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(memberFilterTrigger()).toHaveFocus();
+    });
+
+    it("leaves focus on the outside element when the menu is closed by an outside mousedown", () => {
+      render(
+        <div>
+          <button type="button">outside</button>
+          <MemberDropdown
+            members={MEMBERS}
+            userId="user-self"
+            value="all-except-self"
+            onChange={vi.fn()}
+            favoriteCount={4}
+            hiddenCount={3}
+            hiddenRefs={new Set<string>()}
+          />
+        </div>,
+      );
+      openMenu();
+      const outside = screen.getByRole("button", { name: "outside" });
+      outside.focus();
+
+      fireEvent.mouseDown(outside);
+
+      // Positive companion: the mousedown did dismiss the menu.
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(outside).toHaveFocus();
+      expect(memberFilterTrigger()).not.toHaveFocus();
+    });
+  });
+
   describe("outside-click dismissal", () => {
     it("closes the menu on an outside mousedown", () => {
       renderDropdown();
