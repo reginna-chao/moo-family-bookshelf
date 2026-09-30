@@ -11,7 +11,7 @@ import { borrowRoutes } from "./routes/borrow";
 import { authRoutes } from "./routes/auth";
 import { verifyRoutes } from "./routes/verify";
 import { publicShelfRoutes, publicQueryRoutes } from "./routes/publicShelf";
-import { jsonError } from "./utils/errors";
+import { clientErrorFor, jsonError } from "./utils/errors";
 import { isDevMode, type Env } from "./utils/env";
 
 export type { Env } from "./utils/env";
@@ -189,8 +189,19 @@ app.route("/api", publicQueryRoutes);
 // 404 fallback
 app.notFound((c) => jsonError(c, 404, "NOT_FOUND", "Route not found"));
 
-// Error handler
+// Error handler. A thrown Hono HTTPException that is the client's fault keeps
+// its 4xx (clientErrorFor in utils/errors.ts); only a genuine server fault is
+// logged and answered 500.
 app.onError((err, c) => {
+  const clientError = clientErrorFor(err);
+  if (clientError) {
+    return jsonError(
+      c,
+      clientError.status,
+      clientError.code,
+      clientError.message,
+    );
+  }
   console.error("Unhandled error:", err);
   return jsonError(c, 500, "INTERNAL_ERROR", "Internal server error");
 });

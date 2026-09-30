@@ -77,22 +77,20 @@ function errorCopyFor(result: ValidationResult): ValidationErrorCopy {
  *
  * Every other target is coded by `result.target` (json → INVALID_FIELDS,
  * query → INVALID_QUERY, anything else → INVALID_REQUEST) and is unreachable
- * today: no route declares a body / query / header schema, so request bodies
- * are still validated by the HANDLERS with their own codes (INVALID_JSON,
- * INVALID_FIELDS …). Moving body validation into the schemas is tracked in
- * #239.
+ * today: no route declares a body / query / header schema. Request bodies are
+ * validated by the HANDLERS by design, not pending a migration (#239 decided
+ * against it — see `.claude/rules/backend.md` → API Design).
  *
  * Only registry copy or the generic copy is ever returned — zod's issue list,
  * and with it any caller-supplied value, is never echoed.
  *
- * Caveat for whoever adds the first `request.body` JSON schema: this hook does
- * NOT see an unparsable body. Hono's validator (`hono/validator`) throws
- * `HTTPException(400, "Malformed JSON in request body")` before zod runs, and
- * zod-openapi's media-type gate throws `HTTPException(415)` for a mismatched
- * Content-Type. Both bubble to the root `app.onError` in `index.ts`, which
- * today answers every thrown error with `500 INTERNAL_ERROR` — so that route
- * would need an explicit HTTPException mapping (keeping INVALID_JSON for real
- * parse failures) to preserve the handlers' current 400 contract.
+ * Note for whoever declares a `request.body` JSON schema anyway: this hook
+ * does NOT see an unparsable body or a wrong Content-Type. Hono's validator
+ * (`hono/validator`) throws `HTTPException(400, "Malformed JSON in request
+ * body")` before zod runs, and zod-openapi's media-type gate throws
+ * `HTTPException(415)`. Both bubble to the root `app.onError` in `index.ts`,
+ * which maps them through `clientErrorFor` (`utils/errors.ts`) to
+ * `400 INVALID_JSON` and `415 UNSUPPORTED_MEDIA_TYPE`.
  */
 export const defaultHook = (
   result: ValidationResult,

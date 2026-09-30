@@ -20,6 +20,7 @@ import {
   isValidExpiresDays,
   sanitizeCoverUrl,
   sanitizeReadmooUrl,
+  isJsonObject,
 } from "../utils/validation";
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
@@ -344,12 +345,16 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  let body: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    body = await c.req.json();
+    parsed = await c.req.json();
   } catch {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
+  // A JSON body that is not an object (`null`, a primitive, an array) carries
+  // no fields: read it as `{}` so it gets the missing-title 400 below — a bare
+  // `null` used to throw on `body.title` and answer 500.
+  const body: Record<string, unknown> = isJsonObject(parsed) ? parsed : {};
 
   const title = sanitizePublicShelfTitle(body.title);
   if (title === null) {
@@ -427,12 +432,15 @@ publicShelfRoutes.openapi(updatePublicShelfRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  let body: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    body = await c.req.json();
+    parsed = await c.req.json();
   } catch {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
+  // Non-object JSON body ⇒ `{}` ⇒ the no-fields INVALID_PAYLOAD 400 below (a
+  // bare `null` used to throw here and answer 500) — same rule as create.
+  const body: Record<string, unknown> = isJsonObject(parsed) ? parsed : {};
 
   const hasTitle = body.title !== undefined;
   const hasExpires = body.expiresDays !== undefined;
