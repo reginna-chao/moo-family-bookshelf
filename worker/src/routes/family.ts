@@ -4,6 +4,7 @@ import type { Env } from "../utils/env";
 import {
   BoolFlag,
   type FamilyMember,
+  type FamilyRecord,
   type KickedRecord,
   normalizeFamilyRecord,
   hasMember,
@@ -478,44 +479,13 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   const isExistingMember = hasMember(record.members, body.userId);
 
   // --- Verification gate (both existing-member reconnect and new-member join) ---
-
-  // QR token bypass: if a valid one-time QR token is provided, skip verification.
-  let skipVerification = false;
-  if (body.qrToken && typeof body.qrToken === "string") {
-    const qrRecord = await getQrTokenRecord(c.env.KV, body.qrToken);
-    if (qrRecord && qrRecord.userId === body.userId) {
-      skipVerification = true;
-      // One-time use: delete immediately
-      await deleteQrToken(c.env.KV, body.qrToken);
-    }
-    // If token invalid/expired/wrong-user, fall through to normal verification
-  }
-
-  // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
-  // Users with no verification record (method: "none") pass automatically.
-  if (!skipVerification) {
-    // Failure accounting / lockout is charged to the CALLER (client IP, IPv6
-    // bucketed per /64), never to the target account. This endpoint is public
-    // and body.userId is derived from the user's email with a fixed salt, so a
-    // LOCKOUT keyed on the victim would let any stranger lock them out of PWA
-    // login on demand (DoS). Membership is NOT a usable trust signal here for
-    // the same reason. Brute force from a SINGLE source stays bounded by the
-    // per-IP sensitive-route limit (3/min); an attacker rotating source prefixes
-    // is bounded by the "verify" attempt ceiling inside `validateVerification`
-    // (10/hour, keyed on userId, shared with create and lookup). Unlike the
-    // former standalone per-userId "join" counter — now removed — that ceiling is
-    // charge-on-failure (the secret is compared first, only wrong guesses are
-    // charged), so it never blocks the owner's own correct-secret reconnect.
-    // No bound holds under DEV_MODE=1.
-    const verification = await validateVerification(
-      c.env,
-      body.userId,
-      verifySecret,
-      { callerKey: getCallerIp(c) },
-    );
-    if (!verification.valid) {
-      return verificationErrorResponse(c, verification.error);
-    }
+  const gateFailure = await passJoinVerificationGate(c, {
+    userId: body.userId,
+    qrToken: body.qrToken,
+    verifySecret,
+  });
+  if (gateFailure) {
+    return gateFailure;
   }
 
   // --- Kicked tombstone gate ---
@@ -539,8 +509,9 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   // record. Denying the reconnect is the correct, fail-closed reading of the
   // owner's newer intent.
   //
-  // It also deliberately applies to QR-token-bypass joins (`skipVerification`):
-  // a QR token minted minutes before the kick must not outrank the kick.
+  // It also deliberately applies to QR-token-bypass joins (the bypass inside
+  // `passJoinVerificationGate`): a QR token minted minutes before the kick
+  // must not outrank the kick.
   //
   // Cost: one extra small KV read per join, post-gate — acceptable on this
   // rate-limited sensitive-tier route.
@@ -549,103 +520,10 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     return memberRemovedResponse(c);
   }
 
-  if (isExistingMember) {
-    // Heal a missing or stale pointer: the record lists this user but
-    // `member:{uid}` does not name this family. The pre-gate check above let
-    // only three shapes through to here — no pointer, an orphan (record gone),
-    // or one at a family that no longer lists the user — and overwriting is
-    // right for all three. The usual source is a new-member join whose pointer
-    // put failed after the record put (see below). `member:{uid}` is checked
-    // first by bookshelf / members / auth refresh, so without this write the
-    // reconnect would mint a token that cannot read the family.
-    //
-    // A heal must not land for a member whose removal is in flight — combined
-    // with any concurrent stale-list write re-listing them, it would be a full
-    // re-admission. The tombstone gate above cannot guarantee that alone: when
-    // the target was ALREADY listed-but-pointerless (an earlier half-failed
-    // join), this handler can pass the gate before the owner's tombstone lands,
-    // the owner's pointer read then sees null and deletes nothing, and the heal
-    // put lands after it. So the guarantee is a PAIR of mirrored orders: the
-    // removal writes the tombstone, THEN reads the pointer; the heal writes the
-    // pointer, THEN re-reads the tombstone (`retractPointerIfKicked`). Under
-    // same-colo read-your-writes at least one side observes the other — the
-    // removal's pointer read sees the healed pointer and deletes it, or the
-    // re-check sees the tombstone and this handler retracts its own pointer
-    // and answers 403 MEMBER_REMOVED before any token is minted. Cross-colo
-    // propagation is the documented ~60s residual, as is a tombstone put that
-    // failed open. Cost: one extra read, on this rare heal path only.
-    //
-    // Defence in depth: a healing reconnect still NEVER writes the family
-    // record back — not even for a changed displayName — since `record` may
-    // predate a concurrent removal's put, and with no CAS a stale-record put
-    // would re-list the target together with the pointer healed here. The
-    // displayName catches up on the next, non-healing reconnect or via the
-    // displayName endpoint.
-    //
-    // Reuses the pointer read from the top of the handler to decide whether to
-    // heal, and runs only after the verification and kicked-tombstone gates.
-    const healsPointer = existingFamily !== familyId;
-    if (healsPointer) {
-      await putMemberFamilyId(c.env.KV, body.userId, familyId);
-      if (await retractPointerIfKicked(c.env.KV, familyId, body.userId)) {
-        return memberRemovedResponse(c);
-      }
-    }
-
-    // Update displayName if changed — non-healing reconnects only (see above).
-    const member = findMember(record.members, body.userId);
-    if (
-      !healsPointer &&
-      member &&
-      displayName !== "" &&
-      member.displayName !== displayName
-    ) {
-      member.displayName = displayName;
-      await putFamilyRecord(c.env.KV, familyId, record);
-    }
-
-    const authToken = await getOrGenerateAuthToken(c.env.KV, body.userId);
-    const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
-    return c.json({ data: { ...record, authToken, expiresAt } });
-  }
-
-  // --- New member flow: capacity check ---
-
-  // NOTE: No atomic compare-and-swap in KV. Concurrent joins could bypass
-  // maxMembers limit. Acceptable for 2-person families with low concurrency.
-  if (record.members.length >= record.maxMembers) {
-    return jsonError(c, 409, "FAMILY_FULL", "家庭成員已達上限");
-  }
-  record.members.push({
-    userId: body.userId,
-    displayName,
-    canLend: BoolFlag.TRUE,
-  });
-
-  // Sequential, family record FIRST. If the pointer put then fails, the user is
-  // listed without a pointer; the retry finds them in the member list, takes the
-  // existing-member branch above and heals the pointer there. The reverse order
-  // could leave a pointer at a family that does not list the user; if that
-  // family then filled up, this join answers FAMILY_FULL while the live pointer
-  // makes create and every other join answer ALREADY_IN_FAMILY — stuck for good.
-  await putFamilyRecord(c.env.KV, familyId, record);
-  await putMemberFamilyId(c.env.KV, body.userId, familyId);
-
-  // Same mirrored-order re-check as the heal above: an owner who saw this
-  // record put and kicked writes the tombstone before reading the pointer, so
-  // either that read deletes the pointer just written or this re-check sees
-  // the tombstone. On retraction the member-list entry stays — the in-flight
-  // kick's own list put removes it (or, after a pre-emptive 404 re-kick, the
-  // owner sees them listed and removes them again); no token is minted. Cost:
-  // one extra small read per new-member join, a rare sensitive-tier request.
-  if (await retractPointerIfKicked(c.env.KV, familyId, body.userId)) {
-    return memberRemovedResponse(c);
-  }
-
-  const authToken = await generateAuthToken(c.env.KV, body.userId);
-  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
-
-  return c.json({ data: { ...record, authToken, expiresAt } });
+  const step = { familyId, userId: body.userId, displayName, record };
+  return isExistingMember
+    ? reconnectExistingMember(c, { ...step, existingFamily })
+    : admitNewMember(c, step);
 });
 
 // DELETE /api/family/:id/member/:uid
@@ -1587,6 +1465,204 @@ async function writeKickedTombstone(
       err,
     });
   }
+}
+
+/** Inputs shared by the join handler's two post-gate branches. */
+interface JoinStepInput {
+  familyId: string;
+  userId: string;
+  displayName: string;
+  record: FamilyRecord;
+}
+
+/**
+ * The join handler's verification step: the one-time QR-token bypass, else the
+ * shared verification gate. Returns the gate's error Response when the caller
+ * failed it, `null` when they passed.
+ *
+ * Side effects: when `qrToken` is a non-empty string, one KV get (QR token),
+ * plus one KV delete only for a token issued to `userId` (which skips the
+ * gate); in every other case, whatever `validateVerification` reads and charges.
+ */
+async function passJoinVerificationGate(
+  c: Context<{ Bindings: Env }>,
+  input: {
+    userId: string;
+    qrToken: string | undefined;
+    verifySecret: string | undefined;
+  },
+) {
+  const { userId, qrToken, verifySecret } = input;
+
+  // QR token bypass: if a valid one-time QR token is provided, skip verification.
+  let skipVerification = false;
+  if (qrToken && typeof qrToken === "string") {
+    const qrRecord = await getQrTokenRecord(c.env.KV, qrToken);
+    if (qrRecord && qrRecord.userId === userId) {
+      skipVerification = true;
+      // One-time use: delete immediately
+      await deleteQrToken(c.env.KV, qrToken);
+    }
+    // If token invalid/expired/wrong-user, fall through to normal verification
+  }
+
+  // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
+  // Users with no verification record (method: "none") pass automatically.
+  if (!skipVerification) {
+    // Failure accounting / lockout is charged to the CALLER (client IP, IPv6
+    // bucketed per /64), never to the target account. This endpoint is public
+    // and userId is derived from the user's email with a fixed salt, so a
+    // LOCKOUT keyed on the victim would let any stranger lock them out of PWA
+    // login on demand (DoS). Membership is NOT a usable trust signal here for
+    // the same reason. Brute force from a SINGLE source stays bounded by the
+    // per-IP sensitive-route limit (3/min); an attacker rotating source prefixes
+    // is bounded by the "verify" attempt ceiling inside `validateVerification`
+    // (10/hour, keyed on userId, shared with create and lookup). Unlike the
+    // former standalone per-userId "join" counter — now removed — that ceiling is
+    // charge-on-failure (the secret is compared first, only wrong guesses are
+    // charged), so it never blocks the owner's own correct-secret reconnect.
+    // No bound holds under DEV_MODE=1.
+    const verification = await validateVerification(
+      c.env,
+      userId,
+      verifySecret,
+      { callerKey: getCallerIp(c) },
+    );
+    if (!verification.valid) {
+      return verificationErrorResponse(c, verification.error);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * The join handler's existing-member branch: a listed member reconnecting from
+ * a new device. Heals a missing or stale pointer (then re-checks the kicked
+ * tombstone), or — on a non-healing reconnect — writes back a changed
+ * displayName, and returns the member's (reused or fresh) auth token.
+ *
+ * Side effects: a healing reconnect puts `member:{userId}` and re-reads the
+ * tombstone, possibly retracting the pointer (403 MEMBER_REMOVED, no token);
+ * a non-healing one may put `family:{familyId}`. Then `getOrGenerateAuthToken`.
+ */
+async function reconnectExistingMember(
+  c: Context<{ Bindings: Env }>,
+  input: JoinStepInput & { existingFamily: string | null },
+) {
+  const { familyId, userId, displayName, record, existingFamily } = input;
+
+  // Heal a missing or stale pointer: the record lists this user but
+  // `member:{uid}` does not name this family. The handler's pre-gate check let
+  // only three shapes through to here — no pointer, an orphan (record gone),
+  // or one at a family that no longer lists the user — and overwriting is
+  // right for all three. The usual source is a new-member join whose pointer
+  // put failed after the record put (see below). `member:{uid}` is checked
+  // first by bookshelf / members / auth refresh, so without this write the
+  // reconnect would mint a token that cannot read the family.
+  //
+  // A heal must not land for a member whose removal is in flight — combined
+  // with any concurrent stale-list write re-listing them, it would be a full
+  // re-admission. The handler's tombstone gate cannot guarantee that alone:
+  // when the target was ALREADY listed-but-pointerless (an earlier half-failed
+  // join), this handler can pass the gate before the owner's tombstone lands,
+  // the owner's pointer read then sees null and deletes nothing, and the heal
+  // put lands after it. So the guarantee is a PAIR of mirrored orders: the
+  // removal writes the tombstone, THEN reads the pointer; the heal writes the
+  // pointer, THEN re-reads the tombstone (`retractPointerIfKicked`). Under
+  // same-colo read-your-writes at least one side observes the other — the
+  // removal's pointer read sees the healed pointer and deletes it, or the
+  // re-check sees the tombstone and this handler retracts its own pointer
+  // and answers 403 MEMBER_REMOVED before any token is minted. Cross-colo
+  // propagation is the documented ~60s residual, as is a tombstone put that
+  // failed open. Cost: one extra read, on this rare heal path only.
+  //
+  // Defence in depth: a healing reconnect still NEVER writes the family
+  // record back — not even for a changed displayName — since `record` may
+  // predate a concurrent removal's put, and with no CAS a stale-record put
+  // would re-list the target together with the pointer healed here. The
+  // displayName catches up on the next, non-healing reconnect or via the
+  // displayName endpoint.
+  //
+  // Reuses the pointer read from the top of the handler to decide whether to
+  // heal, and runs only after the verification and kicked-tombstone gates.
+  const healsPointer = existingFamily !== familyId;
+  if (healsPointer) {
+    await putMemberFamilyId(c.env.KV, userId, familyId);
+    if (await retractPointerIfKicked(c.env.KV, familyId, userId)) {
+      return memberRemovedResponse(c);
+    }
+  }
+
+  // Update displayName if changed — non-healing reconnects only (see above).
+  const member = findMember(record.members, userId);
+  if (
+    !healsPointer &&
+    member &&
+    displayName !== "" &&
+    member.displayName !== displayName
+  ) {
+    member.displayName = displayName;
+    await putFamilyRecord(c.env.KV, familyId, record);
+  }
+
+  const authToken = await getOrGenerateAuthToken(c.env.KV, userId);
+  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
+  return c.json({ data: { ...record, authToken, expiresAt } }, 200);
+}
+
+/**
+ * The join handler's new-member branch: refuses a full family (409
+ * FAMILY_FULL), otherwise adds the user to the member list, re-checks the
+ * kicked tombstone and mints a fresh auth token.
+ *
+ * Side effects: mutates `record.members`; puts `family:{familyId}` then
+ * `member:{userId}`; may retract that pointer (403 MEMBER_REMOVED, no token);
+ * otherwise `generateAuthToken` (fresh token, any previous one revoked).
+ */
+async function admitNewMember(
+  c: Context<{ Bindings: Env }>,
+  input: JoinStepInput,
+) {
+  const { familyId, userId, displayName, record } = input;
+
+  // --- New member flow: capacity check ---
+
+  // NOTE: No atomic compare-and-swap in KV. Concurrent joins could bypass
+  // maxMembers limit. Acceptable for 2-person families with low concurrency.
+  if (record.members.length >= record.maxMembers) {
+    return jsonError(c, 409, "FAMILY_FULL", "家庭成員已達上限");
+  }
+  record.members.push({
+    userId,
+    displayName,
+    canLend: BoolFlag.TRUE,
+  });
+
+  // Sequential, family record FIRST. If the pointer put then fails, the user is
+  // listed without a pointer; the retry finds them in the member list, takes
+  // `reconnectExistingMember` and heals the pointer there. The reverse order
+  // could leave a pointer at a family that does not list the user; if that
+  // family then filled up, this join answers FAMILY_FULL while the live pointer
+  // makes create and every other join answer ALREADY_IN_FAMILY — stuck for good.
+  await putFamilyRecord(c.env.KV, familyId, record);
+  await putMemberFamilyId(c.env.KV, userId, familyId);
+
+  // Same mirrored-order re-check as the heal above: an owner who saw this
+  // record put and kicked writes the tombstone before reading the pointer, so
+  // either that read deletes the pointer just written or this re-check sees
+  // the tombstone. On retraction the member-list entry stays — the in-flight
+  // kick's own list put removes it (or, after a pre-emptive 404 re-kick, the
+  // owner sees them listed and removes them again); no token is minted. Cost:
+  // one extra small read per new-member join, a rare sensitive-tier request.
+  if (await retractPointerIfKicked(c.env.KV, familyId, userId)) {
+    return memberRemovedResponse(c);
+  }
+
+  const authToken = await generateAuthToken(c.env.KV, userId);
+  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
+
+  return c.json({ data: { ...record, authToken, expiresAt } }, 200);
 }
 
 /**
