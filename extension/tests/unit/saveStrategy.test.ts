@@ -111,11 +111,11 @@ describe("decideSaveStrategy", () => {
   const REAL_ID = "210180801000101";
 
   it("uses PATCH that unshares a server-held bookId the local list dropped", () => {
-    // R is server-known and under the cap; L is server-only.
+    // R is server-known and under the cap; L is server-only and still shared.
     const { usePut, dirtyBooks, patchChanges } = decideSaveStrategy({
       books: [b(REAL_ID, BoolFlag.TRUE)],
       dirtyBookIds: new Set([REAL_ID]),
-      savedRawPayload: serverPayload(LEGACY_ID, REAL_ID),
+      savedRawPayload: { books: [b(LEGACY_ID, BoolFlag.TRUE), b(REAL_ID)] },
       maxPatchChanges: 1000,
     });
     expect(usePut).toBe(false);
@@ -131,7 +131,9 @@ describe("decideSaveStrategy", () => {
     const { patchChanges } = decideSaveStrategy({
       books: [b("b2", BoolFlag.TRUE)],
       dirtyBookIds: new Set(["b2"]),
-      savedRawPayload: serverPayload("z9", "b2", "a1"),
+      savedRawPayload: {
+        books: [b("z9", BoolFlag.TRUE), b("b2"), b("a1", BoolFlag.TRUE)],
+      },
       maxPatchChanges: 1000,
     });
     expect(patchChanges).toEqual([
@@ -169,6 +171,43 @@ describe("decideSaveStrategy", () => {
     ]);
   });
 
+  // --- only server-only ids still shared on the server are unshared ---
+
+  it.each([
+    {
+      label: "stored FALSE → no unshare",
+      serverFlag: BoolFlag.FALSE,
+      expectedChanges: [{ bookId: REAL_ID, isShared: BoolFlag.TRUE }],
+    },
+    {
+      label: "stored TRUE → unshare",
+      serverFlag: BoolFlag.TRUE,
+      expectedChanges: [
+        { bookId: REAL_ID, isShared: BoolFlag.TRUE },
+        { bookId: LEGACY_ID, isShared: BoolFlag.FALSE },
+      ],
+    },
+  ])(
+    "unshares a server-only id only when the server still shares it ($label)",
+    ({ serverFlag, expectedChanges }) => {
+      const input = {
+        books: [b(REAL_ID, BoolFlag.TRUE)],
+        dirtyBookIds: new Set([REAL_ID]),
+        savedRawPayload: { books: [b(LEGACY_ID, serverFlag), b(REAL_ID)] },
+      };
+      const { usePut, patchChanges } = decideSaveStrategy({
+        ...input,
+        maxPatchChanges: 1000,
+      });
+      expect(usePut).toBe(false);
+      expect(patchChanges).toEqual(expectedChanges);
+      // Cap contribution: a cap of 1 holds the dirty book alone, so PATCH
+      // survives it only when the server-only id adds no change.
+      const atCapOfOne = decideSaveStrategy({ ...input, maxPatchChanges: 1 });
+      expect(atCapOfOne.usePut).toBe(serverFlag === BoolFlag.TRUE);
+    },
+  );
+
   // --- the cap counts unshares too ---
 
   it.each([
@@ -185,7 +224,13 @@ describe("decideSaveStrategy", () => {
       const { usePut, patchChanges } = decideSaveStrategy({
         books: [b("b1", BoolFlag.TRUE)],
         dirtyBookIds: new Set(["b1"]),
-        savedRawPayload: serverPayload("b1", "gone1", "gone2"),
+        savedRawPayload: {
+          books: [
+            b("b1"),
+            b("gone1", BoolFlag.TRUE),
+            b("gone2", BoolFlag.TRUE),
+          ],
+        },
         maxPatchChanges,
       });
       expect(usePut).toBe(expected);
@@ -286,7 +331,10 @@ describe("decideSaveStrategy", () => {
       const { usePut, patchChanges } = decideSaveStrategy({
         books: [b("b1", BoolFlag.TRUE), b("r1", BoolFlag.TRUE)],
         dirtyBookIds: new Set(["b1"]),
-        savedRawPayload: serverPayload("b1", "r1", "gone1"),
+        // r1 is stored FALSE (local TRUE → promoted); gone1 is still shared.
+        savedRawPayload: {
+          books: [b("b1"), b("r1"), b("gone1", BoolFlag.TRUE)],
+        },
         maxPatchChanges,
         includePromoted: true,
       });

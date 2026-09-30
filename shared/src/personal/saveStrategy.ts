@@ -17,9 +17,13 @@ import { BoolFlag } from "../api/types";
  *  - the PATCH `changes` would exceed the backend's cap
  *
  * Server-known bookIds absent from `books` (e.g. a legacy entry dropped
- * locally) are sent as `isShared: FALSE` changes: a PATCH never removes a
- * book, so without them a stale server copy could keep sharing a book the
- * user just unshared. Unlike a full PUT this leaves flags another device
+ * locally) whose server flag is still `TRUE` are sent as `isShared: FALSE`
+ * changes: a PATCH never removes a book, so without them a stale server copy
+ * could keep sharing a book the user just unshared. Ids already `FALSE` on
+ * the server are skipped (a no-op that would only count toward the cap), and
+ * after a successful PATCH the caller folds the sent unshares to `FALSE`
+ * (`applyPatchChanges`), so they are not re-sent on later saves. Unlike a
+ * full PUT this leaves flags another device
  * changed meanwhile untouched. The Worker PATCH handler ignores unknown ids
  * (it only rewrites books the record holds) and checks bookId only as a
  * non-empty string, so unsharing a book the server has since removed is
@@ -62,7 +66,7 @@ export interface SaveStrategy<T> {
   usePut: boolean;
   /** The dirty subset of `books`. */
   dirtyBooks: T[];
-  /** PATCH body: dirty books' flags, then promoted twins when `includePromoted`, then an unshare per server-only id. */
+  /** PATCH body: dirty books' flags, then promoted twins when `includePromoted`, then an unshare per server-only id still shared on the server. */
   patchChanges: PatchChange[];
 }
 
@@ -77,7 +81,7 @@ export function decideSaveStrategy<
     ? findPromoted(books, dirtyBookIds, serverFlags)
     : [];
   const unshareBookIds = [...serverFlags.keys()].filter(
-    (id) => !localIds.has(id),
+    (id) => !localIds.has(id) && serverFlags.get(id) === BoolFlag.TRUE,
   );
   const usePut =
     savedRawPayload === null ||

@@ -446,9 +446,8 @@ describe("usePersonalBooks — legacy short-id entries in the baseline", () => {
       { bookId: LEGACY_ID, isShared: BoolFlag.FALSE },
     ]);
 
-    // Second save: the snapshot now records R as shared, so R is not re-sent.
-    // L's unshare still goes out — unshares are idempotent and re-sent until
-    // the next sync PUT rewrites the record without L.
+    // Second save: the first PATCH was folded into the snapshot — R is recorded
+    // as shared and L's unshare as FALSE — so neither R nor L is re-sent.
     act(() => {
       result.current.handleToggle(OTHER_ID);
     });
@@ -461,12 +460,7 @@ describe("usePersonalBooks — legacy short-id entries in the baseline", () => {
     const secondChanges = vi.mocked(client.patchPersonalBooks).mock.calls[1][1];
     expect(secondChanges).toEqual([
       { bookId: OTHER_ID, isShared: BoolFlag.FALSE },
-      { bookId: LEGACY_ID, isShared: BoolFlag.FALSE },
     ]);
-    expect(secondChanges).not.toContainEqual({
-      bookId: REAL_ID,
-      isShared: BoolFlag.TRUE,
-    });
   });
 });
 
