@@ -74,22 +74,37 @@ function makeBook(
   };
 }
 
+/**
+ * Realistic 15-digit book id. A real Readmoo id is 12+ digits: the scraper
+ * refuses shorter ones, and usePersonalBooks drops a cache-only entry with a
+ * short id as a stale legacy record — so a short fixture id would vanish from
+ * the seeded cache before the test could see it.
+ */
+const bookIdOf = (n: number, prefix = "21"): string =>
+  `${prefix}${String(n).padStart(13, "0")}`;
+const BOOK_1 = bookIdOf(1);
+const BOOK_2 = bookIdOf(2);
+const BOOK_3 = bookIdOf(3);
+const BOOK_4 = bookIdOf(4);
+const BOOK_NEW = bookIdOf(100);
+const BOOK_ARCHIVED = bookIdOf(200);
+
 /** The default 3-book set every test starts from (supplied via the API record). */
 const DEFAULT_BOOKS: TestBook[] = [
   makeBook({
-    bookId: "book-1",
+    bookId: BOOK_1,
     title: "測試書籍一",
     author: "作者A",
     coverUrl: "https://example.com/cover1.jpg",
   }),
   makeBook({
-    bookId: "book-2",
+    bookId: BOOK_2,
     title: "測試書籍二",
     author: "作者B",
     coverUrl: "https://example.com/cover2.jpg",
   }),
   makeBook({
-    bookId: "book-3",
+    bookId: BOOK_3,
     title: "測試書籍三",
     author: "作者C",
     coverUrl: "https://example.com/cover3.jpg",
@@ -715,11 +730,11 @@ describe("PersonalShelf", () => {
           data: {
             books: [
               {
-                bookId: "book-1",
+                bookId: BOOK_1,
                 title: "測試書籍一",
                 author: "作者A",
                 coverUrl: "https://example.com/cover1.jpg",
-                readmooUrl: "https://readmoo.com/book/book-1",
+                readmooUrl: `https://readmoo.com/book/${BOOK_1}`,
                 isShared: BoolFlag.TRUE,
                 isbn: "",
               },
@@ -911,13 +926,13 @@ describe("PersonalShelf", () => {
       // Synced books include an archived book.
       const books = [
         makeBook({
-          bookId: "book-1",
+          bookId: BOOK_1,
           title: "測試書籍一",
           author: "作者A",
           coverUrl: "https://example.com/cover1.jpg",
         }),
         makeBook({
-          bookId: "book-archived",
+          bookId: BOOK_ARCHIVED,
           title: "封存書籍一",
           author: "作者D",
           coverUrl: "https://example.com/cover-a.jpg",
@@ -989,9 +1004,9 @@ describe("PersonalShelf", () => {
 
     it("clicking '未封存' tab shows only active books", async () => {
       const books = [
-        makeBook({ bookId: "book-1", title: "活躍書籍", author: "作者A" }),
+        makeBook({ bookId: BOOK_1, title: "活躍書籍", author: "作者A" }),
         makeBook({
-          bookId: "book-2",
+          bookId: BOOK_2,
           title: "已封存書",
           author: "作者B",
           isArchived: BoolFlag.TRUE,
@@ -1027,9 +1042,9 @@ describe("PersonalShelf", () => {
 
     it("clicking '封存' tab shows only archived books", async () => {
       const books = [
-        makeBook({ bookId: "book-1", title: "活躍書籍", author: "作者A" }),
+        makeBook({ bookId: BOOK_1, title: "活躍書籍", author: "作者A" }),
         makeBook({
-          bookId: "book-2",
+          bookId: BOOK_2,
           title: "已封存書",
           author: "作者B",
           isArchived: BoolFlag.TRUE,
@@ -1138,9 +1153,7 @@ describe("PersonalShelf", () => {
       const cached = JSON.parse(
         (cacheCall![0] as Record<string, string>)[PERSONAL_BOOKS_CACHE_KEY],
       );
-      const book1 = cached.find(
-        (b: { bookId: string }) => b.bookId === "book-1",
-      );
+      const book1 = cached.find((b: { bookId: string }) => b.bookId === BOOK_1);
       expect(book1).toBeDefined();
       expect(book1.isShared).toBe(BoolFlag.TRUE);
     });
@@ -1150,13 +1163,13 @@ describe("PersonalShelf", () => {
     it("resets category filter when status filter changes", async () => {
       const books = [
         makeBook({
-          bookId: "book-1",
+          bookId: BOOK_1,
           title: "奇幻書籍",
           author: "作者A",
           category: "奇幻冒險",
         }),
         makeBook({
-          bookId: "book-2",
+          bookId: BOOK_2,
           title: "韓國書籍",
           author: "作者B",
           category: "韓國耽美",
@@ -1195,11 +1208,11 @@ describe("PersonalShelf", () => {
           data: {
             books: [
               {
-                bookId: "book-1",
+                bookId: BOOK_1,
                 title: "測試書籍一",
                 author: "作者A",
                 coverUrl: "https://example.com/cover1.jpg",
-                readmooUrl: "https://readmoo.com/book/book-1",
+                readmooUrl: `https://readmoo.com/book/${BOOK_1}`,
                 isShared: BoolFlag.TRUE,
                 isbn: "",
               },
@@ -1235,18 +1248,18 @@ describe("PersonalShelf", () => {
         syncError: "",
         lastSyncBooks: [
           {
-            bookId: "book-1",
+            bookId: BOOK_1,
             title: "測試書籍一（更新版）",
             author: "作者A",
             coverUrl: "https://example.com/cover1-v2.jpg",
-            readmooUrl: "https://readmoo.com/book/book-1",
+            readmooUrl: `https://readmoo.com/book/${BOOK_1}`,
           },
           {
-            bookId: "book-4",
+            bookId: BOOK_4,
             title: "新書籍四",
             author: "作者D",
             coverUrl: "https://example.com/cover4.jpg",
-            readmooUrl: "https://readmoo.com/book/book-4",
+            readmooUrl: `https://readmoo.com/book/${BOOK_4}`,
           },
         ],
         triggerManualSync: vi.fn(),
@@ -1304,11 +1317,11 @@ describe("PersonalShelf", () => {
         syncError: "",
         lastSyncBooks: [
           {
-            bookId: "book-new",
+            bookId: BOOK_NEW,
             title: "全新同步書",
             author: "新作者",
             coverUrl: "https://example.com/new.jpg",
-            readmooUrl: "https://readmoo.com/book/book-new",
+            readmooUrl: `https://readmoo.com/book/${BOOK_NEW}`,
           },
         ],
         triggerManualSync: vi.fn(),
@@ -1337,7 +1350,7 @@ describe("PersonalShelf", () => {
     ): TestBook[] {
       return Array.from({ length: count }, (_, i) =>
         makeBook({
-          bookId: `book-${i + 1}`,
+          bookId: bookIdOf(i + 1),
           title: `書籍 ${i + 1}`,
           author: `作者${i + 1}`,
           coverUrl: "https://example.com/cover.jpg",
@@ -1414,7 +1427,8 @@ describe("PersonalShelf", () => {
         ...makeManyBooks(25, BoolFlag.FALSE),
         ...makeManyBooks(5, BoolFlag.TRUE).map((b, i) => ({
           ...b,
-          bookId: `archived-${i}`,
+          bookId: bookIdOf(i, "22"),
+          readmooUrl: `https://readmoo.com/book/${bookIdOf(i, "22")}`,
           title: `封存書 ${i}`,
         })),
       ];

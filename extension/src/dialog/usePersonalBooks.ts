@@ -6,13 +6,17 @@ import {
   BoolFlag,
   PERSONAL_BOOKS_SCHEMA_VERSION,
 } from "../api/client";
-import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
+import {
+  applyPatchChanges,
+  decideSaveStrategy,
+} from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import {
   PERSONAL_BOOKS_CACHE_KEY,
   PERSONAL_SHELF_SAVED_AT_KEY,
 } from "../constants";
 import { mergeBooks } from "./mergeBooks";
+import { dropResolvedLegacyBooks, isRealBookId } from "../sync/legacyBooks";
 
 export type PersonalBooksStatus =
   "loading" | "ready" | "saving" | "saved" | "error";
@@ -53,9 +57,9 @@ function parseCachedBooks(raw: unknown): BookEntry[] {
 }
 
 /**
- * Build the pre-scrape baseline: cached book list with share flags
- * reconciled against the server (API wins for known books; cache value
- * retained for cache-only books). API-only books are appended.
+ * Pre-scrape baseline: cache reconciled against the server (API wins on share
+ * flags), API-only books appended, legacy entries resolved to a real one dropped.
+ * A cache-only legacy entry is stale (never scraped): dropped, its flag unused.
  */
 function reconcileBaseline(
   cached: BookEntry[],
@@ -63,12 +67,13 @@ function reconcileBaseline(
 ): BookEntry[] {
   const savedMap = new Map(saved.map((b) => [b.bookId, b]));
   const cachedIds = new Set(cached.map((b) => b.bookId));
-  const reconciled = cached.map((b) => {
+  const reconciled = cached.flatMap((b) => {
     const apiBook = savedMap.get(b.bookId);
-    return apiBook ? { ...b, isShared: apiBook.isShared } : b;
+    if (apiBook) return [{ ...b, isShared: apiBook.isShared }];
+    return isRealBookId(b.bookId) ? [b] : [];
   });
   const apiOnly = saved.filter((b) => !cachedIds.has(b.bookId));
-  return [...reconciled, ...apiOnly];
+  return dropResolvedLegacyBooks([...reconciled, ...apiOnly]);
 }
 
 export function usePersonalBooks({
@@ -148,12 +153,12 @@ export function usePersonalBooks({
           cacheResult[PERSONAL_BOOKS_CACHE_KEY],
         );
 
-        // Baseline display from cache reconciled against the server (API wins for
-        // share flags). Empty baseline still resolves to "ready" → "尚無書籍".
+        // Cache reconciled against the server, else the server list; resolved
+        // legacy entries dropped on both. Empty baseline → "ready" → "尚無書籍".
         const baseline =
           cachedBooks.length > 0
             ? reconcileBaseline(cachedBooks, savedBooks)
-            : savedBooks;
+            : dropResolvedLegacyBooks(savedBooks);
         originalBooks.current = baseline;
         setBooks(baseline);
         setStatus("ready");
@@ -219,7 +224,6 @@ export function usePersonalBooks({
     // Nothing changed → treat as an instant no-op save (UI guards this too).
     if (dirtyBookIds.size === 0) {
       setStatus("saved");
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
       savedTimerRef.current = setTimeout(() => setStatus("ready"), 1500);
       return;
     }
@@ -227,14 +231,13 @@ export function usePersonalBooks({
     setStatus("saving");
     setErrorMessage("");
 
-    // PATCH only the dirty books, unless the diff can't be safely expressed as
-    // a partial update (new un-synced books, no server record, or over the cap)
-    // — those fall back to a full PUT so nothing is silently dropped.
-    const { usePut, dirtyBooks } = decideSaveStrategy({
+    // PATCH, or a full PUT when a partial update can't be safe (saveStrategy).
+    const { usePut, patchChanges } = decideSaveStrategy({
       books,
       dirtyBookIds,
       savedRawPayload: savedRawPayload.current,
       maxPatchChanges: MAX_PATCH_CHANGES,
+      includePromoted: true, // load-time legacy resolution can promote twins
     });
 
     try {
@@ -247,10 +250,7 @@ export function usePersonalBooks({
             books,
             lastUpdated: new Date().toISOString(),
           })
-        : await apiClient.patchPersonalBooks(
-            userId,
-            dirtyBooks.map((b) => ({ bookId: b.bookId, isShared: b.isShared })),
-          );
+        : await apiClient.patchPersonalBooks(userId, patchChanges);
       if (response.error) {
         setErrorMessage(
           safeErrorText(response.error.message, "儲存失敗，請稍後再試"),
@@ -259,13 +259,10 @@ export function usePersonalBooks({
         return;
       }
       originalBooks.current = books;
-      // Only a PUT persists the full local list; a PATCH leaves the server's
-      // book set unchanged (it can only update isShared of existing books).
-      // Marking PATCH-time books as server-known would wrongly classify
-      // un-synced scraped books as known and silently drop them on a later PATCH.
-      if (usePut) {
-        savedRawPayload.current = { ...(savedRawPayload.current ?? {}), books };
-      }
+      // PATCH adds no ids; marking un-synced books known would lose them.
+      const prev = savedRawPayload.current ?? {};
+      const next = usePut ? books : applyPatchChanges(prev.books, patchChanges);
+      savedRawPayload.current = { ...prev, books: next };
       void browser.storage.local.set({
         [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books),
       });

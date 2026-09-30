@@ -122,3 +122,55 @@ describe("mergeBooks — category", () => {
     expect(result[0].category).toBe("西洋羅曼史");
   });
 });
+
+// #234: early versions saved entries keyed by a short internal id (7–8 digits)
+// instead of the real 15-digit book id, and the saved-only rule kept them
+// forever next to the real entry the scraper writes now.
+describe("mergeBooks — legacy short-id entries", () => {
+  const REAL_ID = "210180801000101";
+  const LEGACY_ID = "14563038";
+
+  it("collapses a shared legacy entry into its scraped real-id twin, keeping the share", () => {
+    const saved = [
+      makeSaved({ bookId: LEGACY_ID, title: "三體", isShared: BoolFlag.TRUE }),
+    ];
+    const scraped = [makeScraped({ bookId: REAL_ID, title: "三體" })];
+
+    const result = mergeBooks(scraped, saved);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].bookId).toBe(REAL_ID);
+    expect(result[0].title).toBe("三體");
+    expect(result[0].isShared).toBe(BoolFlag.TRUE);
+  });
+
+  it("collapses a legacy entry into a saved real-id twin even when nothing is scraped", () => {
+    const saved = [
+      makeSaved({ bookId: LEGACY_ID, title: "三體", isShared: BoolFlag.TRUE }),
+      makeSaved({ bookId: REAL_ID, title: "三體", isShared: BoolFlag.FALSE }),
+    ];
+
+    const result = mergeBooks([], saved);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].bookId).toBe(REAL_ID);
+    expect(result[0].isShared).toBe(BoolFlag.TRUE);
+  });
+
+  it("keeps a saved legacy entry that has no real-id twin", () => {
+    const saved = [
+      makeSaved({ bookId: LEGACY_ID, title: "三體", isShared: BoolFlag.TRUE }),
+    ];
+    const scraped = [makeScraped({ bookId: REAL_ID, title: "別本書" })];
+
+    const result = mergeBooks(scraped, saved);
+
+    expect(result).toHaveLength(2);
+    const legacy = result.find((b) => b.bookId === LEGACY_ID);
+    expect(legacy?.title).toBe("三體");
+    expect(legacy?.isShared).toBe(BoolFlag.TRUE);
+    expect(result.find((b) => b.bookId === REAL_ID)?.isShared).toBe(
+      BoolFlag.FALSE,
+    );
+  });
+});
