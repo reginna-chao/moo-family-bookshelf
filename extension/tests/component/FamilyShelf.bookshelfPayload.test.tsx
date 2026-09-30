@@ -11,6 +11,7 @@ import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { MemberDropdown } from "@/dialog/MemberDropdown";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { ApiClient, BoolFlag } from "@/api/client";
+import { memberFilterTrigger } from "./helpers/memberFilter";
 
 vi.mock("@/constants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/constants")>();
@@ -142,7 +143,7 @@ function renderShelf(apiClient: ApiClient) {
 
 /** Open the member filter and return its option buttons. */
 function openMemberFilter(): HTMLElement[] {
-  fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+  fireEvent.click(memberFilterTrigger());
   return screen.getAllByRole("option");
 }
 
@@ -197,9 +198,7 @@ describe("FamilyShelf member filter with a hostile bookshelf payload", () => {
     renderShelf(createClient(HOSTILE_BOOKSHELF));
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "篩選成員" }),
-      ).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
 
     const labels = openMemberFilter().map(optionLabel);
@@ -216,9 +215,7 @@ describe("FamilyShelf member filter with a hostile bookshelf payload", () => {
     renderShelf(createClient(HOSTILE_BOOKSHELF));
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "篩選成員" }),
-      ).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
 
     const options = openMemberFilter();
@@ -234,9 +231,7 @@ describe("FamilyShelf member filter with a hostile bookshelf payload", () => {
     renderShelf(createClient(HOSTILE_BOOKSHELF));
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "篩選成員" }),
-      ).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
 
     openMemberFilter();
@@ -255,9 +250,7 @@ describe("FamilyShelf member filter with a hostile bookshelf payload", () => {
     renderShelf(createClient(HOSTILE_BOOKSHELF));
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "篩選成員" }),
-      ).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
 
     expect(warnSpy).toHaveBeenCalledWith(
@@ -299,10 +292,11 @@ describe("MemberDropdown duplicate-key detector", () => {
         onChange={vi.fn()}
         favoriteCount={0}
         hiddenCount={0}
+        hiddenRefs={new Set<string>()}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+    fireEvent.click(memberFilterTrigger());
 
     const duplicateKeyCalls = errorSpy.mock.calls.filter((call) =>
       call.some(

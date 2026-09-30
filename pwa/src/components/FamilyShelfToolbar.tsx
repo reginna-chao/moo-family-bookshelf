@@ -12,7 +12,6 @@ import {
 type ViewMode = "grid" | "row";
 
 export interface FamilyShelfToolbarProps {
-  headingCount: string;
   searchTerm: string;
   onSearchChange: (value: string) => void;
   categoryBooks: BookWithMember[];
@@ -28,11 +27,11 @@ export interface FamilyShelfToolbarProps {
   onSortChange: (sort: BookSortMode) => void;
   favoriteCount: number;
   hiddenCount: number;
+  hiddenRefs: ReadonlySet<string>;
 }
 
 /** Family-shelf header + filter controls (PWA). */
 export function FamilyShelfToolbar({
-  headingCount,
   searchTerm,
   onSearchChange,
   categoryBooks,
@@ -48,15 +47,11 @@ export function FamilyShelfToolbar({
   onSortChange,
   favoriteCount,
   hiddenCount,
+  hiddenRefs,
 }: FamilyShelfToolbarProps) {
   return (
     <>
-      <h2 className="text-xl font-bold text-gray-900 mb-3">
-        家庭開放書櫃
-        <span className="text-gray-400 text-sm font-normal ml-2">
-          {headingCount}
-        </span>
-      </h2>
+      <h2 className="text-xl font-bold text-gray-900 mb-3">家庭開放書櫃</h2>
 
       <div className="flex gap-2 mb-3">
         <input
@@ -83,6 +78,7 @@ export function FamilyShelfToolbar({
           onChange={onMemberFilterChange}
           favoriteCount={favoriteCount}
           hiddenCount={hiddenCount}
+          hiddenRefs={hiddenRefs}
         />
         <BookSortDropdown value={sort} onChange={onSortChange} />
       </div>

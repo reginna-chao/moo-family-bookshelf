@@ -11,6 +11,7 @@ import { FamilyShelf } from "@/dialog/FamilyShelf";
 import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { BoolFlag, type ApiClient } from "@/api/client";
 import { DISPLAY_NAME_KEY } from "@/constants";
+import { memberFilterTrigger, triggerCount } from "./helpers/memberFilter";
 
 // Mock useSearch to avoid debounce complexity in tests
 vi.mock("@/dialog/useSearch", () => ({
@@ -85,7 +86,7 @@ function makeMemberBooks(
  * old `fireEvent.change(select, { target: { value } })` interaction.
  */
 function selectMemberFilter(optionName: RegExp) {
-  fireEvent.click(screen.getByRole("button", { name: "篩選成員" }));
+  fireEvent.click(memberFilterTrigger());
   fireEvent.click(screen.getByRole("option", { name: optionName }));
 }
 
@@ -215,8 +216,8 @@ describe("FamilyShelf", () => {
 
     // Only shared books should appear
     expect(screen.queryByText("私密書籍")).not.toBeInTheDocument();
-    // Total count shows 1
-    expect(screen.getByText("(可見 1 本)")).toBeInTheDocument();
+    // The not-shared book is not counted either: the scope count shows 1.
+    expect(triggerCount()).toBe("1");
   });
 
   it("shows error state with retry button on API error", async () => {
@@ -470,7 +471,7 @@ describe("FamilyShelf", () => {
     renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
-      expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
   });
 
@@ -538,7 +539,7 @@ describe("FamilyShelf", () => {
     });
   });
 
-  it("shows total book count in header", async () => {
+  it("shows the book count on the member filter trigger, not in the heading", async () => {
     const apiClient = createMockApiClient({
       getFamilyMembers: vi.fn().mockResolvedValue({
         data: {
@@ -578,8 +579,15 @@ describe("FamilyShelf", () => {
     renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
-      expect(screen.getByText("(可見 2 本)")).toBeInTheDocument();
+      expect(screen.getByText("書二")).toBeInTheDocument();
     });
+    expect(memberFilterTrigger()).toHaveTextContent("其他家人的書");
+    expect(triggerCount()).toBe("2");
+
+    // The heading is the bare title: no "(可見 N 本)" suffix any more.
+    const heading = screen.getByRole("heading", { name: "家庭開放書櫃" });
+    expect(heading.textContent).toBe("家庭開放書櫃");
+    expect(screen.queryByText(/可見/)).not.toBeInTheDocument();
   });
 
   it("shows search bar when books exist", async () => {
@@ -771,7 +779,7 @@ describe("FamilyShelf", () => {
     renderWithProvider(<FamilyShelf userId="user-1" />, apiClient);
 
     await waitFor(() => {
-      expect(screen.getByLabelText("篩選成員")).toBeInTheDocument();
+      expect(memberFilterTrigger()).toBeInTheDocument();
     });
     selectMemberFilter(/所有人的書/);
 

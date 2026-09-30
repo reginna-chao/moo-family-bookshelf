@@ -57,22 +57,17 @@ export function FamilyShelf({ userId, pageSize }: FamilyShelfProps) {
   const { viewMode, setViewMode } = useFamilyShelfViewMode();
   const { sort, setSort } = useBookSort("family");
 
-  const {
-    memberFilteredBooks,
-    totalBooks,
-    headingCount,
-    favoriteCount,
-    hiddenCount,
-  } = useFamilyShelfBooks({
-    members,
-    filterMember,
-    userId,
-    updatedBookIds,
-    hiddenRefs,
-    isHidden,
-    favoriteRefs,
-    isFavorite,
-  });
+  const { memberFilteredBooks, totalBooks, favoriteCount, hiddenCount } =
+    useFamilyShelfBooks({
+      members,
+      filterMember,
+      userId,
+      updatedBookIds,
+      hiddenRefs,
+      isHidden,
+      favoriteRefs,
+      isFavorite,
+    });
 
   const categoryFilteredBooks = filterByCategory(
     memberFilteredBooks,
@@ -154,13 +149,13 @@ export function FamilyShelf({ userId, pageSize }: FamilyShelfProps) {
   return (
     <div>
       <FamilyShelfToolbar
-        headingCount={headingCount}
         members={members}
         userId={userId}
         filterMember={filterMember}
         onMemberFilterChange={handleMemberFilterChange}
         favoriteCount={favoriteCount}
         hiddenCount={hiddenCount}
+        hiddenRefs={hiddenRefs}
         sort={sort}
         onSortChange={setSort}
         searchTerm={searchTerm}

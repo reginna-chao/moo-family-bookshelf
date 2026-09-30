@@ -1,28 +1,21 @@
-import React, { useState, useRef, useMemo } from "react";
-import {
-  Users,
-  UsersRound,
-  User,
-  Heart,
-  EyeOff,
-  ChevronDown,
-} from "lucide-react";
+import { useState, useRef, useMemo } from "react";
+import { ChevronDown } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDismissableMenu } from "../hooks/useDismissableMenu";
+import { memberFilterAccessibleName } from "moo-family-bookshelf-shared/familyShelf/memberFilterLabel";
+import {
+  buildOptions,
+  type MemberFilterValue,
+  type MemberInfo,
+} from "./memberFilterOptions";
 
-/** Sentinel filter value for the cross-everyone hidden-books view. */
-export const HIDDEN_FILTER_VALUE = "__hidden__";
-
-/** Sentinel filter value for the cross-everyone favorites view. */
-export const FAVORITE_FILTER_VALUE = "__favorite__";
-
-export type MemberFilterValue = "all-except-self" | "all" | string;
-
-interface MemberInfo {
-  userId: string;
-  displayName: string;
-  books: { bookId: string }[];
-}
+// The option model moved to ./memberFilterOptions; re-exported so existing
+// importers of "./MemberDropdown" / "@/dialog/MemberDropdown" keep working.
+export {
+  HIDDEN_FILTER_VALUE,
+  FAVORITE_FILTER_VALUE,
+  type MemberFilterValue,
+} from "./memberFilterOptions";
 
 export interface MemberDropdownProps {
   members: MemberInfo[];
@@ -33,83 +26,15 @@ export interface MemberDropdownProps {
   favoriteCount: number;
   /** Total hidden shared cards across everyone (from useFamilyShelfBooks). */
   hiddenCount: number;
-}
-
-interface MemberOption {
-  key: string;
-  value: MemberFilterValue;
-  label: string;
-  icon: React.ReactNode;
-  /** TOTAL book count for this scope, INCLUDING hidden books. */
-  count: number;
+  /** Viewer's hidden refs; member-scope counts leave these books out. */
+  hiddenRefs: ReadonlySet<string>;
 }
 
 /**
- * Build the member-filter options. Ordering is fixed:
- * all / all-except-self / self / each other member with books / favorite / hidden.
- * Counts are totals (hidden books are NOT excluded).
+ * Custom member-filter dropdown (Extension): icon + label trigger, popover
+ * listbox with counts. Choosing an option or pressing Escape returns focus to
+ * the trigger, whose accessible name then announces the new scope and count.
  */
-function buildOptions(
-  members: MemberInfo[],
-  userId: string,
-  favoriteCount: number,
-  hiddenCount: number,
-): MemberOption[] {
-  const allCount = members.reduce((sum, m) => sum + m.books.length, 0);
-  const othersCount = members
-    .filter((m) => m.userId !== userId)
-    .reduce((sum, m) => sum + m.books.length, 0);
-  const self = members.find((m) => m.userId === userId);
-  const othersWithBooks = members.filter(
-    (m) => m.userId !== userId && m.books.length > 0,
-  );
-
-  return [
-    {
-      key: "all",
-      value: "all",
-      label: "所有人的書",
-      icon: <Users size={16} aria-hidden="true" />,
-      count: allCount,
-    },
-    {
-      key: "all-except-self",
-      value: "all-except-self",
-      label: "其他家人的書",
-      icon: <UsersRound size={16} aria-hidden="true" />,
-      count: othersCount,
-    },
-    {
-      key: "self",
-      value: userId,
-      label: "自己的書",
-      icon: <User size={16} aria-hidden="true" />,
-      count: self ? self.books.length : 0,
-    },
-    ...othersWithBooks.map((m) => ({
-      key: m.userId,
-      value: m.userId,
-      label: m.displayName || m.userId.slice(0, 8),
-      icon: <User size={16} aria-hidden="true" />,
-      count: m.books.length,
-    })),
-    {
-      key: FAVORITE_FILTER_VALUE,
-      value: FAVORITE_FILTER_VALUE,
-      label: "我的最愛",
-      icon: <Heart size={16} aria-hidden="true" />,
-      count: favoriteCount,
-    },
-    {
-      key: HIDDEN_FILTER_VALUE,
-      value: HIDDEN_FILTER_VALUE,
-      label: "隱藏的書",
-      icon: <EyeOff size={16} aria-hidden="true" />,
-      count: hiddenCount,
-    },
-  ];
-}
-
 export function MemberDropdown({
   members,
   userId,
@@ -117,6 +42,7 @@ export function MemberDropdown({
   onChange,
   favoriteCount,
   hiddenCount,
+  hiddenRefs,
 }: MemberDropdownProps) {
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
@@ -124,8 +50,8 @@ export function MemberDropdown({
   const menuRef = useRef<HTMLDivElement>(null);
 
   const options = useMemo(
-    () => buildOptions(members, userId, favoriteCount, hiddenCount),
-    [members, userId, favoriteCount, hiddenCount],
+    () => buildOptions(members, userId, favoriteCount, hiddenCount, hiddenRefs),
+    [members, userId, favoriteCount, hiddenCount, hiddenRefs],
   );
   const current = options.find((o) => o.value === value) ?? options[0];
 
@@ -134,11 +60,14 @@ export function MemberDropdown({
     onClose: () => setOpen(false),
     triggerRef,
     menuRef,
+    returnFocusOnEscape: true,
   });
 
   function handleSelect(next: MemberFilterValue) {
     onChange(next);
     setOpen(false);
+    // The option unmounts with the menu; land focus back on the trigger.
+    triggerRef.current?.focus();
   }
 
   const triggerClass = isMobile
@@ -158,7 +87,7 @@ export function MemberDropdown({
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        aria-label="篩選成員"
+        aria-label={memberFilterAccessibleName(current.label, current.count)}
         aria-haspopup="listbox"
         aria-expanded={open}
         className={triggerClass}
@@ -168,6 +97,10 @@ export function MemberDropdown({
           <span className="moo-member-filter__current-label">
             {current.label}
           </span>
+          <span className="moo-member-filter__sep" aria-hidden="true">
+            ·
+          </span>
+          <span className="moo-member-filter__count">{current.count}</span>
         </span>
         <ChevronDown
           size={16}
@@ -184,7 +117,7 @@ export function MemberDropdown({
         >
           {options.map((opt) => (
             <button
-              key={opt.key}
+              key={opt.value}
               type="button"
               role="option"
               aria-selected={opt.value === value}

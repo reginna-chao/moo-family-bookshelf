@@ -11,6 +11,7 @@ import {
 import React from "react";
 import { FamilyShelfPage } from "@/pages/FamilyShelfPage";
 import { FamilyDataProvider, useFamilyData } from "@/hooks/useFamilyData";
+import { memberFilterTrigger, triggerCount } from "./helpers/memberFilter";
 
 // Mock API client
 vi.mock("@/api/client", async (importOriginal) => {
@@ -87,7 +88,7 @@ function renderWithProvider(
  * Options render as `label + count`, so we match the label substring.
  */
 function selectMemberOption(optionLabel: string) {
-  fireEvent.click(screen.getByLabelText("篩選成員"));
+  fireEvent.click(memberFilterTrigger());
   const listbox = screen.getByRole("listbox", { name: "成員選單" });
   const option = within(listbox)
     .getAllByRole("option")
@@ -333,6 +334,8 @@ describe("FamilyShelfPage", () => {
       expect(screen.getByText("Shared Book")).toBeInTheDocument();
     });
     expect(screen.queryByText("Private Book")).not.toBeInTheDocument();
+    // The not-shared book is not counted either: the scope count shows 1.
+    expect(triggerCount()).toBe("1");
   });
 
   it("default member filter excludes self", async () => {
@@ -650,7 +653,7 @@ describe("FamilyShelfPage", () => {
     expect(screen.queryByText("Me")).not.toBeInTheDocument();
   });
 
-  it("shows total book count in header", async () => {
+  it("shows the book count on the member filter trigger, not in the heading", async () => {
     mockGetFamilyMembers.mockResolvedValue({
       data: {
         familyId: "fam-1",
@@ -704,8 +707,15 @@ describe("FamilyShelfPage", () => {
     renderWithProvider(defaultProps);
 
     await waitFor(() => {
-      expect(screen.getByText("(可見 3 本)")).toBeInTheDocument();
+      expect(screen.getByText("Book 3")).toBeInTheDocument();
     });
+    expect(memberFilterTrigger()).toHaveTextContent("其他家人的書");
+    expect(triggerCount()).toBe("3");
+
+    // The heading is the bare title: no "(可見 N 本)" suffix any more.
+    const heading = screen.getByRole("heading", { name: "家庭開放書櫃" });
+    expect(heading.textContent).toBe("家庭開放書櫃");
+    expect(screen.queryByText(/可見/)).not.toBeInTheDocument();
   });
 
   describe("Load More (Wave G)", () => {

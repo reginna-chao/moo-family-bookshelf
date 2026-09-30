@@ -10,13 +10,13 @@ import type { FamilyShelfBook } from "./useFamilyShelfBooks";
 type ViewMode = "grid" | "row";
 
 export interface FamilyShelfToolbarProps {
-  headingCount: string;
   members: MemberBooks[];
   userId: string;
   filterMember: MemberFilterValue;
   onMemberFilterChange: (value: MemberFilterValue) => void;
   favoriteCount: number;
   hiddenCount: number;
+  hiddenRefs: ReadonlySet<string>;
   sort: BookSortMode;
   onSortChange: (sort: BookSortMode) => void;
   searchTerm: string;
@@ -35,13 +35,13 @@ export interface FamilyShelfToolbarProps {
 
 /** Family-shelf header + filter controls (Extension). */
 export function FamilyShelfToolbar({
-  headingCount,
   members,
   userId,
   filterMember,
   onMemberFilterChange,
   favoriteCount,
   hiddenCount,
+  hiddenRefs,
   sort,
   onSortChange,
   searchTerm,
@@ -59,10 +59,7 @@ export function FamilyShelfToolbar({
 }: FamilyShelfToolbarProps) {
   return (
     <>
-      <h3 className="moo-toolbar__heading">
-        家庭開放書櫃
-        <span className="moo-toolbar__count">{headingCount}</span>
-      </h3>
+      <h3 className="moo-toolbar__heading">家庭開放書櫃</h3>
 
       <div className="moo-toolbar__row">
         <div className="moo-toolbar__grow">
@@ -73,6 +70,7 @@ export function FamilyShelfToolbar({
             onChange={onMemberFilterChange}
             favoriteCount={favoriteCount}
             hiddenCount={hiddenCount}
+            hiddenRefs={hiddenRefs}
           />
         </div>
         <BookSortDropdown value={sort} onChange={onSortChange} />
