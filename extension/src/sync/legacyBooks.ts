@@ -45,7 +45,8 @@ function indexRealByTitle(books: BookEntry[]): Map<string, BookEntry | null> {
  * Remove each legacy (short-id, see `isLegacyBookEntry`) entry that resolves to
  * a real entry — exactly one real entry with the same trimmed, non-empty
  * title. A removed legacy entry that was shared moves its flag onto that real
- * entry (a new object; a TRUE flag is never cleared).
+ * entry (a new object; a TRUE flag is never cleared). Ids in `keepFlagsFor`
+ * keep their flag — the user's pending toggle wins over an inherited share.
  *
  * Legacy entries with no same-title real entry, or with two or more, are kept
  * unchanged: until the scrape produces the book's real id, the legacy entry is
@@ -56,7 +57,10 @@ function indexRealByTitle(books: BookEntry[]): Map<string, BookEntry | null> {
  * Order is preserved, the input is not mutated, and the same array is
  * returned when nothing is removed.
  */
-export function dropResolvedLegacyBooks(books: BookEntry[]): BookEntry[] {
+export function dropResolvedLegacyBooks(
+  books: BookEntry[],
+  keepFlagsFor?: ReadonlySet<string>,
+): BookEntry[] {
   const realByTitle = indexRealByTitle(books);
   const resolveTarget = (entry: BookEntry): BookEntry | null =>
     isLegacyBookEntry(entry)
@@ -69,7 +73,8 @@ export function dropResolvedLegacyBooks(books: BookEntry[]): BookEntry[] {
     const target = resolveTarget(entry);
     if (!target) continue;
     removedAny = true;
-    if (entry.isShared === BoolFlag.TRUE) promoted.add(target);
+    if (entry.isShared !== BoolFlag.TRUE) continue;
+    if (!keepFlagsFor?.has(target.bookId)) promoted.add(target);
   }
   if (!removedAny) return books;
 

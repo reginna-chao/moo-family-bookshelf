@@ -90,6 +90,8 @@ export function usePersonalBooks({
   const [errorMessage, setErrorMessage] = useState("");
   const [dirtyBookIds, setDirtyBookIds] = useState<Set<string>>(new Set());
   const isDirty = dirtyBookIds.size > 0;
+  const dirtyRef = useRef(dirtyBookIds);
+  dirtyRef.current = dirtyBookIds;
   /** Pending "saved" → "ready" reset; cleared on unmount and before rescheduling. */
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -176,12 +178,10 @@ export function usePersonalBooks({
     };
   }, [userId, apiClient]);
 
-  // Merge new books from auto-sync or manual sync into both the display list and
-  // the cancel baseline. mergeBooks(scraped, saved) keeps the second arg's
-  // isShared and only adds new books / metadata from the first arg, so:
-  // - display merges into `prev` → user's unsaved toggles are preserved
-  // - baseline merges into the previous clean baseline → "clean + new books"
-  //   without any unsaved toggle, honouring save-before-sync (Invariant 3).
+  // Merge sync results into display + cancel baseline (mergeBooks keeps the 2nd
+  // arg's isShared). Display merges into `prev`, dirty ids never promoted, so
+  // unsaved toggles win; the baseline merges into the clean baseline, holding
+  // no unsaved toggle (save-before-sync, Invariant 3).
   useEffect(() => {
     if (lastSyncBooks.length > 0 && status === "ready") {
       const mapped = lastSyncBooks.map((b) => ({
@@ -193,7 +193,7 @@ export function usePersonalBooks({
         category: b.category,
         isArchived: b.isArchived ?? BoolFlag.FALSE,
       }));
-      setBooks((prev) => mergeBooks(mapped, prev));
+      setBooks((prev) => mergeBooks(mapped, prev, dirtyRef.current));
       originalBooks.current = mergeBooks(mapped, originalBooks.current);
     }
   }, [lastSyncBooks, status]);

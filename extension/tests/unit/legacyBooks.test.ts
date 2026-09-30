@@ -5,7 +5,9 @@ import {
   isLegacyBookEntry,
   isRealBookId,
 } from "@/sync/legacyBooks";
+import { mergeBooks } from "@/sync/mergeBooks";
 import { BoolFlag, type BookEntry } from "@/api/client";
+import type { ScrapedBook } from "@/content/scraper";
 
 // Real Readmoo book ids are 15 digits; the legacy `.privacy` fallback path
 // uploaded 7–8 digit internal ids instead (#234).
@@ -314,5 +316,84 @@ describe("dropResolvedLegacyBooks", () => {
     // The promoted entry is a new object, not the input entry rewritten.
     expect(result[0]).not.toBe(realEntry);
     expect(result[0].isShared).toBe(BoolFlag.TRUE);
+  });
+});
+
+// A user's unsaved toggle on the real twin must win over a share inherited from
+// a legacy entry that resolves mid-session (the legacy entry is still dropped).
+describe("dropResolvedLegacyBooks — keepFlagsFor", () => {
+  const sharedLegacyAndUnsharedTwin = (): BookEntry[] => [
+    makeBook({ bookId: LEGACY_A, title: "三體", isShared: BoolFlag.TRUE }),
+    makeBook({ bookId: REAL_A, title: "三體", isShared: BoolFlag.FALSE }),
+  ];
+
+  it("drops the legacy entry but does not promote a real twin listed in keepFlagsFor", () => {
+    const result = dropResolvedLegacyBooks(
+      sharedLegacyAndUnsharedTwin(),
+      new Set([REAL_A]),
+    );
+
+    expect(result).toEqual([
+      makeBook({ bookId: REAL_A, title: "三體", isShared: BoolFlag.FALSE }),
+    ]);
+  });
+
+  it("promotes the same real twin when keepFlagsFor is omitted (positive companion)", () => {
+    const result = dropResolvedLegacyBooks(sharedLegacyAndUnsharedTwin());
+
+    expect(result).toEqual([
+      makeBook({ bookId: REAL_A, title: "三體", isShared: BoolFlag.TRUE }),
+    ]);
+  });
+
+  it("ignores ids in keepFlagsFor that are not promotion targets", () => {
+    const books = [
+      ...sharedLegacyAndUnsharedTwin(),
+      makeBook({ bookId: REAL_B, title: "別本書", isShared: BoolFlag.FALSE }),
+    ];
+
+    const result = dropResolvedLegacyBooks(
+      books,
+      new Set([REAL_B, LEGACY_A, REAL_C]),
+    );
+
+    expect(result).toEqual([
+      makeBook({ bookId: REAL_A, title: "三體", isShared: BoolFlag.TRUE }),
+      makeBook({ bookId: REAL_B, title: "別本書", isShared: BoolFlag.FALSE }),
+    ]);
+  });
+});
+
+describe("mergeBooks — keepFlagsFor", () => {
+  // The scrape renames REAL_A's title so the saved legacy entry resolves to it.
+  const scraped: ScrapedBook[] = [
+    {
+      bookId: REAL_A,
+      title: "三體",
+      author: "作者",
+      coverUrl: "",
+      readmooUrl: "",
+      category: "",
+    },
+  ];
+  const saved = (): BookEntry[] => [
+    makeBook({ bookId: LEGACY_A, title: "三體", isShared: BoolFlag.TRUE }),
+    makeBook({ bookId: REAL_A, title: "舊書名", isShared: BoolFlag.FALSE }),
+  ];
+
+  it("drops the resolved legacy entry without promoting a real twin in keepFlagsFor", () => {
+    const result = mergeBooks(scraped, saved(), new Set([REAL_A]));
+
+    expect(result.map((b) => [b.bookId, b.isShared])).toEqual([
+      [REAL_A, BoolFlag.FALSE],
+    ]);
+  });
+
+  it("promotes the real twin when keepFlagsFor is omitted (positive companion)", () => {
+    const result = mergeBooks(scraped, saved());
+
+    expect(result.map((b) => [b.bookId, b.isShared])).toEqual([
+      [REAL_A, BoolFlag.TRUE],
+    ]);
   });
 });

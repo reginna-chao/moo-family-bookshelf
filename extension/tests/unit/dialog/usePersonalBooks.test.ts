@@ -462,6 +462,63 @@ describe("usePersonalBooks — legacy short-id entries in the baseline", () => {
       { bookId: OTHER_ID, isShared: BoolFlag.FALSE },
     ]);
   });
+
+  it("keeps an unsaved unshare when a shared legacy entry resolves mid-session via sync", async () => {
+    // Different titles → L is unresolved at load, so the baseline shows both.
+    const client = clientWithServerBooks([
+      { ...makeBook(LEGACY_ID, BoolFlag.TRUE), title: "A" },
+      { ...makeBook(REAL_ID, BoolFlag.TRUE), title: "B" },
+    ]);
+
+    const { result, rerender } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+    expect(result.current.books.map((b) => [b.bookId, b.isShared])).toEqual([
+      [LEGACY_ID, BoolFlag.TRUE],
+      [REAL_ID, BoolFlag.TRUE],
+    ]);
+
+    // The user unshares R but has not saved yet.
+    act(() => {
+      result.current.handleToggle(REAL_ID);
+    });
+    expect(result.current.dirtyBookIds.has(REAL_ID)).toBe(true);
+
+    // A sync renames R to "A", so L now resolves to R for the first time.
+    act(() => {
+      rerender({
+        lastSyncBooks: [{ ...makeBook(REAL_ID), title: "A" }],
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.books.map((b) => b.bookId)).toEqual([REAL_ID]),
+    );
+
+    // Display: L dropped, R NOT re-shared by L's inherited flag.
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.books[0].title).toBe("A");
+    expect(result.current.books[0].isShared).toBe(BoolFlag.FALSE);
+    expect(result.current.dirtyBookIds.has(REAL_ID)).toBe(true);
+    // Cancel baseline holds no unsaved toggle, so promotion still applies there.
+    expect(
+      result.current.originalBooks.current.map((b) => [b.bookId, b.isShared]),
+    ).toEqual([[REAL_ID, BoolFlag.TRUE]]);
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.updatePersonalBooks).not.toHaveBeenCalled();
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+    const changes = vi.mocked(client.patchPersonalBooks).mock.calls[0][1];
+    expect(changes).toEqual([
+      { bookId: REAL_ID, isShared: BoolFlag.FALSE },
+      { bookId: LEGACY_ID, isShared: BoolFlag.FALSE },
+    ]);
+    expect(changes).not.toContainEqual({
+      bookId: REAL_ID,
+      isShared: BoolFlag.TRUE,
+    });
+  });
 });
 
 describe("usePersonalBooks — lastSyncBooks merge effect", () => {
