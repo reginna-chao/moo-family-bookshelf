@@ -47,13 +47,7 @@ export function MemberDropdown({
   const handleToggle = useCallback(() => setOpen((prev) => !prev), []);
   const close = useCallback(() => setOpen(false), []);
 
-  useDismissableMenu({
-    isOpen: open,
-    onClose: close,
-    triggerRef,
-    menuRef,
-    returnFocusOnEscape: true,
-  });
+  useDismissableMenu({ isOpen: open, onClose: close, triggerRef, menuRef });
 
   function handleSelect(next: MemberFilterValue) {
     onChange(next);

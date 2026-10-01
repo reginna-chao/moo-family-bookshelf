@@ -227,6 +227,44 @@ describe("OverflowMenu", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  // Focus starts on a menu item — where a keyboard user is while the menu is
+  // open — so a focus that is NOT moved falls to <body> when the portaled
+  // panel unmounts.
+  describe("focus after closing", () => {
+    function openAndFocusItem(): HTMLElement {
+      render(
+        <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+      const item = screen.getByRole("menuitem", { name: "隱藏書籍" });
+      item.focus();
+      expect(item).toHaveFocus();
+      return item;
+    }
+
+    it("returns focus to the trigger when Escape closes the menu", () => {
+      const item = openAndFocusItem();
+
+      fireEvent.keyDown(item, { key: "Escape" });
+
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "更多選項" })).toHaveFocus();
+    });
+
+    // Selecting an item is deliberately left alone: only Escape hands focus
+    // back to the trigger.
+    it("does not move focus to the trigger when an item is clicked", () => {
+      const item = openAndFocusItem();
+
+      fireEvent.click(item);
+
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "更多選項" }),
+      ).not.toHaveFocus();
+    });
+  });
+
   it("removes document listeners on unmount (no error on later events)", () => {
     const { unmount } = render(
       <OverflowMenu items={[{ label: "隱藏書籍", onSelect: () => {} }]} />,

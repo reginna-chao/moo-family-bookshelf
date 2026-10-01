@@ -50,6 +50,13 @@ export function CategoryFilter({
 
   if (categories.length <= 1) return null;
 
+  function handleSelect(next: string) {
+    onChange(next);
+    onToggle();
+    // The option unmounts with the menu; land focus back on the trigger.
+    triggerRef.current?.focus();
+  }
+
   const isActive = value !== "";
   const triggerClass = [
     "moo-button moo-button--ghost-icon moo-button--icon moo-category__trigger",
@@ -90,10 +97,7 @@ export function CategoryFilter({
             type="button"
             role="option"
             aria-selected={value === ""}
-            onClick={() => {
-              onChange("");
-              onToggle();
-            }}
+            onClick={() => handleSelect("")}
             className={optionClass(value === "")}
           >
             <span>全部分類</span>
@@ -105,10 +109,7 @@ export function CategoryFilter({
               type="button"
               role="option"
               aria-selected={value === cat.value}
-              onClick={() => {
-                onChange(cat.value);
-                onToggle();
-              }}
+              onClick={() => handleSelect(cat.value)}
               className={optionClass(value === cat.value)}
             >
               <span>{cat.label}</span>

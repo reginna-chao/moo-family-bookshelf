@@ -60,7 +60,6 @@ export function MemberDropdown({
     onClose: () => setOpen(false),
     triggerRef,
     menuRef,
-    returnFocusOnEscape: true,
   });
 
   function handleSelect(next: MemberFilterValue) {

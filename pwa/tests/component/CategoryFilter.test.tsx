@@ -193,4 +193,58 @@ describe("CategoryFilter", () => {
 
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
+
+  // Focus starts on an option — where a keyboard user is while the menu is
+  // open — so a focus that is NOT moved falls to <body> when that option
+  // unmounts with the menu.
+  describe("focus after closing", () => {
+    function openAndFocusOption(label: string): HTMLElement {
+      const option = optionByLabel(openListbox(), label);
+      option.focus();
+      expect(option).toHaveFocus();
+      return option;
+    }
+
+    it.each<{ label: string; expected: string }>([
+      { label: "全部分類", expected: "" },
+      { label: "小說", expected: "小說" },
+    ])(
+      "returns focus to the trigger after choosing $label",
+      ({ label, expected }) => {
+        const onChange = vi.fn();
+        renderFilter({ value: "漫畫", onChange });
+        const option = openAndFocusOption(label);
+
+        fireEvent.click(option);
+
+        expect(onChange).toHaveBeenCalledTimes(1);
+        expect(onChange).toHaveBeenCalledWith(expected);
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(trigger()).toHaveFocus();
+      },
+    );
+
+    it("returns focus to the trigger when Escape closes the menu", () => {
+      const onChange = vi.fn();
+      renderFilter({ onChange });
+      const option = openAndFocusOption("漫畫");
+
+      fireEvent.keyDown(option, { key: "Escape" });
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(trigger()).toHaveFocus();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    // Negative companion: the user went elsewhere, so focus is not pulled back.
+    it("does not move focus to the trigger on an outside mousedown", () => {
+      renderFilter();
+      openAndFocusOption("漫畫");
+
+      fireEvent.mouseDown(screen.getByText("outside"));
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(trigger()).not.toHaveFocus();
+    });
+  });
 });

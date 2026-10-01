@@ -13,9 +13,14 @@ export interface DismissableMenuOptions {
   /**
    * On Escape, move focus back to the trigger after closing, so keyboard and
    * screen-reader users land on it (and hear its current name) instead of on
-   * `<body>` when the focused option unmounts. Outside click, scroll and resize
-   * never move focus — the user went elsewhere. Default false. Keep the name
-   * and semantics identical to `extension/src/hooks/useDismissableMenu.ts`.
+   * `<body>` when the focused option unmounts. Focus is returned only when
+   * Escape is pressed with focus in the menu or on its trigger, or when focus
+   * has already fallen to the document (the focused option unmounted); a
+   * control the user moved to while the menu stayed open keeps focus. Outside
+   * click, scroll and resize never move focus — the user went elsewhere.
+   * Default true (the ARIA APG button-popup convention); pass false only for a
+   * special case. Keep the name and semantics identical to
+   * `extension/src/hooks/useDismissableMenu.ts`.
    */
   returnFocusOnEscape?: boolean;
 }
@@ -34,6 +39,19 @@ function eventStartedInMenu(
   const path = e.composedPath();
   return (
     (!!trigger && path.includes(trigger)) || (!!menu && path.includes(menu))
+  );
+}
+
+/**
+ * Returns true when a document-level key event has no focused element behind
+ * it — the focused option already unmounted, or nothing was focused — so focus
+ * has fallen to the document itself rather than to a control the user chose.
+ */
+function focusIsNowhere(target: EventTarget | null): boolean {
+  return (
+    target === document ||
+    target === document.body ||
+    target === document.documentElement
   );
 }
 
@@ -58,7 +76,7 @@ export function useDismissableMenu({
   triggerRef,
   menuRef,
   dismissOnScroll = false,
-  returnFocusOnEscape = false,
+  returnFocusOnEscape = true,
 }: DismissableMenuOptions): void {
   // Store the latest onClose / returnFocusOnEscape so listeners always read
   // the current values without re-subscribing on every render.
@@ -78,8 +96,15 @@ export function useDismissableMenu({
     }
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
+      // Reclaim only focus the menu owned, or focus that already fell to the
+      // document; a control the user Tabbed to while the menu stayed open
+      // keeps it. Decided before onClose, which may unmount the menu.
+      const reclaim =
+        returnFocusRef.current &&
+        (eventStartedInMenu(e, triggerRef.current, menuRef.current) ||
+          focusIsNowhere(e.target));
       onCloseRef.current();
-      if (returnFocusRef.current) triggerRef.current?.focus();
+      if (reclaim) triggerRef.current?.focus();
     }
     function handleResize() {
       onCloseRef.current();

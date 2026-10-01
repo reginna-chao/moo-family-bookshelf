@@ -43,6 +43,8 @@ function Harness({
         </div>
       )}
       <div data-testid="outside">outside</div>
+      {/* A control the user can move focus to while the menu stays open. */}
+      <input data-testid="outside-input" aria-label="outside input" />
     </>
   );
 }
@@ -311,9 +313,14 @@ describe("useDismissableMenu", () => {
       return item;
     }
 
-    it("moves focus to the trigger on Escape when enabled", () => {
+    // Default is on (ARIA APG button-popup convention): omitting the option
+    // must behave exactly like passing true.
+    it.each<{ name: string; flag: boolean | undefined }>([
+      { name: "the option is omitted (default)", flag: undefined },
+      { name: "the option is true", flag: true },
+    ])("moves focus to the trigger on Escape when $name", ({ flag }) => {
       const onClose = vi.fn();
-      render(<Harness isOpen onClose={onClose} returnFocusOnEscape />);
+      render(<Harness isOpen onClose={onClose} returnFocusOnEscape={flag} />);
       focusMenuItem();
 
       escapeKey.fire();
@@ -322,24 +329,69 @@ describe("useDismissableMenu", () => {
       expect(screen.getByTestId("trigger")).toHaveFocus();
     });
 
-    it.each<{ name: string; flag: boolean | undefined }>([
-      { name: "the option is omitted (default)", flag: undefined },
-      { name: "the option is false", flag: false },
+    it("closes on Escape but leaves focus where it was when the option is false", () => {
+      const onClose = vi.fn();
+      render(<Harness isOpen onClose={onClose} returnFocusOnEscape={false} />);
+      const item = focusMenuItem();
+
+      escapeKey.fire();
+
+      // Positive companion: Escape was handled, only the focus move is off.
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(item).toHaveFocus();
+      expect(screen.getByTestId("trigger")).not.toHaveFocus();
+    });
+
+    // Escape reclaims focus the menu owned (an option inside it) or focus that
+    // already fell to the document (the focused option unmounted, or nothing
+    // was focused). Each target is where a real keydown lands in that state.
+    it.each<{ name: string; target: () => Element; focusFirst: boolean }>([
+      {
+        name: "an option inside the menu",
+        target: () => screen.getByTestId("menu-item"),
+        focusFirst: true,
+      },
+      {
+        name: "document.body (nothing focused)",
+        target: () => document.body,
+        focusFirst: false,
+      },
+      {
+        name: "document.documentElement (nothing focused)",
+        target: () => document.documentElement,
+        focusFirst: false,
+      },
     ])(
-      "closes on Escape but leaves focus where it was when $name",
-      ({ flag }) => {
+      "moves focus to the trigger on an Escape fired at $name",
+      ({ target, focusFirst }) => {
         const onClose = vi.fn();
-        render(<Harness isOpen onClose={onClose} returnFocusOnEscape={flag} />);
-        const item = focusMenuItem();
+        render(<Harness isOpen onClose={onClose} />);
+        if (focusFirst) focusMenuItem();
+        else expect(document.activeElement).toBe(document.body);
 
-        escapeKey.fire();
+        fireEvent.keyDown(target(), { key: "Escape" });
 
-        // Positive companion: Escape was handled, only the focus move is off.
         expect(onClose).toHaveBeenCalledTimes(1);
-        expect(item).toHaveFocus();
-        expect(screen.getByTestId("trigger")).not.toHaveFocus();
+        expect(screen.getByTestId("trigger")).toHaveFocus();
       },
     );
+
+    // A control the user moved to while the menu stayed open (e.g. Shift+Tab
+    // back to a search box) keeps focus: Escape still closes the menu but must
+    // not pull focus away to the trigger.
+    it("closes on an Escape fired at an outside control but leaves focus on that control", () => {
+      const onClose = vi.fn();
+      render(<Harness isOpen onClose={onClose} />);
+      const input = screen.getByTestId("outside-input");
+      input.focus();
+      expect(input).toHaveFocus();
+
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(input).toHaveFocus();
+      expect(screen.getByTestId("trigger")).not.toHaveFocus();
+    });
 
     // Only Escape returns focus: every other dismissal means the user went
     // elsewhere, so the hook must not pull focus back to the trigger.
@@ -367,7 +419,9 @@ describe("useDismissableMenu", () => {
 
     it("honours the option when it is turned on while the menu is already open", () => {
       const onClose = vi.fn();
-      const { rerender } = render(<Harness isOpen onClose={onClose} />);
+      const { rerender } = render(
+        <Harness isOpen onClose={onClose} returnFocusOnEscape={false} />,
+      );
 
       rerender(<Harness isOpen onClose={onClose} returnFocusOnEscape />);
       focusMenuItem();
