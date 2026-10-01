@@ -22,6 +22,7 @@ import { scrapeUserEmail } from "@/content/scraper";
 import { mergeBooks } from "@/dialog/mergeBooks";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { LAST_SYNC_AT_KEY } from "@/constants";
+import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/saveErrors";
 
 /** Return the value written to LAST_SYNC_AT_KEY across all storage.set calls, or undefined. */
 function lastSyncWrittenValue(): unknown {
@@ -193,6 +194,34 @@ describe("useAutoSetup", () => {
       expect(success).toBe(false);
       expect(result.current.phase).toBe("error");
       expect(lastSyncWrittenValue()).toBeUndefined();
+    });
+
+    it("shows the too-large copy, not the server's English message, on a 413 PAYLOAD_TOO_LARGE upload", async () => {
+      const mockApi = {
+        getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+        updatePersonalBooks: vi.fn().mockResolvedValue({
+          error: {
+            code: "PAYLOAD_TOO_LARGE",
+            message: "Request body exceeds 2MB limit",
+          },
+        }),
+      } as unknown as ApiClient;
+      const { result } = renderHook(() => useAutoSetup());
+
+      let success = true;
+      const promise = act(async () => {
+        success = await result.current.syncBooks({
+          userId: "user-hash",
+          apiClient: mockApi,
+        });
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+
+      expect(success).toBe(false);
+      expect(result.current.phase).toBe("error");
+      expect(result.current.errorMessage).toBe(BOOKS_TOO_LARGE_MESSAGE);
+      expect(result.current.errorMessage).not.toContain("Request body exceeds");
     });
 
     it("does NOT write LAST_SYNC_AT_KEY when scraping throws", async () => {

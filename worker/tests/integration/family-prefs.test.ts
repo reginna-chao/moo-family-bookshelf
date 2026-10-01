@@ -14,6 +14,7 @@ import {
   type UserBooksRecord,
 } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
+import { maxBodySizeFor } from "../../src/utils/bodyLimit";
 import { USER1, USER2 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -205,16 +206,19 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
     await seedUser(USER1);
 
     // MAX_FAMILY_PREF_ENTRIES (3000) is sized so that an over-limit unique set
-    // (MAX + 1 refs, ~77 bytes each ≈ 231KB) still fits under the 256KB global
-    // body-size guard. The request therefore reaches the handler and trips its
-    // own over-max → 400 INVALID_PAYLOAD branch (rather than being pre-empted
-    // by the 413 body guard), keeping that branch reachable over real HTTP.
+    // (MAX + 1 refs, ~77 bytes each ≈ 231KB) still fits under this route's
+    // 256KB body-size limit (the per-route default — only the books PUT gets
+    // more). The request therefore reaches the handler and trips its own
+    // over-max → 400 INVALID_PAYLOAD branch (rather than being pre-empted by
+    // the 413 body guard), keeping that branch reachable over real HTTP.
     const hidden = Array.from({ length: MAX_FAMILY_PREF_ENTRIES + 1 }, (_, i) =>
       ref(`book-${i}`),
     );
     // Guard the test itself: the payload must stay within the body limit, else
     // we'd be exercising the 413 path instead of the 400 branch under test.
-    expect(JSON.stringify({ hidden }).length).toBeLessThan(262144);
+    expect(Buffer.byteLength(JSON.stringify({ hidden }))).toBeLessThan(
+      maxBodySizeFor("PUT", `/api/user/${USER1}/family-prefs`),
+    );
 
     const res = await request(
       "PUT",

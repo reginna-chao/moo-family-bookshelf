@@ -21,6 +21,7 @@ import { syncBooks, type SyncBooksOptions } from "@/sync/syncBooks";
 import { scrapeBooks, scrapeArchivedBooks } from "@/content/scraper";
 import { queryWithLegacyFallback } from "@/content/readmoo-dom";
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
+import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/saveErrors";
 import {
   BoolFlag,
   BorrowStatus,
@@ -479,6 +480,31 @@ describe("syncBooks — full flow", () => {
       expect(result.books).toEqual([]);
     },
   );
+
+  it("reports the too-large copy, not the server's English message, on a 413 PAYLOAD_TOO_LARGE upload", async () => {
+    setupStorage({ displayName: "Test", syncArchived: 0 });
+    vi.mocked(scrapeBooks).mockResolvedValue([]);
+
+    const apiClient: ApiClient = {
+      getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+      updatePersonalBooks: vi.fn().mockResolvedValue({
+        error: {
+          code: "PAYLOAD_TOO_LARGE",
+          message: "Request body exceeds 2MB limit",
+        },
+      }),
+    } as unknown as ApiClient;
+
+    const result = await syncBooks({
+      navigate: false,
+      userId: "user-123",
+      apiClient,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(BOOKS_TOO_LARGE_MESSAGE);
+    expect(result.error).not.toContain("Request body exceeds");
+  });
 
   it("navigates to #/library and restores hash when navigate=true", async () => {
     Object.defineProperty(window, "location", {

@@ -10,7 +10,7 @@ import {
   applyPatchChanges,
   decideSaveStrategy,
 } from "moo-family-bookshelf-shared/personal/saveStrategy";
-import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
 import {
   PERSONAL_BOOKS_CACHE_KEY,
   PERSONAL_SHELF_SAVED_AT_KEY,
@@ -253,7 +253,7 @@ export function usePersonalBooks({
         : await apiClient.patchPersonalBooks(userId, patchChanges);
       if (response.error) {
         setErrorMessage(
-          safeErrorText(response.error.message, "儲存失敗，請稍後再試"),
+          booksSaveErrorText(response.error, "儲存失敗，請稍後再試"),
         );
         setStatus("error");
         return;

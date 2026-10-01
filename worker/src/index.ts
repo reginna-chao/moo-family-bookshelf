@@ -11,14 +11,12 @@ import { borrowRoutes } from "./routes/borrow";
 import { authRoutes } from "./routes/auth";
 import { verifyRoutes } from "./routes/verify";
 import { publicShelfRoutes, publicQueryRoutes } from "./routes/publicShelf";
+import { bodyLimitFor, payloadTooLargeMessage } from "./utils/bodyLimit";
 import { clientErrorFor, jsonError } from "./utils/errors";
 import { isDevMode, type Env } from "./utils/env";
 
 export type { Env } from "./utils/env";
 export { isDevMode } from "./utils/env";
-
-/** Max request body size: 256KB */
-const MAX_BODY_SIZE = 262144;
 
 /** Check if the origin is allowed for CORS */
 export function isAllowedOrigin(origin: string, devMode?: boolean): boolean {
@@ -88,31 +86,20 @@ app.use("*", async (c, next) => {
   return middleware(c, next);
 });
 
-// Request body size limit for API routes
+// Request body size limit for API routes — per route (utils/bodyLimit.ts)
 app.use("/api/*", async (c, next) => {
+  const limit = bodyLimitFor(c.req.method, c.req.path);
+  const tooLarge = () =>
+    jsonError(c, 413, "PAYLOAD_TOO_LARGE", payloadTooLargeMessage(limit));
   const contentLength = c.req.header("Content-Length");
   if (contentLength) {
     const size = parseInt(contentLength, 10);
-    if (!Number.isNaN(size) && size > MAX_BODY_SIZE) {
-      return jsonError(
-        c,
-        413,
-        "PAYLOAD_TOO_LARGE",
-        "Request body exceeds 256KB limit",
-      );
-    }
+    if (!Number.isNaN(size) && size > limit.maxBytes) return tooLarge();
   } else if (c.req.method !== "GET" && c.req.method !== "DELETE") {
     // No Content-Length: read body to verify size.
     // Cloudflare edge enforces its own body limit (~100MB) as a backstop.
     const buf = await c.req.raw.clone().arrayBuffer();
-    if (buf.byteLength > MAX_BODY_SIZE) {
-      return jsonError(
-        c,
-        413,
-        "PAYLOAD_TOO_LARGE",
-        "Request body exceeds 256KB limit",
-      );
-    }
+    if (buf.byteLength > limit.maxBytes) return tooLarge();
   }
   await next();
 });

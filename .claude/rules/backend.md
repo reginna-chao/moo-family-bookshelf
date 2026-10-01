@@ -41,6 +41,7 @@ worker/src/
 │   ├── publicShelves.ts # Data access: publicshelves:{uid} / public:{token}
 │   └── verify.ts        # Data access: verify:{uid} / otp:{uid} / qr:{token}
 └── utils/
+    ├── bodyLimit.ts  # Per-route request-body limit (bodyLimitFor) — 256KB default, 2MB for PUT /api/user/:id/books; 413 PAYLOAD_TOO_LARGE message
     ├── crypto.ts     # hashSecret / timingSafeEqual primitives
     ├── env.ts        # Env bindings type + isDevMode() production-name guard
     ├── errors.ts     # jsonError() — typed { error: { code, message } } envelope; clientErrorFor() — HTTPException → 4xx copy for the root onError

@@ -6,7 +6,7 @@ import {
   applyPatchChanges,
   decideSaveStrategy,
 } from "moo-family-bookshelf-shared/personal/saveStrategy";
-import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
 import { useFamilyData } from "@/hooks/useFamilyData";
 
 /** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
@@ -91,7 +91,7 @@ export function usePersonalShelfSave({
         : await apiClient.patchPersonalBooks(userId, patchChanges);
       if (response.error) {
         setErrorMessage(
-          safeErrorText(response.error.message, "儲存失敗，請稍後再試"),
+          booksSaveErrorText(response.error, "儲存失敗，請稍後再試"),
         );
         setState("error");
         return;
