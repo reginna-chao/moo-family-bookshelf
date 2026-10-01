@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 - Repo: `moo-family-bookshelf`
-- Language: 繁體中文 for user-facing content (UI, docs, comments, and ALL assistant/bot replies — chat, PR, and issue comments), English for code identifiers and commit messages. Agent-facing documents — this file and everything under `.claude/` — are English; the 繁中 that legitimately stays in them (strings the agent emits or matches verbatim) is defined in `.claude/rules/global.md` → Language → "The exemption".
+- Language: 繁體中文 for everything a person reads — UI strings, the main README, `docs/`, `CHANGELOG.md`, `site/`, PR and issue bodies, and ALL assistant/bot replies and reports (chat, PR, and issue comments). English for code identifiers, code comments, commit messages, branch names, and PR / issue titles. The full list and its two bilingual exceptions are in `.claude/rules/global.md` → Language. Agent-facing documents — this file and everything under `.claude/` — are English; the 繁中 that legitimately stays in them (strings the agent emits or matches verbatim) is defined in `.claude/rules/global.md` → Language → "The exemption".
 - In chat replies, file references must be repo-root relative only (example: `extension/src/dialog/FamilyShelf.tsx:42`); never absolute paths.
 
 ## Project Overview
@@ -193,7 +193,7 @@ When `CHANGELOG.md` is written: between releases, every `/develop` run writes it
 - UI components: React functional components with hooks.
 - Naming: `camelCase` for variables/functions, `PascalCase` for components/types, `UPPER_SNAKE` for constants.
 - Keep files concise. Production sources under `extension/src/`, `pwa/src/` and `shared/src/` are capped at 200 lines by ESLint `max-lines` (error); files that were already longer are pinned in each package's `eslint.config.js` allowlist and may only shrink — see `.claude/rules/frontend.md` → Coding Conventions. `worker/` is not under that rule: aim for under 300 LOC per file there. Split when it improves clarity.
-- Add brief comments for non-obvious logic only; do not over-comment.
+- Comments: English, for non-obvious logic only, at most two lines each. A test file's header, an exported function's JSDoc and workflow YAML comments may run longer (`.claude/rules/global.md` → Language).
 - CSS: Tailwind CSS utility classes preferred. Avoid inline styles for complex layouts.
 
 ### Boolean Convention
