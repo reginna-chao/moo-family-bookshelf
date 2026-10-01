@@ -1,3 +1,10 @@
+---
+paths:
+  - "extension/**"
+  - "pwa/**"
+  - "shared/**"
+---
+
 ## Frontend Architecture Rules
 
 Applies to: `extension/src/`, `pwa/src/`, `shared/src/`

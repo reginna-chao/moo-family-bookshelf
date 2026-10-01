@@ -334,7 +334,7 @@ All development and design go through a **single skill entry: `/develop`**. It t
 
 ```
 .claude/
-├── rules/          # project rules, READ on demand by agents (not auto-magic)
+├── rules/          # project rules — loaded by Claude Code itself, and Read up front by the role agents
 │   ├── global.md       # universal architecture / performance / lifecycle / side-effects
 │   ├── frontend.md     # Extension + PWA (React/TS) conventions
 │   ├── backend.md      # Worker (Hono/KV) conventions
@@ -365,8 +365,11 @@ All development and design go through a **single skill entry: `/develop`**. It t
   rules are **pushed down** into each subproject's own `.claude/` and sliced by **role**
   (`coder.md`, `tester.md`, `reviewer.md`); the abstract agent reads `<subproject>/.claude/<role>.md`.
   Only adopt this for moo if FE/BE/PWA conventions later diverge enough that the shared rules stop fitting.
-- `.claude/rules/` is **not deprecated** and not a remote-magic feature — it is load-bearing because
-  the agents explicitly read it. `.claude/settings.json` is gitignored (personal, per-developer).
+- `.claude/rules/` reaches an agent two ways. Claude Code loads the rule files itself, into the main
+  session and into every dispatched subagent — a file without `paths` frontmatter at launch, a
+  `paths`-scoped one when a matching file is read — and the role agents also `Read` their scope's
+  file up front, so the rules are in hand before any analysis starts.
+  `.claude/settings.json` is gitignored (personal, per-developer).
 
 ### Retro → Distill self-improvement loop
 

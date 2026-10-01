@@ -76,7 +76,7 @@ When the designer agent is dispatched for a banner task, it follows these steps.
 
 ### Step 1: Discovery & Requirements
 
-Before generating, gather requirements from user:
+Before generating, settle these from the invoker's `context`. Where it leaves one open, take the recommended option and record the choice under Open UX Questions:
 
 1. **Purpose** — Where will the banner be used? (see Platform Specifications above)
 
@@ -100,8 +100,6 @@ Before generating, gather requirements from user:
    - Existing brand colors (provide hex)
    - Popular palettes: dark theme, ocean, sunset, forest, neon
    - Let AI decide based on project type
-
-**Wait for user confirmation before proceeding!**
 
 ### Step 2: Generate SVG Banner Variations
 
@@ -368,24 +366,24 @@ Open in browser:
 - Windows: `start preview.html`
 - macOS/Linux: `open preview.html`
 
-### Step 4: Iterate with User
+### Step 4: Refinement rounds
 
-Ask user which banners they prefer:
+Return the first round with these questions for the invoker to relay:
 
 - 「你喜歡哪幾個方案？（例如 #2, #5）」
 - 「在 OG 預覽中文字是否夠大、夠清楚？」
 - 「有什麼想調整的地方？文字、配色、排版？」
 
-Based on feedback:
+When re-dispatched with the user's feedback:
 
 1. Generate 3-5 refined variations based on favorites
 2. Name as `banner-{original}-v{n}.svg` (e.g., `banner-02-v1.svg`)
 3. Update preview.html
-4. Repeat until user approves
+4. Return the round — one round per dispatch
 
 ### Step 5: Finalize & Export
 
-Once user approves:
+When the dispatch names the approved banner:
 
 **5a. Create final directory:**
 

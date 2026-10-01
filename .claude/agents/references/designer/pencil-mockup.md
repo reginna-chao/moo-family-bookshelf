@@ -19,10 +19,10 @@ The Pencil MCP server starts instantly, but the VS Code Pencil extension needs t
 
 **Recovery steps** (in order):
 
-1. Ask the user to open a `.pen` file in VS Code (this triggers extension activation).
-2. Wait ~10 seconds for the extension to fully initialize.
-3. Retry `get_editor_state` — if it still fails, wait another 10 seconds and retry once more.
-4. If it fails 3 times total, ask the user to check:
+1. Wait ~10 seconds for the extension to fully initialize, then retry `get_editor_state`.
+2. If it still fails, wait another 10 seconds and retry once more.
+3. If it fails 3 times total, stop and return the blocker to the invoker, with this checklist for the user:
+   - A `.pen` file is open in VS Code (this triggers extension activation).
    - Pencil extension is enabled (`Ctrl+Shift+X` on Windows / `Cmd+Shift+X` on macOS → search "Pencil" → should show Enabled).
    - VS Code status bar shows a Pencil indicator.
    - Try restarting VS Code, then open a `.pen` file, wait 15 seconds, and retry.
@@ -134,16 +134,16 @@ Add text annotations near the mockup explaining:
 - **Privacy / state invariants** — explicitly mark "default `isShared: BoolFlag.FALSE`", "save-before-sync gate", "non-member access blocked" where relevant. See `.claude/rules/security-ux-invariants.md`.
 - **Lifecycle / cost note** — if the design implies any timer / polling / auto-refresh, label it (e.g. "regenerate on click only — no interval"). See `.claude/rules/global.md` → "Lifecycle & Resource Cost".
 
-### Step 6: Present & iterate
+### Step 6: Return for review
 
-Use `get_screenshot` to render the final mockup and present it to the user. Ask:
+Use `get_screenshot` to render the final mockup and return it with these review questions for the invoker to relay:
 
 1. Layout 是否符合預期？
 2. 有沒有缺少的欄位或操作？
 3. 互動行為是否正確？
 4. 有沒有遺漏的狀態（empty / loading / error / 權限不足）？
 
-Refine based on feedback using `batch_design` (update / replace operations) until the user approves.
+When re-dispatched with the user's feedback, refine with `batch_design` (update / replace operations) — one round per dispatch.
 
 ## Design System Reference
 
@@ -157,8 +157,8 @@ This project does NOT use MUI / Chakra / Ant. The "design system" is Tailwind ut
 | Border radius    | Default Tailwind (`rounded`, `rounded-md`, `rounded-lg`)                              |
 | Spacing unit     | Tailwind 4 px scale                                                                   |
 | Typography       | System font stack — no custom font loaded                                             |
-| Buttons / inputs | Tailwind utility classes — see existing `dialog/` components for patterns             |
-| Layout (Dialog)  | Flex column, `flex: 1`, `minHeight: 0` (see `App.tsx:19` `flexColumnFill`)            |
+| Buttons / inputs | `.moo-button` / `.moo-form-input` classes (`dialog/styles.css`) + Tailwind utilities  |
+| Layout (Dialog)  | Flex column, `flex: 1`, `min-height: 0` (see `dialog/styles.css`)                     |
 | Tabs             | Family Shelf · Personal Shelf · Borrow · Settings (see `App.tsx`)                     |
 
 ## When dispatched by /develop (during a feature's UI work)
@@ -174,23 +174,23 @@ The feature's UI work provides the requirements. Create the mockup in Pencil and
 
 1. Call `get_editor_state` to check if a `.pen` file is already open.
 2. If no editor is active, or the active file is not the target:
-   - Determine the target path: if the request specifies a `.pen` path, use it; otherwise derive from `<surface> <feature-name>` → `design/{surface}/{feature-name}/{name}.pen`. If surface is unclear, ask the user.
+   - Determine the target path: if the request specifies a `.pen` path, use it; otherwise derive from `<surface> <feature-name>` → `design/{surface}/{feature-name}/{name}.pen`. If surface is unclear, pick the most likely one and record the choice under Open UX Questions.
    - If the `.pen` file does not exist on disk, create it:
      ```bash
      mkdir -p design/{surface}/{feature-name}/
      echo '{"version":"2.10","children":[]}' > design/{surface}/{feature-name}/{name}.pen
      ```
    - Call `open_document` with the **absolute** path.
-   - Call `get_editor_state` and verify the path matches — if it shows `/pencil-new.pen`, the seed file was not recognized; warn the user.
+   - Call `get_editor_state` and verify the path matches — if it shows `/pencil-new.pen`, the seed file was not recognized; report it in your return summary.
 3. If `get_editor_state` fails with a WebSocket error, follow the recovery steps in Prerequisites (open a `.pen` file, wait ~10 s, retry up to 3 times).
-4. Ask the user what to design if not specified.
+4. If the request does not say what to design, stop and return that as an Open UX Question.
 5. Follow the full process above.
-6. After design is complete, remind the user: **「請按 Ctrl+S（Windows）/ Cmd+S（macOS）儲存設計檔」**.
+6. After design is complete, put this reminder for the user in your return summary: **「請按 Ctrl+S（Windows）/ Cmd+S（macOS）儲存設計檔」**.
 
 ## Rules
 
 - **Mockup only** — never write production / test code from this reference. Hand off to implementation once the mockup is approved.
 - **Always ground in real components** — read `extension/src/dialog/` and `pwa/src/` before drawing; do not invent UI patterns that don't exist in the codebase unless the feature genuinely needs them.
-- **Respect the four security-UX invariants** (see `.claude/rules/security-ux-invariants.md`) when sketching share / save / unbind / settings flows — annotate them on the mockup.
+- **Respect the security-UX invariants** (see `.claude/rules/security-ux-invariants.md`) when sketching share / save / unbind / settings flows — annotate them on the mockup.
 - **Do not export PNG/JPG to `design/`** — `.pen` only.
 - **Do not commit `.pen` changes without the user's go-ahead** — designs often go through several iterations before being worth committing.

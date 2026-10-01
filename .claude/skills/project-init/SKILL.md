@@ -91,12 +91,15 @@ Update each file according to the approved changes. For each file:
 
 ### Rules (`.claude/rules/`)
 
-| File          | What Gets Customized                                                          |
-| ------------- | ----------------------------------------------------------------------------- |
-| `global.md`   | Language policy, commit conventions, decision framework                       |
-| `frontend.md` | Tech stack, project structure, coding conventions, commands, state management |
-| `backend.md`  | Tech stack, project structure, API design, DB/storage patterns, commands      |
-| `test.md`     | Framework & tools, test locations, coverage targets, mock policy              |
+| File                        | What Gets Customized                                                                          |
+| --------------------------- | --------------------------------------------------------------------------------------------- |
+| `global.md`                 | Language policy, commit conventions, decision framework                                       |
+| `frontend.md`               | Tech stack, project structure, coding conventions, commands, state management                 |
+| `backend.md`                | Tech stack, project structure, API design, DB/storage patterns, commands                      |
+| `test.md`                   | Framework & tools, test locations, coverage targets, mock policy                              |
+| `change-triage.md`          | Tier definitions and the non-goals list for unsolicited proposals                             |
+| `user-facing-copy.md`       | The reader, banned vocabulary, product nouns, worked examples — rewritten for the new product |
+| `security-ux-invariants.md` | The project's own invariants — rewritten for the new product, never carried over              |
 
 ### Agents (`.claude/agents/`)
 
@@ -110,10 +113,13 @@ Update each file according to the approved changes. For each file:
 
 ### Skills (`.claude/skills/`)
 
-| Skill          | What Gets Customized                                                  |
-| -------------- | --------------------------------------------------------------------- |
-| `develop`      | Verification commands; scope tagging; phase commands in `references/` |
-| `project-init` | (this file — stays unchanged)                                         |
+| Skill            | What Gets Customized                                                          |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `develop`        | Verification commands; scope tagging; phase commands in `references/`         |
+| `project-init`   | (this file — stays unchanged)                                                 |
+| `bump-ver`       | Version-file list, release conventions, CHANGELOG section names               |
+| `distill`        | Legal target list (stays in step with the rules / agents / skills that exist) |
+| `speak-human-tw` | (vendored — never adapted; see its `VENDORED.md`)                             |
 
 ## What This Skill Does NOT Change
 
@@ -132,7 +138,10 @@ This skill assumes the `.claude/` directory follows this base structure:
 │   ├── global.md
 │   ├── frontend.md
 │   ├── backend.md
-│   └── test.md
+│   ├── test.md
+│   ├── change-triage.md
+│   ├── user-facing-copy.md
+│   └── security-ux-invariants.md
 ├── agents/
 │   ├── coder.md
 │   ├── tester.md
@@ -140,11 +149,15 @@ This skill assumes the `.claude/` directory follows this base structure:
 │   ├── designer.md
 │   ├── security-auditor.md
 │   └── references/designer/{pencil-mockup,logo,icon,banner}.md
+├── hooks/
+│   └── block-ps-herestring.js
 └── skills/
     ├── develop/
     │   ├── SKILL.md             # intent router (code vs design)
-    │   └── references/{code-cycle,design}.md
+    │   └── references/{code-cycle,design,retro}.md
+    ├── distill/SKILL.md
     ├── bump-ver/SKILL.md
+    ├── speak-human-tw/          # vendored — never adapted
     └── project-init/SKILL.md    # this file (stays unchanged)
 ```
 

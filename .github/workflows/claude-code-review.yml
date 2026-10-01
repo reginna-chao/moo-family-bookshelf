@@ -175,8 +175,7 @@ jobs:
                problems is still a ✅ — do not reach into the five code
                dimensions to manufacture a finding.
 
-            SEVERITY POLICY — align with the local Fix Cycle in
-            .claude/rules/global.md (CRITICAL=must-fix / WARNING=use-judgment /
+            SEVERITY POLICY (CRITICAL=must-fix / WARNING=use-judgment /
             NITPICK=optional-skippable):
 
             - CRITICAL — correctness bugs, security holes, or violations of the
@@ -197,11 +196,7 @@ jobs:
             - 🛑 有 CRITICAL 問題 — one or more CRITICAL findings; list each with
               file:line and a concrete fix.
 
-            Do not flag formatting that ESLint/Prettier already handle. If you
-            find nothing significant, give ✅ 無 CRITICAL 問題 and stop — never
-            invent findings to justify the run. When a human later asks you to
-            re-review after fixes, focus only on whether the prior CRITICAL items
-            are resolved; do not generate a fresh batch of NITPICKs.
+            Do not flag formatting that ESLint/Prettier already handle.
 
             The PR branch is already checked out in the current working directory.
             Use `gh pr comment` for top-level summary feedback.
