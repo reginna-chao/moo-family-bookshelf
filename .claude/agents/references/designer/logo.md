@@ -38,7 +38,7 @@ All generated files saved to `.skill-archive/designer/logo/<yyyy-mm-dd-summaryna
 
 ### Step 1: Discovery & Requirements
 
-Before generating, gather requirements from user:
+Before generating, settle these from the invoker's `context`. Where it leaves one open, take the recommended option and record the choice under Open UX Questions:
 
 1. **Project/Brand name** — What is the logo for?
 2. **Style preference:**
@@ -62,8 +62,6 @@ Before generating, gather requirements from user:
 5. **Background requirement:**
    - Transparent (web/PWA)
    - Solid color required (Google Play — no transparency allowed)
-
-**Wait for user confirmation before proceeding!**
 
 ### Step 2: Generate SVG Variations
 
@@ -470,24 +468,24 @@ Open in browser:
 - Windows: `start preview.html`
 - macOS/Linux: `open preview.html`
 
-### Step 4: Iterate with User
+### Step 4: Refinement rounds
 
-Ask user which logos they prefer:
+Return the first round with these questions for the invoker to relay:
 
 - 「你喜歡哪幾個方案？（例如 #2, #5）」
 - 「有什麼想調整的地方？」
 - 「在 safe zone 預覽中，重要元素是否都在綠圈內？」
 
-Based on feedback:
+When re-dispatched with the user's feedback:
 
 1. Generate 3-5 refined variations based on favorites
 2. Name as `logo-{original}-v{n}.svg` (e.g., `logo-02-v1.svg`)
 3. Update preview.html
-4. Repeat until user approves
+4. Return the round — one round per dispatch
 
 ### Step 5: Finalize & Export
 
-Once user approves a logo, generate the target platform assets:
+When the dispatch names the approved logo, generate the target platform assets:
 
 **5a. Create final directory:**
 

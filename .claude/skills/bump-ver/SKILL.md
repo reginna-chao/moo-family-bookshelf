@@ -33,7 +33,7 @@ Pure version bumps don't need the /develop Fix Cycle. This skill encodes the pro
 - **Included in CHANGELOG** (user-facing): `feat:`, `fix:`, `perf:`, `security:`. `style(<user-facing>):` (e.g. `style(extension)`, `style(pwa)`) is included as a UI tweak.
 - **Bilingual Release notes file**: every bump also creates `docs/release-notes/v<X.Y.Z>.md` (filename carries the `v` prefix to match the git tag the CD workflow reads via `github.ref_name`). It follows `docs/release-notes/TEMPLATE.md`'s bilingual structure: English section first (public Release faces international readers — intentional, do not flip), 繁體中文 section second. The 繁中 section reuses the CHANGELOG bullets just drafted; the English section is a curated, natural translation (not literal). Drop unused categories. This file must exist in the commit the tag points to, so it is created here, before the user tags.
 - **No git tag**: the user tags manually after this skill finishes. Never run `git tag`.
-- **Worker version stays in sync**: even though Worker historically lagged at 1.0.0, going forward it bumps with everything else.
+- **Worker version stays in sync**: it bumps with everything else.
 - **Source-code `// vX.Y.Z` markers are NOT version numbers** — they tag when a feature was introduced and must NOT be touched.
 
 ## Invocation
@@ -149,7 +149,7 @@ In order:
 
 - **No commits since last tag**: stop. Tell user there is nothing to release.
 - **Only excluded commits since last tag** (all `chore`/`docs`): warn that there's nothing user-facing, ask whether to proceed (e.g. release purely for tooling reasons).
-- **`## 未釋出` is absent but included commits exist**: the runs that landed them skipped the CHANGELOG step. Draft every included commit as a new bullet (the pre-未釋出 behaviour), and say so in the plan so the user knows this copy was written from commits, not during the runs.
+- **`## 未釋出` is absent but included commits exist**: the runs that landed them skipped the CHANGELOG step. Draft every included commit as a new bullet, and say so in the plan so the user knows this copy was written from commits, not during the runs.
 - **`## 未釋出` has bullets but no included commit maps to them**: someone wrote copy for a change that never merged, or the commit was mis-prefixed. Surface each orphan bullet in the plan and ask whether to keep, move, or drop it — never promote silently.
 - **Target version equals current**: stop with an error.
 - **Target version is lower than current**: stop with an error.

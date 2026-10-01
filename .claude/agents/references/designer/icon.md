@@ -84,7 +84,7 @@ All icons should use `currentColor` so they inherit the text color from CSS:
 
 ### Step 1: Discovery & Requirements
 
-Before generating, the designer agent gathers requirements from the user:
+Before generating, settle these from the invoker's `context`. Where it leaves one open, take the recommended option and record the choice under Open UX Questions:
 
 1. **Icon list** — Which icons are needed?
    - Provide names (e.g., home, search, settings, bookmark, share, user, bell, ...)
@@ -110,8 +110,6 @@ Before generating, the designer agent gathers requirements from the user:
    - React component icons
    - Mobile app (SVG files)
    - Figma/design handoff
-
-**Wait for user confirmation before proceeding!**
 
 ### Step 2: Generate Icon Set
 
@@ -413,25 +411,25 @@ Open in browser:
 - Windows: `start preview.html`
 - macOS/Linux: `open preview.html`
 
-### Step 5: Iterate with User
+### Step 5: Refinement rounds
 
-Ask the user to review:
+Return the set with these review questions for the invoker to relay:
 
 - 「所有 icon 的視覺重量是否一致？」
 - 「在一致性檢查中有沒有特別突兀的？」
 - 「在 16dp 小尺寸下是否清楚辨識？」
 - 「哪些需要調整？」
 
-Based on feedback:
+When re-dispatched with the user's feedback:
 
 1. Regenerate specific icons
 2. Ensure consistency across the full set
 3. Update sprite.svg and preview.html
-4. Repeat until user approves
+4. Return the round — one round per dispatch
 
 ### Step 6: Finalize & Export
 
-Once the user approves the full set:
+When the dispatch names the approved set:
 
 **6a. Create final directory:**
 

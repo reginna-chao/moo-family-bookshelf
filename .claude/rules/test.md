@@ -1,3 +1,10 @@
+---
+paths:
+  - "**/tests/**"
+  - "**/*.test.{ts,tsx}"
+  - "**/*.spec.ts"
+---
+
 ## Testing Rules
 
 ### Framework & Tools
