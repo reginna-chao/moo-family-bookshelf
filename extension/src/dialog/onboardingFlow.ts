@@ -8,18 +8,10 @@
  */
 
 import browser from "webextension-polyfill";
-import {
-  ApiClient,
-  FamilyGroup,
-  BookEntry,
-  PersonalBooks,
-  PERSONAL_BOOKS_SCHEMA_VERSION,
-} from "../api/client";
+import { ApiClient, FamilyGroup } from "../api/client";
 import { decodeSyncCode, encodeSyncCode } from "../crypto/syncCode";
 import {
   DEFAULT_API_ENDPOINT,
-  PERSONAL_BOOKS_CACHE_KEY,
-  DISPLAY_NAME_KEY,
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
@@ -28,41 +20,10 @@ import {
 import { persistAcceptedFamilyEndpoint } from "../storage/familyEndpointChoice";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type { useAutoSetup } from "./useAutoSetup";
+import { migratePersonalBooksCache } from "./personalBooksCacheMigration";
 
-/**
- * Upload cached personal books as plaintext JSON.
- * Best-effort: failures do not block family create/join.
- */
-export async function migratePersonalBooksCache(
-  userId: string,
-  apiClient: ApiClient,
-): Promise<void> {
-  try {
-    const result = await browser.storage.local.get([
-      PERSONAL_BOOKS_CACHE_KEY,
-      DISPLAY_NAME_KEY,
-    ]);
-    const raw = result[PERSONAL_BOOKS_CACHE_KEY] as string | undefined;
-    if (!raw) return;
-
-    const storedDisplayName =
-      (result[DISPLAY_NAME_KEY] as string | undefined) ?? "";
-    const books = JSON.parse(raw) as BookEntry[];
-    const personalBooks: PersonalBooks = {
-      schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
-      userId,
-      displayName: storedDisplayName,
-      books,
-      lastUpdated: new Date().toISOString(),
-    };
-    await apiClient.updatePersonalBooks(userId, personalBooks);
-    await browser.storage.local.remove([PERSONAL_BOOKS_CACHE_KEY]);
-  } catch {
-    // Cache migration is best-effort; don't block family join/create
-    console.warn("[Onboarding] Failed to migrate personal books cache");
-    await browser.storage.local.remove([PERSONAL_BOOKS_CACHE_KEY]);
-  }
-}
+// Re-exported so existing `./onboardingFlow` importers keep working.
+export { migratePersonalBooksCache };
 
 /**
  * Persist auth/family credentials to chrome.storage.local.

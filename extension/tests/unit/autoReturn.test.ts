@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { detectReturnedRequests, applyAutoReturns } from "@/sync/autoReturn";
+import {
+  detectReturnedRequests,
+  applyAutoReturns,
+  runAutoReturn,
+} from "@/sync/autoReturn";
 import { BorrowStatus, type ApiClient, type BorrowRequest } from "@/api/client";
 
 const OWNER_ID = "user-owner";
@@ -214,6 +218,52 @@ describe("applyAutoReturns", () => {
     const returnedIds = await applyAutoReturns(apiClient, []);
 
     expect(returnedIds).toEqual([]);
+    expect(updateBorrowStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("runAutoReturn", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("works off the borrow list it is given — it never lists requests itself", async () => {
+    const listBorrowRequests = vi.fn();
+    const updateBorrowStatus = vi
+      .fn()
+      .mockResolvedValue(makeRequest({ status: BorrowStatus.RETURNED }));
+    const apiClient = {
+      listBorrowRequests,
+      updateBorrowStatus,
+    } as unknown as ApiClient;
+
+    const ids = await runAutoReturn(
+      apiClient,
+      [makeRequest({ updatedAt: "2020-01-01T00:00:00.000Z" })],
+      OWNER_ID,
+      new Set(["book-1"]),
+    );
+
+    expect(ids).toEqual(["req-1"]);
+    expect(updateBorrowStatus).toHaveBeenCalledWith(
+      "req-1",
+      BorrowStatus.RETURNED,
+    );
+    expect(listBorrowRequests).not.toHaveBeenCalled();
+  });
+
+  it("makes no request when nothing reappeared", async () => {
+    const updateBorrowStatus = vi.fn();
+    const apiClient = { updateBorrowStatus } as unknown as ApiClient;
+
+    const ids = await runAutoReturn(
+      apiClient,
+      [makeRequest()],
+      OWNER_ID,
+      new Set(["another-book"]),
+    );
+
+    expect(ids).toEqual([]);
     expect(updateBorrowStatus).not.toHaveBeenCalled();
   });
 });

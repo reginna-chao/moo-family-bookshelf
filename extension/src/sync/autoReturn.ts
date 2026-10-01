@@ -65,3 +65,31 @@ export async function applyAutoReturns(
   }
   return succeeded;
 }
+
+/**
+ * Best-effort auto-return after a sync upload: mark RETURNED every LENT request
+ * whose book reappeared in the scrape. Takes the borrow list the sync already
+ * fetched (no second list call) + N patches (N = actual returns). All failures
+ * are swallowed (console.warn) so this never affects the sync result. Returns
+ * the successfully-returned requestIds.
+ */
+export async function runAutoReturn(
+  apiClient: ApiClient,
+  requests: BorrowRequest[],
+  ownerId: string,
+  scrapedBookIds: Set<string>,
+): Promise<string[]> {
+  try {
+    const returned = detectReturnedRequests(
+      requests,
+      scrapedBookIds,
+      ownerId,
+      Date.now(),
+    );
+    if (returned.length === 0) return [];
+    return await applyAutoReturns(apiClient, returned);
+  } catch (err) {
+    console.warn("[syncBooks] Auto-return detection failed:", err);
+    return [];
+  }
+}

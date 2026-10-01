@@ -78,6 +78,14 @@ const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
 /** The "put-books" scope uses a 3600s window (routes/user.ts:447). */
 const HOUR_BUCKET = Math.floor(PINNED_NOW / 3_600_000);
 
+/**
+ * Real-shaped Readmoo bookIds (12+ digits). The measured save adds a NEW book,
+ * and PUT drops a new bookId of any other shape (`dropNewMalformedBookIds`), so
+ * a short id would silently measure a request that discards half its payload.
+ */
+const STORED_BOOK_ID = "210439468000101";
+const NEW_BOOK_ID = "210439468000102";
+
 let kv: KVNamespace;
 
 /** Book shape accepted by parseBooks (routes/user.ts:306); "" coverUrl is valid. */
@@ -114,7 +122,7 @@ async function seedMemberWithBooks(): Promise<string> {
     schemaVersion: 1,
     userId: USER1,
     displayName: "Alice",
-    books: [book("book-1", BoolFlag.FALSE)],
+    books: [book(STORED_BOOK_ID, BoolFlag.FALSE)],
     lastUpdated: new Date(PINNED_NOW).toISOString(),
   };
   await kv.put(kvKeys.user(USER1), JSON.stringify(existing));
@@ -135,7 +143,10 @@ async function measuredRequest(token: string) {
         "cf-connecting-ip": CALLER_IP,
       },
       body: JSON.stringify({
-        books: [book("book-1", BoolFlag.TRUE), book("book-2", BoolFlag.FALSE)],
+        books: [
+          book(STORED_BOOK_ID, BoolFlag.TRUE),
+          book(NEW_BOOK_ID, BoolFlag.FALSE),
+        ],
       }),
     },
     { KV: kv, ...bindings },

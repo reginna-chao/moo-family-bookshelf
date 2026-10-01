@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BoolFlag } from "@/api/client";
-import type { ScrapedBook } from "@/content/scraper";
+import type { ScrapeResult } from "@/content/scraper";
 
 /**
  * Pins the `finally` contract of `scrapeArchivedBooks` (scraper-archive.ts):
@@ -74,9 +74,7 @@ function mountFakeLibrary(options: FakeLibraryOptions): FakeLibrary {
   return { clicks };
 }
 
-async function loadScrapeArchivedBooks(): Promise<
-  () => Promise<ScrapedBook[]>
-> {
+async function loadScrapeArchivedBooks(): Promise<() => Promise<ScrapeResult>> {
   vi.resetModules();
   const mod = await import("@/content/scraper");
   return mod.scrapeArchivedBooks;
@@ -117,8 +115,9 @@ describe("scrapeArchivedBooks", () => {
     await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
     const result = await promise;
 
-    expect(result).toHaveLength(1);
-    expect(result[0].isArchived).toBe(BoolFlag.TRUE);
+    expect(result.complete).toBe(true);
+    expect(result.books).toHaveLength(1);
+    expect(result.books[0].isArchived).toBe(BoolFlag.TRUE);
     expect(clicks).toEqual([
       "filter",
       "archive",
@@ -138,7 +137,8 @@ describe("scrapeArchivedBooks", () => {
     await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
     const result = await promise;
 
-    expect(result).toEqual([]);
+    // A failed archive scrape is incomplete — never "zero archived books".
+    expect(result).toEqual({ books: [], complete: false });
     expect(window.location.hash).toBe("#/library");
   });
 
@@ -151,13 +151,14 @@ describe("scrapeArchivedBooks", () => {
     const result = await promise;
 
     // A failed restore must not discard books already scraped.
-    expect(result).toHaveLength(1);
-    expect(result[0].isArchived).toBe(BoolFlag.TRUE);
+    expect(result.complete).toBe(true);
+    expect(result.books).toHaveLength(1);
+    expect(result.books[0].isArchived).toBe(BoolFlag.TRUE);
     expect(clicks).toEqual(["filter", "archive", "confirm", "filter"]);
     expect(window.location.hash).toBe("#/library");
   });
 
-  it("returns [] and still clears the filter when the scrape itself throws", async () => {
+  it("returns an incomplete empty result and still clears the filter when the scrape itself throws", async () => {
     const requestFiberData = vi
       .fn()
       .mockRejectedValue(new Error("fiber bridge unavailable"));
@@ -174,7 +175,7 @@ describe("scrapeArchivedBooks", () => {
 
     // Positive companion: the failure really came from inside the scrape step.
     expect(requestFiberData).toHaveBeenCalledTimes(1);
-    expect(result).toEqual([]);
+    expect(result).toEqual({ books: [], complete: false });
     expect(clicks).toEqual([
       "filter",
       "archive",
@@ -184,5 +185,42 @@ describe("scrapeArchivedBooks", () => {
       "confirm",
     ]);
     expect(window.location.hash).toBe("");
+  });
+
+  it("reports a successful scrape that finds zero archived books as COMPLETE", async () => {
+    mountFakeLibrary({ reopenOnCleanup: true });
+    document.querySelector(".library-item")?.remove();
+    const scrapeArchivedBooks = await loadScrapeArchivedBooks();
+
+    const promise = scrapeArchivedBooks();
+    await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
+    const result = await promise;
+
+    expect(result).toEqual({ books: [], complete: true });
+  });
+
+  it("passes through an incomplete archive scrape (an unreadable archived card)", async () => {
+    mountFakeLibrary({ reopenOnCleanup: true });
+    const extra = document.createElement("div");
+    extra.className = "library-item";
+    extra.innerHTML = `
+      <div class="info"><div class="title" title="短碼書">短碼書</div></div>
+      <div class="privacy" id="privacy-18548672"></div>
+    `;
+    document.body.appendChild(extra);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const scrapeArchivedBooks = await loadScrapeArchivedBooks();
+
+    const promise = scrapeArchivedBooks();
+    await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
+    const result = await promise;
+
+    expect(result.books.map((b) => b.bookId)).toEqual(["210439468000107"]);
+    expect(result.complete).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'rejected .privacy fallback bookId "privacy-18548672"',
+      ),
+    );
   });
 });

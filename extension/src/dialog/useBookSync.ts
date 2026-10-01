@@ -7,10 +7,33 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ApiClient, BookEntry } from "../api/client";
-import { syncBooks, canAutoSync } from "../sync/syncBooks";
+import {
+  syncBooks,
+  canAutoSync,
+  type SyncBooksResult,
+} from "../sync/syncBooks";
+import type { RenamedBook } from "../sync/renamedBooks";
 import { formatScrapeProgress } from "../content/scraper";
 
 export type SyncStatus = "idle" | "syncing" | "done" | "error";
+
+/** The last SUCCESSFUL sync, held as one value so its parts never mismatch. */
+interface LastSync {
+  books: BookEntry[];
+  renamedBooks: RenamedBook[];
+  renamedBookCount: number;
+}
+
+const NO_SYNC: LastSync = { books: [], renamedBooks: [], renamedBookCount: 0 };
+
+function lastSyncOf(result: SyncBooksResult): LastSync {
+  const renamedBooks = result.renamedBooks ?? [];
+  return {
+    books: result.books,
+    renamedBooks,
+    renamedBookCount: result.renamedBookCount ?? renamedBooks.length,
+  };
+}
 
 export interface UseBookSyncOptions {
   userId: string;
@@ -25,12 +48,19 @@ export interface UseBookSyncReturn {
   syncStatus: SyncStatus;
   syncError: string;
   lastSyncBooks: BookEntry[];
+  /**
+   * Books the last SUCCESSFUL sync moved to their new Readmoo id. Always from
+   * the same sync as `lastSyncBooks` (both change in the same render).
+   */
+  lastSyncRenamedBooks: RenamedBook[];
   /** Trigger a manual sync (no rate limit) */
   triggerManualSync: () => Promise<void>;
   /** Whether auto-sync happened this session */
   autoSyncDone: boolean;
   /** Live progress message during a paginated scrape (Wave G). Empty otherwise. */
   progressMessage: string;
+  /** Books moved to their new Readmoo id by the last SUCCESSFUL sync (0 = none). */
+  renamedBookCount: number;
 }
 
 export function useBookSync({
@@ -41,7 +71,7 @@ export function useBookSync({
 }: UseBookSyncOptions): UseBookSyncReturn {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [syncError, setSyncError] = useState("");
-  const [lastSyncBooks, setLastSyncBooks] = useState<BookEntry[]>([]);
+  const [lastSync, setLastSync] = useState<LastSync>(NO_SYNC);
   const [autoSyncDone, setAutoSyncDone] = useState(false);
   const [progressMessage, setProgressMessage] = useState("");
   const autoSyncTriggered = useRef(false);
@@ -85,7 +115,7 @@ export function useBookSync({
           });
           setProgressMessage("");
           if (result.success) {
-            setLastSyncBooks(result.books);
+            setLastSync(lastSyncOf(result));
             setSyncStatus("done");
             setAutoSyncDone(true);
             const returnedIds = result.autoReturnedRequestIds;
@@ -133,7 +163,7 @@ export function useBookSync({
     });
     setProgressMessage("");
     if (result.success) {
-      setLastSyncBooks(result.books);
+      setLastSync(lastSyncOf(result));
       setSyncStatus("done");
       const returnedIds = result.autoReturnedRequestIds;
       if (returnedIds && returnedIds.length > 0) {
@@ -150,9 +180,11 @@ export function useBookSync({
   return {
     syncStatus,
     syncError,
-    lastSyncBooks,
+    lastSyncBooks: lastSync.books,
+    lastSyncRenamedBooks: lastSync.renamedBooks,
     triggerManualSync,
     autoSyncDone,
     progressMessage,
+    renamedBookCount: lastSync.renamedBookCount,
   };
 }

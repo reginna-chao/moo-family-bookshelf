@@ -43,6 +43,7 @@ import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
+import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
 
 /**
  * Refresh the `public:{shareToken}` snapshot of every shelf in `shelves`.
@@ -362,6 +363,24 @@ export function parseBooks(
 }
 
 /**
+ * Drop every book whose `bookId` is not shaped like a real Readmoo id AND is
+ * not already in the stored record. Ids already stored (legacy short ids from
+ * an old scraper fallback) are grandfathered — the Extension resolves and
+ * cleans those client-side — so only NEW malformed ids are kept out of KV.
+ * Pure; `dropped` is the number of entries removed.
+ */
+export function dropNewMalformedBookIds(
+  books: BookEntry[],
+  existingBooks: readonly BookEntry[] | undefined,
+): { books: BookEntry[]; dropped: number } {
+  const storedIds = new Set((existingBooks ?? []).map((b) => b.bookId));
+  const kept = books.filter(
+    (b) => isRealBookId(b.bookId) || storedIds.has(b.bookId),
+  );
+  return { books: kept, dropped: books.length - kept.length };
+}
+
+/**
  * Max books accepted in a single PUT — matches the PATCH change cap.
  *
  * Relationship to the body guard: this PUT carries the 2MB request-body limit
@@ -505,6 +524,14 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
   ]);
   const publicShelves = resolvePublicShelves(publicShelvesPointer, existing);
 
+  // New malformed bookIds are dropped (not rejected); stored ones are kept.
+  const filtered = dropNewMalformedBookIds(parsedBooks.books, existing?.books);
+  if (filtered.dropped > 0) {
+    console.warn("PUT_BOOKS_INVALID_BOOK_ID_DROPPED", {
+      count: filtered.dropped,
+    });
+  }
+
   // Resolve displayName: family record is authoritative when the user is in a family
   // (even an empty value, which represents a deliberate clear). Only fall back to the
   // client-supplied value when there is no family membership / family record.
@@ -522,7 +549,7 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
       typeof body.schemaVersion === "number" ? body.schemaVersion : 1,
     userId,
     displayName: serverDisplayName,
-    books: parsedBooks.books,
+    books: filtered.books,
     lastUpdated: new Date().toISOString(),
     familyShelfPrefs: parsedPrefs ?? existing?.familyShelfPrefs,
   };

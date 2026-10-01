@@ -1807,6 +1807,12 @@
   margin-bottom: 8px;
 }
 
+.moo-shelf__sync-notice {
+  color: var(--moo-text-muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
 .moo-shelf__archive-tabs {
   display: flex;
   gap: 0;

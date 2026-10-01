@@ -6,17 +6,19 @@ import {
   BoolFlag,
   PERSONAL_BOOKS_SCHEMA_VERSION,
 } from "../api/client";
-import {
-  applyPatchChanges,
-  decideSaveStrategy,
-} from "moo-family-bookshelf-shared/personal/saveStrategy";
+import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
+import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import {
   PERSONAL_BOOKS_CACHE_KEY,
   PERSONAL_SHELF_SAVED_AT_KEY,
 } from "../constants";
-import { mergeBooks } from "./mergeBooks";
-import { dropResolvedLegacyBooks, isRealBookId } from "../sync/legacyBooks";
+import { dropResolvedLegacyBooks } from "../sync/legacyBooks";
+import { loadSavedBooks } from "../sync/savedBooks";
+import type { RenamedBook } from "../sync/renamedBooks";
+import { settleSavedShelf, type SavedShelf } from "./syncedShelf";
+import { useDirtyBookIds } from "./useDirtyBookIds";
+import { useApplySyncResult } from "./useApplySyncResult";
 
 export type PersonalBooksStatus =
   "loading" | "ready" | "saving" | "saved" | "error";
@@ -24,62 +26,23 @@ export type PersonalBooksStatus =
 /** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
 const MAX_PATCH_CHANGES = 1000;
 
+const NO_RENAMES: readonly RenamedBook[] = [];
+
 export interface UsePersonalBooksParams {
   userId: string;
   apiClient: ApiClient;
   lastSyncBooks: BookEntry[];
+  /** Books the sync that produced `lastSyncBooks` moved to a new id. */
+  lastSyncRenamedBooks?: readonly RenamedBook[];
   /** Server-authoritative display name. Avoids reading stale value from chrome.storage.local. */
   displayName: string;
-}
-
-interface LoadSavedResult {
-  books: BookEntry[];
-  /** Full payload — preserved so save can merge back unknown fields */
-  raw: Record<string, unknown> | null;
-}
-
-function loadSavedBooks(data: Record<string, unknown>): LoadSavedResult {
-  if (Array.isArray(data.books)) {
-    return { books: data.books as BookEntry[], raw: data };
-  }
-  return { books: [], raw: null };
-}
-
-/** Parse the cached `BookEntry[]` (stored as JSON string). Defensive: returns [] on any failure. */
-function parseCachedBooks(raw: unknown): BookEntry[] {
-  if (typeof raw !== "string") return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as BookEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Pre-scrape baseline: cache reconciled against the server (API wins on share
- * flags), API-only books appended, legacy entries resolved to a real one dropped.
- * A cache-only legacy entry is stale (never scraped): dropped, its flag unused.
- */
-function reconcileBaseline(
-  cached: BookEntry[],
-  saved: BookEntry[],
-): BookEntry[] {
-  const savedMap = new Map(saved.map((b) => [b.bookId, b]));
-  const cachedIds = new Set(cached.map((b) => b.bookId));
-  const reconciled = cached.flatMap((b) => {
-    const apiBook = savedMap.get(b.bookId);
-    if (apiBook) return [{ ...b, isShared: apiBook.isShared }];
-    return isRealBookId(b.bookId) ? [b] : [];
-  });
-  const apiOnly = saved.filter((b) => !cachedIds.has(b.bookId));
-  return dropResolvedLegacyBooks([...reconciled, ...apiOnly]);
 }
 
 export function usePersonalBooks({
   userId,
   apiClient,
   lastSyncBooks,
+  lastSyncRenamedBooks = NO_RENAMES,
   displayName,
 }: UsePersonalBooksParams) {
   const [books, setBooks] = useState<BookEntry[]>([]);
@@ -88,10 +51,16 @@ export function usePersonalBooks({
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
   const [status, setStatus] = useState<PersonalBooksStatus>("loading");
   const [errorMessage, setErrorMessage] = useState("");
-  const [dirtyBookIds, setDirtyBookIds] = useState<Set<string>>(new Set());
+  const {
+    dirtyBookIds,
+    dirtyRef,
+    markDirty,
+    markManyDirty,
+    clearDirty,
+    clearDirtyIds,
+    moveRenamedDirty,
+  } = useDirtyBookIds();
   const isDirty = dirtyBookIds.size > 0;
-  const dirtyRef = useRef(dirtyBookIds);
-  dirtyRef.current = dirtyBookIds;
   /** Pending "saved" → "ready" reset; cleared on unmount and before rescheduling. */
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -101,66 +70,27 @@ export function usePersonalBooks({
     };
   }, []);
 
-  const markDirty = useCallback((bookId: string) => {
-    setDirtyBookIds((prev) => {
-      if (prev.has(bookId)) return prev;
-      const next = new Set(prev);
-      next.add(bookId);
-      return next;
-    });
-  }, []);
-
-  const markManyDirty = useCallback((bookIds: Iterable<string>) => {
-    setDirtyBookIds((prev) => {
-      const next = new Set(prev);
-      let changed = false;
-      for (const id of bookIds) {
-        if (!next.has(id)) {
-          next.add(id);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, []);
-
-  const clearDirty = useCallback(() => {
-    setDirtyBookIds((prev) => (prev.size === 0 ? prev : new Set()));
-  }, []);
-
-  // Load books: cache-first display only (no scrape here). The actual scrape +
-  // upload happens in useBookSync's auto full sync, which refreshes the cache and
-  // streams results back via `lastSyncBooks` (merged by the effect below).
+  // Load books: the server list only (no scrape here). The local cache is never
+  // a source of books — a cached id the server no longer holds would be written
+  // back by the next PUT. The scrape + upload happens in useBookSync's auto full
+  // sync, whose result arrives via `lastSyncBooks` (see useApplySyncResult).
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        // Independent reads — run in parallel to shorten shelf load latency.
-        const [cacheResult, apiResponse] = await Promise.all([
-          browser.storage.local.get([PERSONAL_BOOKS_CACHE_KEY]),
-          apiClient.getPersonalBooks(userId),
-        ]);
+        const apiResponse = await apiClient.getPersonalBooks(userId);
         if (cancelled) return;
-
-        let savedBooks: BookEntry[] = [];
-        if (apiResponse.data) {
-          const result = loadSavedBooks(
-            apiResponse.data as unknown as Record<string, unknown>,
-          );
-          savedBooks = result.books;
-          savedRawPayload.current = result.raw;
+        if (apiResponse.error) {
+          setErrorMessage(safeErrorText(apiResponse.error.message, "載入失敗"));
+          setStatus("error");
+          return;
         }
-        const cachedBooks = parseCachedBooks(
-          cacheResult[PERSONAL_BOOKS_CACHE_KEY],
-        );
 
-        // Cache reconciled against the server, else the server list; resolved
-        // legacy entries dropped on both. Empty baseline → "ready" → "尚無書籍".
-        const baseline =
-          cachedBooks.length > 0
-            ? reconcileBaseline(cachedBooks, savedBooks)
-            : dropResolvedLegacyBooks(savedBooks);
+        const saved = loadSavedBooks(apiResponse.data);
+        savedRawPayload.current = saved.raw;
+        // Resolved legacy entries dropped. Empty baseline → "ready" → "尚無書籍".
+        const baseline = dropResolvedLegacyBooks(saved.books);
         originalBooks.current = baseline;
         setBooks(baseline);
         setStatus("ready");
@@ -178,25 +108,19 @@ export function usePersonalBooks({
     };
   }, [userId, apiClient]);
 
-  // Merge sync results into display + cancel baseline (mergeBooks keeps the 2nd
-  // arg's isShared). Display merges into `prev`, dirty ids never promoted, so
-  // unsaved toggles win; the baseline merges into the clean baseline, holding
-  // no unsaved toggle (save-before-sync, Invariant 3).
-  useEffect(() => {
-    if (lastSyncBooks.length > 0 && status === "ready") {
-      const mapped = lastSyncBooks.map((b) => ({
-        bookId: b.bookId,
-        title: b.title,
-        author: b.author,
-        coverUrl: b.coverUrl,
-        readmooUrl: b.readmooUrl,
-        category: b.category,
-        isArchived: b.isArchived ?? BoolFlag.FALSE,
-      }));
-      setBooks((prev) => mergeBooks(mapped, prev, dirtyRef.current));
-      originalBooks.current = mergeBooks(mapped, originalBooks.current);
-    }
-  }, [lastSyncBooks, status]);
+  /** The last applied sync result; handleSave compares it to spot a mid-save sync. */
+  const appliedSyncRef = useRef<BookEntry[] | null>(null);
+  useApplySyncResult({
+    appliedSyncRef,
+    lastSyncBooks,
+    lastSyncRenamedBooks,
+    loaded: status !== "loading",
+    setBooks,
+    dirtyRef,
+    moveRenamedDirty,
+    originalBooks,
+    savedRawPayload,
+  });
 
   const handleToggle = useCallback(
     (bookId: string) => {
@@ -216,9 +140,31 @@ export function usePersonalBooks({
     [markDirty],
   );
 
+  // After a mid-save sync, clear only the sent ids: the sync may dirty others.
+  const commitSaved = useCallback(
+    (settled: SavedShelf, midSaveSync: boolean, sentIds: Set<string>) => {
+      originalBooks.current = settled.baseline;
+      savedRawPayload.current = {
+        ...savedRawPayload.current,
+        books: settled.serverBooks,
+      };
+      void browser.storage.local.set({
+        [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(settled.baseline),
+      });
+      void browser.storage.local.set({
+        [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now(),
+      });
+      if (midSaveSync) clearDirtyIds(sentIds);
+      else clearDirty();
+      setStatus("saved");
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setStatus("ready"), 1500);
+    },
+    [clearDirty, clearDirtyIds],
+  );
+
   const handleSave = useCallback(async () => {
-    // A new save supersedes any pending saved→ready reset: letting the old timer
-    // fire mid-flight would drop the UI out of "saving" (and out of "error").
+    // Cancel a pending saved→ready reset: it would drop "saving" / "error".
     if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
 
     // Nothing changed → treat as an instant no-op save (UI guards this too).
@@ -230,9 +176,10 @@ export function usePersonalBooks({
 
     setStatus("saving");
     setErrorMessage("");
+    const syncAtStart = appliedSyncRef.current;
 
     // PATCH, or a full PUT when a partial update can't be safe (saveStrategy).
-    const { usePut, patchChanges } = decideSaveStrategy({
+    const { usePut, dirtyBooks, patchChanges } = decideSaveStrategy({
       books,
       dirtyBookIds,
       savedRawPayload: savedRawPayload.current,
@@ -258,26 +205,24 @@ export function usePersonalBooks({
         setStatus("error");
         return;
       }
-      originalBooks.current = books;
-      // PATCH adds no ids; marking un-synced books known would lose them.
-      const prev = savedRawPayload.current ?? {};
-      const next = usePut ? books : applyPatchChanges(prev.books, patchChanges);
-      savedRawPayload.current = { ...prev, books: next };
-      void browser.storage.local.set({
-        [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(books),
+      const syncNow = appliedSyncRef.current;
+      const landedSync = syncNow !== syncAtStart ? syncNow : null;
+      const sent = usePut
+        ? dirtyBooks.map((b) => ({ bookId: b.bookId, isShared: b.isShared }))
+        : patchChanges;
+      const settled = settleSavedShelf({
+        books,
+        usePut,
+        sent,
+        serverBooks: savedRawPayload.current?.books,
+        landedSync,
       });
-      void browser.storage.local.set({
-        [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now(),
-      });
-      clearDirty();
-      setStatus("saved");
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-      savedTimerRef.current = setTimeout(() => setStatus("ready"), 1500);
+      commitSaved(settled, landedSync !== null, dirtyBookIds);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setStatus("error");
     }
-  }, [books, userId, apiClient, displayName, clearDirty, dirtyBookIds]);
+  }, [books, userId, apiClient, displayName, dirtyBookIds, commitSaved]);
 
   const handleCancel = useCallback(() => {
     setBooks(originalBooks.current);

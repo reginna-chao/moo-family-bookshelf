@@ -10,6 +10,15 @@ import { ALICE, BOB, USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
+/**
+ * Real-shaped Readmoo bookIds (12+ digits). PUT /books drops any NEW bookId of
+ * another shape (`dropNewMalformedBookIds` in `src/routes/user.ts`), so a
+ * fixture saved through PUT must use these or its books silently vanish.
+ */
+const B1 = "210439468000101";
+const B2 = "210439468000102";
+const B3 = "210439468000103";
+
 let kv: KVNamespace;
 
 function request(
@@ -116,7 +125,7 @@ describe("GET /api/user/:id/books", () => {
       displayName: "Test",
       books: [
         {
-          bookId: "b1",
+          bookId: B1,
           title: "Book 1",
           author: "",
           isbn: "",
@@ -139,7 +148,7 @@ describe("GET /api/user/:id/books", () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.books).toHaveLength(1);
-    expect(json.data.books[0].bookId).toBe("b1");
+    expect(json.data.books[0].bookId).toBe(B1);
     expect(json.data.lastUpdated).toBeDefined();
   });
 });
@@ -361,7 +370,7 @@ describe("PATCH /api/user/:id/books", () => {
   async function seedBooksForUser(
     userId: string,
     authToken: string,
-    books = [sampleBook("b1"), sampleBook("b2"), sampleBook("b3")],
+    books = [sampleBook(B1), sampleBook(B2), sampleBook(B3)],
   ) {
     await request(
       "PUT",
@@ -380,7 +389,7 @@ describe("PATCH /api/user/:id/books", () => {
 
   it("should return 401 UNAUTHORIZED when no auth token is provided", async () => {
     const res = await request("PATCH", `/api/user/${USER1}/books`, {
-      changes: [{ bookId: "b1", isShared: 1 }],
+      changes: [{ bookId: B1, isShared: 1 }],
     });
     expect(res.status).toBe(401);
     const json = (await res.json()) as Json;
@@ -393,7 +402,7 @@ describe("PATCH /api/user/:id/books", () => {
     const res = await request(
       "PATCH",
       "/api/user/user<script>/books",
-      { changes: [{ bookId: "b1", isShared: 1 }] },
+      { changes: [{ bookId: B1, isShared: 1 }] },
       authToken,
     );
     expect(res.status).toBe(400);
@@ -407,7 +416,7 @@ describe("PATCH /api/user/:id/books", () => {
     const res = await request(
       "PATCH",
       `/api/user/${USER2}/books`,
-      { changes: [{ bookId: "b1", isShared: 1 }] },
+      { changes: [{ bookId: B1, isShared: 1 }] },
       authToken,
     );
     expect(res.status).toBe(403);
@@ -523,7 +532,7 @@ describe("PATCH /api/user/:id/books", () => {
     const res = await request(
       "PATCH",
       `/api/user/${USER1}/books`,
-      { changes: [{ bookId: "b1", isShared: 2 }] },
+      { changes: [{ bookId: B1, isShared: 2 }] },
       authToken,
     );
     expect(res.status).toBe(400);
@@ -537,7 +546,7 @@ describe("PATCH /api/user/:id/books", () => {
     const res = await request(
       "PATCH",
       `/api/user/${USER1}/books`,
-      { changes: [{ bookId: "b1", isShared: "yes" }] },
+      { changes: [{ bookId: B1, isShared: "yes" }] },
       authToken,
     );
     expect(res.status).toBe(400);
@@ -553,7 +562,7 @@ describe("PATCH /api/user/:id/books", () => {
       "PATCH",
       `/api/user/${USER1}/books`,
       {
-        changes: [{ bookId: "b1", isShared: 1 }],
+        changes: [{ bookId: B1, isShared: 1 }],
         displayName: "",
       },
       authToken,
@@ -570,7 +579,7 @@ describe("PATCH /api/user/:id/books", () => {
     const res = await request(
       "PATCH",
       `/api/user/${USER1}/books`,
-      { changes: [{ bookId: "b1", isShared: 1 }] },
+      { changes: [{ bookId: B1, isShared: 1 }] },
       authToken,
     );
     expect(res.status).toBe(404);
@@ -589,8 +598,8 @@ describe("PATCH /api/user/:id/books", () => {
       `/api/user/${USER1}/books`,
       {
         changes: [
-          { bookId: "b1", isShared: 1 },
-          { bookId: "b2", isShared: 1 },
+          { bookId: B1, isShared: 1 },
+          { bookId: B2, isShared: 1 },
         ],
       },
       authToken,
@@ -609,15 +618,15 @@ describe("PATCH /api/user/:id/books", () => {
       authToken,
     );
     const getJson = (await getRes.json()) as Json;
-    expect(
-      getJson.data.books.find((b: Json) => b.bookId === "b1").isShared,
-    ).toBe(1);
-    expect(
-      getJson.data.books.find((b: Json) => b.bookId === "b2").isShared,
-    ).toBe(1);
-    expect(
-      getJson.data.books.find((b: Json) => b.bookId === "b3").isShared,
-    ).toBe(0);
+    expect(getJson.data.books.find((b: Json) => b.bookId === B1).isShared).toBe(
+      1,
+    );
+    expect(getJson.data.books.find((b: Json) => b.bookId === B2).isShared).toBe(
+      1,
+    );
+    expect(getJson.data.books.find((b: Json) => b.bookId === B3).isShared).toBe(
+      0,
+    );
   });
 
   it("should silently skip unknown bookIds and not count them in applied", async () => {
@@ -629,7 +638,7 @@ describe("PATCH /api/user/:id/books", () => {
       `/api/user/${USER1}/books`,
       {
         changes: [
-          { bookId: "b1", isShared: 1 },
+          { bookId: B1, isShared: 1 },
           { bookId: "nonexistent", isShared: 1 },
         ],
       },
@@ -648,9 +657,9 @@ describe("PATCH /api/user/:id/books", () => {
       authToken,
     );
     const getJson = (await getRes.json()) as Json;
-    expect(
-      getJson.data.books.find((b: Json) => b.bookId === "b1").isShared,
-    ).toBe(1);
+    expect(getJson.data.books.find((b: Json) => b.bookId === B1).isShared).toBe(
+      1,
+    );
   });
 
   it("should update displayName when provided and user is not in a family", async () => {
@@ -660,7 +669,7 @@ describe("PATCH /api/user/:id/books", () => {
       schemaVersion: 1,
       userId: USER3,
       displayName: "Old Name",
-      books: [sampleBook("b1")],
+      books: [sampleBook(B1)],
       lastUpdated: new Date().toISOString(),
     };
     await kv.put(kvKeys.user(USER3), JSON.stringify(record));
@@ -669,7 +678,7 @@ describe("PATCH /api/user/:id/books", () => {
       "PATCH",
       `/api/user/${USER3}/books`,
       {
-        changes: [{ bookId: "b1", isShared: 1 }],
+        changes: [{ bookId: B1, isShared: 1 }],
         displayName: "New Name",
       },
       token,
@@ -694,7 +703,7 @@ describe("PATCH /api/user/:id/books", () => {
       schemaVersion: 1,
       userId: USER4,
       displayName: "Keep This Name",
-      books: [sampleBook("b1"), sampleBook("b2")],
+      books: [sampleBook(B1), sampleBook(B2)],
       lastUpdated: new Date().toISOString(),
     };
     await kv.put(kvKeys.user(USER4), JSON.stringify(record));
@@ -704,7 +713,7 @@ describe("PATCH /api/user/:id/books", () => {
       "PATCH",
       `/api/user/${USER4}/books`,
       {
-        changes: [{ bookId: "b1", isShared: 1 }],
+        changes: [{ bookId: B1, isShared: 1 }],
       },
       token,
     );
@@ -726,7 +735,7 @@ describe("PATCH /api/user/:id/books", () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
     const originalBooks = [
       {
-        bookId: "b1",
+        bookId: B1,
         title: "My Book",
         author: "Jane",
         isbn: "978-xxx",
@@ -745,7 +754,7 @@ describe("PATCH /api/user/:id/books", () => {
       "PATCH",
       `/api/user/${USER1}/books`,
       {
-        changes: [{ bookId: "b1", isShared: 1 }],
+        changes: [{ bookId: B1, isShared: 1 }],
       },
       authToken,
     );
@@ -757,7 +766,7 @@ describe("PATCH /api/user/:id/books", () => {
       authToken,
     );
     const getJson = (await getRes.json()) as Json;
-    const book = getJson.data.books.find((b: Json) => b.bookId === "b1");
+    const book = getJson.data.books.find((b: Json) => b.bookId === B1);
     expect(book.title).toBe("My Book");
     expect(book.author).toBe("Jane");
     expect(book.isbn).toBe("978-xxx");
@@ -788,7 +797,7 @@ describe("PATCH /api/user/:id/books", () => {
       "PATCH",
       `/api/user/${USER1}/books`,
       {
-        changes: [{ bookId: "b1", isShared: 1 }],
+        changes: [{ bookId: B1, isShared: 1 }],
       },
       authToken,
     );
@@ -822,7 +831,7 @@ describe("PATCH /api/user/:id/books", () => {
       "PATCH",
       `/api/user/${USER1}/books`,
       {
-        changes: [{ bookId: "b1", isShared: 1 }],
+        changes: [{ bookId: B1, isShared: 1 }],
         displayName: "Client Tried This",
       },
       authToken,
@@ -851,7 +860,7 @@ describe("PATCH /api/user/:id/books", () => {
       schemaVersion: 1,
       userId: USER5,
       displayName: "NoOp User",
-      books: [sampleBook("b1")],
+      books: [sampleBook(B1)],
       lastUpdated: fixedTimestamp,
     };
     await kv.put(kvKeys.user(USER5), JSON.stringify(record));
@@ -945,12 +954,12 @@ describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
 
   it("scrubs the poisoned cover of the book a change targets, keeping a whitelisted one", async () => {
     const token = await seedLegacyRecord([
-      book("b1", POISONED_COVER),
-      book("b2", CLEAN_COVER),
+      book(B1, POISONED_COVER),
+      book(B2, CLEAN_COVER),
     ]);
 
     const res = await patch(
-      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      { changes: [{ bookId: B1, isShared: BoolFlag.TRUE }] },
       token,
     );
     expect(res.status).toBe(200);
@@ -966,32 +975,32 @@ describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
 
   it("scrubs the poisoned cover of a book no change targets", async () => {
     const token = await seedLegacyRecord([
-      book("b1", CLEAN_COVER),
-      book("b2", POISONED_COVER),
+      book(B1, CLEAN_COVER),
+      book(B2, POISONED_COVER),
     ]);
 
     const res = await patch(
-      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      { changes: [{ bookId: B1, isShared: BoolFlag.TRUE }] },
       token,
     );
     expect(res.status).toBe(200);
 
     const record = await storedRecord();
-    const untouched = record.books.find((b: Json) => b.bookId === "b2");
+    const untouched = record.books.find((b: Json) => b.bookId === B2);
     expect(untouched.coverUrl).toBe("");
     // Only the cover moved: the book's own sharing state is not a change target.
     expect(untouched.isShared).toBe(BoolFlag.FALSE);
-    expect(untouched.title).toBe("Book b2");
+    expect(untouched.title).toBe(`Book ${B2}`);
   });
 
   it("counts only requested isShared changes in `applied`, never sanitize rewrites", async () => {
     const token = await seedLegacyRecord([
-      book("b1", POISONED_COVER),
-      book("b2", POISONED_COVER),
+      book(B1, POISONED_COVER),
+      book(B2, POISONED_COVER),
     ]);
 
     const res = await patch(
-      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      { changes: [{ bookId: B1, isShared: BoolFlag.TRUE }] },
       token,
     );
 
@@ -1002,7 +1011,7 @@ describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
   });
 
   it("leaves a poisoned cover in KV when the PATCH is a pure no-op", async () => {
-    const token = await seedLegacyRecord([book("b1", POISONED_COVER)]);
+    const token = await seedLegacyRecord([book(B1, POISONED_COVER)]);
     const ops = watchKvOps(kv);
 
     const res = await patch(
@@ -1021,7 +1030,7 @@ describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
   });
 
   it("scrubs poisoned covers on a displayName-only PATCH, which writes anyway", async () => {
-    const token = await seedLegacyRecord([book("b1", POISONED_COVER)]);
+    const token = await seedLegacyRecord([book(B1, POISONED_COVER)]);
 
     const res = await patch(
       {
@@ -1104,12 +1113,12 @@ describe("PATCH /api/user/:id/books — readmooUrl lazy cleanup", () => {
 
   it("scrubs the poisoned link of the book a change targets, keeping a whitelisted one", async () => {
     const token = await seedLegacyRecord([
-      book("b1", POISONED_LINK),
-      book("b2", CLEAN_LINK),
+      book(B1, POISONED_LINK),
+      book(B2, CLEAN_LINK),
     ]);
 
     const res = await patch(
-      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      { changes: [{ bookId: B1, isShared: BoolFlag.TRUE }] },
       token,
     );
     expect(res.status).toBe(200);
@@ -1125,29 +1134,29 @@ describe("PATCH /api/user/:id/books — readmooUrl lazy cleanup", () => {
 
   it("scrubs the poisoned link of a book no change targets", async () => {
     const token = await seedLegacyRecord([
-      book("b1", CLEAN_LINK),
-      book("b2", POISONED_LINK),
+      book(B1, CLEAN_LINK),
+      book(B2, POISONED_LINK),
     ]);
 
     const res = await patch(
-      { changes: [{ bookId: "b1", isShared: BoolFlag.TRUE }] },
+      { changes: [{ bookId: B1, isShared: BoolFlag.TRUE }] },
       token,
     );
     expect(res.status).toBe(200);
 
     const record = await storedRecord();
-    const untouched = record.books.find((b: Json) => b.bookId === "b2");
+    const untouched = record.books.find((b: Json) => b.bookId === B2);
     // Only the link moved: the book's own sharing state is not a change target,
     // and its whitelisted cover is untouched — the two URL fields are
     // sanitized independently.
     expect(untouched.readmooUrl).toBe("");
     expect(untouched.isShared).toBe(BoolFlag.FALSE);
     expect(untouched.coverUrl).toBe("https://cdn.readmoo.com/clean.jpg");
-    expect(untouched.title).toBe("Book b2");
+    expect(untouched.title).toBe(`Book ${B2}`);
   });
 
   it("leaves a poisoned link in KV when the PATCH is a pure no-op", async () => {
-    const token = await seedLegacyRecord([book("b1", POISONED_LINK)]);
+    const token = await seedLegacyRecord([book(B1, POISONED_LINK)]);
     const ops = watchKvOps(kv);
 
     const res = await patch(
@@ -1203,7 +1212,7 @@ describe("PATCH /:id/books per-user rate limit", () => {
   it("should share the rate limit bucket with PUT — 29 PUTs + 1 PATCH = ok, then 1 more PATCH = 429", async () => {
     const token = await seedAuth(TEST_USER);
     const validPutBody = { books: [] };
-    const validPatchBody = { changes: [{ bookId: "b1", isShared: 1 }] };
+    const validPatchBody = { changes: [{ bookId: B1, isShared: 1 }] };
 
     // Seed a user record so PATCH has something to work with
     await kv.put(
@@ -1214,7 +1223,7 @@ describe("PATCH /:id/books per-user rate limit", () => {
         displayName: "Test",
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "Book",
             author: "",
             isbn: "",

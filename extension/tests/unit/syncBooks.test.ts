@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock scraper module
+// Mock scraper module (the DOM boundary). The sync reads `scrapeLibrary` /
+// `scrapeArchivedBooks`, both of which report completeness (#236).
 vi.mock("@/content/scraper", () => ({
-  scrapeBooks: vi.fn().mockResolvedValue([]),
-  scrapeArchivedBooks: vi.fn().mockResolvedValue([]),
+  scrapeLibrary: vi.fn().mockResolvedValue({ books: [], complete: true }),
+  scrapeArchivedBooks: vi.fn().mockResolvedValue({ books: [], complete: true }),
 }));
 
 // Mock mergeBooks — pass through by returning scraped as BookEntry[]
@@ -18,7 +19,11 @@ vi.mock("@/sync/mergeBooks", () => ({
 }));
 
 import { syncBooks, type SyncBooksOptions } from "@/sync/syncBooks";
-import { scrapeBooks, scrapeArchivedBooks } from "@/content/scraper";
+import {
+  scrapeLibrary,
+  scrapeArchivedBooks,
+  type ScrapedBook,
+} from "@/content/scraper";
 import { queryWithLegacyFallback } from "@/content/readmoo-dom";
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/saveErrors";
@@ -52,6 +57,11 @@ function toStorageKeys(data: Record<string, unknown>): Record<string, unknown> {
     out[STORAGE_KEY_ALIAS[k] ?? k] = v;
   }
   return out;
+}
+
+/** A complete scrape result holding `books` (the common, non-degraded case). */
+function completeScrape(books: ScrapedBook[] = []) {
+  return { books, complete: true };
 }
 
 function createMockApiClient(): ApiClient {
@@ -125,7 +135,7 @@ describe("syncBooks — archive sync path", () => {
 
   it("does NOT call scrapeArchivedBooks when syncArchived=0", async () => {
     setupStorage(makeStorageData({ syncArchived: 0 }));
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
 
     await syncBooks(makeOptions());
 
@@ -136,7 +146,7 @@ describe("syncBooks — archive sync path", () => {
     const data = makeStorageData();
     delete data.syncArchived;
     setupStorage(data);
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
 
     await syncBooks(makeOptions());
 
@@ -169,8 +179,10 @@ describe("syncBooks — archive sync path", () => {
       },
     ];
 
-    vi.mocked(scrapeBooks).mockResolvedValue(normalBooks);
-    vi.mocked(scrapeArchivedBooks).mockResolvedValue(archivedBooks);
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape(normalBooks));
+    vi.mocked(scrapeArchivedBooks).mockResolvedValue(
+      completeScrape(archivedBooks),
+    );
 
     const { mergeBooks } = await import("@/sync/mergeBooks");
 
@@ -189,28 +201,32 @@ describe("syncBooks — archive sync path", () => {
   it("calls updatePersonalBooks after merging archived books", async () => {
     setupStorage(makeStorageData({ syncArchived: 1 }));
 
-    vi.mocked(scrapeBooks).mockResolvedValue([
-      {
-        bookId: "b1",
-        title: "Book 1",
-        author: "",
-        coverUrl: "",
-        readmooUrl: "https://readmoo.com/book/b1",
-        category: "",
-        isArchived: BoolFlag.FALSE,
-      },
-    ]);
-    vi.mocked(scrapeArchivedBooks).mockResolvedValue([
-      {
-        bookId: "b2",
-        title: "Archived Book",
-        author: "",
-        coverUrl: "",
-        readmooUrl: "https://readmoo.com/book/b2",
-        category: "",
-        isArchived: BoolFlag.TRUE,
-      },
-    ]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(
+      completeScrape([
+        {
+          bookId: "b1",
+          title: "Book 1",
+          author: "",
+          coverUrl: "",
+          readmooUrl: "https://readmoo.com/book/b1",
+          category: "",
+          isArchived: BoolFlag.FALSE,
+        },
+      ]),
+    );
+    vi.mocked(scrapeArchivedBooks).mockResolvedValue(
+      completeScrape([
+        {
+          bookId: "b2",
+          title: "Archived Book",
+          author: "",
+          coverUrl: "",
+          readmooUrl: "https://readmoo.com/book/b2",
+          category: "",
+          isArchived: BoolFlag.TRUE,
+        },
+      ]),
+    );
 
     const apiClient = createMockApiClient();
     const result = await syncBooks(makeOptions({ apiClient }));
@@ -414,7 +430,7 @@ describe("syncBooks — full flow", () => {
 
   it("returns error when upload fails", async () => {
     setupStorage({ displayName: "Test", syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
 
     const apiClient: ApiClient = {
       getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
@@ -457,7 +473,7 @@ describe("syncBooks — full flow", () => {
     "reports the local sync-failure copy when the upload error carries $name",
     async ({ message }) => {
       setupStorage({ displayName: "Test", syncArchived: 0 });
-      vi.mocked(scrapeBooks).mockResolvedValue([]);
+      vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
 
       const apiClient: ApiClient = {
         getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
@@ -483,7 +499,7 @@ describe("syncBooks — full flow", () => {
 
   it("reports the too-large copy, not the server's English message, on a 413 PAYLOAD_TOO_LARGE upload", async () => {
     setupStorage({ displayName: "Test", syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
 
     const apiClient: ApiClient = {
       getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
@@ -513,7 +529,7 @@ describe("syncBooks — full flow", () => {
     });
 
     setupStorage({ displayName: "Test", syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
 
     const apiClient: ApiClient = {
       getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
@@ -533,7 +549,7 @@ describe("syncBooks — full flow", () => {
 
   it("records lastSyncAt on success", async () => {
     setupStorage({ displayName: "Test", syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
 
     const apiClient: ApiClient = {
       getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
@@ -569,7 +585,7 @@ describe("syncBooks — full flow", () => {
 
   it("loads saved books from plain books array", async () => {
     setupStorage({ displayName: "Test", syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
 
     const apiClient: ApiClient = {
       getPersonalBooks: vi.fn().mockResolvedValue({
@@ -603,7 +619,7 @@ describe("syncBooks — full flow", () => {
     });
 
     setupStorage({ displayName: "Test", syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockResolvedValue([]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
 
     const apiClient: ApiClient = {
       getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
@@ -623,7 +639,7 @@ describe("syncBooks — full flow", () => {
 
   it("returns generic error message for non-Error exceptions", async () => {
     setupStorage({ displayName: "Test", syncArchived: 0 });
-    vi.mocked(scrapeBooks).mockRejectedValue("string error");
+    vi.mocked(scrapeLibrary).mockRejectedValue("string error");
 
     const apiClient: ApiClient = {
       getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
@@ -707,17 +723,19 @@ describe("syncBooks — auto-return (familyId branch)", () => {
   }
 
   function scrapeLentBook() {
-    vi.mocked(scrapeBooks).mockResolvedValue([
-      {
-        bookId: LENT_BOOK_ID,
-        title: "借出的書",
-        author: "作者",
-        coverUrl: "",
-        readmooUrl: `https://readmoo.com/book/${LENT_BOOK_ID}`,
-        category: "",
-        isArchived: BoolFlag.FALSE,
-      },
-    ]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(
+      completeScrape([
+        {
+          bookId: LENT_BOOK_ID,
+          title: "借出的書",
+          author: "作者",
+          coverUrl: "",
+          readmooUrl: `https://readmoo.com/book/${LENT_BOOK_ID}`,
+          category: "",
+          isArchived: BoolFlag.FALSE,
+        },
+      ]),
+    );
   }
 
   it("marks a reappeared LENT book RETURNED and reports the requestIds", async () => {
@@ -743,6 +761,8 @@ describe("syncBooks — auto-return (familyId branch)", () => {
     });
 
     expect(result.success).toBe(true);
+    // ONE list call per sync: the list fetched before upload is reused here.
+    expect(listBorrowRequests).toHaveBeenCalledTimes(1);
     expect(listBorrowRequests).toHaveBeenCalledWith(FAMILY_ID);
     expect(updateBorrowStatus).toHaveBeenCalledWith(
       "req-lent",
@@ -754,17 +774,19 @@ describe("syncBooks — auto-return (familyId branch)", () => {
   it("does not PATCH when no LENT book reappeared (no requestIds)", async () => {
     setupStorage(makeStorageData({ syncArchived: 0 }));
     // Scrape returns a DIFFERENT book than the lent one.
-    vi.mocked(scrapeBooks).mockResolvedValue([
-      {
-        bookId: "some-other-book",
-        title: "其他書",
-        author: "",
-        coverUrl: "",
-        readmooUrl: "https://readmoo.com/book/some-other-book",
-        category: "",
-        isArchived: BoolFlag.FALSE,
-      },
-    ]);
+    vi.mocked(scrapeLibrary).mockResolvedValue(
+      completeScrape([
+        {
+          bookId: "some-other-book",
+          title: "其他書",
+          author: "",
+          coverUrl: "",
+          readmooUrl: "https://readmoo.com/book/some-other-book",
+          category: "",
+          isArchived: BoolFlag.FALSE,
+        },
+      ]),
+    );
 
     const updateBorrowStatus = vi.fn();
     const listBorrowRequests = vi.fn().mockResolvedValue([makeLentRequest()]);
@@ -810,8 +832,10 @@ describe("syncBooks — auto-return (familyId branch)", () => {
       familyId: FAMILY_ID,
     });
 
-    // The main sync still succeeds; auto-return is best-effort.
+    // The main sync still succeeds (and still uploads); auto-return is
+    // skipped because the borrow list it would reuse is unavailable.
     expect(result.success).toBe(true);
+    expect(apiClient.updatePersonalBooks).toHaveBeenCalledTimes(1);
     expect(result.autoReturnedRequestIds).toEqual([]);
     expect(updateBorrowStatus).not.toHaveBeenCalled();
     warnSpy.mockRestore();
@@ -889,14 +913,14 @@ describe("syncBooks — scrape-time warning reset", () => {
         </div>
       </div>
     `;
-    vi.mocked(scrapeBooks).mockImplementation(async () => {
+    vi.mocked(scrapeLibrary).mockImplementation(async () => {
       queryWithLegacyFallback(
         document,
         READMOO_SELECTORS.readerLink,
         READMOO_SELECTORS.readerLinkLegacy,
         "scraper:reader-link",
       );
-      return [];
+      return completeScrape();
     });
 
     const options: SyncBooksOptions = {

@@ -38,6 +38,14 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
+/**
+ * Real-shaped Readmoo bookIds (12+ digits): PUT /books drops any NEW bookId of
+ * another shape (`dropNewMalformedBookIds` in `src/routes/user.ts`).
+ */
+const B1 = "210439468000101";
+const B2 = "210439468000102";
+const B3 = "210439468000103";
+
 /** A mix of shared + not-shared books, so the assertions prove per-book flags survive. */
 const USER1_BOOKS = {
   schemaVersion: 1,
@@ -45,7 +53,7 @@ const USER1_BOOKS = {
   displayName: "User1",
   books: [
     {
-      bookId: "b1",
+      bookId: B1,
       title: "Shared One",
       author: "",
       isbn: "",
@@ -55,7 +63,7 @@ const USER1_BOOKS = {
       isShared: BoolFlag.TRUE,
     },
     {
-      bookId: "b2",
+      bookId: B2,
       title: "Private Two",
       author: "",
       isbn: "",
@@ -65,7 +73,7 @@ const USER1_BOOKS = {
       isShared: BoolFlag.FALSE,
     },
     {
-      bookId: "b3",
+      bookId: B3,
       title: "Shared Three",
       author: "",
       isbn: "",
@@ -137,7 +145,7 @@ describe("Invariant #5 — personal settings persist across unbind/rebind", () =
     const user1 = memberEntry(json, USER1);
     expect(user1).toBeDefined();
     // Only b1 + b3 (isShared TRUE) are aggregated; the private b2 is withheld.
-    expect((user1.books as Json[]).map((b) => b.bookId)).toEqual(["b1", "b3"]);
+    expect((user1.books as Json[]).map((b) => b.bookId)).toEqual([B1, B3]);
     expect(
       (user1.books as Json[]).every((b) => b.isShared === BoolFlag.TRUE),
     ).toBe(true);
@@ -171,9 +179,9 @@ describe("Invariant #5 — personal settings persist across unbind/rebind", () =
     expect(after).not.toBeNull();
     expect(after!.books).toHaveLength(3);
     expect(after!.books.map((b) => [b.bookId, b.isShared])).toEqual([
-      ["b1", BoolFlag.TRUE],
-      ["b2", BoolFlag.FALSE],
-      ["b3", BoolFlag.TRUE],
+      [B1, BoolFlag.TRUE],
+      [B2, BoolFlag.FALSE],
+      [B3, BoolFlag.TRUE],
     ]);
     // Nothing about the sharing prefs changed relative to before the leave.
     expect(after!.books).toEqual(before.books);
@@ -217,7 +225,7 @@ describe("Invariant #5 — personal settings persist across unbind/rebind", () =
 
     const user1 = memberEntry(json, USER1);
     expect(user1).toBeDefined();
-    expect((user1.books as Json[]).map((b) => b.bookId)).toEqual(["b1", "b3"]);
+    expect((user1.books as Json[]).map((b) => b.bookId)).toEqual([B1, B3]);
 
     // The family-B owner shares nothing, so their entry is empty — confirms the
     // aggregation is per-user and USER1's prefs did not leak onto anyone else.

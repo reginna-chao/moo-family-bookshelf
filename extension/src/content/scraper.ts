@@ -9,14 +9,19 @@
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BoolFlag } from "../api/client";
-import { isRealBookId } from "../sync/legacyBooks";
 import { requestFiberData } from "./fiber-data";
-import { queryWithLegacyFallback, warnOnce } from "./readmoo-dom";
+import { queryWithLegacyFallback } from "./readmoo-dom";
 import {
   paginateLibrary,
   type ScrapeBooksOptions,
   type ScrapeProgressCallback,
 } from "./scraper-pagination";
+import {
+  bookIdFromFiber,
+  bookIdFromHref,
+  bookIdFromPrivacy,
+} from "./scraper-ids";
+import { isLibraryScrapeComplete, type ScrapeResult } from "./scrapeResult";
 
 export interface ScrapedBook {
   bookId: string;
@@ -30,14 +35,20 @@ export interface ScrapedBook {
 
 const HOVER_SETTLE_MS = 120;
 const READMOO_BOOK_BASE = "https://readmoo.com/book/";
-const ATTR_BOOK_ID = "data-moo-book-id";
 const ATTR_COVER = "data-moo-cover-url";
 const ATTR_AUTHOR = "data-moo-author";
 const ATTR_CATEGORY = "data-moo-category";
 
 // Re-export Wave G pagination types so callers can keep `../content/scraper` as the single entry point.
-export type { ScrapeProgressCallback, ScrapeBooksOptions };
+export type { ScrapeProgressCallback, ScrapeBooksOptions, ScrapeResult };
 export { formatScrapeProgress } from "./scraper-pagination";
+
+/**
+ * One card's outcome: a scraped book, `"borrowed"` (a 借入 card — not the
+ * user's own book, ignored), or `null` (an own book that could not be read,
+ * which makes the scrape incomplete).
+ */
+type ItemOutcome = ScrapedBook | "borrowed" | null;
 
 /** Dispatch synthetic hover events so Readmoo renders the `.openbook-overlay` layer. */
 function triggerHover(element: HTMLElement): void {
@@ -49,47 +60,6 @@ function triggerHover(element: HTMLElement): void {
 /** Wait for `ms` milliseconds. */
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Extract book ID (last path segment) from the `a.reader-link` href.
- * The link lives under `.cover` on the new host and under `.openbook` on the
- * legacy one; the href format is identical on both.
- */
-function extractBookIdFromHref(href: string): string | null {
-  try {
-    const url = new URL(href);
-    const segments = url.pathname.split("/").filter(Boolean);
-    return segments.length > 0 ? segments[segments.length - 1] : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Extract fallback book ID from a `.privacy` element (`id="privacy-{id}"`).
- *
- * LENGTH GUARD — the two sites put DIFFERENT ids in this attribute:
- *   - legacy `read.readmoo.com`: the 15-digit book id itself, so the fallback
- *     yields a usable id and this guard never rejects anything.
- *   - new `next.readmoo.com`: an 8-digit INTERNAL id from a different
- *     namespace. Accepting it would upload a book keyed by an id that matches
- *     no real book — a ghost entry in the user's shelf that never resolves.
- *
- * So we only accept 12+ digits (`isRealBookId`), else skip the book (null): it
- * reappears on the next sync once a real id exists — the safer failure.
- */
-function extractFallbackId(item: Element): string | null {
-  const privacy = item.querySelector<HTMLElement>(READMOO_SELECTORS.privacyId);
-  if (!privacy) return null;
-  const match = privacy.id.match(/^privacy-(\d+)$/);
-  if (match && isRealBookId(match[1])) return match[1];
-
-  warnOnce(
-    "scraper:privacy-id-rejected",
-    `[moo] rejected .privacy fallback bookId "${privacy.id}" — not a 12+ digit book id; skipping this book`,
-  );
-  return null;
 }
 
 /** Extract title from `.info .title[title]`. */
@@ -107,55 +77,48 @@ function extractCoverUrl(item: Element): string {
   return src.endsWith(PLACEHOLDER_COVER) ? "" : src;
 }
 
-/** Read book ID from `data-moo-book-id` attribute stamped by the fiber bridge. */
-function extractBookIdFromFiber(item: Element): string | null {
-  return item.getAttribute(ATTR_BOOK_ID);
-}
-
 /** Check if the book is borrowed (借入) — not part of the user's own bookshelf. */
 function isBorrowed(item: Element): boolean {
   return item.querySelector(READMOO_SELECTORS.borrowedBadge) !== null;
 }
 
-async function scrapeItem(item: Element): Promise<ScrapedBook | null> {
-  if (isBorrowed(item)) return null;
+/**
+ * Primary id source is the fiber bridge; when it holds none, hover the card and
+ * fall back to the reader-link href, then `.privacy`. A source holding a
+ * non-real id ends the search with null (skip the book) — see `BookIdLookup`.
+ */
+async function resolveBookId(item: Element): Promise<string | null> {
+  const fiberId = bookIdFromFiber(item);
+  if (fiberId !== undefined) return fiberId;
+
+  if (item instanceof HTMLElement) triggerHover(item);
+  await wait(HOVER_SETTLE_MS);
+
+  const readerLink = queryWithLegacyFallback<HTMLAnchorElement>(
+    item,
+    READMOO_SELECTORS.readerLink,
+    READMOO_SELECTORS.readerLinkLegacy,
+    "scraper:reader-link",
+  );
+  const hrefId = readerLink ? bookIdFromHref(readerLink.href) : undefined;
+  if (hrefId !== undefined) return hrefId;
+  return bookIdFromPrivacy(item);
+}
+
+async function scrapeItem(item: Element): Promise<ItemOutcome> {
+  if (isBorrowed(item)) return "borrowed";
 
   const title = extractTitle(item);
   if (!title) return null;
 
-  // Primary: read metadata from fiber bridge data attributes
-  let bookId = extractBookIdFromFiber(item);
-  let coverUrl = item.getAttribute(ATTR_COVER) ?? "";
+  // Fiber bridge data attributes first; DOM cover read before any hover.
+  let coverUrl = item.getAttribute(ATTR_COVER) || extractCoverUrl(item);
   const author = item.getAttribute(ATTR_AUTHOR) ?? "";
   const category = item.getAttribute(ATTR_CATEGORY) ?? "";
 
-  // Fallback: hover + DOM extraction when fiber tree is unavailable
-  if (!bookId) {
-    if (!coverUrl) coverUrl = extractCoverUrl(item);
-
-    if (item instanceof HTMLElement) {
-      triggerHover(item);
-    }
-    await wait(HOVER_SETTLE_MS);
-
-    const readerLink = queryWithLegacyFallback<HTMLAnchorElement>(
-      item,
-      READMOO_SELECTORS.readerLink,
-      READMOO_SELECTORS.readerLinkLegacy,
-      "scraper:reader-link",
-    );
-    if (readerLink) {
-      bookId = extractBookIdFromHref(readerLink.href);
-    }
-
-    if (!bookId) {
-      bookId = extractFallbackId(item);
-    }
-  }
-
+  const bookId = await resolveBookId(item);
   if (!bookId) return null;
 
-  // If fiber didn't provide cover, fall back to DOM
   if (!coverUrl) coverUrl = extractCoverUrl(item);
 
   return {
@@ -196,24 +159,40 @@ export function scrapeDisplayName(): string | null {
   return nameEl?.textContent?.trim() || null;
 }
 
-/** Scrape all books from the current Readmoo library page. */
-export async function scrapeBooks(
+/**
+ * Scrape all books from the current Readmoo library page, reporting whether
+ * the scrape is complete (no own book skipped, pagination not capped).
+ */
+export async function scrapeLibrary(
   opts?: ScrapeBooksOptions,
-): Promise<ScrapedBook[]> {
+): Promise<ScrapeResult> {
   const originalScrollY = window.scrollY;
   try {
     await requestFiberData();
-    await paginateLibrary(opts?.onProgress);
+    const paginationComplete = await paginateLibrary(opts?.onProgress);
     const items = document.querySelectorAll(READMOO_SELECTORS.libraryItem);
     const books: ScrapedBook[] = [];
+    let skippedCount = 0;
     for (const item of items) {
-      const book = await scrapeItem(item);
-      if (book) books.push(book);
+      const outcome = await scrapeItem(item);
+      if (outcome === null) skippedCount++;
+      else if (outcome !== "borrowed") books.push(outcome);
     }
-    return books;
+    const complete = isLibraryScrapeComplete({
+      skippedCount,
+      paginationComplete,
+    });
+    return { books, complete };
   } finally {
     window.scrollTo(0, originalScrollY);
   }
+}
+
+/** Scrape all books from the current Readmoo library page (books only). */
+export async function scrapeBooks(
+  opts?: ScrapeBooksOptions,
+): Promise<ScrapedBook[]> {
+  return (await scrapeLibrary(opts)).books;
 }
 
 // Re-export archive scraping so existing imports continue to work

@@ -7,11 +7,8 @@
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BoolFlag } from "../api/client";
-import {
-  scrapeBooks,
-  type ScrapedBook,
-  type ScrapeBooksOptions,
-} from "./scraper";
+import { scrapeLibrary, type ScrapeBooksOptions } from "./scraper";
+import { failedScrape, type ScrapeResult } from "./scrapeResult";
 
 /** Wait for `ms` milliseconds. */
 function wait(ms: number): Promise<void> {
@@ -117,38 +114,44 @@ async function waitForLibraryReload(timeoutMs: number): Promise<void> {
  * 7. Clear filter: reopen dialog → click "清除篩選" → click "確定"
  *
  * MUST use try/finally to ensure filter is always cleared.
- * Returns empty array on failure (silent fallback).
+ * Any failure returns `failedScrape()` (no books, `complete: false`) — distinct
+ * from a successful scrape that found zero archived books (`complete: true`).
  */
 export async function scrapeArchivedBooks(
   opts?: ScrapeBooksOptions,
-): Promise<ScrapedBook[]> {
+): Promise<ScrapeResult> {
   try {
     // Step 1: Find and click the filter button
     const filterBtn = findFilterButton();
-    if (!filterBtn) return [];
+    if (!filterBtn) return failedScrape();
     filterBtn.click();
 
     // Step 2: Wait for filter modal
     const modal = await waitForElement(".filter-modal.modal.show", 3000);
-    if (!modal) return [];
+    if (!modal) return failedScrape();
 
     // Step 3: Click "已封存書籍" option
-    if (!clickElement('[data-key="archive"][data-value="true"]')) return [];
+    if (!clickElement('[data-key="archive"][data-value="true"]')) {
+      return failedScrape();
+    }
 
     // Brief pause for React to process the selection
     await wait(300);
 
     // Step 4: Click "確定" button
-    if (!clickElement(".filter-modal .modal-footer .btn-primary")) return [];
+    if (!clickElement(".filter-modal .modal-footer .btn-primary")) {
+      return failedScrape();
+    }
 
     // Step 5: Wait for filter modal to close and library to reload
     await waitForLibraryReload(10000);
 
     // Step 6: Scrape books and mark as archived
-    const books = await scrapeBooks(opts);
-    return books.map((b) => ({ ...b, isArchived: BoolFlag.TRUE }));
+    const { books, complete } = await scrapeLibrary(opts);
+    const archived = books.map((b) => ({ ...b, isArchived: BoolFlag.TRUE }));
+    return { books: archived, complete };
   } catch {
-    return [];
+    return failedScrape();
   } finally {
     // Step 7: Clear filter — must restore normal library view
     try {

@@ -68,7 +68,8 @@ describe("paginateLibrary", () => {
     addLibraryItems(5);
     const onProgress = vi.fn();
 
-    await paginateLibrary(onProgress);
+    // Nothing to paginate is a complete run (true), not a capped one.
+    expect(await paginateLibrary(onProgress)).toBe(true);
 
     expect(scrollToSpy).not.toHaveBeenCalled();
     expect(onProgress).not.toHaveBeenCalled();
@@ -84,7 +85,8 @@ describe("paginateLibrary", () => {
     for (let i = 0; i < 22; i++) {
       await vi.advanceTimersByTimeAsync(500);
     }
-    await promise;
+    // Ran out of pages on its own → complete.
+    expect(await promise).toBe(true);
 
     expect(scrollToSpy).toHaveBeenCalledOnce();
     expect(onProgress).not.toHaveBeenCalled();
@@ -141,8 +143,7 @@ describe("paginateLibrary", () => {
     for (let i = 0; i < 22; i++) {
       await vi.advanceTimersByTimeAsync(500);
     }
-    await promise;
-
+    expect(await promise).toBe(true);
     // Page 1 grows; page 2 has no growth, exits via !grew
     expect(onProgress).toHaveBeenCalledTimes(1);
     expect(onProgress).toHaveBeenCalledWith(1, 400);
@@ -163,7 +164,8 @@ describe("paginateLibrary", () => {
     for (let i = 0; i < 100; i++) {
       await vi.advanceTimersByTimeAsync(500);
     }
-    await promise;
+    // Stopped by the cap, not by the list ending → NOT complete (#236).
+    expect(await promise).toBe(false);
 
     expect(onProgress).toHaveBeenCalledTimes(100);
     expect(warnSpy).toHaveBeenCalledOnce();

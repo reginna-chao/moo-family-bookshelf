@@ -481,4 +481,190 @@ describe("useBookSync", () => {
       expect(capturedOnProgress).toBeTypeOf("function");
     });
   });
+
+  // #236: the personal shelf shows a notice when a sync moved books to their
+  // new Readmoo id; the count reflects the last SUCCESSFUL sync only.
+  describe("renamedBookCount", () => {
+    it("starts at 0", () => {
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+      expect(result.current.renamedBookCount).toBe(0);
+    });
+
+    it("reports the count of a successful auto-sync", async () => {
+      vi.mocked(canAutoSync).mockResolvedValue(true);
+      vi.mocked(syncBooks).mockResolvedValue({
+        success: true,
+        books: [],
+        renamedBookCount: 2,
+      });
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(syncBooks).toHaveBeenCalledOnce();
+      expect(result.current.renamedBookCount).toBe(2);
+    });
+
+    it("updates on a successful manual sync and keeps the value across a failed one", async () => {
+      vi.mocked(syncBooks)
+        .mockResolvedValueOnce({
+          success: true,
+          books: [],
+          renamedBookCount: 3,
+        })
+        .mockResolvedValueOnce({
+          success: false,
+          books: [],
+          error: "讀墨可能改版了，已暫停同步書櫃",
+          renamedBookCount: 9,
+        })
+        .mockResolvedValueOnce({ success: true, books: [] });
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.renamedBookCount).toBe(3);
+
+      // A failed sync uploaded nothing → the last success's count stands.
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.syncStatus).toBe("error");
+      expect(result.current.renamedBookCount).toBe(3);
+
+      // A success that reports nothing renamed clears the notice.
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.renamedBookCount).toBe(0);
+    });
+  });
+
+  // #236 S1: the personal shelf moves an unsaved toggle from a renamed book's
+  // old id to its new one, so the rename pairs must belong to the SAME sync as
+  // `lastSyncBooks` — never a newer list with an older sync's pairs.
+  describe("lastSyncRenamedBooks", () => {
+    const bookOf = (bookId: string) => ({
+      bookId,
+      title: `書 ${bookId}`,
+      author: "",
+      isbn: "",
+      coverUrl: "",
+      readmooUrl: "",
+      category: "",
+      isShared: BoolFlag.FALSE,
+    });
+    const FIRST = {
+      success: true,
+      books: [bookOf("210000000000002")],
+      renamedBooks: [{ oldId: "210000000000001", newId: "210000000000002" }],
+      renamedBookCount: 1,
+    };
+    const SECOND = {
+      success: true,
+      books: [bookOf("210000000000004")],
+      renamedBooks: [{ oldId: "210000000000003", newId: "210000000000004" }],
+      renamedBookCount: 1,
+    };
+
+    it("starts empty", () => {
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+      expect(result.current.lastSyncRenamedBooks).toEqual([]);
+    });
+
+    it("comes from the same successful sync as lastSyncBooks in every render", async () => {
+      vi.mocked(syncBooks)
+        .mockResolvedValueOnce(FIRST)
+        .mockResolvedValueOnce(SECOND);
+      const seen: Array<{ books: unknown; renamed: unknown }> = [];
+      const { result } = renderHook(() => {
+        const sync = useBookSync(makeOptions());
+        seen.push({
+          books: sync.lastSyncBooks,
+          renamed: sync.lastSyncRenamedBooks,
+        });
+        return sync;
+      });
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.lastSyncBooks).toBe(FIRST.books);
+      expect(result.current.lastSyncRenamedBooks).toBe(FIRST.renamedBooks);
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.lastSyncBooks).toBe(SECOND.books);
+      expect(result.current.lastSyncRenamedBooks).toBe(SECOND.renamedBooks);
+
+      // No render ever paired one sync's list with another sync's renames.
+      expect(seen.some((r) => r.books === FIRST.books)).toBe(true);
+      expect(seen.some((r) => r.books === SECOND.books)).toBe(true);
+      const renamedOf = new Map<unknown, unknown>([
+        [FIRST.books, FIRST.renamedBooks],
+        [SECOND.books, SECOND.renamedBooks],
+      ]);
+      for (const render of seen) {
+        const expected = renamedOf.get(render.books);
+        if (expected === undefined) {
+          expect(render.renamed).toEqual([]);
+        } else {
+          expect(render.renamed).toBe(expected);
+        }
+      }
+    });
+
+    it("is kept across a failed sync and reset by a success without renames", async () => {
+      vi.mocked(syncBooks)
+        .mockResolvedValueOnce(FIRST)
+        .mockResolvedValueOnce({
+          success: false,
+          books: [],
+          error: "同步失敗",
+          renamedBooks: [{ oldId: "x", newId: "y" }],
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          books: [bookOf("210000000000009")],
+        });
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.lastSyncRenamedBooks).toEqual(FIRST.renamedBooks);
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.syncStatus).toBe("error");
+      expect(result.current.lastSyncBooks).toBe(FIRST.books);
+      expect(result.current.lastSyncRenamedBooks).toEqual(FIRST.renamedBooks);
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.lastSyncRenamedBooks).toEqual([]);
+    });
+
+    it("reports the pairs of a successful auto-sync", async () => {
+      vi.mocked(canAutoSync).mockResolvedValue(true);
+      vi.mocked(syncBooks).mockResolvedValue(FIRST);
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(syncBooks).toHaveBeenCalledOnce();
+      expect(result.current.lastSyncBooks).toBe(FIRST.books);
+      expect(result.current.lastSyncRenamedBooks).toEqual(FIRST.renamedBooks);
+    });
+  });
 });

@@ -23,6 +23,7 @@ import { mergeBooks } from "@/dialog/mergeBooks";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { LAST_SYNC_AT_KEY } from "@/constants";
 import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/saveErrors";
+import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
 
 /** Return the value written to LAST_SYNC_AT_KEY across all storage.set calls, or undefined. */
 function lastSyncWrittenValue(): unknown {
@@ -335,6 +336,123 @@ describe("useAutoSetup", () => {
       await promise;
 
       expect(mergeBooks).toHaveBeenCalledWith(expect.any(Array), []);
+    });
+  });
+
+  /**
+   * #236: auto-setup is an upload path too, so it obeys the same two stops as
+   * the regular sync — a failed read of the saved list, and the circuit
+   * breaker — both before any upload. The archive is never scraped here, so
+   * saved archived books never count against the scrape.
+   */
+  describe("syncBooks — upload guards", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+    afterEach(() => {
+      warnSpy?.mockRestore();
+      warnSpy = null;
+    });
+
+    function realId(n: number): string {
+      return `2100000${String(n).padStart(8, "0")}`;
+    }
+
+    function makeBook(n: number, overrides: Partial<BookEntry> = {}) {
+      return {
+        bookId: realId(n),
+        title: `書${n}`,
+        author: "",
+        isbn: "",
+        coverUrl: "",
+        readmooUrl: "",
+        category: "",
+        isShared: BoolFlag.FALSE,
+        ...overrides,
+      };
+    }
+
+    function scrapedOf(books: BookEntry[]) {
+      return books.map((b) => ({
+        bookId: b.bookId,
+        title: b.title,
+        author: "",
+        coverUrl: "",
+        readmooUrl: "",
+        category: "",
+        isArchived: BoolFlag.FALSE,
+      }));
+    }
+
+    async function runAutoSync(mockApi: ApiClient) {
+      const { result } = renderHook(() => useAutoSetup());
+      let success = true;
+      const promise = act(async () => {
+        success = await result.current.syncBooks({
+          userId: "user-hash",
+          apiClient: mockApi,
+        });
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+      return { success, result };
+    }
+
+    it("enters the error phase with no upload when reading the saved list fails", async () => {
+      const mockApi = {
+        getPersonalBooks: vi.fn().mockResolvedValue({
+          error: { code: "INTERNAL_ERROR", message: "伺服器忙碌" },
+        }),
+        updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+      } as unknown as ApiClient;
+
+      const { success, result } = await runAutoSync(mockApi);
+
+      expect(success).toBe(false);
+      expect(result.current.phase).toBe("error");
+      expect(result.current.errorMessage).toBe("伺服器忙碌");
+      expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
+      expect(lastSyncWrittenValue()).toBeUndefined();
+    });
+
+    it("enters the error phase with no upload when the circuit breaker trips", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      const saved = Array.from({ length: 50 }, (_, i) => makeBook(i));
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(
+        scrapedOf(saved.slice(0, 10)),
+      );
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const mockApi = {
+        getPersonalBooks: vi.fn().mockResolvedValue({ data: { books: saved } }),
+        updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+      } as unknown as ApiClient;
+
+      const { success, result } = await runAutoSync(mockApi);
+
+      expect(success).toBe(false);
+      expect(result.current.phase).toBe("error");
+      expect(result.current.errorMessage).toBe(SYNC_PAUSED_MESSAGE);
+      expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
+      expect(lastSyncWrittenValue()).toBeUndefined();
+    });
+
+    it("does not count saved archived books against the scrape (archive never scraped here)", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      const active = Array.from({ length: 20 }, (_, i) => makeBook(i));
+      const archived = Array.from({ length: 60 }, (_, i) =>
+        makeBook(100 + i, { isArchived: BoolFlag.TRUE }),
+      );
+      vi.mocked(scrapeBooks).mockResolvedValueOnce(scrapedOf(active));
+      const mockApi = {
+        getPersonalBooks: vi.fn().mockResolvedValue({
+          data: { books: [...active, ...archived] },
+        }),
+        updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+      } as unknown as ApiClient;
+
+      const { success } = await runAutoSync(mockApi);
+
+      expect(success).toBe(true);
+      expect(mockApi.updatePersonalBooks).toHaveBeenCalledTimes(1);
     });
   });
 });

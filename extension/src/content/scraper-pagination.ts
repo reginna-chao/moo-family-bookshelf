@@ -68,17 +68,20 @@ async function waitForItemCountIncrease(
  * Scroll the Readmoo library page to load all available books in batches.
  * Loop exits on (a) no growth after a scroll (no more pages), (b) hard
  * cap reached, or (c) page not scrollable (jsdom test envs).
+ *
+ * Returns false only for (b): the list may hold more books than were loaded,
+ * so the scrape must not be treated as complete.
  */
 export async function paginateLibrary(
   onProgress?: ScrapeProgressCallback,
-): Promise<void> {
+): Promise<boolean> {
   // No pagination possible when the page isn't scrollable.
   // Also covers jsdom test envs where layout dimensions are 0.
   if (
     document.documentElement.scrollHeight <=
     document.documentElement.clientHeight
   ) {
-    return;
+    return true;
   }
 
   let page = 1;
@@ -90,9 +93,10 @@ export async function paginateLibrary(
       PAGE_TIMEOUT_MS,
       POLL_INTERVAL_MS,
     );
-    if (!grew) return;
+    if (!grew) return true;
     onProgress?.(page, countLibraryItems());
     page++;
   }
   console.warn("[Wave G] Reached hard cap of 100 pages, stopping scrape");
+  return false;
 }

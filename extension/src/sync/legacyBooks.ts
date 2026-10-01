@@ -1,16 +1,13 @@
 import { BookEntry, BoolFlag } from "../api/client";
+import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
 
-/**
- * Shape of a real Readmoo book id: 12+ digits (in practice 15). The single
- * source of truth shared by the scraper's `.privacy` fallback guard and the
- * stale-entry cleanup below.
- */
-export const REAL_BOOK_ID_PATTERN = /^\d{12,}$/;
-
-/** True iff `id` is a string shaped like a real Readmoo book id. */
-export function isRealBookId(id: unknown): boolean {
-  return typeof id === "string" && REAL_BOOK_ID_PATTERN.test(id);
-}
+// The real-book-id rule lives in `shared/` so the scraper, this cleanup and the
+// Worker's PUT books boundary cannot drift apart. Re-exported so existing
+// `../sync/legacyBooks` importers keep working.
+export {
+  REAL_BOOK_ID_PATTERN,
+  isRealBookId,
+} from "moo-family-bookshelf-shared/api/bookId";
 
 /**
  * True iff the entry is keyed by a short (non-book) id. Such entries were
