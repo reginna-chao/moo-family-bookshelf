@@ -4,7 +4,6 @@ export interface FloatingActionBarProps {
   selectedCount: number;
   isDirty: boolean;
   isSaving: boolean;
-  isSaved: boolean;
   onBatchShare: () => void;
   onBatchHide: () => void;
   onCancel: () => void;
@@ -15,7 +14,6 @@ export function FloatingActionBar({
   selectedCount,
   isDirty,
   isSaving,
-  isSaved,
   onBatchShare,
   onBatchHide,
   onCancel,
@@ -24,7 +22,8 @@ export function FloatingActionBar({
   const hasSelection = selectedCount > 0;
   if (!hasSelection && !isDirty) return null;
 
-  const saveLabel = isSaving ? "儲存中..." : isSaved ? "已儲存" : "儲存變更";
+  // The bar only renders while dirty, so it never shows a "saved" label.
+  const saveLabel = isSaving ? "儲存中..." : "儲存變更";
   const saveDisabled = !isDirty || isSaving;
 
   const cancelClass = hasSelection

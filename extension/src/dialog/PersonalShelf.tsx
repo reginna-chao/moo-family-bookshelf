@@ -383,7 +383,6 @@ export function PersonalShelf({
         selectedCount={selectedIds.size}
         isDirty={isDirty}
         isSaving={status === "saving"}
-        isSaved={status === "saved"}
         onBatchShare={handleBatchShare}
         onBatchHide={handleBatchHide}
         onCancel={handleCancel}

@@ -35,6 +35,8 @@ export function FloatingActionBar({
   onSave,
 }: FloatingActionBarProps) {
   const showSaveSection = isDirty || isSaving || isSaved;
+  // A save can succeed while toggles made mid-save stay unsaved; never call those saved.
+  const showSaved = isSaved && !isDirty;
   const visible = shouldShowFloatingBar({
     selectedCount,
     isDirty,
@@ -78,25 +80,26 @@ export function FloatingActionBar({
           {isDirty && (
             <button
               onClick={onCancelChanges}
-              className="px-3 py-1.5 text-xs font-medium rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50"
+              disabled={isSaving}
+              className="px-3 py-1.5 text-xs font-medium rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               取消變更
             </button>
           )}
           <button
             onClick={onSave}
-            disabled={isSaving || isSaved || !isDirty}
+            disabled={isSaving || showSaved || !isDirty}
             className={`px-3 py-1.5 text-xs font-medium rounded-full ${
               isSaving
                 ? "bg-blue-400 text-white cursor-not-allowed"
-                : isSaved
+                : showSaved
                   ? "bg-green-100 text-green-700"
                   : !isDirty
                     ? "bg-gray-200 text-gray-400 cursor-not-allowed"
                     : "bg-blue-600 text-white hover:bg-blue-700"
             }`}
           >
-            {isSaving ? "儲存中..." : isSaved ? "已儲存" : "儲存變更"}
+            {isSaving ? "儲存中..." : showSaved ? "已儲存" : "儲存變更"}
           </button>
         </>
       )}
