@@ -114,8 +114,10 @@ async function waitForLibraryReload(timeoutMs: number): Promise<void> {
  * 7. Clear filter: reopen dialog → click "清除篩選" → click "確定"
  *
  * MUST use try/finally to ensure filter is always cleared.
- * Any failure returns `failedScrape()` (no books, `complete: false`) — distinct
- * from a successful scrape that found zero archived books (`complete: true`).
+ * Any failure returns `failedScrape()` (no books, `complete: false`). Otherwise
+ * `complete` follows `scrapeLibrary` under the archive filter: zero archived
+ * books count as complete only when Readmoo's own item count confirms zero; an
+ * unreadable count makes even an empty archive incomplete.
  */
 export async function scrapeArchivedBooks(
   opts?: ScrapeBooksOptions,

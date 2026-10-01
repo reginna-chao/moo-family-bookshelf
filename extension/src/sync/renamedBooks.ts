@@ -79,8 +79,48 @@ function isReplaceableOld(entry: BookEntry, ctx: RenameContext): boolean {
   return !archiveHidden;
 }
 
-function isBrandNew(entry: BookEntry, ctx: RenameContext): boolean {
+/** The id sets that tell scraped, server-held and brand-new entries apart. */
+export type IdContext = Pick<RenameContext, "scrapedIds" | "serverIds">;
+
+function isBrandNew(entry: BookEntry, ctx: IdContext): boolean {
   return ctx.scrapedIds.has(entry.bookId) && !ctx.serverIds.has(entry.bookId);
+}
+
+export interface DeferResult {
+  /** The list to upload — the input array itself when nothing is held back. */
+  books: BookEntry[];
+  /** How many brand-new entries were held back. */
+  deferredCount: number;
+}
+
+/**
+ * For a sync that cannot judge renames (incomplete scrape, or the family's
+ * borrow list unavailable): hold back every brand-new entry whose trimmed,
+ * non-empty title equals that of a saved-only server entry. Uploading it would
+ * make it a server entry, and a server entry is never brand-new again — so a
+ * real rename could never be resolved later and the duplicate would stay. A
+ * later sync that can judge renames it or adds it. Order is preserved and the
+ * input is not mutated.
+ */
+export function deferRenameCandidates(
+  books: BookEntry[],
+  ctx: IdContext,
+): DeferResult {
+  const savedOnlyTitles = new Set<string>();
+  for (const entry of books) {
+    const savedOnly =
+      ctx.serverIds.has(entry.bookId) && !ctx.scrapedIds.has(entry.bookId);
+    if (savedOnly && titleKey(entry) !== "")
+      savedOnlyTitles.add(titleKey(entry));
+  }
+  const kept = books.filter(
+    (entry) =>
+      !(isBrandNew(entry, ctx) && savedOnlyTitles.has(titleKey(entry))),
+  );
+  const deferredCount = books.length - kept.length;
+  return deferredCount === 0
+    ? { books, deferredCount }
+    : { books: kept, deferredCount };
 }
 
 /**

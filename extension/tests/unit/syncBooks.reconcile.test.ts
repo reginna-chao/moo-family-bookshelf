@@ -172,6 +172,17 @@ function wroteLastSyncAt(): boolean {
     );
 }
 
+const HOLD_BACK_WARNING =
+  "[moo] renames cannot be judged this sync; held back possible renamed books";
+
+/** The detail argument of every hold-back warning logged so far. */
+function holdBackWarnings(): unknown[] {
+  return vi
+    .mocked(console.warn)
+    .mock.calls.filter((call) => call[0] === HOLD_BACK_WARNING)
+    .map((call) => call[1]);
+}
+
 async function runSync(api: MockApi, withFamily: boolean) {
   return syncBooks({
     navigate: false,
@@ -354,7 +365,7 @@ describe("syncBooks — reconciliation", () => {
       expect(api.listBorrowRequests).not.toHaveBeenCalled();
     });
 
-    it("keeps the old id when the library scrape is incomplete", async () => {
+    it("keeps the old id and holds back its same-title new id when the library scrape is incomplete", async () => {
       mockScrape(SCRAPED_BOOKS, false);
       const api = createApi(serverRecord(SERVER_BOOKS), []);
 
@@ -363,7 +374,11 @@ describe("syncBooks — reconciliation", () => {
       expect(result.success).toBe(true);
       expect(result.renamedBookCount).toBe(0);
       expect(result.renamedBooks).toEqual([]);
-      expect(uploadedIds(api)).toEqual([KEPT_ID, NEW_ID, OLD_ID]);
+      // NEW is held back: not uploaded, so a later complete sync still sees it
+      // as brand-new and can pair it with OLD.
+      expect(uploadedIds(api)).toEqual([KEPT_ID, OLD_ID]);
+      expect(result.books.map((b) => b.bookId)).toEqual([KEPT_ID, OLD_ID]);
+      expect(holdBackWarnings()).toEqual([{ deferredCount: 1 }]);
     });
 
     it("keeps the old id when archive sync is on but the archive scrape is incomplete", async () => {
@@ -405,12 +420,134 @@ describe("syncBooks — reconciliation", () => {
       expect(result.success).toBe(true);
       expect(result.renamedBookCount).toBe(0);
       expect(result.renamedBooks).toEqual([]);
-      expect(uploadedIds(api)).toEqual([KEPT_ID, NEW_ID, OLD_ID]);
+      // The rename candidate NEW is held back; everything else is uploaded.
+      expect(uploadedIds(api)).toEqual([KEPT_ID, OLD_ID]);
+      expect(result.books.map((b) => b.bookId)).toEqual([KEPT_ID, OLD_ID]);
+      expect(holdBackWarnings()).toEqual([{ deferredCount: 1 }]);
       expect(result.autoReturnedRequestIds).toEqual([]);
       expect(api.updateBorrowStatus).not.toHaveBeenCalled();
       expect(api.listBorrowRequests).toHaveBeenCalledTimes(1);
       expect(wroteLastSyncAt()).toBe(true);
     });
+
+    it("uploads the scrape unchanged (no hold-back warning) when an incomplete scrape has no rename candidate", async () => {
+      const scraped = [
+        scrapedBook(KEPT_ID, "沒變的書"),
+        scrapedBook(NEW_ID, "全新的書"),
+      ];
+      mockScrape(scraped, false);
+      const api = createApi(serverRecord(SERVER_BOOKS), []);
+
+      const result = await runSync(api, true);
+
+      expect(result.success).toBe(true);
+      expect(uploadedIds(api)).toEqual([KEPT_ID, NEW_ID, OLD_ID]);
+      expect(holdBackWarnings()).toEqual([]);
+    });
+
+    it("still auto-returns a LENT request for a held-back id (auto-return sees the real scraped ids)", async () => {
+      mockScrape(SCRAPED_BOOKS, false);
+      const api = createApi(serverRecord(SERVER_BOOKS), [
+        makeLentRequest(NEW_ID),
+      ]);
+
+      const result = await runSync(api, true);
+
+      // NEW is held back from the upload …
+      expect(uploadedIds(api)).not.toContain(NEW_ID);
+      expect(holdBackWarnings()).toEqual([{ deferredCount: 1 }]);
+      // … but it WAS on the page, so its LENT request is marked returned.
+      expect(api.updateBorrowStatus).toHaveBeenCalledWith(
+        `req-${NEW_ID}`,
+        BorrowStatus.RETURNED,
+      );
+      expect(result.autoReturnedRequestIds).toEqual([`req-${NEW_ID}`]);
+    });
+  });
+
+  /**
+   * F2 regression (#236): a sync that cannot judge renames must leave the pair
+   * resolvable by the next one. The fake server stores exactly what each PUT
+   * received and serves it to the next GET.
+   */
+  describe("two consecutive syncs", () => {
+    const OLD_SHARED = savedBook(OLD_ID, RENAMED_TITLE, {
+      isShared: BoolFlag.TRUE,
+    });
+    const SCRAPE_NEW = [scrapedBook(NEW_ID, RENAMED_TITLE)];
+
+    function createFakeServer(
+      initial: BookEntry[],
+      borrowLists: Array<BorrowRequest[] | Error>,
+    ) {
+      let stored: BookEntry[] = initial;
+      const puts: BookEntry[][] = [];
+      const getPersonalBooks = vi.fn(async () => serverRecord(stored));
+      const updatePersonalBooks = vi.fn(
+        async (_userId: string, payload: PersonalBooks) => {
+          stored = payload.books;
+          puts.push(payload.books);
+          return { data: { ok: true } };
+        },
+      );
+      const listBorrowRequests = vi.fn(async () => {
+        const next = borrowLists.shift() ?? [];
+        if (next instanceof Error) throw next;
+        return next;
+      });
+      const client = {
+        getPersonalBooks,
+        updatePersonalBooks,
+        listBorrowRequests,
+        updateBorrowStatus: vi.fn(),
+      } as unknown as ApiClient;
+      return { client, puts };
+    }
+
+    async function sync(client: ApiClient) {
+      return syncBooks({
+        navigate: false,
+        userId: USER_ID,
+        apiClient: client,
+        familyId: FAMILY_ID,
+      });
+    }
+
+    it.each([
+      {
+        name: "the first scrape is incomplete",
+        firstComplete: false,
+        firstBorrow: [] as BorrowRequest[] | Error,
+      },
+      {
+        name: "the first sync cannot read the borrow list",
+        firstComplete: true,
+        firstBorrow: new Error("borrow list down") as BorrowRequest[] | Error,
+      },
+    ])(
+      "resolves the rename on the second sync when $name",
+      async ({ firstComplete, firstBorrow }) => {
+        const server = createFakeServer([OLD_SHARED], [firstBorrow, []]);
+
+        mockScrape(SCRAPE_NEW, firstComplete);
+        const first = await sync(server.client);
+
+        expect(first.success).toBe(true);
+        expect(first.renamedBookCount).toBe(0);
+        // Only OLD is uploaded; NEW stays brand-new for the next sync.
+        expect(server.puts[0].map((b) => b.bookId)).toEqual([OLD_ID]);
+
+        mockScrape(SCRAPE_NEW, true);
+        const second = await sync(server.client);
+
+        expect(second.success).toBe(true);
+        expect(second.renamedBooks).toEqual([{ oldId: OLD_ID, newId: NEW_ID }]);
+        expect(second.renamedBookCount).toBe(1);
+        expect(server.puts[1]).toHaveLength(1);
+        expect(server.puts[1][0].bookId).toBe(NEW_ID);
+        expect(server.puts[1][0].isShared).toBe(BoolFlag.TRUE);
+      },
+    );
   });
 
   it("fetches the borrow list once and reuses it for auto-return", async () => {

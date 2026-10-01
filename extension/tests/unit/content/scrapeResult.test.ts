@@ -19,20 +19,106 @@ function makeScraped(bookId: string, isArchived = BoolFlag.FALSE): ScrapedBook {
   };
 }
 
+/**
+ * Completeness needs POSITIVE confirmation (#236 F1): Readmoo's own item count
+ * must be known and equal the cards read. "Scrolling stopped growing" alone is
+ * what a slow next page looks like, so it never confirms the end of the list.
+ */
 describe("isLibraryScrapeComplete", () => {
   it.each([
-    { skippedCount: 0, paginationComplete: true, expected: true },
-    { skippedCount: 1, paginationComplete: true, expected: false },
-    { skippedCount: 0, paginationComplete: false, expected: false },
-    { skippedCount: 3, paginationComplete: false, expected: false },
-  ])(
-    "skipped=$skippedCount paginationComplete=$paginationComplete → $expected",
-    ({ skippedCount, paginationComplete, expected }) => {
-      expect(
-        isLibraryScrapeComplete({ skippedCount, paginationComplete }),
-      ).toBe(expected);
+    {
+      name: "the total is known and matches, nothing skipped, below the cap",
+      stats: {
+        skippedCount: 0,
+        belowPageCap: true,
+        listTotal: 5,
+        itemCount: 5,
+      },
+      expected: true,
     },
-  );
+    {
+      name: "an empty list confirmed by a published total of 0",
+      stats: {
+        skippedCount: 0,
+        belowPageCap: true,
+        listTotal: 0,
+        itemCount: 0,
+      },
+      expected: true,
+    },
+    {
+      name: "the total is unknown (bridge silent / legacy host / redesign)",
+      stats: {
+        skippedCount: 0,
+        belowPageCap: true,
+        listTotal: null,
+        itemCount: 5,
+      },
+      expected: false,
+    },
+    {
+      name: "an empty DOM with an unknown total",
+      stats: {
+        skippedCount: 0,
+        belowPageCap: true,
+        listTotal: null,
+        itemCount: 0,
+      },
+      expected: false,
+    },
+    {
+      name: "fewer cards than the total (next page not rendered yet)",
+      stats: {
+        skippedCount: 0,
+        belowPageCap: true,
+        listTotal: 6,
+        itemCount: 5,
+      },
+      expected: false,
+    },
+    {
+      name: "more cards than the total",
+      stats: {
+        skippedCount: 0,
+        belowPageCap: true,
+        listTotal: 4,
+        itemCount: 5,
+      },
+      expected: false,
+    },
+    {
+      name: "an own card was skipped",
+      stats: {
+        skippedCount: 1,
+        belowPageCap: true,
+        listTotal: 5,
+        itemCount: 5,
+      },
+      expected: false,
+    },
+    {
+      name: "pagination stopped at its hard cap",
+      stats: {
+        skippedCount: 0,
+        belowPageCap: false,
+        listTotal: 5,
+        itemCount: 5,
+      },
+      expected: false,
+    },
+    {
+      name: "a skip AND the hard cap",
+      stats: {
+        skippedCount: 3,
+        belowPageCap: false,
+        listTotal: 5,
+        itemCount: 5,
+      },
+      expected: false,
+    },
+  ])("$name → $expected", ({ stats, expected }) => {
+    expect(isLibraryScrapeComplete(stats)).toBe(expected);
+  });
 });
 
 describe("failedScrape", () => {

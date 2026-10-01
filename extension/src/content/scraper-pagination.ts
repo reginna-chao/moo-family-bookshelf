@@ -3,8 +3,8 @@
  *
  * Readmoo uses window-level infinite scroll: scrolling to the bottom of
  * the page triggers the next batch (~200 items). This module drives that
- * loop until no more books are loaded, with progress reporting and a
- * hard cap as a safety valve.
+ * loop until scrolling stops producing new cards, with progress reporting
+ * and a hard cap as a safety valve.
  */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
@@ -65,12 +65,14 @@ async function waitForItemCountIncrease(
 }
 
 /**
- * Scroll the Readmoo library page to load all available books in batches.
- * Loop exits on (a) no growth after a scroll (no more pages), (b) hard
- * cap reached, or (c) page not scrollable (jsdom test envs).
+ * Scroll the Readmoo library page to load more books in batches.
+ * Loop exits on (a) no growth after a scroll, (b) hard cap reached, or
+ * (c) page not scrollable (jsdom test envs).
  *
- * Returns false only for (b): the list may hold more books than were loaded,
- * so the scrape must not be treated as complete.
+ * Returns false for (b), true otherwise — i.e. only "did not hit the hard
+ * cap". True does NOT mean every book was loaded: (a) also happens when the
+ * next page is merely slow. Completeness is confirmed elsewhere, against
+ * Readmoo's own item count (`isLibraryScrapeComplete` in `scrapeResult.ts`).
  */
 export async function paginateLibrary(
   onProgress?: ScrapeProgressCallback,

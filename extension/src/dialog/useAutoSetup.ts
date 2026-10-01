@@ -10,6 +10,7 @@ import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { mergeBooks } from "./mergeBooks";
 import { loadSavedBooksForSync } from "../sync/savedBooks";
 import { assertSyncNotPaused } from "../sync/syncBreaker";
+import { holdBackRenameCandidates } from "../sync/syncSteps";
 import {
   ApiClient,
   PersonalBooks,
@@ -156,14 +157,13 @@ export function useAutoSetup(): UseAutoSetupReturn {
         const savedBooks = loadSavedBooksForSync(apiResponse).books;
         const scrapedIds = new Set(scrapedBooks.map((b) => b.bookId));
         assertSyncNotPaused(savedBooks, scrapedIds, false);
-
+        // Onboarding never resolves renames, so it holds back their candidates.
         const merged = mergeBooks(scrapedBooks, savedBooks);
-
         const personalBooks: PersonalBooks = {
           schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
           userId,
           displayName: "",
-          books: merged,
+          books: holdBackRenameCandidates(merged, scrapedIds, savedBooks).books,
           lastUpdated: new Date().toISOString(),
         };
         const uploadResponse = await apiClient.updatePersonalBooks(

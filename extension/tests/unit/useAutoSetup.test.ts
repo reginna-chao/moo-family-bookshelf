@@ -454,5 +454,86 @@ describe("useAutoSetup", () => {
       expect(success).toBe(true);
       expect(mockApi.updatePersonalBooks).toHaveBeenCalledTimes(1);
     });
+
+    /**
+     * #236 F2: onboarding never judges renames, so a brand-new id titled like a
+     * saved-only id is held back from its upload (uploading it would make it a
+     * server id and the pair could never be resolved by a later sync). The real
+     * merge runs here so the saved-only entry is actually in the merged list.
+     */
+    describe("rename candidates", () => {
+      async function withRealMerge(): Promise<void> {
+        const actual = await vi.importActual<
+          typeof import("@/dialog/mergeBooks")
+        >("@/dialog/mergeBooks");
+        vi.mocked(mergeBooks).mockImplementationOnce(actual.mergeBooks);
+      }
+
+      function uploadedIds(mockApi: ApiClient): string[] {
+        const update = vi.mocked(mockApi.updatePersonalBooks);
+        expect(update).toHaveBeenCalledTimes(1);
+        return update.mock.calls[0][1].books.map((b) => b.bookId);
+      }
+
+      it("excludes a held-back candidate from the onboarding upload", async () => {
+        const { scrapeBooks } = await import("@/content/scraper");
+        const old = makeBook(1, {
+          title: "改了編號的書",
+          isShared: BoolFlag.TRUE,
+        });
+        const kept = makeBook(2);
+        const renamed = makeBook(3, { title: "改了編號的書" });
+        vi.mocked(scrapeBooks).mockResolvedValueOnce(
+          scrapedOf([kept, renamed]),
+        );
+        await withRealMerge();
+        warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const mockApi = {
+          getPersonalBooks: vi.fn().mockResolvedValue({
+            data: { books: [old, kept] },
+          }),
+          updatePersonalBooks: vi
+            .fn()
+            .mockResolvedValue({ data: { ok: true } }),
+        } as unknown as ApiClient;
+
+        const { success } = await runAutoSync(mockApi);
+
+        expect(success).toBe(true);
+        expect(uploadedIds(mockApi)).toEqual([kept.bookId, old.bookId]);
+        expect(warnSpy).toHaveBeenCalledWith(
+          "[moo] renames cannot be judged this sync; held back possible renamed books",
+          { deferredCount: 1 },
+        );
+      });
+
+      it("uploads the merged list unchanged when there is no candidate", async () => {
+        const { scrapeBooks } = await import("@/content/scraper");
+        const old = makeBook(1, { title: "舊書" });
+        const kept = makeBook(2);
+        const fresh = makeBook(3, { title: "新買的書" });
+        vi.mocked(scrapeBooks).mockResolvedValueOnce(scrapedOf([kept, fresh]));
+        await withRealMerge();
+        warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const mockApi = {
+          getPersonalBooks: vi.fn().mockResolvedValue({
+            data: { books: [old, kept] },
+          }),
+          updatePersonalBooks: vi
+            .fn()
+            .mockResolvedValue({ data: { ok: true } }),
+        } as unknown as ApiClient;
+
+        const { success } = await runAutoSync(mockApi);
+
+        expect(success).toBe(true);
+        expect(uploadedIds(mockApi)).toEqual([
+          kept.bookId,
+          fresh.bookId,
+          old.bookId,
+        ]);
+        expect(warnSpy).not.toHaveBeenCalled();
+      });
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BoolFlag } from "@/api/client";
+import { installListTotalPublisher } from "../helpers/listTotalBridge";
 
 describe("scrapeUserEmail", () => {
   let scrapeUserEmail: () => string | null;
@@ -615,6 +616,7 @@ describe("scrapeArchivedBooks", () => {
   let scrapeArchivedBooks: () => Promise<
     import("@/content/scraper").ScrapeResult
   >;
+  let cleanupTotal: (() => void) | null = null;
 
   beforeEach(async () => {
     vi.useFakeTimers();
@@ -626,6 +628,8 @@ describe("scrapeArchivedBooks", () => {
   });
 
   afterEach(() => {
+    cleanupTotal?.();
+    cleanupTotal = null;
     vi.useRealTimers();
     document.body.innerHTML = "";
     document.documentElement.removeAttribute("data-moo-fiber-bridge");
@@ -699,6 +703,8 @@ describe("scrapeArchivedBooks", () => {
   }, 15000);
 
   it("returns scraped books marked with isArchived=1 on success", async () => {
+    // Readmoo's own count confirms every archived card was read.
+    cleanupTotal = installListTotalPublisher("cards");
     document.body.innerHTML = `
       <button class="desktop-top-nav-btn"><i class="mo-filter"></i></button>
       <div class="library-item">
@@ -758,12 +764,18 @@ describe("scrapeArchivedBooks", () => {
  * not be read — and a pagination run that hit its hard cap — must surface as
  * `complete: false`. Borrowed (借入) cards are not the user's books and never
  * make a scrape incomplete.
+ *
+ * Completeness also needs POSITIVE confirmation (F1): the bridge must publish
+ * Readmoo's own list total and it must equal the cards read. Cases that test
+ * some OTHER cause of incompleteness publish a matching total ("cards"), so
+ * that cause is the only one in play.
  */
 describe("scrapeLibrary", () => {
   type ScraperModule = typeof import("@/content/scraper");
   let scrapeLibrary: ScraperModule["scrapeLibrary"];
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let cleanupBridge: (() => void) | null = null;
+  let cleanupTotal: (() => void) | null = null;
 
   /** A card whose real id comes from the fiber bridge (no hover) — the control book. */
   const GOOD_CARD = `
@@ -812,6 +824,8 @@ describe("scrapeLibrary", () => {
   afterEach(() => {
     cleanupBridge?.();
     cleanupBridge = null;
+    cleanupTotal?.();
+    cleanupTotal = null;
     vi.restoreAllMocks();
     vi.useRealTimers();
     document.body.innerHTML = "";
@@ -819,10 +833,11 @@ describe("scrapeLibrary", () => {
     setScrollable(0, 0);
   });
 
-  it("is complete when every own card yields a real id", async () => {
+  it("is complete when every own card yields a real id and the total matches", async () => {
     cleanupBridge = installFiberBridgeMock([
       { bookId: GOOD_ID, title: "好書" },
     ]);
+    cleanupTotal = installListTotalPublisher("cards");
     document.body.innerHTML = GOOD_CARD;
 
     const result = await runScrape();
@@ -830,6 +845,63 @@ describe("scrapeLibrary", () => {
     expect(result.complete).toBe(true);
     expect(result.books.map((b) => b.bookId)).toEqual([GOOD_ID]);
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("is incomplete when the bridge publishes no list total (unknown ⇒ not confirmed)", async () => {
+    cleanupBridge = installFiberBridgeMock([
+      { bookId: GOOD_ID, title: "好書" },
+    ]);
+    document.body.innerHTML = GOOD_CARD;
+
+    const result = await runScrape();
+
+    // Books are still returned (the upload stays additive), only unconfirmed.
+    expect(result.books.map((b) => b.bookId)).toEqual([GOOD_ID]);
+    expect(result.complete).toBe(false);
+  });
+
+  it("is incomplete when the published total says a later page has not rendered yet", async () => {
+    // F1 regression: the next page is slow, so scrolling stopped growing after
+    // one card while Readmoo knows of 3. That must NOT be read as the end of
+    // the list (the rename consequence is pinned in syncBooks.reconcile).
+    cleanupBridge = installFiberBridgeMock([
+      { bookId: GOOD_ID, title: "好書" },
+    ]);
+    cleanupTotal = installListTotalPublisher(3);
+    document.body.innerHTML = GOOD_CARD;
+
+    const result = await runScrape();
+
+    expect(result.books.map((b) => b.bookId)).toEqual([GOOD_ID]);
+    expect(result.complete).toBe(false);
+  });
+
+  it("is incomplete when the published total is SMALLER than the cards read", async () => {
+    cleanupBridge = installFiberBridgeMock([
+      { bookId: GOOD_ID, title: "好書" },
+    ]);
+    cleanupTotal = installListTotalPublisher(0);
+    document.body.innerHTML = GOOD_CARD;
+
+    const result = await runScrape();
+
+    expect(result.complete).toBe(false);
+  });
+
+  it("never reuses a total left on <html> by an earlier request", async () => {
+    cleanupBridge = installFiberBridgeMock([
+      { bookId: GOOD_ID, title: "好書" },
+    ]);
+    // A matching value from some earlier request; this bridge publishes none.
+    document.documentElement.setAttribute("data-moo-list-total", "1");
+    document.body.innerHTML = GOOD_CARD;
+
+    const result = await runScrape();
+
+    expect(result.complete).toBe(false);
+    expect(document.documentElement.hasAttribute("data-moo-list-total")).toBe(
+      false,
+    );
   });
 
   const unreadableCardCases: Array<{
@@ -906,6 +978,7 @@ describe("scrapeLibrary", () => {
       const stamps = [{ bookId: GOOD_ID, title: "好書" }];
       if (fiberId) stamps.push({ bookId: fiberId, title: "壞書" });
       cleanupBridge = installFiberBridgeMock(stamps);
+      cleanupTotal = installListTotalPublisher("cards");
       document.body.innerHTML = GOOD_CARD + card;
 
       const result = await runScrape();
@@ -927,6 +1000,7 @@ describe("scrapeLibrary", () => {
       { bookId: "11111111", title: "纖維一" },
       { bookId: "22222222", title: "纖維二" },
     ]);
+    cleanupTotal = installListTotalPublisher("cards");
     const titleOnly = (title: string) =>
       `<div class="info"><div class="title" title="${title}">${title}</div></div>`;
     const hrefCard = (title: string, id: string) => `
@@ -961,6 +1035,8 @@ describe("scrapeLibrary", () => {
     cleanupBridge = installFiberBridgeMock([
       { bookId: GOOD_ID, title: "好書" },
     ]);
+    // Readmoo's total COUNTS the borrowed-in card (2 cards, 1 own book).
+    cleanupTotal = installListTotalPublisher(2);
     document.body.innerHTML = `
       ${GOOD_CARD}
       <div class="library-item">
@@ -991,6 +1067,7 @@ describe("scrapeLibrary", () => {
       cleanupBridge = installFiberBridgeMock([
         { bookId: GOOD_ID, title: "好書" },
       ]);
+      cleanupTotal = installListTotalPublisher("cards");
       document.body.innerHTML = GOOD_CARD;
       setScrollable(5000, 800);
       // Every scroll loads another card → the list never runs out.
@@ -1003,10 +1080,12 @@ describe("scrapeLibrary", () => {
       expect(result.complete).toBe(false);
     });
 
-    it("is complete when pagination runs out of pages on its own", async () => {
+    it("is complete when pagination runs out of pages and the total confirms it", async () => {
       cleanupBridge = installFiberBridgeMock([
         { bookId: GOOD_ID, title: "好書" },
       ]);
+      // Read after pagination: GOOD + the card the scroll loaded = 2.
+      cleanupTotal = installListTotalPublisher("cards");
       document.body.innerHTML = GOOD_CARD;
       setScrollable(5000, 800);
       // One more page loads, then nothing — the normal end of the list.
@@ -1019,6 +1098,51 @@ describe("scrapeLibrary", () => {
       expect(warnSpy).not.toHaveBeenCalled();
       expect(result.complete).toBe(true);
       expect(result.books.map((b) => b.bookId)).toEqual([GOOD_ID]);
+    });
+
+    it("is incomplete when scrolling stops growing but Readmoo holds more items (slow next page)", async () => {
+      cleanupBridge = installFiberBridgeMock([
+        { bookId: GOOD_ID, title: "好書" },
+      ]);
+      // Readmoo knows of 5 items; only 2 ever render before scrolling stalls.
+      cleanupTotal = installListTotalPublisher(5);
+      document.body.innerHTML = GOOD_CARD;
+      setScrollable(5000, 800);
+      vi.spyOn(window, "scrollTo")
+        .mockImplementationOnce(() => addBorrowedCard())
+        .mockImplementation(() => {});
+
+      const result = await runScrape(40, 500);
+
+      expect(result.books.map((b) => b.bookId)).toEqual([GOOD_ID]);
+      expect(result.complete).toBe(false);
+    });
+
+    it("stamps a card that only rendered during pagination (fiber data requested again afterwards)", async () => {
+      // F3: the late card has NO id source but the fiber stamp, so it can only
+      // be read if fiber data is requested after the scroll that rendered it.
+      const LATE_ID = "210439468000202";
+      cleanupBridge = installFiberBridgeMock([
+        { bookId: GOOD_ID, title: "好書" },
+        { bookId: LATE_ID, title: "後來的書" },
+      ]);
+      cleanupTotal = installListTotalPublisher("cards");
+      document.body.innerHTML = GOOD_CARD;
+      setScrollable(5000, 800);
+      vi.spyOn(window, "scrollTo")
+        .mockImplementationOnce(() => {
+          const div = document.createElement("div");
+          div.className = "library-item";
+          div.innerHTML = `<div class="info"><div class="title" title="後來的書">後來的書</div></div>`;
+          document.body.appendChild(div);
+        })
+        .mockImplementation(() => {});
+
+      const result = await runScrape(40, 500);
+
+      expect(result.books.map((b) => b.bookId)).toEqual([GOOD_ID, LATE_ID]);
+      expect(result.complete).toBe(true);
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 });

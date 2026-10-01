@@ -9,7 +9,7 @@
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BoolFlag } from "../api/client";
-import { requestFiberData } from "./fiber-data";
+import { requestFiberData, requestLibraryListTotal } from "./fiber-data";
 import { queryWithLegacyFallback } from "./readmoo-dom";
 import {
   paginateLibrary,
@@ -132,36 +132,16 @@ async function scrapeItem(item: Element): Promise<ItemOutcome> {
   };
 }
 
-/** Scrape user email from the Readmoo profile panel (#/me page). */
-export function scrapeUserEmail(): string | null {
-  const panel = document.querySelector(READMOO_SELECTORS.mePanel);
-  if (!panel) return null;
-
-  // Email is a leaf div (no child elements) containing "@".
-  const candidates = panel.querySelectorAll<HTMLElement>("div[style]");
-  for (const el of candidates) {
-    if (el.childElementCount > 0) continue;
-    const text = el.textContent?.trim() ?? "";
-    if (text.includes("@") && text.includes(".")) {
-      return text;
-    }
-  }
-  return null;
-}
-
-/** Scrape display name from the Readmoo profile panel (#/me page). */
-export function scrapeDisplayName(): string | null {
-  const panel = document.querySelector(READMOO_SELECTORS.mePanel);
-  if (!panel) return null;
-  const nameEl = panel.querySelector<HTMLElement>(
-    "div[style*='font-size: 16px']",
-  );
-  return nameEl?.textContent?.trim() || null;
-}
+export { scrapeUserEmail, scrapeDisplayName } from "./scraper-profile";
 
 /**
  * Scrape all books from the current Readmoo library page, reporting whether
- * the scrape is complete (no own book skipped, pagination not capped).
+ * the scrape is complete (see `isLibraryScrapeComplete`).
+ *
+ * Fiber data is requested twice: before pagination for the first screen, and
+ * again after it so cards rendered by later scrolls are stamped too (the
+ * bridge skips cards already stamped). The list total comes from that second
+ * request, read together with the card count it is compared against.
  */
 export async function scrapeLibrary(
   opts?: ScrapeBooksOptions,
@@ -169,7 +149,8 @@ export async function scrapeLibrary(
   const originalScrollY = window.scrollY;
   try {
     await requestFiberData();
-    const paginationComplete = await paginateLibrary(opts?.onProgress);
+    const belowPageCap = await paginateLibrary(opts?.onProgress);
+    const listTotal = await requestLibraryListTotal();
     const items = document.querySelectorAll(READMOO_SELECTORS.libraryItem);
     const books: ScrapedBook[] = [];
     let skippedCount = 0;
@@ -180,7 +161,9 @@ export async function scrapeLibrary(
     }
     const complete = isLibraryScrapeComplete({
       skippedCount,
-      paginationComplete,
+      belowPageCap,
+      listTotal,
+      itemCount: items.length,
     });
     return { books, complete };
   } finally {

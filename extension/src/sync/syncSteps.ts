@@ -15,8 +15,10 @@ import {
 } from "../content/scraper";
 import { combineScrapeResults } from "../content/scrapeResult";
 import {
+  deferRenameCandidates,
   lentBookIdsOf,
   resolveRenamedBooks,
+  type DeferResult,
   type RenameResult,
 } from "./renamedBooks";
 
@@ -83,9 +85,36 @@ export async function fetchBorrowRequestsForSync(
 }
 
 /**
+ * The upload list of a sync that cannot judge renames: the merged list minus
+ * its rename candidates (`deferRenameCandidates`), with a count-only warning
+ * when any is held back. Used by `resolveForUpload` and by the onboarding sync
+ * (`dialog/useAutoSetup.ts`), which never resolves renames.
+ */
+export function holdBackRenameCandidates(
+  merged: BookEntry[],
+  scrapedIds: ReadonlySet<string>,
+  savedBooks: readonly BookEntry[],
+): DeferResult {
+  const serverIds = new Set(savedBooks.map((b) => b.bookId));
+  const result = deferRenameCandidates(merged, { scrapedIds, serverIds });
+  if (result.deferredCount > 0) {
+    console.warn(
+      "[moo] renames cannot be judged this sync; held back possible renamed books",
+      { deferredCount: result.deferredCount },
+    );
+  }
+  return result;
+}
+
+export interface UploadPlan extends RenameResult {
+  /** Brand-new entries held back because renames could not be judged. */
+  deferredCount: number;
+}
+
+/**
  * Id-change resolution runs only on a COMPLETE scrape, and — with a family —
  * only when the borrow list was obtained (lent books must stay); otherwise the
- * merged list is uploaded as-is. Pure.
+ * merged list is uploaded minus its rename candidates. Writes nothing.
  */
 export function resolveForUpload(
   merged: BookEntry[],
@@ -93,15 +122,18 @@ export function resolveForUpload(
   savedBooks: BookEntry[],
   requests: BorrowRequest[] | null,
   options: { familyId?: string; userId: string },
-): RenameResult {
+): UploadPlan {
+  const scrapedIds = new Set(scrape.books.map((b) => b.bookId));
   const borrowKnown = !options.familyId || requests !== null;
   if (!scrape.complete || !borrowKnown) {
-    return { books: merged, renamedBooks: [], renamedCount: 0 };
+    const held = holdBackRenameCandidates(merged, scrapedIds, savedBooks);
+    return { ...held, renamedBooks: [], renamedCount: 0 };
   }
-  return resolveRenamedBooks(merged, {
-    scrapedIds: new Set(scrape.books.map((b) => b.bookId)),
+  const resolved = resolveRenamedBooks(merged, {
+    scrapedIds,
     serverIds: new Set(savedBooks.map((b) => b.bookId)),
     lentBookIds: lentBookIdsOf(requests ?? [], options.userId),
     syncArchived: scrape.syncArchived,
   });
+  return { ...resolved, deferredCount: 0 };
 }

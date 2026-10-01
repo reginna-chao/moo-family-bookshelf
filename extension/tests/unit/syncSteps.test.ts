@@ -8,6 +8,7 @@ vi.mock("@/content/scraper", () => ({
 
 import {
   fetchBorrowRequestsForSync,
+  holdBackRenameCandidates,
   resolveForUpload,
   scrapeForSync,
   type SyncScrape,
@@ -189,7 +190,16 @@ describe("resolveForUpload", () => {
     expect(result.renamedBooks).toEqual([{ oldId: OLD_ID, newId: NEW_ID }]);
   });
 
-  it.each([
+  it("reports deferredCount 0 on the judging path", () => {
+    const result = resolveForUpload(merged, scrapeOf(true), [saved], [], {
+      familyId: "fam-1",
+      userId: USER_ID,
+    });
+
+    expect(result.deferredCount).toBe(0);
+  });
+
+  const cannotJudge = [
     {
       name: "the scrape is incomplete",
       complete: false,
@@ -200,9 +210,20 @@ describe("resolveForUpload", () => {
       complete: true,
       requests: null,
     },
-  ])(
-    "skips resolution and reports no rename when $name",
-    ({ complete, requests }) => {
+  ];
+
+  describe.each(cannotJudge)("when $name", ({ complete, requests }) => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it("renames nothing and holds back the brand-new same-title entry", () => {
       const result = resolveForUpload(
         merged,
         scrapeOf(complete),
@@ -211,14 +232,45 @@ describe("resolveForUpload", () => {
         { familyId: "fam-1", userId: USER_ID },
       );
 
+      // The OLD id stays (it may still be real); the NEW twin is not uploaded,
+      // so a later sync that can judge still sees it as brand-new.
       expect(result).toEqual({
-        books: merged,
+        books: [saved],
         renamedBooks: [],
         renamedCount: 0,
+        deferredCount: 1,
       });
-      expect(result.books).toBe(merged);
-    },
-  );
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[moo] renames cannot be judged this sync; held back possible renamed books",
+        { deferredCount: 1 },
+      );
+    });
+
+    it("uploads the merged list itself (same reference) when nothing is a candidate", () => {
+      const unrelated = { ...LIB_BOOK, bookId: NEW_ID, title: "別的書" };
+      const plain: BookEntry[] = [
+        { ...saved, bookId: NEW_ID, title: "別的書", isShared: BoolFlag.FALSE },
+        saved,
+      ];
+      const result = resolveForUpload(
+        plain,
+        { ...scrapeOf(complete), books: [unrelated] },
+        [saved],
+        requests,
+        { familyId: "fam-1", userId: USER_ID },
+      );
+
+      expect(result).toEqual({
+        books: plain,
+        renamedBooks: [],
+        renamedCount: 0,
+        deferredCount: 0,
+      });
+      expect(result.books).toBe(plain);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+  });
 
   it("keeps a lent old id and reports no rename", () => {
     const result = resolveForUpload(
@@ -234,5 +286,63 @@ describe("resolveForUpload", () => {
 
     expect(result.renamedBooks).toEqual([]);
     expect(result.books.map((b) => b.bookId)).toEqual([NEW_ID, OLD_ID]);
+  });
+});
+
+/**
+ * The onboarding sync (`dialog/useAutoSetup.ts`) never judges renames and
+ * calls this directly with the scrape's ids and the saved list.
+ */
+describe("holdBackRenameCandidates", () => {
+  const OLD_ID = "210000000000021";
+  const NEW_ID = "210000000000022";
+  const book = (bookId: string, title: string): BookEntry => ({
+    bookId,
+    title,
+    author: "",
+    isbn: "",
+    coverUrl: "",
+    readmooUrl: "",
+    category: "",
+    isShared: BoolFlag.FALSE,
+    isArchived: BoolFlag.FALSE,
+  });
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it("derives server ids from the saved list and warns with the count only", () => {
+    const old = book(OLD_ID, "同名書");
+    const result = holdBackRenameCandidates(
+      [book(NEW_ID, "同名書"), old],
+      new Set([NEW_ID]),
+      [old],
+    );
+
+    expect(result).toEqual({ books: [old], deferredCount: 1 });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [, detail] = warnSpy.mock.calls[0] as [string, unknown];
+    // Count only: no ids, no titles in the log.
+    expect(detail).toEqual({ deferredCount: 1 });
+    expect(JSON.stringify(warnSpy.mock.calls[0])).not.toContain(NEW_ID);
+    expect(JSON.stringify(warnSpy.mock.calls[0])).not.toContain("同名書");
+  });
+
+  it("is silent and returns the same array when nothing is held back", () => {
+    const merged = [book(NEW_ID, "新書"), book(OLD_ID, "舊書")];
+
+    const result = holdBackRenameCandidates(merged, new Set([NEW_ID]), [
+      book(OLD_ID, "舊書"),
+    ]);
+
+    expect(result.books).toBe(merged);
+    expect(result.deferredCount).toBe(0);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });

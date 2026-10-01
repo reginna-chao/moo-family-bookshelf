@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  deferRenameCandidates,
   lentBookIdsOf,
   resolveRenamedBooks,
+  type IdContext,
   type RenameContext,
 } from "@/sync/renamedBooks";
+import { mergeBooks } from "@/sync/mergeBooks";
+import type { ScrapedBook } from "@/content/scraper";
 import {
   BoolFlag,
   BorrowStatus,
@@ -346,5 +350,155 @@ describe("lentBookIdsOf", () => {
 
   it("returns an empty set for no requests", () => {
     expect(lentBookIdsOf([], OWNER).size).toBe(0);
+  });
+});
+
+/**
+ * `deferRenameCandidates` (#236 F2): a sync that cannot judge renames must not
+ * upload a brand-new id that could be the new twin of a saved-only id — once
+ * uploaded it is a server id, never brand-new again, and the pair could never
+ * be resolved. Held-back entries wait for a sync that can judge.
+ */
+describe("deferRenameCandidates", () => {
+  const KEPT_ID = "210000000000004";
+  const NEW2_ID = "210000000000005";
+  const OLD2_ID = "210000000000006";
+
+  function idCtx(scraped: string[], server: string[]): IdContext {
+    return { scrapedIds: new Set(scraped), serverIds: new Set(server) };
+  }
+
+  it("holds back a brand-new entry titled like a saved-only entry, and keeps the saved-only one", () => {
+    const old = oldEntry({ isShared: BoolFlag.TRUE });
+    const books = [newEntry(), old];
+
+    const result = deferRenameCandidates(books, idCtx([NEW_ID], [OLD_ID]));
+
+    expect(result.deferredCount).toBe(1);
+    expect(result.books).toEqual([old]);
+    expect(result.books[0]).toBe(old);
+  });
+
+  it.each([
+    {
+      name: "a different title",
+      newTitle: "另一本書",
+      oldTitle: TITLE,
+    },
+    { name: "both titles empty", newTitle: "", oldTitle: "" },
+    { name: "both titles whitespace only", newTitle: "   ", oldTitle: " " },
+  ])(
+    "keeps the brand-new entry for $name (same array)",
+    ({ newTitle, oldTitle }) => {
+      const books = [
+        newEntry({ title: newTitle }),
+        oldEntry({ title: oldTitle }),
+      ];
+
+      const result = deferRenameCandidates(books, idCtx([NEW_ID], [OLD_ID]));
+
+      expect(result.deferredCount).toBe(0);
+      expect(result.books).toBe(books);
+    },
+  );
+
+  it("matches titles after trimming", () => {
+    const books = [newEntry({ title: `  ${TITLE} ` }), oldEntry()];
+
+    const result = deferRenameCandidates(books, idCtx([NEW_ID], [OLD_ID]));
+
+    expect(ids(result.books)).toEqual([OLD_ID]);
+    expect(result.deferredCount).toBe(1);
+  });
+
+  it("never holds back an id the server already knows (scraped AND saved)", () => {
+    // Same title as the saved-only OLD, but NEW is on the server too.
+    const books = [newEntry(), oldEntry()];
+
+    const result = deferRenameCandidates(
+      books,
+      idCtx([NEW_ID], [NEW_ID, OLD_ID]),
+    );
+
+    expect(result.deferredCount).toBe(0);
+    expect(result.books).toBe(books);
+  });
+
+  it("does not treat a scraped server entry's title as a candidate source", () => {
+    // KEPT is scraped AND saved — not saved-only — so its title proves nothing.
+    const books = [makeBook({ bookId: KEPT_ID }), newEntry()];
+
+    const result = deferRenameCandidates(
+      books,
+      idCtx([KEPT_ID, NEW_ID], [KEPT_ID]),
+    );
+
+    expect(result.deferredCount).toBe(0);
+    expect(result.books).toBe(books);
+  });
+
+  it("ignores entries that are neither scraped nor on the server", () => {
+    const books = [newEntry(), oldEntry()];
+
+    // OLD is not in serverIds here → not saved-only.
+    const result = deferRenameCandidates(books, idCtx([NEW_ID], []));
+
+    expect(result.deferredCount).toBe(0);
+  });
+
+  it("holds back several candidates, preserving the order of what remains", () => {
+    const books = [
+      makeBook({ bookId: KEPT_ID, title: "沒變的書" }),
+      newEntry(),
+      makeBook({ bookId: NEW2_ID, title: "第二本" }),
+      oldEntry(),
+      makeBook({ bookId: OTHER_ID, title: TITLE }),
+      makeBook({ bookId: OLD2_ID, title: "第二本" }),
+    ];
+    const snapshot = structuredClone(books);
+
+    const result = deferRenameCandidates(
+      books,
+      idCtx([KEPT_ID, NEW_ID, NEW2_ID, OTHER_ID], [KEPT_ID, OLD_ID, OLD2_ID]),
+    );
+
+    // NEW_ID and OTHER_ID both match OLD_ID's title; NEW2_ID matches OLD2_ID's.
+    expect(result.deferredCount).toBe(3);
+    expect(ids(result.books)).toEqual([KEPT_ID, OLD_ID, OLD2_ID]);
+    expect(result.books).not.toBe(books);
+    // Pure: the input array and its entries are untouched.
+    expect(books).toEqual(snapshot);
+  });
+
+  it("does not hold back the real twin of a legacy short id already resolved by mergeBooks", () => {
+    const LEGACY_ID = "18548672";
+    const legacyTitle = "薩提爾的對話練習";
+    const saved: BookEntry[] = [
+      makeBook({
+        bookId: LEGACY_ID,
+        title: legacyTitle,
+        isShared: BoolFlag.TRUE,
+      }),
+    ];
+    const scraped: ScrapedBook[] = [
+      {
+        bookId: NEW_ID,
+        title: legacyTitle,
+        author: "作者",
+        coverUrl: "",
+        readmooUrl: "",
+        category: "",
+        isArchived: BoolFlag.FALSE,
+      },
+    ];
+
+    const merged = mergeBooks(scraped, saved);
+    const result = deferRenameCandidates(merged, idCtx([NEW_ID], [LEGACY_ID]));
+
+    // Positive companion: mergeBooks really dropped the legacy entry first.
+    expect(ids(merged)).toEqual([NEW_ID]);
+    expect(result.deferredCount).toBe(0);
+    expect(ids(result.books)).toEqual([NEW_ID]);
+    expect(result.books[0].isShared).toBe(BoolFlag.TRUE);
   });
 });
