@@ -157,7 +157,7 @@ jobs:
             1. Design: single responsibility, clear layering, depend on abstractions;
                flag god functions (> ~40 lines) and mixed concerns.
             2. Readability: naming, nesting depth (max 3, prefer early return),
-               no nested ternaries, file length (components < 200 lines).
+               no nested ternaries, file length (components ≤ 200 lines).
             3. Performance: redundant I/O, N+1, needless recomputation; and lifecycle
                cost (setInterval / polling / background sync, per the "Lifecycle &
                Resource Cost" rules in .claude/rules/global.md).

@@ -193,7 +193,7 @@ When `CHANGELOG.md` is written: between releases, every `/develop` run writes it
 - UI components: React functional components with hooks.
 - Naming: `camelCase` for variables/functions, `PascalCase` for components/types, `UPPER_SNAKE` for constants.
 - Keep files concise. Production sources under `extension/src/`, `pwa/src/` and `shared/src/` are capped at 200 lines by ESLint `max-lines` (error); files that were already longer are pinned in each package's `eslint.config.js` allowlist and may only shrink — see `.claude/rules/frontend.md` → Coding Conventions. `worker/` is not under that rule: aim for under 300 LOC per file there. Split when it improves clarity.
-- Comments: English, for non-obvious logic only, at most two lines each. A test file's header, an exported function's JSDoc and workflow YAML comments may run longer (`.claude/rules/global.md` → Language).
+- Comments: English, for non-obvious logic only, at most two lines each. A test file's header, an exported function's JSDoc, a comment a rule or `docs/` file points to by name, and workflow YAML comments may run longer (`.claude/rules/global.md` → Language).
 - CSS: Tailwind CSS utility classes preferred. Avoid inline styles for complex layouts.
 
 ### Boolean Convention
