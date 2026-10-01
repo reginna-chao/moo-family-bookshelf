@@ -166,4 +166,69 @@ describe("BookSortDropdown", () => {
 
     expect(onChange).toHaveBeenCalledWith("title-asc");
   });
+
+  // Focus starts on an option — where a keyboard user is while the menu is
+  // open — so a focus that is NOT moved falls to <body> when that option
+  // unmounts with the menu.
+  describe("focus after closing", () => {
+    function renderWithOutside(onChange: (mode: BookSortMode) => void) {
+      render(
+        <div>
+          <button>outside</button>
+          <BookSortDropdown value="default" onChange={onChange} />
+        </div>,
+      );
+    }
+
+    function openAndFocusOption(label: string): HTMLElement {
+      const option = within(openListbox()).getByRole("option", {
+        name: label,
+      });
+      option.focus();
+      expect(option).toHaveFocus();
+      return option;
+    }
+
+    it.each<{ label: string; expected: BookSortMode }>([
+      { label: "預設順序", expected: "default" },
+      { label: "作者 Z → A", expected: "author-desc" },
+    ])(
+      "returns focus to the trigger after choosing $label",
+      ({ label, expected }) => {
+        const onChange = vi.fn();
+        renderWithOutside(onChange);
+        const option = openAndFocusOption(label);
+
+        fireEvent.click(option);
+
+        expect(onChange).toHaveBeenCalledTimes(1);
+        expect(onChange).toHaveBeenCalledWith(expected);
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(screen.getByLabelText("排序方式")).toHaveFocus();
+      },
+    );
+
+    it("returns focus to the trigger when Escape closes the menu", () => {
+      const onChange = vi.fn();
+      renderWithOutside(onChange);
+      const option = openAndFocusOption("書名 A → Z");
+
+      fireEvent.keyDown(option, { key: "Escape" });
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("排序方式")).toHaveFocus();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    // Negative companion: the user went elsewhere, so focus is not pulled back.
+    it("does not move focus to the trigger on an outside mousedown", () => {
+      renderWithOutside(vi.fn());
+      openAndFocusOption("書名 A → Z");
+
+      fireEvent.mouseDown(screen.getByText("outside"));
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("排序方式")).not.toHaveFocus();
+    });
+  });
 });

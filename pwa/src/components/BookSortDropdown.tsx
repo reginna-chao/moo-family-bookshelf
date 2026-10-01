@@ -19,7 +19,8 @@ const OPTIONS: Array<{ value: BookSortMode; label: string }> = [
 /**
  * Sort dropdown (PWA): icon-button trigger + popover listbox, mirroring the
  * Extension BookSortDropdown behavior with Tailwind styling. Closes on outside
- * click or Escape via useDismissableMenu.
+ * click or Escape via useDismissableMenu. Choosing an option or pressing Escape
+ * returns focus to the trigger.
  */
 export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   const [open, setOpen] = useState(false);
@@ -35,6 +36,8 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   function handleSelect(mode: BookSortMode) {
     onChange(mode);
     setOpen(false);
+    // The option unmounts with the menu; land focus back on the trigger.
+    triggerRef.current?.focus();
   }
 
   return (

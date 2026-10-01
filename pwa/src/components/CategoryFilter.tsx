@@ -56,6 +56,13 @@ export function CategoryFilter({
 
   const isActive = value !== "";
 
+  function handleSelect(next: string) {
+    onChange(next);
+    setOpen(false);
+    // The option unmounts with the menu; land focus back on the trigger.
+    triggerRef.current?.focus();
+  }
+
   return (
     <div className="relative flex-shrink-0">
       <button
@@ -81,10 +88,7 @@ export function CategoryFilter({
           <button
             role="option"
             aria-selected={value === ""}
-            onClick={() => {
-              onChange("");
-              setOpen(false);
-            }}
+            onClick={() => handleSelect("")}
             className={`flex justify-between w-full px-3 py-2 text-sm text-left ${
               value === ""
                 ? "bg-blue-50 text-blue-600"
@@ -99,10 +103,7 @@ export function CategoryFilter({
               key={cat.value}
               role="option"
               aria-selected={value === cat.value}
-              onClick={() => {
-                onChange(cat.value);
-                setOpen(false);
-              }}
+              onClick={() => handleSelect(cat.value)}
               className={`flex justify-between w-full px-3 py-2 text-sm text-left ${
                 value === cat.value
                   ? "bg-blue-50 text-blue-600"

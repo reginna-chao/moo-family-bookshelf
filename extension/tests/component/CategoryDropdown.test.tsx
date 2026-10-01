@@ -1,5 +1,6 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useState } from "react";
 import { CategoryFilter, filterByCategory } from "@/dialog/CategoryDropdown";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
@@ -168,6 +169,87 @@ describe("CategoryFilter", () => {
       const trigger = screen.getByLabelText("篩選分類");
       expect(trigger).toHaveClass("moo-category__trigger");
       expect(trigger).toHaveClass("moo-category__trigger--mobile");
+    });
+  });
+
+  // CategoryFilter is controlled (`open` / `onToggle` live in the parent), so a
+  // small stateful parent drives it the way FamilyShelf / PersonalShelf do and
+  // lets the menu genuinely unmount on close. Focus starts on an option — where
+  // a keyboard user is while the menu is open — so a focus that is NOT moved
+  // falls to <body> when that option unmounts.
+  describe("focus after closing", () => {
+    function StatefulFilter({ onChange }: { onChange: (v: string) => void }) {
+      const [open, setOpen] = useState(false);
+      const [value, setValue] = useState("");
+      return (
+        <div>
+          <button type="button">outside</button>
+          <CategoryFilter
+            books={makeBooks(["奇幻冒險", "韓國耽美"])}
+            value={value}
+            onChange={(next) => {
+              onChange(next);
+              setValue(next);
+            }}
+            open={open}
+            onToggle={() => setOpen((prev) => !prev)}
+          />
+        </div>
+      );
+    }
+
+    /** Opens the menu, focuses the option labelled `label`, returns it. */
+    function openAndFocusOption(label: string): HTMLElement {
+      fireEvent.click(screen.getByLabelText("篩選分類"));
+      const option = screen
+        .getAllByRole("option")
+        .find((o) => o.firstElementChild?.textContent === label);
+      if (!option) throw new Error(`option not found: ${label}`);
+      option.focus();
+      expect(option).toHaveFocus();
+      return option;
+    }
+
+    it.each<{ label: string; expected: string }>([
+      { label: "全部分類", expected: "" },
+      { label: "奇幻冒險", expected: "奇幻冒險" },
+    ])(
+      "returns focus to the trigger after choosing $label",
+      ({ label, expected }) => {
+        const onChange = vi.fn();
+        render(<StatefulFilter onChange={onChange} />);
+        const option = openAndFocusOption(label);
+
+        fireEvent.click(option);
+
+        expect(onChange).toHaveBeenCalledTimes(1);
+        expect(onChange).toHaveBeenCalledWith(expected);
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(screen.getByLabelText("篩選分類")).toHaveFocus();
+      },
+    );
+
+    it("returns focus to the trigger when Escape closes the menu", () => {
+      const onChange = vi.fn();
+      render(<StatefulFilter onChange={onChange} />);
+      const option = openAndFocusOption("韓國耽美");
+
+      fireEvent.keyDown(option, { key: "Escape" });
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("篩選分類")).toHaveFocus();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    // Negative companion: the user went elsewhere, so focus is not pulled back.
+    it("does not move focus to the trigger on an outside mousedown", () => {
+      render(<StatefulFilter onChange={vi.fn()} />);
+      openAndFocusOption("韓國耽美");
+
+      fireEvent.mouseDown(screen.getByText("outside"));
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("篩選分類")).not.toHaveFocus();
     });
   });
 });
