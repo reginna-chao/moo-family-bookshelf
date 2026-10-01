@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PersonalShelf, PersonalShelfProps } from "@/dialog/PersonalShelf";
 import { BoolFlag, type ApiClient, type FamilyMember } from "@/api/client";
 import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
+import { renamedBooksNotice } from "@/dialog/PersonalShelfSyncNotices";
 
 const mockUseFamilyData = vi.fn();
 
@@ -23,6 +24,7 @@ const mockUseBookSync = vi.fn().mockReturnValue({
   triggerManualSync: vi.fn(),
   autoSyncDone: false,
   progressMessage: "",
+  renamedBookCount: 0,
 });
 
 vi.mock("@/dialog/useBookSync", () => ({
@@ -37,9 +39,9 @@ vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => mockUseIsMobile(),
 }));
 
-// usePersonalBooks no longer scrapes — its baseline comes from the API record
-// (cache-first reconciled against the server). The scraper is mocked only so an
-// accidental call would surface; books for these tests are supplied via the API.
+// usePersonalBooks no longer scrapes — its baseline is the API record ONLY
+// (#236: the local cache is never a source of books). The scraper is mocked only
+// so an accidental call would surface; books for these tests come via the API.
 vi.mock("@/content/scraper", () => ({
   scrapeBooks: vi.fn().mockResolvedValue([]),
   scrapeArchivedBooks: vi.fn().mockResolvedValue([]),
@@ -76,9 +78,7 @@ function makeBook(
 
 /**
  * Realistic 15-digit book id. A real Readmoo id is 12+ digits: the scraper
- * refuses shorter ones, and usePersonalBooks drops a cache-only entry with a
- * short id as a stale legacy record — so a short fixture id would vanish from
- * the seeded cache before the test could see it.
+ * refuses shorter ones, and the legacy cleanup can drop a short-id entry.
  */
 const bookIdOf = (n: number, prefix = "21"): string =>
   `${prefix}${String(n).padStart(13, "0")}`;
@@ -129,9 +129,9 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     createFamily: vi.fn(),
     joinFamily: vi.fn(),
     leaveFamily: vi.fn(),
-    // No server record by default: the books for these tests arrive via the
-    // auto-sync stream (useBookSync.lastSyncBooks). With no server record, a
-    // save goes out as a full PUT (updatePersonalBooks) — see decideSaveStrategy.
+    // No server record by default. Tests that need books use
+    // `serverClient` / `renderPersonalShelf`, which supply them as the server
+    // record — so they are server-known and a save goes out as a PATCH.
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
     patchPersonalBooks: vi
@@ -145,23 +145,34 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
+/** A client whose server record holds `books` (server-known → saves PATCH). */
+function serverClient(
+  overrides: Partial<ApiClient> = {},
+  books: TestBook[] = DEFAULT_BOOKS,
+): ApiClient {
+  return createMockApiClient({
+    getPersonalBooks: getPersonalBooksReturning(books),
+    ...overrides,
+  });
+}
+
 /** Configure the mocked useBookSync to stream `books` back via lastSyncBooks (the "open shelf → auto full sync" path). */
-function setSyncBooks(books: TestBook[]) {
+function setSyncBooks(books: TestBook[], renamedBookCount = 0) {
   mockUseBookSync.mockReturnValue({
-    syncStatus: "idle",
+    syncStatus: "done",
     syncError: "",
     lastSyncBooks: books,
     triggerManualSync: vi.fn(),
     autoSyncDone: true,
     progressMessage: "",
+    renamedBookCount,
   });
 }
 
 /**
- * Seed chrome.storage.local so the cache-first load picks up `books` as its
- * baseline (and originalBooks snapshot). Using the cache — rather than the API
- * record — means the books are NOT server-known, so a save goes out as a full
- * PUT (updatePersonalBooks), matching what the save-flow tests assert.
+ * Seed chrome.storage.local's personal-books cache with `books`. Since #236 the
+ * shelf never READS that cache (it is still written on save), so a test seeds
+ * it only to prove that its contents do not show up.
  */
 function seedCache(books: TestBook[]) {
   const store: Record<string, unknown> = {
@@ -188,10 +199,9 @@ function renderPersonalShelf(
   props: Partial<PersonalShelfProps> = {},
   books: TestBook[] = DEFAULT_BOOKS,
 ) {
-  seedCache(books);
   const defaultProps: PersonalShelfProps = {
     userId: "user-abc123",
-    apiClient: createMockApiClient(),
+    apiClient: serverClient({}, books),
   };
   return render(<PersonalShelf {...defaultProps} {...props} />);
 }
@@ -223,6 +233,7 @@ describe("PersonalShelf", () => {
       triggerManualSync: vi.fn(),
       autoSyncDone: false,
       progressMessage: "",
+      renamedBookCount: 0,
     });
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -283,7 +294,7 @@ describe("PersonalShelf", () => {
     });
   });
 
-  it("renders books streamed from the auto-sync after loading", async () => {
+  it("renders the books of the server record after loading", async () => {
     renderPersonalShelf();
     await waitForBooksLoaded();
 
@@ -606,11 +617,11 @@ describe("PersonalShelf", () => {
 
   describe("save via floating bar", () => {
     it("save button in floating bar triggers save", async () => {
-      const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
-      const apiClient = createMockApiClient({
-        updatePersonalBooks: mockUpdate,
-      });
-      seedCache(DEFAULT_BOOKS);
+      // Server-known books → the save goes out as a PATCH.
+      const mockUpdate = vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true, applied: 1 } });
+      const apiClient = serverClient({ patchPersonalBooks: mockUpdate });
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitForBooksLoaded();
@@ -711,6 +722,20 @@ describe("PersonalShelf", () => {
       expect(screen.queryByText("Error test")).not.toBeInTheDocument();
     });
 
+    it("shows the server's message, and no cached books, when the read returns an error", async () => {
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockResolvedValue({
+          error: { code: "INTERNAL_ERROR", message: "伺服器忙碌" },
+        }),
+      });
+      seedCache(DEFAULT_BOOKS);
+
+      await renderSettledFailedLoad(apiClient);
+
+      expect(screen.getByText("伺服器忙碌")).toBeInTheDocument();
+      expect(screen.queryByText("測試書籍一")).not.toBeInTheDocument();
+    });
+
     it("shows generic error for non-Error exceptions", async () => {
       const apiClient = createMockApiClient({
         getPersonalBooks: vi.fn().mockRejectedValue("string error"),
@@ -757,11 +782,10 @@ describe("PersonalShelf", () => {
 
   describe("save flow", () => {
     it("clears isDirty after successful save", async () => {
-      const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
-      const apiClient = createMockApiClient({
-        updatePersonalBooks: mockUpdate,
-      });
-      seedCache(DEFAULT_BOOKS);
+      const mockUpdate = vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true, applied: 1 } });
+      const apiClient = serverClient({ patchPersonalBooks: mockUpdate });
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitForBooksLoaded();
@@ -797,39 +821,46 @@ describe("PersonalShelf", () => {
         members: [{ userId: "user-abc123", displayName: "伺服器名稱" }],
         applyBorrowStatus: vi.fn(),
       });
-
-      const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
-      const apiClient = createMockApiClient({
-        updatePersonalBooks: mockUpdate,
-      });
-      seedCache(DEFAULT_BOOKS);
-      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
-
+      // Only a full PUT carries displayName. With server-known books the one
+      // PUT path left is a dirty book that a sync result then dropped (#236).
+      const mockPut = vi.fn().mockResolvedValue({ data: { ok: true } });
+      const apiClient = serverClient({ updatePersonalBooks: mockPut });
+      const { rerender } = render(
+        <PersonalShelf userId="user-abc123" apiClient={apiClient} />,
+      );
       await waitForBooksLoaded();
 
-      // Make dirty and save
-      const checkboxes = screen.getAllByRole("checkbox");
-      fireEvent.click(checkboxes[0]);
+      // Toggle book three (dirty), then a sync result without it arrives.
+      fireEvent.click(screen.getAllByRole("checkbox")[2]);
       fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+      setSyncBooks(DEFAULT_BOOKS.slice(0, 2));
+      await act(async () => {
+        rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      });
+      await waitFor(() => {
+        expect(screen.queryByText("測試書籍三")).not.toBeInTheDocument();
+      });
+
       fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
 
       await waitFor(() => {
-        expect(mockUpdate).toHaveBeenCalled();
+        expect(mockPut).toHaveBeenCalled();
       });
 
       // Verify the saved payload uses the server displayName, not the stale local one
-      const savedPayload = mockUpdate.mock.calls[0][1];
+      const savedPayload = mockPut.mock.calls[0][1];
       expect(savedPayload.displayName).toBe("伺服器名稱");
+      // …and that the book the sync dropped is not written back.
+      expect(
+        savedPayload.books.map((b: { bookId: string }) => b.bookId),
+      ).toEqual([BOOK_1, BOOK_2]);
     });
 
     it("shows error when save fails via API error", async () => {
       const mockUpdate = vi.fn().mockResolvedValue({
         error: { code: "SAVE_FAILED", message: "儲存失敗" },
       });
-      const apiClient = createMockApiClient({
-        updatePersonalBooks: mockUpdate,
-      });
-      seedCache(DEFAULT_BOOKS);
+      const apiClient = serverClient({ patchPersonalBooks: mockUpdate });
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitForBooksLoaded();
@@ -1110,11 +1141,10 @@ describe("PersonalShelf", () => {
     // scrape was removed). The cache is now written by syncBooks (during sync) and
     // by handleSave — the latter is exercised below.
     it("updates cache after successful save", async () => {
-      const mockUpdate = vi.fn().mockResolvedValue({ data: { ok: true } });
-      const apiClient = createMockApiClient({
-        updatePersonalBooks: mockUpdate,
-      });
-      seedCache(DEFAULT_BOOKS);
+      const mockUpdate = vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true, applied: 1 } });
+      const apiClient = serverClient({ patchPersonalBooks: mockUpdate });
       render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
 
       await waitForBooksLoaded();
@@ -1201,145 +1231,95 @@ describe("PersonalShelf", () => {
     });
   });
 
-  describe("lastSyncBooks merge preserves isShared", () => {
-    it("preserves existing isShared state when lastSyncBooks arrives", async () => {
-      const apiClient = createMockApiClient({
-        getPersonalBooks: vi.fn().mockResolvedValue({
-          data: {
-            books: [
-              {
-                bookId: BOOK_1,
-                title: "測試書籍一",
-                author: "作者A",
-                coverUrl: "https://example.com/cover1.jpg",
-                readmooUrl: `https://readmoo.com/book/${BOOK_1}`,
-                isShared: BoolFlag.TRUE,
-                isbn: "",
-              },
-            ],
-          },
+  /**
+   * #236: a sync result is what the server now holds, so it REPLACES the list
+   * (it used to be merged into the displayed one, keeping books the sync had
+   * dropped). Both tests were rewritten from the old merge semantics: their
+   * fixtures streamed a partial list without share flags, which no longer
+   * describes a real sync result.
+   */
+  describe("lastSyncBooks replaces the list", () => {
+    it("shows the sync result with the server's share flags", async () => {
+      const apiClient = serverClient({}, [
+        makeBook({
+          bookId: BOOK_1,
+          title: "測試書籍一",
+          isShared: BoolFlag.TRUE,
         }),
-      });
-
-      // Initially return no sync books
-      mockUseBookSync.mockReturnValue({
-        syncStatus: "idle",
-        syncError: "",
-        lastSyncBooks: [],
-        triggerManualSync: vi.fn(),
-        autoSyncDone: false,
-      });
-
+      ]);
       const { rerender } = render(
         <PersonalShelf userId="user-abc123" apiClient={apiClient} />,
       );
-
-      // Wait for initial load — book-1 should be shared from saved data
-      await waitFor(() => {
-        expect(screen.getByText("測試書籍一")).toBeInTheDocument();
-      });
-      const openBadges = screen.queryAllByText("開放");
-      expect(openBadges.length).toBeGreaterThanOrEqual(1);
-
-      // Now simulate lastSyncBooks arriving (same book-1 + a new book-4)
-      // The remap in PersonalShelf lines 125-136 intentionally omits isShared
-      mockUseBookSync.mockReturnValue({
-        syncStatus: "done",
-        syncError: "",
-        lastSyncBooks: [
-          {
-            bookId: BOOK_1,
-            title: "測試書籍一（更新版）",
-            author: "作者A",
-            coverUrl: "https://example.com/cover1-v2.jpg",
-            readmooUrl: `https://readmoo.com/book/${BOOK_1}`,
-          },
-          {
-            bookId: BOOK_4,
-            title: "新書籍四",
-            author: "作者D",
-            coverUrl: "https://example.com/cover4.jpg",
-            readmooUrl: `https://readmoo.com/book/${BOOK_4}`,
-          },
-        ],
-        triggerManualSync: vi.fn(),
-        autoSyncDone: true,
-      });
-
-      // Re-render to trigger the useEffect that reacts to lastSyncBooks
-      await act(async () => {
-        rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
-      });
-
-      await waitFor(() => {
-        // New book should appear
-        expect(screen.getByText("新書籍四")).toBeInTheDocument();
-      });
-
-      // book-1 should still be shared (isShared preserved by mergeBooks)
-      // Check that "開放" badge still exists (at least 1 for book-1)
-      const updatedOpenBadges = screen.queryAllByText("開放");
-      expect(updatedOpenBadges.length).toBeGreaterThanOrEqual(1);
-
-      // book-4 is new, should default to not-shared
-      // The "未開放" badge count should include book-4
-      const hiddenBadges = screen.queryAllByText("未開放");
-      expect(hiddenBadges.length).toBeGreaterThanOrEqual(1);
-    });
-
-    it("new books from sync default to not-shared", async () => {
-      // Start with 3 server-known books, none shared.
-      mockUseBookSync.mockReturnValue({
-        syncStatus: "idle",
-        syncError: "",
-        lastSyncBooks: [],
-        triggerManualSync: vi.fn(),
-        autoSyncDone: false,
-      });
-
-      const apiClient = createMockApiClient({
-        getPersonalBooks: getPersonalBooksReturning(DEFAULT_BOOKS),
-      });
-      const { rerender } = render(
-        <PersonalShelf userId="user-abc123" apiClient={apiClient} />,
-      );
-
       await waitForBooksLoaded();
 
-      // All 3 initial books should be not-shared
-      const initialHidden = screen.getAllByText("未開放");
-      // 3 badges + 1 filter button = at least 3
-      expect(initialHidden.length).toBeGreaterThanOrEqual(3);
-
-      // Simulate sync bringing a new book
-      mockUseBookSync.mockReturnValue({
-        syncStatus: "done",
-        syncError: "",
-        lastSyncBooks: [
-          {
-            bookId: BOOK_NEW,
-            title: "全新同步書",
-            author: "新作者",
-            coverUrl: "https://example.com/new.jpg",
-            readmooUrl: `https://readmoo.com/book/${BOOK_NEW}`,
-          },
-        ],
-        triggerManualSync: vi.fn(),
-        autoSyncDone: true,
-      });
-
+      setSyncBooks([
+        makeBook({
+          bookId: BOOK_1,
+          title: "測試書籍一（更新版）",
+          isShared: BoolFlag.TRUE,
+        }),
+        makeBook({ bookId: BOOK_4, title: "新書籍四" }),
+      ]);
       await act(async () => {
         rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
       });
 
       await waitFor(() => {
-        expect(screen.getByText("全新同步書")).toBeInTheDocument();
+        expect(screen.getByText("新書籍四")).toBeInTheDocument();
+      });
+      expect(screen.getByText("測試書籍一（更新版）")).toBeInTheDocument();
+      expect(screen.queryByText("測試書籍一")).not.toBeInTheDocument();
+      // book-1 stays shared, book-4 is new and not shared.
+      expect(screen.getAllByText("開放").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("未開放").length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("removes a book that the sync result no longer holds", async () => {
+      const apiClient = serverClient();
+      const { rerender } = render(
+        <PersonalShelf userId="user-abc123" apiClient={apiClient} />,
+      );
+      await waitForBooksLoaded();
+      expect(screen.getByText("測試書籍三")).toBeInTheDocument();
+
+      // Readmoo gave book three a new id: the sync replaced it.
+      setSyncBooks([
+        ...DEFAULT_BOOKS.slice(0, 2),
+        makeBook({ bookId: BOOK_NEW, title: "測試書籍三" }),
+      ]);
+      await act(async () => {
+        rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
       });
 
-      // The new book should default to not-shared (no "開放" badge for it)
-      // Total "未開放" badges should include the new book
-      const updatedHidden = screen.getAllByText("未開放");
-      expect(updatedHidden.length).toBeGreaterThanOrEqual(4);
+      await waitFor(() => {
+        expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+      });
+      // Exactly one row carries the title — the old id did not linger.
+      expect(screen.getAllByText("測試書籍三")).toHaveLength(1);
+      expect(screen.getByText("(3 本)")).toBeInTheDocument();
+    });
+  });
+
+  describe("rename notice", () => {
+    it("shows the production notice when the last sync moved books to a new id", async () => {
+      setSyncBooks(DEFAULT_BOOKS, 2);
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      expect(screen.getByRole("status")).toHaveTextContent(
+        renamedBooksNotice(2),
+      );
+    });
+
+    it("shows no notice when the last sync moved nothing", async () => {
+      setSyncBooks(DEFAULT_BOOKS, 0);
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/讀墨更換了 .* 本書的編號/),
+      ).not.toBeInTheDocument();
     });
   });
 

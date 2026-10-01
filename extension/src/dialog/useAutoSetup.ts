@@ -8,9 +8,11 @@ import {
 } from "../content/scraper";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { mergeBooks } from "./mergeBooks";
+import { loadSavedBooksForSync } from "../sync/savedBooks";
+import { assertSyncNotPaused } from "../sync/syncBreaker";
+import { holdBackRenameCandidates } from "../sync/syncSteps";
 import {
   ApiClient,
-  BookEntry,
   PersonalBooks,
   PERSONAL_BOOKS_SCHEMA_VERSION,
 } from "../api/client";
@@ -37,17 +39,6 @@ const NAV_SETTLE_MS = 1500;
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Extract saved books from the personal books API response.
- * Parses the API response as plain JSON — returns BookEntry[] directly.
- */
-function extractSavedBooks(data: unknown): BookEntry[] {
-  if (!data || typeof data !== "object") return [];
-  const record = data as Record<string, unknown>;
-  if (Array.isArray(record.books)) return record.books as BookEntry[];
-  return [];
 }
 
 /**
@@ -160,17 +151,19 @@ export function useAutoSetup(): UseAutoSetupReturn {
           }),
         );
 
-        // Fetch existing saved books for merging (plain JSON)
+        // Both throw → catch below (error phase, no upload): a failed read, a
+        // redesign-shaped scrape. The archive is never scraped here (false).
         const apiResponse = await apiClient.getPersonalBooks(userId);
-        const savedBooks = extractSavedBooks(apiResponse.data);
-
+        const savedBooks = loadSavedBooksForSync(apiResponse).books;
+        const scrapedIds = new Set(scrapedBooks.map((b) => b.bookId));
+        assertSyncNotPaused(savedBooks, scrapedIds, false);
+        // Onboarding never resolves renames, so it holds back their candidates.
         const merged = mergeBooks(scrapedBooks, savedBooks);
-
         const personalBooks: PersonalBooks = {
           schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
           userId,
           displayName: "",
-          books: merged,
+          books: holdBackRenameCandidates(merged, scrapedIds, savedBooks).books,
           lastUpdated: new Date().toISOString(),
         };
         const uploadResponse = await apiClient.updatePersonalBooks(

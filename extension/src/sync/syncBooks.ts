@@ -12,30 +12,31 @@ import browser from "webextension-polyfill";
 import {
   ApiClient,
   BookEntry,
-  BoolFlag,
   PersonalBooks,
   PERSONAL_BOOKS_SCHEMA_VERSION,
 } from "../api/client";
 import {
   AUTO_SYNC_INTERVAL_KEY,
   LAST_SYNC_AT_KEY,
-  SYNC_ARCHIVED_KEY,
   DISPLAY_NAME_KEY,
 } from "../constants";
 
 // Re-export ApiClient so the content script can import it from content-sync.js
 // instead of needing a separate content-api.js entry point.
 export { ApiClient } from "../api/client";
-import {
-  ScrapedBook,
-  scrapeBooks,
-  scrapeArchivedBooks,
-  type ScrapeProgressCallback,
-} from "../content/scraper";
+import { type ScrapeProgressCallback } from "../content/scraper";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { mergeBooks } from "./mergeBooks";
-import { detectReturnedRequests, applyAutoReturns } from "./autoReturn";
+import { runAutoReturn } from "./autoReturn";
 import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
+import { loadSavedBooksForSync } from "./savedBooks";
+import { assertSyncNotPaused } from "./syncBreaker";
+import type { RenamedBook } from "./renamedBooks";
+import {
+  fetchBorrowRequestsForSync,
+  resolveForUpload,
+  scrapeForSync,
+} from "./syncSteps";
 
 /** User-configurable auto-sync frequency */
 export type AutoSyncInterval = "daily" | "weekly" | "monthly" | "never";
@@ -88,22 +89,6 @@ export function canAutoSync(): Promise<boolean> {
   return canSyncByInterval(LAST_SYNC_AT_KEY);
 }
 
-/**
- * Parse saved books from the API response (now plaintext JSON).
- */
-interface LoadSavedResult {
-  books: BookEntry[];
-  /** Full payload — preserved so save can merge back unknown fields */
-  raw: Record<string, unknown> | null;
-}
-
-function loadSavedBooks(data: Record<string, unknown>): LoadSavedResult {
-  if (Array.isArray(data.books)) {
-    return { books: data.books as BookEntry[], raw: data };
-  }
-  return { books: [], raw: null };
-}
-
 export interface SyncBooksOptions {
   /** Navigate to #/library before scraping (and restore hash after) */
   navigate: boolean;
@@ -114,8 +99,9 @@ export interface SyncBooksOptions {
   /** Optional progress callback for the paginated scrape (Wave G) */
   onProgress?: ScrapeProgressCallback;
   /**
-   * When present, enables best-effort auto-return detection after upload: books
-   * that reappeared in the scrape get their LENT borrow requests marked RETURNED.
+   * When present, the family's borrow list is fetched once before upload: lent
+   * books are protected from id-change resolution, and after upload books
+   * that reappeared in the scrape get their LENT requests marked RETURNED.
    */
   familyId?: string;
 }
@@ -129,37 +115,10 @@ export interface SyncBooksResult {
    * Callers can derive the count via `.length` and apply the local status change.
    */
   autoReturnedRequestIds?: string[];
-}
-
-/**
- * Best-effort auto-return detection: a lent Readmoo book vanishes from the
- * library while lent, so its reappearance in `scrapedBooks` means it is back in
- * the owner's hands → mark its LENT request RETURNED. One extra list call + N
- * patches (N = actual returns). All failures are swallowed (console.warn) so
- * this never affects the main sync result. Returns the successfully-returned
- * requestIds.
- */
-async function runAutoReturn(
-  apiClient: ApiClient,
-  familyId: string,
-  ownerId: string,
-  scrapedBooks: ScrapedBook[],
-): Promise<string[]> {
-  try {
-    const requests = await apiClient.listBorrowRequests(familyId);
-    const scrapedBookIds = new Set(scrapedBooks.map((b) => b.bookId));
-    const returned = detectReturnedRequests(
-      requests,
-      scrapedBookIds,
-      ownerId,
-      Date.now(),
-    );
-    if (returned.length === 0) return [];
-    return await applyAutoReturns(apiClient, returned);
-  } catch (err) {
-    console.warn("[syncBooks] Auto-return detection failed:", err);
-    return [];
-  }
+  /** Saved books replaced by their new Readmoo id this sync (`sync/renamedBooks.ts`). */
+  renamedBooks?: RenamedBook[];
+  /** Always `renamedBooks.length` on success. */
+  renamedBookCount?: number;
 }
 
 /**
@@ -173,8 +132,9 @@ async function runAutoReturn(
  *
  * 1. Navigate to #/library if needed
  * 2. Wait for render
- * 3. Scrape books
- * 4. Merge with saved books (preserve isShared settings)
+ * 3. Scrape books (+ archive when enabled)
+ * 4. Merge with saved books (preserve isShared settings); circuit breaker;
+ *    id-change resolution
  * 5. Upload as plaintext JSON
  * 6. Navigate back if needed
  * 7. Update lastSyncAt
@@ -199,54 +159,37 @@ export async function syncBooks(
       await wait(NAV_SETTLE_MS);
     }
 
-    // Step 3: Scrape books
-    const scrapedBooks: ScrapedBook[] = await scrapeBooks({ onProgress });
+    // Step 3: Scrape books (+ archived books when 同步封存書 is on)
+    const scrape = await scrapeForSync(onProgress);
+    const scrapedIds = new Set(scrape.books.map((b) => b.bookId));
 
-    // Step 3b: Optionally scrape archived books
-    let syncArchived = BoolFlag.FALSE;
-    try {
-      const archiveResult = await browser.storage.local.get([
-        SYNC_ARCHIVED_KEY,
-      ]);
-      syncArchived =
-        (archiveResult[SYNC_ARCHIVED_KEY] as number | undefined) ??
-        BoolFlag.FALSE;
-    } catch {
-      // Archive setting unavailable — skip archive sync
-    }
-
-    let allScrapedBooks: ScrapedBook[] = [...scrapedBooks];
-
-    if (syncArchived === BoolFlag.TRUE) {
-      const archivedBooks = await scrapeArchivedBooks({ onProgress });
-      allScrapedBooks = [...allScrapedBooks, ...archivedBooks];
-    }
-
-    // Step 4: Fetch existing saved books for merge
+    // Step 4: Fetch existing saved books for merge. Both checks below throw
+    // (no upload, no lastSyncAt): a failed read, a redesign-shaped scrape.
     const storageResult = await browser.storage.local.get([DISPLAY_NAME_KEY]);
-
-    let savedBooks: BookEntry[] = [];
-    let savedRawPayload: Record<string, unknown> | null = null;
     const apiResponse = await apiClient.getPersonalBooks(userId);
-    if (apiResponse.data) {
-      const result = loadSavedBooks(
-        apiResponse.data as unknown as Record<string, unknown>,
-      );
-      savedBooks = result.books;
-      savedRawPayload = result.raw;
-    }
-
-    const merged = mergeBooks(allScrapedBooks, savedBooks);
+    const saved = loadSavedBooksForSync(apiResponse);
+    assertSyncNotPaused(saved.books, scrapedIds, scrape.archiveCovered);
+    const requests = familyId
+      ? await fetchBorrowRequestsForSync(apiClient, familyId)
+      : null;
+    const merged = mergeBooks(scrape.books, saved.books);
+    const { books, renamedBooks } = resolveForUpload(
+      merged,
+      scrape,
+      saved.books,
+      requests,
+      options,
+    );
 
     // Step 5: Build PersonalBooks object and upload as plaintext JSON
     const displayName =
       (storageResult[DISPLAY_NAME_KEY] as string | undefined) ?? "";
     const personalBooks: PersonalBooks = {
-      ...savedRawPayload,
+      ...saved.raw,
       schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
       userId,
       displayName,
-      books: merged,
+      books,
       lastUpdated: new Date().toISOString(),
     };
     const uploadResponse = await apiClient.updatePersonalBooks(
@@ -270,12 +213,22 @@ export async function syncBooks(
     await browser.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now() });
 
     // Step 8 (best-effort, does NOT block/affect the sync result): auto-detect
-    // returned books and mark their LENT requests RETURNED.
-    const autoReturnedRequestIds = familyId
-      ? await runAutoReturn(apiClient, familyId, userId, allScrapedBooks)
-      : undefined;
+    // returned books and mark their LENT requests RETURNED, reusing the borrow
+    // list fetched before upload (skipped when that fetch failed).
+    let autoReturnedRequestIds: string[] | undefined;
+    if (familyId) {
+      autoReturnedRequestIds = requests
+        ? await runAutoReturn(apiClient, requests, userId, scrapedIds)
+        : [];
+    }
 
-    return { success: true, books: merged, autoReturnedRequestIds };
+    return {
+      success: true,
+      books,
+      autoReturnedRequestIds,
+      renamedBooks,
+      renamedBookCount: renamedBooks.length,
+    };
   } catch (err) {
     // Restore navigation on error
     if (navigate && !isOnLibrary) {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BoolFlag } from "@/api/client";
-import type { ScrapedBook } from "@/content/scraper";
+import type { ScrapeResult } from "@/content/scraper";
+import { installListTotalPublisher } from "../../helpers/listTotalBridge";
 
 /**
  * Pins the `finally` contract of `scrapeArchivedBooks` (scraper-archive.ts):
@@ -74,9 +75,7 @@ function mountFakeLibrary(options: FakeLibraryOptions): FakeLibrary {
   return { clicks };
 }
 
-async function loadScrapeArchivedBooks(): Promise<
-  () => Promise<ScrapedBook[]>
-> {
+async function loadScrapeArchivedBooks(): Promise<() => Promise<ScrapeResult>> {
   vi.resetModules();
   const mod = await import("@/content/scraper");
   return mod.scrapeArchivedBooks;
@@ -96,6 +95,8 @@ afterEach(() => {
 });
 
 describe("scrapeArchivedBooks", () => {
+  let cleanupTotal: (() => void) | null = null;
+
   beforeEach(() => {
     vi.useFakeTimers();
     resetPageState();
@@ -104,12 +105,15 @@ describe("scrapeArchivedBooks", () => {
   });
 
   afterEach(() => {
+    cleanupTotal?.();
+    cleanupTotal = null;
     vi.doUnmock("@/content/fiber-data");
     vi.restoreAllMocks();
     resetPageState();
   });
 
   it("clears the filter (清除篩選 then 確定) after a successful archived scrape", async () => {
+    cleanupTotal = installListTotalPublisher("cards");
     const { clicks } = mountFakeLibrary({ reopenOnCleanup: true });
     const scrapeArchivedBooks = await loadScrapeArchivedBooks();
 
@@ -117,8 +121,9 @@ describe("scrapeArchivedBooks", () => {
     await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
     const result = await promise;
 
-    expect(result).toHaveLength(1);
-    expect(result[0].isArchived).toBe(BoolFlag.TRUE);
+    expect(result.complete).toBe(true);
+    expect(result.books).toHaveLength(1);
+    expect(result.books[0].isArchived).toBe(BoolFlag.TRUE);
     expect(clicks).toEqual([
       "filter",
       "archive",
@@ -138,11 +143,13 @@ describe("scrapeArchivedBooks", () => {
     await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
     const result = await promise;
 
-    expect(result).toEqual([]);
+    // A failed archive scrape is incomplete — never "zero archived books".
+    expect(result).toEqual({ books: [], complete: false });
     expect(window.location.hash).toBe("#/library");
   });
 
   it("falls back to #/library when the filter dialog does not reopen during cleanup", async () => {
+    cleanupTotal = installListTotalPublisher("cards");
     const { clicks } = mountFakeLibrary({ reopenOnCleanup: false });
     const scrapeArchivedBooks = await loadScrapeArchivedBooks();
 
@@ -151,18 +158,20 @@ describe("scrapeArchivedBooks", () => {
     const result = await promise;
 
     // A failed restore must not discard books already scraped.
-    expect(result).toHaveLength(1);
-    expect(result[0].isArchived).toBe(BoolFlag.TRUE);
+    expect(result.complete).toBe(true);
+    expect(result.books).toHaveLength(1);
+    expect(result.books[0].isArchived).toBe(BoolFlag.TRUE);
     expect(clicks).toEqual(["filter", "archive", "confirm", "filter"]);
     expect(window.location.hash).toBe("#/library");
   });
 
-  it("returns [] and still clears the filter when the scrape itself throws", async () => {
+  it("returns an incomplete empty result and still clears the filter when the scrape itself throws", async () => {
     const requestFiberData = vi
       .fn()
       .mockRejectedValue(new Error("fiber bridge unavailable"));
     vi.doMock("@/content/fiber-data", () => ({
       requestFiberData,
+      requestLibraryListTotal: vi.fn().mockResolvedValue(1),
       injectFiberBridge: () => false,
     }));
     const { clicks } = mountFakeLibrary({ reopenOnCleanup: true });
@@ -174,7 +183,7 @@ describe("scrapeArchivedBooks", () => {
 
     // Positive companion: the failure really came from inside the scrape step.
     expect(requestFiberData).toHaveBeenCalledTimes(1);
-    expect(result).toEqual([]);
+    expect(result).toEqual({ books: [], complete: false });
     expect(clicks).toEqual([
       "filter",
       "archive",
@@ -184,5 +193,71 @@ describe("scrapeArchivedBooks", () => {
       "confirm",
     ]);
     expect(window.location.hash).toBe("");
+  });
+
+  it("reports zero archived books as COMPLETE when Readmoo's total confirms 0", async () => {
+    cleanupTotal = installListTotalPublisher(0);
+    mountFakeLibrary({ reopenOnCleanup: true });
+    document.querySelector(".library-item")?.remove();
+    const scrapeArchivedBooks = await loadScrapeArchivedBooks();
+
+    const promise = scrapeArchivedBooks();
+    await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
+    const result = await promise;
+
+    expect(result).toEqual({ books: [], complete: true });
+  });
+
+  it("reports zero archived books as INCOMPLETE when no total is published", async () => {
+    // An empty grid with an unreadable count could equally be a page that has
+    // not rendered yet — never "the archive is empty".
+    mountFakeLibrary({ reopenOnCleanup: true });
+    document.querySelector(".library-item")?.remove();
+    const scrapeArchivedBooks = await loadScrapeArchivedBooks();
+
+    const promise = scrapeArchivedBooks();
+    await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
+    const result = await promise;
+
+    expect(result).toEqual({ books: [], complete: false });
+  });
+
+  it("reports zero rendered archived books as INCOMPLETE when the total says some exist", async () => {
+    cleanupTotal = installListTotalPublisher(4);
+    mountFakeLibrary({ reopenOnCleanup: true });
+    document.querySelector(".library-item")?.remove();
+    const scrapeArchivedBooks = await loadScrapeArchivedBooks();
+
+    const promise = scrapeArchivedBooks();
+    await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
+    const result = await promise;
+
+    expect(result).toEqual({ books: [], complete: false });
+  });
+
+  it("passes through an incomplete archive scrape (an unreadable archived card)", async () => {
+    cleanupTotal = installListTotalPublisher("cards");
+    mountFakeLibrary({ reopenOnCleanup: true });
+    const extra = document.createElement("div");
+    extra.className = "library-item";
+    extra.innerHTML = `
+      <div class="info"><div class="title" title="短碼書">短碼書</div></div>
+      <div class="privacy" id="privacy-18548672"></div>
+    `;
+    document.body.appendChild(extra);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const scrapeArchivedBooks = await loadScrapeArchivedBooks();
+
+    const promise = scrapeArchivedBooks();
+    await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
+    const result = await promise;
+
+    expect(result.books.map((b) => b.bookId)).toEqual(["210439468000107"]);
+    expect(result.complete).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'rejected .privacy fallback bookId "privacy-18548672"',
+      ),
+    );
   });
 });

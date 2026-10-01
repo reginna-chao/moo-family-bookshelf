@@ -66,6 +66,17 @@ const PHISHING_BOOK_URL = `https://${PHISHING_HOST}/login`;
  */
 const BASE_SENSITIVE_BOOK_URL = "https:readmoo.com/../../public/x#invite=moo-x";
 
+/**
+ * Real-shaped Readmoo bookIds (12+ digits) for the HTTP-level suites. The PUT
+ * handler drops any NEW bookId of another shape (`dropNewMalformedBookIds`),
+ * so a short id like "b1" would vanish before the assertion under test runs.
+ * `parseBooks` itself does not filter ids, so its pure-function suites keep
+ * their short ids.
+ */
+const B1 = "210439468000101";
+const B2 = "210439468000102";
+const B3 = "210439468000103";
+
 let kv: KVNamespace;
 
 function request(
@@ -467,7 +478,7 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
       "PUT",
       `/api/user/${USER1}/books`,
       {
-        books: [{ bookId: "b1", title: "Book 1", isShared: BoolFlag.TRUE }],
+        books: [{ bookId: B1, title: "Book 1", isShared: BoolFlag.TRUE }],
         // junk top-level fields that must never reach KV:
         isAdmin: true,
         publicSharing: { shelves: [{ shareToken: "hax" }] },
@@ -495,7 +506,7 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
       {
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "T",
             isShared: BoolFlag.FALSE,
             secret: "leak",
@@ -515,7 +526,7 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
     const book = json.data.books[0];
     expect("secret" in book).toBe(false);
     expect("isShared2" in book).toBe(false);
-    expect(book.bookId).toBe("b1");
+    expect(book.bookId).toBe(B1);
   });
 
   it("returns 400 INVALID_PAYLOAD when a book entry is missing bookId", async () => {
@@ -538,7 +549,7 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
       `/api/user/${USER1}/books`,
       {
         userId: "0".repeat(64),
-        books: [{ bookId: "b1", isShared: BoolFlag.TRUE }],
+        books: [{ bookId: B1, isShared: BoolFlag.TRUE }],
       },
       token,
     );
@@ -554,7 +565,7 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
       "PUT",
       `/api/user/${USER1}/books`,
       {
-        books: [{ bookId: "b1", isShared: BoolFlag.TRUE }],
+        books: [{ bookId: B1, isShared: BoolFlag.TRUE }],
         familyShelfPrefs: { hidden: [ref("b1")], favorites: [ref("b2")] },
       },
       token,
@@ -609,7 +620,7 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
       "PUT",
       `/api/user/${USER1}/books`,
       {
-        books: [{ bookId: "b1", isShared: BoolFlag.TRUE }],
+        books: [{ bookId: B1, isShared: BoolFlag.TRUE }],
         familyShelfPrefs: { hidden: [ref("b1")] },
       },
       token,
@@ -618,7 +629,7 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
     await request(
       "PUT",
       `/api/user/${USER1}/books`,
-      { books: [{ bookId: "b1", isShared: BoolFlag.FALSE }] },
+      { books: [{ bookId: B1, isShared: BoolFlag.FALSE }] },
       token,
     );
     const getRes = await request(
@@ -668,9 +679,9 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
 describe("PUT /api/user/:id/books — coverUrl sanitize", () => {
   /** Off-whitelist, whitelisted, and the empty placeholder, in one save. */
   const MIXED_BOOKS = [
-    { bookId: "b1", title: "Beacon", coverUrl: BEACON_COVER },
-    { bookId: "b2", title: "Clean", coverUrl: ALLOWED_COVER },
-    { bookId: "b3", title: "No cover", coverUrl: "" },
+    { bookId: B1, title: "Beacon", coverUrl: BEACON_COVER },
+    { bookId: B2, title: "Clean", coverUrl: ALLOWED_COVER },
+    { bookId: B3, title: "No cover", coverUrl: "" },
   ];
   const EXPECTED_COVERS = ["", ALLOWED_COVER, ""];
 
@@ -689,11 +700,7 @@ describe("PUT /api/user/:id/books — coverUrl sanitize", () => {
 
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.books.map((b: Json) => b.bookId)).toEqual([
-      "b1",
-      "b2",
-      "b3",
-    ]);
+    expect(json.data.books.map((b: Json) => b.bookId)).toEqual([B1, B2, B3]);
   });
 
   it("returns the off-whitelist cover blanked and the whitelisted one intact", async () => {
@@ -718,7 +725,7 @@ describe("PUT /api/user/:id/books — coverUrl sanitize", () => {
     await putMixedBooks();
 
     const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
-    const beaconBook = stored?.books.find((b) => b.bookId === "b1");
+    const beaconBook = stored?.books.find((b) => b.bookId === B1);
     expect(beaconBook?.title).toBe("Beacon");
     expect(beaconBook?.isShared).toBe(BoolFlag.FALSE);
   });
@@ -736,9 +743,9 @@ describe("PUT /api/user/:id/books — coverUrl sanitize", () => {
 describe("PUT /api/user/:id/books — readmooUrl sanitize", () => {
   /** Off-whitelist, whitelisted, and the empty placeholder, in one save. */
   const MIXED_BOOKS = [
-    { bookId: "b1", title: "Phish", readmooUrl: PHISHING_BOOK_URL },
-    { bookId: "b2", title: "Clean", readmooUrl: ALLOWED_BOOK_URL },
-    { bookId: "b3", title: "No link", readmooUrl: "" },
+    { bookId: B1, title: "Phish", readmooUrl: PHISHING_BOOK_URL },
+    { bookId: B2, title: "Clean", readmooUrl: ALLOWED_BOOK_URL },
+    { bookId: B3, title: "No link", readmooUrl: "" },
   ];
   const EXPECTED_LINKS = ["", ALLOWED_BOOK_URL, ""];
 
@@ -759,11 +766,7 @@ describe("PUT /api/user/:id/books — readmooUrl sanitize", () => {
     // and no new error code is introduced for it.
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.books.map((b: Json) => b.bookId)).toEqual([
-      "b1",
-      "b2",
-      "b3",
-    ]);
+    expect(json.data.books.map((b: Json) => b.bookId)).toEqual([B1, B2, B3]);
   });
 
   it("returns the off-whitelist book link blanked and the whitelisted one intact", async () => {
@@ -788,7 +791,7 @@ describe("PUT /api/user/:id/books — readmooUrl sanitize", () => {
     await putMixedBooks();
 
     const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
-    const phishBook = stored?.books.find((b) => b.bookId === "b1");
+    const phishBook = stored?.books.find((b) => b.bookId === B1);
     expect(phishBook?.title).toBe("Phish");
     expect(phishBook?.isShared).toBe(BoolFlag.FALSE);
   });
@@ -809,7 +812,7 @@ describe("PUT /api/user/:id/books — readmooUrl sanitize", () => {
       {
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "Lure",
             coverUrl: ALLOWED_COVER,
             readmooUrl: BASE_SENSITIVE_BOOK_URL,

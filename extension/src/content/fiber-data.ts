@@ -61,3 +61,21 @@ export async function requestFiberData(): Promise<void> {
     document.dispatchEvent(new CustomEvent("moo-request-fiber-data"));
   });
 }
+
+/** Set on `<html>` by the bridge: item count of the library's current filter. */
+export const ATTR_LIST_TOTAL = "data-moo-list-total";
+
+/**
+ * Stamp the cards (as `requestFiberData`) and read how many items the library
+ * holds for the current filter. The attribute is cleared first, so a bridge
+ * that never answers — or answers without a total — yields null (unknown),
+ * never a value left over from an earlier request.
+ */
+export async function requestLibraryListTotal(): Promise<number | null> {
+  document.documentElement.removeAttribute(ATTR_LIST_TOTAL);
+  await requestFiberData();
+  const raw = document.documentElement.getAttribute(ATTR_LIST_TOTAL);
+  if (raw === null || !/^\d+$/.test(raw)) return null;
+  const total = Number(raw);
+  return Number.isSafeInteger(total) ? total : null;
+}

@@ -30,6 +30,13 @@ async function readJson(res: Response): Promise<ResponseData> {
   return body.data;
 }
 
+/**
+ * Real-shaped Readmoo bookIds (12+ digits): PUT /books drops any NEW bookId of
+ * another shape (`dropNewMalformedBookIds` in `src/routes/user.ts`).
+ */
+const B1 = "210439468000101";
+const B2 = "210439468000102";
+
 let kv: KVNamespace;
 
 function request(
@@ -100,7 +107,7 @@ describe("PUT displayName syncs user record", () => {
         displayName: "Alice",
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "Book 1",
             author: "",
             isbn: "",
@@ -201,7 +208,7 @@ describe("PUT displayName syncs user record", () => {
         displayName: "Alice",
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "Book 1",
             author: "Author1",
             isbn: "123",
@@ -211,7 +218,7 @@ describe("PUT displayName syncs user record", () => {
             isShared: 1,
           },
           {
-            bookId: "b2",
+            bookId: B2,
             title: "Book 2",
             author: "Author2",
             isbn: "456",
@@ -237,8 +244,8 @@ describe("PUT displayName syncs user record", () => {
     );
     expect(data.displayName).toBe("AliceRenamed");
     expect(data.books).toHaveLength(2);
-    expect(data.books?.[0].bookId).toBe("b1");
-    expect(data.books?.[1].bookId).toBe("b2");
+    expect(data.books?.[0].bookId).toBe(B1);
+    expect(data.books?.[1].bookId).toBe(B2);
     expect(data.userId).toBe(USER1);
     expect(data.schemaVersion).toBe(1);
   });
@@ -271,7 +278,7 @@ describe("PUT books uses family displayName over client displayName", () => {
         displayName: "Alice", // stale!
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "Book 1",
             author: "",
             isbn: "",
@@ -473,7 +480,7 @@ describe("PUT books uses family displayName over client displayName", () => {
         displayName: "Alice",
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "Book 1",
             author: "",
             isbn: "",
@@ -495,7 +502,7 @@ describe("PUT books uses family displayName over client displayName", () => {
         displayName: "Bob",
         books: [
           {
-            bookId: "b2",
+            bookId: B2,
             title: "Book 2",
             author: "",
             isbn: "",
@@ -532,7 +539,7 @@ describe("PUT books uses family displayName over client displayName", () => {
         displayName: "Alice",
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "Book 1",
             author: "",
             isbn: "",

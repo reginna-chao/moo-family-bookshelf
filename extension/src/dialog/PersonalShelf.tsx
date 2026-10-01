@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import browser from "webextension-polyfill";
 import { Share2, RefreshCw } from "lucide-react";
 import { ApiClient, BoolFlag, BorrowStatus } from "../api/client";
 import { BookRow } from "./BookRow";
@@ -17,6 +16,8 @@ import { useBookSort } from "./useBookSort";
 import { sortBooks } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import { BookSortDropdown } from "./BookSortDropdown";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { PersonalShelfSyncNotices } from "./PersonalShelfSyncNotices";
+import { useFamilySettingsSyncArchived } from "./useFamilySettingsSyncArchived";
 
 export interface PersonalShelfProps {
   userId: string;
@@ -55,7 +56,6 @@ export function PersonalShelf({
   const [archiveView, setArchiveView] = useState<"active" | "archived">(
     "active",
   );
-  const [syncArchived, setSyncArchived] = useState<number>(0);
   const [showPublicShare, setShowPublicShare] = useState(false);
   const { sort, setSort } = useBookSort("personal");
 
@@ -75,7 +75,9 @@ export function PersonalShelf({
     syncError,
     triggerManualSync,
     lastSyncBooks,
+    lastSyncRenamedBooks,
     progressMessage,
+    renamedBookCount,
   } = useBookSync({
     userId,
     apiClient,
@@ -95,27 +97,16 @@ export function PersonalShelf({
     handleToggle,
     handleSave,
     handleCancel: handleCancelBooks,
-  } = usePersonalBooks({ userId, apiClient, lastSyncBooks, displayName });
+  } = usePersonalBooks({
+    userId,
+    apiClient,
+    lastSyncBooks,
+    lastSyncRenamedBooks,
+    displayName,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = (await browser.runtime.sendMessage({
-          type: "GET_SYNC_ARCHIVED",
-        })) as { syncArchived?: number } | undefined;
-        if (cancelled) return;
-        if (response?.syncArchived !== undefined) {
-          setSyncArchived(response.syncArchived);
-        }
-      } catch {
-        // Background unavailable — keep default
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Read-only use: the shelf only follows the 同步封存書 setting.
+  const { syncArchived } = useFamilySettingsSyncArchived();
 
   useEffect(() => {
     if (syncArchived === BoolFlag.FALSE) {
@@ -294,13 +285,11 @@ export function PersonalShelf({
         </div>
       </div>
 
-      {progressMessage && (
-        <div className="moo-shelf__progress">{progressMessage}</div>
-      )}
-
-      {syncStatus === "error" && syncError && (
-        <p className="moo-shelf__sync-error">{syncError}</p>
-      )}
+      <PersonalShelfSyncNotices
+        progressMessage={progressMessage}
+        syncError={syncStatus === "error" ? syncError : ""}
+        renamedBookCount={renamedBookCount}
+      />
 
       {syncArchived === BoolFlag.TRUE && (
         <div role="tablist" className="moo-shelf__archive-tabs">

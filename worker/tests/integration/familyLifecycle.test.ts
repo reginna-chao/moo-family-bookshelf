@@ -7,6 +7,13 @@ import { ALICE, BOB, NOBODY, USER1, USER2, USER3 } from "../helpers/ids";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
+/**
+ * Real-shaped Readmoo bookIds (12+ digits): PUT /books drops any NEW bookId of
+ * another shape (`dropNewMalformedBookIds` in `src/routes/user.ts`).
+ */
+const B1 = "210439468000101";
+const B2 = "210439468000102";
+
 // ---------------------------------------------------------------------------
 // Shared helpers (DRY — Finding #14)
 // ---------------------------------------------------------------------------
@@ -710,7 +717,7 @@ describe("Personal Books", () => {
       displayName: "Test",
       books: [
         {
-          bookId: "b1",
+          bookId: B1,
           title: "Book 1",
           author: "",
           isbn: "",
@@ -732,7 +739,7 @@ describe("Personal Books", () => {
     const putJson = (await putRes.json()) as Json;
     // Mutation returns the UserBooksRecord
     expect(putJson.data.books).toHaveLength(1);
-    expect(putJson.data.books[0].bookId).toBe("b1");
+    expect(putJson.data.books[0].bookId).toBe(B1);
     expect(putJson.data.lastUpdated).toBeDefined();
 
     const getRes = await request(
@@ -743,7 +750,7 @@ describe("Personal Books", () => {
     );
     const json = (await getRes.json()) as Json;
     expect(json.data.books).toHaveLength(1);
-    expect(json.data.books[0].bookId).toBe("b1");
+    expect(json.data.books[0].bookId).toBe(B1);
     expect(json.data.lastUpdated).toBeDefined();
   });
 
@@ -773,7 +780,7 @@ describe("Family Bookshelf Aggregation", () => {
         displayName: "User1",
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "Book 1",
             author: "",
             isbn: "",
@@ -795,7 +802,7 @@ describe("Family Bookshelf Aggregation", () => {
         displayName: "User2",
         books: [
           {
-            bookId: "b2",
+            bookId: B2,
             title: "Book 2",
             author: "",
             isbn: "",
@@ -820,9 +827,9 @@ describe("Family Bookshelf Aggregation", () => {
     const json = (await res.json()) as Json;
     expect(json.data.members).toHaveLength(2);
     expect(json.data.members[0].books).toHaveLength(1);
-    expect(json.data.members[0].books[0].bookId).toBe("b1");
+    expect(json.data.members[0].books[0].bookId).toBe(B1);
     expect(json.data.members[1].books).toHaveLength(1);
-    expect(json.data.members[1].books[0].bookId).toBe("b2");
+    expect(json.data.members[1].books[0].bookId).toBe(B2);
   });
 
   it("should include displayName in bookshelf response", async () => {
@@ -844,7 +851,7 @@ describe("Family Bookshelf Aggregation", () => {
         displayName: "Alice",
         books: [
           {
-            bookId: "b1",
+            bookId: B1,
             title: "Book 1",
             author: "",
             isbn: "",
@@ -866,7 +873,7 @@ describe("Family Bookshelf Aggregation", () => {
         displayName: "Bob",
         books: [
           {
-            bookId: "b2",
+            bookId: B2,
             title: "Book 2",
             author: "",
             isbn: "",
@@ -927,7 +934,7 @@ describe("Family Bookshelf Aggregation", () => {
         displayName: "User2",
         books: [
           {
-            bookId: "b2",
+            bookId: B2,
             title: "Book 2",
             author: "",
             isbn: "",
