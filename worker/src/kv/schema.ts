@@ -352,9 +352,11 @@ export interface UserBooksRecord {
  * which returns 400 INVALID_PAYLOAD when a deduped present list exceeds it.
  *
  * Sizing rationale — kept reachable under the body guard:
- *   The global 256KB request-body guard (`MAX_BODY_SIZE = 262144` in
- *   `index.ts`) is the *outer* defense and rejects oversized bodies with 413
- *   before they reach this handler. Each valid entry is
+ *   The request-body guard in `index.ts` is per-route (`bodyLimitFor` in
+ *   `utils/bodyLimit.ts`); `/family-prefs` keeps the 256KB default
+ *   (`DEFAULT_MAX_BODY_SIZE`) — only the books PUT gets 2MB. That guard is the
+ *   *outer* defense and rejects oversized bodies with 413 before they reach
+ *   this handler. Each valid entry is
  *   `"{64-hex ownerId}:{bookId}"` and serializes to ~69 bytes of JSON
  *   (including quotes + comma). At 3000 entries an over-limit payload of
  *   3001 refs is ~207KB < 256KB, so it slips past the body guard and actually

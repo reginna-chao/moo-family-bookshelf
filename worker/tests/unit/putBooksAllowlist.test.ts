@@ -9,6 +9,7 @@ import {
 } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
 import { parseBooks, MAX_PUT_BOOKS } from "../../src/routes/user";
+import { maxBodySizeFor } from "../../src/utils/bodyLimit";
 import { USER1 } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -630,26 +631,33 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
     expect(json.data.familyShelfPrefs.hidden).toEqual([ref("b1")]);
   });
 
-  // NOTE: MAX_PUT_BOOKS + 1 minimal book entries serialize to > 256KB, so the
-  // request is rejected by the body-size guard (413) BEFORE reaching the
-  // handler's book-count check. The 400 INVALID_PAYLOAD cap branch itself is
-  // exercised at the pure-function level in the `parseBooks` describe above.
-  // This test documents that over-cap payloads are rejected end-to-end.
-  it("rejects an over-MAX_PUT_BOOKS payload end-to-end (body-size guard fires first)", async () => {
+  // NOTE: MAX_PUT_BOOKS + 1 minimal book entries serialize to ~320KB — over
+  // the 256KB default body limit but under the books PUT's own limit
+  // (`maxBodySizeFor` in `utils/bodyLimit.ts`, 2MB since #233). The request
+  // therefore passes the body-size guard and must be refused by the handler's
+  // book-count cap, which makes that 400 branch reachable over real HTTP.
+  it("rejects an over-MAX_PUT_BOOKS payload end-to-end with 400 INVALID_PAYLOAD from the count cap", async () => {
     const token = await auth();
+    const path = `/api/user/${USER1}/books`;
     const books = Array.from({ length: MAX_PUT_BOOKS + 1 }, (_v, i) => ({
       bookId: `b${i}`,
       isShared: BoolFlag.FALSE,
     }));
-    const res = await request(
-      "PUT",
-      `/api/user/${USER1}/books`,
-      { books },
-      token,
+    // Fixture guard: the payload must fit the route's body limit, or this
+    // would exercise the 413 guard instead of the count cap under test.
+    expect(Buffer.byteLength(JSON.stringify({ books }))).toBeLessThan(
+      maxBodySizeFor("PUT", path),
     );
-    // Either the size guard (413) or the count cap (400) must reject it — never a 200.
-    expect([400, 413]).toContain(res.status);
-    expect(res.status).not.toBe(200);
+
+    const res = await request("PUT", path, { books }, token);
+
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("INVALID_PAYLOAD");
+    expect(json.error.message).toBe(
+      `books array exceeds maximum of ${MAX_PUT_BOOKS}`,
+    );
+    expect(await kv.get(kvKeys.user(USER1))).toBeNull();
   });
 });
 

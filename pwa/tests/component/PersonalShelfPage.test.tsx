@@ -8,6 +8,7 @@ import {
   act,
 } from "@testing-library/react";
 import { PersonalShelfPage } from "@/pages/PersonalShelfPage";
+import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/saveErrors";
 
 import { BoolFlag, type PersonalBooks, type ApiClient } from "@/api/client";
 
@@ -842,6 +843,46 @@ describe("PersonalShelfPage", () => {
       expect(screen.getByText("重試")).toBeInTheDocument();
       // A refused save is not a save: the aggregated family shelf must not be
       // re-fetched as if the shares had changed.
+      expect(mockRefreshBookshelf).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The Worker refuses an oversized upload with `413 { code:
+   * "PAYLOAD_TOO_LARGE", message: "Request body exceeds …" }`. The English
+   * byte-limit message must not reach the page; the shared too-large copy
+   * (imported from production) replaces it. The PWA's save goes out as a
+   * PATCH for server-known books, and PUT shares the same error branch.
+   */
+  describe("oversized save (413 PAYLOAD_TOO_LARGE)", () => {
+    it("shows the too-large copy instead of the server's English message", async () => {
+      await renderWithBooks([
+        {
+          bookId: "b1",
+          title: "書籍一",
+          author: "作者A",
+          isShared: BoolFlag.FALSE,
+        },
+      ]);
+
+      mockPatchPersonalBooks.mockResolvedValue({
+        error: {
+          code: "PAYLOAD_TOO_LARGE",
+          message: "Request body exceeds 2MB limit",
+        },
+      });
+
+      fireEvent.click(screen.getByLabelText("選取 書籍一"));
+      fireEvent.click(screen.getByText("設為開放"));
+      fireEvent.click(screen.getByText("儲存變更"));
+
+      await waitFor(() => {
+        expect(screen.getByText(BOOKS_TOO_LARGE_MESSAGE)).toBeInTheDocument();
+      });
+      expect(mockPatchPersonalBooks).toHaveBeenCalledTimes(1);
+      expect(
+        screen.queryByText(/Request body exceeds/),
+      ).not.toBeInTheDocument();
       expect(mockRefreshBookshelf).not.toHaveBeenCalled();
     });
   });

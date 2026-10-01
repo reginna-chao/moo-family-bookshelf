@@ -6,6 +6,7 @@ import {
   sensitiveBucketFor,
 } from "../../src/utils/routes";
 import { rateLimitBucketFor } from "../../src/middleware/rateLimit";
+import { DEFAULT_MAX_BODY_SIZE } from "../../src/utils/bodyLimit";
 import { createMockKV } from "../helpers/mockKv";
 import {
   createRateLimitBindings,
@@ -462,6 +463,9 @@ describe("rateLimitBucketFor", () => {
 // B2: Request Body Size Limit
 // ===========================================================================
 
+// `/api/family` carries the 256KB per-route default (`utils/bodyLimit.ts`);
+// the books PUT's 2MB limit is covered in
+// `tests/integration/bodyLimitRoutes.test.ts`.
 describe("Request body size limit", () => {
   it("should return 413 when Content-Length exceeds 256KB", async () => {
     const res = await request("POST", "/api/family", {
@@ -491,25 +495,25 @@ describe("Request body size limit", () => {
     expect(res.status).toBe(201);
   });
 
-  it("should return 413 for Content-Length exactly at boundary (262145)", async () => {
+  it("should return 413 for Content-Length one byte over the 256KB boundary", async () => {
     const res = await request("POST", "/api/family", {
       body: JSON.stringify({ userId: USER1 }),
-      headers: { "Content-Length": "262145" },
+      headers: { "Content-Length": String(DEFAULT_MAX_BODY_SIZE + 1) },
     });
     expect(res.status).toBe(413);
   });
 
-  it("should allow Content-Length exactly at 262144 (256KB)", async () => {
+  it("should allow Content-Length exactly at the 256KB limit", async () => {
     const res = await request("POST", "/api/family", {
       body: JSON.stringify({ userId: USER1 }),
-      headers: { "Content-Length": "262144" },
+      headers: { "Content-Length": String(DEFAULT_MAX_BODY_SIZE) },
     });
     // Should pass to handler, not be rejected by size check
     expect(res.status).not.toBe(413);
   });
 
   it("should reject oversized body even without Content-Length header", async () => {
-    const largeBody = "x".repeat(262145);
+    const largeBody = "x".repeat(DEFAULT_MAX_BODY_SIZE + 1);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };

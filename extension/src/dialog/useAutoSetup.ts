@@ -19,7 +19,7 @@ import {
   DISPLAY_NAME_KEY,
   LAST_SYNC_AT_KEY,
 } from "../constants";
-import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
 
 export type AutoSetupPhase =
   "idle" | "scraping-profile" | "scraping-books" | "done" | "error";
@@ -180,8 +180,8 @@ export function useAutoSetup(): UseAutoSetupReturn {
 
         if (uploadResponse.error) {
           setErrorMessage(
-            safeErrorText(
-              uploadResponse.error.message,
+            booksSaveErrorText(
+              uploadResponse.error,
               "同步書單失敗，請稍後再試",
             ),
           );

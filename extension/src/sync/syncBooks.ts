@@ -35,7 +35,7 @@ import {
 import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { mergeBooks } from "./mergeBooks";
 import { detectReturnedRequests, applyAutoReturns } from "./autoReturn";
-import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
 
 /** User-configurable auto-sync frequency */
 export type AutoSyncInterval = "daily" | "weekly" | "monthly" | "never";
@@ -256,7 +256,7 @@ export async function syncBooks(
 
     if (uploadResponse.error) {
       throw new Error(
-        safeErrorText(uploadResponse.error.message, "同步書單失敗，請稍後再試"),
+        booksSaveErrorText(uploadResponse.error, "同步書單失敗，請稍後再試"),
       );
     }
 

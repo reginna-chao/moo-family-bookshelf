@@ -364,11 +364,13 @@ export function parseBooks(
 /**
  * Max books accepted in a single PUT — matches the PATCH change cap.
  *
- * Reachability note: over the real HTTP path this count-cap's 400 branch is
- * effectively unreachable, because 10001 minimal book entries far exceed the
- * 256KB request-body guard (`MAX_BODY_SIZE` in `index.ts`) and get rejected
- * with 413 first. The count-cap therefore mainly protects direct `parseBooks`
- * pure-function callers, where no body-size guard applies.
+ * Relationship to the body guard: this PUT carries the 2MB request-body limit
+ * (`PUT_BOOKS_MAX_BODY_SIZE` in `utils/bodyLimit.ts`), which fits roughly
+ * 4000–5000 realistic books (~400–500 bytes of JSON each) — the size guard is
+ * what bounds a realistic upload. Minimal entries are far smaller: 10001
+ * `{ bookId, isShared }` entries serialize to ~320KB, under 2MB, so this
+ * count-cap's 400 INVALID_PAYLOAD branch IS reachable over HTTP and is what
+ * bounds the entry count of a minimal-entry payload.
  */
 export const MAX_PUT_BOOKS = 10000;
 

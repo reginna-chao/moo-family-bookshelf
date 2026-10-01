@@ -17,6 +17,7 @@ import { usePersonalBooks } from "@/dialog/usePersonalBooks";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { scrapeBooks } from "@/content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
+import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/saveErrors";
 
 /**
  * Realistic 15-digit book ids. A real Readmoo id is 12+ digits (the scraper
@@ -1238,5 +1239,69 @@ describe("usePersonalBooks — hostile save error envelope", () => {
     expect(result.current.status).toBe("error");
     // A refused save keeps the toggle staged (save-before-sync, invariant 3).
     expect(result.current.dirtyBookIds.has(B1)).toBe(true);
+  });
+});
+
+/**
+ * A large shelf saved through PUT can exceed the Worker's body cap, which
+ * answers `413 { code: "PAYLOAD_TOO_LARGE", message: "Request body exceeds …" }`.
+ * The English byte-limit message must never reach the shelf; the shared
+ * too-large copy replaces it. Both strategies share the one error branch, but
+ * PUT is the realistic path (full list), so both are driven here.
+ */
+describe("usePersonalBooks — oversized save (413 PAYLOAD_TOO_LARGE)", () => {
+  const TOO_LARGE = {
+    error: {
+      code: "PAYLOAD_TOO_LARGE",
+      message: "Request body exceeds 2MB limit",
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows the too-large copy when the PUT save is refused as too large", async () => {
+    // Cache carries a book the server does not know yet → the save goes out as PUT.
+    setupStorage(setCache([makeBook(B1), makeBook(B2)]));
+    const client = clientWithServerBooks([makeBook(B1)], {
+      updatePersonalBooks: vi.fn().mockResolvedValue(TOO_LARGE),
+    });
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    act(() => {
+      result.current.handleToggle(B2);
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.updatePersonalBooks).toHaveBeenCalledTimes(1);
+    expect(result.current.errorMessage).toBe(BOOKS_TOO_LARGE_MESSAGE);
+    expect(result.current.errorMessage).not.toContain("Request body exceeds");
+    expect(result.current.status).toBe("error");
+    // A refused save keeps the toggle staged (save-before-sync, invariant 3).
+    expect(result.current.dirtyBookIds.has(B2)).toBe(true);
+  });
+
+  it("shows the too-large copy when the PATCH save is refused as too large", async () => {
+    setupStorage();
+    const client = clientWithServerBooks([makeBook(B1)], {
+      patchPersonalBooks: vi.fn().mockResolvedValue(TOO_LARGE),
+    });
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    act(() => {
+      result.current.handleToggle(B1);
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+    expect(result.current.errorMessage).toBe(BOOKS_TOO_LARGE_MESSAGE);
+    expect(result.current.status).toBe("error");
   });
 });
