@@ -7,15 +7,8 @@ import {
   formatScrapeProgress,
 } from "../content/scraper";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
-import { mergeBooks } from "./mergeBooks";
-import { loadSavedBooksForSync } from "../sync/savedBooks";
-import { assertSyncNotPaused } from "../sync/syncBreaker";
-import { holdBackRenameCandidates } from "../sync/syncSteps";
-import {
-  ApiClient,
-  PersonalBooks,
-  PERSONAL_BOOKS_SCHEMA_VERSION,
-} from "../api/client";
+import { ApiClient } from "../api/client";
+import { uploadOnboardingBooks } from "./onboardingBooksUpload";
 import {
   USER_EMAIL_KEY,
   DISPLAY_NAME_KEY,
@@ -151,32 +144,17 @@ export function useAutoSetup(): UseAutoSetupReturn {
           }),
         );
 
-        // Both throw → catch below (error phase, no upload): a failed read, a
-        // redesign-shaped scrape. The archive is never scraped here (false).
-        const apiResponse = await apiClient.getPersonalBooks(userId);
-        const savedBooks = loadSavedBooksForSync(apiResponse).books;
-        const scrapedIds = new Set(scrapedBooks.map((b) => b.bookId));
-        assertSyncNotPaused(savedBooks, scrapedIds, false);
-        // Onboarding never resolves renames, so it holds back their candidates.
-        const merged = mergeBooks(scrapedBooks, savedBooks);
-        const personalBooks: PersonalBooks = {
-          schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
+        // A failed read or a redesign-shaped scrape throws → catch below
+        // (error phase, no upload).
+        const uploadError = await uploadOnboardingBooks({
+          apiClient,
           userId,
-          displayName: "",
-          books: holdBackRenameCandidates(merged, scrapedIds, savedBooks).books,
-          lastUpdated: new Date().toISOString(),
-        };
-        const uploadResponse = await apiClient.updatePersonalBooks(
-          userId,
-          personalBooks,
-        );
+          scrapedBooks,
+        });
 
-        if (uploadResponse.error) {
+        if (uploadError) {
           setErrorMessage(
-            booksSaveErrorText(
-              uploadResponse.error,
-              "同步書單失敗，請稍後再試",
-            ),
+            booksSaveErrorText(uploadError, "同步書單失敗，請稍後再試"),
           );
           setPhase("error");
           restoreHash();

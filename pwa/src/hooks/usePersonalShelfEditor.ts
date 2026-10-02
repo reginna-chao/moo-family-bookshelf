@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { BoolFlag } from "@/api/client";
 import type { ApiClient, BookEntry } from "@/api/client";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { usePersonalShelfDirty } from "@/hooks/usePersonalShelfDirty";
+import { normalizePersonalBooks } from "@/hooks/personalShelfUpload";
 import { usePersonalShelfSave } from "@/hooks/usePersonalShelfSave";
 import type { LoadState } from "@/hooks/usePersonalShelfSave";
 import { usePersonalShelfActions } from "@/hooks/usePersonalShelfActions";
@@ -48,6 +48,8 @@ export function usePersonalShelfEditor(
     clearDirty,
     clearDirtyIds,
   } = usePersonalShelfDirty();
+  const dirtyRef = useRef(dirtyBookIds);
+  dirtyRef.current = dirtyBookIds;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const originalBooksRef = useRef<BookEntry[]>([]);
   /** Raw server response — kept so save can spread back unknown fields from future versions */
@@ -58,8 +60,10 @@ export function usePersonalShelfEditor(
     apiClient,
     displayName,
     books,
+    setBooks,
     latestBooksRef,
     dirtyBookIds,
+    dirtyRef,
     clearDirtyIds,
     originalBooksRef,
     savedRawPayload,
@@ -89,13 +93,7 @@ export function usePersonalShelfEditor(
       const data = response.data;
       savedRawPayload.current = data as Record<string, unknown>;
       setDisplayName(data.displayName ?? "");
-      const rawBooks = Array.isArray(data.books) ? data.books : [];
-      // Normalize: Extension may store boolean for isShared/isArchived, PWA uses BoolFlag
-      const normalized = rawBooks.map((b) => ({
-        ...b,
-        isShared: b.isShared ? BoolFlag.TRUE : BoolFlag.FALSE,
-        isArchived: b.isArchived ? BoolFlag.TRUE : BoolFlag.FALSE,
-      }));
+      const normalized = normalizePersonalBooks(data);
       setBooks(normalized);
       originalBooksRef.current = normalized;
       clearDirty();

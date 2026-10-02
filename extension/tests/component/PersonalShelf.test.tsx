@@ -1330,6 +1330,44 @@ describe("PersonalShelf", () => {
       expect(screen.getAllByText("測試書籍三")).toHaveLength(1);
       expect(screen.getByText("(3 本)")).toBeInTheDocument();
     });
+
+    it("forwards the sync's lastUpdated: the next full PUT is conditioned on it (#259)", async () => {
+      const SYNC_STAMP = "2026-09-30T10:00:03.000Z";
+      const mockPut = vi.fn().mockResolvedValue({ data: { ok: true } });
+      const apiClient = serverClient({ updatePersonalBooks: mockPut });
+      const { rerender } = render(
+        <PersonalShelf userId="user-abc123" apiClient={apiClient} />,
+      );
+      await waitForBooksLoaded();
+
+      // A dirty book the sync then drops forces the full PUT.
+      fireEvent.click(screen.getAllByRole("checkbox")[2]);
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+      mockUseBookSync.mockReturnValue({
+        syncStatus: "done",
+        syncError: "",
+        lastSyncBooks: DEFAULT_BOOKS.slice(0, 2),
+        lastSyncLastUpdated: SYNC_STAMP,
+        triggerManualSync: vi.fn(),
+        autoSyncDone: true,
+        progressMessage: "",
+        renamedBookCount: 0,
+      });
+      await act(async () => {
+        rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      });
+      await waitFor(() => {
+        expect(screen.queryByText("測試書籍三")).not.toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+      await waitFor(() => {
+        expect(mockPut).toHaveBeenCalledTimes(1);
+      });
+
+      // The sync's stamp, not the load's "2026-01-01T00:00:00.000Z".
+      expect(mockPut.mock.calls[0][1].expectedLastUpdated).toBe(SYNC_STAMP);
+    });
   });
 
   describe("rename notice", () => {

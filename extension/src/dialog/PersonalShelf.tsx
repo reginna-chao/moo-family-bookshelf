@@ -76,6 +76,7 @@ export function PersonalShelf({
     triggerManualSync,
     lastSyncBooks,
     lastSyncRenamedBooks,
+    lastSyncLastUpdated,
     progressMessage,
     renamedBookCount,
   } = useBookSync({
@@ -102,6 +103,7 @@ export function PersonalShelf({
     apiClient,
     lastSyncBooks,
     lastSyncRenamedBooks,
+    lastSyncLastUpdated,
     displayName,
   });
 
@@ -149,11 +151,7 @@ export function PersonalShelf({
     hasMore,
     loadMore,
     reset: resetLoadMore,
-  } = useLoadMore({
-    items: sortedBooks,
-    narrowingActive,
-    pageSize,
-  });
+  } = useLoadMore({ items: sortedBooks, narrowingActive, pageSize });
 
   const handleStatusFilterChange = useCallback((value: StatusFilter) => {
     setStatusFilter(value);

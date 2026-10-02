@@ -40,7 +40,7 @@ shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pw
 ├── hostNote/       # SyncCodeHostNote copy (join / verify / onboarding lead-ins)
 ├── icons/          # Inline brand SVG paths
 ├── invite/         # Invite message templates
-├── personal/       # Personal-shelf save strategy (PUT vs PATCH)
+├── personal/       # Personal-shelf save strategy (PUT vs PATCH) + full-PUT conflict rebase + save-error copy
 ├── publicShelf/    # Public-shelf local-vs-server divergence rule
 └── unkick/         # Un-kick notice copy (removed / cleared / hint)
 ```

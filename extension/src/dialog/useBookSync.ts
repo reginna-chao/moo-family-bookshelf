@@ -22,6 +22,8 @@ interface LastSync {
   books: BookEntry[];
   renamedBooks: RenamedBook[];
   renamedBookCount: number;
+  /** The `lastUpdated` this sync's own PUT stored; undefined when the PUT response carries none. */
+  lastUpdated?: string;
 }
 
 const NO_SYNC: LastSync = { books: [], renamedBooks: [], renamedBookCount: 0 };
@@ -32,6 +34,7 @@ function lastSyncOf(result: SyncBooksResult): LastSync {
     books: result.books,
     renamedBooks,
     renamedBookCount: result.renamedBookCount ?? renamedBooks.length,
+    lastUpdated: result.lastUpdated,
   };
 }
 
@@ -53,6 +56,8 @@ export interface UseBookSyncReturn {
    * the same sync as `lastSyncBooks` (both change in the same render).
    */
   lastSyncRenamedBooks: RenamedBook[];
+  /** The `lastUpdated` that same sync's PUT stored; undefined before a sync or when its PUT response carries none. */
+  lastSyncLastUpdated: string | undefined;
   /** Trigger a manual sync (no rate limit) */
   triggerManualSync: () => Promise<void>;
   /** Whether auto-sync happened this session */
@@ -182,6 +187,7 @@ export function useBookSync({
     syncError,
     lastSyncBooks: lastSync.books,
     lastSyncRenamedBooks: lastSync.renamedBooks,
+    lastSyncLastUpdated: lastSync.lastUpdated,
     triggerManualSync,
     autoSyncDone,
     progressMessage,

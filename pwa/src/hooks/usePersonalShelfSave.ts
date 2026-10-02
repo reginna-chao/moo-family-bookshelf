@@ -1,17 +1,18 @@
 import { useEffect, useCallback, useRef } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { PERSONAL_BOOKS_SCHEMA_VERSION } from "@/api/client";
 import type { ApiClient, BookEntry } from "@/api/client";
+import { applyPatchChanges } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import {
-  applyPatchChanges,
-  decideSaveStrategy,
-} from "moo-family-bookshelf-shared/personal/saveStrategy";
-import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
+  BOOKS_SAVE_CONFLICT_MESSAGE,
+  booksSaveErrorText,
+} from "moo-family-bookshelf-shared/personal/saveErrors";
 import { savedDirtyIds } from "moo-family-bookshelf-shared/personal/savedDirty";
+import { overlayShareFlags } from "moo-family-bookshelf-shared/personal/fullPutConflict";
 import { useFamilyData } from "@/hooks/useFamilyData";
-
-/** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
-const MAX_PATCH_CHANGES = 1000;
+import {
+  uploadPersonalShelf,
+  type LandedSave,
+} from "@/hooks/personalShelfUpload";
 
 export type LoadState = "loading" | "ready" | "saving" | "saved" | "error";
 
@@ -20,9 +21,12 @@ export interface UsePersonalShelfSaveOptions {
   apiClient: ApiClient;
   displayName: string;
   books: BookEntry[];
+  setBooks: Dispatch<SetStateAction<BookEntry[]>>;
   /** The list on screen right now; read when a save lands. */
   latestBooksRef: RefObject<BookEntry[]>;
   dirtyBookIds: Set<string>;
+  /** The latest committed unsaved-toggle set; read when a save lands. */
+  dirtyRef: RefObject<Set<string>>;
   clearDirtyIds: (bookIds: Iterable<string>) => void;
   originalBooksRef: RefObject<BookEntry[]>;
   savedRawPayload: RefObject<Record<string, unknown> | null>;
@@ -39,8 +43,10 @@ export function usePersonalShelfSave({
   apiClient,
   displayName,
   books,
+  setBooks,
   latestBooksRef,
   dirtyBookIds,
+  dirtyRef,
   clearDirtyIds,
   originalBooksRef,
   savedRawPayload,
@@ -57,6 +63,48 @@ export function usePersonalShelfSave({
     };
   }, []);
 
+  const markSaved = useCallback(() => {
+    setState("saved");
+    if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => setState("ready"), 1500);
+  }, [setState]);
+
+  // Fold a landed save into the snapshot, baseline and screen.
+  const commitSaved = useCallback(
+    (landed: LandedSave, sentIds: Set<string>) => {
+      originalBooksRef.current = landed.books;
+      if (landed.usePut) {
+        savedRawPayload.current = { ...landed.raw, books: landed.books };
+        // A full PUT wrote every flag: show it on each book not unsaved right now.
+        const unsaved = dirtyRef.current;
+        setBooks((prev) => overlayShareFlags(prev, landed.books, unsaved));
+      } else {
+        // A PATCH never adds books: marking un-synced books server-known would
+        // drop them on a later PATCH, so only the sent flags are folded in.
+        const prev = savedRawPayload.current ?? {};
+        const next = applyPatchChanges(prev.books, landed.patchChanges);
+        savedRawPayload.current = { ...prev, books: next };
+      }
+      // Clear only the ids this save really saved: a mid-save toggle stays dirty.
+      clearDirtyIds(
+        savedDirtyIds(landed.books, latestBooksRef.current, sentIds),
+      );
+      markSaved();
+      // Refresh the aggregated family bookshelf so it reflects the saved shares
+      void refreshBookshelf();
+    },
+    [
+      originalBooksRef,
+      savedRawPayload,
+      dirtyRef,
+      setBooks,
+      clearDirtyIds,
+      latestBooksRef,
+      markSaved,
+      refreshBookshelf,
+    ],
+  );
+
   const handleSave = useCallback(async () => {
     // A new save supersedes any pending saved→ready reset: letting the old timer
     // fire mid-flight would drop `state` out of "saving" (and out of "error").
@@ -64,58 +112,33 @@ export function usePersonalShelfSave({
 
     // Nothing changed → treat as an instant no-op save (UI guards this too).
     if (dirtyBookIds.size === 0) {
-      setState("saved");
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-      savedTimerRef.current = setTimeout(() => setState("ready"), 1500);
+      markSaved();
       return;
     }
 
     setState("saving");
 
-    // PATCH `patchChanges` (dirty books, server-only unshares)
-    // unless the diff can't be safely expressed as a partial update — those
-    // fall back to a full PUT so nothing is silently dropped (see saveStrategy).
-    const { usePut, patchChanges } = decideSaveStrategy({
-      books,
-      dirtyBookIds,
-      savedRawPayload: savedRawPayload.current,
-      maxPatchChanges: MAX_PATCH_CHANGES,
-    });
-
     try {
-      const response = usePut
-        ? await apiClient.updatePersonalBooks(userId, {
-            ...savedRawPayload.current,
-            schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
-            userId,
-            displayName,
-            books,
-            lastUpdated: new Date().toISOString(),
-          })
-        : await apiClient.patchPersonalBooks(userId, patchChanges);
-      if (response.error) {
+      const result = await uploadPersonalShelf({
+        apiClient,
+        userId,
+        displayName,
+        books,
+        dirtyBookIds,
+        raw: savedRawPayload.current,
+      });
+      if (!result.ok) {
         setErrorMessage(
-          booksSaveErrorText(response.error, "儲存失敗，請稍後再試"),
+          booksSaveErrorText(
+            result.error,
+            "儲存失敗，請稍後再試",
+            BOOKS_SAVE_CONFLICT_MESSAGE,
+          ),
         );
         setState("error");
         return;
       }
-      originalBooksRef.current = books;
-      // Only a PUT persists the full local list; a PATCH leaves the server's
-      // book set unchanged (it can only update isShared of existing books), so
-      // it only folds the sent flags into the snapshot. Marking PATCH-time
-      // books as server-known would wrongly classify un-synced scraped books
-      // as known and silently drop them on a later PATCH.
-      const prev = savedRawPayload.current ?? {};
-      const next = usePut ? books : applyPatchChanges(prev.books, patchChanges);
-      savedRawPayload.current = { ...prev, books: next };
-      // Clear only the ids this save really saved: a mid-save toggle stays dirty.
-      clearDirtyIds(savedDirtyIds(books, latestBooksRef.current, dirtyBookIds));
-      setState("saved");
-      // Refresh the aggregated family bookshelf so it reflects the saved shares
-      void refreshBookshelf();
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-      savedTimerRef.current = setTimeout(() => setState("ready"), 1500);
+      commitSaved(result.landed, dirtyBookIds);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setState("error");
@@ -125,12 +148,10 @@ export function usePersonalShelfSave({
     displayName,
     books,
     apiClient,
-    latestBooksRef,
-    clearDirtyIds,
     dirtyBookIds,
-    refreshBookshelf,
-    originalBooksRef,
     savedRawPayload,
+    markSaved,
+    commitSaved,
     setState,
     setErrorMessage,
   ]);

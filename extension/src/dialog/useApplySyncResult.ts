@@ -15,6 +15,8 @@ export interface UseApplySyncResultParams {
   lastSyncBooks: BookEntry[];
   /** Books that same sync moved to a new Readmoo id. */
   lastSyncRenamedBooks: readonly RenamedBook[];
+  /** The `lastUpdated` that same sync's PUT stored; undefined = keep the held one. */
+  lastSyncLastUpdated: string | undefined;
   /** The initial load has finished; a result is never applied before it. */
   loaded: boolean;
   setBooks: Dispatch<SetStateAction<BookEntry[]>>;
@@ -23,7 +25,7 @@ export interface UseApplySyncResultParams {
   moveRenamedDirty: (renamed: readonly RenamedBook[]) => void;
   /** WRITTEN: becomes the sync result (the cancel baseline). */
   originalBooks: RefObject<BookEntry[]>;
-  /** WRITTEN: its `books` becomes the sync result (the server snapshot). */
+  /** WRITTEN: its `books` and `lastUpdated` become the sync's (the server snapshot). */
   savedRawPayload: RefObject<Record<string, unknown> | null>;
 }
 
@@ -33,12 +35,15 @@ export interface UseApplySyncResultParams {
  * the list (a book whose Readmoo id changed must leave the screen, or a later
  * PUT would write the old id back). Display keeps the local flag of every
  * unsaved toggle, moved to the new id of a renamed book (Invariant 3); the
- * cancel baseline and the server snapshot become the sync result.
+ * cancel baseline and the server snapshot become the sync result. The snapshot
+ * takes the sync's own stamp: a sync applied after a later save must not leave
+ * that save's newer stamp over the sync's older flags. No stamp keeps the held one.
  */
 export function useApplySyncResult({
   appliedSyncRef,
   lastSyncBooks,
   lastSyncRenamedBooks,
+  lastSyncLastUpdated,
   loaded,
   setBooks,
   dirtyRef,
@@ -62,14 +67,18 @@ export function useApplySyncResult({
     );
     moveRenamedDirty(lastSyncRenamedBooks);
     originalBooks.current = lastSyncBooks;
-    savedRawPayload.current = {
+    const raw: Record<string, unknown> = {
       ...savedRawPayload.current,
       books: lastSyncBooks,
     };
+    if (lastSyncLastUpdated !== undefined)
+      raw.lastUpdated = lastSyncLastUpdated;
+    savedRawPayload.current = raw;
   }, [
     appliedSyncRef,
     lastSyncBooks,
     lastSyncRenamedBooks,
+    lastSyncLastUpdated,
     loaded,
     setBooks,
     dirtyRef,
