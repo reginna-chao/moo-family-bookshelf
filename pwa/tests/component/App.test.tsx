@@ -358,6 +358,39 @@ describe("App", () => {
     expect(before.setAuthToken).toHaveBeenLastCalledWith("new-token");
   });
 
+  /**
+   * PR #260 review: nulling the session client's token on logout let the
+   * family-shelf prefs unmount flush go out unauthenticated. The client the
+   * pages held must keep its token; the logged-out view gets its own instance.
+   */
+  it("does not clear the token on the ApiClient the pages held when the user logs out", async () => {
+    window.location.hash = "#personal-shelf";
+    mockAuth = {
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      encryptionKey: "key-123",
+      authToken: "token-123",
+    };
+
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<App />);
+    });
+    const held = personalShelfClients.at(-1) as {
+      setAuthToken: ReturnType<typeof vi.fn>;
+    };
+    expect(held.setAuthToken).toHaveBeenCalledWith("token-123");
+
+    mockAuth = null;
+    await act(async () => {
+      view.rerender(<App />);
+    });
+
+    expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+    expect(held.setAuthToken).not.toHaveBeenCalledWith(null);
+  });
+
   describe("acquireNewToken join failures", () => {
     // No authToken — every render triggers acquireNewToken via the
     // auto-acquire effect

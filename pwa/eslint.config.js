@@ -11,7 +11,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 // entry — split the file instead. Keys are relative to this directory.
 const MAX_LINES = 200;
 const MAX_LINES_LEGACY_CEILINGS = {
-  "src/App.tsx": 415,
+  "src/App.tsx": 408,
   "src/api/client.ts": 706,
   "src/components/MemberList.tsx": 310,
   "src/components/PatternLock.tsx": 285,

@@ -1,5 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { useLayoutEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Library,
   BookOpen,
@@ -14,6 +13,7 @@ import {
   type AuthState,
 } from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
+import { useSessionApiClient } from "./hooks/useSessionApiClient";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
@@ -218,15 +218,8 @@ function AuthenticatedApp() {
     return null;
   }, [login, logout]);
 
-  // No token dep (#256): a new client re-runs every page's load and drops unsaved edits.
-  const apiClient = useMemo(() => {
-    const client = new ApiClient(auth?.apiHost);
-    client.setTokenRefresher(acquireNewToken);
-    return client;
-  }, [auth?.apiHost, acquireNewToken]);
-  useLayoutEffect(() => {
-    apiClient.setAuthToken(auth?.authToken ?? null);
-  }, [apiClient, auth?.authToken]);
+  // Same client across a token swap, new one per session (#256) — see the hook.
+  const apiClient = useSessionApiClient(auth, acquireNewToken);
 
   // Auto-acquire auth token if missing (e.g., QR code entry)
   const [acquiringToken, setAcquiringToken] = useState(false);
