@@ -8,6 +8,7 @@ import {
 } from "../api/client";
 import { decideSaveStrategy } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
+import { savedDirtyIds } from "moo-family-bookshelf-shared/personal/savedDirty";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import {
   PERSONAL_BOOKS_CACHE_KEY,
@@ -46,6 +47,8 @@ export function usePersonalBooks({
   displayName,
 }: UsePersonalBooksParams) {
   const [books, setBooks] = useState<BookEntry[]>([]);
+  const latestBooksRef = useRef(books);
+  latestBooksRef.current = books;
   const originalBooks = useRef<BookEntry[]>([]);
   /** Raw payload — kept so save can spread back unknown fields from future versions */
   const savedRawPayload = useRef<Record<string, unknown> | null>(null);
@@ -70,10 +73,8 @@ export function usePersonalBooks({
     };
   }, []);
 
-  // Load books: the server list only (no scrape here). The local cache is never
-  // a source of books — a cached id the server no longer holds would be written
-  // back by the next PUT. The scrape + upload happens in useBookSync's auto full
-  // sync, whose result arrives via `lastSyncBooks` (see useApplySyncResult).
+  // Load the server list only, never the local cache (a cached id the server no
+  // longer holds would be PUT back). Scraped books arrive via `lastSyncBooks`.
   useEffect(() => {
     let cancelled = false;
 
@@ -140,9 +141,9 @@ export function usePersonalBooks({
     [markDirty],
   );
 
-  // After a mid-save sync, clear only the sent ids: the sync may dirty others.
+  // Clear only the ids this save really saved: a mid-save toggle stays dirty.
   const commitSaved = useCallback(
-    (settled: SavedShelf, midSaveSync: boolean, sentIds: Set<string>) => {
+    (settled: SavedShelf, sentBooks: BookEntry[], sentIds: Set<string>) => {
       originalBooks.current = settled.baseline;
       savedRawPayload.current = {
         ...savedRawPayload.current,
@@ -154,13 +155,12 @@ export function usePersonalBooks({
       void browser.storage.local.set({
         [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now(),
       });
-      if (midSaveSync) clearDirtyIds(sentIds);
-      else clearDirty();
+      clearDirtyIds(savedDirtyIds(sentBooks, latestBooksRef.current, sentIds));
       setStatus("saved");
       if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
       savedTimerRef.current = setTimeout(() => setStatus("ready"), 1500);
     },
-    [clearDirty, clearDirtyIds],
+    [clearDirtyIds],
   );
 
   const handleSave = useCallback(async () => {
@@ -217,7 +217,7 @@ export function usePersonalBooks({
         serverBooks: savedRawPayload.current?.books,
         landedSync,
       });
-      commitSaved(settled, landedSync !== null, dirtyBookIds);
+      commitSaved(settled, books, dirtyBookIds);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
       setStatus("error");

@@ -1728,3 +1728,291 @@ describe("usePersonalBooks — an unsaved toggle follows a renamed book (#236)",
     expect(result.current.dirtyBookIds.has(NEW_Y)).toBe(false);
   });
 });
+
+/**
+ * #250: a share change made while a save is in flight used to lose its unsaved
+ * mark when that save succeeded — the success path cleared the WHOLE dirty set,
+ * so the screen showed the new flag with nothing to save while the server held
+ * the sent one. Only the ids the save really saved may be cleared now.
+ *
+ * Each case holds the save's PATCH open with `heldPatch()`, edits mid-flight,
+ * then releases it. The 1500ms saved→ready timer is cleared by RTL's unmount.
+ */
+describe("usePersonalBooks — a share change made while a save is in flight (#250)", () => {
+  const MID_A = bookIdOf(40);
+  const MID_B = bookIdOf(41);
+  const MID_C = bookIdOf(42);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupStorage();
+  });
+
+  /** Server holds A (not shared), B (shared), C (not shared). */
+  async function renderHeld() {
+    const held = heldPatch();
+    const client = clientWithServerBooks(
+      [makeBook(MID_A), makeBook(MID_B, BoolFlag.TRUE), makeBook(MID_C)],
+      { patchPersonalBooks: held.patch },
+    );
+    const hook = renderUsePersonalBooks(client);
+    await waitForReady(hook.result);
+    return { ...hook, client, ...held };
+  }
+
+  /** Start a save and leave it in flight (the promise is returned wrapped). */
+  async function startSave(result: {
+    current: { handleSave: () => Promise<void>; status: string };
+  }): Promise<{ pending: Promise<void> }> {
+    let pending: Promise<void> = Promise.resolve();
+    await act(async () => {
+      pending = result.current.handleSave();
+    });
+    expect(result.current.status).toBe("saving");
+    return { pending };
+  }
+
+  /** Share A, save (held open), un-share A mid-save, let the save succeed. */
+  async function shareAThenRevertMidSave() {
+    const hook = await renderHeld();
+    act(() => {
+      hook.result.current.handleToggle(MID_A);
+    });
+    const { pending } = await startSave(hook.result);
+    expect(hook.patch.mock.calls[0][1]).toEqual([
+      { bookId: MID_A, isShared: BoolFlag.TRUE },
+    ]);
+
+    act(() => {
+      hook.result.current.handleToggle(MID_A);
+    });
+    await act(async () => {
+      hook.release();
+      await pending;
+    });
+    expect(hook.result.current.status).toBe("saved");
+    return hook;
+  }
+
+  it("keeps a book reverted mid-save unsaved, then saves the revert on the next save", async () => {
+    const { result, patch, client } = await shareAThenRevertMidSave();
+
+    // The screen shows A not shared and still marks it unsaved…
+    expect(result.current.books.find((b) => b.bookId === MID_A)?.isShared).toBe(
+      BoolFlag.FALSE,
+    );
+    expect([...result.current.dirtyBookIds]).toEqual([MID_A]);
+    expect(result.current.isDirty).toBe(true);
+    // …while the server (and the Cancel baseline) holds the sent share.
+    expect(
+      result.current.originalBooks.current.find((b) => b.bookId === MID_A)
+        ?.isShared,
+    ).toBe(BoolFlag.TRUE);
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.updatePersonalBooks).not.toHaveBeenCalled();
+    expect(patch).toHaveBeenCalledTimes(2);
+    expect(patch.mock.calls[1][1]).toEqual([
+      { bookId: MID_A, isShared: BoolFlag.FALSE },
+    ]);
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.dirtyBookIds.size).toBe(0);
+  });
+
+  it("restores the server's share on Cancel after a mid-save revert", async () => {
+    const { result } = await shareAThenRevertMidSave();
+
+    act(() => {
+      result.current.handleCancel();
+    });
+
+    expect(flagsOf(result.current.books)).toEqual([
+      [MID_A, BoolFlag.TRUE],
+      [MID_B, BoolFlag.TRUE],
+      [MID_C, BoolFlag.FALSE],
+    ]);
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.dirtyBookIds.size).toBe(0);
+  });
+
+  it("keeps another book toggled mid-save unsaved and clears the one that was sent", async () => {
+    const { result, patch, release } = await renderHeld();
+    act(() => {
+      result.current.handleToggle(MID_A);
+    });
+    const { pending } = await startSave(result);
+
+    act(() => {
+      result.current.handleToggle(MID_C);
+    });
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect([...result.current.dirtyBookIds]).toEqual([MID_C]);
+    expect(result.current.isDirty).toBe(true);
+    expect(flagsOf(result.current.books)).toEqual([
+      [MID_A, BoolFlag.TRUE],
+      [MID_B, BoolFlag.TRUE],
+      [MID_C, BoolFlag.TRUE],
+    ]);
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    expect(patch.mock.calls[1][1]).toEqual([
+      { bookId: MID_C, isShared: BoolFlag.TRUE },
+    ]);
+  });
+
+  it("keeps a batch change made mid-save unsaved", async () => {
+    const { result, patch, release } = await renderHeld();
+    act(() => {
+      result.current.handleToggle(MID_A);
+    });
+    const { pending } = await startSave(result);
+
+    // PersonalShelf's batch hide: setBooks over the selection + markManyDirty.
+    const selected = new Set([MID_A, MID_B]);
+    act(() => {
+      result.current.setBooks((prev) =>
+        prev.map((b) =>
+          selected.has(b.bookId) ? { ...b, isShared: BoolFlag.FALSE } : b,
+        ),
+      );
+      result.current.markManyDirty(selected);
+    });
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect([...result.current.dirtyBookIds].sort()).toEqual(
+      [MID_A, MID_B].sort(),
+    );
+    expect(flagsOf(result.current.books)).toEqual([
+      [MID_A, BoolFlag.FALSE],
+      [MID_B, BoolFlag.FALSE],
+      [MID_C, BoolFlag.FALSE],
+    ]);
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    expect(patch.mock.calls[1][1]).toEqual([
+      { bookId: MID_A, isShared: BoolFlag.FALSE },
+      { bookId: MID_B, isShared: BoolFlag.FALSE },
+    ]);
+  });
+
+  it("clears every sent id when nothing changed during the save", async () => {
+    const { result, release } = await renderHeld();
+    act(() => {
+      result.current.handleToggle(MID_A);
+      result.current.handleToggle(MID_C);
+    });
+    const { pending } = await startSave(result);
+
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect(result.current.status).toBe("saved");
+    expect(result.current.dirtyBookIds.size).toBe(0);
+    expect(result.current.isDirty).toBe(false);
+  });
+
+  it("clears a book toggled twice mid-save (back to the value that was sent)", async () => {
+    const { result, patch, release } = await renderHeld();
+    act(() => {
+      result.current.handleToggle(MID_A);
+    });
+    const { pending } = await startSave(result);
+
+    act(() => {
+      result.current.handleToggle(MID_A);
+    });
+    act(() => {
+      result.current.handleToggle(MID_A);
+    });
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect(result.current.books.find((b) => b.bookId === MID_A)?.isShared).toBe(
+      BoolFlag.TRUE,
+    );
+    expect(result.current.dirtyBookIds.size).toBe(0);
+    expect(result.current.isDirty).toBe(false);
+    expect(patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears an untouched sent id but keeps a mid-save revert when a sync also lands mid-save", async () => {
+    const { result, rerender, patch, release, client } = await renderHeld();
+    act(() => {
+      result.current.handleToggle(MID_A);
+      result.current.handleToggle(MID_C);
+    });
+    const { pending } = await startSave(result);
+    expect(patch.mock.calls[0][1]).toEqual([
+      { bookId: MID_A, isShared: BoolFlag.TRUE },
+      { bookId: MID_C, isShared: BoolFlag.TRUE },
+    ]);
+
+    // The sync result is the server's view (pre-save flags) plus a new book.
+    const NEW_D = bookIdOf(43);
+    await act(async () => {
+      rerender({
+        lastSyncBooks: [
+          makeBook(MID_A),
+          makeBook(MID_B, BoolFlag.TRUE),
+          makeBook(MID_C),
+          makeBook(NEW_D),
+        ],
+      });
+    });
+    // Unsaved toggles survive the sync on screen.
+    expect(flagsOf(result.current.books)).toEqual([
+      [MID_A, BoolFlag.TRUE],
+      [MID_B, BoolFlag.TRUE],
+      [MID_C, BoolFlag.TRUE],
+      [NEW_D, BoolFlag.FALSE],
+    ]);
+
+    // Un-share C before the save comes back.
+    act(() => {
+      result.current.handleToggle(MID_C);
+    });
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect([...result.current.dirtyBookIds]).toEqual([MID_C]);
+    expect(result.current.books.find((b) => b.bookId === MID_C)?.isShared).toBe(
+      BoolFlag.FALSE,
+    );
+    // Baseline = the sync result with the sent flags folded in.
+    expect(flagsOf(result.current.originalBooks.current)).toEqual([
+      [MID_A, BoolFlag.TRUE],
+      [MID_B, BoolFlag.TRUE],
+      [MID_C, BoolFlag.TRUE],
+      [NEW_D, BoolFlag.FALSE],
+    ]);
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    expect(client.updatePersonalBooks).not.toHaveBeenCalled();
+    expect(patch.mock.calls[1][1]).toEqual([
+      { bookId: MID_C, isShared: BoolFlag.FALSE },
+    ]);
+    expect(result.current.dirtyBookIds.size).toBe(0);
+  });
+});

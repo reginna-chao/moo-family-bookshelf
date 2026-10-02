@@ -35,11 +35,19 @@ export function usePersonalShelfEditor(
   apiClient: ApiClient,
 ): UsePersonalShelfEditorReturn {
   const [books, setBooks] = useState<BookEntry[]>([]);
+  const latestBooksRef = useRef(books);
+  latestBooksRef.current = books;
   const [displayName, setDisplayName] = useState("");
   const [state, setState] = useState<LoadState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
-  const { dirtyBookIds, isDirty, markDirty, markManyDirty, clearDirty } =
-    usePersonalShelfDirty();
+  const {
+    dirtyBookIds,
+    isDirty,
+    markDirty,
+    markManyDirty,
+    clearDirty,
+    clearDirtyIds,
+  } = usePersonalShelfDirty();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const originalBooksRef = useRef<BookEntry[]>([]);
   /** Raw server response — kept so save can spread back unknown fields from future versions */
@@ -50,8 +58,9 @@ export function usePersonalShelfEditor(
     apiClient,
     displayName,
     books,
+    latestBooksRef,
     dirtyBookIds,
-    clearDirty,
+    clearDirtyIds,
     originalBooksRef,
     savedRawPayload,
     setState,

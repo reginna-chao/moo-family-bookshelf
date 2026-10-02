@@ -7,6 +7,7 @@ import {
   decideSaveStrategy,
 } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
+import { savedDirtyIds } from "moo-family-bookshelf-shared/personal/savedDirty";
 import { useFamilyData } from "@/hooks/useFamilyData";
 
 /** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
@@ -19,8 +20,10 @@ export interface UsePersonalShelfSaveOptions {
   apiClient: ApiClient;
   displayName: string;
   books: BookEntry[];
+  /** The list on screen right now; read when a save lands. */
+  latestBooksRef: RefObject<BookEntry[]>;
   dirtyBookIds: Set<string>;
-  clearDirty: () => void;
+  clearDirtyIds: (bookIds: Iterable<string>) => void;
   originalBooksRef: RefObject<BookEntry[]>;
   savedRawPayload: RefObject<Record<string, unknown> | null>;
   setState: Dispatch<SetStateAction<LoadState>>;
@@ -36,8 +39,9 @@ export function usePersonalShelfSave({
   apiClient,
   displayName,
   books,
+  latestBooksRef,
   dirtyBookIds,
-  clearDirty,
+  clearDirtyIds,
   originalBooksRef,
   savedRawPayload,
   setState,
@@ -105,7 +109,8 @@ export function usePersonalShelfSave({
       const prev = savedRawPayload.current ?? {};
       const next = usePut ? books : applyPatchChanges(prev.books, patchChanges);
       savedRawPayload.current = { ...prev, books: next };
-      clearDirty();
+      // Clear only the ids this save really saved: a mid-save toggle stays dirty.
+      clearDirtyIds(savedDirtyIds(books, latestBooksRef.current, dirtyBookIds));
       setState("saved");
       // Refresh the aggregated family bookshelf so it reflects the saved shares
       void refreshBookshelf();
@@ -120,7 +125,8 @@ export function usePersonalShelfSave({
     displayName,
     books,
     apiClient,
-    clearDirty,
+    latestBooksRef,
+    clearDirtyIds,
     dirtyBookIds,
     refreshBookshelf,
     originalBooksRef,

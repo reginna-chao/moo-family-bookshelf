@@ -856,6 +856,38 @@ describe("PersonalShelf", () => {
       ).toEqual([BOOK_1, BOOK_2]);
     });
 
+    it("keeps offering 儲存變更 after a save when a toggle made mid-save is still unsaved (#250)", async () => {
+      let resolvePatch!: (v: { data: { ok: true; applied: number } }) => void;
+      const mockPatch = vi.fn().mockReturnValue(
+        new Promise((resolve) => {
+          resolvePatch = resolve;
+        }),
+      );
+      const apiClient = serverClient({ patchPersonalBooks: mockPatch });
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      await waitForBooksLoaded();
+
+      // Share book one, start the save (held open), then hide it again mid-save.
+      fireEvent.click(screen.getAllByRole("checkbox")[0]);
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+      fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+      expect(screen.getByRole("button", { name: "儲存中..." })).toBeDisabled();
+      fireEvent.click(screen.getAllByRole("checkbox")[0]);
+      fireEvent.click(screen.getByRole("button", { name: "設為隱藏" }));
+
+      await act(async () => {
+        resolvePatch({ data: { ok: true, applied: 1 } });
+      });
+
+      expect(mockPatch).toHaveBeenCalledWith("user-abc123", [
+        { bookId: BOOK_1, isShared: BoolFlag.TRUE },
+      ]);
+      // The server holds "shared", the screen "hidden": still unsaved.
+      expect(screen.getByRole("button", { name: "儲存變更" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "取消變更" })).toBeEnabled();
+      expect(screen.queryByText("已儲存")).not.toBeInTheDocument();
+    });
+
     it("shows error when save fails via API error", async () => {
       const mockUpdate = vi.fn().mockResolvedValue({
         error: { code: "SAVE_FAILED", message: "儲存失敗" },
