@@ -39,6 +39,7 @@ import {
 } from "../constants";
 import { BorrowStatus } from "../api/types";
 import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
+import { isReadmooAppPath } from "moo-family-bookshelf-shared/config/readmoo";
 
 const APP_ENV = getAppEnv();
 
@@ -515,10 +516,7 @@ function tryScrapeAndCacheEmail(): void {
 
 let currentAbortController: AbortController | null = null;
 
-/**
- * Abort any in-flight page-ready wait, then wait for the page to finish
- * loading before injecting the 家庭書櫃 button.
- */
+/** Abort any pending wait; re-inject the 家庭書櫃 button in the reader app only. */
 function waitAndInjectButton(): void {
   currentAbortController?.abort();
   const controller = new AbortController();
@@ -529,6 +527,7 @@ function waitAndInjectButton(): void {
   disposeButtonWatcher?.();
   disposeButtonWatcher = null;
   document.getElementById(MOO_ELEMENT_IDS.button)?.remove();
+  if (!isReadmooAppPath(location.hostname, location.pathname)) return;
 
   waitForPageReady(controller.signal)
     .then(() => void injectFamilyBookshelfButton())
