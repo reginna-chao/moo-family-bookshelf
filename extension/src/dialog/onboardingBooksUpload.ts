@@ -58,7 +58,8 @@ function buildOnboardingRecord(
 /**
  * Upload the onboarding scrape over the saved list, re-reading and rebuilding
  * on `BOOKS_CONFLICT` up to `MAX_SYNC_UPLOAD_ATTEMPTS` PUTs. Returns null once
- * a PUT lands, else the last upload error. A failed read throws.
+ * a PUT lands, else the last upload error (also when a re-read finds no
+ * record). A failed read throws.
  */
 export async function uploadOnboardingBooks(
   p: OnboardingBooksUploadParams,
@@ -76,5 +77,8 @@ export async function uploadOnboardingBooks(
       attempt < MAX_SYNC_UPLOAD_ATTEMPTS;
     if (!retry) return response.error;
     saved = await readSavedForOnboarding(p, scrapedIds);
+    // No record on the re-read: a retry would carry no precondition and reset
+    // every share flag, so report the conflict instead (as the sync does).
+    if (saved.raw === null) return response.error;
   }
 }

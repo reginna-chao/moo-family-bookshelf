@@ -159,6 +159,19 @@ describe("uploadOnboardingBooks", () => {
     ).toEqual([L0, L1, L2]);
   });
 
+  it("returns the conflict with no second PUT when the re-read finds no record (#265)", async () => {
+    // A retry built on the empty read would send no precondition and reset A.
+    const { api, getPersonalBooks, updatePersonalBooks } = client(
+      [record([saved(A, BoolFlag.TRUE)], L0), { data: null }],
+      [CONFLICT, { data: { ok: true } }],
+    );
+
+    await expect(upload(api)).resolves.toEqual(CONFLICT.error);
+
+    expect(getPersonalBooks).toHaveBeenCalledTimes(2);
+    expect(updatePersonalBooks).toHaveBeenCalledTimes(1);
+  });
+
   it("returns a non-conflict error at once, without a re-read", async () => {
     const error = { code: "PAYLOAD_TOO_LARGE", message: "too big" };
     const { api, getPersonalBooks, updatePersonalBooks } = client(

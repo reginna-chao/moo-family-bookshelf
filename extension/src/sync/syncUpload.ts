@@ -91,8 +91,9 @@ function buildSyncUpload(
 
 /**
  * PUT the merged list, re-reading and rebuilding on `BOOKS_CONFLICT` up to `MAX_SYNC_UPLOAD_ATTEMPTS`
- * PUTs; any other error or a last-attempt conflict throws. Returns the attempt that landed,
- * with the stamp its PUT answered (the dialog's next precondition).
+ * PUTs; any other error, a last-attempt conflict, or a re-read that finds no record
+ * throws. Returns the attempt that landed, with the stamp its PUT answered (the
+ * dialog's next precondition).
  */
 export async function uploadSyncBooksRereadingOnConflict(
   ctx: SyncUploadContext,
@@ -109,14 +110,17 @@ export async function uploadSyncBooksRereadingOnConflict(
       const lastUpdated = landedLastUpdatedOf(response.data);
       return { books, renamedBooks, lastUpdated };
     }
+    const failure = booksSaveErrorText(
+      response.error,
+      SYNC_UPLOAD_FAILED_MESSAGE,
+    );
     const retry =
       response.error.code === BOOKS_CONFLICT_CODE &&
       attempt < MAX_SYNC_UPLOAD_ATTEMPTS;
-    if (!retry) {
-      throw new Error(
-        booksSaveErrorText(response.error, SYNC_UPLOAD_FAILED_MESSAGE),
-      );
-    }
+    if (!retry) throw new Error(failure);
     saved = await fetchSavedBooksForSync(ctx);
+    // No record on the re-read: a retry would carry no precondition and reset
+    // every share flag, so report the conflict instead (as fullPutConflict.ts).
+    if (saved.raw === null) throw new Error(failure);
   }
 }
