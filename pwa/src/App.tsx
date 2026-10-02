@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Library,
   BookOpen,
@@ -13,6 +13,7 @@ import {
   type AuthState,
 } from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
+import { useSessionApiClient } from "./hooks/useSessionApiClient";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
@@ -173,9 +174,7 @@ function AuthenticatedApp() {
 
     const tempClient = new ApiClient(current.apiHost);
     // Refresh endpoint is protected — include current token for authentication
-    if (current.authToken) {
-      tempClient.setAuthToken(current.authToken);
-    }
+    tempClient.setAuthToken(current.authToken ?? null);
     const res = await tempClient.joinFamily(
       current.familyId,
       current.userId,
@@ -219,14 +218,8 @@ function AuthenticatedApp() {
     return null;
   }, [login, logout]);
 
-  const apiClient = useMemo(() => {
-    const client = new ApiClient(auth?.apiHost);
-    if (auth?.authToken) {
-      client.setAuthToken(auth.authToken);
-    }
-    client.setTokenRefresher(acquireNewToken);
-    return client;
-  }, [auth?.apiHost, auth?.authToken, acquireNewToken]);
+  // Same client across a token swap, new one per session (#256) — see the hook.
+  const apiClient = useSessionApiClient(auth, acquireNewToken);
 
   // Auto-acquire auth token if missing (e.g., QR code entry)
   const [acquiringToken, setAcquiringToken] = useState(false);

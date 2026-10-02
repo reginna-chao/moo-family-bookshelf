@@ -91,10 +91,15 @@ vi.mock("@/pages/FamilyShelfPage", () => ({
   ),
 }));
 
+// Every apiClient prop PersonalShelfPage renders with, in order — the real
+// page keys its book load on `[apiClient]`, so a new identity means a reload.
+const personalShelfClients: unknown[] = [];
+
 vi.mock("@/pages/PersonalShelfPage", () => ({
-  PersonalShelfPage: () => (
-    <div data-testid="personal-shelf-page">Personal Shelf</div>
-  ),
+  PersonalShelfPage: ({ apiClient }: { apiClient: unknown }) => {
+    personalShelfClients.push(apiClient);
+    return <div data-testid="personal-shelf-page">Personal Shelf</div>;
+  },
 }));
 
 vi.mock("@/pages/SettingsPage", () => ({
@@ -156,6 +161,7 @@ describe("App", () => {
     mockIsLoading = false;
     window.location.hash = "";
     clearSuiteStorageKeys();
+    personalShelfClients.length = 0;
     vi.clearAllMocks();
     mockJoinFamily.mockResolvedValue({ data: { authToken: "new-token" } });
   });
@@ -299,6 +305,90 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByTestId("family-shelf-page")).toBeInTheDocument();
     });
+  });
+
+  /**
+   * #256: a 401 refresh stores a new token via `login`. If that swapped the
+   * ApiClient instance, every `[apiClient]`-keyed page load would re-run and the
+   * personal shelf's reload would wipe unsaved share toggles. The token must be
+   * moved onto the SAME instance instead.
+   */
+  it("keeps the same ApiClient instance when a 401 refresh stores a new token", async () => {
+    window.location.hash = "#personal-shelf";
+    mockAuth = {
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      encryptionKey: "key-123",
+      authToken: "old-token",
+    };
+    // Production login() stores the new session; mirror it for the rerender.
+    mockLogin.mockImplementation((next: Record<string, unknown>) => {
+      mockAuth = next;
+    });
+
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<App />);
+    });
+    const before = personalShelfClients.at(-1) as {
+      setAuthToken: ReturnType<typeof vi.fn>;
+      setTokenRefresher: ReturnType<typeof vi.fn>;
+    };
+    expect(before).toBeDefined();
+
+    // Run the refresher App registered — the path ApiClient takes on a 401.
+    const refresh = before.setTokenRefresher.mock.calls[0][0] as () => Promise<
+      string | null
+    >;
+    await act(async () => {
+      await expect(refresh()).resolves.toBe("new-token");
+    });
+    expect(mockLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ authToken: "new-token" }),
+    );
+    const rendersBefore = personalShelfClients.length;
+    await act(async () => {
+      view.rerender(<App />);
+    });
+
+    // The page really re-rendered with the new session, and got the same client.
+    expect(personalShelfClients.length).toBeGreaterThan(rendersBefore);
+    expect(personalShelfClients.at(-1)).toBe(before);
+    expect(before.setAuthToken).toHaveBeenLastCalledWith("new-token");
+  });
+
+  /**
+   * PR #260 review: nulling the session client's token on logout let the
+   * family-shelf prefs unmount flush go out unauthenticated. The client the
+   * pages held must keep its token; the logged-out view gets its own instance.
+   */
+  it("does not clear the token on the ApiClient the pages held when the user logs out", async () => {
+    window.location.hash = "#personal-shelf";
+    mockAuth = {
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      encryptionKey: "key-123",
+      authToken: "token-123",
+    };
+
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<App />);
+    });
+    const held = personalShelfClients.at(-1) as {
+      setAuthToken: ReturnType<typeof vi.fn>;
+    };
+    expect(held.setAuthToken).toHaveBeenCalledWith("token-123");
+
+    mockAuth = null;
+    await act(async () => {
+      view.rerender(<App />);
+    });
+
+    expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+    expect(held.setAuthToken).not.toHaveBeenCalledWith(null);
   });
 
   describe("acquireNewToken join failures", () => {
