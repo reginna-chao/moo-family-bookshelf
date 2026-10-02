@@ -9,12 +9,7 @@
  */
 
 import browser from "webextension-polyfill";
-import {
-  ApiClient,
-  BookEntry,
-  PersonalBooks,
-  PERSONAL_BOOKS_SCHEMA_VERSION,
-} from "../api/client";
+import { ApiClient, BookEntry } from "../api/client";
 import {
   AUTO_SYNC_INTERVAL_KEY,
   LAST_SYNC_AT_KEY,
@@ -26,17 +21,13 @@ import {
 export { ApiClient } from "../api/client";
 import { type ScrapeProgressCallback } from "../content/scraper";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
-import { mergeBooks } from "./mergeBooks";
 import { runAutoReturn } from "./autoReturn";
-import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
-import { loadSavedBooksForSync } from "./savedBooks";
-import { assertSyncNotPaused } from "./syncBreaker";
 import type { RenamedBook } from "./renamedBooks";
+import { fetchBorrowRequestsForSync, scrapeForSync } from "./syncSteps";
 import {
-  fetchBorrowRequestsForSync,
-  resolveForUpload,
-  scrapeForSync,
-} from "./syncSteps";
+  fetchSavedBooksForSync,
+  uploadSyncBooksRereadingOnConflict,
+} from "./syncUpload";
 
 /** User-configurable auto-sync frequency */
 export type AutoSyncInterval = "daily" | "weekly" | "monthly" | "never";
@@ -135,7 +126,7 @@ export interface SyncBooksResult {
  * 3. Scrape books (+ archive when enabled)
  * 4. Merge with saved books (preserve isShared settings); circuit breaker;
  *    id-change resolution
- * 5. Upload as plaintext JSON
+ * 5. Upload as plaintext JSON; a save that lands meanwhile re-runs step 4
  * 6. Navigate back if needed
  * 7. Update lastSyncAt
  */
@@ -163,45 +154,22 @@ export async function syncBooks(
     const scrape = await scrapeForSync(onProgress);
     const scrapedIds = new Set(scrape.books.map((b) => b.bookId));
 
-    // Step 4: Fetch existing saved books for merge. Both checks below throw
-    // (no upload, no lastSyncAt): a failed read, a redesign-shaped scrape.
+    // Step 4: Read the saved books for merge. A failed read or a
+    // redesign-shaped scrape throws here (no upload, no lastSyncAt).
     const storageResult = await browser.storage.local.get([DISPLAY_NAME_KEY]);
-    const apiResponse = await apiClient.getPersonalBooks(userId);
-    const saved = loadSavedBooksForSync(apiResponse);
-    assertSyncNotPaused(saved.books, scrapedIds, scrape.archiveCovered);
+    const read = { apiClient, userId, scrape, scrapedIds };
+    const firstRead = await fetchSavedBooksForSync(read);
     const requests = familyId
       ? await fetchBorrowRequestsForSync(apiClient, familyId)
       : null;
-    const merged = mergeBooks(scrape.books, saved.books);
-    const { books, renamedBooks } = resolveForUpload(
-      merged,
-      scrape,
-      saved.books,
-      requests,
-      options,
-    );
 
-    // Step 5: Build PersonalBooks object and upload as plaintext JSON
+    // Step 5: Merge, resolve ids and upload; a conflict re-reads and retries.
     const displayName =
       (storageResult[DISPLAY_NAME_KEY] as string | undefined) ?? "";
-    const personalBooks: PersonalBooks = {
-      ...saved.raw,
-      schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
-      userId,
-      displayName,
-      books,
-      lastUpdated: new Date().toISOString(),
-    };
-    const uploadResponse = await apiClient.updatePersonalBooks(
-      userId,
-      personalBooks,
+    const { books, renamedBooks } = await uploadSyncBooksRereadingOnConflict(
+      { ...read, familyId, displayName, requests },
+      firstRead,
     );
-
-    if (uploadResponse.error) {
-      throw new Error(
-        booksSaveErrorText(uploadResponse.error, "同步書單失敗，請稍後再試"),
-      );
-    }
 
     // Step 6: Navigate back if we navigated away
     if (navigate && !isOnLibrary) {

@@ -36,6 +36,7 @@ import {
   sanitizeDisplayName,
   sanitizeCoverUrl,
   sanitizeReadmooUrl,
+  sanitizeExpectedLastUpdated,
   isValidFamilyPrefRef,
 } from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
@@ -439,6 +440,13 @@ const putUserBooksRoute = createRoute({
   path: "/{id}/books",
   tags: ["User"],
   summary: "Save user books",
+  description:
+    "Full replace of the caller's books record. Optional `expectedLastUpdated` " +
+    "(a `lastUpdated` value previously read from GET) makes the write " +
+    "conditional: when the stored `lastUpdated` differs, or no record exists, " +
+    "the request answers 409 BOOKS_CONFLICT without writing the books record " +
+    "or refreshing any public snapshot (it still counts against the hourly " +
+    "rate limit). Absent, null or an empty string means no precondition.",
   request: {
     params: UserIdParam,
   },
@@ -447,6 +455,7 @@ const putUserBooksRoute = createRoute({
     400: jsonRes("Invalid request"),
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden"),
+    409: jsonRes("Books record changed since it was read (BOOKS_CONFLICT)"),
     429: jsonRes("Rate limited"),
   },
 });
@@ -483,6 +492,19 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
 
   if (!body || !Array.isArray(body.books)) {
     return jsonError(c, 400, "INVALID_PAYLOAD", "books array is required");
+  }
+
+  // Optional optimistic precondition; "" = not supplied (no check). Never persisted.
+  const expectedLastUpdated = sanitizeExpectedLastUpdated(
+    body.expectedLastUpdated,
+  );
+  if (expectedLastUpdated === null) {
+    return jsonError(
+      c,
+      400,
+      "INVALID_FIELDS",
+      "expectedLastUpdated must be a string of 64 characters or fewer",
+    );
   }
 
   // Validate + normalize each book entry from an explicit allowlist. The raw
@@ -522,6 +544,21 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     getMemberFamilyId(c.env.KV, userId),
     getPublicShelves(c.env.KV, userId),
   ]);
+
+  // Lost-update guard for read-merge-put clients (#249); narrows the window to
+  // this handler's own read→put gap — see backend.md → API Design.
+  if (
+    expectedLastUpdated !== "" &&
+    existing?.lastUpdated !== expectedLastUpdated
+  ) {
+    return jsonError(
+      c,
+      409,
+      "BOOKS_CONFLICT",
+      "Books record changed since it was read",
+    );
+  }
+
   const publicShelves = resolvePublicShelves(publicShelvesPointer, existing);
 
   // New malformed bookIds are dropped (not rejected); stored ones are kept.

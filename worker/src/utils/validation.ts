@@ -94,6 +94,24 @@ export function sanitizeVerifySecret(value: unknown): string | null {
   return value;
 }
 
+/** Upper bound for `expectedLastUpdated`; a stored `lastUpdated` is a 24-char ISO string. */
+export const EXPECTED_LAST_UPDATED_MAX_LENGTH = 64;
+
+/**
+ * Classify the optional `expectedLastUpdated` precondition of `PUT
+ * /api/user/:id/books`, same convention as {@link sanitizeVerifySecret}:
+ * `""` = not supplied (absent, `null`, or `""` — no precondition), `null` =
+ * malformed (not a string, or longer than
+ * {@link EXPECTED_LAST_UPDATED_MAX_LENGTH}; the caller answers 400), otherwise
+ * the value itself, unmodified, for a strict comparison with the stored one.
+ */
+export function sanitizeExpectedLastUpdated(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string") return null;
+  if (value.length > EXPECTED_LAST_UPDATED_MAX_LENGTH) return null;
+  return value;
+}
+
 /**
  * Upper bounds for the free-text fields of `POST /api/family/:id/borrow`,
  * checked at the handler boundary alongside the string-type guard (a format
