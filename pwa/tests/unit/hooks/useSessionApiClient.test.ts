@@ -12,8 +12,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createElement, useEffect } from "react";
 import { act, render, renderHook } from "@testing-library/react";
-import { useSessionApiClient } from "@/hooks/useSessionApiClient";
-import type { AuthState } from "@/hooks/useAuth";
+import {
+  isLiveSession,
+  isSameSession,
+  useSessionApiClient,
+} from "@/hooks/useSessionApiClient";
+import { USER_ID_KEY, type AuthState } from "@/hooks/useAuth";
 import type { ApiClient } from "@/api/client";
 
 const USER_A = "a".repeat(64);
@@ -177,5 +181,83 @@ describe("useSessionApiClient", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(authHeaderOfCall()).toBe("Bearer token-a");
     view.unmount();
+  });
+});
+
+// #258: the in-flight refresh guard keys a session on the same fields as the hook.
+describe("isSameSession", () => {
+  it("is false once the session is gone (logged out)", () => {
+    expect(isSameSession(null, SESSION_A)).toBe(false);
+  });
+
+  it("is true for the same session after a token swap", () => {
+    expect(
+      isSameSession({ ...SESSION_A, authToken: "token-a2" }, SESSION_A),
+    ).toBe(true);
+  });
+
+  it.each<[string, AuthState]>([
+    ["userId", { ...SESSION_A, userId: USER_B }],
+    ["familyId", { ...SESSION_A, familyId: "fam-other" }],
+    ["apiHost", { ...SESSION_A, apiHost: "https://self-hosted.example.com" }],
+  ])("is false when the %s differs", (_field, other) => {
+    expect(isSameSession(other, SESSION_A)).toBe(false);
+  });
+});
+
+// #258: React state lags a logout issued after an await; the stored userId,
+// which production logout / login update synchronously, does not.
+describe("isLiveSession", () => {
+  afterEach(() => {
+    localStorage.removeItem(USER_ID_KEY);
+  });
+
+  const OTHER_HOST = "https://self-hosted.example.com";
+
+  it.each<[string, boolean, AuthState | null, string | null]>([
+    ["same session, its userId stored", true, SESSION_A, USER_A],
+    [
+      "same session after a token swap, its userId stored",
+      true,
+      { ...SESSION_A, authToken: "token-a2" },
+      USER_A,
+    ],
+    [
+      "same session, userId removed (logout not yet rendered)",
+      false,
+      SESSION_A,
+      null,
+    ],
+    [
+      "same session, another user's id stored (login not yet rendered)",
+      false,
+      SESSION_A,
+      USER_B,
+    ],
+    ["no session (logged out)", false, null, USER_A],
+    [
+      "different userId, A's id still stored",
+      false,
+      { ...SESSION_A, userId: USER_B },
+      USER_A,
+    ],
+    [
+      "different familyId, userId stored",
+      false,
+      { ...SESSION_A, familyId: "fam-other" },
+      USER_A,
+    ],
+    [
+      "different apiHost, userId stored",
+      false,
+      { ...SESSION_A, apiHost: OTHER_HOST },
+      USER_A,
+    ],
+  ])("%s → %s", (_case, expected, current, storedUserId) => {
+    localStorage.removeItem(USER_ID_KEY);
+    if (storedUserId !== null) {
+      localStorage.setItem(USER_ID_KEY, storedUserId);
+    }
+    expect(isLiveSession(current, SESSION_A)).toBe(expected);
   });
 });
