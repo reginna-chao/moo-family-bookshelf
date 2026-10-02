@@ -342,18 +342,16 @@ export class ApiClient {
   async joinFamily(
     familyId: string,
     userId: string,
-    opts?: { verifySecret?: string; qrToken?: string },
+    // `recovery` is sent only by the silent token-recovery join in App.tsx.
+    opts?: { verifySecret?: string; qrToken?: string; recovery?: BoolFlag },
   ): Promise<
     ApiResponse<{ ok: boolean; authToken?: string; expiresAt?: number }>
   > {
     this.validateHexId(userId, "userId");
-    const body: Record<string, string> = { userId };
-    if (opts?.verifySecret !== undefined) {
-      body.verifySecret = opts.verifySecret;
-    }
-    if (opts?.qrToken !== undefined) {
-      body.qrToken = opts.qrToken;
-    }
+    const body: Record<string, string | BoolFlag> = { userId };
+    if (opts?.verifySecret !== undefined) body.verifySecret = opts.verifySecret;
+    if (opts?.qrToken !== undefined) body.qrToken = opts.qrToken;
+    if (opts?.recovery !== undefined) body.recovery = opts.recovery;
     return this.post(`/api/family/${familyId}/join`, body);
   }
 

@@ -21,7 +21,7 @@ import { useEffect } from "react";
 import browser from "webextension-polyfill";
 import { clearFamilyStorageAndBroadcast } from "../api/auth-refresh";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
-import type { ApiClient } from "../api/client";
+import { BoolFlag, type ApiClient } from "../api/client";
 import {
   USER_ID_KEY,
   FAMILY_ID_KEY,
@@ -49,9 +49,10 @@ export interface UseReauthOptions {
 }
 
 /**
- * Re-join the family with the supplied verification secret. On success persist
- * the fresh token and prime the in-memory client; on failure surface the code
- * so the prompt can retry / show locked messaging.
+ * Re-join the family with the supplied verification secret, flagged `recovery`
+ * so the server refuses a user no longer listed (409 RECOVERY_NOT_MEMBER). On
+ * success persist the fresh token and prime the in-memory client; on failure
+ * surface the code so the prompt can retry / show locked messaging.
  */
 async function runReauthJoin(
   apiClient: ApiClient,
@@ -63,6 +64,7 @@ async function runReauthJoin(
 ): Promise<VerificationAttemptResult> {
   const res = await apiClient.joinFamily(familyId, userId, displayName, {
     verifySecret,
+    recovery: BoolFlag.TRUE,
   });
   if (res.error) {
     return {
@@ -81,9 +83,8 @@ async function runReauthJoin(
     }
     await browser.storage.local.set(update);
   }
-  // A successful manual re-verification proves the credentials are valid again,
-  // so a leftover recovery cooldown must not survive to throttle the next
-  // silent refresh.
+  // A successful re-verification proves the credentials are valid again, so a
+  // leftover recovery cooldown must not throttle the next silent refresh.
   await browser.storage.local.remove(RECOVERY_COOLDOWN_UNTIL_KEY);
   onSuccess?.();
   return { ok: true };
@@ -91,7 +92,7 @@ async function runReauthJoin(
 
 /**
  * Tear down the local family binding after a re-verification join came back with
- * a family-gone code (family deleted / full / owner removed this member).
+ * a family-gone code (family deleted / full / user removed or no longer listed).
  *
  * The secret was CORRECT here — the silent recovery never got past the server's
  * verification gate, so the refusal only surfaces once the user has typed a
@@ -121,9 +122,8 @@ async function tearDownGoneFamily(
     // overwrites it. Cannot reject — it swallows its own storage failures.
     await resetFamilyEndpointChoice();
   } finally {
-    // The 401 path that raised this prompt already nulled the token; repeated
-    // here because this hook owns the client's state rather than inheriting it
-    // from whoever ran before (and `onFamilyRemoved` below is optional).
+    // The 401 path already nulled the token; repeated because this hook owns
+    // the client's state (and `onFamilyRemoved` below is optional).
     apiClient.setAuthToken(null);
     // Release the latch BEFORE handing over: while it is set every later 401
     // skips silent recovery, so a stale one would mute re-auth for good.

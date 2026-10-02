@@ -26,6 +26,10 @@ export const FAMILY_FULL_MESSAGE = "家庭成員已達上限（每個家庭最�
  *                        is no record left for a rejoin to land in.
  *  - ALREADY_IN_FAMILY — the stored familyId no longer matches this account's
  *                        actual membership; only leaving the other family helps.
+ *  - RECOVERY_NOT_MEMBER — this user is no longer listed in the family (left,
+ *                        deleted the account, or was removed and the tombstone
+ *                        expired); the server refuses a silent `recovery: 1`
+ *                        join from a non-member so it cannot re-add them (#263).
  *
  * A `Map`, NOT an object literal, on purpose: the lookup key is `error.code`
  * straight off the wire, and a hostile or buggy self-hosted backend is an
@@ -39,7 +43,7 @@ export const FAMILY_FULL_MESSAGE = "家庭成員已達上限（每個家庭最�
  * `extension/src/api/auth-refresh.ts` (`FAMILY_GONE_ERROR_CODES`).
  *
  * Only the token-recovery path consults the whole table. The manual-join path
- * deliberately reuses `FAMILY_FULL_MESSAGE` alone and lets the other three fall
+ * deliberately reuses `FAMILY_FULL_MESSAGE` alone and lets the others fall
  * through to its generic branch, which shows the server's own message — do not
  * reroute them here.
  *
@@ -54,4 +58,24 @@ export const JOIN_BLOCKED_MESSAGES: ReadonlyMap<string, string> = new Map([
   ["MEMBER_REMOVED", "你已被家庭管理者移出，已為你登出"],
   ["FAMILY_NOT_FOUND", "找不到這個家庭，家庭可能已被解散"],
   ["ALREADY_IN_FAMILY", "此帳號已加入其他家庭，請先離開原本的家庭"],
+  ["RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員，已為你登出"],
 ]);
+
+/**
+ * Recovery-join failures that need the member's PWA-login secret. The recovery
+ * join sends none, so REQUIRED is the realistic one; the other two are parity
+ * with `VERIFICATION_ERROR_CODES` in `extension/src/api/auth-refresh.ts`.
+ */
+export const VERIFICATION_ERROR_CODES: ReadonlySet<string> = new Set([
+  "VERIFICATION_REQUIRED",
+  "VERIFICATION_FAILED",
+  "VERIFICATION_LOCKED",
+]);
+
+/**
+ * Landing-page reason for a logout forced by `VERIFICATION_ERROR_CODES`. Not a
+ * `JOIN_BLOCKED_MESSAGES` entry: re-verifying logs the user back in. The redo hint
+ * is conditional: a leave (#263) triggers it, but so does a background-load 401.
+ */
+export const REVERIFY_LOGOUT_MESSAGE =
+  "登入已失效，已為你登出。請重新登入並驗證身分，如果剛才有正在進行的操作，登入後請再做一次";
