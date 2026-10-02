@@ -631,5 +631,32 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
       expect(wroteLastSyncAt()).toBe(false);
       expect(server.updateBorrowStatus).not.toHaveBeenCalled();
     });
+
+    it("fails with the conflict and no unconditional PUT when the re-read finds no record (#265)", async () => {
+      mockScrape([scrapedBook(BOOK_A)]);
+      const server = createFakeServer(
+        storedRecord([savedBook(BOOK_A, BoolFlag.TRUE)]),
+        {
+          beforePut: (index, state) => {
+            if (index === 0) saveLands(state, BOOK_A, BoolFlag.TRUE, "toggle");
+          },
+          scriptedGet: (index) => (index === 1 ? { data: null } : undefined),
+        },
+      );
+
+      const result = await runSync(server.client);
+
+      expect(result).toEqual({
+        success: false,
+        books: [],
+        error: BOOKS_CONFLICT_MESSAGE,
+      });
+      // A retry built on the empty read would reset A to not-shared.
+      expect(server.puts.map((p) => p.outcome)).toEqual(["conflict"]);
+      expect(isSharedOf(server.state.stored?.books ?? [], BOOK_A)).toBe(
+        BoolFlag.TRUE,
+      );
+      expect(wroteLastSyncAt()).toBe(false);
+    });
   });
 });
