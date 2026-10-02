@@ -73,9 +73,7 @@ async function canSyncByInterval(timestampKey: string): Promise<boolean> {
   return Date.now() - last >= minMs;
 }
 
-/**
- * Check if enough time has passed since the last full upload sync.
- */
+/** Check if enough time has passed since the last full upload sync. */
 export function canAutoSync(): Promise<boolean> {
   return canSyncByInterval(LAST_SYNC_AT_KEY);
 }
@@ -110,6 +108,8 @@ export interface SyncBooksResult {
   renamedBooks?: RenamedBook[];
   /** Always `renamedBooks.length` on success. */
   renamedBookCount?: number;
+  /** The `lastUpdated` this sync's own landed PUT stored (`SyncUploadResult`). */
+  lastUpdated?: string;
 }
 
 /**
@@ -166,7 +166,7 @@ export async function syncBooks(
     // Step 5: Merge, resolve ids and upload; a conflict re-reads and retries.
     const displayName =
       (storageResult[DISPLAY_NAME_KEY] as string | undefined) ?? "";
-    const { books, renamedBooks } = await uploadSyncBooksRereadingOnConflict(
+    const upload = await uploadSyncBooksRereadingOnConflict(
       { ...read, familyId, displayName, requests },
       firstRead,
     );
@@ -192,10 +192,9 @@ export async function syncBooks(
 
     return {
       success: true,
-      books,
+      ...upload,
       autoReturnedRequestIds,
-      renamedBooks,
-      renamedBookCount: renamedBooks.length,
+      renamedBookCount: upload.renamedBooks.length,
     };
   } catch (err) {
     // Restore navigation on error

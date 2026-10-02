@@ -290,7 +290,7 @@ describe("resolveForUpload", () => {
 });
 
 /**
- * The onboarding sync (`dialog/useAutoSetup.ts`) never judges renames and
+ * The onboarding sync (`dialog/onboardingBooksUpload.ts`) never judges renames and
  * calls this directly with the scrape's ids and the saved list.
  */
 describe("holdBackRenameCandidates", () => {

@@ -114,6 +114,8 @@ interface FakeServerOptions {
   scriptedGet?: (index: number) => unknown;
   /** Every PUT fails with this error envelope. */
   putError?: { code: unknown; message: unknown };
+  /** `data` of an accepted PUT, given the stored record; default `{ ok: true }`. */
+  putData?: (stored: StoredRecord) => unknown;
 }
 
 interface PutLog {
@@ -160,9 +162,12 @@ function createFakeServer(
     const record = { ...body };
     delete record.expectedLastUpdated;
     writes += 1;
-    state.stored = { ...record, lastUpdated: `server-write-${writes}` };
+    const stored = { ...record, lastUpdated: `server-write-${writes}` };
+    state.stored = stored;
     puts.push({ body, outcome: "ok" });
-    return { data: { ok: true } };
+    return {
+      data: options.putData ? options.putData(clone(stored)) : { ok: true },
+    };
   });
 
   const listBorrowRequests = vi.fn(async (): Promise<BorrowRequest[]> => []);
@@ -425,6 +430,81 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         );
       },
     );
+  });
+
+  // #259 C1: the stamp the landed PUT answered travels with the sync result,
+  // so the dialog's next full PUT is conditioned on the sync's own write.
+  describe("the landed PUT's lastUpdated", () => {
+    it("returns the stamp the Worker answered for the stored record", async () => {
+      mockScrape([scrapedBook(BOOK_A)]);
+      const server = createFakeServer(storedRecord([savedBook(BOOK_A)]), {
+        putData: (stored) => stored,
+      });
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      expect(result.lastUpdated).toBe("server-write-1");
+      expect(result.lastUpdated).toBe(server.state.stored?.lastUpdated);
+    });
+
+    it("returns the stamp of the attempt that landed after a conflict", async () => {
+      mockScrape([scrapedBook(BOOK_A)]);
+      const toggleStamp = "2026-09-30T10:00:05.000Z";
+      const server = createFakeServer(
+        storedRecord([savedBook(BOOK_A, BoolFlag.TRUE)]),
+        {
+          beforePut: (index, state) => {
+            if (index === 0)
+              saveLands(state, BOOK_A, BoolFlag.FALSE, toggleStamp);
+          },
+          putData: (stored) => stored,
+        },
+      );
+
+      const result = await runSync(server.client);
+
+      expect(server.puts.map((p) => p.outcome)).toEqual(["conflict", "ok"]);
+      // Neither the first read's stamp nor the re-read's: the landed write's.
+      expect(result.lastUpdated).toBe("server-write-1");
+      expect(result.lastUpdated).not.toBe(READ_STAMP);
+      expect(result.lastUpdated).not.toBe(toggleStamp);
+      expect(result.books).toEqual(server.puts[1].body.books);
+    });
+
+    it.each<{ name: string; data: unknown }>([
+      { name: "{ ok: true }, with no usable lastUpdated", data: { ok: true } },
+      { name: "a record with no lastUpdated", data: { books: [] } },
+      { name: "an empty lastUpdated", data: { lastUpdated: "" } },
+      { name: "a numeric lastUpdated", data: { lastUpdated: 1727690400000 } },
+      { name: "null data", data: null },
+      { name: "no data", data: undefined },
+    ])("returns no stamp when the PUT answers $name", async ({ data }) => {
+      mockScrape([scrapedBook(BOOK_A)]);
+      const server = createFakeServer(storedRecord([savedBook(BOOK_A)]), {
+        putData: () => data,
+      });
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      expect(result.lastUpdated).toBeUndefined();
+      // Positive companion: the sync really landed its list.
+      expect(result.books.map((b) => b.bookId)).toEqual([BOOK_A]);
+    });
+
+    it("returns no stamp when the sync fails", async () => {
+      mockScrape([scrapedBook(BOOK_A)]);
+      const server = createFakeServer(storedRecord([savedBook(BOOK_A)]), {
+        putError: { code: "INTERNAL_ERROR", message: "伺服器忙碌" },
+        putData: (stored) => stored,
+      });
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(false);
+      expect(result).not.toHaveProperty("lastUpdated");
+    });
   });
 
   describe("a list that keeps changing", () => {

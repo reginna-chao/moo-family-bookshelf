@@ -946,7 +946,7 @@ describe("usePersonalBooks — dirty Set", () => {
     // flushes microtasks and pending effects; it never awaited the 1500ms
     // "saved → ready" setTimeout production schedules, so there is nothing to
     // be held up by — and that timer is now cleared on unmount as well
-    // (src/dialog/usePersonalBooks.ts), so it cannot outlive the test either.
+    // (src/dialog/useSavePersonalShelf.ts), so it cannot outlive the test either.
     await act(async () => {
       await result.current.handleSave();
     });
@@ -1351,7 +1351,7 @@ describe("usePersonalBooks — hostile save error envelope", () => {
       await result.current.handleSave();
     });
 
-    // Literal from src/dialog/usePersonalBooks.ts (handleSave), read back off
+    // Literal from src/dialog/useSavePersonalShelf.ts (the save), read back off
     // the state the shelf renders. Exact equality proves the fallback REPLACED
     // the hostile value rather than sitting beside a leaked one.
     expect(result.current.errorMessage).toBe("儲存失敗，請稍後再試");

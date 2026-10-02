@@ -285,7 +285,7 @@ export class ApiClient {
 
   async updatePersonalBooks(
     userId: string,
-    data: PersonalBooks,
+    data: PersonalBooks & { expectedLastUpdated?: string },
   ): Promise<ApiResponse<{ ok: boolean }>> {
     this.validateHexId(userId, "userId");
     return this.put(`/api/user/${userId}/books`, data);

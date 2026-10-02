@@ -667,4 +667,124 @@ describe("useBookSync", () => {
       expect(result.current.lastSyncRenamedBooks).toEqual(FIRST.renamedBooks);
     });
   });
+
+  // #259 C1: the personal shelf's next full PUT is conditioned on this stamp,
+  // so it must belong to the SAME sync as `lastSyncBooks` in every render.
+  describe("lastSyncLastUpdated", () => {
+    const bookOf = (bookId: string) => ({
+      bookId,
+      title: `書 ${bookId}`,
+      author: "",
+      isbn: "",
+      coverUrl: "",
+      readmooUrl: "",
+      category: "",
+      isShared: BoolFlag.FALSE,
+    });
+    const FIRST = {
+      success: true,
+      books: [bookOf("210000000000001")],
+      lastUpdated: "2026-09-30T10:00:01.000Z",
+    };
+    const SECOND = {
+      success: true,
+      books: [bookOf("210000000000002")],
+      lastUpdated: "2026-09-30T10:00:02.000Z",
+    };
+
+    it("starts undefined", () => {
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+      expect(result.current.lastSyncLastUpdated).toBeUndefined();
+    });
+
+    it("comes from the same successful sync as lastSyncBooks in every render", async () => {
+      vi.mocked(syncBooks)
+        .mockResolvedValueOnce(FIRST)
+        .mockResolvedValueOnce(SECOND);
+      const seen: Array<{ books: unknown; stamp: unknown }> = [];
+      const { result } = renderHook(() => {
+        const sync = useBookSync(makeOptions());
+        seen.push({
+          books: sync.lastSyncBooks,
+          stamp: sync.lastSyncLastUpdated,
+        });
+        return sync;
+      });
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.lastSyncBooks).toBe(FIRST.books);
+      expect(result.current.lastSyncLastUpdated).toBe(FIRST.lastUpdated);
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.lastSyncBooks).toBe(SECOND.books);
+      expect(result.current.lastSyncLastUpdated).toBe(SECOND.lastUpdated);
+
+      // No render ever paired one sync's list with another sync's stamp.
+      const stampOf = new Map<unknown, unknown>([
+        [FIRST.books, FIRST.lastUpdated],
+        [SECOND.books, SECOND.lastUpdated],
+      ]);
+      expect(seen.some((r) => r.books === SECOND.books)).toBe(true);
+      for (const render of seen) {
+        expect(render.stamp).toBe(stampOf.get(render.books));
+      }
+    });
+
+    it("is kept, with its list, across a failed sync", async () => {
+      vi.mocked(syncBooks).mockResolvedValueOnce(FIRST).mockResolvedValueOnce({
+        success: false,
+        books: [],
+        error: "同步失敗",
+        lastUpdated: "2026-09-30T10:00:09.000Z",
+      });
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+
+      expect(result.current.syncStatus).toBe("error");
+      expect(result.current.lastSyncBooks).toBe(FIRST.books);
+      expect(result.current.lastSyncLastUpdated).toBe(FIRST.lastUpdated);
+    });
+
+    it("becomes undefined after a success whose PUT response carried no usable lastUpdated", async () => {
+      const noStamp = { success: true, books: [bookOf("210000000000003")] };
+      vi.mocked(syncBooks)
+        .mockResolvedValueOnce(FIRST)
+        .mockResolvedValueOnce(noStamp);
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+
+      expect(result.current.lastSyncBooks).toBe(noStamp.books);
+      expect(result.current.lastSyncLastUpdated).toBeUndefined();
+    });
+
+    it("reports the stamp of a successful auto-sync", async () => {
+      vi.mocked(canAutoSync).mockResolvedValue(true);
+      vi.mocked(syncBooks).mockResolvedValue(FIRST);
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(syncBooks).toHaveBeenCalledOnce();
+      expect(result.current.lastSyncBooks).toBe(FIRST.books);
+      expect(result.current.lastSyncLastUpdated).toBe(FIRST.lastUpdated);
+    });
+  });
 });

@@ -102,7 +102,7 @@ export interface SavedShelfInput {
   /** The list the save was computed from. */
   books: BookEntry[];
   usePut: boolean;
-  /** Flags the save sent: the PATCH `changes`, or the dirty books' flags on PUT. */
+  /** Flags the save sent: the PATCH `changes`, or every sent book's flag on PUT. */
   sent: readonly PatchChange[];
   /** The server `books` snapshot as it is now. */
   serverBooks: unknown;
