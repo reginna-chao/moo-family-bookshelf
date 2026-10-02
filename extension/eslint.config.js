@@ -35,7 +35,7 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/dialog/usePublicShelfActions.ts": 286,
   "src/dialog/useReauth.ts": 205,
   "src/dialog/useVerificationPrompt.ts": 345,
-  "src/sync/syncBooks.ts": 243,
+  "src/sync/syncBooks.ts": 211,
 };
 
 export default tseslint.config(
