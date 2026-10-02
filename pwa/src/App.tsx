@@ -13,7 +13,10 @@ import {
   type AuthState,
 } from "./hooks/useAuth";
 import { ApiClient } from "./api/client";
-import { useSessionApiClient } from "./hooks/useSessionApiClient";
+import {
+  isLiveSession,
+  useSessionApiClient,
+} from "./hooks/useSessionApiClient";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
@@ -166,10 +169,8 @@ function AuthenticatedApp() {
   const acquireNewToken = useCallback(async (): Promise<string | null> => {
     const current = authRef.current;
     if (!current) return null;
-    // The recovery join spends the worker's per-IP sensitive tier (3/min) and
-    // every page-level 401 retries through this refresher, so an active
-    // cooldown must not re-spend it. Manual joins live on LandingPage, outside
-    // this gate.
+    // Each 401 retries through here and the join spends the worker's per-IP 3/min
+    // tier, so an active cooldown must not re-spend it (LandingPage joins bypass).
     if (getActiveRecoveryCooldown() !== undefined) return null;
 
     const tempClient = new ApiClient(current.apiHost);
@@ -180,16 +181,12 @@ function AuthenticatedApp() {
       current.userId,
       {},
     );
+    // Logged out or switched session mid-join (#258): drop the stale result.
+    if (!isLiveSession(authRef.current, current)) return null;
     if (res.error) {
       const { code, retryAfter } = res.error;
-      // A blocked code is terminal — retrying this join cannot succeed — so the
-      // stored session really is unrecoverable and the logout is earned.
-      // `.get` on a Map, never an object index: the code is backend-controlled
-      // (see the prototype-chain note in `utils/joinErrorMessages.ts`).
-      // Anything NOT in that table and not a verification failure keeps the
-      // session instead, so a transient failure never silently drops the user's
-      // data (security-ux Invariant 2) — the same split as the branch map in
-      // `extension/src/api/auth-refresh.ts`.
+      // A blocked code is terminal, so the logout is earned (Map `.get`: the
+      // code is backend-controlled). Same split as `extension/src/api/auth-refresh.ts`.
       const blockedMessage = JOIN_BLOCKED_MESSAGES.get(code);
       if (blockedMessage !== undefined) {
         setLandingError(blockedMessage);
@@ -201,10 +198,8 @@ function AuthenticatedApp() {
         logout();
         return null;
       }
-      // Everything below KEEPS the session (Invariant 2): a 429 spent by a
-      // shared-NAT neighbour, a dropped connection or an unknown code is not a
-      // reason to drop the user's data. Only the quota failure earns a
-      // cooldown — a failed connection cost the worker nothing.
+      // Any other failure (shared-NAT 429, dropped connection, unknown code) KEEPS
+      // the session (Invariant 2); only the quota failure earns a cooldown.
       if (code === "RATE_LIMITED") {
         setRecoveryCooldown(retryAfter);
       }

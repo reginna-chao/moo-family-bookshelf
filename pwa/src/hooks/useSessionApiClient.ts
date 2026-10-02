@@ -1,6 +1,24 @@
 import { useLayoutEffect, useMemo } from "react";
 import { ApiClient } from "../api/client";
-import type { AuthState } from "./useAuth";
+import { USER_ID_KEY, type AuthState } from "./useAuth";
+
+/** True when `a` is still session `b` (the keys that pick the client below). */
+export function isSameSession(a: AuthState | null, b: AuthState): boolean {
+  return (
+    a !== null &&
+    a.userId === b.userId &&
+    a.familyId === b.familyId &&
+    a.apiHost === b.apiHost
+  );
+}
+
+/**
+ * `isSameSession` plus `b.userId` still stored: React state lags a logout issued
+ * after an await, but logout / login update `USER_ID_KEY` synchronously.
+ */
+export function isLiveSession(a: AuthState | null, b: AuthState): boolean {
+  return isSameSession(a, b) && localStorage.getItem(USER_ID_KEY) === b.userId;
+}
 
 /**
  * One `ApiClient` per login session (#256). A token swap inside the session

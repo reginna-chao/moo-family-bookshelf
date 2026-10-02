@@ -140,7 +140,11 @@ import React from "react";
 import App from "@/App";
 // The useAuth mock factory spreads the actual module, so these are the real
 // production key literals, not mock copies (anti-drift: import from production).
-import { REMEMBER_SYNC_CODE_KEY, REMEMBERED_LOGOUT_KEY } from "@/hooks/useAuth";
+import {
+  REMEMBER_SYNC_CODE_KEY,
+  REMEMBERED_LOGOUT_KEY,
+  USER_ID_KEY,
+} from "@/hooks/useAuth";
 import { RECOVERY_COOLDOWN_UNTIL_KEY } from "@/utils/recoveryCooldown";
 import { decodeSyncCode } from "@/crypto/syncCode";
 // The terminal-failure copy under test is production's own — App resolves it
@@ -153,17 +157,39 @@ function clearSuiteStorageKeys() {
   localStorage.removeItem(RECOVERY_COOLDOWN_UNTIL_KEY);
   localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
   localStorage.removeItem(REMEMBER_SYNC_CODE_KEY);
+  localStorage.removeItem(USER_ID_KEY);
+}
+
+/**
+ * Set the session the mocked useAuth returns, mirroring production's
+ * synchronous storage write: login stores USER_ID_KEY, logout removes it.
+ * App's #258 guard (`isLiveSession`) reads that key after the recovery join,
+ * so the two must never disagree outside a test that splits them on purpose.
+ */
+function setMockSession(next: Record<string, unknown> | null): void {
+  mockAuth = next;
+  if (next) {
+    localStorage.setItem(USER_ID_KEY, next.userId as string);
+  } else {
+    localStorage.removeItem(USER_ID_KEY);
+  }
 }
 
 describe("App", () => {
   beforeEach(() => {
-    mockAuth = null;
+    setMockSession(null);
     mockIsLoading = false;
     window.location.hash = "";
     clearSuiteStorageKeys();
     personalShelfClients.length = 0;
     vi.clearAllMocks();
     mockJoinFamily.mockResolvedValue({ data: { authToken: "new-token" } });
+    // Production logout() / forceLogout() drop the stored session; mirroring
+    // that is what lets LandingPage render on the branches that DO log out.
+    // Registered per test, after vi.clearAllMocks() (afterEach's
+    // vi.restoreAllMocks() wipes it), so no implementation leaks between tests.
+    mockLogout.mockImplementation(() => setMockSession(null));
+    mockForceLogout.mockImplementation(() => setMockSession(null));
   });
 
   afterEach(async () => {
@@ -178,13 +204,13 @@ describe("App", () => {
     // On refresh, hash is #personal-shelf and auth restores from localStorage.
     window.location.hash = "#personal-shelf";
 
-    mockAuth = {
+    setMockSession({
       userId:
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "token-123",
-    };
+    });
     render(<App />);
 
     // Should stay on personal-shelf, not redirect to family-shelf
@@ -195,13 +221,13 @@ describe("App", () => {
   it("preserves settings page hash on refresh", () => {
     window.location.hash = "#settings";
 
-    mockAuth = {
+    setMockSession({
       userId:
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "token-123",
-    };
+    });
     render(<App />);
 
     expect(screen.getByTestId("settings-page")).toBeInTheDocument();
@@ -215,20 +241,20 @@ describe("App", () => {
   });
 
   it("shows landing page when not authenticated", () => {
-    mockAuth = null;
+    setMockSession(null);
     render(<App />);
     expect(screen.getByTestId("landing-page")).toBeInTheDocument();
   });
 
   it("shows main view with navigation when authenticated", () => {
-    mockAuth = {
+    setMockSession({
       userId:
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       apiHost: "https://api.example.com",
       authToken: "token-123",
-    };
+    });
     render(<App />);
 
     // Default page is family shelf
@@ -240,13 +266,13 @@ describe("App", () => {
   });
 
   it("navigates between tabs", async () => {
-    mockAuth = {
+    setMockSession({
       userId:
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "token-123",
-    };
+    });
     render(<App />);
 
     // Default: family shelf
@@ -268,13 +294,13 @@ describe("App", () => {
   });
 
   it("highlights current tab with aria-current", () => {
-    mockAuth = {
+    setMockSession({
       userId:
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "token-123",
-    };
+    });
     render(<App />);
 
     const familyBtn = screen.getByRole("button", { name: "家庭書櫃" });
@@ -289,13 +315,13 @@ describe("App", () => {
   });
 
   it("auto-acquires token when auth exists but authToken is missing", async () => {
-    mockAuth = {
+    setMockSession({
       userId:
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       // No authToken — triggers acquireNewToken
-    };
+    });
 
     await act(async () => {
       render(<App />);
@@ -305,6 +331,16 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByTestId("family-shelf-page")).toBeInTheDocument();
     });
+    // The acquired token was really stored for this session, not dropped.
+    expect(mockJoinFamily).toHaveBeenCalledTimes(1);
+    expect(mockLogin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId:
+          "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        familyId: "fam-001",
+        authToken: "new-token",
+      }),
+    );
   });
 
   /**
@@ -315,16 +351,16 @@ describe("App", () => {
    */
   it("keeps the same ApiClient instance when a 401 refresh stores a new token", async () => {
     window.location.hash = "#personal-shelf";
-    mockAuth = {
+    setMockSession({
       userId:
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "old-token",
-    };
+    });
     // Production login() stores the new session; mirror it for the rerender.
     mockLogin.mockImplementation((next: Record<string, unknown>) => {
-      mockAuth = next;
+      setMockSession(next);
     });
 
     let view!: ReturnType<typeof render>;
@@ -365,13 +401,13 @@ describe("App", () => {
    */
   it("does not clear the token on the ApiClient the pages held when the user logs out", async () => {
     window.location.hash = "#personal-shelf";
-    mockAuth = {
+    setMockSession({
       userId:
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
       familyId: "fam-001",
       encryptionKey: "key-123",
       authToken: "token-123",
-    };
+    });
 
     let view!: ReturnType<typeof render>;
     await act(async () => {
@@ -382,7 +418,7 @@ describe("App", () => {
     };
     expect(held.setAuthToken).toHaveBeenCalledWith("token-123");
 
-    mockAuth = null;
+    setMockSession(null);
     await act(async () => {
       view.rerender(<App />);
     });
@@ -415,16 +451,6 @@ describe("App", () => {
       "ALREADY_IN_FAMILY",
     ];
 
-    beforeEach(() => {
-      // Production logout() drops the stored session; mirroring that here is
-      // what lets LandingPage render on the branches that DO log out.
-      // Registered per test, after the suite-level vi.clearAllMocks(), so no
-      // implementation leaks between tests.
-      mockLogout.mockImplementation(() => {
-        mockAuth = null;
-      });
-    });
-
     /**
      * Render with a token-less auth — the auto-acquire effect fires
      * acquireNewToken — and the recovery join stubbed to fail with `code`.
@@ -438,7 +464,7 @@ describe("App", () => {
       mockJoinFamily.mockResolvedValueOnce({
         error: { code, message: `stub ${code}`, ...errorExtras },
       });
-      mockAuth = { ...AUTH_WITHOUT_TOKEN };
+      setMockSession({ ...AUTH_WITHOUT_TOKEN });
 
       await act(async () => {
         render(<App />);
@@ -569,7 +595,7 @@ describe("App", () => {
         RECOVERY_COOLDOWN_UNTIL_KEY,
         String(Date.now() + 60_000),
       );
-      mockAuth = { ...AUTH_WITHOUT_TOKEN };
+      setMockSession({ ...AUTH_WITHOUT_TOKEN });
 
       await act(async () => {
         render(<App />);
@@ -586,7 +612,7 @@ describe("App", () => {
         RECOVERY_COOLDOWN_UNTIL_KEY,
         String(Date.now() - 1000),
       );
-      mockAuth = { ...AUTH_WITHOUT_TOKEN };
+      setMockSession({ ...AUTH_WITHOUT_TOKEN });
 
       // Default mockJoinFamily resolves { data: { authToken: "new-token" } }
       await act(async () => {
@@ -604,7 +630,7 @@ describe("App", () => {
         RECOVERY_COOLDOWN_UNTIL_KEY,
         String(Date.now() + 60_000),
       );
-      mockAuth = null;
+      setMockSession(null);
 
       await act(async () => {
         render(<App />);
@@ -647,6 +673,137 @@ describe("App", () => {
         expect(mockLogout).toHaveBeenCalled();
       });
       expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
+    });
+  });
+
+  /**
+   * #258: a 401 refresh awaits the recovery join. If the session ends (logout)
+   * or switches (another user) while that join is in flight, its result belongs
+   * to a session that no longer exists: a success must not re-login the old
+   * session, and a terminal failure must not log out — or explain a logout to —
+   * the session that replaced it. The same-session success path is pinned by
+   * "keeps the same ApiClient instance when a 401 refresh stores a new token".
+   */
+  describe("acquireNewToken when the session changes mid-join", () => {
+    const SESSION_A = {
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      encryptionKey: "key-123",
+      authToken: "old-token",
+    };
+
+    type JoinResult = Record<string, unknown>;
+    let resolveJoin!: (result: JoinResult) => void;
+
+    beforeEach(() => {
+      window.location.hash = "#personal-shelf";
+      mockJoinFamily.mockImplementationOnce(
+        () =>
+          new Promise<JoinResult>((resolve) => {
+            resolveJoin = resolve;
+          }),
+      );
+    });
+
+    /**
+     * Render session A, start the refresher App registered on its client (the
+     * path ApiClient takes on a 401) and leave the join pending.
+     */
+    async function renderWithPendingRefresh() {
+      setMockSession({ ...SESSION_A });
+      let view!: ReturnType<typeof render>;
+      await act(async () => {
+        view = render(<App />);
+      });
+      const client = personalShelfClients.at(-1) as {
+        setTokenRefresher: ReturnType<typeof vi.fn>;
+      };
+      const refresh = client.setTokenRefresher.mock
+        .calls[0][0] as () => Promise<string | null>;
+      const pending = refresh();
+      // The deferred join must really be the one in flight, for a session whose
+      // id is stored — else the guard would drop the result for the wrong reason.
+      expect(mockJoinFamily).toHaveBeenCalledTimes(1);
+      expect(localStorage.getItem(USER_ID_KEY)).toBe(SESSION_A.userId);
+      return { view, pending };
+    }
+
+    it("does not log the session back in when the user logged out before the join succeeded", async () => {
+      const { view, pending } = await renderWithPendingRefresh();
+
+      // Production logout(): the session is gone before the join answers.
+      setMockSession(null);
+      await act(async () => {
+        view.rerender(<App />);
+      });
+      expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+
+      await act(async () => {
+        resolveJoin({ data: { authToken: "new" } });
+        await expect(pending).resolves.toBeNull();
+      });
+
+      expect(mockLogin).not.toHaveBeenCalled();
+      expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+    });
+
+    /**
+     * The window `isSameSession` alone misses: a logout issued after an await
+     * (leave family / delete account) removes USER_ID_KEY synchronously, but
+     * React re-renders one task later, so `authRef` still holds session A when
+     * the join answers. Positive companion (key present → login runs): "keeps
+     * the same ApiClient instance when a 401 refresh stores a new token".
+     */
+    it("does not log the session back in when logout cleared storage but has not re-rendered yet", async () => {
+      const { pending } = await renderWithPendingRefresh();
+
+      // What production logout() does synchronously — no rerender, mockAuth
+      // (and so App's authRef) is still session A.
+      localStorage.removeItem(USER_ID_KEY);
+      expect(mockAuth).toMatchObject({ userId: SESSION_A.userId });
+
+      await act(async () => {
+        resolveJoin({ data: { authToken: "new" } });
+        await expect(pending).resolves.toBeNull();
+      });
+
+      expect(mockLogin).not.toHaveBeenCalled();
+    });
+
+    it("does not log out or explain a logout to a different user who signed in before the join failed", async () => {
+      const code = "MEMBER_REMOVED";
+      expect(JOIN_BLOCKED_MESSAGES.get(code)).toBeDefined();
+      const { view, pending } = await renderWithPendingRefresh();
+
+      // Session A ended and user B signed in while A's join was in flight.
+      setMockSession({
+        ...SESSION_A,
+        userId:
+          "1111111111111111111111111111111111111111111111111111111111111111",
+        authToken: "token-b",
+      });
+      await act(async () => {
+        view.rerender(<App />);
+      });
+
+      await act(async () => {
+        resolveJoin({ error: { code, message: `stub ${code}` } });
+        await expect(pending).resolves.toBeNull();
+      });
+
+      expect(mockLogout).not.toHaveBeenCalled();
+      expect(screen.getByTestId("personal-shelf-page")).toBeInTheDocument();
+
+      // When B later logs out on their own, A's stale reason must not appear.
+      setMockSession(null);
+      await act(async () => {
+        view.rerender(<App />);
+      });
+      expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("landing-external-error"),
+      ).not.toBeInTheDocument();
     });
   });
 });
