@@ -324,17 +324,15 @@ function isNextAppPath(pathname: string): boolean {
   );
 }
 
+/** False only on the new site outside `/read` (sign-in); NOT a host whitelist. */
+export function isReadmooAppPath(hostname: string, pathname: string): boolean {
+  return hostname !== READMOO_HOST_NEXT || isNextAppPath(pathname);
+}
+
 /**
- * True when the given location parts point at the library (書櫃) page.
- *
- * Single source of truth for "am I on the bookshelf?", checked in three steps:
- *   1. `hostname` must be a supported Readmoo web-app host — a look-alike such
- *      as `next.readmoo.com.evil.com` is rejected.
- *   2. On the new site the app only exists under `/read`, so any other pathname
- *      is not the library even when the hash happens to match.
- *   3. The hash must be exactly `#/library` or a sub-route of it (`#/library/…`).
- *      The `/` boundary is required so a sibling route like `#/librarything`
- *      does not pass a naive prefix test.
+ * True on the library (書櫃) page: a supported Readmoo host (look-alike
+ * `next.readmoo.com.evil.com` rejected), under `/read` on the new site, and
+ * hash `#/library` or `#/library/…` (`/` boundary rejects `#/librarything`).
  */
 export function isLibraryUrl(
   hostname: string,
@@ -342,7 +340,7 @@ export function isLibraryUrl(
   hash: string,
 ): boolean {
   if (!isReadmooHost(hostname)) return false;
-  if (hostname === READMOO_HOST_NEXT && !isNextAppPath(pathname)) return false;
+  if (!isReadmooAppPath(hostname, pathname)) return false;
   return hash === LIBRARY_HASH || hash.startsWith(`${LIBRARY_HASH}/`);
 }
 

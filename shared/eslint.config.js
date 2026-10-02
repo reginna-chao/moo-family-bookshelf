@@ -28,7 +28,7 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/api/bookshelfValidation.ts": 233,
   "src/api/entityText.ts": 280,
   "src/api/types.ts": 292,
-  "src/config/readmoo.ts": 412,
+  "src/config/readmoo.ts": 410,
 };
 
 export default tseslint.config(
