@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useLayoutEffect } from "react";
 import {
   Library,
   BookOpen,
@@ -173,9 +174,7 @@ function AuthenticatedApp() {
 
     const tempClient = new ApiClient(current.apiHost);
     // Refresh endpoint is protected — include current token for authentication
-    if (current.authToken) {
-      tempClient.setAuthToken(current.authToken);
-    }
+    tempClient.setAuthToken(current.authToken ?? null);
     const res = await tempClient.joinFamily(
       current.familyId,
       current.userId,
@@ -219,14 +218,15 @@ function AuthenticatedApp() {
     return null;
   }, [login, logout]);
 
+  // No token dep (#256): a new client re-runs every page's load and drops unsaved edits.
   const apiClient = useMemo(() => {
     const client = new ApiClient(auth?.apiHost);
-    if (auth?.authToken) {
-      client.setAuthToken(auth.authToken);
-    }
     client.setTokenRefresher(acquireNewToken);
     return client;
-  }, [auth?.apiHost, auth?.authToken, acquireNewToken]);
+  }, [auth?.apiHost, acquireNewToken]);
+  useLayoutEffect(() => {
+    apiClient.setAuthToken(auth?.authToken ?? null);
+  }, [apiClient, auth?.authToken]);
 
   // Auto-acquire auth token if missing (e.g., QR code entry)
   const [acquiringToken, setAcquiringToken] = useState(false);
