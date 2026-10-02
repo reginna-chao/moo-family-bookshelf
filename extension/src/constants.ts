@@ -40,6 +40,9 @@ export const AUTH_TOKEN_KEY = "moo:authToken";
 export const TOKEN_EXPIRES_AT_KEY = "moo:tokenExpiresAt";
 // Epoch ms until which automatic recovery joins are suppressed after a 429.
 export const RECOVERY_COOLDOWN_UNTIL_KEY = "moo:recoveryCooldownUntil";
+// Epoch ms until which the user's own leave / account deletion counts as in
+// flight, so silent recovery joins stay off — see storage/selfDeparture.ts.
+export const SELF_DEPARTURE_UNTIL_KEY = "moo:selfDepartureUntil";
 
 // Family
 export const FAMILY_ID_KEY = "moo:familyId";

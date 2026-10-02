@@ -30,6 +30,7 @@ import {
   sanitizeVerifySecret,
   validateDisplayName,
   sanitizeShortString,
+  parseRecoveryFlag,
 } from "../utils/validation";
 import {
   generateAuthToken,
@@ -112,6 +113,17 @@ const joinFamilyRoute = createRoute({
   path: "/{id}/join",
   tags: ["Family"],
   summary: "Join an existing family",
+  description:
+    "Body: `{ userId: string, displayName?: string, verifySecret?: string, " +
+    "qrToken?: string, recovery?: 0 | 1 }`. `recovery` (BoolFlag) marks the " +
+    "client's silent recovery join after a 401; absent means 0, any value " +
+    "other than 0 / 1 is rejected with 400 `INVALID_RECOVERY_FLAG`. A " +
+    "recovery join never admits a new member: `recovery: 1` from a user the " +
+    "family does not list (they left, deleted their account, or were removed) " +
+    "is refused with 409 `RECOVERY_NOT_MEMBER`, after the verification and " +
+    "removed-member checks and before the capacity check. A listed member's " +
+    "recovery reconnect is unaffected, and a manual join (`recovery` absent " +
+    "or 0) is admitted exactly as before.",
   request: {
     params: FamilyIdParam,
   },
@@ -120,7 +132,9 @@ const joinFamilyRoute = createRoute({
     400: jsonRes("Invalid input"),
     403: jsonRes("Verification failed, or member was removed by the owner"),
     404: jsonRes("Family not found"),
-    409: jsonRes("Already in a family or family full"),
+    409: jsonRes(
+      "Already in a family, family full, or recovery join by a non-member",
+    ),
     429: jsonRes("Rate limit exceeded"),
   },
 });
@@ -135,7 +149,9 @@ const removeMemberRoute = createRoute({
     "caller) writes a 6-hour kicked tombstone; while it lives, that user's " +
     "`POST /{id}/join` is refused with 403 `MEMBER_REMOVED`, including " +
     "reconnects and QR-token joins. A voluntary self-leave (`uid` = the " +
-    "caller) writes no tombstone — leave-then-rejoin stays legitimate. The " +
+    "caller) writes no tombstone — leave-then-rejoin stays legitimate; only " +
+    "the client's silent `recovery: 1` join is refused afterwards, because " +
+    "the user is no longer listed (409 `RECOVERY_NOT_MEMBER`). The " +
     "tombstone is also written when the owner targets a userId that is not in " +
     "the family, so a retry after a partly-failed removal still applies the " +
     "ban even though the response is 404 `MEMBER_NOT_FOUND`. A removal made by " +
@@ -403,6 +419,7 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     displayName?: string;
     verifySecret?: unknown;
     qrToken?: string;
+    recovery?: unknown;
   } | null;
   try {
     body = await c.req.json();
@@ -432,6 +449,16 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     return verifySecretFormatResponse(c);
   }
   const verifySecret = sanitizedSecret === "" ? undefined : sanitizedSecret;
+
+  const recovery = parseRecoveryFlag(body.recovery);
+  if (recovery === null) {
+    return jsonError(
+      c,
+      400,
+      "INVALID_RECOVERY_FLAG",
+      "recovery must be 0 or 1",
+    );
+  }
 
   // Cheap, terminal conflict: the user already belongs to a DIFFERENT family, so
   // no secret can make this request succeed. Answered before the verification
@@ -518,6 +545,12 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   const kicked = await hasKickedTombstone(c.env.KV, familyId, body.userId);
   if (kicked) {
     return memberRemovedResponse(c);
+  }
+
+  // A silent recovery join never admits a NEW member (#263): an unlisted user left or was
+  // removed, and only a manual join may bring them back. No KV op; precedes FAMILY_FULL.
+  if (!isExistingMember && recovery === BoolFlag.TRUE) {
+    return jsonError(c, 409, "RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員");
   }
 
   const step = { familyId, userId: body.userId, displayName, record };
@@ -797,10 +830,12 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   // naming this family together with its token. If the token delete landed
   // and the pointer delete did not (`Promise.all` does not cancel the
   // sibling), the target's next request answers 401, not 404, so the client's
-  // own recovery join runs first: a self-leave writes no tombstone and the
-  // stray pointer names THIS family (so no ALREADY_IN_FAMILY), and the
-  // recovery re-lists them. A retried leave therefore still succeeds —
-  // through that transient rejoin — and a user who does not retry stays
+  // own recovery join runs first. A client that flags it `recovery: 1` is
+  // refused with 409 RECOVERY_NOT_MEMBER — the user is no longer listed — and
+  // the stray pointer stays inert; an older, unflagged client's join is
+  // admitted on a self-leave (no tombstone, and the stray pointer names THIS
+  // family, so no ALREADY_IN_FAMILY) and re-lists them — a retried leave then
+  // succeeds through that transient rejoin, and one who does not retry stays
   // listed, consistent with the 500 they were shown. Either way the stray
   // pointer reads nothing until it is cleared.
   //

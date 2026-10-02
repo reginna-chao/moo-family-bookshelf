@@ -2,7 +2,7 @@ import {
   isAllowedBookUrl,
   isAllowedCoverUrl,
 } from "moo-family-bookshelf-shared/config/readmoo";
-import type { VerifyMethod } from "../kv/schema";
+import { BoolFlag, type VerifyMethod } from "../kv/schema";
 import {
   UserIdSchema,
   Sha256HexSchema,
@@ -92,6 +92,18 @@ export function sanitizeVerifySecret(value: unknown): string | null {
   if (typeof value !== "string") return null;
   if (value.length > VERIFY_SECRET_MAX_LENGTH) return null;
   return value;
+}
+
+/**
+ * Classify the optional `recovery` flag of `POST /api/family/:id/join` (#263):
+ * absent ⇒ `BoolFlag.FALSE` (deployed clients never send it), `0` / `1` ⇒ that
+ * flag, anything else (`null`, `true`, a string …) ⇒ `null`, and the caller
+ * answers 400 INVALID_RECOVERY_FLAG.
+ */
+export function parseRecoveryFlag(value: unknown): BoolFlag | null {
+  if (value === undefined) return BoolFlag.FALSE;
+  if (value === BoolFlag.FALSE || value === BoolFlag.TRUE) return value;
+  return null;
 }
 
 /** Upper bound for `expectedLastUpdated`; a stored `lastUpdated` is a 24-char ISO string. */

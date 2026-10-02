@@ -846,6 +846,41 @@ describe("ApiClient", () => {
       expect(body.keyFingerprint).toBeUndefined();
       expect(body.verifySecret).toBeUndefined();
     });
+
+    // #263: only the re-verification join (dialog/useReauth.ts) passes
+    // `recovery`; onboarding joins omit the key entirely.
+    it("includes recovery: 1 in body when opts.recovery is TRUE", async () => {
+      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
+      await client.joinFamily("fam-1", "u1", "Bob", {
+        verifySecret: "1234",
+        recovery: BoolFlag.TRUE,
+      });
+
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
+      );
+      expect(body).toEqual({
+        userId: "u1",
+        displayName: "Bob",
+        verifySecret: "1234",
+        recovery: 1,
+      });
+    });
+
+    it.each([
+      ["no opts", undefined],
+      ["a verifySecret only", { verifySecret: "1234" }],
+    ])("omits the recovery key with %s", async (_label, opts) => {
+      globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });
+      await client.joinFamily("fam-1", "u1", "Bob", opts);
+
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+          .body as string,
+      );
+      expect(body).not.toHaveProperty("recovery");
+    });
   });
 
   describe("leaveFamily", () => {
@@ -1409,6 +1444,8 @@ describe("ApiClient", () => {
       expect(joinCall[0]).toBe(`${MOCK_ENDPOINT}/api/family/fam-1/join`);
       const joinBody = JSON.parse(joinCall[1].body as string);
       expect(joinBody.userId).toBe("u1");
+      // Flagged as a recovery join so the server can refuse a non-member (#263).
+      expect(joinBody.recovery).toBe(1);
       // Recovery must NOT send displayName — the backend should preserve the
       // existing member's name instead of having it overwritten by a default.
       expect(joinBody).not.toHaveProperty("displayName");

@@ -337,6 +337,27 @@ describe("LandingPage", () => {
         });
       });
     });
+
+    // #263: `recovery` belongs to App's silent token-recovery join only. A
+    // manual join must stay a plain join, or the server would refuse a user
+    // who is not (yet) listed in the family instead of adding them.
+    it("should send a manual join without the recovery flag", async () => {
+      mockDecodeSyncCode.mockReturnValue({ familyId: "fam-1" });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "test@test.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(mockOnAuth).toHaveBeenCalled();
+      });
+      expect(mockJoinFamily).toHaveBeenCalledTimes(1);
+      const [familyId, , opts] = mockJoinFamily.mock.calls[0];
+      expect(familyId).toBe("fam-1");
+      expect(opts).not.toHaveProperty("recovery");
+    });
   });
 
   describe("submit button disabled during processing", () => {
@@ -1531,6 +1552,8 @@ describe("LandingPage", () => {
           QR_USER_ID,
           expect.objectContaining({ qrToken: QR_TOKEN }),
         );
+        // A QR join is a manual join, never a silent recovery one (#263).
+        expect(mockJoinFamily.mock.calls[0][2]).not.toHaveProperty("recovery");
         // And the join is the ONLY request. Without this, "token still goes
         // straight to the join" is indistinguishable from "probe first, then
         // join": the latter would spend an extra round trip telling this

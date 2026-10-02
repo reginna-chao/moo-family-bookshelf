@@ -40,17 +40,18 @@ export const FAMILY_GONE_NOTICE_MESSAGES: ReadonlyMap<string, string> = new Map(
       "家庭資料已不存在（可能已解散），已為你解除家庭綁定。",
     ],
     ["FAMILY_FULL", "家庭成員已滿，無法重新連線，已為你解除家庭綁定。"],
+    ["RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員，已為你解除家庭綁定。"],
   ],
 );
 
-/** Shown when the code is not one of the three above — see `familyGoneNoticeText`. */
+/** Shown when the code is not one of those above — see `familyGoneNoticeText`. */
 export const FAMILY_GONE_NOTICE_FALLBACK =
   "家庭連線已失效，已為你解除家庭綁定。";
 
 /**
  * Reason text for a family-gone teardown.
  *
- * In practice only the three `FAMILY_GONE_ERROR_CODES` members can arrive — both
+ * In practice only `FAMILY_GONE_ERROR_CODES` members can arrive — both
  * callers classify through `isFamilyGoneError` before tearing anything down — so
  * the fallback is defense in depth: an unknown code still gets an explanation
  * rather than a blank banner.

@@ -125,7 +125,7 @@ export function MemberList({
       // and skipping the refresh keeps a removed member on screen until the
       // list is next loaded. Mirrored in pwa/src/components/MemberList.tsx
       // handleConfirm; keep the two identical. Self-leave twin:
-      // useFamilySettingsLeave.ts handleLeaveConfirm.
+      // useFamilySettingsLeave.ts settleLeave.
       const alreadyRemoved = response.error?.code === "MEMBER_NOT_FOUND";
       if (response.error && !alreadyRemoved) {
         setActionError(

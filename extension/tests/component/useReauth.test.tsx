@@ -1,7 +1,7 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useReauth } from "@/dialog/useReauth";
-import type { ApiClient } from "@/api/client";
+import { BoolFlag, type ApiClient } from "@/api/client";
 import {
   USER_ID_KEY,
   FAMILY_ID_KEY,
@@ -113,9 +113,11 @@ describe("useReauth", () => {
       await result.current.submit("1234");
     });
 
-    // joinFamily called with the collected secret (displayName preserved).
+    // joinFamily called with the collected secret (displayName preserved),
+    // flagged recovery so the server refuses a user no longer listed (#263).
     expect(apiClient.joinFamily).toHaveBeenCalledWith("fam-1", "u1", "小明", {
       verifySecret: "1234",
+      recovery: BoolFlag.TRUE,
     });
     // Fresh token primed in-memory and persisted with its expiry.
     expect(apiClient.setAuthToken).toHaveBeenCalledWith("fresh-token");
@@ -350,7 +352,13 @@ describe("useReauth", () => {
       });
     }
 
-    it.each(["MEMBER_REMOVED", "FAMILY_NOT_FOUND", "FAMILY_FULL"])(
+    it.each([
+      "MEMBER_REMOVED",
+      "FAMILY_NOT_FOUND",
+      "FAMILY_FULL",
+      // #263: the recovery-flagged re-join from a user no longer listed.
+      "RECOVERY_NOT_MEMBER",
+    ])(
       "clears the family binding and closes the prompt on %s",
       async (errorCode) => {
         seedStorage();

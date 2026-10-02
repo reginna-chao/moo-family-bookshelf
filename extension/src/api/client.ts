@@ -440,15 +440,15 @@ export class ApiClient {
     familyId: string,
     userId: string,
     displayName?: string,
-    opts?: { verifySecret?: string },
+    // `recovery` is sent only by the re-verification join in dialog/useReauth.ts.
+    opts?: { verifySecret?: string; recovery?: BoolFlag },
   ): Promise<ApiResponse<FamilyGroup>> {
-    const body: Record<string, string> = {
+    const body: Record<string, string | BoolFlag> = {
       userId,
       displayName: displayName ?? "",
     };
-    if (opts?.verifySecret !== undefined) {
-      body.verifySecret = opts.verifySecret;
-    }
+    if (opts?.verifySecret !== undefined) body.verifySecret = opts.verifySecret;
+    if (opts?.recovery !== undefined) body.recovery = opts.recovery;
     const res = await this.post<FamilyGroup>(
       `/api/family/${familyId}/join`,
       body,

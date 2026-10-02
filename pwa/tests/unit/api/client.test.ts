@@ -430,6 +430,31 @@ describe("ApiClient", () => {
       expect(body.verifySecret).toBe("9999");
     });
 
+    // #263: only App's silent token-recovery join carries `recovery`; every
+    // other join (LandingPage form / QR) omits the key entirely.
+    it("should send recovery: 1 when opts.recovery is TRUE", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+
+      await client.joinFamily("fam-1", USER_2, { recovery: BoolFlag.TRUE });
+
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body)).toEqual({ userId: USER_2, recovery: 1 });
+    });
+
+    it.each([
+      ["no opts", undefined],
+      ["empty opts", {}],
+      ["a verifySecret only", { verifySecret: "9999" }],
+      ["a qrToken only", { qrToken: "qr-1" }],
+    ])("should omit the recovery key with %s", async (_label, opts) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+
+      await client.joinFamily("fam-1", USER_2, opts);
+
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body)).not.toHaveProperty("recovery");
+    });
+
     it("should reject invalid userId", async () => {
       await expect(client.joinFamily("fam-1", "bad-id")).rejects.toThrow(
         "Invalid userId",
