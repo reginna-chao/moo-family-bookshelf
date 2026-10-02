@@ -2,12 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   EXPECTED_LAST_UPDATED_MAX_LENGTH,
   isJsonObject,
+  parseRecoveryFlag,
   sanitizeCoverUrl,
   sanitizeDisplayName,
   sanitizeExpectedLastUpdated,
   sanitizeReadmooUrl,
   validateDisplayName,
 } from "../../src/utils/validation";
+import { BoolFlag } from "../../src/kv/schema";
 
 describe("sanitizeDisplayName", () => {
   it("returns empty string for undefined/null", () => {
@@ -314,6 +316,38 @@ describe("sanitizeExpectedLastUpdated", () => {
     },
   ])("returns $label unmodified", ({ value }) => {
     expect(sanitizeExpectedLastUpdated(value)).toBe(value);
+  });
+});
+
+describe("parseRecoveryFlag", () => {
+  // Absent = FALSE (deployed clients never send it); null = malformed (400).
+  it.each<{ label: string; value: unknown; expected: BoolFlag }>([
+    {
+      label: "undefined (field absent)",
+      value: undefined,
+      expected: BoolFlag.FALSE,
+    },
+    { label: "0", value: 0, expected: BoolFlag.FALSE },
+    { label: "1", value: 1, expected: BoolFlag.TRUE },
+  ])("classifies $label as $expected", ({ value, expected }) => {
+    expect(parseRecoveryFlag(value)).toBe(expected);
+  });
+
+  it.each<{ label: string; value: unknown }>([
+    { label: "null", value: null },
+    { label: "true", value: true },
+    { label: "false", value: false },
+    { label: 'the string "1"', value: "1" },
+    { label: 'the string "0"', value: "0" },
+    { label: "the empty string", value: "" },
+    { label: "2", value: 2 },
+    { label: "-1", value: -1 },
+    { label: "0.5", value: 0.5 },
+    { label: "NaN", value: Number.NaN },
+    { label: "an object", value: { recovery: 1 } },
+    { label: "an array", value: [1] },
+  ])("rejects $label as malformed", ({ value }) => {
+    expect(parseRecoveryFlag(value)).toBeNull();
   });
 });
 

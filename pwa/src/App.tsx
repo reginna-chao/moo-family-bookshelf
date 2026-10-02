@@ -12,11 +12,13 @@ import {
   REMEMBERED_LOGOUT_KEY,
   type AuthState,
 } from "./hooks/useAuth";
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import { ApiClient } from "./api/client";
 import {
   isLiveSession,
   useSessionApiClient,
 } from "./hooks/useSessionApiClient";
+import { recoveryJoinBlocked } from "./hooks/recoveryJoinGate";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
@@ -29,10 +31,13 @@ import { VerifySetupPrompt } from "./components/VerifySetupPrompt";
 import { FamilyDataProvider, useFamilyData } from "./hooks/useFamilyData";
 import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
-import { JOIN_BLOCKED_MESSAGES } from "./utils/joinErrorMessages";
+import {
+  JOIN_BLOCKED_MESSAGES,
+  REVERIFY_LOGOUT_MESSAGE,
+  VERIFICATION_ERROR_CODES,
+} from "./utils/joinErrorMessages";
 import {
   clearRecoveryCooldown,
-  getActiveRecoveryCooldown,
   setRecoveryCooldown,
 } from "./utils/recoveryCooldown";
 import { encodeSyncCode } from "@/crypto/syncCode";
@@ -75,17 +80,6 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const PUBLIC_PATH_RE = /^\/public\/([a-f0-9]{32})\/?$/;
-
-/**
- * Recovery-join failures that need the member's PWA-login secret. The recovery
- * join sends none, so REQUIRED is the realistic one; the other two are parity
- * with `VERIFICATION_ERROR_CODES` in `extension/src/api/auth-refresh.ts`.
- */
-const VERIFICATION_ERROR_CODES = new Set([
-  "VERIFICATION_REQUIRED",
-  "VERIFICATION_FAILED",
-  "VERIFICATION_LOCKED",
-]);
 
 /**
  * Preserve the sync code so LandingPage can pre-fill it and open the
@@ -169,18 +163,17 @@ function AuthenticatedApp() {
   const acquireNewToken = useCallback(async (): Promise<string | null> => {
     const current = authRef.current;
     if (!current) return null;
-    // Each 401 retries through here and the join spends the worker's per-IP 3/min
-    // tier, so an active cooldown must not re-spend it (LandingPage joins bypass).
-    if (getActiveRecoveryCooldown() !== undefined) return null;
+    // Skip on a 429 cooldown, while this user's own leave / delete is in flight
+    // (#263), or once the session has ended — see `recoveryJoinBlocked`.
+    if (recoveryJoinBlocked(authRef.current, current)) return null;
 
     const tempClient = new ApiClient(current.apiHost);
     // Refresh endpoint is protected — include current token for authentication
     tempClient.setAuthToken(current.authToken ?? null);
-    const res = await tempClient.joinFamily(
-      current.familyId,
-      current.userId,
-      {},
-    );
+    // `recovery` lets the server refuse a non-member (409 RECOVERY_NOT_MEMBER).
+    const res = await tempClient.joinFamily(current.familyId, current.userId, {
+      recovery: BoolFlag.TRUE,
+    });
     // Logged out or switched session mid-join (#258): drop the stale result.
     if (!isLiveSession(authRef.current, current)) return null;
     if (res.error) {
@@ -194,6 +187,7 @@ function AuthenticatedApp() {
         return null;
       }
       if (VERIFICATION_ERROR_CODES.has(code)) {
+        setLandingError(REVERIFY_LOGOUT_MESSAGE);
         rememberSyncCodeForRelogin(current);
         logout();
         return null;

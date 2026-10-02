@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   JOIN_BLOCKED_MESSAGES,
   FAMILY_FULL_MESSAGE,
+  REVERIFY_LOGOUT_MESSAGE,
+  VERIFICATION_ERROR_CODES,
 } from "@/utils/joinErrorMessages";
 
 describe("JOIN_BLOCKED_MESSAGES", () => {
@@ -12,11 +14,39 @@ describe("JOIN_BLOCKED_MESSAGES", () => {
     ["MEMBER_REMOVED", "你已被家庭管理者移出，已為你登出"],
     ["FAMILY_NOT_FOUND", "找不到這個家庭，家庭可能已被解散"],
     ["ALREADY_IN_FAMILY", "此帳號已加入其他家庭，請先離開原本的家庭"],
+    ["RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員，已為你登出"],
   ])("pins the 繁中 copy for %s", (code, copy) => {
     expect(JOIN_BLOCKED_MESSAGES.get(code)).toBe(copy);
   });
 
   it("keeps FAMILY_FULL_MESSAGE and the map entry as one string", () => {
     expect(JOIN_BLOCKED_MESSAGES.get("FAMILY_FULL")).toBe(FAMILY_FULL_MESSAGE);
+  });
+});
+
+describe("VERIFICATION_ERROR_CODES", () => {
+  it("holds exactly the three verification codes", () => {
+    expect([...VERIFICATION_ERROR_CODES].sort()).toEqual([
+      "VERIFICATION_FAILED",
+      "VERIFICATION_LOCKED",
+      "VERIFICATION_REQUIRED",
+    ]);
+  });
+
+  // Re-verifying logs the user back in, so none of these may be terminal.
+  it.each([...VERIFICATION_ERROR_CODES])(
+    "does not list %s as a terminal JOIN_BLOCKED_MESSAGES code",
+    (code) => {
+      expect(JOIN_BLOCKED_MESSAGES.has(code)).toBe(false);
+    },
+  );
+});
+
+describe("REVERIFY_LOGOUT_MESSAGE", () => {
+  // Literal anchor for App.test.tsx, which asserts on the imported constant.
+  it("pins the 繁中 copy", () => {
+    expect(REVERIFY_LOGOUT_MESSAGE).toBe(
+      "登入已失效，已為你登出。請重新登入並驗證身分，如果剛才有正在進行的操作，登入後請再做一次",
+    );
   });
 });

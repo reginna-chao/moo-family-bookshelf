@@ -4,7 +4,8 @@ import {
   doRefreshToken,
   isFamilyGoneError,
 } from "@/api/auth-refresh";
-import type { ApiResponse } from "@/api/types";
+import { BoolFlag, type ApiResponse } from "@/api/types";
+import { beginSelfDeparture } from "@/storage/selfDeparture";
 import {
   USER_ID_KEY,
   FAMILY_ID_KEY,
@@ -31,8 +32,11 @@ import {
  *    outcome.
  *  - recovery blocked by a verification code → call onReauthRequired, KEEP data.
  *  - recovery says family is gone (FAMILY_NOT_FOUND / FAMILY_FULL /
- *    MEMBER_REMOVED) → clear (family id + the family-scoped API endpoint) and
- *    hand the triggering code to onFamilyRemoved + FAMILY_REMOVED.
+ *    MEMBER_REMOVED / RECOVERY_NOT_MEMBER) → clear (family id + the
+ *    family-scoped API endpoint) and hand the triggering code to
+ *    onFamilyRemoved + FAMILY_REMOVED.
+ *  - the user's own leave / account deletion is in flight (#263) → the refresh
+ *    POST still runs, but the silent join is skipped and nothing is cleared.
  *  - any other / transient failure → leave family data intact for a later retry.
  *
  * doRefreshToken takes an injected `deps` boundary (request / setAuthToken /
@@ -295,6 +299,15 @@ describe("doRefreshToken", () => {
       {
         name: "MEMBER_REMOVED → clear family + notify",
         code: "MEMBER_REMOVED",
+        expectReauth: false,
+        expectFamilyRemoved: true,
+        expectCleared: true,
+      },
+      {
+        // #263: the server refuses a `recovery: 1` join from a user no longer
+        // listed — the user left or deleted the account elsewhere.
+        name: "RECOVERY_NOT_MEMBER → clear family + notify",
+        code: "RECOVERY_NOT_MEMBER",
         expectReauth: false,
         expectFamilyRemoved: true,
         expectCleared: true,
@@ -848,6 +861,112 @@ describe("doRefreshToken", () => {
       expect(familyWasCleared()).toBe(false);
     });
   });
+
+  /**
+   * The silent join is flagged `recovery: 1` (#263) so the server can refuse a
+   * user no longer listed in the family instead of re-adding them, and it still
+   * omits displayName so the member's chosen name is kept.
+   */
+  it("sends the recovery join with exactly { userId, recovery: 1 }", async () => {
+    await seedStorage();
+    const deps = makeDeps({
+      refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+      join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+    });
+
+    await doRefreshToken(deps);
+
+    const joinCall = (
+      deps.request as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.find((call) => String(call[0]).endsWith("/join"));
+    expect(joinCall?.[0]).toBe("/api/family/fam-1/join");
+    const init = joinCall?.[1] as { method: string; body: string };
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      userId: "u1",
+      recovery: BoolFlag.TRUE,
+    });
+  });
+
+  /**
+   * #263: the server can revoke the user's token before it answers their own
+   * "leave family" / "delete account" request, so another request 401s while
+   * the departure is in flight. A silent join then would re-add the user to the
+   * family they are leaving, so it is skipped while the departure mark is up —
+   * but the refresh POST still runs (a token fixed elsewhere recovers without a
+   * join) and nothing is torn down.
+   */
+  describe("own departure in flight (#263)", () => {
+    let endDeparture: (() => Promise<void>) | undefined;
+
+    afterEach(async () => {
+      await endDeparture?.();
+      endDeparture = undefined;
+    });
+
+    it("skips the silent join and keeps the family data while the mark is up", async () => {
+      await seedStorage();
+      endDeparture = await beginSelfDeparture();
+      vi.mocked(chrome.storage.local.set).mockClear();
+      const deps = makeDeps({
+        refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+        // Would re-add the user if the join fired — it must NOT fire.
+        join: { data: { authToken: "should-not-be-used", expiresAt: 8888 } },
+      });
+
+      const result = await doRefreshToken(deps);
+
+      expect(result).toEqual({ refreshed: false });
+      // The refresh POST itself still went out, first and alone.
+      expect(deps.request).toHaveBeenCalledTimes(1);
+      expect(
+        (deps.request as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0],
+      ).toBe("/api/auth/refresh");
+      expect(joinWasRequested(deps.request)).toBe(false);
+      // Family data and its endpoint are kept; no prompt, no cooldown.
+      expect(familyWasCleared()).toBe(false);
+      expect(await storedEndpointChoice()).toEqual({
+        [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
+        [DECLINED_FAMILY_ENDPOINT_KEY]: { value: null },
+      });
+      const stored = await chrome.storage.local.get(FAMILY_ID_KEY);
+      expect(stored[FAMILY_ID_KEY]).toBe("fam-1");
+      expect(deps.onReauthRequired).not.toHaveBeenCalled();
+      expect(deps.onFamilyRemoved).not.toHaveBeenCalled();
+      expect(cooldownWriteValue()).toBeUndefined();
+    });
+
+    it("still reports refreshed when the refresh POST succeeds under the mark", async () => {
+      await seedStorage();
+      endDeparture = await beginSelfDeparture();
+      const deps = makeDeps({
+        refresh: { data: { token: "fresh-token", expiresAt: 9999 } },
+      });
+
+      const result = await doRefreshToken(deps);
+
+      expect(result).toEqual({ refreshed: true });
+      expect(deps.setAuthToken).toHaveBeenCalledWith("fresh-token");
+      expect(joinWasRequested(deps.request)).toBe(false);
+    });
+
+    it("joins again once the departure has settled", async () => {
+      // Positive companion: the skip above is the mark's doing, not a join
+      // path that never fires.
+      await seedStorage();
+      const end = await beginSelfDeparture();
+      await end();
+      const deps = makeDeps({
+        refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+        join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+      });
+
+      const result = await doRefreshToken(deps);
+
+      expect(result).toEqual({ refreshed: true });
+      expect(joinRequestCount(deps.request)).toBe(1);
+    });
+  });
 });
 
 /**
@@ -869,6 +988,7 @@ describe("isFamilyGoneError", () => {
     ["FAMILY_NOT_FOUND", true],
     ["FAMILY_FULL", true],
     ["MEMBER_REMOVED", true],
+    ["RECOVERY_NOT_MEMBER", true],
     ["VERIFICATION_REQUIRED", false],
     ["VERIFICATION_FAILED", false],
     ["VERIFICATION_LOCKED", false],

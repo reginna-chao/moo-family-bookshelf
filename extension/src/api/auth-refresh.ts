@@ -3,7 +3,7 @@
  */
 
 import browser from "webextension-polyfill";
-import type { ApiResponse } from "./types";
+import { BoolFlag, type ApiResponse } from "./types";
 import {
   USER_ID_KEY,
   FAMILY_ID_KEY,
@@ -12,6 +12,7 @@ import {
   RECOVERY_COOLDOWN_UNTIL_KEY,
 } from "../constants";
 import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
+import { isSelfDepartureActive } from "../storage/selfDeparture";
 
 /** Fallback cooldown (seconds) when a 429 body omits `retryAfter`. */
 const DEFAULT_RECOVERY_COOLDOWN_SECONDS = 300;
@@ -47,18 +48,17 @@ const VERIFICATION_ERROR_CODES = new Set([
  *                       client would silently auto-rejoin once the tombstone
  *                       expires, undoing the removal; treat it as "family gone
  *                       for this user" — stop retrying, clear local family data.
+ *  - RECOVERY_NOT_MEMBER — this user is no longer listed in the family, and
+ *                       the server refuses a `recovery: 1` join from a non-member.
  *
  * Only these justify clearing the local family data — anything else
  * (network/transient/verification) must not silently drop the user's data
  * (security-ux Invariant 2).
  *
- * Exported READ-ONLY (`ReadonlySet`, so no caller can add or drop a code) for a
- * single consumer: the copy-coverage test in
+ * Exported READ-ONLY (`ReadonlySet`) for one consumer: the copy-coverage test
  * `extension/tests/unit/dialog/familyGoneNotice.test.ts`, which asserts every
- * code listed here has a user-facing reason message in
- * `dialog/familyGoneNotice.ts`. Without that reach-in the coverage check only
- * runs message-key → gone, so a code added here and nowhere else would silently
- * degrade to the generic fallback banner with no test failing.
+ * code here has a reason in `dialog/familyGoneNotice.ts` — without it a code
+ * added only here would silently degrade to the generic fallback banner.
  *
  * Runtime classification still goes exclusively through `isFamilyGoneError`
  * below — it stays the one definition of "gone" in the codebase. Do not
@@ -68,6 +68,7 @@ export const FAMILY_GONE_ERROR_CODES: ReadonlySet<string> = new Set([
   "FAMILY_NOT_FOUND",
   "FAMILY_FULL",
   "MEMBER_REMOVED",
+  "RECOVERY_NOT_MEMBER",
 ]);
 
 /**
@@ -218,13 +219,12 @@ export async function doRefreshToken(
     deps.setAuthToken(null);
     await browser.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
 
-    // Reauth-pending guard: a verification prompt was already raised by an
-    // earlier 401 wave. The refresh POST above still ran (a token fixed in
-    // storage by another tab/context is picked up at the top of this function
-    // and can recover without a join), but silent join-recovery must NOT fire a
-    // second time — it would re-spend the per-IP join budget and re-fire
-    // onReauthRequired, wiping the user's in-progress pattern/PIN input.
-    if (deps.isReauthPending()) {
+    // No silent join while a verification prompt from an earlier 401 wave is
+    // pending (it would re-spend the per-IP join budget and wipe the user's
+    // in-progress PIN/pattern input), nor while the user's own leave / account
+    // deletion is in flight (#263) — it could re-add them. The refresh POST
+    // above still ran: a token fixed in storage elsewhere recovers without one.
+    if (deps.isReauthPending() || (await isSelfDepartureActive())) {
       return { refreshed: false };
     }
 
@@ -384,9 +384,9 @@ async function attemptJoinRecovery(deps: RefreshDeps): Promise<RecoveryResult> {
 
   if (!familyId || !userId) return { recovered: false };
 
-  // Build join body — omit displayName so the backend preserves the existing
-  // member record (silent recovery must not overwrite the user's chosen name).
-  const joinBody: Record<string, string> = { userId };
+  // Omit displayName so the backend keeps the member's chosen name; `recovery`
+  // lets it refuse a user no longer listed (409 RECOVERY_NOT_MEMBER).
+  const joinBody = { userId, recovery: BoolFlag.TRUE };
 
   const joinResult = await deps.request<{
     familyId: string;

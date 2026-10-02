@@ -120,7 +120,7 @@ export function MemberList({
         // the error and skipping the refresh keeps a removed member on screen
         // until the list is next loaded. Mirrored in
         // extension/src/dialog/MemberList.tsx handleRemove; keep the two
-        // identical. Self-leave twin: hooks/useLeaveFamily.ts handleLeave.
+        // identical. Self-leave twin: hooks/useLeaveFamily.ts settleLeave.
         const alreadyRemoved = res.error?.code === "MEMBER_NOT_FOUND";
         if (res.error && !alreadyRemoved) {
           setError(

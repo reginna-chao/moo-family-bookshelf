@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import {
   render,
+  renderHook,
   screen,
   fireEvent,
   waitFor,
@@ -150,10 +151,21 @@ import { decodeSyncCode } from "@/crypto/syncCode";
 // The terminal-failure copy under test is production's own — App resolves it
 // from this map with `.get`, so the assertions below cannot drift from
 // `pwa/src/utils/joinErrorMessages.ts`.
-import { JOIN_BLOCKED_MESSAGES } from "@/utils/joinErrorMessages";
+import {
+  JOIN_BLOCKED_MESSAGES,
+  REVERIFY_LOGOUT_MESSAGE,
+} from "@/utils/joinErrorMessages";
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
+import { useLeaveFamily } from "@/hooks/useLeaveFamily";
+import {
+  isSelfDepartureActive,
+  SELF_DEPARTURE_UNTIL_KEY,
+} from "@/utils/selfDeparture";
+import type { ApiClient } from "@/api/client";
 
 /** localStorage keys this suite touches — cleared around every test. */
 function clearSuiteStorageKeys() {
+  localStorage.removeItem(SELF_DEPARTURE_UNTIL_KEY);
   localStorage.removeItem(RECOVERY_COOLDOWN_UNTIL_KEY);
   localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
   localStorage.removeItem(REMEMBER_SYNC_CODE_KEY);
@@ -333,6 +345,13 @@ describe("App", () => {
     });
     // The acquired token was really stored for this session, not dropped.
     expect(mockJoinFamily).toHaveBeenCalledTimes(1);
+    // A silent recovery join is flagged, so the server can refuse a user who is
+    // no longer listed (#263) instead of re-adding them.
+    expect(mockJoinFamily).toHaveBeenCalledWith(
+      "fam-001",
+      "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      { recovery: BoolFlag.TRUE },
+    );
     expect(mockLogin).toHaveBeenCalledWith(
       expect.objectContaining({
         userId:
@@ -449,6 +468,8 @@ describe("App", () => {
       "MEMBER_REMOVED",
       "FAMILY_NOT_FOUND",
       "ALREADY_IN_FAMILY",
+      // #263: a recovery join from a user no longer listed in the family.
+      "RECOVERY_NOT_MEMBER",
     ];
 
     /**
@@ -662,6 +683,50 @@ describe("App", () => {
       expect(remembered).not.toBeNull();
       expect(decodeSyncCode(remembered as string).familyId).toBe("fam-001");
       expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+      // #263: a reason, so this forced logout cannot pass for a finished leave.
+      // Exact equality — the literal is pinned in joinErrorMessages.test.ts.
+      expect(screen.getByTestId("landing-external-error").textContent).toBe(
+        REVERIFY_LOGOUT_MESSAGE,
+      );
+    });
+
+    it("clears the re-verify message once the user logs in again (onAuth)", async () => {
+      mockLogin.mockImplementation((next: Record<string, unknown>) => {
+        setMockSession(next);
+      });
+      mockJoinFamily.mockResolvedValueOnce({
+        error: { code: "VERIFICATION_REQUIRED", message: "stub" },
+      });
+      setMockSession({ ...AUTH_WITHOUT_TOKEN });
+      let view!: ReturnType<typeof render>;
+      await act(async () => {
+        view = render(<App />);
+      });
+      await waitFor(() => {
+        expect(mockLogout).toHaveBeenCalledTimes(1);
+      });
+      // Positive companion: the message really was on screen before the login.
+      expect(screen.getByTestId("landing-external-error").textContent).toBe(
+        REVERIFY_LOGOUT_MESSAGE,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Login" }));
+      });
+      expect(mockLogin).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: "u1", familyId: "f1" }),
+      );
+      expect(screen.queryByTestId("landing-page")).not.toBeInTheDocument();
+
+      // A later, voluntary logout must not resurface the stale reason.
+      setMockSession(null);
+      await act(async () => {
+        view.rerender(<App />);
+      });
+      expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("landing-external-error"),
+      ).not.toBeInTheDocument();
     });
 
     it("still logs out but does not remember the sync code when rememberSyncCode is off", async () => {
@@ -804,6 +869,186 @@ describe("App", () => {
       expect(
         screen.queryByTestId("landing-external-error"),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * #263 REGRESSION: the server can revoke the user's token before it answers
+   * their own "leave family" request, so another request of theirs 401s while
+   * the leave is in flight — and App's silent recovery join then re-added them
+   * to the family they were leaving. The real `useLeaveFamily` drives the leave
+   * (its request held pending), and the refresher App registered on the
+   * session client is the path ApiClient takes on that 401.
+   */
+  describe("acquireNewToken while the user's own leave is in flight (#263)", () => {
+    const SESSION = {
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      encryptionKey: "key-123",
+      authToken: "old-token",
+    };
+
+    type LeaveRes = { data?: { ok: boolean }; error?: Record<string, unknown> };
+
+    async function renderWithPendingLeave() {
+      window.location.hash = "#personal-shelf";
+      setMockSession({ ...SESSION });
+      await act(async () => {
+        render(<App />);
+      });
+      const client = personalShelfClients.at(-1) as {
+        setTokenRefresher: ReturnType<typeof vi.fn>;
+      };
+      const refresh = client.setTokenRefresher.mock
+        .calls[0][0] as () => Promise<string | null>;
+
+      let resolveLeave!: (res: LeaveRes) => void;
+      const leaveFamily = vi.fn(
+        () =>
+          new Promise<LeaveRes>((resolve) => {
+            resolveLeave = resolve;
+          }),
+      );
+      const flow = renderHook(() =>
+        useLeaveFamily({
+          familyId: SESSION.familyId,
+          userId: SESSION.userId,
+          apiClient: { leaveFamily } as unknown as ApiClient,
+          onLogout: mockLogout,
+        }),
+      );
+      let leaving!: Promise<void>;
+      act(() => {
+        leaving = flow.result.current.handleLeave();
+      });
+      // The leave really is in flight, guarded, for a session still stored.
+      expect(leaveFamily).toHaveBeenCalledTimes(1);
+      expect(isSelfDepartureActive()).toBe(true);
+      expect(localStorage.getItem(USER_ID_KEY)).toBe(SESSION.userId);
+      return { refresh, resolveLeave, leaving, flow };
+    }
+
+    it("does not send a recovery join while the leave request is pending", async () => {
+      const { refresh, resolveLeave, leaving } = await renderWithPendingLeave();
+
+      await act(async () => {
+        await expect(refresh()).resolves.toBeNull();
+      });
+
+      expect(mockJoinFamily).not.toHaveBeenCalled();
+      expect(mockLogin).not.toHaveBeenCalled();
+
+      // The leave lands: the user is logged out and the mark is gone.
+      await act(async () => {
+        resolveLeave({ data: { ok: true } });
+        await leaving;
+      });
+      expect(mockLogout).toHaveBeenCalledTimes(1);
+      expect(isSelfDepartureActive()).toBe(false);
+    });
+
+    /**
+     * Positive companion: the null above came from the departure mark, not from
+     * a refresher that never joins. A leave the server REFUSED keeps the
+     * session, and the very next refresh joins again — flagged as recovery.
+     */
+    it("joins again, flagged as recovery, once a refused leave has settled", async () => {
+      const { refresh, resolveLeave, leaving, flow } =
+        await renderWithPendingLeave();
+
+      await act(async () => {
+        await expect(refresh()).resolves.toBeNull();
+      });
+      expect(mockJoinFamily).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveLeave({
+          error: { code: "OWNER_CANNOT_LEAVE", message: "owner" },
+        });
+        await leaving;
+      });
+      expect(flow.result.current.leaveError).toBe(
+        "管理者必須先轉移管理權才能離開家庭",
+      );
+      expect(mockLogout).not.toHaveBeenCalled();
+      expect(isSelfDepartureActive()).toBe(false);
+
+      await act(async () => {
+        await expect(refresh()).resolves.toBe("new-token");
+      });
+      expect(mockJoinFamily).toHaveBeenCalledTimes(1);
+      expect(mockJoinFamily).toHaveBeenCalledWith(
+        SESSION.familyId,
+        SESSION.userId,
+        { recovery: BoolFlag.TRUE },
+      );
+    });
+
+    /**
+     * Review S1: the guarded leave 401s, its unguarded resend 401s too, and the
+     * recovery join that 401 triggers needs re-verification. ApiClient is mocked
+     * here, so the resend stub runs the registered refresher itself, mirroring
+     * `doRequest`'s 401 branch (refresher → null → the 401 envelope comes back).
+     */
+    it("explains the logout when the leave's recovery join needs re-verification", async () => {
+      window.location.hash = "#personal-shelf";
+      setMockSession({ ...SESSION });
+      await act(async () => {
+        render(<App />);
+      });
+      const client = personalShelfClients.at(-1) as {
+        setTokenRefresher: ReturnType<typeof vi.fn>;
+      };
+      const refresh = client.setTokenRefresher.mock
+        .calls[0][0] as () => Promise<string | null>;
+      mockJoinFamily.mockResolvedValueOnce({
+        error: { code: "VERIFICATION_REQUIRED", message: "stub" },
+      });
+      const unauthorized = {
+        error: { code: "UNAUTHORIZED", message: "Invalid token" },
+      };
+      const markDuringSend: boolean[] = [];
+      const leaveFamily = vi
+        .fn<() => Promise<LeaveRes>>()
+        .mockImplementationOnce(async () => {
+          markDuringSend.push(isSelfDepartureActive());
+          return unauthorized;
+        })
+        .mockImplementationOnce(async () => {
+          markDuringSend.push(isSelfDepartureActive());
+          const token = await refresh();
+          return token ? { data: { ok: true } } : unauthorized;
+        });
+      const flow = renderHook(() =>
+        useLeaveFamily({
+          familyId: SESSION.familyId,
+          userId: SESSION.userId,
+          apiClient: { leaveFamily } as unknown as ApiClient,
+          onLogout: mockLogout,
+        }),
+      );
+
+      await act(async () => {
+        await flow.result.current.handleLeave();
+      });
+
+      // First send guarded, resend unguarded — so the join really was sent.
+      expect(markDuringSend).toEqual([true, false]);
+      expect(mockJoinFamily).toHaveBeenCalledTimes(1);
+      expect(mockJoinFamily).toHaveBeenCalledWith(
+        SESSION.familyId,
+        SESSION.userId,
+        { recovery: BoolFlag.TRUE },
+      );
+      // Logged out once, by App, with a reason — not a silent "leave done".
+      expect(mockLogout).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+      expect(screen.getByTestId("landing-external-error").textContent).toBe(
+        REVERIFY_LOGOUT_MESSAGE,
+      );
+      expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).not.toBeNull();
+      expect(isSelfDepartureActive()).toBe(false);
     });
   });
 });

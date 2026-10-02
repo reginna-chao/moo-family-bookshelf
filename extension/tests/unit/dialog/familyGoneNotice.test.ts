@@ -27,6 +27,8 @@ const MESSAGES: Array<[string, string]> = [
   ],
   ["FAMILY_NOT_FOUND", "家庭資料已不存在（可能已解散），已為你解除家庭綁定。"],
   ["FAMILY_FULL", "家庭成員已滿，無法重新連線，已為你解除家庭綁定。"],
+  // #263: the server refused a recovery join from a user no longer listed.
+  ["RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員，已為你解除家庭綁定。"],
 ];
 
 describe("FAMILY_GONE_NOTICE_MESSAGES", () => {
@@ -34,7 +36,7 @@ describe("FAMILY_GONE_NOTICE_MESSAGES", () => {
     expect(FAMILY_GONE_NOTICE_MESSAGES.get(code)).toBe(expected);
   });
 
-  it("carries exactly the three family-gone codes and nothing else", () => {
+  it("carries exactly the four family-gone codes and nothing else", () => {
     expect([...FAMILY_GONE_NOTICE_MESSAGES.keys()]).toEqual(
       MESSAGES.map(([code]) => code),
     );
@@ -89,7 +91,7 @@ describe("familyGoneNoticeText", () => {
   });
 
   /**
-   * Defense in depth: only the three codes above can arrive in practice, but an
+   * Defense in depth: only the codes above can arrive in practice, but an
    * unknown one must still get an explanation rather than a blank banner.
    * Casing is not normalized either — a lookalike code takes the fallback.
    */
