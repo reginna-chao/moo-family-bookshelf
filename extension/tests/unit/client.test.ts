@@ -505,6 +505,64 @@ describe("ApiClient", () => {
         }),
       );
     });
+
+    const RECORD = {
+      schemaVersion: 1,
+      userId: "u1",
+      displayName: "Test",
+      books: [],
+      lastUpdated: "2026-01-01T00:00:00.000Z",
+    };
+
+    function sentBody(): Record<string, unknown> {
+      const init = vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit;
+      return JSON.parse(init.body as string) as Record<string, unknown>;
+    }
+
+    it("carries the expectedLastUpdated precondition in the PUT body", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+      await client.updatePersonalBooks("u1", {
+        ...RECORD,
+        expectedLastUpdated: "2025-12-31T23:59:59.000Z",
+      });
+
+      expect(sentBody()).toHaveProperty(
+        "expectedLastUpdated",
+        "2025-12-31T23:59:59.000Z",
+      );
+    });
+
+    it("sends no expectedLastUpdated key when the value is undefined", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+      await client.updatePersonalBooks("u1", {
+        ...RECORD,
+        expectedLastUpdated: undefined,
+      });
+
+      const body = sentBody();
+      expect(body).not.toHaveProperty("expectedLastUpdated");
+      // Positive companion: the record itself was sent.
+      expect(body).toHaveProperty("lastUpdated", RECORD.lastUpdated);
+    });
+
+    it("returns a 409 BOOKS_CONFLICT as an error envelope instead of throwing", async () => {
+      globalThis.fetch = mockFetchError(
+        "BOOKS_CONFLICT",
+        "Books record changed since it was read",
+        409,
+      );
+      const result = await client.updatePersonalBooks("u1", {
+        ...RECORD,
+        expectedLastUpdated: "2025-12-31T23:59:59.000Z",
+      });
+
+      expect(result).toEqual({
+        error: {
+          code: "BOOKS_CONFLICT",
+          message: "Books record changed since it was read",
+        },
+      });
+    });
   });
 
   describe("patchPersonalBooks", () => {

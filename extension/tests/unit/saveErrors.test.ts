@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  BOOKS_CONFLICT_CODE,
+  BOOKS_CONFLICT_MESSAGE,
   BOOKS_TOO_LARGE_MESSAGE,
   booksSaveErrorText,
 } from "moo-family-bookshelf-shared/personal/saveErrors";
@@ -9,7 +11,9 @@ import {
  * upload (Extension save / sync / auto-setup, PWA save). The Worker answers an
  * oversized body with `413 { code: "PAYLOAD_TOO_LARGE", message: "Request body
  * exceeds …" }`; that English byte-limit message means nothing to a reader, so
- * the code alone selects local 繁中 copy. Every other error keeps going through
+ * the code alone selects local 繁中 copy. A sync whose `expectedLastUpdated`
+ * kept failing ends on `409 { code: "BOOKS_CONFLICT" }` (#249), which likewise
+ * maps to local copy. Every other error keeps going through
  * `safeErrorText` exactly as the call sites did before (that helper's full
  * value domain is pinned in tests/unit/safeErrorText.test.ts).
  *
@@ -54,6 +58,42 @@ describe("booksSaveErrorText", () => {
     },
   );
 
+  it("pins the production copy and wire code for a sync conflict", () => {
+    expect(BOOKS_CONFLICT_MESSAGE).toBe(
+      "書單剛在別的地方改過，這次同步已停止。請稍後再同步一次。",
+    );
+    // The code the Worker answers a failed `expectedLastUpdated` with (#249).
+    expect(BOOKS_CONFLICT_CODE).toBe("BOOKS_CONFLICT");
+  });
+
+  it.each([
+    {
+      name: "the server's English message",
+      message: "Books record changed since it was read",
+    },
+    { name: "an object message", message: { zh: "壞掉了" } },
+    { name: "a missing message", message: undefined },
+    { name: "an empty message", message: "" },
+  ])(
+    "returns the conflict copy for BOOKS_CONFLICT carrying $name",
+    ({ message }) => {
+      for (const fallback of [SAVE_FALLBACK, SYNC_FALLBACK]) {
+        expect(
+          booksSaveErrorText(asError("BOOKS_CONFLICT", message), fallback),
+        ).toBe(BOOKS_CONFLICT_MESSAGE);
+      }
+    },
+  );
+
+  it("keeps the too-large and conflict copies apart", () => {
+    expect(
+      booksSaveErrorText(asError("PAYLOAD_TOO_LARGE", "x"), SYNC_FALLBACK),
+    ).not.toBe(BOOKS_CONFLICT_MESSAGE);
+    expect(
+      booksSaveErrorText(asError("BOOKS_CONFLICT", "x"), SYNC_FALLBACK),
+    ).not.toBe(BOOKS_TOO_LARGE_MESSAGE);
+  });
+
   it.each([
     { name: "a generic server error", code: "BOOM", message: "patch failed" },
     { name: "a rate-limit error", code: "RATE_LIMITED", message: "稍後再試" },
@@ -61,6 +101,11 @@ describe("booksSaveErrorText", () => {
       name: "a near-miss lowercase code",
       code: "payload_too_large",
       message: "Request body exceeds 2MB limit",
+    },
+    {
+      name: "a near-miss lowercase conflict code",
+      code: "books_conflict",
+      message: "Books record changed since it was read",
     },
   ])("passes through the server message for $name", ({ code, message }) => {
     expect(booksSaveErrorText(asError(code, message), SAVE_FALLBACK)).toBe(
@@ -93,6 +138,7 @@ describe("booksSaveErrorText", () => {
     { name: "undefined", code: undefined },
     { name: "an object", code: { code: "PAYLOAD_TOO_LARGE" } },
     { name: "an array", code: ["PAYLOAD_TOO_LARGE"] },
+    { name: "an array holding the conflict code", code: ["BOOKS_CONFLICT"] },
     { name: "a boolean", code: true },
   ])(
     "treats a non-string code ($name) as an ordinary error without throwing",

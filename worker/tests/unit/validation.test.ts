@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
+  EXPECTED_LAST_UPDATED_MAX_LENGTH,
   isJsonObject,
   sanitizeCoverUrl,
   sanitizeDisplayName,
+  sanitizeExpectedLastUpdated,
   sanitizeReadmooUrl,
   validateDisplayName,
 } from "../../src/utils/validation";
@@ -272,6 +274,47 @@ describe("sanitizeReadmooUrl", () => {
       expect(sanitizeReadmooUrl(input)).toBe("");
     },
   );
+});
+
+describe("sanitizeExpectedLastUpdated", () => {
+  // "" = not supplied (no precondition), null = malformed (400), else the value.
+  const STORED_SHAPED = "2026-03-01T12:00:00.000Z";
+
+  it("caps the length at 64 characters", () => {
+    expect(EXPECTED_LAST_UPDATED_MAX_LENGTH).toBe(64);
+  });
+
+  it.each<{ label: string; value: unknown }>([
+    { label: "undefined (field absent)", value: undefined },
+    { label: "null", value: null },
+    { label: "the empty string", value: "" },
+  ])("treats $label as not supplied", ({ value }) => {
+    expect(sanitizeExpectedLastUpdated(value)).toBe("");
+  });
+
+  it.each<{ label: string; value: unknown }>([
+    { label: "a number", value: 1_772_366_400_000 },
+    { label: "zero", value: 0 },
+    { label: "false", value: false },
+    { label: "true", value: true },
+    { label: "an object", value: { lastUpdated: STORED_SHAPED } },
+    { label: "an array", value: [STORED_SHAPED] },
+    { label: "a 65-character string", value: "x".repeat(65) },
+  ])("rejects $label as malformed", ({ value }) => {
+    expect(sanitizeExpectedLastUpdated(value)).toBeNull();
+  });
+
+  it.each<{ label: string; value: string }>([
+    { label: "a stored-shaped ISO timestamp", value: STORED_SHAPED },
+    { label: "a 64-character string", value: "x".repeat(64) },
+    { label: "a single space", value: " " },
+    {
+      label: "a string with surrounding whitespace",
+      value: ` ${STORED_SHAPED} `,
+    },
+  ])("returns $label unmodified", ({ value }) => {
+    expect(sanitizeExpectedLastUpdated(value)).toBe(value);
+  });
 });
 
 describe("isJsonObject", () => {
