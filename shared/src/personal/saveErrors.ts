@@ -16,13 +16,19 @@ export const BOOKS_TOO_LARGE_MESSAGE =
 /** Error code the Worker answers when an upload's `expectedLastUpdated` no longer matches the stored list. */
 export const BOOKS_CONFLICT_CODE = "BOOKS_CONFLICT";
 
-/** Shown when a sync gave up after the list kept changing elsewhere; only the Extension sync sends the precondition. */
+/** Shown when a sync (Extension sync or onboarding first sync) gave up after the list kept changing elsewhere. */
 export const BOOKS_CONFLICT_MESSAGE =
   "書單剛在別的地方改過，這次同步已停止。請稍後再同步一次。";
+
+/** Shown when a personal-shelf Save gave up after the list kept changing elsewhere; the unsaved changes stay on screen. */
+export const BOOKS_SAVE_CONFLICT_MESSAGE =
+  "書單剛在別的地方改過，這次沒有存進去。請稍後再按一次儲存。";
 
 /**
  * Display text for an error returned by a personal-books upload (save or
  * sync), shared by Extension and PWA so both show the same copy.
+ * `conflictMessage` is the `BOOKS_CONFLICT` copy: the sync wording by default,
+ * `BOOKS_SAVE_CONFLICT_MESSAGE` for a Save.
  *
  * `error` comes from an unvalidated envelope cast, so its fields may be any
  * type at runtime: the strict `===` on `code` is safe for any value, and every
@@ -31,12 +37,13 @@ export const BOOKS_CONFLICT_MESSAGE =
 export function booksSaveErrorText(
   error: Pick<ApiErrorPayload, "code" | "message">,
   fallback: string,
+  conflictMessage = BOOKS_CONFLICT_MESSAGE,
 ): string {
   if (error.code === PAYLOAD_TOO_LARGE_CODE) {
     return BOOKS_TOO_LARGE_MESSAGE;
   }
   if (error.code === BOOKS_CONFLICT_CODE) {
-    return BOOKS_CONFLICT_MESSAGE;
+    return conflictMessage;
   }
   return safeErrorText(error.message, fallback);
 }

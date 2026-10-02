@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   BOOKS_CONFLICT_CODE,
   BOOKS_CONFLICT_MESSAGE,
+  BOOKS_SAVE_CONFLICT_MESSAGE,
   BOOKS_TOO_LARGE_MESSAGE,
   booksSaveErrorText,
 } from "moo-family-bookshelf-shared/personal/saveErrors";
@@ -13,7 +14,8 @@ import {
  * exceeds …" }`; that English byte-limit message means nothing to a reader, so
  * the code alone selects local 繁中 copy. A sync whose `expectedLastUpdated`
  * kept failing ends on `409 { code: "BOOKS_CONFLICT" }` (#249), which likewise
- * maps to local copy. Every other error keeps going through
+ * maps to local copy — the sync wording by default, the Save wording when the
+ * caller passes `BOOKS_SAVE_CONFLICT_MESSAGE` (#259). Every other error keeps going through
  * `safeErrorText` exactly as the call sites did before (that helper's full
  * value domain is pinned in tests/unit/safeErrorText.test.ts).
  *
@@ -84,6 +86,54 @@ describe("booksSaveErrorText", () => {
       }
     },
   );
+
+  it("pins the production copy for a Save that gave up on a conflict (#259)", () => {
+    expect(BOOKS_SAVE_CONFLICT_MESSAGE).toBe(
+      "書單剛在別的地方改過，這次沒有存進去。請稍後再按一次儲存。",
+    );
+    expect(BOOKS_SAVE_CONFLICT_MESSAGE).not.toBe(BOOKS_CONFLICT_MESSAGE);
+  });
+
+  it("returns the caller's conflict copy for BOOKS_CONFLICT when one is passed", () => {
+    const conflict = asError(
+      "BOOKS_CONFLICT",
+      "Books record changed since it was read",
+    );
+    expect(
+      booksSaveErrorText(conflict, SAVE_FALLBACK, BOOKS_SAVE_CONFLICT_MESSAGE),
+    ).toBe(BOOKS_SAVE_CONFLICT_MESSAGE);
+    // Omitted → the sync wording, so existing sync / onboarding call sites keep it.
+    expect(booksSaveErrorText(conflict, SYNC_FALLBACK)).toBe(
+      BOOKS_CONFLICT_MESSAGE,
+    );
+  });
+
+  it.each([
+    {
+      name: "PAYLOAD_TOO_LARGE",
+      error: asError("PAYLOAD_TOO_LARGE", "x"),
+      expected: BOOKS_TOO_LARGE_MESSAGE,
+    },
+    {
+      name: "another code",
+      error: asError("BOOM", "patch failed"),
+      expected: "patch failed",
+    },
+    {
+      name: "another code with a hostile message",
+      error: asError("BOOM", { zh: "壞掉了" }),
+      expected: SAVE_FALLBACK,
+    },
+    {
+      name: "a near-miss lowercase conflict code",
+      error: asError("books_conflict", "Books record changed"),
+      expected: "Books record changed",
+    },
+  ])("ignores the conflict copy argument for $name", ({ error, expected }) => {
+    expect(
+      booksSaveErrorText(error, SAVE_FALLBACK, BOOKS_SAVE_CONFLICT_MESSAGE),
+    ).toBe(expected);
+  });
 
   it("keeps the too-large and conflict copies apart", () => {
     expect(

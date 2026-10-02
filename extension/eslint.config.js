@@ -24,18 +24,16 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/dialog/Onboarding.tsx": 281,
   "src/dialog/OverflowMenu.tsx": 214,
   "src/dialog/PatternLock.tsx": 255,
-  "src/dialog/PersonalShelf.tsx": 402,
+  "src/dialog/PersonalShelf.tsx": 400,
   "src/dialog/PublicShareDialog.tsx": 418,
   "src/dialog/VerificationPrompt.tsx": 211,
   "src/dialog/VerificationSettings.tsx": 304,
   "src/dialog/onboardingFlow.ts": 450,
-  "src/dialog/useAutoSetup.ts": 217,
   "src/dialog/useEndpointSwitch.ts": 234,
-  "src/dialog/usePersonalBooks.ts": 248,
   "src/dialog/usePublicShelfActions.ts": 286,
   "src/dialog/useReauth.ts": 205,
   "src/dialog/useVerificationPrompt.ts": 345,
-  "src/sync/syncBooks.ts": 211,
+  "src/sync/syncBooks.ts": 210,
 };
 
 export default tseslint.config(

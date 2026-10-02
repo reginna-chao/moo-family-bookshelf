@@ -12,6 +12,11 @@ import {
   BOOKS_CONFLICT_CODE,
   booksSaveErrorText,
 } from "moo-family-bookshelf-shared/personal/saveErrors";
+// `safeText` keeps a read string byte-identical, so the read value goes back unchanged.
+import {
+  expectedLastUpdatedOf,
+  landedLastUpdatedOf,
+} from "moo-family-bookshelf-shared/personal/fullPutConflict";
 import { mergeBooks } from "./mergeBooks";
 import type { RenamedBook } from "./renamedBooks";
 import { loadSavedBooksForSync, type LoadSavedResult } from "./savedBooks";
@@ -37,9 +42,11 @@ export interface SyncUploadContext {
 export interface SyncUploadResult {
   books: BookEntry[];
   renamedBooks: RenamedBook[];
+  /** The stored record's `lastUpdated` the landed PUT answered; undefined when the PUT response carries no usable `lastUpdated`. */
+  lastUpdated?: string;
 }
 
-interface SyncUpload extends SyncUploadResult {
+interface SyncUpload extends Omit<SyncUploadResult, "lastUpdated"> {
   record: PersonalBooks & { expectedLastUpdated?: string };
 }
 
@@ -54,13 +61,6 @@ export async function fetchSavedBooksForSync(
   const saved = loadSavedBooksForSync(response);
   assertSyncNotPaused(saved.books, ctx.scrapedIds, ctx.scrape.archiveCovered);
   return saved;
-}
-
-// The read `lastUpdated`, unchanged (`safeText` keeps a string byte-identical and
-// turns a non-string into ""); undefined for no record or an empty value.
-function expectedLastUpdatedOf(saved: LoadSavedResult): string | undefined {
-  const value = saved.raw?.lastUpdated;
-  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 /** Merge, id-change resolution and the upload record for one read. Writes nothing. */
@@ -84,14 +84,15 @@ function buildSyncUpload(
     books,
     lastUpdated: new Date().toISOString(),
     // Undefined is dropped by JSON.stringify, so no precondition is sent.
-    expectedLastUpdated: expectedLastUpdatedOf(saved),
+    expectedLastUpdated: expectedLastUpdatedOf(saved.raw),
   };
   return { record, books, renamedBooks };
 }
 
 /**
  * PUT the merged list, re-reading and rebuilding on `BOOKS_CONFLICT` up to `MAX_SYNC_UPLOAD_ATTEMPTS`
- * PUTs; any other error or a last-attempt conflict throws. Returns the attempt that landed.
+ * PUTs; any other error or a last-attempt conflict throws. Returns the attempt that landed,
+ * with the stamp its PUT answered (the dialog's next precondition).
  */
 export async function uploadSyncBooksRereadingOnConflict(
   ctx: SyncUploadContext,
@@ -104,7 +105,10 @@ export async function uploadSyncBooksRereadingOnConflict(
       ctx.userId,
       record,
     );
-    if (!response.error) return { books, renamedBooks };
+    if (!response.error) {
+      const lastUpdated = landedLastUpdatedOf(response.data);
+      return { books, renamedBooks, lastUpdated };
+    }
     const retry =
       response.error.code === BOOKS_CONFLICT_CODE &&
       attempt < MAX_SYNC_UPLOAD_ATTEMPTS;

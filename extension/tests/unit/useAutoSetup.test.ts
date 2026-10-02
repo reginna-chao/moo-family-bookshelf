@@ -22,7 +22,11 @@ import { scrapeUserEmail } from "@/content/scraper";
 import { mergeBooks } from "@/dialog/mergeBooks";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { LAST_SYNC_AT_KEY } from "@/constants";
-import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/saveErrors";
+import {
+  BOOKS_CONFLICT_MESSAGE,
+  BOOKS_SAVE_CONFLICT_MESSAGE,
+  BOOKS_TOO_LARGE_MESSAGE,
+} from "moo-family-bookshelf-shared/personal/saveErrors";
 import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
 
 /** Return the value written to LAST_SYNC_AT_KEY across all storage.set calls, or undefined. */
@@ -223,6 +227,79 @@ describe("useAutoSetup", () => {
       expect(result.current.phase).toBe("error");
       expect(result.current.errorMessage).toBe(BOOKS_TOO_LARGE_MESSAGE);
       expect(result.current.errorMessage).not.toContain("Request body exceeds");
+    });
+
+    /**
+     * #259: the onboarding PUT carries the read `lastUpdated`; a `BOOKS_CONFLICT`
+     * re-reads and re-PUTs (at most 3 PUTs), then ends in the error phase with
+     * the SYNC conflict wording. Retry detail: dialog/onboardingBooksUpload.test.ts.
+     */
+    const CONFLICT = {
+      error: {
+        code: "BOOKS_CONFLICT",
+        message: "Books record changed since it was read",
+      },
+    };
+    const stamped = (lastUpdated: string) => ({
+      data: { books: [], lastUpdated },
+    });
+
+    it("re-reads and lands the onboarding upload after a conflict", async () => {
+      const mockApi = {
+        getPersonalBooks: vi
+          .fn()
+          .mockResolvedValueOnce(stamped("read-1"))
+          .mockResolvedValueOnce(stamped("read-2")),
+        updatePersonalBooks: vi
+          .fn()
+          .mockResolvedValueOnce(CONFLICT)
+          .mockResolvedValueOnce({ data: { ok: true } }),
+      } as unknown as ApiClient;
+      const { result } = renderHook(() => useAutoSetup());
+
+      let success = false;
+      const promise = act(async () => {
+        success = await result.current.syncBooks({
+          userId: "user-hash",
+          apiClient: mockApi,
+        });
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+
+      expect(success).toBe(true);
+      expect(result.current.phase).toBe("done");
+      const puts = vi.mocked(mockApi.updatePersonalBooks).mock.calls;
+      expect(puts.map(([, body]) => body.expectedLastUpdated)).toEqual([
+        "read-1",
+        "read-2",
+      ]);
+      expect(typeof lastSyncWrittenValue()).toBe("number");
+    });
+
+    it("ends in the error phase with the sync conflict copy after 3 conflicted PUTs", async () => {
+      const mockApi = {
+        getPersonalBooks: vi.fn().mockResolvedValue(stamped("read")),
+        updatePersonalBooks: vi.fn().mockResolvedValue(CONFLICT),
+      } as unknown as ApiClient;
+      const { result } = renderHook(() => useAutoSetup());
+
+      let success = true;
+      const promise = act(async () => {
+        success = await result.current.syncBooks({
+          userId: "user-hash",
+          apiClient: mockApi,
+        });
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+
+      expect(success).toBe(false);
+      expect(result.current.phase).toBe("error");
+      expect(mockApi.updatePersonalBooks).toHaveBeenCalledTimes(3);
+      expect(result.current.errorMessage).toBe(BOOKS_CONFLICT_MESSAGE);
+      expect(result.current.errorMessage).not.toBe(BOOKS_SAVE_CONFLICT_MESSAGE);
+      expect(lastSyncWrittenValue()).toBeUndefined();
     });
 
     it("does NOT write LAST_SYNC_AT_KEY when scraping throws", async () => {
