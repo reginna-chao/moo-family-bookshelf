@@ -16,7 +16,12 @@ import {
 } from "vitest";
 import { SYNC_CODE_HOST_SETTLE_DELAY_MS } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { Onboarding, OnboardingProps } from "@/dialog/Onboarding";
-import { BoolFlag, validateEndpointUrl, type ApiClient } from "@/api/client";
+import {
+  BoolFlag,
+  validateEndpointUrl,
+  type ApiClient,
+  type BookEntry,
+} from "@/api/client";
 import { scrapeUserEmail } from "@/content/scraper";
 import {
   API_ENDPOINT_KEY,
@@ -28,6 +33,7 @@ import {
 } from "@/constants";
 import { encodeSyncCode } from "@/crypto/syncCode";
 import { verificationLockedMessage } from "@/dialog/verificationMessages";
+import { encodePersonalBooksCache } from "@/dialog/personalBooksCache";
 import { NO_HOST_CODE, SPOOFED_CODE } from "../helpers/syncCodeHostFixtures";
 
 import { webcrypto } from "node:crypto";
@@ -768,18 +774,26 @@ describe("Onboarding", () => {
   });
 
   describe("personalBooksCache migration", () => {
-    const cachedBooks = [
+    const cachedBooks: BookEntry[] = [
       {
         bookId: "book-cached-1",
         title: "快取書籍一",
         author: "作者X",
+        isbn: "",
         coverUrl: "https://example.com/cached1.jpg",
         readmooUrl: "https://readmoo.com/book/book-cached-1",
+        category: "",
         isShared: BoolFlag.TRUE,
       },
     ];
 
-    function setupCacheMock(cache: unknown[] | null) {
+    // The userId the deriveUserId mock at the top of this file resolves to.
+    const ONBOARDING_USER_ID = "a".repeat(64);
+
+    function setupCacheMock(
+      cache: BookEntry[] | null,
+      owner: string = ONBOARDING_USER_ID,
+    ) {
       vi.mocked(chrome.storage.local.get).mockImplementation(
         (
           keys: unknown,
@@ -792,7 +806,10 @@ describe("Onboarding", () => {
               : [];
           const result: Record<string, unknown> = {};
           if (cache && keyArr.includes(PERSONAL_BOOKS_CACHE_KEY)) {
-            result[PERSONAL_BOOKS_CACHE_KEY] = JSON.stringify(cache);
+            result[PERSONAL_BOOKS_CACHE_KEY] = encodePersonalBooksCache(
+              owner,
+              cache,
+            );
           }
           if (typeof callback === "function") {
             callback(result);
@@ -837,10 +854,10 @@ describe("Onboarding", () => {
       // The exact userId is the mocked deriveUserId value — this also proves the
       // module-level hash mock above really intercepts the production import.
       expect(mockApi.updatePersonalBooks).toHaveBeenCalledWith(
-        "a".repeat(64), // userId (from the mocked deriveUserId)
+        ONBOARDING_USER_ID, // userId (from the mocked deriveUserId)
         expect.objectContaining({
           schemaVersion: 1,
-          books: expect.any(Array),
+          books: cachedBooks,
         }),
       );
 
@@ -892,10 +909,10 @@ describe("Onboarding", () => {
 
       // Migration should have uploaded cached books
       expect(mockApi.updatePersonalBooks).toHaveBeenCalledWith(
-        expect.any(String), // userId (hashed)
+        ONBOARDING_USER_ID,
         expect.objectContaining({
           schemaVersion: 1,
-          books: expect.any(Array),
+          books: cachedBooks,
         }),
       );
 
@@ -939,6 +956,44 @@ describe("Onboarding", () => {
 
       // updatePersonalBooks should NOT have been called for migration
       expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
+    });
+
+    it("never uploads a cache another account left behind, and deletes it (#272)", async () => {
+      const mockApi = createMockApiClient({
+        createFamily: vi.fn().mockResolvedValue({
+          data: {
+            familyId: "fam-foreign-cache",
+            members: ["user-1"],
+            createdAt: "2026-01-01",
+            authToken: "auth-token-foreign",
+          },
+        }),
+      });
+
+      // Same seed as the "migrates" cases above, but owned by another account.
+      setupCacheMock(cachedBooks, "f".repeat(64));
+
+      renderOnboarding({ apiClient: mockApi });
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByText("建立家庭公開書櫃")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("建立家庭公開書櫃"));
+        await flushMicrotasks();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
+      });
+
+      expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+        PERSONAL_BOOKS_CACHE_KEY,
+      ]);
     });
 
     it("cleans up cache even when migration fails", async () => {

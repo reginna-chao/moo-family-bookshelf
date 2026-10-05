@@ -1466,7 +1466,11 @@ function lastCachedBooks(): BookEntry[] | undefined {
   const last = writes.at(-1);
   return last === undefined
     ? undefined
-    : (JSON.parse(last[PERSONAL_BOOKS_CACHE_KEY] as string) as BookEntry[]);
+    : (
+        JSON.parse(last[PERSONAL_BOOKS_CACHE_KEY] as string) as {
+          books: BookEntry[];
+        }
+      ).books;
 }
 
 /** A PATCH whose FIRST call stays pending until `release()`; later calls succeed. */
