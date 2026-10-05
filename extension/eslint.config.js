@@ -14,10 +14,10 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/api/auth-refresh.ts": 425,
   "src/api/client.ts": 866,
   "src/background/messageHandlers.ts": 301,
-  "src/content/index.ts": 583,
+  "src/content/index.ts": 560,
   "src/content/mobileLayout.ts": 292,
   "src/content/readmoo-lend.ts": 423,
-  "src/dialog/App.tsx": 484,
+  "src/dialog/App.tsx": 479,
   "src/dialog/BorrowTab.tsx": 475,
   "src/dialog/FamilyShelf.tsx": 215,
   "src/dialog/MemberList.tsx": 401,
@@ -33,7 +33,7 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/dialog/usePublicShelfActions.ts": 286,
   "src/dialog/useReauth.ts": 205,
   "src/dialog/useVerificationPrompt.ts": 345,
-  "src/sync/syncBooks.ts": 210,
+  "src/sync/syncBooks.ts": 208,
 };
 
 export default tseslint.config(

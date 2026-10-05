@@ -3171,6 +3171,31 @@
   margin-top: 8px;
 }
 
+/* ── AccountMismatchScreen ────────────────────────────────────────────────
+   Reuses the .moo-family-gone-notice box (amber, informational: nothing was
+   changed). Only the heading, the hint and the reset-failure line live here. */
+.moo-account-mismatch__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moo-text-strong);
+  line-height: 1.5;
+  margin: 0 0 4px;
+}
+
+.moo-account-mismatch__hint {
+  font-size: 12px;
+  color: var(--moo-text-muted);
+  line-height: 1.5;
+  margin: 4px 0 0;
+}
+
+.moo-account-mismatch__error {
+  font-size: 12px;
+  color: var(--moo-danger-alt);
+  line-height: 1.5;
+  margin: 4px 0 0;
+}
+
 /* ── DisplayNameEditor ────────────────────────────────────────────────── */
 
 .moo-name-editor {

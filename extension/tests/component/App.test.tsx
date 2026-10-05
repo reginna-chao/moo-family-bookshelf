@@ -56,6 +56,15 @@ vi.mock("@/dialog/DialogFooter", () => ({
   DialogFooter: () => <div data-testid="dialog-footer">footer</div>,
 }));
 
+// The boot-time Readmoo account check (#271) navigates to `#/me` and waits
+// 1500ms; here it is the confirmed account, so the boot reaches the main view
+// exactly as before. The check itself: tests/component/AppAccountCheck.test.tsx.
+vi.mock("@/dialog/accountIdentityCheck", () => ({
+  checkAccountIdentity: vi.fn().mockResolvedValue("match"),
+  markAccountConfirmed: vi.fn(),
+  forgetAccountConfirmation: vi.fn(),
+}));
+
 vi.mock("@/constants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/constants")>();
   return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };

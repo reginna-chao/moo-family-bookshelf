@@ -5,17 +5,18 @@ import { ApiClient, BorrowStatus } from "../api/client";
 import {
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
-  TOKEN_EXPIRES_AT_KEY,
-  FAMILY_ID_KEY,
   HAS_COMPLETED_INITIAL_SETUP_KEY,
   DEFAULT_API_ENDPOINT,
 } from "../constants";
 import { readFamilyId } from "../storage/familyId";
-import {
-  readStoredApiEndpoint,
-  resetFamilyEndpointChoice,
-} from "../storage/familyEndpointChoice";
+import { readStoredApiEndpoint } from "../storage/familyEndpointChoice";
 import { safeStorageGet } from "../storage/safeStorage";
+import { applyStoredEndpoint } from "./applyStoredEndpoint";
+import { clearStoredFamilyBinding } from "./familyBindingReset";
+import { checkAccountIdentity } from "./accountIdentityCheck";
+import { useAccountGate } from "./useAccountGate";
+import { AccountCheckProvider } from "./AccountCheckContext";
+import { AccountMismatchScreen } from "./AccountMismatchScreen";
 import { familyGoneNoticeText } from "./familyGoneNotice";
 import { Onboarding } from "./Onboarding";
 import { PersonalShelf } from "./PersonalShelf";
@@ -32,7 +33,7 @@ import { VersionWarning } from "./VersionWarning";
 import { LoadingState } from "./LoadingState";
 import { useIsMobile } from "../hooks/useIsMobile";
 
-export type View = "loading" | "onboarding" | "main";
+export type View = "loading" | "onboarding" | "main" | "account-mismatch";
 type Tab = "family-shelf" | "personal-shelf" | "borrow" | "settings";
 
 interface AppProps {
@@ -68,6 +69,12 @@ export function App({
   // automatically, without a manual "重試" tap.
   const [reloadSignal, setReloadSignal] = useState(0);
   const apiClientRef = useRef(new ApiClient());
+  // A teardown or join landing during the boot account check beats its result.
+  const bootSupersededRef = useRef(false);
+  // A late manual-sync mismatch may only leave the main view, never override another.
+  const { accountCheck, settleAccount } = useAccountGate(userId, () =>
+    setView((v) => (v === "main" ? "account-mismatch" : v)),
+  );
 
   // Proactive token refresh — runs regardless of view state
   useTokenRefresh(apiClientRef.current);
@@ -88,13 +95,10 @@ export function App({
   useEffect(() => {
     const client = apiClientRef.current;
     client.onFamilyRemoved = (info) => {
+      bootSupersededRef.current = true;
       client.setAuthToken(null);
-      // Live-client half of the endpoint restore; the storage half already ran
-      // inside clearFamilyStorageAndBroadcast(). Being removed ends the
-      // membership exactly like leaving it (see handleLeaveFamily): the endpoint
-      // is FAMILY-scoped, and a client still pointed at the ex-family's server
-      // would hand the next create/join its userId, token and whole book list —
-      // and bake that host into the sync code it then hands out.
+      // Endpoint is family-scoped, as in handleLeaveFamily (storage half ran in
+      // clearFamilyStorageAndBroadcast); the old server must not get the next join.
       client.setEndpoint(DEFAULT_API_ENDPOINT);
       setFamilyId(null);
       setUserId(null);
@@ -115,13 +119,10 @@ export function App({
       return;
     }
 
-    // Load familyId, userId, and the accepted API endpoint on mount — all three
-    // from DIRECT storage reads. Message round-trips are unreliable in Firefox,
-    // whose non-persistent background event page sleeps; the endpoint used to
-    // go through GET_API_ENDPOINT and silently fall back to the default, which
-    // booted the dialog on the wrong backend for a member who had accepted a
-    // custom one.
+    // familyId, userId and endpoint come from DIRECT storage reads: background
+    // messages are unreliable in Firefox (its event page sleeps).
     let cancelled = false;
+    const identityCheck = new AbortController();
     void (async () => {
       try {
         const [familyId, storageResult, storedEndpoint] = await Promise.all([
@@ -129,7 +130,7 @@ export function App({
           browser.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY]),
           readStoredApiEndpoint(),
         ]);
-        if (cancelled) return;
+        if (cancelled || bootSupersededRef.current) return;
 
         applyStoredEndpoint(apiClientRef.current, storedEndpoint);
         if (storageResult[AUTH_TOKEN_KEY]) {
@@ -138,9 +139,17 @@ export function App({
           );
         }
         if (familyId && storageResult[USER_ID_KEY]) {
+          // Stays "loading" until the page's Readmoo account is checked (#271).
+          const storedUserId = storageResult[USER_ID_KEY] as string;
+          const identity = await checkAccountIdentity(
+            storedUserId,
+            identityCheck.signal,
+          );
+          if (cancelled || bootSupersededRef.current) return;
+          settleAccount(identity, storedUserId);
           setFamilyId(familyId);
-          setUserId(storageResult[USER_ID_KEY] as string);
-          setView("main");
+          setUserId(storedUserId);
+          setView(identity === "mismatch" ? "account-mismatch" : "main");
         } else {
           setView("onboarding");
         }
@@ -148,14 +157,15 @@ export function App({
         // Background asleep/unavailable or storage read failed after the
         // context-valid guard passed. Don't leave `view` stuck on "loading";
         // fall back to onboarding so the UI stays interactive.
-        if (cancelled) return;
+        if (cancelled || bootSupersededRef.current) return;
         setView("onboarding");
       }
     })();
     return () => {
       cancelled = true;
+      identityCheck.abort();
     };
-  }, []);
+  }, [settleAccount]);
 
   // Report the current view to the host so it can adapt the dialog container's
   // layout (only "main" uses a fixed desktop height; other views fit content).
@@ -164,6 +174,9 @@ export function App({
   }, [view, onViewChange]);
 
   const handleFamilyJoined = (id: string, newUserId: string) => {
+    bootSupersededRef.current = true;
+    // Onboarding derived newUserId from the account on this page just now.
+    settleAccount("match", newUserId);
     setFamilyId(id);
     setUserId(newUserId);
     // A fresh family supersedes the explanation of the previous one's teardown.
@@ -182,33 +195,23 @@ export function App({
   };
 
   const handleLeaveFamily = () => {
-    // CLEAR_FAMILY_ID can fail in Firefox (sleeping background event page), so
-    // also clear familyId + auth credentials DIRECTLY from storage to guarantee
-    // Unbind Isolation (no leftover familyId/token readable after leave).
-    void browser.runtime.sendMessage({ type: "CLEAR_FAMILY_ID" });
-    void browser.storage.local.remove([
-      FAMILY_ID_KEY,
-      AUTH_TOKEN_KEY,
-      TOKEN_EXPIRES_AT_KEY,
-    ]);
-    // The API endpoint is a FAMILY-scoped setting — the owner picks it, every
-    // member adopts it — so it must not outlive the membership. Reset the stored
-    // choice AND the live client: a family-less client still pointed at the old
-    // family's server would send the next create/join (userId, display name, the
-    // token that server issues, the whole personal book list) there, and would
-    // bake that host into the sync code it then hands out. Account deletion
-    // reaches this same handler after a storage.local.clear(), where the storage
-    // half is simply a no-op.
-    void resetFamilyEndpointChoice();
+    bootSupersededRef.current = true;
+    // Storage half (direct removal + endpoint choice): see familyBindingReset.ts.
+    // Account deletion reaches here after storage.local.clear(): a no-op then.
+    clearStoredFamilyBinding().catch((err: unknown) => {
+      console.warn("[App] Leave: local family cleanup failed", err);
+    });
+    // The endpoint is family-scoped; the live client must not keep the old one.
     apiClientRef.current.setEndpoint(DEFAULT_API_ENDPOINT);
-    void (async () => {
-      try {
-        await browser.storage.sync.remove(FAMILY_ID_KEY);
-      } catch {
-        // sync storage may be unavailable (e.g. Firefox without sync)
-      }
-    })();
     setFamilyId(null);
+    setActiveTab("family-shelf");
+    setView("onboarding");
+  };
+
+  const handleAccountForgotten = () => {
+    setFamilyId(null);
+    setUserId(null);
+    setFamilyGoneNotice(null);
     setActiveTab("family-shelf");
     setView("onboarding");
   };
@@ -220,6 +223,15 @@ export function App({
 
   if (view === "loading") {
     return <LoadingState message="載入中..." />;
+  }
+
+  if (view === "account-mismatch") {
+    return (
+      <AccountMismatchScreen
+        apiClient={apiClientRef.current}
+        onAccountForgotten={handleAccountForgotten}
+      />
+    );
   }
 
   if (view === "onboarding") {
@@ -254,7 +266,7 @@ export function App({
   }
 
   return (
-    <>
+    <AccountCheckProvider value={accountCheck}>
       <FamilyDataProvider
         familyId={familyId}
         userId={userId}
@@ -274,7 +286,7 @@ export function App({
       {reauth.active && (
         <ReauthModal apiClient={apiClientRef.current} reauth={reauth} />
       )}
-    </>
+    </AccountCheckProvider>
   );
 }
 
@@ -459,23 +471,6 @@ function MainContent({
       <DialogFooter />
     </div>
   );
-}
-
-/**
- * Point the client at the endpoint the user has accepted, if any.
- *
- * A stored value the client refuses (hand-edited storage, or written by an
- * older build with looser rules) must not derail the whole boot read into the
- * catch below — that would drop a member with a family into onboarding. Degrade
- * to the default endpoint instead.
- */
-function applyStoredEndpoint(client: ApiClient, endpoint: string | null): void {
-  if (endpoint === null) return;
-  try {
-    client.setEndpoint(endpoint);
-  } catch (err) {
-    console.warn("[App] Ignoring unusable stored API endpoint", err);
-  }
 }
 
 /** Class for a tab panel; only the active panel is displayed. */

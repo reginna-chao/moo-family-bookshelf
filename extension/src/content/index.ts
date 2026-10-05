@@ -5,12 +5,12 @@
  * 2. Mount the Dialog UI when button is clicked
  */
 
-// The scraper module is statically imported here (bundled into the content script IIFE)
-// and also imported by syncBooks.ts (bundled into the ESM content-sync module).
-// This intentional duplication is safe because the scraper is stateless — it only
-// reads DOM elements and returns data, with no shared mutable state.
+// The scraper module is statically imported (via ./profileCache, bundled into the
+// content script IIFE) and also by syncBooks.ts (bundled into the ESM content-sync
+// module). This intentional duplication is safe because the scraper is stateless —
+// it only reads DOM elements and returns data, with no shared mutable state.
 import browser from "webextension-polyfill";
-import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
+import { tryScrapeAndCacheEmail } from "./profileCache";
 import {
   isExtensionContextValid,
   cleanupMooFamilyUI,
@@ -34,8 +34,6 @@ import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   API_ENDPOINT_KEY,
-  USER_EMAIL_KEY,
-  DISPLAY_NAME_KEY,
 } from "../constants";
 import { BorrowStatus } from "../api/types";
 import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
@@ -491,27 +489,6 @@ function toggleDialog(): void {
       console.error("[MooFamily] Failed to load dialog module:", err);
       mountPoint.textContent = "載入失敗，請重新整理頁面再試。";
     });
-}
-
-/**
- * Opportunistically scrape user email when on the #/me page
- * and cache it in chrome.storage.local for later use.
- */
-function tryScrapeAndCacheEmail(): void {
-  if (!isExtensionContextValid()) return;
-  if (!location.hash.includes("/me")) return;
-
-  // Delay slightly to let React render the profile panel
-  setTimeout(() => {
-    const email = scrapeUserEmail();
-    if (!email) return;
-
-    const displayName = scrapeDisplayName() ?? "";
-    void browser.storage.local.set({
-      [USER_EMAIL_KEY]: email,
-      [DISPLAY_NAME_KEY]: displayName,
-    });
-  }, 1000);
 }
 
 let currentAbortController: AbortController | null = null;

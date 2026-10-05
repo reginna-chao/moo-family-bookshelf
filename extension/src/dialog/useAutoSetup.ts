@@ -1,11 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import browser from "webextension-polyfill";
-import {
-  scrapeUserEmail,
-  scrapeDisplayName,
-  scrapeBooks,
-  formatScrapeProgress,
-} from "../content/scraper";
+import { scrapeBooks, formatScrapeProgress } from "../content/scraper";
+import { navigateAndRun, readMePageProfile } from "../content/hashNavigation";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { ApiClient } from "../api/client";
 import { uploadOnboardingBooks } from "./onboardingBooksUpload";
@@ -26,26 +22,6 @@ const STATIC_PHASE_MESSAGES: Record<AutoSetupPhase, string> = {
   done: "完成！",
   error: "",
 };
-
-/** Delay in ms to wait for page render after hash navigation */
-const NAV_SETTLE_MS = 1500;
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Navigate the host SPA to a hash route, wait for render, then run a task.
- * Returns the result of the task function.
- */
-async function navigateAndRun<T>(
-  hash: string,
-  task: () => T | Promise<T>,
-): Promise<T> {
-  window.location.hash = hash;
-  await wait(NAV_SETTLE_MS);
-  return task();
-}
 
 export interface AutoSetupResult {
   email: string;
@@ -85,23 +61,18 @@ export function useAutoSetup(): UseAutoSetupReturn {
     setProgressMessage("");
   }, []);
 
+  // readMePageProfile restores the hash itself, on every path.
   const scrapeProfile =
     useCallback(async (): Promise<AutoSetupResult | null> => {
-      originalHashRef.current = window.location.hash;
       setPhase("scraping-profile");
       setErrorMessage("");
 
       try {
-        const result = await navigateAndRun("#/me", () => {
-          const email = scrapeUserEmail();
-          const displayName = scrapeDisplayName() ?? "";
-          return { email, displayName };
-        });
+        const result = await readMePageProfile();
 
         if (!result.email) {
           setErrorMessage("無法取得帳號信箱，請確認已登入讀墨帳號。");
           setPhase("error");
-          restoreHash();
           return null;
         }
 
@@ -110,7 +81,6 @@ export function useAutoSetup(): UseAutoSetupReturn {
           [DISPLAY_NAME_KEY]: result.displayName,
         });
 
-        restoreHash();
         setPhase("idle");
         return { email: result.email, displayName: result.displayName };
       } catch (err) {
@@ -118,10 +88,9 @@ export function useAutoSetup(): UseAutoSetupReturn {
           err instanceof Error ? err.message : "取得帳號資訊失敗",
         );
         setPhase("error");
-        restoreHash();
         return null;
       }
-    }, [restoreHash]);
+    }, []);
 
   const syncBooks = useCallback(
     async ({ userId, apiClient }: AutoBookSyncParams): Promise<boolean> => {
