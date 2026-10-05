@@ -27,6 +27,7 @@ import {
 } from "@/dialog/onboardingFlow";
 import { decodeSyncCode } from "@/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
+import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
 import type { ApiClient } from "@/api/client";
 import type { useAutoSetup } from "@/dialog/useAutoSetup";
 import {
@@ -406,6 +407,56 @@ describe("performJoin", () => {
       ok: false,
       errorCode: "VERIFICATION_REQUIRED",
       errorMessage: "此帳號需要驗證才能登入",
+    });
+  });
+
+  /**
+   * #270: a removed member's refused join says how long the block lasts, in
+   * the client's own copy — the server message does not carry the 6 hours.
+   */
+  it("replaces the server message with the rejoin-wait copy for MEMBER_REMOVED", async () => {
+    const apiClient = createMockApiClient({
+      joinFamily: vi.fn().mockResolvedValue({
+        error: { code: "MEMBER_REMOVED", message: "你已被家庭管理者移出" },
+      }),
+    });
+
+    const result = await performJoin({
+      syncCodeInput: "moo-fam-join-1",
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: "MEMBER_REMOVED",
+      errorMessage: REMOVED_JOIN_TEXT,
+    });
+    // Literal pin of the shared copy this production site returns.
+    expect(REMOVED_JOIN_TEXT).toBe(
+      "你已被家庭管理者移出這個家庭，移除後 6 小時內無法重新加入。",
+    );
+  });
+
+  it("keeps the server message for a refused join other than MEMBER_REMOVED", async () => {
+    const apiClient = createMockApiClient({
+      joinFamily: vi.fn().mockResolvedValue({
+        error: { code: "FAMILY_FULL", message: "家庭成員已達上限" },
+      }),
+    });
+
+    const result = await performJoin({
+      syncCodeInput: "moo-fam-join-1",
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: "FAMILY_FULL",
+      errorMessage: "家庭成員已達上限",
     });
   });
 

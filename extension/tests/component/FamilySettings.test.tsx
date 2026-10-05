@@ -16,12 +16,17 @@ import {
 } from "@/dialog/UnkickNotice";
 import { BoolFlag, validateEndpointUrl, type ApiClient } from "@/api/client";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
+import { REJOIN_WAIT_NOTE } from "moo-family-bookshelf-shared/unkick/messages";
 import {
   API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
   DEFAULT_API_ENDPOINT,
   DISPLAY_NAME_KEY,
 } from "@/constants";
+
+// Remove-confirm question + shared rejoin-wait note, rendered in one element.
+// Literal pin: tests/component/MemberList.test.tsx → "rejoin-wait note".
+const REMOVE_CONFIRM_TEXT = `確定要移除此成員？${REJOIN_WAIT_NOTE}`;
 
 // FamilySettings mounts InviteQrCode, which does a real `await import("qrcode")`
 // plus a PNG encode on every mount (its effect keys on [inviteUrl], so it reruns
@@ -419,7 +424,7 @@ describe("FamilySettings", () => {
     fireEvent.click(screen.getByText("移除"));
 
     await waitFor(() => {
-      expect(screen.getByText("確定要移除此成員？")).toBeInTheDocument();
+      expect(screen.getByText(REMOVE_CONFIRM_TEXT)).toBeInTheDocument();
       expect(screen.getByText("確定")).toBeInTheDocument();
     });
   });
@@ -586,7 +591,7 @@ describe("FamilySettings", () => {
     fireEvent.click(screen.getByText("移除"));
 
     await waitFor(() => {
-      expect(screen.getByText("確定要移除此成員？")).toBeInTheDocument();
+      expect(screen.getByText(REMOVE_CONFIRM_TEXT)).toBeInTheDocument();
     });
 
     // Find the cancel button inside the MemberList confirmation (not the leave cancel)
@@ -594,7 +599,7 @@ describe("FamilySettings", () => {
     fireEvent.click(cancelButtons[0]);
 
     await waitFor(() => {
-      expect(screen.queryByText("確定要移除此成員？")).not.toBeInTheDocument();
+      expect(screen.queryByText(REMOVE_CONFIRM_TEXT)).not.toBeInTheDocument();
     });
   });
 

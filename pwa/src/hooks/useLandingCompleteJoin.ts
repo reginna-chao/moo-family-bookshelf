@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
+import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
 import type { ApiClient, VerifyMethod } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
 import { isUnsafeApiHost, UNSAFE_API_HOST_ERROR } from "@/utils/apiHostGuard";
@@ -100,6 +101,9 @@ export function useLandingCompleteJoin({
           // JOIN_BLOCKED_MESSAGES, which is built from this constant), so the
           // two join paths cannot report a full family differently.
           setGeneralError(FAMILY_FULL_MESSAGE);
+        } else if (code === "MEMBER_REMOVED") {
+          // Shared with the Extension so both say how long the rejoin is refused.
+          setGeneralError(REMOVED_JOIN_TEXT);
         } else if (
           code === "VERIFICATION_REQUIRED" ||
           code === "VERIFICATION_FAILED"

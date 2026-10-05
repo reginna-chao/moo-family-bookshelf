@@ -15,6 +15,8 @@
  * production literals instead of asserting on their own copies of them.
  */
 
+import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
+
 /**
  * Reason text per family-gone error code.
  *
@@ -33,7 +35,7 @@ export const FAMILY_GONE_NOTICE_MESSAGES: ReadonlyMap<string, string> = new Map(
   [
     [
       "MEMBER_REMOVED",
-      "你已被家庭管理者移出家庭。如要繼續使用，可重新建立或加入家庭。",
+      `${REMOVED_JOIN_TEXT}如要繼續使用，可以建立新家庭或加入其他家庭。`,
     ],
     [
       "FAMILY_NOT_FOUND",

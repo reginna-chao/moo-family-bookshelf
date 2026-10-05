@@ -27,7 +27,7 @@ const HINT_TEXT = "解除後對方仍需自行輸入同步碼加入，不會自�
  * reword would go unnoticed. These are asserted against the real render site.
  * Source: shared/src/unkick/messages.ts (buildRemovedNoticeText / buildUnkickedNoticeText)
  */
-const REMOVED_TEXT = `已移除 ${DISPLAY_NAME}。若為誤移除，可解除限制讓對方重新加入。`;
+const REMOVED_TEXT = `已移除 ${DISPLAY_NAME}，對方 6 小時內無法用同步碼重新加入。如果是誤移除，可以在這裡解除限制；關閉這則通知或離開這個畫面後，就無法再解除。`;
 const UNKICKED_TEXT = `已解除限制，${DISPLAY_NAME} 可重新使用同步碼加入（可能需要約一分鐘生效）`;
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {

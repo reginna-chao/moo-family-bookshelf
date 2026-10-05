@@ -13,7 +13,7 @@ const MAX_LINES = 200;
 const MAX_LINES_LEGACY_CEILINGS = {
   "src/App.tsx": 377,
   "src/api/client.ts": 704,
-  "src/components/MemberList.tsx": 310,
+  "src/components/MemberList.tsx": 309,
   "src/components/PatternLock.tsx": 285,
   "src/components/PublicShareDialog.tsx": 324,
   "src/components/VerifySetupPrompt.tsx": 269,

@@ -10,10 +10,17 @@ import {
 import { MemberList } from "@/components/MemberList";
 import { buildRemovedNoticeText } from "@/components/UnkickNotice";
 import { ApiError, BoolFlag, type ApiClient } from "@/api/client";
+import { REJOIN_WAIT_NOTE } from "moo-family-bookshelf-shared/unkick/messages";
 import {
   buildRetryMessage,
   buildStaticRetryMessage,
 } from "@/utils/retryMessage";
+
+/**
+ * Remove-confirm question for 小明 + the shared rejoin-wait note, rendered in
+ * one element. Literal pin: the "rejoin-wait note" suite below.
+ */
+const REMOVE_CONFIRM_TEXT = `確定要移除成員 小明？${REJOIN_WAIT_NOTE}`;
 
 const mockRemoveMember = vi.fn();
 const mockTransferOwnership = vi.fn();
@@ -105,7 +112,7 @@ describe("MemberList", () => {
     fireEvent.click(removeButtons[0]);
 
     // Confirm dialog appears
-    expect(screen.getByText("確定要移除成員 小明？")).toBeInTheDocument();
+    expect(screen.getByText(REMOVE_CONFIRM_TEXT)).toBeInTheDocument();
 
     // Click 確定
     fireEvent.click(screen.getByRole("button", { name: "確定" }));
@@ -153,6 +160,43 @@ describe("MemberList", () => {
     });
     await waitFor(() => {
       expect(defaultProps.onMembersChanged).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #270: removing a member blocks their sync-code rejoin for 6 hours, so the
+   * owner's remove confirmation says so. Transfer has no such block.
+   */
+  describe("rejoin-wait note", () => {
+    it("pins the exact remove question with the 6-hour note at the render site", () => {
+      render(
+        <MemberList {...defaultProps} userId={OWNER_ID} ownerId={OWNER_ID} />,
+      );
+
+      fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]);
+
+      expect(
+        screen.getByText(
+          "確定要移除成員 小明？移除後，對方 6 小時內無法用同步碼重新加入。",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("leaves the note out of the transfer confirmation", () => {
+      render(
+        <MemberList {...defaultProps} userId={OWNER_ID} ownerId={OWNER_ID} />,
+      );
+
+      fireEvent.click(screen.getAllByRole("button", { name: "轉移管理權" })[0]);
+
+      // Positive companion: the transfer question really is on screen.
+      expect(
+        screen.getByText(/確定要將管理權轉移給 小明？/),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/6 小時/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(REJOIN_WAIT_NOTE, { exact: false }),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -613,9 +657,7 @@ describe("MemberList", () => {
       expect(onMembersChanged).toHaveBeenCalledTimes(1);
       // Confirm closed, no error shown (the error node is role="alert", as
       // the hostile-envelope cases pin).
-      expect(
-        screen.queryByText("確定要移除成員 小明？"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText(REMOVE_CONFIRM_TEXT)).not.toBeInTheDocument();
       expect(
         screen.queryByText("目標使用者不是家庭成員"),
       ).not.toBeInTheDocument();
