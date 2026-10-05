@@ -12,6 +12,7 @@ import {
   PERSONAL_BOOKS_CACHE_KEY,
   PERSONAL_SHELF_SAVED_AT_KEY,
 } from "../constants";
+import { encodePersonalBooksCache } from "./personalBooksCache";
 import { settleSavedShelf } from "./syncedShelf";
 import { uploadPersonalShelf, type LandedSave } from "./personalShelfUpload";
 
@@ -98,7 +99,10 @@ export function useSavePersonalShelf(
       const rawBase = landed.usePut ? landed.raw : savedRawPayload.current;
       savedRawPayload.current = { ...rawBase, books: settled.serverBooks };
       void browser.storage.local.set({
-        [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(settled.baseline),
+        [PERSONAL_BOOKS_CACHE_KEY]: encodePersonalBooksCache(
+          userId,
+          settled.baseline,
+        ),
       });
       void browser.storage.local.set({
         [PERSONAL_SHELF_SAVED_AT_KEY]: Date.now(),
@@ -114,6 +118,7 @@ export function useSavePersonalShelf(
       markSaved();
     },
     [
+      userId,
       savedRawPayload,
       originalBooks,
       dirtyRef,

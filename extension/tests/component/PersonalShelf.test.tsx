@@ -1215,7 +1215,11 @@ describe("PersonalShelf", () => {
       const cached = JSON.parse(
         (cacheCall![0] as Record<string, string>)[PERSONAL_BOOKS_CACHE_KEY],
       );
-      const book1 = cached.find((b: { bookId: string }) => b.bookId === BOOK_1);
+      // #272: the cache records which account it belongs to.
+      expect(cached.userId).toBe("user-abc123");
+      const book1 = cached.books.find(
+        (b: { bookId: string }) => b.bookId === BOOK_1,
+      );
       expect(book1).toBeDefined();
       expect(book1.isShared).toBe(BoolFlag.TRUE);
     });

@@ -3,6 +3,7 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { usePersonalBooks } from "@/dialog/usePersonalBooks";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
+import { readOwnedCachedBooks } from "@/dialog/personalBooksCache";
 import {
   BOOKS_CONFLICT_MESSAGE,
   BOOKS_SAVE_CONFLICT_MESSAGE,
@@ -213,15 +214,21 @@ async function save(result: Shelf): Promise<void> {
 const flagOf = (books: readonly BookEntry[] | undefined, id: string) =>
   books?.find((b) => b.bookId === id)?.isShared;
 
-function lastCachedBooks(): BookEntry[] | undefined {
+/** The raw string of the LAST personal-books cache write. */
+function lastCacheRaw(): string | undefined {
   const writes = vi
     .mocked(chrome.storage.local.set)
     .mock.calls.map(([items]) => items as Record<string, unknown>)
     .filter((items) => items !== null && PERSONAL_BOOKS_CACHE_KEY in items);
-  const last = writes.at(-1);
-  return last === undefined
+  return writes.at(-1)?.[PERSONAL_BOOKS_CACHE_KEY] as string | undefined;
+}
+
+/** The books of the LAST cache write (the cache is `{ userId, books }`, #272). */
+function lastCachedBooks(): BookEntry[] | undefined {
+  const raw = lastCacheRaw();
+  return raw === undefined
     ? undefined
-    : (JSON.parse(last[PERSONAL_BOOKS_CACHE_KEY] as string) as BookEntry[]);
+    : (JSON.parse(raw) as { books: BookEntry[] }).books;
 }
 
 describe("useSavePersonalShelf (via usePersonalBooks) — full-PUT save over a list changed elsewhere (#259)", () => {
@@ -311,6 +318,12 @@ describe("useSavePersonalShelf (via usePersonalBooks) — full-PUT save over a l
     expect(result.current.isDirty).toBe(false);
     expect(result.current.originalBooks.current).toEqual(landed);
     expect(lastCachedBooks()).toEqual(landed);
+    // #272: the cache is tagged with the saving account, so only it may migrate it.
+    expect(JSON.parse(lastCacheRaw()!)).toEqual({
+      userId: USER,
+      books: landed,
+    });
+    expect(readOwnedCachedBooks(lastCacheRaw()!, USER)).toEqual(landed);
     act(() => {
       result.current.handleCancel();
     });

@@ -3,14 +3,21 @@ import { migratePersonalBooksCache } from "@/dialog/personalBooksCacheMigration"
 import { migratePersonalBooksCache as reExported } from "@/dialog/onboardingFlow";
 import { BoolFlag, type ApiClient } from "@/api/client";
 import { DISPLAY_NAME_KEY, PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
+import { encodePersonalBooksCache } from "@/dialog/personalBooksCache";
 
 /**
  * #236: the cache is uploaded ONLY when the server holds no record. An existing
  * record is authoritative (the cache may hold ids the server has replaced), and
  * a failed check must neither upload nor discard the cache.
+ *
+ * #272 (P0 privacy): the cache is uploaded ONLY for the account that owns it.
+ * Account A's cache left in the browser profile must never become account B's
+ * shelf when B onboards; a cache with another owner, or in the legacy ownerless
+ * bare-array format, is deleted without asking or writing to the server.
  */
 
 const USER_ID = "user-abc";
+const OTHER_USER_ID = "user-xyz";
 const CACHED = [
   {
     bookId: "210000000000001",
@@ -46,7 +53,7 @@ describe("migratePersonalBooksCache", () => {
     vi.clearAllMocks();
     await chrome.storage.local.clear();
     await chrome.storage.local.set({
-      [PERSONAL_BOOKS_CACHE_KEY]: JSON.stringify(CACHED),
+      [PERSONAL_BOOKS_CACHE_KEY]: encodePersonalBooksCache(USER_ID, CACHED),
       [DISPLAY_NAME_KEY]: "小明",
     });
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -112,6 +119,44 @@ describe("migratePersonalBooksCache", () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
     },
   );
+
+  describe("a cache that is not the onboarding account's (#272)", () => {
+    it("uploads the cache for the account that owns it (positive companion)", async () => {
+      const api = makeApi({ data: null });
+
+      await migratePersonalBooksCache(USER_ID, api);
+
+      expect(api.updatePersonalBooks).toHaveBeenCalledWith(
+        USER_ID,
+        expect.objectContaining({ userId: USER_ID, books: CACHED }),
+      );
+    });
+
+    it("never uploads another account's cache, and deletes it", async () => {
+      // Server answers "no record" — the exact state in which a cache is uploaded.
+      const api = makeApi({ data: null });
+
+      await migratePersonalBooksCache(OTHER_USER_ID, api);
+
+      expect(api.updatePersonalBooks).not.toHaveBeenCalled();
+      expect(api.getPersonalBooks).not.toHaveBeenCalled();
+      expect(await cacheStillThere()).toBe(false);
+    });
+
+    it.each([
+      { name: "the legacy bare-array format", raw: JSON.stringify(CACHED) },
+      { name: "malformed JSON", raw: "{not json" },
+    ])("never uploads a cache in $name, and deletes it", async ({ raw }) => {
+      await chrome.storage.local.set({ [PERSONAL_BOOKS_CACHE_KEY]: raw });
+      const api = makeApi({ data: null });
+
+      await migratePersonalBooksCache(USER_ID, api);
+
+      expect(api.updatePersonalBooks).not.toHaveBeenCalled();
+      expect(api.getPersonalBooks).not.toHaveBeenCalled();
+      expect(await cacheStillThere()).toBe(false);
+    });
+  });
 
   it("does nothing at all without a cache", async () => {
     await chrome.storage.local.clear();

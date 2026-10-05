@@ -1,11 +1,11 @@
 import browser from "webextension-polyfill";
 import {
   ApiClient,
-  BookEntry,
   PersonalBooks,
   PERSONAL_BOOKS_SCHEMA_VERSION,
 } from "../api/client";
 import { PERSONAL_BOOKS_CACHE_KEY, DISPLAY_NAME_KEY } from "../constants";
+import { readOwnedCachedBooks } from "./personalBooksCache";
 
 type ServerRecordState = "present" | "absent" | "unknown";
 
@@ -29,6 +29,7 @@ async function readServerRecordState(
  * and may hold ids the server has since replaced, so it is discarded instead
  * of overwriting the record. When the server cannot be checked, nothing is
  * uploaded and the cache is kept for a later attempt.
+ * A cache not owned by `userId` (or in the legacy format) is deleted, never uploaded.
  * Best-effort: failures do not block family create/join.
  */
 export async function migratePersonalBooksCache(
@@ -42,6 +43,11 @@ export async function migratePersonalBooksCache(
     ]);
     const raw = result[PERSONAL_BOOKS_CACHE_KEY] as string | undefined;
     if (!raw) return;
+    const cachedBooks = readOwnedCachedBooks(raw, userId);
+    if (cachedBooks === null) {
+      await browser.storage.local.remove([PERSONAL_BOOKS_CACHE_KEY]);
+      return;
+    }
 
     const serverRecord = await readServerRecordState(userId, apiClient);
     if (serverRecord === "unknown") {
@@ -57,7 +63,7 @@ export async function migratePersonalBooksCache(
         schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
         userId,
         displayName: storedDisplayName,
-        books: JSON.parse(raw) as BookEntry[],
+        books: cachedBooks,
         lastUpdated: new Date().toISOString(),
       };
       await apiClient.updatePersonalBooks(userId, personalBooks);
