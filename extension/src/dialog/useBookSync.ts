@@ -3,40 +3,24 @@
  * Provides:
  * - Auto-sync on personal-shelf mount (a full sync, rate limited by autoSyncInterval)
  * - Manual sync button handler (no rate limiting)
+ *
+ * Reads the account check from AccountCheckContext (issue #271): while the
+ * page's Readmoo account is unconfirmed, auto-sync is skipped and a manual sync
+ * re-checks first. With a confirmed account it behaves exactly as before.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ApiClient, BookEntry } from "../api/client";
-import {
-  syncBooks,
-  canAutoSync,
-  type SyncBooksResult,
-} from "../sync/syncBooks";
+import { syncBooks, canAutoSync } from "../sync/syncBooks";
 import type { RenamedBook } from "../sync/renamedBooks";
 import { formatScrapeProgress } from "../content/scraper";
+import { type LastSync, NO_SYNC, lastSyncOf } from "./lastSync";
+import {
+  ACCOUNT_UNCONFIRMED_SYNC_MESSAGE,
+  useAccountCheck,
+} from "./AccountCheckContext";
 
 export type SyncStatus = "idle" | "syncing" | "done" | "error";
-
-/** The last SUCCESSFUL sync, held as one value so its parts never mismatch. */
-interface LastSync {
-  books: BookEntry[];
-  renamedBooks: RenamedBook[];
-  renamedBookCount: number;
-  /** The `lastUpdated` this sync's own PUT stored; undefined when the PUT response carries none. */
-  lastUpdated?: string;
-}
-
-const NO_SYNC: LastSync = { books: [], renamedBooks: [], renamedBookCount: 0 };
-
-function lastSyncOf(result: SyncBooksResult): LastSync {
-  const renamedBooks = result.renamedBooks ?? [];
-  return {
-    books: result.books,
-    renamedBooks,
-    renamedBookCount: result.renamedBookCount ?? renamedBooks.length,
-    lastUpdated: result.lastUpdated,
-  };
-}
 
 export interface UseBookSyncOptions {
   userId: string;
@@ -88,6 +72,11 @@ export function useBookSync({
   familyIdRef.current = familyId;
   const onAutoReturnedRef = useRef(onAutoReturned);
   onAutoReturnedRef.current = onAutoReturned;
+  // Ref for the same reason: a status flip must not re-run the mount effect
+  // (a manual sync that just confirmed the account is already syncing).
+  const account = useAccountCheck();
+  const accountRef = useRef(account);
+  accountRef.current = account;
 
   useEffect(() => {
     return () => {
@@ -101,6 +90,8 @@ export function useBookSync({
   // (syncBooks restores the original hash afterwards), matching manual sync.
   useEffect(() => {
     if (autoSyncTriggered.current) return;
+    // Unconfirmed account: never upload without a click this page load.
+    if (accountRef.current.status !== "match") return;
     autoSyncTriggered.current = true;
 
     canAutoSync()
@@ -157,6 +148,17 @@ export function useBookSync({
     setSyncStatus("syncing");
     setSyncError("");
     setProgressMessage("");
+
+    if (accountRef.current.status !== "match") {
+      const identity = await accountRef.current.recheck();
+      if (identity === "unknown") {
+        setSyncError(ACCOUNT_UNCONFIRMED_SYNC_MESSAGE);
+        setSyncStatus("error");
+      }
+      // A mismatch swaps the Dialog to the blocking screen (this shelf unmounts).
+      if (identity === "mismatch") setSyncStatus("idle");
+      if (identity !== "match") return;
+    }
 
     const result = await syncBooks({
       navigate: true,

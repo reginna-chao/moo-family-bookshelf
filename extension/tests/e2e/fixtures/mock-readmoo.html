@@ -217,12 +217,22 @@
   </div>
 
   <script>
-    // Randomize email per page load to avoid KV collisions between test runs
+    // A random email avoids KV collisions between test runs, but it must stay the
+    // SAME account across reloads: the Dialog checks the logged-in account against
+    // the stored userId (#271), so a new email per load reads as an account switch.
+    // localStorage models the login cookie — shared by the browser context's tabs,
+    // and fresh per test because each test launches a new temporary profile.
     (function() {
       var emailEl = document.getElementById("mock-email");
-      if (emailEl) {
-        emailEl.textContent = "test-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6) + "@readmoo.com";
+      if (!emailEl) return;
+      var key = "moo-e2e-mock-email";
+      var email = null;
+      try { email = localStorage.getItem(key); } catch (e) {}
+      if (!email) {
+        email = "test-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6) + "@readmoo.com";
+        try { localStorage.setItem(key, email); } catch (e) {}
       }
+      emailEl.textContent = email;
     })();
 
     // SPA 路由：根據 hash 顯示對應頁面

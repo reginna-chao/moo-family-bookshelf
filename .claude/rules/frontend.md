@@ -75,8 +75,12 @@ shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pw
 ```
 Open Dialog → has family_id in chrome.storage?
   No  → Onboarding (create / join family)
-  Yes → Verify family → Main view (Family Shelf | Personal Shelf | Settings)
+  Yes → Check the Readmoo account on the page (#/me email → deriveUserId vs stored userId)
+          match / unknown → Verify family → Main view (Family Shelf | Personal Shelf | Settings)
+          mismatch        → Account-mismatch screen (nothing mounted; local reset → Onboarding)
 ```
+
+The account check (issue #271) is cached per page load (`dialog/accountIdentityCheck.ts`). While it is `unknown`, `useBookSync` skips the mount auto-sync and re-checks before a manual sync (`dialog/AccountCheckContext.ts`). Never compare against `USER_EMAIL_KEY`: it is a cache, not the identity.
 
 ### Commands
 
