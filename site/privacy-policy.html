@@ -191,7 +191,7 @@
   <body>
     <header class="header">
       <h1>隱私政策</h1>
-      <p class="subtitle">最後更新：2026-04-02</p>
+      <p class="subtitle">最後更新：2026-10-05</p>
       <a href="index.html" class="back-link">&larr; 回到首頁</a>
     </header>
 
@@ -254,12 +254,18 @@
         <h2>二、使用者識別方式</h2>
         <p>本擴充功能從讀墨「個人帳戶」頁面讀取您的 Email 地址。</p>
         <p>
+          本擴充功能也會從讀墨網站的登入 Cookie 讀取目前登入帳號的
+          Email，用來確認登入的仍是當初設定的帳號，說明見「七、Cookie 與追蹤」。
+        </p>
+        <p>
           Email 經過<strong>加入應用程式專屬前綴後進行 SHA-256 雜湊</strong
           >，轉為匿名的使用者識別碼（User ID），無法被反推回原始 Email。
         </p>
         <p>
-          <strong>原始 Email 永遠不會離開您的瀏覽器</strong>，僅儲存於本機
-          <code>chrome.storage.local</code>。
+          <strong>原始 Email 永遠不會離開您的瀏覽器</strong
+          >。從「個人帳戶」頁面讀到的 Email 只存放在本機
+          <code>chrome.storage.local</code>，從登入 Cookie 讀到的 Email
+          則不會儲存。
         </p>
         <p>伺服器只會收到雜湊後的匿名識別碼，無法反推出您的 Email。</p>
       </section>
@@ -333,7 +339,17 @@
       <!-- 七、Cookie 與追蹤 -->
       <section>
         <h2>七、Cookie 與追蹤</h2>
-        <p>本擴充功能<strong>不使用</strong> Cookie。</p>
+        <p>本擴充功能<strong>不會設定</strong>、也不會修改任何 Cookie。</p>
+        <p>
+          本擴充功能只讀取一個 Cookie：讀墨網站自己的登入
+          Cookie（<code>ReadmooNext.email</code>），裡面是目前登入帳號的
+          Email。這個 Email
+          只在您的瀏覽器裡處理：用「二、使用者識別方式」的同一種方式轉成匿名識別碼，再和本機存放的識別碼比對。目的是確認目前登入的讀墨帳號就是當初設定的帳號，避免同一個瀏覽器上的其他讀墨帳號看到您的資料。
+        </p>
+        <p>
+          從這個 Cookie 讀到的 Email
+          <strong>不會儲存</strong>，也不會傳送到任何地方。
+        </p>
         <p>本擴充功能<strong>不嵌入</strong>任何追蹤器或分析工具。</p>
       </section>
 

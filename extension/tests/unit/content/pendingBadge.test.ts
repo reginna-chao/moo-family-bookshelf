@@ -1,3 +1,4 @@
+import { webcrypto } from "node:crypto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import browser from "webextension-polyfill";
 import { MOO_ELEMENT_IDS } from "@/utils/extensionContext";
@@ -10,18 +11,32 @@ import {
 } from "@/constants";
 import { BorrowStatus } from "@/api/types";
 import type { BorrowRequest } from "@/api/types";
+import { updatePendingBorrowBadge } from "@/content/pendingBorrowBadge";
+import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
+import {
+  setRawReadmooEmailCookie,
+  setReadmooEmailCookie,
+  clearReadmooEmailCookie,
+} from "../../helpers/readmooEmailCookie";
 
 /**
  * Boundary-validation tests for the floating button's pending-borrow badge
- * (`updatePendingBorrowBadge` in the content script).
+ * (`updatePendingBorrowBadge` in content/pendingBorrowBadge.ts).
  *
  * The content script talks to `GET /api/family/:id/borrow` with a bare `fetch`
  * (no ApiClient), so a self-hosted / hostile backend payload reaches it raw.
- * The production path is: read storage → fetch → read `.data` off a real object
- * → `sanitizeBorrowRequests` → filter → `updateBadge`. `sanitizeBorrowRequests`
+ * The production path is: read storage → confirm the page's Readmoo account via
+ * its login cookie → fetch → read `.data` off a real object →
+ * `sanitizeBorrowRequests` → filter → `updateBadge`. `sanitizeBorrowRequests`
  * is the REAL production import here (internal utility, never mocked) — the
  * point of this file is pinning that wiring, not the sanitizer in isolation
  * (which `tests/unit/api/borrow-client.test.ts` already covers).
+ *
+ * Every case runs with the stored owner's login cookie set (beforeEach), so the
+ * payload cases exercise the fetch path. The "account gate" block (issue #275)
+ * pins the opposite: any page account that is not provably the stored user
+ * means no request and no badge. OWNER_ID is the REAL deriveUserId of
+ * OWNER_EMAIL, so the gate is exercised end to end, not stubbed.
  *
  * Key tripwire: several tests seed a STALE badge before calling. A malformed
  * payload must still reach `updateBadge(button, 0)` and REMOVE that badge. If
@@ -30,24 +45,21 @@ import type { BorrowRequest } from "@/api/types";
  * would survive — so these assertions fail on exactly that regression.
  */
 
-// Reject page-ready with an AbortError so the content script's top-level init
-// takes its silent "navigation cancelled" branch: no button injection, hence no
-// bootstrap-triggered updatePendingBorrowBadge call polluting the fetch /
-// storage call counts asserted below. pageReady has its own unit tests.
-vi.mock("@/content/pageReady", () => ({
-  PAGE_READY_TIMEOUT_MS: 5000,
-  waitForPageReady: (): Promise<void> =>
-    Promise.reject(new DOMException("aborted", "AbortError")),
-}));
-
-// Static import so the vi.mock above is hoisted ahead of module evaluation.
-import { updatePendingBorrowBadge } from "@/content/index";
+if (!globalThis.crypto?.subtle) {
+  Object.defineProperty(globalThis, "crypto", {
+    value: webcrypto,
+    writable: true,
+  });
+}
 
 /** Badge id is derived from production's element-id map (anti-drift). */
 const BADGE_ID = `${MOO_ELEMENT_IDS.button}-badge`;
 
-const OWNER_ID = "a".repeat(64);
-const OTHER_ID = "b".repeat(64);
+const OWNER_EMAIL = "owner@example.com";
+const OTHER_EMAIL = "someone-else@example.com";
+// Top-level await: the it.each tables below are built at collection time.
+const OWNER_ID = await deriveUserId(OWNER_EMAIL);
+const OTHER_ID = await deriveUserId(OTHER_EMAIL);
 const FAMILY_ID = "fam-abc";
 const AUTH_TOKEN = "token-xyz";
 const ENDPOINT = "https://test.workers.dev";
@@ -130,6 +142,8 @@ beforeEach(async () => {
   warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   button = document.createElement("button");
   document.body.appendChild(button);
+  // The page is logged in as the stored owner unless a case says otherwise.
+  setReadmooEmailCookie(OWNER_EMAIL);
   await seedStorage(storageWithout());
   serveData([]);
 });
@@ -137,6 +151,7 @@ beforeEach(async () => {
 afterEach(async () => {
   globalThis.fetch = originalFetch;
   warnSpy.mockRestore();
+  clearReadmooEmailCookie();
   button.remove();
   await browser.storage.local.clear();
 });
@@ -326,6 +341,8 @@ describe("updatePendingBorrowBadge", () => {
 
       await expect(updatePendingBorrowBadge(button)).resolves.toBeUndefined();
 
+      // Fetched under the owner's cookie, so the null badge is the filter's verdict.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
       expect(getBadge()).toBeNull();
     });
 
@@ -433,6 +450,80 @@ describe("updatePendingBorrowBadge", () => {
       await seedStorage(stored);
 
       await expect(updatePendingBorrowBadge(button)).resolves.toBeUndefined();
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(getBadge()).toBeNull();
+    });
+  });
+
+  describe("account gate (issue #275)", () => {
+    // Every case serves a payload that WOULD show "1" and seeds a stale "9", so
+    // a request slipping past the gate shows up as a "1" badge, a skipped
+    // cleanup as the "9" — the stored account's count never reaches another one.
+    beforeEach(() => {
+      serveData([makeBorrowRequest()]);
+      seedStaleBadge();
+    });
+
+    it("fetches and shows the count when the page is the stored owner", async () => {
+      await updatePendingBorrowBadge(button);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(getBadge()?.textContent).toBe("1");
+    });
+
+    const REFUSED_CASES: Array<{ name: string; arrange: () => void }> = [
+      {
+        name: "the page has no login cookie",
+        arrange: () => clearReadmooEmailCookie(),
+      },
+      {
+        name: "another Readmoo account is logged in on the page",
+        arrange: () => setReadmooEmailCookie(OTHER_EMAIL),
+      },
+      {
+        name: "the login cookie cannot be decoded",
+        arrange: () => setRawReadmooEmailCookie("%%%"),
+      },
+      {
+        name: "the login cookie is not an email",
+        arrange: () => setReadmooEmailCookie("not-an-email"),
+      },
+    ];
+
+    it.each(REFUSED_CASES)(
+      "sends no request and removes the stale badge when $name",
+      async ({ arrange }) => {
+        arrange();
+
+        await expect(updatePendingBorrowBadge(button)).resolves.toBeUndefined();
+
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(getBadge()).toBeNull();
+      },
+    );
+
+    it("sends no request and removes the stale badge when hashing fails", async () => {
+      // The owner's own cookie: only the failed hash stands between it and a match.
+      const digest = vi
+        .spyOn(globalThis.crypto.subtle, "digest")
+        .mockRejectedValueOnce(new Error("no crypto"));
+
+      try {
+        await expect(updatePendingBorrowBadge(button)).resolves.toBeUndefined();
+        expect(digest).toHaveBeenCalledOnce();
+      } finally {
+        digest.mockRestore();
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(getBadge()).toBeNull();
+    });
+
+    it("never fetches for a stored userId the page's email does not derive to", async () => {
+      // The page is the "owner" account, but storage holds a different user.
+      await seedStorage({ ...storageWithout(), [USER_ID_KEY]: OTHER_ID });
+
+      await updatePendingBorrowBadge(button);
 
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(getBadge()).toBeNull();

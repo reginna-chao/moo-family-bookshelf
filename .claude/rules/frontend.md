@@ -82,6 +82,8 @@ Open Dialog → has family_id in chrome.storage?
 
 The account check (issue #271) is cached per page load (`dialog/accountIdentityCheck.ts`). While it is `unknown`, `useBookSync` skips the mount auto-sync and re-checks before a manual sync (`dialog/AccountCheckContext.ts`). Never compare against `USER_EMAIL_KEY`: it is a cache, not the identity.
 
+The floating button's pending-borrow badge (`content/pendingBorrowBadge.ts`, issue #275) fetches only when Readmoo's `ReadmooNext.email` login cookie (`content/pageAccountCookie.ts`) confirms the stored userId; otherwise it sends no request and clears the badge. The Dialog deliberately does not trust that cookie — its account check is `#/me` only (docs/architecture.md → 讀墨帳號確認（已加入家庭時）) — but its main view still sets the badge through `onPendingBorrowCountChange` (`dialog/App.tsx`), including under `unknown`.
+
 ### Commands
 
 - `pnpm dev` — dev server

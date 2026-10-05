@@ -14,7 +14,7 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/api/auth-refresh.ts": 425,
   "src/api/client.ts": 866,
   "src/background/messageHandlers.ts": 301,
-  "src/content/index.ts": 560,
+  "src/content/index.ts": 456,
   "src/content/mobileLayout.ts": 292,
   "src/content/readmoo-lend.ts": 423,
   "src/dialog/App.tsx": 479,
