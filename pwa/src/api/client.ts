@@ -342,7 +342,7 @@ export class ApiClient {
   async joinFamily(
     familyId: string,
     userId: string,
-    // `recovery` is sent only by the silent token-recovery join in App.tsx.
+    // `recovery`: silent recovery join (App.tsx) + forced re-login (completeJoin, #266).
     opts?: { verifySecret?: string; qrToken?: string; recovery?: BoolFlag },
   ): Promise<
     ApiResponse<{ ok: boolean; authToken?: string; expiresAt?: number }>

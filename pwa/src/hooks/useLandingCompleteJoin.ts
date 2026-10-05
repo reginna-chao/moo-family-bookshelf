@@ -1,9 +1,14 @@
 import type { Dispatch, SetStateAction } from "react";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import type { ApiClient, VerifyMethod } from "@/api/client";
 import type { AuthState } from "@/hooks/useAuth";
 import { isUnsafeApiHost, UNSAFE_API_HOST_ERROR } from "@/utils/apiHostGuard";
-import { FAMILY_FULL_MESSAGE } from "@/utils/joinErrorMessages";
+import {
+  FAMILY_FULL_MESSAGE,
+  RECOVERY_NOT_MEMBER_LANDING_MESSAGE,
+} from "@/utils/joinErrorMessages";
+import { clearReauthPending, isReauthPendingFor } from "@/utils/reauthPending";
 import type { JoinOrigin, PendingAuth } from "@/hooks/joinState";
 import type { RetryErrorCode } from "@/utils/retryMessage";
 
@@ -66,15 +71,26 @@ export function useLandingCompleteJoin({
     setJoinOrigin((prev) => prev ?? "form");
     try {
       const joinClient = getJoinClient(apiHost);
+      // Re-login after a forced re-verification of THIS identity (#266): the
+      // server then refuses to re-add a user who left meanwhile.
+      const recovery = await isReauthPendingFor({ familyId, userId, apiHost });
       const joinRes = await joinClient.joinFamily(familyId, userId, {
         verifySecret,
         qrToken: tokenFromQr,
+        ...(recovery ? { recovery: BoolFlag.TRUE } : {}),
       });
       if (joinRes.error) {
         const code = joinRes.error.code;
         const retryAfter = joinRes.error.retryAfter;
         const hasRetryHint = typeof retryAfter === "number" && retryAfter > 0;
-        if (code === "FAMILY_FULL") {
+        if (recovery && code === "RECOVERY_NOT_MEMBER") {
+          // Marker spent, so the user's next submit is an explicit re-join.
+          clearReauthPending();
+          setVerifyError("");
+          setPendingAuth(null);
+          setCodeInput("");
+          setGeneralError(RECOVERY_NOT_MEMBER_LANDING_MESSAGE);
+        } else if (code === "FAMILY_FULL") {
           // Same entry the token-recovery path shows (App.tsx reads it out of
           // JOIN_BLOCKED_MESSAGES, which is built from this constant), so the
           // two join paths cannot report a full family differently.
@@ -132,6 +148,8 @@ export function useLandingCompleteJoin({
       // this page out on `onAuth`, and "still working" is the honest screen
       // until it does. Every exit that stays on this page clears the origin.
       setPendingAuth(null);
+      // Only the join that used the marker spends it: another identity's login keeps it (#266).
+      if (recovery) clearReauthPending();
       onAuth({
         userId,
         familyId,

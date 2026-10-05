@@ -2,10 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import {
   useAuth,
+  forceClearStorage,
   namespacedKey,
   REMEMBER_SYNC_CODE_KEY,
   REMEMBERED_LOGOUT_KEY,
 } from "@/hooks/useAuth";
+import {
+  REAUTH_PENDING_KEY,
+  isReauthPendingFor,
+  markReauthPending,
+} from "@/utils/reauthPending";
 
 // Mock syncCode module
 vi.mock("@/crypto/syncCode", () => ({
@@ -983,6 +989,61 @@ describe("useAuth", () => {
       ).toBeNull();
       expect(localStorage.getItem(REMEMBER_SYNC_CODE_KEY)).toBeNull();
       expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
+    });
+  });
+
+  /**
+   * #266: the forced-re-verification marker must survive the logout that
+   * follows it (App writes it right after `logout()`, and the landing re-login
+   * reads it), but a full wipe — `forceLogout` / `forceClearStorage` — drops it.
+   */
+  describe("re-auth marker", () => {
+    const IDENTITY = { familyId: "fam-1", userId: "user-1" };
+
+    it("forceLogout() removes the marker", async () => {
+      seedStorage({ ...IDENTITY });
+      await markReauthPending(IDENTITY);
+      expect(localStorage.getItem(REAUTH_PENDING_KEY)).not.toBeNull();
+
+      const { result } = renderHook(() => useAuth());
+      act(() => {
+        result.current.forceLogout();
+      });
+
+      expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBeNull();
+    });
+
+    it("forceClearStorage() removes the marker, whoever it names", () => {
+      localStorage.setItem(REAUTH_PENDING_KEY, "a".repeat(64));
+
+      forceClearStorage();
+
+      expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBeNull();
+    });
+
+    it("a voluntary logout() leaves the marker in place", async () => {
+      seedStorage({ ...IDENTITY });
+      await markReauthPending(IDENTITY);
+
+      const { result } = renderHook(() => useAuth());
+      expect(result.current.auth).not.toBeNull();
+      act(() => {
+        result.current.logout();
+      });
+
+      expect(result.current.auth).toBeNull();
+      await expect(isReauthPendingFor(IDENTITY)).resolves.toBe(true);
+    });
+
+    it("a voluntary logout() does not write a marker", () => {
+      seedStorage({ ...IDENTITY });
+
+      const { result } = renderHook(() => useAuth());
+      act(() => {
+        result.current.logout();
+      });
+
+      expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBeNull();
     });
   });
 });

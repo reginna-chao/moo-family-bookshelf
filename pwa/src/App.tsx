@@ -6,12 +6,7 @@ import {
   Settings,
   type LucideIcon,
 } from "lucide-react";
-import {
-  useAuth,
-  REMEMBER_SYNC_CODE_KEY,
-  REMEMBERED_LOGOUT_KEY,
-  type AuthState,
-} from "./hooks/useAuth";
+import { useAuth } from "./hooks/useAuth";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import { ApiClient } from "./api/client";
 import {
@@ -40,7 +35,8 @@ import {
   clearRecoveryCooldown,
   setRecoveryCooldown,
 } from "./utils/recoveryCooldown";
-import { encodeSyncCode } from "@/crypto/syncCode";
+import { markReauthPending } from "./utils/reauthPending";
+import { rememberSyncCodeForRelogin } from "./utils/reloginSyncCode";
 
 type Page = "family-shelf" | "personal-shelf" | "borrow" | "settings";
 
@@ -80,24 +76,6 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const PUBLIC_PATH_RE = /^\/public\/([a-f0-9]{32})\/?$/;
-
-/**
- * Preserve the sync code so LandingPage can pre-fill it and open the
- * verification UI after the logout. Respects the "remember sync code"
- * preference; best-effort, a refused localStorage only costs the pre-fill.
- */
-function rememberSyncCodeForRelogin(auth: AuthState): void {
-  if (!auth.familyId) return;
-  try {
-    if (localStorage.getItem(REMEMBER_SYNC_CODE_KEY) === "0") return;
-    localStorage.setItem(
-      REMEMBERED_LOGOUT_KEY,
-      encodeSyncCode({ familyId: auth.familyId, apiHost: auth.apiHost }),
-    );
-  } catch {
-    /* best-effort */
-  }
-}
 
 export default function App() {
   // Path-based route: /public/{shareToken} bypasses all auth/hash routing
@@ -190,6 +168,8 @@ function AuthenticatedApp() {
         setLandingError(REVERIFY_LOGOUT_MESSAGE);
         rememberSyncCodeForRelogin(current);
         logout();
+        // After logout (an await first reopens #258); lands before any re-login (#266).
+        await markReauthPending(current);
         return null;
       }
       // Any other failure (shared-NAT 429, dropped connection, unknown code) KEEPS
