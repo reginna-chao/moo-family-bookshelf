@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   JOIN_BLOCKED_MESSAGES,
   FAMILY_FULL_MESSAGE,
+  RECOVERY_NOT_MEMBER_LANDING_MESSAGE,
   REVERIFY_LOGOUT_MESSAGE,
   VERIFICATION_ERROR_CODES,
 } from "@/utils/joinErrorMessages";
@@ -48,5 +49,24 @@ describe("REVERIFY_LOGOUT_MESSAGE", () => {
     expect(REVERIFY_LOGOUT_MESSAGE).toBe(
       "登入已失效，已為你登出。請重新登入並驗證身分，如果剛才有正在進行的操作，登入後請再做一次",
     );
+  });
+});
+
+describe("RECOVERY_NOT_MEMBER_LANDING_MESSAGE", () => {
+  // Literal anchor for the landing re-login tests (#266), which assert on the
+  // imported constant.
+  it("pins the 繁中 copy", () => {
+    expect(RECOVERY_NOT_MEMBER_LANDING_MESSAGE).toBe(
+      "你已經不是這個家庭的成員，可能已在其他裝置離開。如果要重新加入，請再按一次「開始使用」並完成驗證",
+    );
+  });
+
+  // On the landing page nobody is being logged out, so the token-recovery
+  // entry ("已為你登出") must not be reused here.
+  it("differs from the token-recovery RECOVERY_NOT_MEMBER entry", () => {
+    const blocked = JOIN_BLOCKED_MESSAGES.get("RECOVERY_NOT_MEMBER");
+    expect(blocked).toBeDefined();
+    expect(RECOVERY_NOT_MEMBER_LANDING_MESSAGE).not.toBe(blocked);
+    expect(RECOVERY_NOT_MEMBER_LANDING_MESSAGE).not.toContain("已為你登出");
   });
 });

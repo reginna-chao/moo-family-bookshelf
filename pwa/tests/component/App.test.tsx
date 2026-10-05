@@ -147,6 +147,11 @@ import {
   USER_ID_KEY,
 } from "@/hooks/useAuth";
 import { RECOVERY_COOLDOWN_UNTIL_KEY } from "@/utils/recoveryCooldown";
+import {
+  REAUTH_PENDING_KEY,
+  isReauthPendingFor,
+  markReauthPending,
+} from "@/utils/reauthPending";
 import { decodeSyncCode } from "@/crypto/syncCode";
 // The terminal-failure copy under test is production's own — App resolves it
 // from this map with `.get`, so the assertions below cannot drift from
@@ -170,6 +175,7 @@ function clearSuiteStorageKeys() {
   localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
   localStorage.removeItem(REMEMBER_SYNC_CODE_KEY);
   localStorage.removeItem(USER_ID_KEY);
+  localStorage.removeItem(REAUTH_PENDING_KEY);
 }
 
 /**
@@ -727,6 +733,83 @@ describe("App", () => {
       expect(
         screen.queryByTestId("landing-external-error"),
       ).not.toBeInTheDocument();
+    });
+
+    /**
+     * #266: the forced re-verification marks THIS identity, so the landing
+     * re-login can send `recovery: 1` and the server refuses a user who left
+     * the family on another device meanwhile. The write is awaited after
+     * `logout()`, hence the waitFor.
+     */
+    it.each([
+      "VERIFICATION_REQUIRED",
+      "VERIFICATION_FAILED",
+      "VERIFICATION_LOCKED",
+    ])(
+      "marks the session identity for a recovery re-login on %s",
+      async (code) => {
+        await renderWithFailedJoin(code);
+
+        await waitFor(() => {
+          expect(localStorage.getItem(REAUTH_PENDING_KEY)).not.toBeNull();
+        });
+        // The stored session has no apiHost: the default server.
+        await expect(
+          isReauthPendingFor({
+            familyId: AUTH_WITHOUT_TOKEN.familyId,
+            userId: AUTH_WITHOUT_TOKEN.userId,
+          }),
+        ).resolves.toBe(true);
+      },
+    );
+
+    // #266 review: on a shared device a second account's forced logout must
+    // ADD its marker, not overwrite the one already waiting for re-login.
+    it("keeps an earlier identity's marker when this session is marked", async () => {
+      const earlier = { familyId: "fam-earlier", userId: "1".repeat(64) };
+      await markReauthPending(earlier);
+      await expect(isReauthPendingFor(earlier)).resolves.toBe(true);
+
+      await renderWithFailedJoin("VERIFICATION_REQUIRED");
+
+      const session = {
+        familyId: AUTH_WITHOUT_TOKEN.familyId,
+        userId: AUTH_WITHOUT_TOKEN.userId,
+      };
+      await waitFor(async () => {
+        expect(await isReauthPendingFor(session)).toBe(true);
+      });
+      await expect(isReauthPendingFor(earlier)).resolves.toBe(true);
+    });
+
+    it("marks the identity even when rememberSyncCode is off", async () => {
+      localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "0");
+
+      await renderWithFailedJoin("VERIFICATION_REQUIRED");
+
+      await waitFor(() => {
+        expect(localStorage.getItem(REAUTH_PENDING_KEY)).not.toBeNull();
+      });
+    });
+
+    /**
+     * Only the verification branch writes the marker: a terminal code already
+     * explains itself, and a kept session never reaches the landing page.
+     * Positive companion (same key, same render path): the case above.
+     */
+    it.each([
+      ...TERMINAL_CODES,
+      "INVALID_TOKEN",
+      "NETWORK_ERROR",
+      "RATE_LIMITED",
+    ])("does not mark a recovery re-login on %s", async (code) => {
+      await renderWithFailedJoin(code);
+      // Room for an async digest + write to land, had one been started.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBeNull();
     });
 
     it("still logs out but does not remember the sync code when rememberSyncCode is off", async () => {

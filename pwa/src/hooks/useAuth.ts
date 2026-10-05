@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { decodeSyncCode, encodeSyncCode } from "@/crypto/syncCode";
 import { PAGE_HASHES } from "@/routes";
+import { clearReauthPending } from "@/utils/reauthPendingKey";
 
 export interface AuthState {
   userId: string;
@@ -149,6 +150,7 @@ export function forceClearStorage(): void {
   removeUserKeys();
   localStorage.removeItem(REMEMBER_SYNC_CODE_KEY);
   localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
+  clearReauthPending();
 }
 
 function clearUrlParams(): void {
@@ -270,11 +272,8 @@ export function useAuth(): UseAuthReturn {
   const login = useCallback((data: AuthState): void => {
     const apiHost = safeApiHost(data.apiHost);
 
-    // Fail closed, exactly like loadFromStorage. saveToStorage refuses an
-    // unusable host on its own, but setAuth used to keep the raw one — a
-    // half-state where App's `new ApiClient(auth.apiHost)` throws (white screen)
-    // and, after a reload, the session silently comes back against the DEFAULT
-    // endpoint. Neither is a session worth starting.
+    // Fail closed like loadFromStorage: keeping a refused host in state would
+    // white-screen `new ApiClient` now and fall back to the DEFAULT endpoint on reload.
     if (data.apiHost && apiHost === null) {
       console.warn(
         "[useAuth] Refusing to start a session on an unusable endpoint",

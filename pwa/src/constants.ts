@@ -32,6 +32,6 @@ export function buildInviteUrl(syncCode: string): string {
   return `${window.location.origin}${window.location.pathname}#invite=${encodeURIComponent(syncCode)}`;
 }
 
-// PAGE_HASHES moved to routes.ts to avoid import.meta.env side-effects
-// when imported from Node-side code (Playwright E2E helpers).
+// PAGE_HASHES moved to routes.ts (and the reauth key to reauthPendingKey.ts)
+// to keep import.meta.env out of Node-side code (Playwright E2E helpers).
 export { PAGE_HASHES } from "./routes";

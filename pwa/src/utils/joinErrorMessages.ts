@@ -45,7 +45,8 @@ export const FAMILY_FULL_MESSAGE = "家庭成員已達上限（每個家庭最�
  * Only the token-recovery path consults the whole table. The manual-join path
  * deliberately reuses `FAMILY_FULL_MESSAGE` alone and lets the others fall
  * through to its generic branch, which shows the server's own message — do not
- * reroute them here.
+ * reroute them here. (Its RECOVERY_NOT_MEMBER copy is the separate constant
+ * `RECOVERY_NOT_MEMBER_LANDING_MESSAGE` below.)
  *
  * Test anchoring: `pwa/tests/component/App.test.tsx` renders every entry
  * through the landing page via THIS map (its key-set tripwire fails on a
@@ -60,6 +61,15 @@ export const JOIN_BLOCKED_MESSAGES: ReadonlyMap<string, string> = new Map([
   ["ALREADY_IN_FAMILY", "此帳號已加入其他家庭，請先離開原本的家庭"],
   ["RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員，已為你登出"],
 ]);
+
+/**
+ * Landing-page form error when a re-login after a forced re-verification
+ * (`pwa/src/utils/reauthPending.ts`, #266) meets 409 RECOVERY_NOT_MEMBER. Not the
+ * `JOIN_BLOCKED_MESSAGES` entry: on the landing page nobody is being logged out.
+ * The button it names is the form's submit label in `LandingForm.tsx`.
+ */
+export const RECOVERY_NOT_MEMBER_LANDING_MESSAGE =
+  "你已經不是這個家庭的成員，可能已在其他裝置離開。如果要重新加入，請再按一次「開始使用」並完成驗證";
 
 /**
  * Recovery-join failures that need the member's PWA-login secret. The recovery
