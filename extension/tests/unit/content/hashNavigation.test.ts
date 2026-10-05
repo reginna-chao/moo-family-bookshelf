@@ -200,4 +200,93 @@ describe("hashNavigation", () => {
       expect(scrapeUserEmail).not.toHaveBeenCalled();
     });
   });
+
+  // `lastRestoreAt` is module state (one value per page load), so every case
+  // gets a fresh module, and Date is faked too because the module reads Date.now().
+  describe("settleMsLeft", () => {
+    let nav: typeof import("@/content/hashNavigation");
+
+    beforeEach(async () => {
+      vi.useRealTimers();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      vi.resetModules();
+      nav = await import("@/content/hashNavigation");
+    });
+
+    /** Run a full #/me check; the clock then stands at the restore instant. */
+    async function checkAccount(): Promise<void> {
+      const check = nav.readMePageProfile();
+      expect(location.hash).toBe("#/me");
+      await vi.advanceTimersByTimeAsync(NAV_SETTLE_MS);
+      await check;
+      expect(location.hash).toBe("#/library");
+    }
+
+    it("is 0 when nothing was restored this page load", () => {
+      expect(nav.settleMsLeft()).toBe(0);
+    });
+
+    it("is the full NAV_SETTLE_MS right after a restore", async () => {
+      await checkAccount();
+
+      expect(nav.settleMsLeft()).toBe(NAV_SETTLE_MS);
+    });
+
+    it.each([1, 500, NAV_SETTLE_MS - 1])(
+      "shrinks with time: %i ms after the restore leaves the rest of NAV_SETTLE_MS",
+      async (elapsed) => {
+        await checkAccount();
+
+        vi.advanceTimersByTime(elapsed);
+
+        expect(nav.settleMsLeft()).toBe(NAV_SETTLE_MS - elapsed);
+      },
+    );
+
+    it.each([NAV_SETTLE_MS, NAV_SETTLE_MS + 1, 60_000])(
+      "is 0 once the route has settled (%i ms after the restore)",
+      async (elapsed) => {
+        await checkAccount();
+
+        vi.advanceTimersByTime(elapsed);
+
+        expect(nav.settleMsLeft()).toBe(0);
+      },
+    );
+
+    it("never exceeds NAV_SETTLE_MS when the clock goes backwards", async () => {
+      await checkAccount();
+
+      vi.setSystemTime(Date.now() - 5_000);
+
+      expect(nav.settleMsLeft()).toBe(NAV_SETTLE_MS);
+    });
+
+    it("counts the restore of a check aborted mid-wait", async () => {
+      const controller = new AbortController();
+      const check = nav.readMePageProfile(controller.signal);
+      const settled = expect(check).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      expect(location.hash).toBe("#/me");
+
+      controller.abort();
+      await settled;
+
+      expect(location.hash).toBe("#/library");
+      expect(nav.settleMsLeft()).toBe(NAV_SETTLE_MS);
+    });
+
+    it("stays 0 after a check that never left the page (already aborted)", async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        nav.readMePageProfile(controller.signal),
+      ).rejects.toMatchObject({ name: "AbortError" });
+
+      expect(location.hash).toBe("#/library");
+      expect(nav.settleMsLeft()).toBe(0);
+    });
+  });
 });

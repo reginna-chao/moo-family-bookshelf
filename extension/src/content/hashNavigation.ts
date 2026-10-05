@@ -1,8 +1,8 @@
 /**
  * Hash navigation of the Readmoo SPA from the Dialog (same document, content
  * script isolated world): go to a route, wait for it to render, read the DOM.
- * Shared by onboarding (dialog/useAutoSetup.ts) and the boot-time account check
- * (dialog/accountIdentityCheck.ts).
+ * Shared by onboarding (dialog/useAutoSetup.ts), the account check
+ * (dialog/accountIdentityCheck.ts) and the book sync (sync/syncBooks.ts).
  */
 
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
@@ -14,8 +14,11 @@ function abortError(): DOMException {
   return new DOMException("Hash navigation aborted", "AbortError");
 }
 
+/** When readMePageProfile last put the page back on its hash (ms epoch). */
+let lastRestoreAt: number | null = null;
+
 /** Resolve after `ms`; reject early (timer cleared) when `signal` aborts. */
-function wait(ms: number, signal?: AbortSignal): Promise<void> {
+export function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(abortError());
@@ -76,5 +79,19 @@ export async function readMePageProfile(
     );
   } finally {
     window.location.hash = originalHash || "#/";
+    lastRestoreAt = Date.now();
   }
+}
+
+/**
+ * Milliseconds a scrape must still wait for the route readMePageProfile last
+ * restored to render: the rest of NAV_SETTLE_MS since that restore, or 0 once
+ * it has settled (or when nothing was restored this page load).
+ * readMePageProfile never waits on the way back, so the boot-time account
+ * check stays as fast as it is; only a scrape that follows it pays.
+ */
+export function settleMsLeft(): number {
+  if (lastRestoreAt === null) return 0;
+  const remaining = NAV_SETTLE_MS - (Date.now() - lastRestoreAt);
+  return Math.min(NAV_SETTLE_MS, Math.max(0, remaining));
 }

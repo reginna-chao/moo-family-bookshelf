@@ -20,6 +20,7 @@ import {
 // instead of needing a separate content-api.js entry point.
 export { ApiClient } from "../api/client";
 import { type ScrapeProgressCallback } from "../content/scraper";
+import { NAV_SETTLE_MS, settleMsLeft, wait } from "../content/hashNavigation";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { runAutoReturn } from "./autoReturn";
 import type { RenamedBook } from "./renamedBooks";
@@ -45,13 +46,6 @@ export const DEFAULT_AUTO_SYNC_INTERVAL: AutoSyncInterval = "daily";
 /** Type guard for AutoSyncInterval */
 export function isAutoSyncInterval(v: unknown): v is AutoSyncInterval {
   return v === "daily" || v === "weekly" || v === "monthly" || v === "never";
-}
-
-/** Delay (ms) to wait for page render after hash navigation */
-const NAV_SETTLE_MS = 1500;
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -144,10 +138,14 @@ export async function syncBooks(
   resetScrapeWarnings();
 
   try {
-    // Step 1+2: Navigate to library page if needed
+    // Step 1+2: Navigate to library page if needed. Otherwise a hash that an
+    // account check (#/me) just put back may still be rendering: wait it out.
     if (navigate && !isOnLibrary) {
       window.location.hash = "#/library";
       await wait(NAV_SETTLE_MS);
+    } else {
+      const settleMs = settleMsLeft();
+      if (settleMs > 0) await wait(settleMs);
     }
 
     // Step 3: Scrape books (+ archived books when 同步封存書 is on)
