@@ -19,6 +19,7 @@ import {
 } from "../constants";
 import { persistAcceptedFamilyEndpoint } from "../storage/familyEndpointChoice";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { removedJoinText } from "moo-family-bookshelf-shared/unkick/messages";
 import type { useAutoSetup } from "./useAutoSetup";
 import { migratePersonalBooksCache } from "./personalBooksCacheMigration";
 
@@ -401,10 +402,9 @@ export async function performJoin(opts: {
     return {
       ok: false,
       errorCode: response.error.code,
-      errorMessage: safeErrorText(
-        response.error.message,
-        "加入家庭失敗，請稍後再試",
-      ),
+      errorMessage:
+        removedJoinText(response.error.code) ??
+        safeErrorText(response.error.message, "加入家庭失敗，請稍後再試"),
       retryAfter: response.error.retryAfter,
     };
   }

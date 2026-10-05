@@ -9,6 +9,14 @@ import { describe, it, expect, vi } from "vitest";
 import { MemberList, MemberListProps } from "@/dialog/MemberList";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import type { ApiClient } from "@/api/client";
+import { REJOIN_WAIT_NOTE } from "moo-family-bookshelf-shared/unkick/messages";
+
+/**
+ * The remove confirmation renders the question and the shared rejoin-wait note
+ * in one element. The literal pin for the note lives in the "rejoin-wait note"
+ * suite below; every other assertion reuses this full string.
+ */
+const REMOVE_CONFIRM_TEXT = `確定要移除此成員？${REJOIN_WAIT_NOTE}`;
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
@@ -73,7 +81,7 @@ describe("MemberList", () => {
 
     fireEvent.click(screen.getByText("移除"));
 
-    expect(screen.getByText("確定要移除此成員？")).toBeInTheDocument();
+    expect(screen.getByText(REMOVE_CONFIRM_TEXT)).toBeInTheDocument();
     expect(screen.getByText("確定")).toBeInTheDocument();
     expect(screen.getByText("取消")).toBeInTheDocument();
   });
@@ -88,6 +96,48 @@ describe("MemberList", () => {
         "確定要將管理權轉移給此成員？轉移後你將無法移除其他成員。",
       ),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * #270: removing a member blocks their sync-code rejoin for 6 hours, so the
+   * owner's remove confirmation says so before they press 確定. Transferring
+   * ownership has no such block and must not borrow the note.
+   */
+  describe("rejoin-wait note", () => {
+    it("pins the exact remove question with the 6-hour note at the render site", () => {
+      const { container } = renderMemberList();
+
+      fireEvent.click(screen.getByText("移除"));
+
+      expect(
+        container.querySelector(".moo-member-list__confirm-text")?.textContent,
+      ).toBe("確定要移除此成員？移除後，對方 6 小時內無法用同步碼重新加入。");
+    });
+
+    it("leaves the note out of the transfer confirmation", () => {
+      const { container } = renderMemberList();
+
+      fireEvent.click(screen.getByText("轉移管理權"));
+
+      const confirm = container.querySelector(".moo-member-list__confirm");
+      // Positive companion: the selector really is the transfer confirm.
+      expect(confirm?.textContent).toContain("確定要將管理權轉移給此成員？");
+      expect(confirm?.textContent).not.toContain(REJOIN_WAIT_NOTE);
+      expect(confirm?.textContent).not.toContain("6 小時");
+    });
+
+    it("leaves the note out of the custom-endpoint transfer warning", () => {
+      const { container } = renderMemberList({
+        familyEndpoint: "https://my-worker.example.com",
+      });
+
+      fireEvent.click(screen.getByText("轉移管理權"));
+
+      const confirm = container.querySelector(".moo-member-list__confirm");
+      expect(confirm?.textContent).toContain("目前家庭使用自訂 API 端點");
+      expect(confirm?.textContent).not.toContain(REJOIN_WAIT_NOTE);
+      expect(confirm?.textContent).not.toContain("6 小時");
+    });
   });
 
   it("calls removeMember and onMembersChanged on confirm", async () => {
@@ -130,10 +180,10 @@ describe("MemberList", () => {
     renderMemberList();
 
     fireEvent.click(screen.getByText("移除"));
-    expect(screen.getByText("確定要移除此成員？")).toBeInTheDocument();
+    expect(screen.getByText(REMOVE_CONFIRM_TEXT)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("取消"));
-    expect(screen.queryByText("確定要移除此成員？")).not.toBeInTheDocument();
+    expect(screen.queryByText(REMOVE_CONFIRM_TEXT)).not.toBeInTheDocument();
   });
 
   it("shows error when removeMember fails", async () => {
@@ -351,7 +401,7 @@ describe("MemberList", () => {
       expect(onMemberRemoved).toHaveBeenCalledTimes(1);
       expect(onMembersChanged).toHaveBeenCalledTimes(1);
       // Confirm closed, no error shown.
-      expect(screen.queryByText("確定要移除此成員？")).not.toBeInTheDocument();
+      expect(screen.queryByText(REMOVE_CONFIRM_TEXT)).not.toBeInTheDocument();
       expect(
         screen.queryByText("目標使用者不是家庭成員"),
       ).not.toBeInTheDocument();

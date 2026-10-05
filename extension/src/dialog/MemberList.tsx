@@ -3,6 +3,7 @@ import { ApiClient, BoolFlag, FamilyMember } from "../api/client";
 import { memberSettingsErrorMessage } from "./memberSettingsMessages";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { REJOIN_WAIT_NOTE } from "moo-family-bookshelf-shared/unkick/messages";
 
 function switchTrackClass(on: boolean): string {
   return on ? "moo-switch__track moo-switch__track--on" : "moo-switch__track";
@@ -50,9 +51,7 @@ function getMemberLabel(member: FamilyMember): string {
   return member.displayName || member.userId.slice(0, 8);
 }
 
-/**
- * readmooName 對應功能僅在家庭 ≥ 3 人時顯示（家庭 ≤ 2 人時讀墨借出不需要選擇成員）。
- */
+/** readmooName 對應功能僅在家庭 ≥ 3 人時顯示（家庭 ≤ 2 人時讀墨借出不需要選擇成員）。 */
 const MIN_MEMBERS_FOR_READMOO_NAME = 3;
 
 export function MemberList({
@@ -184,7 +183,7 @@ export function MemberList({
       return (
         <div className="moo-member-list__confirm">
           <div className="moo-member-list__confirm-text">
-            確定要移除此成員？
+            確定要移除此成員？{REJOIN_WAIT_NOTE}
           </div>
           <div className="moo-member-list__confirm-row">
             <button

@@ -12,7 +12,10 @@ describe("JOIN_BLOCKED_MESSAGES", () => {
   // 期望值取自生產 map，因此無法固定內容本身；這裡逐字釘住。
   it.each([
     ["FAMILY_FULL", "家庭成員已達上限（每個家庭最多 2 位成員）"],
-    ["MEMBER_REMOVED", "你已被家庭管理者移出，已為你登出"],
+    [
+      "MEMBER_REMOVED",
+      "你已被家庭管理者移出這個家庭，移除後 6 小時內無法重新加入。已為你登出。",
+    ],
     ["FAMILY_NOT_FOUND", "找不到這個家庭，家庭可能已被解散"],
     ["ALREADY_IN_FAMILY", "此帳號已加入其他家庭，請先離開原本的家庭"],
     ["RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員，已為你登出"],

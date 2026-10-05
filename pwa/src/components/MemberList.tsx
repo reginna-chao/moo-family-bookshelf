@@ -3,6 +3,7 @@ import { ApiError, BoolFlag } from "@/api/client";
 import type { ApiClient, FamilyMember } from "@/api/client";
 import { rateLimitedEnvelopeMessage } from "@/utils/retryMessage";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { REJOIN_WAIT_NOTE } from "moo-family-bookshelf-shared/unkick/messages";
 
 function getMemberLabel(member: FamilyMember): string {
   return member.displayName || member.userId.slice(0, 8);
@@ -32,9 +33,7 @@ function memberSettingsErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-/**
- * readmooName 對應功能僅在家庭 ≥ 3 人時顯示（家庭 ≤ 2 人時讀墨借出不需要選擇成員）。
- */
+/** readmooName 對應功能僅在家庭 ≥ 3 人時顯示（家庭 ≤ 2 人時讀墨借出不需要選擇成員）。 */
 const MIN_MEMBERS_FOR_READMOO_NAME = 3;
 
 /** A member the owner just removed, as reported to the parent. */
@@ -275,7 +274,7 @@ export function MemberList({
                   className={`text-xs mb-2 ${confirmAction.type === "remove" ? "text-red-700" : "text-blue-700"}`}
                 >
                   {confirmAction.type === "remove"
-                    ? `確定要移除成員 ${label}？`
+                    ? `確定要移除成員 ${label}？${REJOIN_WAIT_NOTE}`
                     : `確定要將管理權轉移給 ${label}？轉移後你將無法移除其他成員。`}
                 </p>
                 <div className="flex gap-2">

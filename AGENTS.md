@@ -34,7 +34,7 @@ moo-family-bookshelf/
 │   │   ├── invite/             # Invite message templates
 │   │   ├── personal/           # Personal-shelf save strategy (PUT vs PATCH) + full-PUT conflict rebase + save-error copy
 │   │   ├── publicShelf/        # Public-shelf local-vs-server divergence rule
-│   │   └── unkick/             # Un-kick notice copy (removed / cleared / hint)
+│   │   └── unkick/             # Member-removal copy (remove confirm / un-kick notice / refused rejoin) + rejoin-wait hours
 │   ├── eslint.config.js
 │   ├── tsconfig.json
 │   └── package.json

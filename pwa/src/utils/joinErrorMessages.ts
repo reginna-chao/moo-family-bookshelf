@@ -7,6 +7,8 @@
  * join in `pwa/src/hooks/useLandingCompleteJoin.ts` (`completeJoin`).
  */
 
+import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
+
 /**
  * No seat left in the family, so a rejoin cannot succeed. Used by BOTH join
  * paths — it is the entry `JOIN_BLOCKED_MESSAGES` carries for `FAMILY_FULL`,
@@ -43,9 +45,11 @@ export const FAMILY_FULL_MESSAGE = "家庭成員已達上限（每個家庭最�
  * `extension/src/api/auth-refresh.ts` (`FAMILY_GONE_ERROR_CODES`).
  *
  * Only the token-recovery path consults the whole table. The manual-join path
- * deliberately reuses `FAMILY_FULL_MESSAGE` alone and lets the others fall
- * through to its generic branch, which shows the server's own message — do not
- * reroute them here. (Its RECOVERY_NOT_MEMBER copy is the separate constant
+ * takes just `FAMILY_FULL_MESSAGE` from here, plus `REMOVED_JOIN_TEXT` (the
+ * shared copy this table's MEMBER_REMOVED entry is built from) for
+ * MEMBER_REMOVED, and lets the others fall through to its generic branch, which
+ * shows the server's own message — do not reroute them here. (Its
+ * RECOVERY_NOT_MEMBER copy is the separate constant
  * `RECOVERY_NOT_MEMBER_LANDING_MESSAGE` below.)
  *
  * Test anchoring: `pwa/tests/component/App.test.tsx` renders every entry
@@ -56,7 +60,7 @@ export const FAMILY_FULL_MESSAGE = "家庭成員已達上限（每個家庭最�
  */
 export const JOIN_BLOCKED_MESSAGES: ReadonlyMap<string, string> = new Map([
   ["FAMILY_FULL", FAMILY_FULL_MESSAGE],
-  ["MEMBER_REMOVED", "你已被家庭管理者移出，已為你登出"],
+  ["MEMBER_REMOVED", `${REMOVED_JOIN_TEXT}已為你登出。`],
   ["FAMILY_NOT_FOUND", "找不到這個家庭，家庭可能已被解散"],
   ["ALREADY_IN_FAMILY", "此帳號已加入其他家庭，請先離開原本的家庭"],
   ["RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員，已為你登出"],

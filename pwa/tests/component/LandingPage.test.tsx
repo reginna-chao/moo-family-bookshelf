@@ -17,6 +17,7 @@ import {
 } from "@testing-library/react";
 import { webcrypto } from "node:crypto";
 import { SYNC_CODE_HOST_SETTLE_DELAY_MS } from "moo-family-bookshelf-shared/api/syncCodeHost";
+import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
 import { LandingPage } from "@/pages/LandingPage";
 import {
   HALF_TYPED_PREFIXES,
@@ -481,6 +482,41 @@ describe("LandingPage", () => {
       });
 
       expect(mockOnAuth).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #270: a removed member's refused manual join says how long the block
+   * lasts, in the client's own copy (shared with the Extension) — the server
+   * message does not carry the 6 hours.
+   */
+  describe("MEMBER_REMOVED error", () => {
+    it("shows the shared rejoin-wait copy instead of the server message", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+      });
+      mockJoinFamily.mockResolvedValue({
+        error: { code: "MEMBER_REMOVED", message: "Member was removed" },
+      });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByText(REMOVED_JOIN_TEXT)).toBeInTheDocument();
+      });
+      // Literal pin of the shared copy this production site renders.
+      expect(REMOVED_JOIN_TEXT).toBe(
+        "你已被家庭管理者移出這個家庭，移除後 6 小時內無法重新加入。",
+      );
+      expect(screen.queryByText("Member was removed")).not.toBeInTheDocument();
+      expect(mockOnAuth).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole("button", { name: "開始使用" }),
+      ).not.toBeDisabled();
     });
   });
 
