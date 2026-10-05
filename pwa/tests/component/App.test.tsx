@@ -147,7 +147,11 @@ import {
   USER_ID_KEY,
 } from "@/hooks/useAuth";
 import { RECOVERY_COOLDOWN_UNTIL_KEY } from "@/utils/recoveryCooldown";
-import { REAUTH_PENDING_KEY, isReauthPendingFor } from "@/utils/reauthPending";
+import {
+  REAUTH_PENDING_KEY,
+  isReauthPendingFor,
+  markReauthPending,
+} from "@/utils/reauthPending";
 import { decodeSyncCode } from "@/crypto/syncCode";
 // The terminal-failure copy under test is production's own — App resolves it
 // from this map with `.get`, so the assertions below cannot drift from
@@ -758,6 +762,25 @@ describe("App", () => {
         ).resolves.toBe(true);
       },
     );
+
+    // #266 review: on a shared device a second account's forced logout must
+    // ADD its marker, not overwrite the one already waiting for re-login.
+    it("keeps an earlier identity's marker when this session is marked", async () => {
+      const earlier = { familyId: "fam-earlier", userId: "1".repeat(64) };
+      await markReauthPending(earlier);
+      await expect(isReauthPendingFor(earlier)).resolves.toBe(true);
+
+      await renderWithFailedJoin("VERIFICATION_REQUIRED");
+
+      const session = {
+        familyId: AUTH_WITHOUT_TOKEN.familyId,
+        userId: AUTH_WITHOUT_TOKEN.userId,
+      };
+      await waitFor(async () => {
+        expect(await isReauthPendingFor(session)).toBe(true);
+      });
+      await expect(isReauthPendingFor(earlier)).resolves.toBe(true);
+    });
 
     it("marks the identity even when rememberSyncCode is off", async () => {
       localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "0");

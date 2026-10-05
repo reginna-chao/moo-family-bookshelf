@@ -7,10 +7,10 @@
  * trailing comment in `constants.ts`). Keep this file dependency-free.
  */
 
-/** Digest of the identity whose session a forced re-verification ended. */
+/** Truncated digests (`,`-joined) of the identities a forced re-verification signed out. */
 export const REAUTH_PENDING_KEY = "moo:reauthPending";
 
-/** REMOVES the marker, whoever it names. Never throws. */
+/** REMOVES every marker, whoever they name. Never throws. */
 export function clearReauthPending(): void {
   try {
     localStorage.removeItem(REAUTH_PENDING_KEY);

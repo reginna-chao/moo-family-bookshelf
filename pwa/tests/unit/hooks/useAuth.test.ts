@@ -1013,7 +1013,22 @@ describe("useAuth", () => {
       expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBeNull();
     });
 
-    it("forceClearStorage() removes the marker, whoever it names", () => {
+    it("forceClearStorage() removes every marker, whoever they name", async () => {
+      const other = { familyId: "fam-2", userId: "user-2" };
+      await markReauthPending(IDENTITY);
+      await markReauthPending(other);
+      // Positive companion: two identities really are pending first.
+      await expect(isReauthPendingFor(IDENTITY)).resolves.toBe(true);
+      await expect(isReauthPendingFor(other)).resolves.toBe(true);
+
+      forceClearStorage();
+
+      expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBeNull();
+      await expect(isReauthPendingFor(IDENTITY)).resolves.toBe(false);
+      await expect(isReauthPendingFor(other)).resolves.toBe(false);
+    });
+
+    it("forceClearStorage() also removes a legacy single-digest value", () => {
       localStorage.setItem(REAUTH_PENDING_KEY, "a".repeat(64));
 
       forceClearStorage();

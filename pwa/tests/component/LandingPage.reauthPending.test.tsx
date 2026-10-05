@@ -233,6 +233,67 @@ describe("LandingPage re-login after a forced re-verification", () => {
     });
   });
 
+  /**
+   * Shared device (#266 review): B's forced logout came AFTER A's. The marker
+   * key holds a set, so A's re-login is still a recovery join, and spending
+   * A's marker must leave B's in place for B's own later re-login.
+   */
+  describe("with another identity also awaiting re-verification", () => {
+    /** Another account in another family, signed out after the marked one. */
+    const SECOND: ReauthIdentity = {
+      familyId: "fam-002",
+      userId: "1".repeat(64),
+    };
+
+    async function seedBoth(): Promise<void> {
+      await markReauthPending(MARKED);
+      await markReauthPending(SECOND);
+      // Positive companion: both really are pending before A logs in.
+      expect(await isReauthPendingFor(MARKED)).toBe(true);
+      expect(await isReauthPendingFor(SECOND)).toBe(true);
+    }
+
+    it("refuses the first-marked user's re-login on RECOVERY_NOT_MEMBER and keeps the other marker", async () => {
+      await seedBoth();
+      mockJoinFamily.mockResolvedValue({
+        error: { code: "RECOVERY_NOT_MEMBER", message: "Server says no" },
+      });
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      login(`moo-${FAMILY_ID}`, EMAIL);
+
+      const message = await screen.findByText(
+        RECOVERY_NOT_MEMBER_LANDING_MESSAGE,
+      );
+      expect(message.textContent).toBe(RECOVERY_NOT_MEMBER_LANDING_MESSAGE);
+      expect(screen.queryByText("Server says no")).not.toBeInTheDocument();
+      expect(mockJoinFamily).toHaveBeenCalledTimes(1);
+      expect(mockJoinFamily.mock.calls[0][0]).toBe(FAMILY_ID);
+      expect(mockJoinFamily.mock.calls[0][1]).toBe(USER_ID);
+      expect(joinOpts().recovery).toBe(BoolFlag.TRUE);
+      expect(mockOnAuth).not.toHaveBeenCalled();
+      expect(await isReauthPendingFor(MARKED)).toBe(false);
+      expect(await isReauthPendingFor(SECOND)).toBe(true);
+    });
+
+    it("logs the first-marked user back in through a recovery join and keeps the other marker", async () => {
+      await seedBoth();
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      login(`moo-${FAMILY_ID}`, EMAIL);
+
+      await waitFor(() => {
+        expect(mockOnAuth).toHaveBeenCalledTimes(1);
+      });
+      expect(mockOnAuth).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: USER_ID, familyId: FAMILY_ID }),
+      );
+      expect(joinOpts().recovery).toBe(BoolFlag.TRUE);
+      expect(await isReauthPendingFor(MARKED)).toBe(false);
+      expect(await isReauthPendingFor(SECOND)).toBe(true);
+    });
+  });
+
   describe("without a marker", () => {
     it("treats RECOVERY_NOT_MEMBER like any other server error", async () => {
       mockJoinFamily.mockResolvedValue({

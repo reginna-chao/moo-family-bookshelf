@@ -8,7 +8,10 @@ import {
   FAMILY_FULL_MESSAGE,
   RECOVERY_NOT_MEMBER_LANDING_MESSAGE,
 } from "@/utils/joinErrorMessages";
-import { clearReauthPending, isReauthPendingFor } from "@/utils/reauthPending";
+import {
+  clearReauthPendingFor,
+  isReauthPendingFor,
+} from "@/utils/reauthPending";
 import type { JoinOrigin, PendingAuth } from "@/hooks/joinState";
 import type { RetryErrorCode } from "@/utils/retryMessage";
 
@@ -73,7 +76,8 @@ export function useLandingCompleteJoin({
       const joinClient = getJoinClient(apiHost);
       // Re-login after a forced re-verification of THIS identity (#266): the
       // server then refuses to re-add a user who left meanwhile.
-      const recovery = await isReauthPendingFor({ familyId, userId, apiHost });
+      const identity = { familyId, userId, apiHost };
+      const recovery = await isReauthPendingFor(identity);
       const joinRes = await joinClient.joinFamily(familyId, userId, {
         verifySecret,
         qrToken: tokenFromQr,
@@ -84,8 +88,9 @@ export function useLandingCompleteJoin({
         const retryAfter = joinRes.error.retryAfter;
         const hasRetryHint = typeof retryAfter === "number" && retryAfter > 0;
         if (recovery && code === "RECOVERY_NOT_MEMBER") {
-          // Marker spent, so the user's next submit is an explicit re-join.
-          clearReauthPending();
+          // Only this identity's marker is spent, and gone before the form
+          // reopens, so the user's next submit is an explicit re-join.
+          await clearReauthPendingFor(identity);
           setVerifyError("");
           setPendingAuth(null);
           setCodeInput("");
@@ -147,9 +152,10 @@ export function useLandingCompleteJoin({
       // Deliberately no `setJoinOrigin(null)` on this exit: the parent swaps
       // this page out on `onAuth`, and "still working" is the honest screen
       // until it does. Every exit that stays on this page clears the origin.
+      // Only the join that used the marker spends it, and only its own: other
+      // identities' markers stay (#266). Awaited first so both setters batch.
+      if (recovery) await clearReauthPendingFor(identity);
       setPendingAuth(null);
-      // Only the join that used the marker spends it: another identity's login keeps it (#266).
-      if (recovery) clearReauthPending();
       onAuth({
         userId,
         familyId,
