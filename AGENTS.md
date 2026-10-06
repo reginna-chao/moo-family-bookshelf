@@ -165,8 +165,8 @@ Every push/PR triggers:
 
 ### Claude Review (GitHub Actions)
 
-- `claude-code-review.yml`: fires a Claude review automatically on every PR (`opened` / `ready_for_review` / `reopened`; not draft, not fork), with **no paths filter** — doc and config changes are reviewed too (six dimensions; the sixth reviews the docs/config diff specifically). The model is the `opus` family alias (always the latest Opus generation); the workflow writes the resolved model id back into the review comment's footer afterwards. The review bot can only comment: `--disallowedTools` blocks `gh pr review` / `gh pr merge` / `gh pr close` plus Write / Edit, so approving and merging stay human decisions.
-- `claude.yml`: triggered by tagging `@claude` in a PR / issue comment (including a reply to an inline review comment), for re-review after fixes and for questions; it runs the latest Opus through `--model opus` as well. Code suggestions go inline in the comment — the job is `contents: read` and never commits or pushes.
+- `claude-code-review.yml`: fires a Claude review automatically on every PR (`opened` / `ready_for_review` / `reopened`; not draft, not fork), with **no paths filter** — doc and config changes are reviewed too (six dimensions; the sixth reviews the docs/config diff specifically). The model is the `fable` family alias (always the latest Fable generation), so the `CLAUDE_CODE_OAUTH_TOKEN` secret must come from an account with Fable access; the workflow writes the resolved model id back into the review comment's footer afterwards. The review bot can only comment: `--disallowedTools` blocks `gh pr review` / `gh pr merge` / `gh pr close` plus Write / Edit, so approving and merging stay human decisions.
+- `claude.yml`: triggered by tagging `@claude` in a PR / issue comment (including a reply to an inline review comment), for re-review after fixes and for questions; it runs the latest Fable through `--model fable` as well. Code suggestions go inline in the comment — the job is `contents: read` and never commits or pushes.
 
 ### CD (GitHub Actions)
 

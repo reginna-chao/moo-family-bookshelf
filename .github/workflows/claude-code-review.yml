@@ -58,11 +58,12 @@ jobs:
     # review) that a 20-file / +2454-line PR took, so it bites only on a runaway.
     timeout-minutes: 20
     env:
-      # Family alias — resolves to the latest Opus generation at run time, so the
+      # Family alias — resolves to the latest Fable generation at run time, so the
       # repo never sits pinned on a retired snapshot. The resolved model id is
       # read from the execution log after the run and patched into the review
-      # comment (see the "Fill in model footer" step below).
-      CLAUDE_MODEL: "opus"
+      # comment (see the "Fill in model footer" step below). Fable requires the
+      # CLAUDE_CODE_OAUTH_TOKEN secret to belong to an account with Fable access.
+      CLAUDE_MODEL: "fable"
     permissions:
       contents: read
       pull-requests: write # official default is read; raised to write so the review can post inline comments
@@ -223,7 +224,7 @@ jobs:
       - name: Fill in model footer
         # Replaces the <!-- MODEL_FOOTER --> marker in the review summary comment
         # with the model id the run actually resolved to (read from the execution
-        # log), so the footer always shows the real Opus version behind the alias.
+        # log), so the footer always shows the real Fable version behind the alias.
         # Cosmetic backfill: a failure here (gh 5xx, rate limit, jq surprise) must
         # not turn an already-posted successful review red.
         #
@@ -254,7 +255,7 @@ jobs:
             # shape. The extraction below tries both known candidate paths — a
             # nested .message.model (assistant entries, preferred: always the
             # concrete resolved id) and a top-level .model (system/init entry).
-            # startswith("claude-") skips an echoed alias ("opus") and the
+            # startswith("claude-") skips an echoed alias ("fable") and the
             # "<synthetic>" model on synthetic entries. After the first
             # successful run, check which path matched, trim the dead path, and
             # delete this debug block.
