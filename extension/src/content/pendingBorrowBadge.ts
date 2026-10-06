@@ -2,7 +2,11 @@
 // Fetched only when the login cookie confirms the stored user (issue #275).
 
 import browser from "webextension-polyfill";
-import { MOO_ELEMENT_IDS } from "../utils/extensionContext";
+import {
+  isExtensionContextValid,
+  MOO_ELEMENT_IDS,
+} from "../utils/extensionContext";
+import { isReadmooAppPath } from "moo-family-bookshelf-shared/config/readmoo";
 import {
   DEFAULT_API_ENDPOINT,
   USER_ID_KEY,
@@ -14,6 +18,10 @@ import { BorrowStatus } from "../api/types";
 import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
 import { cookieConfirmsAccount } from "./pageAccountCookie";
 
+// Bumped by every fetch and every offline recheck; an in-flight fetch whose
+// epoch is no longer current discards its result instead of writing the badge.
+let badgeEpoch = 0;
+
 /**
  * Fetch pending incoming borrow requests and add a numeric badge to the
  * floating button when count > 0. Silently no-ops on any error so a
@@ -22,12 +30,15 @@ import { cookieConfirmsAccount } from "./pageAccountCookie";
  * The request is sent only when the Readmoo account logged in on the page is
  * the stored user (issue #275); otherwise — another account, or no usable
  * login cookie — nothing is fetched and any badge already shown is removed.
+ * A result is written only if no newer fetch or offline recheck started
+ * meanwhile (issue #280: the same button survives a hashchange).
  *
  * Production caller: `injectFamilyBookshelfButton` in content/index.ts.
  */
 export async function updatePendingBorrowBadge(
   button: HTMLElement,
 ): Promise<void> {
+  const epoch = ++badgeEpoch;
   try {
     const stored = await browser.storage.local.get([
       USER_ID_KEY,
@@ -42,6 +53,7 @@ export async function updatePendingBorrowBadge(
       (stored[API_ENDPOINT_KEY] as string | undefined) ?? DEFAULT_API_ENDPOINT;
     if (!userId || !familyId || !authToken) return;
     if (!(await cookieConfirmsAccount(userId))) {
+      if (epoch !== badgeEpoch) return; // superseded by a newer fetch/recheck
       updateBadge(button, 0);
       return;
     }
@@ -69,10 +81,48 @@ export async function updatePendingBorrowBadge(
     const pending = requests.filter(
       (r) => r.status === BorrowStatus.PENDING && r.ownerId === userId,
     ).length;
+    if (epoch !== badgeEpoch) return; // superseded by a newer fetch/recheck
     updateBadge(button, pending);
   } catch {
     // ignore — best-effort enhancement
   }
+}
+
+/**
+ * Hashchange while the Dialog is open (its `#/me` check, a book sync — issue
+ * #280): keep the button, badge and watcher, send no request, re-gate offline.
+ * Returns false (caller re-injects as before) unless all four guards hold.
+ */
+export function recheckBadgeIfDialogOpen(): boolean {
+  if (!isExtensionContextValid()) return false;
+  if (!isReadmooAppPath(location.hostname, location.pathname)) return false;
+  const button = document.getElementById(MOO_ELEMENT_IDS.button);
+  if (!button || !document.getElementById(MOO_ELEMENT_IDS.host)) return false;
+  void recheckBadgeAccount(button);
+  return true;
+}
+
+/**
+ * Remove the badge unless the stored binding (familyId + token) still exists
+ * and the login cookie confirms the stored userId — covers a number the Dialog
+ * set without a cookie check, or before leaving the family. No request;
+ * fail-closed.
+ */
+export async function recheckBadgeAccount(button: HTMLElement): Promise<void> {
+  badgeEpoch++; // discard any fetch still in flight; this recheck owns the badge
+  try {
+    const stored = await browser.storage.local.get([
+      USER_ID_KEY,
+      FAMILY_ID_KEY,
+      AUTH_TOKEN_KEY,
+    ]);
+    const userId = stored[USER_ID_KEY] as string | undefined;
+    const bound = Boolean(stored[FAMILY_ID_KEY] && stored[AUTH_TOKEN_KEY]);
+    if (userId && bound && (await cookieConfirmsAccount(userId))) return;
+  } catch {
+    // fall through: an unreadable store must not keep a number on screen
+  }
+  updateBadge(button, 0);
 }
 
 /**
