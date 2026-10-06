@@ -151,6 +151,9 @@ export function useAutoSetup(): UseAutoSetupReturn {
         setPhase("done");
         return true;
       } catch (err) {
+        // A scrape failure must not leave the account unconfirmed: a still-
+        // matching account refreshes the cache so the mount auto-sync retries.
+        await verifyAccountIdentity(userId);
         setErrorMessage(err instanceof Error ? err.message : "同步書單失敗");
         setPhase("error");
         restoreHash();

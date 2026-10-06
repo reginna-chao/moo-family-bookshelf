@@ -538,6 +538,22 @@ describe("useAutoSetup", () => {
       expect(lastSyncWrittenValue()).toBeUndefined();
     });
 
+    // A failed scrape still re-checks the account, so a still-matching one
+    // refreshes the cache and the personal-shelf mount auto-sync can retry.
+    it("still re-checks the account when the scrape throws", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockRejectedValueOnce(new Error("scrape failed"));
+      const mockApi = createMockApiClient();
+
+      const { success, result } = await runAutoSync(mockApi);
+
+      expect(verifyAccountIdentity).toHaveBeenCalledWith("user-hash");
+      expect(success).toBe(false);
+      expect(result.current.phase).toBe("error");
+      expect(result.current.errorMessage).toBe("scrape failed");
+      expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
+    });
+
     it("does not count saved archived books against the scrape (archive never scraped here)", async () => {
       const { scrapeBooks } = await import("@/content/scraper");
       const active = Array.from({ length: 20 }, (_, i) => makeBook(i));
