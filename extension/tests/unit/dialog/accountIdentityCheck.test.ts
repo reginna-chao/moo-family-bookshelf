@@ -45,6 +45,7 @@ import {
   verifyAccountIdentity,
   markAccountConfirmed,
   forgetAccountConfirmation,
+  cachedIdentity,
 } from "@/dialog/accountIdentityCheck";
 import { NAV_SETTLE_MS } from "@/content/hashNavigation";
 import { scrapeUserEmail, scrapeDisplayName } from "@/content/scraper";
@@ -386,5 +387,93 @@ describe("verifyAccountIdentity", () => {
     setReadmooEmailCookie(EMAIL_A);
     await expect(runCheck(userA)).resolves.toBe("match");
     expect(scrapeUserEmail).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * cachedIdentity (issue #284) — onboarding's hand-off to App: it reports the
+ * latest verifyAccountIdentity `mismatch` for that userId only, never
+ * navigates, and is cleared by any later result or reset. A remembered
+ * mismatch never lets checkAccountIdentity skip the navigation.
+ */
+describe("cachedIdentity", () => {
+  /** Page on account A, stored user B: the latest verify finds a mismatch. */
+  async function rememberMismatchForB(): Promise<void> {
+    await expect(runVerify(userB)).resolves.toBe("mismatch");
+  }
+
+  it("reports a verify mismatch for that userId only, without navigating", async () => {
+    await rememberMismatchForB();
+    deliverHashChanges();
+    const scrapes = vi.mocked(scrapeUserEmail).mock.calls.length;
+
+    expect(cachedIdentity(userB)).toBe("mismatch");
+    expect(cachedIdentity(userA)).toBe("unknown");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(location.hash).toBe("#/library");
+    expect(scrapeUserEmail).toHaveBeenCalledTimes(scrapes);
+  });
+
+  it("reports unknown when nothing was checked, and match once confirmed", async () => {
+    expect(cachedIdentity(userA)).toBe("unknown");
+
+    await expect(runVerify(userA)).resolves.toBe("match");
+    expect(cachedIdentity(userA)).toBe("match");
+    expect(cachedIdentity(userB)).toBe("unknown");
+  });
+
+  it.each<[string, () => Promise<void> | void, "match" | "unknown"]>([
+    [
+      "a later verify for B resolves match (page switched to B)",
+      async () => {
+        vi.mocked(scrapeUserEmail).mockReturnValue(EMAIL_B);
+        await expect(runVerify(userB)).resolves.toBe("match");
+      },
+      "match",
+    ],
+    [
+      "a later verify for B resolves unknown",
+      async () => {
+        vi.mocked(scrapeUserEmail).mockReturnValueOnce(null);
+        await expect(runVerify(userB)).resolves.toBe("unknown");
+      },
+      "unknown",
+    ],
+    [
+      "a later verify for another user resolves match",
+      async () => {
+        await expect(runVerify(userA)).resolves.toBe("match");
+      },
+      "unknown",
+    ],
+    [
+      "markAccountConfirmed runs for another user",
+      () => markAccountConfirmed(userA),
+      "unknown",
+    ],
+    [
+      "forgetAccountConfirmation runs",
+      () => forgetAccountConfirmation(),
+      "unknown",
+    ],
+  ])("drops the remembered mismatch when %s", async (_case, then, expected) => {
+    await rememberMismatchForB();
+    expect(cachedIdentity(userB)).toBe("mismatch");
+
+    await then();
+
+    expect(cachedIdentity(userB)).toBe(expected);
+  });
+
+  it("never lets checkAccountIdentity return a remembered mismatch without navigating", async () => {
+    await rememberMismatchForB();
+    expect(scrapeUserEmail).toHaveBeenCalledOnce();
+
+    // Account B logs in on the page: a fresh #/me read must see it.
+    vi.mocked(scrapeUserEmail).mockReturnValue(EMAIL_B);
+
+    await expect(runCheck(userB)).resolves.toBe("match");
+    expect(scrapeUserEmail).toHaveBeenCalledTimes(2);
+    expect(cachedIdentity(userB)).toBe("match");
   });
 });
