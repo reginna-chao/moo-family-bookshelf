@@ -5,7 +5,8 @@
  * otherwise act as the first one.
  *
  * Pure: no navigation, no storage. Callers obtain the email (content/
- * hashNavigation.ts → readMePageProfile, or a scrape already on `#/me`).
+ * hashNavigation.ts → readMePageProfile, a scrape already on `#/me`, or
+ * Readmoo's login cookie via content/pageAccountCookie.ts).
  */
 
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
