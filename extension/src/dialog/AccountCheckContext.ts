@@ -25,7 +25,10 @@ export interface AccountCheck {
   recheck: () => Promise<AccountIdentity>;
 }
 
-/** Shown on the personal shelf when a manual sync could not confirm the account. */
+/**
+ * Shown when a sync (personal-shelf manual sync, or onboarding's first sync)
+ * could not confirm the account.
+ */
 export const ACCOUNT_UNCONFIRMED_SYNC_MESSAGE =
   "無法確認目前登入的讀墨帳號，這次沒有同步書單。請確認已登入讀墨後再試一次。";
 

@@ -8,7 +8,8 @@
  *   the same page does not navigate again. The cache serves this ONLY.
  * - `verifyAccountIdentity` — always navigates, never trusts the cache. Every
  *   book sync calls it right before uploading, because another tab sharing the
- *   cookies may have switched accounts since the cached `match`.
+ *   cookies may have switched accounts since the cached `match`. Onboarding's
+ *   first book upload calls it too, right after the scrape (issue #281).
  *
  * After a `#/me` match, Readmoo's login cookie (`content/pageAccountCookie.ts`)
  * may VETO it down to `unknown` — it never confirms the stored user and never
@@ -30,6 +31,11 @@ let confirmedUserId: string | null = null;
 /** Record that `userId` belongs to the account on the page (this page load only). */
 export function markAccountConfirmed(userId: string): void {
   confirmedUserId = userId;
+}
+
+/** This page load's confirmation of `userId`, read-only: never navigates. */
+export function cachedIdentity(userId: string): "match" | "unknown" {
+  return confirmedUserId === userId ? "match" : "unknown";
 }
 
 /** Drop the page-load confirmation, e.g. once the stored identity is cleared. */

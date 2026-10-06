@@ -62,6 +62,7 @@ vi.mock("@/dialog/DialogFooter", () => ({
 vi.mock("@/dialog/accountIdentityCheck", () => ({
   checkAccountIdentity: vi.fn().mockResolvedValue("match"),
   verifyAccountIdentity: vi.fn().mockResolvedValue("match"),
+  cachedIdentity: vi.fn().mockReturnValue("match"),
   markAccountConfirmed: vi.fn(),
   forgetAccountConfirmation: vi.fn(),
 }));

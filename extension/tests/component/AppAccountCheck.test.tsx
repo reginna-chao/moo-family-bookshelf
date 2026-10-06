@@ -44,6 +44,7 @@ import type { AccountIdentity } from "@/content/accountIdentity";
 vi.mock("@/dialog/accountIdentityCheck", () => ({
   checkAccountIdentity: vi.fn(),
   verifyAccountIdentity: vi.fn(),
+  cachedIdentity: vi.fn(),
   markAccountConfirmed: vi.fn(),
   forgetAccountConfirmation: vi.fn(),
 }));
@@ -92,6 +93,7 @@ vi.mock("@/dialog/DialogFooter", () => ({
 import {
   checkAccountIdentity,
   verifyAccountIdentity,
+  cachedIdentity,
   markAccountConfirmed,
   forgetAccountConfirmation,
 } from "@/dialog/accountIdentityCheck";
@@ -183,6 +185,7 @@ describe("App account check (#271)", () => {
     vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
     vi.mocked(checkAccountIdentity).mockResolvedValue("match");
     vi.mocked(verifyAccountIdentity).mockResolvedValue("match");
+    vi.mocked(cachedIdentity).mockReturnValue("match");
     // Never settles: the main view's loads are observable as calls, and no
     // response can cascade into reauth / family-removed flows.
     fetchMock = vi.fn(() => new Promise(() => {}));
@@ -336,6 +339,8 @@ describe("App account check (#271)", () => {
       fireEvent.click(screen.getByText("Mock Join"));
 
       expect(await screen.findByRole("tablist")).toBeInTheDocument();
+      // Onboarding's pre-upload re-check (#281) left a cached match for it.
+      expect(cachedIdentity).toHaveBeenCalledWith("user-new");
       expect(markAccountConfirmed).toHaveBeenCalledWith("user-new");
     });
   });

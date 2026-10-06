@@ -13,7 +13,7 @@ import { readStoredApiEndpoint } from "../storage/familyEndpointChoice";
 import { safeStorageGet } from "../storage/safeStorage";
 import { applyStoredEndpoint } from "./applyStoredEndpoint";
 import { clearStoredFamilyBinding } from "./familyBindingReset";
-import { checkAccountIdentity } from "./accountIdentityCheck";
+import { checkAccountIdentity, cachedIdentity } from "./accountIdentityCheck";
 import { useAccountGate } from "./useAccountGate";
 import { AccountCheckProvider } from "./AccountCheckContext";
 import { AccountMismatchScreen } from "./AccountMismatchScreen";
@@ -175,8 +175,8 @@ export function App({
 
   const handleFamilyJoined = (id: string, newUserId: string) => {
     bootSupersededRef.current = true;
-    // Onboarding derived newUserId from the account on this page just now.
-    settleAccount("match", newUserId);
+    // Match only if this page load confirmed newUserId (#281 pre-upload check).
+    settleAccount(cachedIdentity(newUserId), newUserId);
     setFamilyId(id);
     setUserId(newUserId);
     // A fresh family supersedes the explanation of the previous one's teardown.
