@@ -1,5 +1,5 @@
-// The page's Readmoo account, read from Readmoo's login cookie (issue #275). Used
-// only by the floating button's badge; the Dialog trusts `#/me` alone (docs/architecture.md).
+// The page's Readmoo account, read from Readmoo's login cookie (issue #275). The badge confirms
+// with it; the Dialog's pre-sync check (dialog/accountIdentityCheck.ts) may only VETO with it.
 
 import { compareAccountIdentity } from "./accountIdentity";
 

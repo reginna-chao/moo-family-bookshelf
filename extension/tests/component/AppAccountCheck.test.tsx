@@ -43,6 +43,7 @@ import type { AccountIdentity } from "@/content/accountIdentity";
 
 vi.mock("@/dialog/accountIdentityCheck", () => ({
   checkAccountIdentity: vi.fn(),
+  verifyAccountIdentity: vi.fn(),
   markAccountConfirmed: vi.fn(),
   forgetAccountConfirmation: vi.fn(),
 }));
@@ -90,6 +91,7 @@ vi.mock("@/dialog/DialogFooter", () => ({
 
 import {
   checkAccountIdentity,
+  verifyAccountIdentity,
   markAccountConfirmed,
   forgetAccountConfirmation,
 } from "@/dialog/accountIdentityCheck";
@@ -180,6 +182,7 @@ describe("App account check (#271)", () => {
     vi.clearAllMocks();
     vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
     vi.mocked(checkAccountIdentity).mockResolvedValue("match");
+    vi.mocked(verifyAccountIdentity).mockResolvedValue("match");
     // Never settles: the main view's loads are observable as calls, and no
     // response can cascade into reauth / family-removed flows.
     fetchMock = vi.fn(() => new Promise(() => {}));
@@ -445,12 +448,14 @@ describe("App account check (#271)", () => {
       const rendered = await renderApp("unknown");
       expect(await screen.findByRole("tablist")).toBeInTheDocument();
       await settle();
-      vi.mocked(checkAccountIdentity).mockReturnValueOnce(pending.promise);
+      vi.mocked(verifyAccountIdentity).mockReturnValueOnce(pending.promise);
 
       fireEvent.click(screen.getByRole("tab", { name: /個人書櫃/ }));
       fireEvent.click(await screen.findByText("Mock Recheck"));
-      expect(checkAccountIdentity).toHaveBeenCalledTimes(2);
-      expect(checkAccountIdentity).toHaveBeenLastCalledWith(OLD_USER);
+      // The recheck is the uncached one (#277); the cached check ran at boot only.
+      expect(verifyAccountIdentity).toHaveBeenCalledOnce();
+      expect(verifyAccountIdentity).toHaveBeenCalledWith(OLD_USER);
+      expect(checkAccountIdentity).toHaveBeenCalledOnce();
       return { ...rendered, pending };
     }
 

@@ -61,6 +61,7 @@ vi.mock("@/dialog/DialogFooter", () => ({
 // exactly as before. The check itself: tests/component/AppAccountCheck.test.tsx.
 vi.mock("@/dialog/accountIdentityCheck", () => ({
   checkAccountIdentity: vi.fn().mockResolvedValue("match"),
+  verifyAccountIdentity: vi.fn().mockResolvedValue("match"),
   markAccountConfirmed: vi.fn(),
   forgetAccountConfirmation: vi.fn(),
 }));
