@@ -256,7 +256,7 @@ When the answer is yes: read `references/retro.md` and follow it in **this sessi
 
 ## Phase 9: Post-merge cleanup gate (inventory, then ASK — never act unasked)
 
-**Trigger:** the session learns that the run's PR has MERGED — a `<ci-monitor-event>` from the desktop app, `mcp__ccd_pr__get_status` reporting `MERGED`, or the user saying so. Not before the merge, and not on a PR closed without merging (ask the user what they want with the branch instead). The phase exists because post-merge leftovers (stale local branches, orphan worktrees) accumulate silently when cleanup depends on someone remembering; it lives here, not in a per-machine memory, so every clone behaves the same.
+**Trigger:** the session learns that the run's PR has MERGED — a `<ci-monitor-event>` from the desktop app, `mcp__ccd_pr__get_status` reporting `MERGED`, or the user saying so. Not before the merge, and not on a PR closed without merging (ask the user what they want with the branch instead). **Merging itself is the user's action, done by hand on GitHub**: this phase never runs `gh pr merge`, never enables auto-merge, and never suggests doing either — it only reacts to a merge that has already happened. The phase exists because post-merge leftovers (stale local branches, orphan worktrees) accumulate silently when cleanup depends on someone remembering; it lives here, not in a per-machine memory, so every clone behaves the same.
 
 **Hard rule: nothing is deleted, removed or archived without the user's answer to step 2 — in every permission mode, auto mode included.** A stale branch costs nothing; a lost one is unrecoverable from a user's point of view. Exceptions are not granted by "it is obviously merged".
 
