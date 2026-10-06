@@ -343,6 +343,27 @@ describe("App account check (#271)", () => {
       expect(cachedIdentity).toHaveBeenCalledWith("user-new");
       expect(markAccountConfirmed).toHaveBeenCalledWith("user-new");
     });
+
+    it("shows the mismatch screen when onboarding's check found another account (#284)", async () => {
+      await chrome.storage.local.clear();
+      await chrome.storage.sync.clear();
+      vi.mocked(cachedIdentity).mockReturnValue("mismatch");
+      const { onViewChange } = await renderApp("match");
+      await screen.findByTestId("onboarding");
+
+      fireEvent.click(screen.getByText("Mock Join"));
+
+      expect(
+        await screen.findByRole("heading", { name: MISMATCH_HEADING }),
+      ).toBeInTheDocument();
+      await settle();
+      expect(cachedIdentity).toHaveBeenCalledWith("user-new");
+      expectNoMainView();
+      expect(onViewChange).toHaveBeenLastCalledWith("account-mismatch");
+      expect(onViewChange).not.toHaveBeenCalledWith("main");
+      expect(markAccountConfirmed).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("while the check is running", () => {

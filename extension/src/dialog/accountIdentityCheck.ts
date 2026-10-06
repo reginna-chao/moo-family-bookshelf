@@ -17,6 +17,11 @@
  *
  * Nothing is persisted — the next page load checks afresh. The cache is keyed
  * on the userId it confirmed, so it can never vouch for a different stored user.
+ *
+ * The most recent `verifyAccountIdentity` `mismatch` is remembered too, but
+ * ONLY for `cachedIdentity` — onboarding's hand-off to App (issue #284). It is
+ * never used to skip a navigation: `checkAccountIdentity` short-circuits on a
+ * cached `match` alone.
  */
 
 import {
@@ -27,20 +32,30 @@ import { readMePageProfile } from "../content/hashNavigation";
 import { readPageAccountEmail } from "../content/pageAccountCookie";
 
 let confirmedUserId: string | null = null;
+// The userId the latest verifyAccountIdentity found to be a DIFFERENT account.
+let mismatchedUserId: string | null = null;
 
 /** Record that `userId` belongs to the account on the page (this page load only). */
 export function markAccountConfirmed(userId: string): void {
   confirmedUserId = userId;
+  mismatchedUserId = null;
 }
 
-/** This page load's confirmation of `userId`, read-only: never navigates. */
-export function cachedIdentity(userId: string): "match" | "unknown" {
-  return confirmedUserId === userId ? "match" : "unknown";
+/**
+ * The latest known result for `userId` on this page load, read-only: never
+ * navigates. `match` if confirmed, `mismatch` if the latest
+ * verifyAccountIdentity found another account (onboarding → App, issue #284),
+ * otherwise `unknown`.
+ */
+export function cachedIdentity(userId: string): AccountIdentity {
+  if (confirmedUserId === userId) return "match";
+  return mismatchedUserId === userId ? "mismatch" : "unknown";
 }
 
-/** Drop the page-load confirmation, e.g. once the stored identity is cleared. */
+/** Drop the page-load results, e.g. once the stored identity is cleared. */
 export function forgetAccountConfirmation(): void {
   confirmedUserId = null;
+  mismatchedUserId = null;
 }
 
 /**
@@ -70,8 +85,9 @@ async function cookieVetoes(storedUserId: string): Promise<boolean> {
  * cookie contradicts becomes `unknown`: the cookie can only veto, never
  * confirm, and never produces `mismatch`. Never rejects: any failure (no
  * email, scrape error, abort) is `unknown`. A `match` refreshes the cache;
- * any other result drops it, so the next Dialog open checks again. The page
- * hash is restored on every path (see readMePageProfile).
+ * any other result drops it, so the next Dialog open checks again, and a
+ * `mismatch` is remembered for cachedIdentity. The page hash is restored on
+ * every path (see readMePageProfile).
  */
 export async function verifyAccountIdentity(
   storedUserId: string,
@@ -88,7 +104,11 @@ export async function verifyAccountIdentity(
   } catch {
     identity = "unknown";
   }
-  if (identity === "match") markAccountConfirmed(storedUserId);
-  else forgetAccountConfirmation();
+  if (identity === "match") {
+    markAccountConfirmed(storedUserId);
+    return identity;
+  }
+  forgetAccountConfirmation();
+  if (identity === "mismatch") mismatchedUserId = storedUserId;
   return identity;
 }

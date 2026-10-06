@@ -60,9 +60,8 @@ export function App({
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [contextLost, setContextLost] = useState(false);
-  // Why the family binding was torn down (removed by the owner / family gone /
-  // full). Rendered above Onboarding so the forced flip has a stated reason
-  // instead of looking like the dialog reset itself.
+  // Why the family binding was torn down (removed / family gone / full), shown
+  // above Onboarding so the forced flip doesn't look like a spontaneous reset.
   const [familyGoneNotice, setFamilyGoneNotice] = useState<string | null>(null);
   // Bumped after a successful re-verification so FamilyDataProvider re-runs its
   // initial load (members → bookshelf → borrow) and the stale 401 view clears
@@ -175,8 +174,9 @@ export function App({
 
   const handleFamilyJoined = (id: string, newUserId: string) => {
     bootSupersededRef.current = true;
-    // Match only if this page load confirmed newUserId (#281 pre-upload check).
-    settleAccount(cachedIdentity(newUserId), newUserId);
+    // Adopt onboarding's pre-upload check (#281); a mismatch shows its screen (#284).
+    const identity = cachedIdentity(newUserId);
+    settleAccount(identity, newUserId);
     setFamilyId(id);
     setUserId(newUserId);
     // A fresh family supersedes the explanation of the previous one's teardown.
@@ -191,7 +191,7 @@ export function App({
           .catch(() => {});
       }
     })();
-    setView("main");
+    setView(identity === "mismatch" ? "account-mismatch" : "main");
   };
 
   const handleLeaveFamily = () => {

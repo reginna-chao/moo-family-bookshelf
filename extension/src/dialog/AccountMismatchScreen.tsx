@@ -42,7 +42,7 @@ export function AccountMismatchScreen({
           目前登入的讀墨帳號與設定時不同
         </h2>
         <div className="moo-family-gone-notice__text">
-          這個瀏覽器的家庭書櫃是用另一個讀墨帳號設定的，這次沒有讀取或變更任何資料。要用原本的帳號，請改用那個帳號登入讀墨，再打開家庭書櫃。
+          這個瀏覽器的家庭書櫃是用另一個讀墨帳號設定的，所以不會顯示家庭書櫃，也不會把現在這個帳號的書單同步到原本的帳號。要用原本的帳號，請改用那個帳號登入讀墨，再打開家庭書櫃。
         </div>
         <p className="moo-account-mismatch__hint">
           重新設定只會清除這個瀏覽器上的設定，原本的帳號仍會留在家庭裡。

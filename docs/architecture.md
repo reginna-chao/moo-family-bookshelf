@@ -97,7 +97,7 @@
 擴充功能的身分（`moo:userId` / `moo:familyId`）存在瀏覽器設定檔裡，不是跟著讀墨帳號走。同一個設定檔換了另一個讀墨帳號登入時，Dialog 不能沿用原本的身分（issue #271）。
 
 - 開啟 Dialog、讀到 familyId 與 userId 後，先導航到 `#/me` 抓 email，算出 `deriveUserId(email)` 與存好的 userId 比對，再回到原頁；比對期間維持「載入中」。邏輯在 `extension/src/dialog/accountIdentityCheck.ts`，純比對在 `extension/src/content/accountIdentity.ts`。
-- **相同**：進主畫面。結果記在模組層級，只用來省下開啟 Dialog 時的導航：同一次頁面載入重開 Dialog 不再導航；不寫進 storage，重新載入頁面就重新確認。透過引導畫面建立／加入家庭時，userId 本來就是從這一頁的帳號算出來的，直接記為相同。
+- **相同**：進主畫面。結果記在模組層級，只用來省下開啟 Dialog 時的導航：同一次頁面載入重開 Dialog 不再導航；不寫進 storage，重新載入頁面就重新確認。透過引導畫面建立／加入家庭時，沿用上傳書單前重新確認的結果（issue #281）：相同就記為相同；不同就顯示帳號不符畫面（issue #284）；無法確認就照常進主畫面，但不自動同步。
 - **每次同步前都重新確認**（issue #277）：自動同步與手動同步上傳書單前，都會先導航到 `#/me` 重新比對（`verifyAccountIdentity`），不採用模組層級的結果，因為同一個瀏覽器的另一個分頁可能已經換了帳號。比對到不同帳號就切到帳號不符畫面，並丟掉模組層級的結果，下次開啟 Dialog 會重新確認。`#/me` 比對相同後，還會再看讀墨的登入 cookie（`ReadmooNext.email`），以防讀墨的單頁程式把舊帳號的個人資料留在記憶體、`#/me` 仍顯示舊帳號：cookie 解得出 email 且算出的 userId 跟存好的不同時，這次當作「無法確認」、不上傳。cookie 只能擋、不能確認：沒有 cookie 或解不開時，仍只看 `#/me`。開啟 Dialog 時第一次的確認走同一個函式，也會被 cookie 擋成「無法確認」。
 - **不同**：顯示帳號不符畫面（`AccountMismatchScreen`），不掛載 `FamilyDataProvider` / `MainContent`，因此不讀書櫃資料、不自動同步，也碰不到任何寫入動作。「改用這個帳號重新設定」只清除本機的身分與家庭綁定（`familyBindingReset.ts` 的 `forgetStoredAccount`），不呼叫任何 API，原帳號仍留在家庭裡、伺服器資料不動，然後回到引導畫面。
 - **無法確認**（沒登入、頁面改版、載入太慢、任何錯誤）：照常進主畫面，但這次頁面載入不做個人書櫃的自動同步。同步前的重新確認若無法確認，自動同步直接略過、不顯示任何訊息；手動同步不上傳，並顯示原本的提示。
