@@ -97,22 +97,24 @@
 擴充功能的身分（`moo:userId` / `moo:familyId`）存在瀏覽器設定檔裡，不是跟著讀墨帳號走。同一個設定檔換了另一個讀墨帳號登入時，Dialog 不能沿用原本的身分（issue #271）。
 
 - 開啟 Dialog、讀到 familyId 與 userId 後，先導航到 `#/me` 抓 email，算出 `deriveUserId(email)` 與存好的 userId 比對，再回到原頁；比對期間維持「載入中」。邏輯在 `extension/src/dialog/accountIdentityCheck.ts`，純比對在 `extension/src/content/accountIdentity.ts`。
-- **相同**：進主畫面。結果記在模組層級，同一次頁面載入重開 Dialog 不再導航；不寫進 storage，重新載入頁面就重新確認。透過引導畫面建立／加入家庭時，userId 本來就是從這一頁的帳號算出來的，直接記為相同。
+- **相同**：進主畫面。結果記在模組層級，只用來省下開啟 Dialog 時的導航：同一次頁面載入重開 Dialog 不再導航；不寫進 storage，重新載入頁面就重新確認。透過引導畫面建立／加入家庭時，userId 本來就是從這一頁的帳號算出來的，直接記為相同。
+- **每次同步前都重新確認**（issue #277）：自動同步與手動同步上傳書單前，都會先導航到 `#/me` 重新比對（`verifyAccountIdentity`），不採用模組層級的結果，因為同一個瀏覽器的另一個分頁可能已經換了帳號。比對到不同帳號就切到帳號不符畫面，並丟掉模組層級的結果，下次開啟 Dialog 會重新確認。`#/me` 比對相同後，還會再看讀墨的登入 cookie（`ReadmooNext.email`），以防讀墨的單頁程式把舊帳號的個人資料留在記憶體、`#/me` 仍顯示舊帳號：cookie 解得出 email 且算出的 userId 跟存好的不同時，這次當作「無法確認」、不上傳。cookie 只能擋、不能確認：沒有 cookie 或解不開時，仍只看 `#/me`。開啟 Dialog 時第一次的確認走同一個函式，也會被 cookie 擋成「無法確認」。
 - **不同**：顯示帳號不符畫面（`AccountMismatchScreen`），不掛載 `FamilyDataProvider` / `MainContent`，因此不讀書櫃資料、不自動同步，也碰不到任何寫入動作。「改用這個帳號重新設定」只清除本機的身分與家庭綁定（`familyBindingReset.ts` 的 `forgetStoredAccount`），不呼叫任何 API，原帳號仍留在家庭裡、伺服器資料不動，然後回到引導畫面。
-- **無法確認**（沒登入、頁面改版、載入太慢、任何錯誤）：照常進主畫面，但這次頁面載入不做個人書櫃的自動同步；手動同步會先重新確認，相同才同步，不同就切到帳號不符畫面，仍無法確認則不同步並提示使用者。
+- **無法確認**（沒登入、頁面改版、載入太慢、任何錯誤）：照常進主畫面，但這次頁面載入不做個人書櫃的自動同步。同步前的重新確認若無法確認，自動同步直接略過、不顯示任何訊息；手動同步不上傳，並顯示原本的提示。
+- **尚未在真實的讀墨上驗證**（issue #277）：另一個分頁換了帳號後，沒有重新載入的讀墨分頁實際上會不會抓到新帳號的書、`#/me` 會不會顯示新帳號，都沒有實測過。同步前的重新確認是防禦性的保護；若 `#/me` 仍顯示舊帳號，登入 cookie 的否決就是針對這個未驗證情況的第二道防線。
 - Content Script 在 `#/me` 順手快取 email／顯示名稱時（`extension/src/content/profileCache.ts`），若 storage 已有 userId 且與這個 email 算出的不同，就什麼都不寫——顯示名稱會跟著原帳號的書單一起上傳。
 
-浮動按鈕上的待處理借閱數字（issue #275）用另一個訊號確認帳號：讀墨自己的登入 cookie。這個 cookie 只有按鈕用，上面的 Dialog 帳號確認不讀它，只認 `#/me`。
+浮動按鈕上的待處理借閱數字（issue #275）用另一個訊號確認帳號：讀墨自己的登入 cookie。按鈕靠這個 cookie 確認相同；上面的 Dialog 帳號確認只認 `#/me` 判定相同，cookie 只用來否決（issue #277）。
 
 - **按鈕只在 cookie 確認相同時查詢**（`extension/src/content/pendingBorrowBadge.ts`）：每次頁面載入／hashchange 注入按鈕時，從 cookie 解出 email，算出 `deriveUserId(email)` 與存好的 userId 相同才送出 `/api/family/…/borrow` 請求；不同或無法確認（沒有 cookie、解不開、雜湊失敗）時不送任何請求，並移除按鈕上已有的數字（fail-closed）。按鈕不做 `#/me` 導航，所以 cookie 無法使用時寧可不顯示。
 - **cookie 格式**（`extension/src/content/pageAccountCookie.ts`）：讀墨在 next.readmoo.com 設有 `ReadmooNext.email`，不是 HttpOnly，`document.cookie` 讀得到；值是 `encodeURIComponent(base64(email))`，未登入時不存在。這個格式只用**一個**帳號實測過（解出的 email 與 `#/me` 抓到的完全相同）。read.readmoo.com 目前會轉址到 next.readmoo.com/read。
 - cookie 是頁面可寫的輸入，一律當成不可信：不存在、`decodeURIComponent` 或 base64 解不開、解出來不是 UTF-8 或不像 email、同名 cookie 出現兩個不同的值，都當作「無法確認」，不丟例外，按鈕就不顯示數字。讀墨若改了 cookie 的名稱或格式，結果也只是按鈕不再顯示數字。
 - **cookie 能被誰寫入沒有驗證過**（安全掃描指出）：cookie 的寫入範圍比 `#/me` 的頁面內容大。其他 `*.readmoo.com` 子網域可以設定上層網域的同名 cookie；讀墨這個 cookie 是否為 host-only、readmoo.com 是否送出含 `includeSubDomains` 的 HSTS，都**沒有驗證過**。同名 cookie 出現兩個不同的值已當作無法確認，擋不住的是只剩單一錯誤值的情況，例如換帳號後只留下原帳號的舊值。
-- **Dialog 為什麼不採信 cookie**：cookie 一旦替錯的人確認相同，Dialog 會讓頁面上的帳號以存好帳號的身分操作——用存好的 userId 同步書單、產生 PWA 登入用的 QR Code 與驗證碼、離開家庭；同樣的情況 `#/me` 會顯示帳號不符畫面。這個代價太大，所以 Dialog 的帳號確認維持 issue #271 的做法，只認 `#/me`。
+- **Dialog 為什麼不採信 cookie**：cookie 一旦替錯的人確認相同，Dialog 會讓頁面上的帳號以存好帳號的身分操作——用存好的 userId 同步書單、產生 PWA 登入用的 QR Code 與驗證碼、離開家庭；同樣的情況 `#/me` 會顯示帳號不符畫面。這個代價太大，所以 Dialog 的帳號確認維持 issue #271 的做法，「相同」只認 `#/me`。issue #277 起 cookie 可以否決：`#/me` 相同但 cookie 指向另一個帳號時，結果改為「無法確認」，不上傳書單。否決只會讓結果更嚴格，不會替錯的人確認，也不會只憑 cookie 就切到帳號不符畫面，所以不違反上面的理由。
 - **按鈕的最壞情況**：cookie 替錯的人確認時，頁面上的帳號看到的是存好帳號的待處理借閱**數字**，看不到書名或借閱內容；修正前不管誰登入，按鈕都會顯示這個數字。這個代價可以接受，所以按鈕採信 cookie。
 - **Dialog 也會更新按鈕上的數字**：Dialog 掛載主畫面後（`#/me` 確認相同或無法確認），`MainContent` 讀完借閱清單就經 `onPendingBorrowCountChange`（`extension/src/dialog/App.tsx`）更新數字，不看 cookie。所以 Dialog 的結果是無法確認時，按鈕可能顯示存好帳號的待處理數字，直到下次頁面載入或 hashchange 重新注入按鈕；帳號不符時不掛載主畫面，不會回報數字。
 - **已手動實測**（2026-10-05，repo 擁有者在 Chrome 載入 dev build 的擴充功能）：同一個瀏覽器登出後改用另一個讀墨帳號登入，浮動按鈕沒有數字、沒有送出 `/api/family/…/borrow` 請求，Dialog 顯示帳號不符畫面。仍未驗證：這次用的是哪一種登入方式沒有記錄（讀墨的帳號密碼表單，或 Google／Apple／Facebook／QR Code 登入），非 ASCII 的 email 也沒有測過。
-- **仍未解決的多餘請求**：Dialog 在一次頁面載入第一次確認帳號時，仍會導航到 `#/me` 再回到原頁。帳號相同時，這兩次 hashchange 各會重新注入按鈕並重新查詢一次數字，也就是每次開啟 Dialog（這次頁面載入還沒確認過時）最多會多送 2 次 GET。這次沒有處理。
+- **仍未解決的多餘請求**：Dialog 在一次頁面載入第一次確認帳號時，仍會導航到 `#/me` 再回到原頁。帳號相同時，這兩次 hashchange 各會重新注入按鈕並重新查詢一次數字，也就是每次開啟 Dialog（這次頁面載入還沒確認過時）最多會多送 2 次 GET。issue #277 起每次同步（自動與手動）上傳前也會先導航到 `#/me` 再回來，所以每次同步也可能多送最多 2 次 GET；手動同步由使用者觸發，自動同步每個間隔最多一次，遠低於成本上限。這次也沒有處理。
 
 #### 引導畫面（未加入家庭時）
 

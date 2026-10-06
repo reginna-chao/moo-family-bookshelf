@@ -4,9 +4,9 @@
  * - Auto-sync on personal-shelf mount (a full sync, rate limited by autoSyncInterval)
  * - Manual sync button handler (no rate limiting)
  *
- * Reads the account check from AccountCheckContext (issue #271): while the
- * page's Readmoo account is unconfirmed, auto-sync is skipped and a manual sync
- * re-checks first. With a confirmed account it behaves exactly as before.
+ * Reads the account check from AccountCheckContext (issues #271, #277): every
+ * sync re-reads `#/me` and compares right before uploading. Unconfirmed at
+ * mount → no auto-sync; a sync that cannot confirm the account uploads nothing.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -101,6 +101,10 @@ export function useBookSync({
         setSyncStatus("syncing");
         setProgressMessage("");
         try {
+          if ((await accountRef.current.recheck()) !== "match") {
+            setSyncStatus("idle"); // A mismatch already swapped the Dialog.
+            return;
+          }
           const result = await syncBooks({
             navigate: true,
             userId,
@@ -149,16 +153,14 @@ export function useBookSync({
     setSyncError("");
     setProgressMessage("");
 
-    if (accountRef.current.status !== "match") {
-      const identity = await accountRef.current.recheck();
-      if (identity === "unknown") {
-        setSyncError(ACCOUNT_UNCONFIRMED_SYNC_MESSAGE);
-        setSyncStatus("error");
-      }
-      // A mismatch swaps the Dialog to the blocking screen (this shelf unmounts).
-      if (identity === "mismatch") setSyncStatus("idle");
-      if (identity !== "match") return;
+    const identity = await accountRef.current.recheck();
+    if (identity === "unknown") {
+      setSyncError(ACCOUNT_UNCONFIRMED_SYNC_MESSAGE);
+      setSyncStatus("error");
     }
+    // A mismatch swaps the Dialog to the blocking screen (this shelf unmounts).
+    if (identity === "mismatch") setSyncStatus("idle");
+    if (identity !== "match") return;
 
     const result = await syncBooks({
       navigate: true,
