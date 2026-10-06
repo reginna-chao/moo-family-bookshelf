@@ -110,9 +110,9 @@
 - **cookie 能被誰寫入沒有驗證過**（安全掃描指出）：cookie 的寫入範圍比 `#/me` 的頁面內容大。其他 `*.readmoo.com` 子網域可以設定上層網域的同名 cookie；讀墨這個 cookie 是否為 host-only、readmoo.com 是否送出含 `includeSubDomains` 的 HSTS，都**沒有驗證過**。同名 cookie 出現兩個不同的值已當作無法確認，擋不住的是只剩單一錯誤值的情況，例如換帳號後只留下原帳號的舊值。
 - **Dialog 為什麼不採信 cookie**：cookie 一旦替錯的人確認相同，Dialog 會讓頁面上的帳號以存好帳號的身分操作——用存好的 userId 同步書單、產生 PWA 登入用的 QR Code 與驗證碼、離開家庭；同樣的情況 `#/me` 會顯示帳號不符畫面。這個代價太大，所以 Dialog 的帳號確認維持 issue #271 的做法，只認 `#/me`。
 - **按鈕的最壞情況**：cookie 替錯的人確認時，頁面上的帳號看到的是存好帳號的待處理借閱**數字**，看不到書名或借閱內容；修正前不管誰登入，按鈕都會顯示這個數字。這個代價可以接受，所以按鈕採信 cookie。
-- **Dialog 也會更新按鈕上的數字**：Dialog 掛載主畫面後（`#/me` 確認相同或無法確認），`MainContent` 讀完借閱清單就經 `onPendingBorrowCountChange`（`extension/src/dialog/App.tsx`）更新數字，不看 cookie。所以 Dialog 的結果是無法確認時，按鈕可能顯示存好帳號的待處理數字，直到下次頁面載入或 hashchange 重新注入按鈕；帳號不符時不掛載主畫面，不會回報數字。
+- **Dialog 也會更新按鈕上的數字**：Dialog 掛載主畫面後（`#/me` 確認相同或無法確認），`MainContent` 讀完借閱清單就經 `onPendingBorrowCountChange`（`extension/src/dialog/App.tsx`）更新數字，不看 cookie。所以 Dialog 的結果是無法確認時，按鈕可能顯示存好帳號的待處理數字，直到下次頁面載入或 hashchange 重新注入按鈕；Dialog 開著時的 hashchange 不重新注入按鈕，但仍會用 cookie 重新確認，不相同或無法確認就移除數字。帳號不符時不掛載主畫面，不會回報數字。
 - **已手動實測**（2026-10-05，repo 擁有者在 Chrome 載入 dev build 的擴充功能）：同一個瀏覽器登出後改用另一個讀墨帳號登入，浮動按鈕沒有數字、沒有送出 `/api/family/…/borrow` 請求，Dialog 顯示帳號不符畫面。仍未驗證：這次用的是哪一種登入方式沒有記錄（讀墨的帳號密碼表單，或 Google／Apple／Facebook／QR Code 登入），非 ASCII 的 email 也沒有測過。
-- **仍未解決的多餘請求**：Dialog 在一次頁面載入第一次確認帳號時，仍會導航到 `#/me` 再回到原頁。帳號相同時，這兩次 hashchange 各會重新注入按鈕並重新查詢一次數字，也就是每次開啟 Dialog（這次頁面載入還沒確認過時）最多會多送 2 次 GET。這次沒有處理。
+- **Dialog 造成的 hash 切換不再查詢**（issue #280）：Dialog 開著時，它自己造成的 hash 切換（`#/me` 帳號確認、同步書單）不再重新注入按鈕、不再查詢數字，只用 cookie 重新確認帳號，不送請求（`recheckBadgeIfDialogOpen`）。
 
 #### 引導畫面（未加入家庭時）
 

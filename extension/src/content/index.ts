@@ -27,7 +27,11 @@ import {
   placeFloatingButton,
 } from "./mobileLayout";
 import { SHELL_BOOTSTRAP_CSS, SHELL_STYLE_MARKER } from "./shellStyles";
-import { updatePendingBorrowBadge, updateBadge } from "./pendingBorrowBadge";
+import {
+  updatePendingBorrowBadge,
+  updateBadge,
+  recheckBadgeIfDialogOpen,
+} from "./pendingBorrowBadge";
 import { FLOATING_ICON_SIZE_KEY } from "../constants";
 import { isReadmooAppPath } from "moo-family-bookshelf-shared/config/readmoo";
 
@@ -303,11 +307,7 @@ function toggleDialog(): void {
   host.id = MOO_ELEMENT_IDS.host;
   const shadowRoot = host.attachShadow({ mode: "open" });
 
-  // Inject the tiny bootstrap stylesheet IMMEDIATELY — before the backdrop/dialog
-  // are appended — so the shell's `moo-shell-*` classes resolve the instant those
-  // elements render (no flash of unstyled content). The full scoped styles.css is
-  // injected into this same root later by mountDialog. The marker attribute gives
-  // idempotency parity with that main injection.
+  // Must run before backdrop/dialog are appended, so they never flash unstyled.
   injectShellStyles(shadowRoot);
 
   // Single close path reused by backdrop click and the mobile close icon.
@@ -450,7 +450,7 @@ if (!isExtensionContextValid()) {
   }
 
   window.addEventListener("hashchange", () => {
-    waitAndInjectButton();
+    if (!recheckBadgeIfDialogOpen()) waitAndInjectButton();
     tryScrapeAndCacheEmail();
   });
 }

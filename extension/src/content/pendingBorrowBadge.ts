@@ -2,7 +2,11 @@
 // Fetched only when the login cookie confirms the stored user (issue #275).
 
 import browser from "webextension-polyfill";
-import { MOO_ELEMENT_IDS } from "../utils/extensionContext";
+import {
+  isExtensionContextValid,
+  MOO_ELEMENT_IDS,
+} from "../utils/extensionContext";
+import { isReadmooAppPath } from "moo-family-bookshelf-shared/config/readmoo";
 import {
   DEFAULT_API_ENDPOINT,
   USER_ID_KEY,
@@ -73,6 +77,42 @@ export async function updatePendingBorrowBadge(
   } catch {
     // ignore — best-effort enhancement
   }
+}
+
+/**
+ * Hashchange while the Dialog is open (its `#/me` check, a book sync — issue
+ * #280): keep the button, badge and watcher, send no request, re-gate offline.
+ * Returns false (caller re-injects as before) unless all four guards hold.
+ */
+export function recheckBadgeIfDialogOpen(): boolean {
+  if (!isExtensionContextValid()) return false;
+  if (!isReadmooAppPath(location.hostname, location.pathname)) return false;
+  const button = document.getElementById(MOO_ELEMENT_IDS.button);
+  if (!button || !document.getElementById(MOO_ELEMENT_IDS.host)) return false;
+  void recheckBadgeAccount(button);
+  return true;
+}
+
+/**
+ * Remove the badge unless the stored binding (familyId + token) still exists
+ * and the login cookie confirms the stored userId — covers a number the Dialog
+ * set without a cookie check, or before leaving the family. No request;
+ * fail-closed.
+ */
+export async function recheckBadgeAccount(button: HTMLElement): Promise<void> {
+  try {
+    const stored = await browser.storage.local.get([
+      USER_ID_KEY,
+      FAMILY_ID_KEY,
+      AUTH_TOKEN_KEY,
+    ]);
+    const userId = stored[USER_ID_KEY] as string | undefined;
+    const bound = Boolean(stored[FAMILY_ID_KEY] && stored[AUTH_TOKEN_KEY]);
+    if (userId && bound && (await cookieConfirmsAccount(userId))) return;
+  } catch {
+    // fall through: an unreadable store must not keep a number on screen
+  }
+  updateBadge(button, 0);
 }
 
 /**
