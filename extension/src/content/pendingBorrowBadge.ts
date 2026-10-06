@@ -18,6 +18,10 @@ import { BorrowStatus } from "../api/types";
 import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
 import { cookieConfirmsAccount } from "./pageAccountCookie";
 
+// Bumped by every fetch and every offline recheck; an in-flight fetch whose
+// epoch is no longer current discards its result instead of writing the badge.
+let badgeEpoch = 0;
+
 /**
  * Fetch pending incoming borrow requests and add a numeric badge to the
  * floating button when count > 0. Silently no-ops on any error so a
@@ -26,12 +30,15 @@ import { cookieConfirmsAccount } from "./pageAccountCookie";
  * The request is sent only when the Readmoo account logged in on the page is
  * the stored user (issue #275); otherwise — another account, or no usable
  * login cookie — nothing is fetched and any badge already shown is removed.
+ * A result is written only if no newer fetch or offline recheck started
+ * meanwhile (issue #280: the same button survives a hashchange).
  *
  * Production caller: `injectFamilyBookshelfButton` in content/index.ts.
  */
 export async function updatePendingBorrowBadge(
   button: HTMLElement,
 ): Promise<void> {
+  const epoch = ++badgeEpoch;
   try {
     const stored = await browser.storage.local.get([
       USER_ID_KEY,
@@ -46,6 +53,7 @@ export async function updatePendingBorrowBadge(
       (stored[API_ENDPOINT_KEY] as string | undefined) ?? DEFAULT_API_ENDPOINT;
     if (!userId || !familyId || !authToken) return;
     if (!(await cookieConfirmsAccount(userId))) {
+      if (epoch !== badgeEpoch) return; // superseded by a newer fetch/recheck
       updateBadge(button, 0);
       return;
     }
@@ -73,6 +81,7 @@ export async function updatePendingBorrowBadge(
     const pending = requests.filter(
       (r) => r.status === BorrowStatus.PENDING && r.ownerId === userId,
     ).length;
+    if (epoch !== badgeEpoch) return; // superseded by a newer fetch/recheck
     updateBadge(button, pending);
   } catch {
     // ignore — best-effort enhancement
@@ -100,6 +109,7 @@ export function recheckBadgeIfDialogOpen(): boolean {
  * fail-closed.
  */
 export async function recheckBadgeAccount(button: HTMLElement): Promise<void> {
+  badgeEpoch++; // discard any fetch still in flight; this recheck owns the badge
   try {
     const stored = await browser.storage.local.get([
       USER_ID_KEY,

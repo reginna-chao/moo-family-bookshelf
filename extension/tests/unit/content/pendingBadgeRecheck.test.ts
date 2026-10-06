@@ -4,9 +4,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import browser from "webextension-polyfill";
 import { MOO_ELEMENT_IDS } from "@/utils/extensionContext";
 import { AUTH_TOKEN_KEY, FAMILY_ID_KEY, USER_ID_KEY } from "@/constants";
+import { BorrowStatus } from "@/api/types";
 import {
   recheckBadgeAccount,
   recheckBadgeIfDialogOpen,
+  updatePendingBorrowBadge,
 } from "@/content/pendingBorrowBadge";
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import {
@@ -200,6 +202,59 @@ describe("recheckBadgeAccount", () => {
     expect(getBadge()).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  // A borrow fetch started for the owner is still in flight when the offline
+  // re-check removes the badge; its late response must not put the number back.
+  it.each([
+    {
+      name: "another Readmoo account logs in",
+      arrange: async () => setReadmooEmailCookie(OTHER_EMAIL),
+    },
+    {
+      name: "leaving the family clears the binding",
+      arrange: async () => {
+        await browser.storage.local.remove([FAMILY_ID_KEY, AUTH_TOKEN_KEY]);
+      },
+    },
+  ])(
+    "discards a fetch still in flight when $name and the re-check removes the badge",
+    async ({ arrange }) => {
+      let resolveFetch: (res: unknown) => void = () => {};
+      fetchSpy.mockImplementation(
+        () => new Promise((resolve) => (resolveFetch = resolve)),
+      );
+      const ownerPending = {
+        requestId: "req-1",
+        familyId: "fam-abc",
+        borrowerId: "borrower-1",
+        borrowerName: "Bob",
+        ownerId: OWNER_ID,
+        bookId: "book-1",
+        bookTitle: "The Test Book",
+        bookAuthor: "Author A",
+        bookCoverUrl: "https://example.com/cover.jpg",
+        status: BorrowStatus.PENDING,
+        createdAt: "2026-08-01T00:00:00Z",
+        updatedAt: "2026-08-01T00:00:00Z",
+      };
+
+      const inFlight = updatePendingBorrowBadge(button);
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      await arrange();
+      await recheckBadgeAccount(button);
+      expect(getBadge()).toBeNull();
+
+      resolveFetch({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [ownerPending] }),
+      });
+      await inFlight;
+
+      // textContent, so a regression reports the stale count ("1") it wrote.
+      expect(getBadge()?.textContent).toBeUndefined();
+    },
+  );
 });
 
 describe("recheckBadgeIfDialogOpen", () => {
