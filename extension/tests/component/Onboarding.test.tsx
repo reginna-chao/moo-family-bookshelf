@@ -62,6 +62,13 @@ vi.mock("@/content/scraper", () => ({
   scrapeBooks: vi.fn().mockResolvedValue([]),
 }));
 
+// The pre-upload account re-check (#281) navigates `#/me` again (another
+// 1500ms); here it is the confirmed account. Covered in useAutoSetup.test.ts.
+vi.mock("@/dialog/accountIdentityCheck", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/dialog/accountIdentityCheck")>()),
+  verifyAccountIdentity: vi.fn().mockResolvedValue("match"),
+}));
+
 function createMockApiClient(
   overrides: Partial<ApiClient> = {},
   initialEndpoint = "https://test.workers.dev",

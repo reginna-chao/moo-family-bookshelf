@@ -15,8 +15,8 @@ import {
 export interface UseAccountGateReturn {
   accountCheck: AccountCheck;
   /**
-   * Record a known result for `checkedUserId`: the boot check's, or `match`
-   * after onboarding derived the userId from the page's own account.
+   * Record a known result for `checkedUserId`: the boot check's, or
+   * onboarding's `cachedIdentity(newUserId)` after its pre-upload check (#281).
    */
   settleAccount: (identity: AccountIdentity, checkedUserId: string) => void;
 }

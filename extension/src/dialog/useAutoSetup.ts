@@ -5,6 +5,8 @@ import { navigateAndRun, readMePageProfile } from "../content/hashNavigation";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { ApiClient } from "../api/client";
 import { uploadOnboardingBooks } from "./onboardingBooksUpload";
+import { verifyAccountIdentity } from "./accountIdentityCheck";
+import { ACCOUNT_UNCONFIRMED_SYNC_MESSAGE } from "./AccountCheckContext";
 import {
   USER_EMAIL_KEY,
   DISPLAY_NAME_KEY,
@@ -115,6 +117,16 @@ export function useAutoSetup(): UseAutoSetupReturn {
 
         // A failed read or a redesign-shaped scrape throws → catch below
         // (error phase, no upload).
+
+        // Re-check AFTER the scrape (issue #281): another tab may have switched
+        // accounts since #/me was read at the start of onboarding, or mid-scrape.
+        if ((await verifyAccountIdentity(userId)) !== "match") {
+          setErrorMessage(ACCOUNT_UNCONFIRMED_SYNC_MESSAGE);
+          setPhase("error");
+          restoreHash();
+          return false;
+        }
+
         const uploadError = await uploadOnboardingBooks({
           apiClient,
           userId,
@@ -139,6 +151,9 @@ export function useAutoSetup(): UseAutoSetupReturn {
         setPhase("done");
         return true;
       } catch (err) {
+        // A scrape failure must not leave the account unconfirmed: a still-
+        // matching account refreshes the cache so the mount auto-sync retries.
+        await verifyAccountIdentity(userId);
         setErrorMessage(err instanceof Error ? err.message : "同步書單失敗");
         setPhase("error");
         restoreHash();

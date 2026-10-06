@@ -17,9 +17,17 @@ vi.mock("@/dialog/mergeBooks", () => ({
   mergeBooks: vi.fn((scraped: unknown[]) => scraped),
 }));
 
+// The pre-upload account re-check (#281) navigates `#/me`; it is the confirmed
+// account by default. The check itself: tests/unit/dialog/accountIdentityCheck.test.ts.
+vi.mock("@/dialog/accountIdentityCheck", () => ({
+  verifyAccountIdentity: vi.fn(),
+}));
+
 import { useAutoSetup } from "@/dialog/useAutoSetup";
 import { scrapeUserEmail } from "@/content/scraper";
 import { mergeBooks } from "@/dialog/mergeBooks";
+import { verifyAccountIdentity } from "@/dialog/accountIdentityCheck";
+import { ACCOUNT_UNCONFIRMED_SYNC_MESSAGE } from "@/dialog/AccountCheckContext";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { LAST_SYNC_AT_KEY } from "@/constants";
 import {
@@ -51,6 +59,7 @@ describe("useAutoSetup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    vi.mocked(verifyAccountIdentity).mockResolvedValue("match");
 
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -510,6 +519,39 @@ describe("useAutoSetup", () => {
       expect(result.current.errorMessage).toBe(SYNC_PAUSED_MESSAGE);
       expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
       expect(lastSyncWrittenValue()).toBeUndefined();
+    });
+
+    // #281: another tab switched the Readmoo account after onboarding read #/me.
+    it("enters the error phase with no upload when the account is no longer confirmed after the scrape", async () => {
+      vi.mocked(verifyAccountIdentity).mockResolvedValue("unknown");
+      const mockApi = createMockApiClient();
+
+      const { success, result } = await runAutoSync(mockApi);
+
+      expect(verifyAccountIdentity).toHaveBeenCalledWith("user-hash");
+      expect(success).toBe(false);
+      expect(result.current.phase).toBe("error");
+      expect(result.current.errorMessage).toBe(
+        ACCOUNT_UNCONFIRMED_SYNC_MESSAGE,
+      );
+      expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
+      expect(lastSyncWrittenValue()).toBeUndefined();
+    });
+
+    // A failed scrape still re-checks the account, so a still-matching one
+    // refreshes the cache and the personal-shelf mount auto-sync can retry.
+    it("still re-checks the account when the scrape throws", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockRejectedValueOnce(new Error("scrape failed"));
+      const mockApi = createMockApiClient();
+
+      const { success, result } = await runAutoSync(mockApi);
+
+      expect(verifyAccountIdentity).toHaveBeenCalledWith("user-hash");
+      expect(success).toBe(false);
+      expect(result.current.phase).toBe("error");
+      expect(result.current.errorMessage).toBe("scrape failed");
+      expect(mockApi.updatePersonalBooks).not.toHaveBeenCalled();
     });
 
     it("does not count saved archived books against the scrape (archive never scraped here)", async () => {
