@@ -8,8 +8,8 @@ import { useState, useCallback, useMemo, useRef } from "react";
 import type { AccountIdentity } from "../content/accountIdentity";
 import type { AccountCheck, AccountStatus } from "./AccountCheckContext";
 import {
-  checkAccountIdentity,
   markAccountConfirmed,
+  verifyAccountIdentity,
 } from "./accountIdentityCheck";
 
 export interface UseAccountGateReturn {
@@ -29,10 +29,11 @@ export function useAccountGate(
   const onMismatchRef = useRef(onMismatch);
   onMismatchRef.current = onMismatch;
 
+  // Always a fresh `#/me` read (issue #277): the cached match may be stale.
   const recheck = useCallback(async (): Promise<AccountIdentity> => {
     if (!userId) return "unknown";
-    const identity = await checkAccountIdentity(userId);
-    if (identity === "match") setStatus("match");
+    const identity = await verifyAccountIdentity(userId);
+    setStatus(identity === "match" ? "match" : "unknown");
     if (identity === "mismatch") onMismatchRef.current();
     return identity;
   }, [userId]);

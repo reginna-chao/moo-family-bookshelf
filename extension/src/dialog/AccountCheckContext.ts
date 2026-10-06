@@ -1,7 +1,8 @@
 /**
  * Hands the main view's account-check state (issue #271) to the code that
- * uploads on the user's behalf without a click — today only useBookSync's
- * mount-time auto-sync. App provides it; see dialog/useAccountGate.ts.
+ * uploads on the user's behalf — useBookSync reads it for both the auto-sync
+ * and the manual sync before every upload. App provides it; see
+ * dialog/useAccountGate.ts.
  */
 
 import { createContext, useContext } from "react";
@@ -17,8 +18,9 @@ export type AccountStatus = "match" | "unknown";
 export interface AccountCheck {
   status: AccountStatus;
   /**
-   * Run the check again (navigates to `#/me` and back). A `match` flips
-   * `status`; a `mismatch` also switches the Dialog to the blocking screen.
+   * Run the check again: ALWAYS navigates to `#/me` and back, never the
+   * cached result (issue #277). Sets `status` to `match` or `unknown`; a
+   * `mismatch` also switches the Dialog to the blocking screen.
    */
   recheck: () => Promise<AccountIdentity>;
 }
