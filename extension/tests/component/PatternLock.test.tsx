@@ -126,12 +126,8 @@ describe("PatternLock", () => {
       expect(onComplete).toHaveBeenCalledWith("0,1,4,7");
     });
 
-    /**
-     * 重新設定 sits OUTSIDE the dimmed wrapper (so it stays readable during a
-     * lockout countdown), which means `pointerEvents: none` does not cover it.
-     * It therefore needs its own `disabled` — otherwise a locked-out user could
-     * still wipe the first pattern and restart the setup mid-lockout.
-     */
+    /** 重新設定 sits OUTSIDE the dimmed wrapper (readable during a lockout), so `pointerEvents: none` misses
+     *  it: it needs its own `disabled`, or a locked-out user could wipe the first pattern mid-lockout. */
     it("marks the setup reset button as disabled while disabled", () => {
       const { rerender } = render(
         <PatternLock mode="setup" onComplete={vi.fn()} />,
@@ -168,11 +164,8 @@ describe("PatternLock", () => {
     });
   });
 
-  /**
-   * The dim wraps ONLY the interactive cluster (label + dot grid). The error
-   * line is what explains the lock during a rate-limit countdown, so it — and
-   * the reset button — must stay readable at full opacity for the whole wait.
-   */
+  /** The dim wraps ONLY the interactive cluster (label + dot grid): the error line explaining the lock,
+   *  and the reset button, stay at full opacity for the whole countdown. */
   describe("disabled dim scope", () => {
     it("dims the dot grid while disabled", () => {
       render(<PatternLock mode="verify" onComplete={vi.fn()} disabled />);

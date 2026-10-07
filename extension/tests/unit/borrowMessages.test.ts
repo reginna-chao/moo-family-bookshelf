@@ -16,15 +16,28 @@ import {
  * `useBorrowAction` suites and the two family-shelf component suites — asserts
  * against `buildBorrowFailureText(code)` rather than a literal, so a wording
  * change fails exactly here and nowhere else.
+ *
+ * Codes whose advice must stay distinct (the distinctness assertion enforces
+ * that no two collapse onto one sentence):
+ *  - TOO_MANY_PENDING_REQUESTS — 409 from the per-borrower PENDING ceiling
+ *    (BORROW_MAX_PENDING_PER_BORROWER, worker/src/routes/borrow.ts). Distinct
+ *    from DUPLICATE_REQUEST: that one is about THIS book, this one is about how
+ *    many requests the member is holding open.
+ *  - INVALID_OWNER_SELF — the owner check's OTHER 403
+ *    (worker/src/routes/borrow.ts). Distinct from INVALID_OWNER: that one means
+ *    the owner has left the family, this one means the caller IS the owner.
+ *
+ * The lookup is a Map precisely so a backend-controlled `code` cannot reach
+ * Object.prototype: an object-literal table would answer "__proto__" with an
+ * object and "toString" with a function, both of which would render as garbage
+ * (or crash) in the banner.
  */
 
 /** code → the exact 繁體中文 sentence production ships today. */
 const COPY_BY_CODE: [string, string][] = [
   ["DUPLICATE_REQUEST", "這本書已有待處理的借閱申請，請到「借閱」查看"],
-  // 409 from the per-borrower PENDING ceiling
-  // (BORROW_MAX_PENDING_PER_BORROWER, worker/src/routes/borrow.ts). Distinct
-  // from DUPLICATE_REQUEST: that one is about THIS book, this one is about how
-  // many requests the member is holding open, so the advice differs.
+  // 409 from BORROW_MAX_PENDING_PER_BORROWER — distinct from DUPLICATE_REQUEST.
+  // See the file header.
   [
     "TOO_MANY_PENDING_REQUESTS",
     "你的待處理借閱申請太多了，請先處理或取消部分申請",
@@ -33,10 +46,8 @@ const COPY_BY_CODE: [string, string][] = [
   ["LENDING_DISABLED", "借閱功能已關閉，請在家庭設定確認你與對方的借閱權限"],
   ["NOT_FAMILY_MEMBER", "你已不在這個家庭，無法申請借閱"],
   ["INVALID_OWNER", "無法申請借閱這本書，書籍擁有者已不在這個家庭"],
-  // The owner check's OTHER 403 (worker/src/routes/borrow.ts). Distinct from
-  // INVALID_OWNER: that one means the owner has left the family, this one means
-  // the caller IS the owner, so the advice differs — the two must never collapse
-  // onto one sentence, which the distinctness assertion below enforces.
+  // The owner check's OTHER 403 — the caller IS the owner; never collapsed onto
+  // INVALID_OWNER's sentence. See the file header.
   ["INVALID_OWNER_SELF", "這是你自己的書，不需要申請借閱"],
   ["FAMILY_NOT_FOUND", "找不到這個家庭，請重新開啟書櫃後再試"],
   ["UNAUTHORIZED", "登入狀態已失效，請重新開啟書櫃後再試"],
@@ -85,10 +96,8 @@ describe("buildBorrowFailureText", () => {
     expect(BORROW_FAILURE_FALLBACK_TEXT).toBe("申請借閱失敗，請稍後再試");
   });
 
-  // The lookup is a Map precisely so a backend-controlled `code` cannot reach
-  // Object.prototype: an object-literal table would answer "__proto__" with an
-  // object and "toString" with a function, both of which would render as
-  // garbage (or crash) in the banner.
+  // A Map, so a backend-controlled `code` never reaches Object.prototype. See the
+  // file header.
   it.each([
     "__proto__",
     "constructor",

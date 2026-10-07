@@ -27,11 +27,22 @@ import { MOO_ELEMENT_IDS } from "@/utils/extensionContext";
  *     style — the guard prevents a duplicate).
  *  3. The floating button carries the `transition: opacity 0.2s ease-in` inline
  *     style that the hover effect animates.
+ *
+ * Module setup: the content script loads the React root from a code-split
+ * module at runtime via browser.runtime.getURL("content-dialog.js"); this file
+ * never opens the dialog, but the `@/dialog/main` mock keeps that boundary inert
+ * if a click ever fires. Importing the content script runs its top-level init
+ * (injects the floating button → injectBaseButtonStyle); the import is static so
+ * the vi.mock calls are hoisted ahead of module evaluation.
+ *
+ * `getHoverStyles` collects the base hover <style> elements in document.head:
+ * those whose CSS text carries the `@media (hover: hover)` wrapper AND the
+ * button's `:hover` selector. The `(hover: hover)` marker is unique to this
+ * style (the dev env style has no `:hover` rule), so the filter never mis-counts.
  */
 
-// The content script loads the React root from a code-split module at runtime
-// via browser.runtime.getURL("content-dialog.js"). We never open the dialog in
-// this file, but the mock keeps that boundary inert if a click ever fires.
+// Keeps the code-split dialog boundary inert if a click ever fires. See the
+// header → "Module setup".
 vi.mock("@/dialog/main", () => ({
   mountDialog: vi.fn(() => vi.fn()),
 }));
@@ -43,9 +54,8 @@ vi.mock("@/content/pageReady", () => ({
   PAGE_READY_TIMEOUT_MS: 5000,
 }));
 
-// Importing the content script runs its top-level init (injects the floating
-// button → injectBaseButtonStyle). Static import so the vi.mock calls above are
-// hoisted ahead of module evaluation.
+// Runs the content script's top-level init; static so the vi.mock calls above
+// are hoisted ahead of module evaluation.
 import "@/content/index";
 
 const WAIT_TIMEOUT_MS = 10_000;
@@ -82,12 +92,8 @@ function getButton(): HTMLElement {
   return btn;
 }
 
-/**
- * Collect the base hover <style> elements in document.head: those whose CSS text
- * carries the `@media (hover: hover)` wrapper AND the button's `:hover` selector.
- * The `(hover: hover)` marker is unique to this style (the dev env style has no
- * `:hover` rule), so the filter never mis-counts.
- */
+/** The base hover <style> elements in document.head (`(hover: hover)` + `:hover`).
+ *  See the file header. */
 function getHoverStyles(): HTMLStyleElement[] {
   return Array.from(document.head.querySelectorAll("style")).filter((el) => {
     const css = el.textContent ?? "";

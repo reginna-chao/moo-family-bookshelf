@@ -2,6 +2,136 @@ import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { webcrypto } from "node:crypto";
 
+/**
+ * useOnboardingFlow (`src/dialog/useOnboardingFlow.ts`): the onboarding state
+ * machine — start / create / join / recovery paths and their verification bridges.
+ *
+ * Mock shapes:
+ *  - `@/dialog/onboardingFlow` is mocked so recovery-path outcomes can be
+ *    injected. `CreateFamilyError` is re-exported UNMOCKED: useOnboardingFlow
+ *    narrows the create failure with `instanceof`, so a hand-rolled stand-in
+ *    would silently drift from the production class (and drop the
+ *    code/retryAfter fields). `restoreApiEndpoint` is re-exported UNMOCKED for the
+ *    same reason in reverse: the endpoint rollback is asserted through its
+ *    OBSERVABLE effect on the client, so the real implementation has to run — a
+ *    stub would let the rollback rot while the tests stayed green.
+ *  - The mock API client is stateful like the real one: setEndpoint runs the
+ *    PRODUCTION validator and is what getEndpoint reports back afterwards.
+ *    handleJoin's endpoint rollback is only observable through that pairing — a
+ *    getEndpoint stub frozen on one value would make every rollback assertion
+ *    pass vacuously.
+ *  - `driveToRecoveryChoice` drives handleStart into "recovery-choice", the
+ *    canonical precondition for any test of the post-discovery handlers
+ *    (handleRecoveryChoice*, handleSoloRecovery*).
+ *
+ * Verification prompt bridge (SEC-1): an existing verification-enabled member
+ * reconnecting on a fresh device gets VERIFICATION_REQUIRED. Every join path
+ * must bridge to the "verify-prompt" state (not a generic error / silent
+ * recovery-choice fallback), retry with the secret, and restore the prior view
+ * on cancel.
+ *  - Lockout countdown (REGRESSION): a 429 lockout carries `retryAfter`. Every
+ *    join path must forward it into the prompt so a dialog opened while the
+ *    account is locked shows the remaining wait immediately, instead of an
+ *    open-ended "請稍後再試" that never resolves on its own. The handleStart path
+ *    used to drop it — each call site is pinned.
+ *
+ * Auth-lookup verification gate (SEC-1, lookup side): `POST /api/auth/lookup` no
+ * longer answers with the family data for an account that has verification
+ * configured — it returns 200 with `requiresVerification: TRUE` and a withheld
+ * payload. Read naively that looks exactly like "this account has no family",
+ * which would drop a user who HAS one onto the create/join screen and let them
+ * fork a second family.
+ *
+ * COPY PINS (single place each literal is asserted — a wording change fails HERE):
+ *  - START_VERIFY_CANCELLED_MESSAGE and its 「重新驗證」 action label, module-private
+ *    in src/dialog/useOnboardingStartFlow.ts;
+ *  - VERIFY_CANCELLED_MESSAGE and its 「重新驗證」 action label, module-private in
+ *    src/dialog/useOnboardingCreateFlow.ts;
+ *  - FAMILY_GONE_FALLBACK_MESSAGE, module-private in
+ *    src/dialog/useRecoveryVerificationBridge.ts. The recovery bridges reach it
+ *    structurally: `RecoveryResult` carries no `errorMessage`, so an
+ *    auto-recovery refusal never has server wording to quote and the client must
+ *    supply its own.
+ *
+ * Failed retry restores the prompt (REGRESSION — UI deadlock, had zero
+ * coverage): every retry closure runs a whole onboarding flow, and several of
+ * them move the state machine into a progress view ("recovering") whose
+ * full-screen LoadingOverlay covers the prompt. When the attempt failed, nothing
+ * brought the state machine back — one wrong PIN left the dialog stuck under the
+ * overlay until the user reopened it. `onAttemptFailed` restores "verify-prompt"
+ * on every failed attempt. Two cases pin the invariant rather than reproduce the
+ * bug: the solo bridge's retry closure calls performSoloRecovery directly and
+ * does not (today) enter a progress view — it starts catching a real deadlock
+ * the moment the closure gains one, as attemptRecovery has; and performJoin only
+ * advances the state machine ("syncing-books") on success, so the manual join
+ * path cannot deadlock today — that case guards the shared bridge handleJoin was
+ * migrated onto against a future progress view.
+ *
+ * Family gone after a verified retry — a TERMINAL refusal after a CORRECT secret.
+ * The worker only answers a join with a family-gone code (owner removed this
+ * member / family deleted / no seat left) once its verification gate has passed,
+ * so the verdict always lands on the retry the user typed a VALID PIN into.
+ * Re-offering the prompt would loop them on "right secret → error" until the
+ * kicked tombstone expires (6h); the flow must end the attempt and say why.
+ *
+ * handleJoin with a refused `@host`: a sync code whose `@host` the endpoint
+ * validator refuses aborts inside performJoin with `INVALID_ENDPOINT` (nothing
+ * persisted, no join attempted). The hook must surface that as an ordinary
+ * retryable error — it is NOT a verification challenge, so it must not open the
+ * PIN prompt, and it must not be swallowed into a state where the user believes
+ * the join succeeded.
+ *
+ * ENDPOINT LIFETIME of ONE join attempt — the security contract of this round.
+ * A sync code's `@host` must be applied to the in-memory client for the join
+ * request to reach that server. But a server that REFUSED the join has proven
+ * nothing, and an applied endpoint outlives the attempt: it would still be in
+ * force when the user gives up and presses 建立家庭, shipping the userId, the
+ * display name, the token that create issues and the whole personal book list —
+ * unshared books included — to that same server, which would then be baked into
+ * the sync code handed to the rest of the family (THE attack the rollback
+ * closes).
+ *
+ * | exit from the attempt                      | in-memory endpoint |
+ * | ------------------------------------------ | ------------------ |
+ * | `@host` rejected by the validator          | never applied      |
+ * | join succeeds (first try or verify retry)  | stays adopted      |
+ * | join refused for a NON-verification reason | RESTORED           |
+ * | join refused pending verification          | stays adopted      |
+ * | user cancels the verification prompt       | RESTORED           |
+ * | verified retry refused as family-gone      | RESTORED           |
+ * | performJoin / deriveUserId throws          | RESTORED           |
+ * | join succeeded, then the book sync throws  | stays adopted      |
+ *
+ *  - Verification pending is a DELIBERATE exception: a challenge is a
+ *    CONTINUATION of the same attempt, not its end. The prompt asks that family's
+ *    own server for the account's verification method and then retries the join
+ *    against it, so releasing the endpoint would send both to the wrong host.
+ *  - A verified retry refused for good (owner removed this member / family
+ *    deleted / full) ends the attempt exactly as cancel does, so the `@host` must
+ *    be handed back — otherwise the refusing server would still be steering the
+ *    client when the user reaches for 建立家庭 next.
+ *  - Sync failure after success: the backend already accepted the join, so
+ *    performJoin has persisted this endpoint; a best-effort sync failure must not
+ *    roll back a membership that exists — the client would then be on a
+ *    different endpoint from the one in storage.
+ * Storage is the other half of the contract and belongs to performJoin (it
+ * persists ONLY after the backend accepts) — pinned in
+ * tests/unit/onboardingFlow.test.ts. What this hook owns is the in-memory
+ * column, so that is what these cases assert. `mockJoinAdopting` stands in for
+ * production performJoin's in-memory adoption: it applies the `@host` to the
+ * client BEFORE the request and, on failure, deliberately leaves it applied —
+ * releasing it is handleJoin's job. That production behaviour is pinned in
+ * tests/unit/onboardingFlow.test.ts → "adopts, persists, and broadcasts the
+ * endpoint when decoded.apiHost is set" / "keeps the adopted endpoint in memory
+ * when the backend refuses the join".
+ *
+ * Sync-code pre-fill from a storage.sync REMNANT: on mount, when this device has
+ * onboarded (local userId) but lost its local familyId while sync still holds
+ * one, the hook offers the encoded sync code so the user can rejoin in one tap.
+ * It is PRE-FILL only — never auto-submits — and uses a functional state update
+ * so it can never clobber what the user is typing.
+ */
+
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {
     Object.defineProperty(globalThis, "crypto", {
@@ -16,14 +146,8 @@ vi.mock("moo-family-bookshelf-shared/crypto/hash", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
 }));
 
-// Mock onboardingFlow module so we can inject recovery-path outcomes.
-// CreateFamilyError is re-exported UNMOCKED: useOnboardingFlow narrows the
-// create failure with `instanceof`, so a hand-rolled stand-in would silently
-// drift from the production class (and drop the code/retryAfter fields).
-// restoreApiEndpoint is re-exported UNMOCKED for the same reason in reverse:
-// the endpoint rollback below is asserted through its OBSERVABLE effect on the
-// client, so the real implementation has to run — a stub would let the rollback
-// rot while the tests stayed green.
+// Inject recovery-path outcomes; CreateFamilyError and restoreApiEndpoint stay
+// UNMOCKED. See the header → "Mock shapes".
 vi.mock("@/dialog/onboardingFlow", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/dialog/onboardingFlow")>();
@@ -79,10 +203,8 @@ import type { useAutoSetup } from "@/dialog/useAutoSetup";
 const ORIGINAL_ENDPOINT = "https://test.workers.dev";
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
-  // Stateful like the real client: setEndpoint runs the PRODUCTION validator and
-  // is what getEndpoint reports back afterwards. handleJoin's endpoint rollback
-  // is only observable through that pairing — a getEndpoint stub frozen on one
-  // value would make every rollback assertion below pass vacuously.
+  // Stateful like the real client (production validator in setEndpoint), or the
+  // rollback assertions pass vacuously. See the header → "Mock shapes".
   let endpoint = ORIGINAL_ENDPOINT;
   return {
     lookupUser: vi.fn().mockResolvedValue({
@@ -130,11 +252,8 @@ function renderFlow(
   );
 }
 
-/**
- * Drive handleStart such that the hook lands in "recovery-choice".
- * This is the canonical precondition for any test that exercises
- * post-discovery handlers (handleRecoveryChoice*, handleSoloRecovery*).
- */
+/** Drive handleStart into "recovery-choice" — the precondition for the
+ *  post-discovery handlers (handleRecoveryChoice*, handleSoloRecovery*). */
 async function driveToRecoveryChoice(
   apiClient: ApiClient = createMockApiClient({
     lookupUser: vi.fn().mockResolvedValue({
@@ -448,12 +567,8 @@ describe("useOnboardingFlow", () => {
     });
   });
 
-  /**
-   * SEC-1: an existing verification-enabled member reconnecting on a fresh
-   * device gets VERIFICATION_REQUIRED. Every join path must bridge to the
-   * "verify-prompt" state (not a generic error / silent recovery-choice
-   * fallback), retry with the secret, and restore the prior view on cancel.
-   */
+  // SEC-1: every join path bridges VERIFICATION_REQUIRED to "verify-prompt".
+  // See the header → "Verification prompt bridge".
   describe("verification prompt bridge (verify-prompt)", () => {
     function apiClientWithFamily(method: VerifyMethod = "pin"): ApiClient {
       return createMockApiClient({
@@ -631,13 +746,8 @@ describe("useOnboardingFlow", () => {
       expect(result.current.verify.active).toBe(true);
     });
 
-    /**
-     * REGRESSION: a 429 lockout carries `retryAfter`. Every join path must
-     * forward it into the prompt so a dialog opened while the account is locked
-     * shows the remaining wait immediately, instead of an open-ended
-     * "請稍後再試" that never resolves on its own. The handleStart path used to
-     * drop it — each call site is pinned below.
-     */
+    // REGRESSION: every join path forwards a 429's `retryAfter` into the prompt
+    // (handleStart used to drop it). See the header → "Lockout countdown".
     describe("lockout countdown (retryAfter forwarding)", () => {
       const LOCKED = "VERIFICATION_LOCKED";
 
@@ -767,13 +877,8 @@ describe("useOnboardingFlow", () => {
     });
   });
 
-  /**
-   * SEC-1 (lookup side): `POST /api/auth/lookup` no longer answers with the
-   * family data for an account that has verification configured — it returns 200
-   * with `requiresVerification: TRUE` and a withheld payload. Read naively that
-   * looks exactly like "this account has no family", which would drop a user who
-   * HAS one onto the create/join screen and let them fork a second family.
-   */
+  // SEC-1 (lookup side): a withheld payload must not read as "no family".
+  // See the header → "Auth-lookup verification gate".
   describe("auth-lookup verification gate", () => {
     /** 200 + withheld payload: the server refuses to say whether a family exists. */
     const WITHHELD = {
@@ -954,12 +1059,8 @@ describe("useOnboardingFlow", () => {
         expect(result.current.verify.countdownSeconds).toBe(300);
       });
 
-      /**
-       * COPY PIN: START_VERIFY_CANCELLED_MESSAGE and its 「重新驗證」 action label
-       * are module-private in src/dialog/useOnboardingStartFlow.ts. This is
-       * the single place the literals are asserted — a wording change fails
-       * HERE.
-       */
+      // COPY PIN: START_VERIFY_CANCELLED_MESSAGE + 「重新驗證」, module-private in
+      // src/dialog/useOnboardingStartFlow.ts — asserted only here.
       it("shows the retryable 「重新驗證」 error when the user cancels the challenge", async () => {
         const lookupUser = vi.fn().mockResolvedValue(WITHHELD);
         const { result } = renderFlow(createMockApiClient({ lookupUser }));
@@ -1153,11 +1254,8 @@ describe("useOnboardingFlow", () => {
         expect(result.current.state).not.toBe("created");
       });
 
-      /**
-       * COPY PIN: VERIFY_CANCELLED_MESSAGE and its 「重新驗證」 action label are
-       * module-private in src/dialog/useOnboardingCreateFlow.ts. This is the
-       * single place the literals are asserted — a wording change fails HERE.
-       */
+      // COPY PIN: VERIFY_CANCELLED_MESSAGE + 「重新驗證」, module-private in
+      // src/dialog/useOnboardingCreateFlow.ts — asserted only here.
       it("shows the create-cancelled message with a 「重新驗證」 action on cancel", async () => {
         const lookupUser = vi
           .fn()
@@ -1251,14 +1349,8 @@ describe("useOnboardingFlow", () => {
     });
   });
 
-  /**
-   * REGRESSION (UI deadlock, had zero coverage): every retry closure runs a whole
-   * onboarding flow, and several of them move the state machine into a progress
-   * view ("recovering") whose full-screen LoadingOverlay covers the prompt. When
-   * the attempt failed, nothing brought the state machine back — one wrong PIN
-   * left the dialog stuck under the overlay until the user reopened it.
-   * `onAttemptFailed` restores "verify-prompt" on every failed attempt.
-   */
+  // REGRESSION (UI deadlock): `onAttemptFailed` restores "verify-prompt" on every
+  // failed attempt. See the header → "Failed retry restores the prompt".
   describe("failed retry restores the prompt (no loading-overlay deadlock)", () => {
     function apiClientWithFamily(): ApiClient {
       return createMockApiClient({
@@ -1355,10 +1447,8 @@ describe("useOnboardingFlow", () => {
         await result.current.verify.submit("000000");
       });
 
-      // This bridge's retry closure calls performSoloRecovery directly and does
-      // not (today) enter a progress view, so the assertion pins the invariant
-      // rather than reproducing the overlay bug — it starts catching a real
-      // deadlock the moment the closure gains one, as attemptRecovery has.
+      // Pins the invariant (no progress view here today) rather than reproducing
+      // the bug. See the header → "Failed retry restores the prompt".
       expect(result.current.state).toBe("verify-prompt");
       expect(result.current.state).not.toBe("recovering");
       expect(result.current.verify.active).toBe(true);
@@ -1418,9 +1508,8 @@ describe("useOnboardingFlow", () => {
       expect(result.current.state).not.toBe("verify-prompt");
     });
 
-    // performJoin only advances the state machine ("syncing-books") on success,
-    // so this path cannot deadlock today; the case guards the shared bridge
-    // handleJoin was migrated onto against a future progress view.
+    // Cannot deadlock today; guards the shared bridge against a future progress
+    // view. See the header → "Failed retry restores the prompt".
     it("manual sync-code join: a wrong secret keeps the prompt open", async () => {
       vi.mocked(performJoin).mockResolvedValue({
         ok: false,
@@ -1450,14 +1539,8 @@ describe("useOnboardingFlow", () => {
     });
   });
 
-  /**
-   * TERMINAL refusal after a CORRECT secret. The worker only answers a join with
-   * a family-gone code (owner removed this member / family deleted / no seat
-   * left) once its verification gate has passed, so the verdict always lands on
-   * the retry the user typed a VALID PIN into. Re-offering the prompt would loop
-   * them on "right secret → error" until the kicked tombstone expires (6h); the
-   * flow must end the attempt and say why instead.
-   */
+  // TERMINAL refusal after a CORRECT secret: end the attempt and say why, never
+  // re-offer the prompt. See the header → "Family gone after a verified retry".
   describe("family gone after a verified retry", () => {
     /** The worker's own wording for the refusal — quoted, never re-invented. */
     const SERVER_MESSAGE = "你已被家庭管理者移出，無法重新加入";
@@ -1521,15 +1604,8 @@ describe("useOnboardingFlow", () => {
       },
     );
 
-    /**
-     * COPY PIN: FAMILY_GONE_FALLBACK_MESSAGE is module-private in
-     * src/dialog/useRecoveryVerificationBridge.ts. This is the single place
-     * the literal is asserted — a wording change fails HERE.
-     *
-     * The recovery bridges reach it structurally: `RecoveryResult` carries no
-     * `errorMessage`, so an auto-recovery refusal never has server wording to
-     * quote and the client must supply its own.
-     */
+    // COPY PIN: FAMILY_GONE_FALLBACK_MESSAGE (module-private) — asserted only here.
+    // See the header → "COPY PINS".
     it("auto-recovery: falls back to the client's own explanation when no message is carried", async () => {
       vi.mocked(tryAutoRecovery).mockImplementation(async (opts) =>
         opts.verifySecret
@@ -1565,16 +1641,10 @@ describe("useOnboardingFlow", () => {
     });
   });
 
-  /**
-   * A sync code whose `@host` the endpoint validator refuses aborts inside
-   * performJoin with `INVALID_ENDPOINT` (nothing persisted, no join attempted).
-   * The hook must surface that as an ordinary retryable error — it is NOT a
-   * verification challenge, so it must not open the PIN prompt, and it must not
-   * be swallowed into a state where the user believes the join succeeded.
-   */
+  // `INVALID_ENDPOINT` is an ordinary retryable error, never a PIN prompt or a
+  // silent "success". See the header → "handleJoin with a refused `@host`".
   describe("handleJoin with a refused @host endpoint", () => {
-    // Mirrors the production copy thrown in src/dialog/onboardingFlow.ts;
-    // the literal itself is pinned against production in
+    // Mirrors src/dialog/onboardingFlow.ts; pinned against production in
     // tests/unit/onboardingFlow.test.ts → "aborts the join with INVALID_ENDPOINT".
     const INVALID_ENDPOINT_MESSAGE =
       "此同步碼的伺服器位址無效或不安全，無法加入";
@@ -1652,48 +1722,16 @@ describe("useOnboardingFlow", () => {
     });
   });
 
-  /**
-   * ENDPOINT LIFETIME of ONE join attempt — the security contract of this round.
-   *
-   * A sync code's `@host` must be applied to the in-memory client for the join
-   * request to reach that server. But a server that REFUSED the join has proven
-   * nothing, and an applied endpoint outlives the attempt: it would still be in
-   * force when the user gives up and presses 建立家庭, shipping the userId, the
-   * display name, the token that create issues and the whole personal book list
-   * — unshared books included — to that same server, which would then be baked
-   * into the sync code handed to the rest of the family.
-   *
-   * | exit from the attempt                      | in-memory endpoint |
-   * | ------------------------------------------ | ------------------ |
-   * | `@host` rejected by the validator          | never applied      |
-   * | join succeeds (first try or verify retry)  | stays adopted      |
-   * | join refused for a NON-verification reason | RESTORED           |
-   * | join refused pending verification          | stays adopted      |
-   * | user cancels the verification prompt       | RESTORED           |
-   * | verified retry refused as family-gone      | RESTORED           |
-   * | performJoin / deriveUserId throws          | RESTORED           |
-   * | join succeeded, then the book sync throws  | stays adopted      |
-   *
-   * Storage is the other half of the contract and belongs to performJoin (it
-   * persists ONLY after the backend accepts) — pinned in
-   * tests/unit/onboardingFlow.test.ts. What this hook owns is the in-memory
-   * column, so that is what these cases assert.
-   */
+  // The in-memory endpoint's lifetime across ONE join attempt (exit → endpoint
+  // table). See the header → "ENDPOINT LIFETIME".
   describe("handleJoin endpoint lifetime (@host adoption and rollback)", () => {
     /** A legitimate self-hosted family server. */
     const FAMILY_ENDPOINT = "https://family.example";
     /** A server whose only job is to be reached by a client it should not steer. */
     const ATTACKER_ENDPOINT = "https://attacker.example";
 
-    /**
-     * Stand-in for production performJoin's in-memory adoption: it applies the
-     * `@host` to the client BEFORE the request and, on failure, deliberately
-     * leaves it applied — releasing it is handleJoin's job, which is exactly
-     * what these cases exercise. That production behaviour is pinned in
-     * tests/unit/onboardingFlow.test.ts → "adopts, persists, and broadcasts the
-     * endpoint when decoded.apiHost is set" / "keeps the adopted endpoint in
-     * memory when the backend refuses the join".
-     */
+    /** Stand-in for performJoin's adoption: applies `@host` first, leaves it applied
+     *  on failure (release is handleJoin's job). See the header → "ENDPOINT LIFETIME". */
     function mockJoinAdopting(
       endpoint: string,
       outcome: (opts: Parameters<typeof performJoin>[0]) => PerformJoinResult,
@@ -1792,13 +1830,8 @@ describe("useOnboardingFlow", () => {
       );
     });
 
-    /**
-     * THE attack this rollback closes. The sync code's server deliberately fails
-     * the join; the victim gives up and presses 建立家庭. Without the rollback
-     * that create — userId, display name, the auth token that server issues and
-     * the whole personal book list — would go to the attacker's host, which
-     * would then be baked into the sync code shared with the family.
-     */
+    // THE attack the rollback closes: a refused join, then 建立家庭 must not reach
+    // the attacker's host. See the header → "ENDPOINT LIFETIME".
     it("sends the next 建立家庭 to the original endpoint, not the refused host", async () => {
       let endpointAtCreate: string | null = null;
       vi.mocked(createNewFamily).mockImplementation(async (opts) => {
@@ -1832,13 +1865,8 @@ describe("useOnboardingFlow", () => {
       expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
     });
 
-    /**
-     * DELIBERATE exception to the rollback: a verification challenge is a
-     * CONTINUATION of the same attempt, not its end. The prompt asks that
-     * family's own server for the account's verification method and then retries
-     * the join against it, so releasing the endpoint here would send both to the
-     * wrong host.
-     */
+    // DELIBERATE exception: a verification challenge CONTINUES the attempt, so the
+    // endpoint stays. See the header → "ENDPOINT LIFETIME".
     it("keeps the adopted endpoint while a verification challenge is open", async () => {
       const endpointsSeenByVerifyMethod: string[] = [];
       // Self-reference is safe: the callback only runs once the prompt opens.
@@ -1913,13 +1941,8 @@ describe("useOnboardingFlow", () => {
       expect(apiClient.getEndpoint()).toBe(ORIGINAL_ENDPOINT);
     });
 
-    /**
-     * The other way a challenge can end WITHOUT a join: the secret was right and
-     * the family still said no for good (owner removed this member / family
-     * deleted / full). The attempt is over exactly as on cancel, so the `@host`
-     * must be handed back here too — otherwise the refusing server would still
-     * be steering the client when the user reaches for 建立家庭 next.
-     */
+    // A verified retry refused for good ends the attempt as cancel does: hand the
+    // `@host` back. See the header → "ENDPOINT LIFETIME".
     it("restores the previous endpoint when the verified retry is refused for good", async () => {
       mockJoinAdopting(ATTACKER_ENDPOINT, (opts) =>
         opts.verifySecret
@@ -2032,10 +2055,8 @@ describe("useOnboardingFlow", () => {
     });
 
     it("keeps the adopted endpoint when the post-join book sync throws", async () => {
-      // The backend already accepted the join, so performJoin has persisted this
-      // endpoint. A best-effort sync failure afterwards must not roll back a
-      // membership that exists — the client would then be on a different
-      // endpoint from the one in storage.
+      // The join was accepted and persisted: a later sync failure must not roll
+      // back the endpoint (memory would diverge from storage).
       mockJoinAdopting(FAMILY_ENDPOINT, (opts) => ({
         ok: true,
         familyId: "fam-joined",
@@ -2055,13 +2076,8 @@ describe("useOnboardingFlow", () => {
     });
   });
 
-  /**
-   * On mount the hook pre-fills the sync-code input from a storage.sync REMNANT:
-   * when this device has onboarded (local userId) but lost its local familyId
-   * while sync still holds one, it offers the encoded sync code so the user can
-   * rejoin in one tap. It is PRE-FILL only — never auto-submits — and uses a
-   * functional state update so it can never clobber what the user is typing.
-   */
+  // PRE-FILL only (never auto-submits, never clobbers typing) from a storage.sync
+  // remnant. See the header → "Sync-code pre-fill".
   describe("sync-code pre-fill from storage.sync remnant", () => {
     /** local = onboarded but no familyId; sync = holds the remnant familyId. */
     function mockRemnantStorage(opts: {

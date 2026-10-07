@@ -157,9 +157,8 @@ describe("normalizeSortMode", () => {
     expect(normalizeSortMode(input)).toBe("default");
   });
 
-  // Regression guard (W1): prototype-chain keys must not resolve to inherited
-  // Object/Function members via LEGACY_ALIASES lookup. The Object.hasOwn guard
-  // makes these fall back to 'default' instead of returning an object/function.
+  // Regression guard (W1): the Object.hasOwn guard makes prototype-chain keys fall
+  // back to 'default', never an inherited LEGACY_ALIASES object/function.
   it.each<string>(["__proto__", "constructor", "toString"])(
     "falls back to 'default' for prototype-chain key '%s'",
     (input) => {

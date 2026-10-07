@@ -15,6 +15,52 @@ import {
   verificationLockedMessage,
 } from "@/dialog/verificationMessages";
 
+/**
+ * useVerificationPrompt (`src/dialog/useVerificationPrompt.ts`): the
+ * verification prompt controller — method load, submit/retry, lockout
+ * countdown, and the restore / family-gone hand-offs to its caller.
+ *
+ * Rate limiting: a 429 (per-IP sensitive tier, or the verify attempt ceiling)
+ * keeps the prompt open so the user can retry once the window clears, with a
+ * message distinct from the generic error.
+ *
+ * onAttemptFailed (prompt restore) — REGRESSION (UI deadlock): the `retry`
+ * closure runs a whole onboarding flow that moves the caller into a progress
+ * view ("recovering", "syncing-books"), which renders a full-screen loading
+ * overlay OVER the still-open prompt. When the attempt then fails, nothing
+ * brought the caller back — a single wrong PIN bricked the dialog until it was
+ * reopened. `onAttemptFailed` is that restore hook: it must fire on every
+ * failure (including an unexpected throw), never on success, and never after
+ * the session it belongs to is gone.
+ *
+ * onFamilyGone — TERMINAL refusal (the join target is gone for THIS user). The
+ * backend only answers a re-join with a family-gone code AFTER its verification
+ * gate has passed — the gate runs BEFORE the kicked-tombstone check — so the
+ * user who sees one has just typed the CORRECT secret. No retry can succeed, and
+ * the generic failure handling would re-offer the same input: the user then
+ * loops on "correct secret → error" until the server's tombstone expires (6h).
+ * `onFamilyGone` is the escape: the prompt tears itself down and hands the
+ * verdict (plus the server's own wording) to the caller, who owns the side
+ * effects. Flows that do not pass one keep the old behaviour verbatim.
+ * `SERVER_MESSAGE` is an arbitrary backend-style message: these tests assert
+ * PASS-THROUGH (whatever the server said reaches the caller untouched), not
+ * production copy, so it is never compared against a worker literal and is
+ * deliberately NOT claimed to be the server's own wording. reset() runs BEFORE
+ * the handover, so a rejecting caller can neither strand the prompt on
+ * 「驗證中…」 nor re-open an input no secret can satisfy — the teardown stands on
+ * its own.
+ *
+ * Retry countdown (429 retryAfter): 429 responses (RATE_LIMITED /
+ * VERIFICATION_LOCKED on a newer backend) carry `retryAfter`. The controller
+ * turns it into a live countdown so the user is told how long to wait, and —
+ * when the wait ends — drops the lock + stale message so the input becomes
+ * usable again without reopening the prompt. The countdown is purely local (no
+ * polling), so the only leak risk is the interval itself: `vi.getTimerCount()`
+ * is asserted on every exit path. A second 429 without retryAfter downgrades to
+ * the static message, so the ticker from the first one must go too — otherwise
+ * the UI would render a live wait the server never promised.
+ */
+
 function createMockApiClient(method: VerifyMethod = "pin"): ApiClient {
   return {
     getVerifyMethod: vi
@@ -287,9 +333,8 @@ describe("useVerificationPrompt", () => {
       await result.current.submit("123456");
     });
 
-    // 429 rate limited (per-IP sensitive tier, or the verify attempt ceiling):
-    // the prompt stays open so the user can retry once the window clears, with
-    // a message distinct from the generic error.
+    // 429 (per-IP tier or verify ceiling): the prompt stays open, with a message
+    // distinct from the generic error.
     expect(result.current.active).toBe(true);
     expect(result.current.error).toContain("嘗試次數過多");
     expect(result.current.locked).toBe(false);
@@ -447,15 +492,8 @@ describe("useVerificationPrompt", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * REGRESSION (UI deadlock): the `retry` closure runs a whole onboarding flow
-   * that moves the caller into a progress view ("recovering", "syncing-books"),
-   * which renders a full-screen loading overlay OVER the still-open prompt. When
-   * the attempt then fails, nothing brought the caller back — a single wrong PIN
-   * bricked the dialog until it was reopened. `onAttemptFailed` is that restore
-   * hook: it must fire on every failure (including an unexpected throw), never
-   * on success, and never after the session it belongs to is gone.
-   */
+  // REGRESSION (UI deadlock): fires on every failure, never on success or after the
+  // session is gone. See the header → "onAttemptFailed".
   describe("onAttemptFailed (prompt restore)", () => {
     it.each([
       ["a wrong secret", { ok: false, errorCode: "VERIFICATION_FAILED" }],
@@ -700,25 +738,10 @@ describe("useVerificationPrompt", () => {
     });
   });
 
-  /**
-   * TERMINAL refusal (the join target is gone for THIS user). The backend only
-   * answers a re-join with a family-gone code AFTER its verification gate has
-   * passed — the gate runs BEFORE the kicked-tombstone check — so the user who
-   * sees one has just typed the CORRECT secret. No retry can succeed, and the
-   * generic failure handling below would re-offer the same input: the user then
-   * loops on "correct secret → error" until the server's tombstone expires (6h).
-   *
-   * `onFamilyGone` is the escape: the prompt tears itself down and hands the
-   * verdict (plus the server's own wording) to the caller, who owns the side
-   * effects. Flows that do not pass one keep the old behaviour verbatim.
-   */
+  // TERMINAL refusal after a CORRECT secret: tear down and hand the verdict over.
+  // See the header → "onFamilyGone".
   describe("onFamilyGone (terminal refusal)", () => {
-    /**
-     * Arbitrary backend-style message — these tests assert PASS-THROUGH (that
-     * whatever the server said reaches the caller untouched), not production
-     * copy. It is never compared against a worker literal, so it is
-     * deliberately NOT claimed to be the server's own wording.
-     */
+    // Arbitrary backend-style text for PASS-THROUGH checks, not production copy.
     const SERVER_MESSAGE = "你已被家庭管理者移出，無法重新加入";
 
     it.each(["MEMBER_REMOVED", "FAMILY_NOT_FOUND", "FAMILY_FULL"])(
@@ -874,9 +897,8 @@ describe("useVerificationPrompt", () => {
       expect(onFamilyGone).toHaveBeenCalledTimes(1);
       // Contained, not hidden.
       expect(warn).toHaveBeenCalledTimes(1);
-      // reset() runs BEFORE the handover, so a rejecting caller can neither
-      // strand the prompt on 「驗證中…」 nor re-open an input no secret can
-      // satisfy — the teardown stands on its own.
+      // reset() runs BEFORE the handover: a rejecting caller cannot strand the
+      // prompt on 「驗證中…」 or re-open a hopeless input.
       expect(result.current.active).toBe(false);
       expect(result.current.submitting).toBe(false);
       expect(result.current.method).toBeNull();
@@ -1025,14 +1047,8 @@ describe("useVerificationPrompt", () => {
     });
   });
 
-  /**
-   * 429 responses (RATE_LIMITED / VERIFICATION_LOCKED on a newer backend) carry
-   * `retryAfter`. The controller turns it into a live countdown so the user is
-   * told how long to wait, and — when the wait ends — drops the lock + stale
-   * message so the input becomes usable again without reopening the prompt.
-   * The countdown is purely local (no polling), so the only leak risk is the
-   * interval itself: `vi.getTimerCount()` is asserted on every exit path.
-   */
+  // `retryAfter` → a local live countdown; `vi.getTimerCount()` is asserted on every
+  // exit path. See the header → "Retry countdown".
   describe("retry countdown (429 retryAfter)", () => {
     beforeEach(() => {
       vi.useFakeTimers();
@@ -1350,9 +1366,8 @@ describe("useVerificationPrompt", () => {
       });
       expect(result.current.countdownSeconds).toBe(300);
 
-      // A second 429 without retryAfter downgrades to the static message, so the
-      // ticker from the first one must go too — otherwise the UI would render a
-      // live wait the server never promised.
+      // A second 429 without retryAfter must also kill the first ticker, or the UI
+      // shows a wait the server never promised.
       await act(async () => {
         await result.current.submit("654321");
       });

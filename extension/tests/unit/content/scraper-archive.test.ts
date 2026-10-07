@@ -25,11 +25,8 @@ interface FakeLibraryOptions {
 // (10s each) + fiber-bridge timeout + cleanup waits, with clear margin.
 const FULL_RUN_MS = 40_000;
 
-/**
- * Mount a minimal Readmoo library whose filter dialog reacts to clicks like
- * the real one: the nav filter button shows the dialog, 確定 closes it.
- * Every click is recorded in order.
- */
+/** A minimal Readmoo library whose filter dialog reacts like the real one (filter
+ *  button opens it, 確定 closes it); every click is recorded in order. */
 function mountFakeLibrary(options: FakeLibraryOptions): FakeLibrary {
   const clicks: Click[] = [];
   document.body.innerHTML = `

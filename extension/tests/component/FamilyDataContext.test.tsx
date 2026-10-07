@@ -14,6 +14,30 @@ import { seenKey, chipsKey } from "@/constants";
  *
  * Mock policy: only the ApiClient boundary + chrome.storage are stubbed; the
  * real provider + real useFamilyData/useFamilyShelfPrefs run.
+ *
+ * Hostile error envelopes: both load paths read the `{ data, error }` envelope through `readEnvelope`,
+ * which bare-casts `response.json()` (extension/src/api/client.ts), and the endpoint is
+ * user-configurable (BYO backend via the sync code's `@host`), so `error.message` is `unknown` at
+ * runtime. Each path dropped it straight into React state that the shelf renders as a JSX child: React
+ * 19 throws on an object/array and the Dialog mounts no ErrorBoundary, so a refused refresh used to
+ * blank the whole overlay until reload. The quieter half of the same bug: an absent or empty message
+ * left the error state blank, so a failed load reported nothing. This provider is where BOTH sites
+ * converge, so one table serves the hostile envelope to `getFamilyMembers` AND `getFamilyBookshelf` in
+ * the same render — a regression at either fails here. The exhaustive value-domain proof for the
+ * coercion lives in tests/unit/safeErrorText.test.ts; these pin the wiring and the copy. StateProbe
+ * renders the two error strings as JSX children on purpose: that is the shape every real consumer
+ * uses (FamilyShelf / MemberList), and exactly where a non-string slipping past the guard makes React
+ * 19 throw — so a regression fails the render, not just an assertion.
+ *
+ * Update tracking: the 「更新」 chip is a diff between each member's `lastUpdated` on the wire and the
+ * baseline stored under `seenKey(userId)` (shared/src/familyShelf/updateTracking.ts). The provider
+ * used to hand the tracker a synthesized `lastUpdated: null` for every member (the Extension's
+ * `FamilyBookshelf` type lacked the field — issue #169), and `computeFreshBookIds` reads `null` as
+ * "nothing to diff against", so an EXISTING member's newly shared books never got a chip; only a member
+ * absent from the baseline did. The provider now passes the wire members through on load and keeps
+ * them for `markBookshelfSeen`, mirroring the PWA (`pwa/src/hooks/useFamilyData.tsx`). The pure diff
+ * is proven in tests/unit/updateTracking.test.ts; these pin the WIRING — that the real `lastUpdated`
+ * reaches the tracker at both call sites.
  */
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
@@ -39,14 +63,8 @@ function MountCounter() {
   return null;
 }
 
-/**
- * Surfaces the load states + member count for assertions.
- *
- * The two error strings are rendered as JSX children on purpose: that is the
- * shape every real consumer uses (FamilyShelf / MemberList render them), and it
- * is exactly where a non-string that slipped past the guard would make React 19
- * throw. A regression therefore fails the render, not just an assertion.
- */
+/** Surfaces the load states + member count; the error strings render as JSX children like every real
+ *  consumer, so a non-string fails the render. See the file header, "Hostile error envelopes". */
 function StateProbe() {
   const {
     membersState,
@@ -172,28 +190,11 @@ describe("FamilyDataProvider reloadSignal", () => {
   });
 });
 
-/**
- * Both load paths read the `{ data, error }` envelope through `readEnvelope`,
- * which bare-casts `response.json()` (extension/src/api/client.ts), and the
- * endpoint is user-configurable (BYO backend via the sync code's `@host`), so
- * `error.message` is `unknown` at runtime. Each path drops it straight into
- * React state that the shelf renders as a JSX child: React 19 throws on an
- * object/array and the Dialog mounts no ErrorBoundary, so a refused refresh
- * used to blank the whole overlay until reload. The quieter half of the same
- * bug: an absent or empty message left the error state blank, so a failed load
- * reported nothing at all.
- *
- * This provider is where BOTH sites converge, so one table serves the hostile
- * envelope to `getFamilyMembers` AND `getFamilyBookshelf` in the same render —
- * a regression at either one fails here. The exhaustive value-domain proof for
- * the coercion itself lives in tests/unit/safeErrorText.test.ts; these pin the
- * wiring and the copy.
- */
+/** A non-string or empty `error.message` on either load path must neither crash the Dialog nor blank
+ *  the error state. See the file header, "Hostile error envelopes". */
 describe("FamilyDataProvider hostile error envelopes", () => {
-  /**
-   * Literal from useFamilyDataMembers.ts and useFamilyDataBookshelf.ts — same
-   * copy at both call sites.
-   */
+  /** Literal from useFamilyDataMembers.ts and useFamilyDataBookshelf.ts — same copy at both call
+   *  sites. */
   const LOAD_FAILED = "載入失敗，請稍後再試";
 
   const HOSTILE_MESSAGES = [
@@ -251,9 +252,8 @@ describe("FamilyDataProvider hostile error envelopes", () => {
   );
 
   it("keeps a usable provider tree after a hostile envelope", async () => {
-    // What the regression is really about: React 19 throwing on the error
-    // string tears the subtree down, so the Dialog goes white. A mounted probe
-    // that never remounted proves the tree survived intact.
+    // The regression proper: React 19 throwing on the error string tears the subtree down (white
+    // Dialog). A mounted probe that never remounted proves the tree survived intact.
     renderProvider(clientFailingBothPathsWith({ zh: "壞掉了" }), 0);
 
     await waitFor(() => {
@@ -278,20 +278,8 @@ describe("FamilyDataProvider hostile error envelopes", () => {
   });
 });
 
-/**
- * The 「更新」 chip is a diff between each member's `lastUpdated` on the wire
- * and the baseline stored under `seenKey(userId)` (shared/src/familyShelf/
- * updateTracking.ts). The provider used to hand the tracker a synthesized
- * `lastUpdated: null` for every member (the Extension's `FamilyBookshelf` type
- * lacked the field — issue #169), and `computeFreshBookIds` reads `null` as
- * "nothing to diff against", so an EXISTING member's newly shared books never
- * got a chip; only a member absent from the baseline did. The provider now
- * passes the wire members through on load and keeps them for
- * `markBookshelfSeen`, mirroring the PWA (`pwa/src/hooks/useFamilyData.tsx`).
- *
- * The pure diff is proven in tests/unit/updateTracking.test.ts; these pin the
- * WIRING — that the real `lastUpdated` reaches the tracker at both call sites.
- */
+/** The real wire `lastUpdated` must reach the 「更新」 tracker at both call sites (issue #169).
+ *  See the file header, "Update tracking". */
 describe("FamilyDataProvider update tracking", () => {
   const SEEN_AT = "2026-01-01T00:00:00Z";
   const SYNCED_AT = "2026-02-01T00:00:00Z";

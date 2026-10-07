@@ -16,6 +16,7 @@ import { FAMILY_SHELF_VIEW_MODE_KEY } from "@/constants";
  * UI back on a storage failure — a lost persistence beats snapping the view back
  * under the user.
  */
+
 function mockStoredViewMode(value: unknown) {
   vi.mocked(chrome.storage.local.get).mockResolvedValue({
     [FAMILY_SHELF_VIEW_MODE_KEY]: value,

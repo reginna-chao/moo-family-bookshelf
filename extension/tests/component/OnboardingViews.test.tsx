@@ -23,6 +23,27 @@ import {
  * is what these tests drive. The rest of the module stays real, notably
  * `parseSyncCodeApiHost`, which IdleView's SyncCodeHostNote calls on every
  * keystroke; stubbing the whole module would make the note untestable here.
+ *
+ * Styling contract: after the Shadow DOM + scoped-CSS conversion, styling moved from inline styles to
+ * classes in styles.css, and jsdom does not apply stylesheet rules, so the class is the observable
+ * contract — the monospace sync code is `.moo-onboarding-view__code-text`; the error heading's red is
+ * the `--error` modifier on the base heading class; the filled-blue primary vs outlined secondary
+ * (transparent bg + blue border) buttons are `moo-onboarding-view__primary` / `__secondary`, asserted
+ * present-and-absent so the two variants stay distinct. The restored
+ * `.moo-onboarding-view { padding: 24px }` rule and the mobile centering media query both target the
+ * `moo-onboarding-view` wrapper, so the class is pinned onto the rendered root to keep those selectors
+ * matching real DOM (jsdom cannot verify the padding itself).
+ *
+ * Custom-server note timing — WHEN the warning may appear, as opposed to what it says. The warning
+ * used to be live, so it flashed through nearly every keystroke of a half-typed `@host`, and a warning
+ * that cries wolf during normal typing is one the user is trained to dismiss. That is fatal here: it is
+ * the last human-facing defence against a userinfo-spoofed endpoint, which would ship the auth token
+ * and the whole book list to the attacker. So it is DELAYED until the value settles, and never
+ * suppressed. Kept symmetric with the PWA's copy in pwa/tests/component/LandingPage.test.tsx — the
+ * policy lives in `shared/` exactly so the two cannot drift. The hazard the mechanism must not create:
+ * if the delay KEPT the last rendered note, appending `@evil.com` to a host the user already saw named
+ * would leave a reassuring "will connect to api.moofamily.app" standing over a spoofed address —
+ * lending the spoof exactly the legitimacy the warning exists to deny.
  */
 vi.mock("@/crypto/syncCode", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/crypto/syncCode")>()),
@@ -184,9 +205,8 @@ describe("CreatedView", () => {
   });
 
   it("sync code is displayed in monospace font", () => {
-    // After the Shadow DOM + scoped-CSS conversion the monospace font moved from
-    // an inline style to `.moo-onboarding-view__code-text` in styles.css. jsdom
-    // does not apply stylesheet rules, so the observable contract is now the class.
+    // The monospace font is the `.moo-onboarding-view__code-text` class (see the file header,
+    // "Styling contract").
     render(<CreatedView {...defaultProps} />);
 
     const codeEl = screen.getByText(/moo-abc123/);
@@ -234,9 +254,8 @@ describe("CreatedView", () => {
 
 describe("ErrorView", () => {
   it("renders error heading with red color", () => {
-    // The red color moved from an inline style to the `--error` heading modifier
-    // in styles.css. jsdom does not apply stylesheet rules, so assert the base
-    // heading class plus the error modifier that carries the danger color.
+    // The red color is the `--error` heading modifier: assert the base heading class plus that modifier
+    // (see the file header, "Styling contract").
     render(
       <ErrorView
         errorMessage="測試錯誤"
@@ -304,9 +323,8 @@ describe("ErrorView", () => {
   });
 
   it("primary variant renders filled blue button", () => {
-    // The filled-blue vs outlined styling moved from inline styles to scoped
-    // classes in styles.css. jsdom does not apply stylesheet rules, so the
-    // observable contract is the primary class (and the absence of secondary).
+    // Filled blue is the primary class, and the secondary class is absent (see the file header,
+    // "Styling contract").
     render(
       <ErrorView
         errorMessage="錯誤"
@@ -320,9 +338,8 @@ describe("ErrorView", () => {
   });
 
   it("secondary variant renders outlined button", () => {
-    // Outlined (transparent bg + blue border) styling now lives in the
-    // `moo-onboarding-view__secondary` class. Assert the secondary class is
-    // present and the primary class is absent so the two variants stay distinct.
+    // Outlined styling is `moo-onboarding-view__secondary`: secondary present and primary absent, so the
+    // two variants stay distinct.
     render(
       <ErrorView
         errorMessage="錯誤"
@@ -498,10 +515,8 @@ describe("IdleView", () => {
     expect(input).toHaveAttribute("type", "text");
   });
 
-  /**
-   * Joining via an `@host` sync code silently repoints the client at someone
-   * else's server, so the host is surfaced BEFORE the user presses join.
-   */
+  /** Joining via an `@host` sync code silently repoints the client at someone else's server, so the
+   *  host is surfaced BEFORE the user presses join. */
   describe("custom-server note", () => {
     it("names the host while a sync code carrying @host is typed", () => {
       render(
@@ -549,11 +564,8 @@ describe("IdleView", () => {
       ).not.toBeInTheDocument();
     });
 
-    /**
-     * A `@host` the join path would refuse must NOT get the reassuring
-     * "will connect to …" line — that would lend a spoofed address legitimacy
-     * on the very screen where the user decides to join.
-     */
+    /** A `@host` the join path would refuse must NOT get the reassuring "will connect to …" line — that
+     *  would lend a spoofed address legitimacy where the user decides to join. */
     it("warns instead of naming the host when the @host would be refused", () => {
       render(
         <IdleView
@@ -609,27 +621,11 @@ describe("IdleView", () => {
     });
   });
 
-  /**
-   * WHEN the warning may appear, as opposed to what it says.
-   *
-   * The warning used to be live, so it flashed through nearly every keystroke of
-   * a half-typed `@host` — and a warning that cries wolf during normal typing is
-   * one the user is trained to dismiss. That is fatal here: it is the last
-   * human-facing defence against a userinfo-spoofed endpoint, which would ship
-   * the auth token and the whole book list to the attacker. So it is DELAYED
-   * until the value settles, and never suppressed.
-   *
-   * Kept symmetric with the PWA's copy in
-   * pwa/tests/component/LandingPage.test.tsx — the policy lives in `shared/`
-   * exactly so the two cannot drift.
-   */
+  /** The warning is DELAYED until the value settles, never suppressed; symmetric with the PWA's
+   *  LandingPage.test.tsx. See the file header, "Custom-server note timing". */
   describe("custom-server note timing", () => {
-    /**
-     * IdleView is controlled by its parent (dialog/Onboarding.tsx feeds it
-     * `flow.syncCodeInput` / `flow.setSyncCodeInput`), so a stateful wrapper is
-     * what lets these tests drive the real input → onChange → prop round trip
-     * the settle timing hangs off — including the onPaste / onBlur handlers.
-     */
+    /** IdleView is controlled by Onboarding.tsx (`flow.syncCodeInput` / `flow.setSyncCodeInput`); this
+     *  wrapper drives the real input → onChange → prop round trip, onPaste / onBlur included. */
     function ControlledIdleView({
       initialSyncCode = "",
       onJoin = () => {},
@@ -697,9 +693,8 @@ describe("IdleView", () => {
         expectNoNote();
       }
 
-      // Anchor against a vacuous pass: the same field DOES speak once the value
-      // is a complete, adoptable endpoint, so the silence above is the delay
-      // doing its job — not a note that never renders at all.
+      // Anchor against a vacuous pass: the same field DOES speak once the value is a complete, adoptable
+      // endpoint, so the silence above is the delay at work — not a note that never renders.
       typeCode(LAN_CODE);
       expect(screen.getByTestId("sync-code-host-note")).toBeInTheDocument();
     });
@@ -764,22 +759,15 @@ describe("IdleView", () => {
     });
 
     it("warns immediately for an invite-link prefill present at first render", () => {
-      // Trigger 4: a code the user never typed has no typing to flicker
-      // through, so it is settled from the very first render. This is also the
-      // path every other test in this file exercises by passing `syncCodeInput`
-      // straight in as a prop.
+      // Trigger 4: a code the user never typed has no typing to flicker through, so it is settled from
+      // the first render — the path every other test here uses by passing `syncCodeInput` as a prop.
       render(<IdleView {...defaultProps} syncCodeInput={SPOOFED_CODE} />);
 
       expectWarning();
     });
 
-    /**
-     * The hazard this whole mechanism has to avoid creating. If the delay were
-     * ever implemented by KEEPING the last rendered note, appending `@evil.com`
-     * to a host the user already saw named would leave a reassuring "will
-     * connect to api.moofamily.app" standing over a spoofed address — lending
-     * the spoof exactly the legitimacy the warning exists to deny.
-     */
+    /** If the delay KEPT the last rendered note, appending `@evil.com` would leave a reassuring line over
+     *  a spoofed address. See the file header, "Custom-server note timing". */
     it("drops the previously named host the instant the value turns invalid", () => {
       const { container } = render(
         <ControlledIdleView initialSyncCode={TRUSTED_CODE} />,
@@ -815,10 +803,8 @@ describe("IdleView", () => {
 });
 
 describe("onboarding-view wrapper class", () => {
-  // The restored `.moo-onboarding-view { padding: 24px }` rule and the mobile
-  // centering media query both target the `moo-onboarding-view` wrapper. These
-  // assertions pin the class onto the rendered root so the CSS selectors keep
-  // matching real DOM (jsdom cannot verify the padding itself).
+  // The `moo-onboarding-view` class is pinned onto the root so the padding rule and mobile centering
+  // query keep matching real DOM (see the file header, "Styling contract").
   const idleProps: IdleViewProps = {
     state: "idle",
     syncCodeInput: "",

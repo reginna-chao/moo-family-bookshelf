@@ -11,6 +11,46 @@ import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
 
+/**
+ * VerificationSettings: choosing the PWA-login verification method, the save / OTP-generation
+ * status lines, and the guards against hostile responses from a user-configurable (BYO) backend.
+ *
+ * Current-method label: `method` is bare-cast out of the API response by `getVerifyMethod()`
+ * (extension/src/api/client.ts:535) and stored unvalidated in component state, and the endpoint is
+ * user-configurable, so an out-of-union value reaches this render. The label lookup is a Map rather
+ * than an object literal precisely so a prototype-chain key resolves to nothing, and a miss must fall
+ * back to the fallback label — a throw takes down the whole Dialog, which has no ErrorBoundary, on
+ * the very tab where the user would switch the endpoint back.
+ *
+ * Hostile save-error envelopes: `setVerifyMethod` resolves the `{ data, error }` envelope through
+ * `readEnvelope`, which bare-casts `response.json()` (extension/src/api/client.ts), so
+ * `error.message` is `unknown` at runtime. Before the `safeErrorText` guard a non-string landed in
+ * `saveError` state and was rendered as a JSX child — React 19 throws "Objects are not valid as a
+ * React child" on an object/array, and with no ErrorBoundary the whole overlay went white on the
+ * screen where the user would point the endpoint back at a working host. The quieter half of the same
+ * bug: the site assigned `result.error.message` verbatim, so an absent or empty message left the
+ * error banner rendered but blank. Table modeled on the hostile-value `it.each` in
+ * BorrowRequestCard.test.tsx.
+ *
+ * OTP envelope guard: `generateOtp` resolves the same bare-cast envelope, so `data.code` and
+ * `data.expiresAt` are `unknown` too, and each fails differently — a non-string `code` renders as a
+ * JSX child (the white Dialog above); a non-finite `expiresAt` breaks the 1s countdown: with
+ * `Infinity`, `remaining <= 0` is never true, so the interval never clears itself and keeps
+ * re-rendering for as long as the Dialog stays open. The component treats either as a failed
+ * generation: no OTP state is set, so no timer starts, and the user gets local copy plus a retry
+ * button. The countdown-hygiene cases assert on the fake-timer queue because that is the leak itself:
+ * the countdown is invisible once the OTP state is refused, but an infinite deadline used to leave the
+ * interval running.
+ *
+ * Save-reset timers: method buttons are disabled only while saveState === "saving", so a second save
+ * is reachable inside the 2s 已儲存 window; if the first save's pending saved→idle timer still fires,
+ * it drops the in-flight save out of "saving" and the UI stops reporting the request. Likewise
+ * 產生驗證碼 stays on screen through that window (the save leaves currentMethod === "code"), so a
+ * failed generation lands inside it: handleGenerateOtp resets the status on entry — the same status
+ * the save's pending timer owns — so unless that timer is superseded there too, it fires afterwards
+ * and wipes an error the user has not read.
+ */
+
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     getVerifyMethod: vi
@@ -53,9 +93,8 @@ describe("VerificationSettings", () => {
     });
   });
 
-  // Also the Map-completeness guard: METHOD_LABELS is iterated to build these
-  // buttons, so a label dropped from (or added to) the Map fails here — the
-  // old `Record<VerifyMethod, string>` gave that for free at compile time.
+  // Also the Map-completeness guard: METHOD_LABELS builds these buttons, so a label dropped from (or
+  // added to) the Map fails here — the old `Record<VerifyMethod, string>` caught that at compile time.
   it("renders all 4 method buttons", async () => {
     const api = createMockApiClient();
     render(<VerificationSettings userId="user-1" apiClient={api} />);
@@ -207,23 +246,11 @@ describe("VerificationSettings", () => {
     });
   });
 
-  /**
-   * `method` is bare-cast out of the API response by `getVerifyMethod()`
-   * (extension/src/api/client.ts:535) and stored unvalidated in this
-   * component's state, and the API endpoint is user-configurable (BYO
-   * backend), so an out-of-union value reaches this render. The label lookup
-   * is a Map rather than an object literal precisely so a prototype-chain key
-   * resolves to nothing, and a miss must degrade to the fallback label — a
-   * throw here takes down the whole Dialog, which has no ErrorBoundary, on the
-   * very tab where the user would switch the endpoint back.
-   */
+  /** An out-of-union `method` from a BYO backend must fall back to the fallback label, never throw.
+   *  See the file header, "Current-method label". */
   describe("current-method label", () => {
-    /**
-     * Typed as `Record<VerifyMethod, string>` on purpose: it restores the
-     * compile-time exhaustiveness production gave up when METHOD_LABELS became
-     * a Map. A new union member fails typecheck here until this table — and
-     * the Map — cover it.
-     */
+    /** Typed `Record<VerifyMethod, string>` on purpose: restores the compile-time exhaustiveness lost when
+     *  METHOD_LABELS became a Map — a new union member fails typecheck until this table and the Map cover it. */
     const KNOWN_METHOD_LABELS: Record<VerifyMethod, string> = {
       pin: "PIN 碼",
       pattern: "圖形驗證",
@@ -270,10 +297,8 @@ describe("VerificationSettings", () => {
     ])(
       "falls back to the no-verification label for $name instead of crashing",
       async ({ method }) => {
-        // The crash was on the re-render AFTER getVerifyMethod resolved (the
-        // first paint is the loading state), so the settled DOM below is the
-        // assertion that carries the regression: a throw tears the tree down
-        // and neither the label nor the buttons are ever found.
+        // The crash was on the re-render AFTER getVerifyMethod resolved (first paint is loading), so the
+        // settled DOM carries the regression: a throw tears the tree down and nothing below is found.
         renderWithMethod(method as unknown as VerifyMethod);
 
         await waitFor(() => {
@@ -298,10 +323,8 @@ describe("VerificationSettings", () => {
     });
 
     it("keeps the saving indicator when the previous save's reset comes due", async () => {
-      // Method buttons are disabled only while saveState === "saving", so a
-      // second save is reachable inside the 2s 已儲存 window. If the first
-      // save's pending saved->idle timer still fires, it drops the in-flight
-      // save out of "saving" and the UI stops reporting the request.
+      // A second save is reachable inside the 2s 已儲存 window; the first save's pending timer must not
+      // drop it out of "saving". See the file header, "Save-reset timers".
       const api = createMockApiClient({
         getVerifyMethod: vi
           .fn()
@@ -313,9 +336,8 @@ describe("VerificationSettings", () => {
           .mockImplementation(() => new Promise<never>(() => {})),
       });
 
-      // Real clock: settle the initial load before touching timers. `act` (not
-      // findBy/waitFor) is the ready signal — it guarantees pending effects are
-      // flushed on exit, and waitFor cannot run once fake timers are installed.
+      // Real clock: settle the initial load first. `act` (not findBy/waitFor) is the ready signal — it
+      // flushes pending effects on exit, and waitFor cannot run once fake timers are installed.
       await act(async () => {
         render(<VerificationSettings userId="user-1" apiClient={api} />);
       });
@@ -347,11 +369,8 @@ describe("VerificationSettings", () => {
     });
 
     it("keeps a failed generation's error when the save's reset comes due", async () => {
-      // 產生驗證碼 stays on screen through the 2s 已儲存 window (the save leaves
-      // currentMethod === "code"), so a failed generation lands inside it.
-      // handleGenerateOtp resets the status on entry — the same status the
-      // save's pending timer owns — so unless that timer is superseded there
-      // too, it fires afterwards and wipes an error the user has not read.
+      // A failed generation inside the 2s 已儲存 window must not be wiped by the save's pending timer.
+      // See the file header, "Save-reset timers".
       const api = createMockApiClient({
         getVerifyMethod: vi
           .fn()
@@ -398,21 +417,8 @@ describe("VerificationSettings", () => {
     });
   });
 
-  /**
-   * `setVerifyMethod` resolves the `{ data, error }` envelope through
-   * `readEnvelope`, which bare-casts `response.json()`
-   * (extension/src/api/client.ts), and the endpoint is user-configurable (BYO
-   * backend), so `error.message` is `unknown` at runtime. Before the
-   * `safeErrorText` guard a non-string landed in `saveError` state and was
-   * rendered as a JSX child — React 19 throws "Objects are not valid as a React
-   * child" on an object/array, and the Dialog mounts no ErrorBoundary, so the
-   * whole overlay went white on the very screen where the user would point the
-   * endpoint back at a working host. The quieter half of the same bug: the site
-   * assigned `result.error.message` verbatim, so an absent or empty message
-   * left the error banner rendered but blank — a failure with nothing in it.
-   *
-   * Table modeled on the hostile-value `it.each` in BorrowRequestCard.test.tsx.
-   */
+  /** A non-string or empty `error.message` from a BYO backend must neither crash the Dialog nor leave a
+   *  blank banner. See the file header, "Hostile save-error envelopes". */
   describe("hostile save-error envelopes", () => {
     /** 隨機驗證碼 is the only method that saves without collecting a secret. */
     async function selectCodeMethod(api: ApiClient) {
@@ -420,9 +426,8 @@ describe("VerificationSettings", () => {
       await waitFor(() => {
         expect(screen.getByText("隨機驗證碼")).toBeInTheDocument();
       });
-      // `act` is the barrier for the save: its state update lands in a promise
-      // continuation that would otherwise settle outside any act scope, between
-      // this helper resolving and the caller's next assertion.
+      // `act` is the barrier for the save: its state update lands in a promise continuation that would
+      // otherwise settle outside any act scope, before the caller's next assertion.
       await act(async () => {
         fireEvent.click(screen.getByText("隨機驗證碼"));
       });
@@ -448,10 +453,8 @@ describe("VerificationSettings", () => {
           }),
         );
 
-        // The literal lives in VerificationSettings.tsx (`handleSave`); this
-        // assertion reads it back off the production render path. `getByText`
-        // matches the node's whole text, so a hostile value that had reached
-        // state would fail here rather than hide inside the same node.
+        // The literal lives in VerificationSettings.tsx (`handleSave`). `getByText` matches the node's whole
+        // text, so a hostile value that reached state would fail here rather than hide in the same node.
         expect(screen.getByText("儲存失敗，請重試")).toHaveClass(
           "moo-verify__status--error",
         );
@@ -464,18 +467,8 @@ describe("VerificationSettings", () => {
     );
   });
 
-  /**
-   * `generateOtp` resolves the same bare-cast envelope, so `data.code` and
-   * `data.expiresAt` are `unknown` too, and each fails differently:
-   *
-   * - a non-string `code` renders as a JSX child → the white Dialog above;
-   * - a non-finite `expiresAt` breaks the 1s countdown — with `Infinity`,
-   *   `remaining <= 0` is never true, so the interval never clears itself and
-   *   keeps re-rendering for as long as the Dialog stays open.
-   *
-   * The component treats either as a failed generation: no OTP state is set, so
-   * no timer starts, and the user gets local copy plus a retry button.
-   */
+  /** A non-string `code` or non-finite `expiresAt` counts as a failed generation: no OTP state, no timer.
+   *  See the file header, "OTP envelope guard". */
   describe("OTP envelope guard", () => {
     /** The mock factory's happy-path code — must never surface below. */
     const VALID_CODE = "482916";
@@ -496,10 +489,8 @@ describe("VerificationSettings", () => {
       return api;
     }
 
-    /**
-     * `act` is the barrier for the generate call: its state update lands in a
-     * promise continuation, and the assertions run right after.
-     */
+    /** `act` is the barrier for the generate call: its state update lands in a promise continuation,
+     *  and the assertions run right after. */
     async function clickGenerate() {
       await act(async () => {
         fireEvent.click(screen.getByText("產生驗證碼"));
@@ -509,9 +500,8 @@ describe("VerificationSettings", () => {
     it.each([
       { name: "an object code", data: { code: { v: VALID_CODE } } },
       { name: "an array code", data: { code: [VALID_CODE] } },
-      // A JSON number renders harmlessly on its own; the guard is deliberately
-      // type-strict, so an all-digit code arriving unquoted is refused with the
-      // same copy as the shapes that do crash rather than half-trusted.
+      // A JSON number renders harmlessly, but the guard is deliberately type-strict: an unquoted all-digit
+      // code is refused with the same copy as the crashing shapes rather than half-trusted.
       { name: "a numeric code", data: { code: 482916 } },
       { name: "an empty code", data: { code: "" } },
       { name: "a missing code", data: { code: undefined } },
@@ -547,9 +537,8 @@ describe("VerificationSettings", () => {
       ).toBeInTheDocument();
     });
 
-    // Any code EXCEPT "RATE_LIMITED": that one is rewritten to local back-off
-    // copy before `safeErrorText` is ever reached (next case), so it would pin
-    // the opposite of the passthrough this case is about.
+    // Any code EXCEPT "RATE_LIMITED": that one is rewritten to local back-off copy before
+    // `safeErrorText` is reached (next case), so it would pin the opposite of this passthrough.
     it("shows the server's own message when a rejected generation carried one", async () => {
       await renderReadyToGenerate({
         generateOtp: vi.fn().mockResolvedValue({
@@ -565,9 +554,8 @@ describe("VerificationSettings", () => {
       ).not.toBeInTheDocument();
     });
 
-    // Pins the order of the composition at this site: the 429 rewrite sits
-    // ABOVE `safeErrorText`, so a rate-limited envelope keeps the localized
-    // back-off copy no matter what its `message` holds.
+    // Pins the composition order: the 429 rewrite sits ABOVE `safeErrorText`, so a rate-limited envelope
+    // keeps the localized back-off copy whatever its `message` holds.
     it("keeps the localized back-off copy when a rate-limited generation carries a hostile message", async () => {
       await renderReadyToGenerate({
         generateOtp: vi.fn().mockResolvedValue({
@@ -595,27 +583,17 @@ describe("VerificationSettings", () => {
       expect(screen.queryByText("已過期")).not.toBeInTheDocument();
     });
 
-    /**
-     * The stuck-interval half of the guard. Asserted on the fake-timer queue
-     * because that is the leak itself: the countdown is invisible once the OTP
-     * state is refused, but an infinite deadline used to leave the interval
-     * running.
-     */
+    /** The stuck-interval half of the guard, asserted on the fake-timer queue because that is the leak
+     *  itself. See the file header, "OTP envelope guard". */
     describe("countdown timer hygiene", () => {
       afterEach(() => {
-        // Tripwire, not decoration: a mid-body failure would leak a frozen
-        // clock into the rest of the file, where RTL's waiters (which cannot
-        // detect Vitest's fake timers) would hang to the full testTimeout
-        // instead of failing where the bug is.
+        // Tripwire: a mid-body failure would leak a frozen clock into the rest of the file, where RTL's
+        // waiters (blind to Vitest's fake timers) would hang to the full testTimeout instead of failing.
         vi.useRealTimers();
       });
 
-      /**
-       * Mounts under fake timers and clicks generate. `act` — not `findBy*` —
-       * is the barrier at both steps: the button only exists after the load
-       * effect's promise commits, and the countdown interval is published by
-       * the effect that runs after the click's state update.
-       */
+      /** Mount under fake timers and click generate. `act`, not `findBy*`, is the barrier at both steps:
+       *  the button appears after the load effect commits; the interval is published after the click. */
       async function generateUnderFakeTimers(otpResult: unknown) {
         vi.useFakeTimers();
         const api = createMockApiClient({
@@ -635,9 +613,8 @@ describe("VerificationSettings", () => {
       }
 
       it("starts no countdown when the expiry never reaches zero", async () => {
-        // Infinity, not NaN, is the true leak value: `if (!otpExpiresAt)
-        // return` early-returns on NaN, so NaN never mounts the interval and a
-        // NaN-based timer-count assertion pins nothing.
+        // Infinity, not NaN, is the true leak value: `if (!otpExpiresAt) return` early-returns on NaN, so
+        // NaN never mounts the interval and a NaN-based timer-count assertion pins nothing.
         const { unmount } = await generateUnderFakeTimers({
           data: { code: VALID_CODE, expiresAt: Number.POSITIVE_INFINITY },
         });

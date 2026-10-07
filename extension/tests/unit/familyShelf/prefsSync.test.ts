@@ -225,9 +225,8 @@ describe("FamilyPrefsSync", () => {
   });
 
   describe("results that settle while detached", () => {
-    // Each row runs twice: `detached: false` is the positive companion proving
-    // the callback DOES fire on the same path, so the `detached: true` row
-    // cannot pass vacuously.
+    // Each row runs twice: `detached: false` proves the callback DOES fire on that
+    // path, so the `detached: true` row cannot pass vacuously.
     const cases = [
       {
         name: "load result",

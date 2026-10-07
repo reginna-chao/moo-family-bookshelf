@@ -23,12 +23,8 @@ describe("lookupFamily", () => {
     vi.restoreAllMocks();
   });
 
-  /**
-   * The verification gate is expressed INSIDE a 200 body: the server withholds
-   * `existingFamilyId` and flags `requiresVerification`. Normalizing that into a
-   * failure code is what stops the onboarding flow from telling a user who has a
-   * family that they have none.
-   */
+  // The gate lives INSIDE a 200 body (withheld `existingFamilyId`, `requiresVerification`);
+  // as a failure code it stops onboarding telling a member they have no family.
   describe("requiresVerification normalization", () => {
     it.each([
       [

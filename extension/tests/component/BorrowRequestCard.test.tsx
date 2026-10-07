@@ -6,6 +6,19 @@ import {
 } from "@/dialog/BorrowRequestCard";
 import { BorrowStatus, type BorrowRequest } from "@/api/client";
 
+/**
+ * BorrowRequestCard: cover rendering, action buttons and their shared class contract, and the status
+ * badge.
+ *
+ * Status badge: `request.status` is bare-cast out of the API response by `listBorrowRequests()`, and
+ * the endpoint is user-configurable (BYO backend), so an out-of-enum value can reach this render. The
+ * badge lookup is a Map rather than an object literal precisely so a prototype-chain key resolves to
+ * nothing, and a miss must fall back to the fallback badge — a throw takes down the whole Dialog,
+ * which has no ErrorBoundary. A backend that simply omits `status` is the likeliest out-of-range case,
+ * and exactly where the old object-literal lookup crashed (`STATUS_META[undefined]` → reading
+ * `.modifier` of undefined).
+ */
+
 const REQUEST: BorrowRequest = {
   requestId: "req-1",
   familyId: "fam-1",
@@ -15,9 +28,8 @@ const REQUEST: BorrowRequest = {
   bookId: "book-1",
   bookTitle: "深度學習",
   bookAuthor: "作者甲",
-  // Must sit on a Readmoo cover host: the card filters `bookCoverUrl` through
-  // `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) at render time, so
-  // any other host renders the placeholder instead of an <img>.
+  // Must sit on a Readmoo cover host: `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) filters it
+  // at render time, so any other host renders the placeholder instead of an <img>.
   bookCoverUrl: "https://cdn.readmoo.com/cover.jpg",
   status: BorrowStatus.PENDING,
   createdAt: new Date().toISOString(),
@@ -44,13 +56,8 @@ describe("BorrowRequestCard", () => {
     expect(screen.getByText("待處理")).toBeInTheDocument();
   });
 
-  /**
-   * A borrow record carries the cover URL its BORROWER sent, has no TTL, and is
-   * rendered on the other party's screen — inside a Readmoo page that sends no
-   * CSP. `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) is therefore the
-   * only render-time brake on a stored tracking beacon leaking the viewer's
-   * IP / UA, including rows written before the Worker rejected such URLs.
-   */
+  /** A borrow record carries its BORROWER's cover URL, has no TTL, and renders on a no-CSP Readmoo page:
+   *  `safeCoverUrl` is the only brake on a tracking beacon, including rows predating the Worker check. */
   describe("cover URL whitelist", () => {
     it("renders the cover image when the URL is on a Readmoo cover host", () => {
       renderCard([]);
@@ -106,13 +113,8 @@ describe("BorrowRequestCard", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  /**
-   * The three action variants were re-based on the shared `.moo-button`
-   * component class; the per-variant look is now expressed through modifiers
-   * that only override CSS variables. jsdom does not apply the stylesheet, so
-   * the class list is the observable contract — asserting it catches a variant
-   * that loses its shared base (the exact regression this refactor risks).
-   */
+  /** The three action variants sit on the shared `.moo-button` class with CSS-variable-only modifiers;
+   *  the class list is the jsdom contract and catches a variant losing its shared base. */
   describe("shared .moo-button class contract", () => {
     it.each([
       {
@@ -175,14 +177,8 @@ describe("BorrowRequestCard", () => {
     });
   });
 
-  /**
-   * `request.status` is bare-cast out of the API response by
-   * `listBorrowRequests()`, and the API endpoint is user-configurable (BYO
-   * backend), so an out-of-enum value can reach this render. The badge lookup
-   * is a Map rather than an object literal precisely so a prototype-chain key
-   * resolves to nothing, and a miss must degrade to the fallback badge — a
-   * throw here takes down the whole Dialog, which has no ErrorBoundary.
-   */
+  /** An out-of-enum `status` from a BYO backend must fall back to the fallback badge, never throw.
+   *  See the file header, "Status badge". */
   describe("status badge", () => {
     const KNOWN_STATUS_CASES = [
       {
@@ -223,9 +219,8 @@ describe("BorrowRequestCard", () => {
       },
     );
 
-    // Replaces the exhaustiveness the old `Record<BorrowStatus, StatusMeta>`
-    // gave us: a new enum member fails here until the table (and the Map)
-    // cover it.
+    // Replaces the exhaustiveness of the old `Record<BorrowStatus, StatusMeta>`: a new enum member fails
+    // here until the table (and the Map) cover it.
     it("covers every BorrowStatus member", () => {
       const members = Object.values(BorrowStatus).filter(
         (v): v is BorrowStatus => typeof v === "number",
@@ -242,8 +237,7 @@ describe("BorrowRequestCard", () => {
       { name: '"valueOf"', status: "valueOf" },
       { name: '"hasOwnProperty"', status: "hasOwnProperty" },
       { name: "an unknown numeric status (99)", status: 99 },
-      // A backend that simply omits `status` is the likeliest out-of-range
-      // case, and is exactly where the old object-literal lookup crashed
+      // A backend omitting `status` is the likeliest case, and where the old lookup crashed
       // (`STATUS_META[undefined]` → reading `.modifier` of undefined).
       { name: "a null status", status: null },
       { name: "a missing status (undefined)", status: undefined },

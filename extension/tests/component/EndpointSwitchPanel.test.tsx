@@ -15,16 +15,24 @@ import { DEFAULT_API_ENDPOINT } from "@/constants";
  * only this file can reach is the panel's own branch selection, driven purely
  * by props: which of the three states (nothing / question / failure notice) it
  * renders, and which callback each button fires.
+ *
+ * Direction-aware title: both literals live only here. 「已變更」 holds solely for the adopt direction:
+ * the revert direction also fires when the family record NEVER carried an endpoint — a LAN
+ * self-hoster's record cannot hold one at all, because the Worker rejects private addresses (see
+ * shared/src/api/endpointUrl.ts) — so telling those members something changed would claim an event
+ * that never happened. A refused target is still the adopt direction: the record does name an
+ * endpoint, just one this client will not take.
+ *
+ * Refused targets: a target the client's own validation would REFUSE is never printed. Rendering
+ * `https://family.example@evil.com` under 「將切換至」 dresses a spoofed address up as a legitimate
+ * destination on the exact screen where the user decides whether to trust it — the panel is the last
+ * thing standing between the owner's chosen string and the member's eyes.
  */
 
 const CURRENT_ENDPOINT = "https://current.example";
 const FAMILY_ENDPOINT = "https://family.example";
-/**
- * A record value `validateEndpointUrl` refuses: the userinfo makes the string
- * READ as family.example while the browser would fetch evil.com. The family
- * owner controls this field, so it is exactly the shape a malicious owner
- * plants — and exactly the string the panel must not print.
- */
+/** A record value `validateEndpointUrl` refuses: the userinfo makes it READ as family.example while the
+ *  browser would fetch evil.com — what a malicious owner plants, and what the panel must not print. */
 const REFUSED_ENDPOINT = "https://family.example@evil.com";
 
 const customSwitch: PendingEndpointSwitch = {
@@ -69,9 +77,8 @@ function renderPanel(props: Partial<EndpointSwitchPanelProps> = {}) {
 }
 
 describe("EndpointSwitchPanel", () => {
-  // FamilySettings mounts the panel unconditionally (same shape as
-  // VersionWarning), so "nothing to say" has to render as literally nothing —
-  // otherwise an empty amber box would sit above the Settings tab forever.
+  // FamilySettings mounts the panel unconditionally (like VersionWarning), so "nothing to say" must
+  // render nothing — otherwise an empty amber box would sit above the Settings tab forever.
   it("renders nothing when there is neither a question nor a failure notice", () => {
     const { container } = renderPanel();
 
@@ -91,16 +98,8 @@ describe("EndpointSwitchPanel", () => {
       expect(screen.getByText(FAMILY_ENDPOINT)).toBeInTheDocument();
     });
 
-    /**
-     * The title is DIRECTION-aware, and both literals live only here.
-     * 「已變更」 holds solely for the adopt direction: the revert direction also
-     * fires when the family record NEVER carried an endpoint — a LAN
-     * self-hoster's record cannot hold one at all, because the Worker rejects
-     * private addresses (see shared/src/api/endpointUrl.ts) — so telling those
-     * members something changed would be a claim about an event that never
-     * happened. A refused target is still the adopt direction: the record does
-     * name an endpoint, it is just one this client will not take.
-     */
+    /** The title is DIRECTION-aware: 「已變更」 only for adopt, since revert also fires when the record
+     *  never had an endpoint. See the file header, "Direction-aware title". */
     it.each([
       [
         "adopting a custom endpoint",
@@ -177,13 +176,8 @@ describe("EndpointSwitchPanel", () => {
     });
   });
 
-  /**
-   * A target the client's own validation would REFUSE is never printed.
-   * Rendering `https://family.example@evil.com` under 「將切換至」 dresses a
-   * spoofed address up as a legitimate destination on the exact screen where
-   * the user decides whether to trust it — the panel is the last thing standing
-   * between the owner's chosen string and the member's eyes.
-   */
+  /** A target the client's validation would refuse is never printed under 「將切換至」.
+   *  See the file header, "Refused targets". */
   describe("a target the validator would refuse", () => {
     it("withholds the address and warns in its place", () => {
       renderPanel({ pending: refusedSwitch });
@@ -257,11 +251,8 @@ describe("EndpointSwitchPanel", () => {
     });
   });
 
-  /**
-   * A confirmation the client's own URL validation then refuses leaves the
-   * member on the old endpoint. The panel simply closing would read as
-   * "switched successfully", so the refusal gets said out loud instead.
-   */
+  /** A confirmation the client's URL validation then refuses leaves the member on the old endpoint; a
+   *  panel that just closed would read as "switched successfully", so the refusal is stated. */
   describe("confirmError notice", () => {
     it("states the refusal and announces it", () => {
       renderPanel({ confirmError: true });
@@ -287,9 +278,8 @@ describe("EndpointSwitchPanel", () => {
       expect(onDecline).not.toHaveBeenCalled();
     });
 
-    // The hook keeps the two mutually exclusive, but the panel must not depend
-    // on that: an unreported failed switch is the more urgent thing to say, and
-    // showing both would offer 確認切換 for a question already answered.
+    // The hook keeps the two mutually exclusive, but the panel must not rely on it: an unreported failed
+    // switch is more urgent, and showing both would offer 確認切換 for an answered question.
     it("takes precedence over a still-pending question", () => {
       renderPanel({ pending: customSwitch, confirmError: true });
 

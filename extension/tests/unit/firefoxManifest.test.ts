@@ -72,9 +72,8 @@ describe("toFirefoxManifest", () => {
       expect(gecko.id).toBe(expectedId);
       expect(gecko.strict_min_version).toBe(STRICT_MIN_VERSION);
 
-      // AMO requires a data-consent declaration on all new Firefox add-ons;
-      // both channels declare exactly ["websiteContent"] (book-list content
-      // scraped from Readmoo; email hashed client-side, no tracking).
+      // AMO requires data-consent on all new add-ons; both channels declare exactly
+      // ["websiteContent"] (scraped book list; email hashed client-side, no tracking).
       expect(gecko.data_collection_permissions).toEqual({
         required: ["websiteContent"],
       });

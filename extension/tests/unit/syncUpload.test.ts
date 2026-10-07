@@ -1,5 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+/**
+ * Lost-update guard of the sync upload (#249, `sync/syncUpload.ts`), driven
+ * through `syncBooks`. The sync reads the saved list, merges it with the scrape
+ * and PUTs the whole record; a share-toggle save landing between that read and
+ * the PUT used to be overwritten with the stale flag. The PUT now carries the
+ * read `lastUpdated` as `expectedLastUpdated`; the Worker answers 409
+ * BOOKS_CONFLICT when it no longer matches, and the sync re-reads and rebuilds
+ * (at most 3 PUTs in total).
+ *
+ * The fake server below honours that contract like the Worker does: the
+ * precondition is optional, a mismatch writes nothing, and every accepted write
+ * gets a fresh server-assigned `lastUpdated`. PUT bodies are logged as the
+ * JSON wire body (`ApiClient.updatePersonalBooks` sends `JSON.stringify(data)`).
+ */
+
 // Only the DOM scraper is replaced; merge, breaker, id-change resolution and
 // the conflict retry all run for real.
 vi.mock("@/content/scraper", () => ({
@@ -25,21 +40,6 @@ import {
   type BorrowRequest,
 } from "@/api/client";
 import { LAST_SYNC_AT_KEY } from "@/constants";
-
-/**
- * Lost-update guard of the sync upload (#249, `sync/syncUpload.ts`), driven
- * through `syncBooks`. The sync reads the saved list, merges it with the scrape
- * and PUTs the whole record; a share-toggle save landing between that read and
- * the PUT used to be overwritten with the stale flag. The PUT now carries the
- * read `lastUpdated` as `expectedLastUpdated`; the Worker answers 409
- * BOOKS_CONFLICT when it no longer matches, and the sync re-reads and rebuilds
- * (at most 3 PUTs in total).
- *
- * The fake server below honours that contract like the Worker does: the
- * precondition is optional, a mismatch writes nothing, and every accepted write
- * gets a fresh server-assigned `lastUpdated`. PUT bodies are logged as the
- * JSON wire body (`ApiClient.updatePersonalBooks` sends `JSON.stringify(data)`).
- */
 
 const USER_ID = "user-123";
 const FAMILY_ID = "fam-1";

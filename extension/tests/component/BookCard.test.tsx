@@ -3,15 +3,48 @@ import { describe, it, expect } from "vitest";
 import { BookCard, FilterButton, BookWithMember } from "@/dialog/BookCard";
 import { BoolFlag } from "@/api/client";
 
+/**
+ * BookCard and FilterButton: rendering, the scoped style classes, and the two server-supplied URL
+ * gates (cover and book link).
+ *
+ * Styling contract: after the Shadow DOM + scoped-CSS conversion, inline styles moved into styles.css
+ * classes — the title's 2-line clamp/ellipsis is `.moo-book-card__title`, the filter button's
+ * active/inactive difference is the `.moo-filter-btn--active` modifier. jsdom does not apply
+ * stylesheet rules, so the class is the observable contract.
+ *
+ * rel="noopener noreferrer" is asserted as the full string: the two tokens do different jobs, so a
+ * substring check stays green after the load-bearing half is deleted — `noopener` severs
+ * `window.opener`, `noreferrer` suppresses the Referer header. Production documents the pair as
+ * load-bearing (shared/src/config/readmoo.ts → isAllowedBookUrl), and it is the layer that still holds
+ * when the URL whitelist is bypassed — which has happened: see the base-sensitivity rows in
+ * tests/unit/readmooConfig.test.ts.
+ *
+ * Book link whitelist: `readmooUrl` on a family book arrives from the SERVER, so a member who bypasses
+ * the UI and POSTs a book record can choose it freely. It lands in an `<a href>` wrapping the cover AND
+ * the title, so following it looks exactly like opening the book on Readmoo — an arbitrary-redirect /
+ * phishing lure, and the destination learns the viewer's IP and User-Agent the moment the navigation
+ * lands. It does NOT leak the referer only because the render site (extension/src/dialog/BookCard.tsx)
+ * pairs the href with `rel="noopener noreferrer"`; removing that adds a referer leak on top. Firing
+ * takes a click, unlike a cover URL that loads on render — that lowers the rate, not the severity,
+ * since the click happens precisely when the user believes they are opening Readmoo. Nothing in the
+ * browser constrains where it goes: the dialog is injected into Readmoo pages, which send no CSP, and
+ * `img-src` would say nothing about a navigation anyway (hence a separate defence from the
+ * `safeCoverUrl` gate, not a second use of it). `safeBookUrl` (extension/src/dialog/safeBookUrl.ts) is
+ * the only thing between the stored value and the click. The degradation contract is
+ * `href={safeBookUrl(...) || undefined}`: the attribute is OMITTED rather than set to `""`, because an
+ * empty `href` resolves to the current document and a click would reload the Readmoo page the dialog
+ * lives in; with no `href` the `<a>` has no `link` role and is inert, while layout and content stay
+ * untouched.
+ */
+
 function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
   return {
     bookId: "book-1",
     title: "測試書籍",
     author: "測試作者",
     isbn: "",
-    // Must sit on a Readmoo cover host: the card filters `coverUrl` through
-    // `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) at render time, so
-    // any other host yields "" and no <img> is emitted at all.
+    // Must sit on a Readmoo cover host: `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) filters it
+    // at render time, so any other host yields "" and no <img> at all.
     coverUrl: "https://cdn.readmoo.com/cover/test.jpg",
     readmooUrl: "https://readmoo.com/book/book-1",
     category: "",
@@ -31,13 +64,8 @@ describe("BookCard", () => {
     expect(img.src).toBe("https://cdn.readmoo.com/cover/test.jpg");
   });
 
-  /**
-   * Cover URLs on a family book arrive from the SERVER, and the dialog is
-   * injected into Readmoo pages that send no CSP — so this render-time filter
-   * is the only thing between a stored tracking beacon and every viewer's
-   * IP / UA. A rejected URL must degrade to the empty-cover placeholder, never
-   * reach an `<img src>`.
-   */
+  /** Server-supplied cover URLs on a no-CSP Readmoo page: this render-time filter is all that stands
+   *  between a tracking beacon and every viewer's IP / UA, so a rejected URL renders the placeholder. */
   it("drops a non-Readmoo cover URL and renders the fallback instead", () => {
     const { container } = render(
       <BookCard
@@ -62,14 +90,8 @@ describe("BookCard", () => {
     expect(link).not.toBeNull();
     expect(link.href).toBe("https://readmoo.com/book/book-1");
     expect(link.target).toBe("_blank");
-    // Full string, not `toContain("noopener")`: the two tokens do different
-    // jobs, so a substring check stays green after the load-bearing half is
-    // deleted. `noopener` severs `window.opener`; `noreferrer` is the one
-    // that suppresses the Referer header. Production documents the pair as
-    // load-bearing (shared/src/config/readmoo.ts → isAllowedBookUrl), and it
-    // is the layer that still holds when the URL whitelist is bypassed —
-    // which has happened: see the base-sensitivity rows in
-    // tests/unit/readmooConfig.test.ts.
+    // Full string, not `toContain("noopener")`: the two tokens do different jobs and `noreferrer` is
+    // load-bearing. See the file header, `rel="noopener noreferrer"` paragraph.
     expect(link.rel).toBe("noopener noreferrer");
   });
 
@@ -86,9 +108,8 @@ describe("BookCard", () => {
   });
 
   it("title carries the scoped title class (2-line clamp lives in styles.css)", () => {
-    // After the Shadow DOM + scoped-CSS conversion the clamp/ellipsis rules moved
-    // out of inline styles into `.moo-book-card__title` in styles.css. jsdom does
-    // not apply stylesheet rules, so the observable contract is now the class.
+    // The clamp/ellipsis rules live in `.moo-book-card__title`; the class is the contract (see the file
+    // header, "Styling contract").
     render(<BookCard book={makeBook()} />);
 
     const title = screen.getByText("測試書籍") as HTMLElement;
@@ -162,39 +183,13 @@ describe("BookCard", () => {
     expect(screen.queryByText("韓國耽美")).not.toBeInTheDocument();
   });
 
-  /**
-   * `readmooUrl` on a family book arrives from the SERVER, so a family member
-   * who bypasses the UI and POSTs a book record can choose it freely. It lands
-   * in an `<a href>` that wraps the cover AND the title, so following it looks
-   * exactly like opening the book on Readmoo — an arbitrary-redirect / phishing
-   * lure, and the destination host learns the viewer's IP and User-Agent the
-   * moment the navigation lands. What it does NOT leak is the referer, and only
-   * because the render site pairs the href with `rel="noopener noreferrer"`
-   * (extension/src/dialog/BookCard.tsx), where `noreferrer` suppresses the
-   * Referer header outright. That attribute is load-bearing, not decoration:
-   * removing it adds a referer leak on top of everything below.
-   *
-   * Firing takes a click, unlike a cover URL that loads on render — that lowers
-   * the rate, not the severity, since the click happens precisely when the user
-   * believes they are opening Readmoo. Nothing in the browser constrains where
-   * it goes: the dialog is injected into Readmoo pages, which send no CSP, and
-   * `img-src` would say nothing about a navigation anyway (that is why this is
-   * a separate defence from the `safeCoverUrl` gate above, not a second use of
-   * it). `safeBookUrl` (extension/src/dialog/safeBookUrl.ts) is the only thing
-   * between the stored value and the click.
-   *
-   * The degradation contract is `href={safeBookUrl(...) || undefined}`: the
-   * attribute is OMITTED rather than set to `""`, because an empty `href`
-   * resolves to the current document and a click would reload the Readmoo page
-   * the dialog lives in. With no `href` the `<a>` has no `link` role and is
-   * inert, while the card's layout and content stay untouched.
-   */
+  /** A server-chosen `readmooUrl` is a phishing lure behind a click; `safeBookUrl` is the only gate, and
+   *  a rejected URL OMITS `href`. See the file header, "Book link whitelist". */
   describe("book link whitelist", () => {
     const PHISHING_URL = "https://evil.example.com/phish";
 
-    // Role-level positive control for the negative cases below: the assertions
-    // on the href VALUE live in the two "link to readmooUrl" tests above, this
-    // one pins that a whitelisted URL is what makes the <a> a `link` at all.
+    // Role-level positive control for the negative cases: href VALUES are asserted in the two "link to
+    // readmooUrl" tests above; this pins that a whitelisted URL makes the <a> a `link` at all.
     it("exposes a link role for a Readmoo book URL", () => {
       render(<BookCard book={makeBook()} />);
 
@@ -223,10 +218,8 @@ describe("BookCard", () => {
 
         const anchors = container.querySelectorAll("a");
         expect(anchors).toHaveLength(1);
-        // Load-bearing assertion, and NOT interchangeable with the role query
-        // below: RTL reports no `link` role for `href=""` either, so only the
-        // attribute check can tell "omitted" from "empty" — i.e. only this line
-        // fails if the `|| undefined` is ever dropped from the render site.
+        // Load-bearing, NOT interchangeable with the role query: RTL reports no `link` role for `href=""`
+        // either, so only this line fails if `|| undefined` is dropped from the render site.
         expect(anchors[0].getAttribute("href")).toBeNull();
         // The role query is what proves the hostile URL never made it in: with
         // the filter removed this anchor would be a real, followable link.
@@ -418,9 +411,8 @@ describe("FilterButton", () => {
   });
 
   it("adds the --active modifier class when active is true", () => {
-    // The active/inactive visual difference moved from inline styles to the
-    // `.moo-filter-btn--active` modifier class (styles.css). The modifier class
-    // is the observable behavioural contract in jsdom.
+    // The active/inactive difference is the `.moo-filter-btn--active` modifier (see the file header,
+    // "Styling contract").
     render(<FilterButton label="已開放" active={true} onClick={() => {}} />);
 
     const btn = screen.getByText("已開放");

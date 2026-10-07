@@ -9,6 +9,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { MANUAL_LEND_NOTICE_DISMISSED_KEY } from "@/constants";
 
+/**
+ * BorrowTab: incoming / outgoing borrow requests, approval through the Readmoo lend automation, the
+ * member picker, and the history cap hint.
+ *
+ * History cap hint: each box states how many finished records it keeps, and 收件匣 / 寄件匣 say
+ * DIFFERENT things — the cap is per borrower, so the outbox as a whole is bounded while the inbox holds
+ * one allowance per family member. The two sentences share substrings, so every assertion uses
+ * `getByText` / `queryByText` with the imported constant (RTL matches a string against the node's FULL
+ * normalized text) plus a negative assertion on the sibling variant (.claude/rules/test.md →
+ * "Substring copy variants need exact equality").
+ */
+
 // Stub the Readmoo automation so 同意借閱 can succeed in jsdom (no real Readmoo DOM).
 const mockOpenLendDialogForBook = vi.fn();
 const mockSelectMemberByName = vi.fn();
@@ -16,9 +28,8 @@ const mockWaitForLendDialogClose = vi.fn().mockResolvedValue(true);
 const mockCloseLendDialog = vi.fn();
 const mockRestoreLibrarySearch = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/content/readmoo-lend", async () => {
-  // Pull in the real `decideLendAction` so picker / fast-match branching is
-  // exercised exactly as in production. Only the side-effecting helpers are
-  // stubbed because jsdom does not contain the Readmoo DOM.
+  // Real `decideLendAction` so picker / fast-match branching runs as in production; only the
+  // side-effecting helpers are stubbed, since jsdom has no Readmoo DOM.
   const actual = await vi.importActual<typeof import("@/content/readmoo-lend")>(
     "@/content/readmoo-lend",
   );
@@ -733,20 +744,11 @@ describe("BorrowTab", () => {
       expect(mockCloseLendDialog).toHaveBeenCalledTimes(1);
     });
 
-    /**
-     * The picker's confirm PATCHes the same rate-limited member-settings
-     * endpoint as MemberList's toggles, so its inline error goes through
-     * `memberSettingsErrorMessage` too. Copy is asserted against the production
-     * builder, whose literals are pinned in
-     * tests/unit/dialog/verificationMessages.test.ts.
-     */
+    /** The picker's confirm PATCHes the rate-limited member-settings endpoint like MemberList's toggles,
+     *  so its error uses `memberSettingsErrorMessage` (literals pinned in verificationMessages.test.ts). */
     describe("picker save failure", () => {
-      /**
-       * Drive the flow to the picker and confirm "Bob", with the PATCH
-       * rejecting. The approve promise is deliberately left pending (the picker
-       * stays open for retry) — nothing is scheduled, so there is nothing to
-       * clean up.
-       */
+      /** Drive the flow to the picker and confirm "Bob" with the PATCH rejecting. The approve promise stays
+       *  pending (the picker stays open for retry); nothing is scheduled, so nothing needs cleanup. */
       async function pickWithRejection(err: unknown) {
         const updateMemberSettings = vi.fn().mockRejectedValue(err);
         const updateBorrowStatus = vi.fn();
@@ -798,9 +800,8 @@ describe("BorrowTab", () => {
             screen.getByText(/請選擇「Alice」對應的讀墨家庭成員/),
           ).toBeInTheDocument();
         });
-        // `act` (not waitFor) is the readiness signal here: the rejected PATCH
-        // settles in a microtask, and only act guarantees the resulting error
-        // state is committed before the assertions run.
+        // `act` (not waitFor) is the readiness signal: the rejected PATCH settles in a microtask, and only
+        // act guarantees the error state is committed before the assertions.
         await act(async () => {
           fireEvent.click(screen.getByRole("button", { name: /Bob/ }));
         });
@@ -1146,11 +1147,8 @@ describe("BorrowTab", () => {
           .fn()
           .mockResolvedValue([makeRequest({ status: BorrowStatus.PENDING })]),
       });
-      // Must stay in sync with the NOT_ON_LIBRARY message thrown by
-      // `openLendDialogForBook` in extension/src/content/readmoo-lend.ts — that
-      // module is mocked here, so this file cannot import the real string.
-      // `tests/unit/readmooLend.test.ts` pins the exact wording against
-      // production; this case only checks that whatever it throws is surfaced.
+      // Mirrors NOT_ON_LIBRARY from `openLendDialogForBook` (content/readmoo-lend.ts, mocked here); the
+      // wording is pinned in tests/unit/readmooLend.test.ts — this only checks it is surfaced.
       mockOpenLendDialogForBook.mockRejectedValue(
         new Error("請先切換到讀墨的「書櫃」頁面後再試一次"),
       );
@@ -1172,21 +1170,11 @@ describe("BorrowTab", () => {
     });
   });
 
-  /**
-   * History cap hint: each box states how many finished records it keeps, and
-   * 收件匣 / 寄件匣 say DIFFERENT things (the cap is per borrower, so the
-   * outbox as a whole is bounded while the inbox holds one allowance per
-   * family member). The two sentences share substrings, so every assertion
-   * uses `getByText` / `queryByText` with the imported constant — RTL matches
-   * a string matcher against the node's FULL normalized text — plus a negative
-   * assertion on the sibling variant (.claude/rules/test.md → "Substring copy
-   * variants need exact equality").
-   */
+  /** History cap hint: 收件匣 / 寄件匣 state different caps with shared substrings, so assertions use exact
+   *  text plus a sibling negative. See the file header, "History cap hint". */
   describe("history cap hint", () => {
-    /**
-     * 收件匣 gets 2 archived records (the user owns the books), 寄件匣 gets 1
-     * (the user is the borrower), so each section's toggle label is unique.
-     */
+    /** 收件匣 gets 2 archived records (the user owns the books), 寄件匣 gets 1 (the user borrows), so each
+     *  section's toggle label is unique. */
     function archivedOnBothSidesClient(): ApiClient {
       return createMockApiClient({
         listBorrowRequests: vi.fn().mockResolvedValue([

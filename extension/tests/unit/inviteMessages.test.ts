@@ -4,9 +4,11 @@ import {
   buildLinkInviteMessage,
 } from "moo-family-bookshelf-shared/invite/messages";
 
-// The invite-message builders are pure shared functions consumed by both the
-// Extension and PWA family-settings copy buttons. Tested here alongside the
-// other shared pure functions (see reportLinks.test.ts, saveStrategy.test.ts).
+/**
+ * The invite-message builders are pure shared functions consumed by both the
+ * Extension and PWA family-settings copy buttons. Tested here alongside the
+ * other shared pure functions (see reportLinks.test.ts, saveStrategy.test.ts).
+ */
 
 describe("buildSyncCodeInviteMessage", () => {
   const SYNC_CODE = "moo-abcd-1234";

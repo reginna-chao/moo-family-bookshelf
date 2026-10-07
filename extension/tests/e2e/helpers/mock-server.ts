@@ -1,12 +1,5 @@
-/**
- * Mock server utilities for E2E tests.
- *
- * The primary static file server for fixtures is handled by
- * playwright.config.ts webServer (using `serve`).
- *
- * This module provides URL helpers and route mapping utilities
- * for navigation between mock pages during tests.
- */
+/** URL helpers and route mapping for navigating mock pages in E2E tests; the fixtures' static file
+ *  server itself is playwright.config.ts's webServer (using `serve`). */
 
 import { API_ENDPOINT_KEY } from "../../../src/constants";
 

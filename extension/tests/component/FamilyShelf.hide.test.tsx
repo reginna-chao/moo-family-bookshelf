@@ -17,12 +17,8 @@ import {
   triggerCount,
 } from "./helpers/memberFilter";
 
-/**
- * Walks up from the book title to the nearest card root that contains its
- * overflow trigger. After the v1.5.0 reshape the title lives in a nested info
- * div while the action row (overflow + favorite) is a sibling, so a plain
- * `.closest("div")` no longer reaches the shared root.
- */
+/** Walks up from the title to the card root holding the overflow trigger: since the v1.5.0 reshape the
+ *  title sits in a nested info div beside the action row (overflow + favorite), so `.closest("div")` misses it. */
 function cardOf(title: string): HTMLElement {
   let el: HTMLElement | null = screen.getByText(title);
   while (el) {
@@ -39,10 +35,8 @@ function triggerHideAction(title: string, itemName: string) {
   fireEvent.click(screen.getByRole("menuitem", { name: itemName }));
 }
 
-/**
- * Drive the custom MemberDropdown (rewritten from a native `<select>`):
- * open the trigger, then click the option matching `optionName`.
- */
+/** Drive the custom MemberDropdown (rewritten from a native `<select>`): open the trigger, then click
+ *  the option matching `optionName`. */
 function selectMemberFilter(optionName: RegExp) {
   fireEvent.click(memberFilterTrigger());
   fireEvent.click(screen.getByRole("option", { name: optionName }));

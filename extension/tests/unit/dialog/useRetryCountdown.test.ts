@@ -8,6 +8,11 @@ import { useRetryCountdown } from "@/dialog/useRetryCountdown";
  * value and (b) an interval that outlives its deadline — both are pinned here.
  * `vi.getTimerCount()` is asserted directly so a leaked interval fails the test
  * instead of quietly burning a timer for the rest of the suite.
+ *
+ * The hook clamps every incoming wait to one hour (`MAX_RETRY_WAIT_SECONDS` in
+ * useRetryCountdown.ts). The official worker never asks for more than 900s, so
+ * the cap exists purely to stop a hostile / buggy self-hosted backend from
+ * arming an effectively endless ticker in the user's dialog.
  */
 describe("useRetryCountdown", () => {
   beforeEach(() => {
@@ -102,12 +107,8 @@ describe("useRetryCountdown", () => {
     expect(onElapsed).not.toHaveBeenCalled();
   });
 
-  /**
-   * The hook clamps every incoming wait to one hour (`MAX_RETRY_WAIT_SECONDS`
-   * in useRetryCountdown.ts). The official worker never asks for more than 900s,
-   * so the cap exists purely to stop a hostile / buggy self-hosted backend from
-   * arming an effectively endless ticker in the user's dialog.
-   */
+  // Every wait is clamped to 1h (`MAX_RETRY_WAIT_SECONDS`) against hostile backends;
+  // the official worker never asks for more than 900s.
   it.each([
     ["a short wait", 60, 60],
     ["the longest wait the worker really sends", 900, 900],

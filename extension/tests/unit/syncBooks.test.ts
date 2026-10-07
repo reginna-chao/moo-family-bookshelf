@@ -1,5 +1,43 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+/**
+ * syncBooks (`src/sync/syncBooks.ts`): scrape → merge → upload, the archive
+ * path, throttle bookkeeping and the upload-error copy.
+ *
+ * `STORAGE_KEY_ALIAS`: tests describe storage data with logical names while
+ * production reads the `moo:`-prefixed keys; the alias maps logical →
+ * production keys via the imported constants, so a key-constant rename still
+ * breaks the test at compile time.
+ *
+ * Upload error envelope: `updatePersonalBooks` resolves the `{ data, error }`
+ * envelope through `readEnvelope`, which bare-casts `response.json()`
+ * (src/api/client.ts), and the endpoint is user-configurable (BYO backend via
+ * the sync code's `@host`), so `error.message` is `unknown` at runtime. It is
+ * handed to `new Error(...)`, whose ToString turns an object into
+ * "[object Object]" and an array into its bare contents — the sync banner then
+ * shows that instead of an explanation. An absent or empty message is worse
+ * still: `err.message` stays "", so the failed sync reports NOTHING (the outer
+ * catch's "同步失敗" default only covers non-Error throws, not an Error with a
+ * blank message). String passthrough is already pinned by "returns error when
+ * upload fails" — not repeated. The exhaustive value-domain proof for the
+ * coercion lives in tests/unit/safeErrorText.test.ts; this pins the wiring and
+ * the copy (the literal from src/sync/syncBooks.ts's upload-error throw, read
+ * back off `result.error` — the thrown Error's own message, which is what the
+ * sync banner renders).
+ *
+ * Throttle bookkeeping: a successful sync records the sync timestamp so
+ * canAutoSync() throttles the next auto sync. The separate display-scrape timer
+ * was removed when the self-contained display scrape was deleted — sync only
+ * writes LAST_SYNC_AT_KEY.
+ *
+ * Legacy-selector warn-once reset: the real scraper is mocked in this file, so
+ * the test stands in for the one scrape-time behaviour under test — a card that
+ * only matches the legacy selector, which warns at most once per warn-once
+ * window. Readmoo's library is a SPA that can stay open for days; without the
+ * per-sync reset the second sync would stay silent and the degraded path would
+ * look fixed.
+ */
+
 // Mock scraper module (the DOM boundary). The sync reads `scrapeLibrary` /
 // `scrapeArchivedBooks`, both of which report completeness (#236).
 vi.mock("@/content/scraper", () => ({
@@ -40,11 +78,8 @@ import {
   SYNC_ARCHIVED_KEY,
 } from "@/constants";
 
-/**
- * Tests describe storage data with logical names; production reads the
- * `moo:`-prefixed keys. This maps logical → production keys via the imported
- * constants, so a key-constant rename still breaks the test at compile time.
- */
+/** Logical → production (`moo:`) storage keys via the imported constants, so a
+ *  key rename still breaks the test at compile time. */
 const STORAGE_KEY_ALIAS: Record<string, string> = {
   autoSyncInterval: AUTO_SYNC_INTERVAL_KEY,
   lastSyncAt: LAST_SYNC_AT_KEY,
@@ -449,22 +484,8 @@ describe("syncBooks — full flow", () => {
     expect(result.error).toBe("Upload error");
   });
 
-  /**
-   * `updatePersonalBooks` resolves the `{ data, error }` envelope through
-   * `readEnvelope`, which bare-casts `response.json()` (src/api/client.ts), and
-   * the endpoint is user-configurable (BYO backend via the sync code's `@host`),
-   * so `error.message` is `unknown` at runtime. It is handed to `new Error(...)`,
-   * whose ToString turns an object into "[object Object]" and an array into its
-   * bare contents — the sync banner then shows that instead of an explanation.
-   * An absent or empty message is worse still: `err.message` stays "", so the
-   * failed sync reports NOTHING (the outer catch's "同步失敗" default only covers
-   * non-Error throws, not an Error with a blank message).
-   *
-   * String passthrough is already pinned by "returns error when upload fails"
-   * above — not repeated here. The exhaustive value-domain proof for the
-   * coercion lives in tests/unit/safeErrorText.test.ts; this pins the wiring
-   * and the copy.
-   */
+  // A non-string or blank `error.message` must still yield the upload-error copy.
+  // See the header → "Upload error envelope".
   it.each([
     { name: "an object message", message: { zh: "壞掉了" } },
     { name: "an empty-string message", message: "" },
@@ -489,9 +510,8 @@ describe("syncBooks — full flow", () => {
       });
 
       expect(result.success).toBe(false);
-      // Literal from src/sync/syncBooks.ts (the upload-error throw), read back
-      // off `result.error` — the thrown Error's own message, which is what the
-      // sync banner renders.
+      // Literal from src/sync/syncBooks.ts's upload-error throw, as the sync
+      // banner renders it.
       expect(result.error).toBe("同步書單失敗，請稍後再試");
       expect(result.books).toEqual([]);
     },
@@ -562,9 +582,8 @@ describe("syncBooks — full flow", () => {
       apiClient,
     });
 
-    // A successful sync records the sync timestamp so canAutoSync() throttles
-    // the next auto sync. The separate display-scrape timer was removed when the
-    // self-contained display scrape was deleted — sync only writes LAST_SYNC_AT_KEY.
+    // Success records LAST_SYNC_AT_KEY (the only timer left) so canAutoSync()
+    // throttles the next auto sync.
     expect(chrome.storage.local.set).toHaveBeenCalledWith(
       expect.objectContaining({ [LAST_SYNC_AT_KEY]: expect.any(Number) }),
     );
@@ -903,9 +922,8 @@ describe("syncBooks — scrape-time warning reset", () => {
   });
 
   it("re-arms the warn-once state so a still-degraded scrape warns on every sync", async () => {
-    // The real scraper is mocked in this file, so stand in for the one scrape-time
-    // behaviour under test: a card that only matches the legacy selector, which
-    // warns at most once per warn-once window.
+    // Stand-in for the mocked scraper: a legacy-selector-only card, warning at
+    // most once per warn-once window.
     document.body.innerHTML = `
       <div class="library-item">
         <div class="openbook">
@@ -931,9 +949,8 @@ describe("syncBooks — scrape-time warning reset", () => {
     await syncBooks(options);
     await syncBooks(options);
 
-    // Readmoo's library is a SPA that can stay open for days. Without the
-    // per-sync reset the second sync would stay silent and the degraded path
-    // would look fixed.
+    // The library SPA can stay open for days: without the per-sync reset the
+    // degraded path would look fixed.
     expect(warnSpy).toHaveBeenCalledTimes(2);
     expect(warnSpy).toHaveBeenLastCalledWith(
       expect.stringContaining(

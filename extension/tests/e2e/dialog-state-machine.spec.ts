@@ -26,9 +26,7 @@ import {
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 import { API_ENDPOINT_KEY, FAMILY_ID_KEY } from "../../src/constants";
 
-/**
- * Helper: go through full onboarding to reach main view.
- */
+/** Helper: go through full onboarding to reach main view. */
 async function goThroughOnboarding(
   page: import("@playwright/test").Page,
 ): Promise<void> {

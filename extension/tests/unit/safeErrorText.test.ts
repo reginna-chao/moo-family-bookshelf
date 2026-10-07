@@ -13,18 +13,20 @@ import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
  * The `||` / `??` idioms this helper replaced do NOT cover that: `{} || fb` is
  * `{}` and `[] || fb` is `[]`, so exactly the two values React refuses to
  * render were the two that used to pass through.
+ *
+ * `DEGRADING_CASES` is the complete set of values `error.message` can hold:
+ * `JSON.parse` output can only be an object, array, string, number, boolean or
+ * null, and `undefined` covers a backend that omits the field entirely. Every
+ * non-string member — plus the empty string, since a blank error is not a
+ * report — must degrade.
  */
 
 /** Fallback copy is per call site; these are two real ones, used verbatim. */
 const FALLBACK = "儲存失敗，請重試";
 const OTHER_FALLBACK = "驗證碼產生失敗，請重試";
 
-/**
- * The complete set of values `error.message` can hold. `JSON.parse` output can
- * only be an object, array, string, number, boolean or null; `undefined` covers
- * a backend that omits the field entirely. Every non-string member — plus the
- * empty string, since a blank error is not a report — must degrade.
- */
+/** Every non-string `error.message` shape (plus `""`) — each must degrade.
+ *  See the file header. */
 const DEGRADING_CASES: { name: string; message: unknown }[] = [
   { name: "an object", message: { zh: "壞掉了" } },
   { name: "a nested object", message: { error: { message: "壞掉了" } } },

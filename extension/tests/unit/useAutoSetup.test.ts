@@ -1,6 +1,33 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+/**
+ * useAutoSetup (`src/dialog/useAutoSetup.ts`): onboarding's first scrape +
+ * upload of the personal book list.
+ *
+ * mergeBooks is mocked to pass the scraped list straight through, so tests
+ * assert on the arguments it receives (the vi.fn records every actual arg,
+ * including the savedBooks one this stub ignores) without depending on real
+ * merge logic. The rename-candidate cases run the real merge instead (see
+ * below).
+ *
+ * #259 conflicts: the onboarding PUT carries the read `lastUpdated`; a
+ * `BOOKS_CONFLICT` re-reads and re-PUTs (at most 3 PUTs), then ends in the error
+ * phase with the SYNC conflict wording. Retry detail:
+ * dialog/onboardingBooksUpload.test.ts.
+ *
+ * #236 upload guards: auto-setup is an upload path too, so it obeys the same two
+ * stops as the regular sync — a failed read of the saved list, and the circuit
+ * breaker — both before any upload. The archive is never scraped here, so saved
+ * archived books never count against the scrape.
+ *
+ * #236 F2 rename candidates: onboarding never judges renames, so a brand-new id
+ * titled like a saved-only id is held back from its upload (uploading it would
+ * make it a server id and the pair could never be resolved by a later sync).
+ * The real merge runs there so the saved-only entry is actually in the merged
+ * list.
+ */
+
 // Mock scraper module before importing the hook
 vi.mock("@/content/scraper", () => ({
   scrapeUserEmail: vi.fn().mockReturnValue("user@example.com"),
@@ -10,9 +37,8 @@ vi.mock("@/content/scraper", () => ({
     `正在讀取第 ${page} 頁，已收集 ${count} 本…`,
 }));
 
-// Mock mergeBooks to pass the scraped list straight through, so tests assert on
-// the arguments it receives (the vi.fn records every actual arg, including the
-// savedBooks one this stub ignores) without depending on real merge logic.
+// Pass-through mergeBooks: tests assert on the args it receives, not on merge
+// logic. See the file header.
 vi.mock("@/dialog/mergeBooks", () => ({
   mergeBooks: vi.fn((scraped: unknown[]) => scraped),
 }));
@@ -238,11 +264,8 @@ describe("useAutoSetup", () => {
       expect(result.current.errorMessage).not.toContain("Request body exceeds");
     });
 
-    /**
-     * #259: the onboarding PUT carries the read `lastUpdated`; a `BOOKS_CONFLICT`
-     * re-reads and re-PUTs (at most 3 PUTs), then ends in the error phase with
-     * the SYNC conflict wording. Retry detail: dialog/onboardingBooksUpload.test.ts.
-     */
+    // #259: `BOOKS_CONFLICT` → re-read and re-PUT (at most 3 PUTs), then the SYNC
+    // conflict wording. Retry detail: dialog/onboardingBooksUpload.test.ts.
     const CONFLICT = {
       error: {
         code: "BOOKS_CONFLICT",
@@ -425,12 +448,8 @@ describe("useAutoSetup", () => {
     });
   });
 
-  /**
-   * #236: auto-setup is an upload path too, so it obeys the same two stops as
-   * the regular sync — a failed read of the saved list, and the circuit
-   * breaker — both before any upload. The archive is never scraped here, so
-   * saved archived books never count against the scrape.
-   */
+  // #236: the regular sync's two stops (failed saved-list read, circuit breaker)
+  // apply before any upload. See the header → "#236 upload guards".
   describe("syncBooks — upload guards", () => {
     let warnSpy: ReturnType<typeof vi.spyOn> | null = null;
 
@@ -574,12 +593,8 @@ describe("useAutoSetup", () => {
       expect(mockApi.updatePersonalBooks).toHaveBeenCalledTimes(1);
     });
 
-    /**
-     * #236 F2: onboarding never judges renames, so a brand-new id titled like a
-     * saved-only id is held back from its upload (uploading it would make it a
-     * server id and the pair could never be resolved by a later sync). The real
-     * merge runs here so the saved-only entry is actually in the merged list.
-     */
+    // #236 F2: a new id titled like a saved-only id is held back (real merge here).
+    // See the header → "#236 F2 rename candidates".
     describe("rename candidates", () => {
       async function withRealMerge(): Promise<void> {
         const actual = await vi.importActual<

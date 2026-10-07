@@ -168,13 +168,8 @@ describe("useDisplayName", () => {
     });
   });
 
-  /**
-   * The Worker rate-limits the family write endpoints (429 RATE_LIMITED, with
-   * an optional `retryAfter`). Its `message` is English, so this path shows the
-   * localized back-off copy instead — asserted against the production builder
-   * (`rateLimitedMessage`), whose literals are pinned in
-   * tests/unit/dialog/verificationMessages.test.ts.
-   */
+  // Family-write 429 RATE_LIMITED (optional `retryAfter`, English `message`) shows
+  // `rateLimitedMessage`'s copy (pinned in tests/unit/dialog/verificationMessages.test.ts).
   describe("rate-limited save", () => {
     async function saveWith(error: Record<string, unknown>) {
       const apiClient = createMockApiClient({

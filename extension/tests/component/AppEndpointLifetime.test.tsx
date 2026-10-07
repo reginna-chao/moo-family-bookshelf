@@ -34,9 +34,8 @@ import { API_ENDPOINT_KEY, DEFAULT_API_ENDPOINT } from "@/constants";
  * `setEndpoint` is what performJoin actually calls.
  */
 
-// crypto.subtle competes with fake timers in this environment (see the same
-// mock in tests/component/Onboarding.test.tsx). The value only has to satisfy
-// ApiClient's 64-char-hex guard.
+// crypto.subtle competes with fake timers here (same mock as tests/component/Onboarding.test.tsx); the
+// value only has to satisfy ApiClient's 64-char-hex guard.
 const USER_ID = "a".repeat(64);
 vi.mock("moo-family-bookshelf-shared/crypto/hash", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
@@ -67,11 +66,8 @@ function jsonResponse(status: number, body: unknown) {
   };
 }
 
-/**
- * Route the three requests this journey makes, and record every URL — the URL
- * is how the endpoint in force becomes OBSERVABLE without reaching into App's
- * private ref.
- */
+/** Route the journey's three requests and record every URL — the URL is how the endpoint in force
+ *  becomes OBSERVABLE without reaching into App's private ref. */
 function stubFetch(): RecordedCall[] {
   const calls: RecordedCall[] = [];
   const fetchMock = vi.fn((input: unknown, init?: RequestInit) => {
@@ -117,11 +113,8 @@ function flushMicrotasks(): Promise<void> {
   });
 }
 
-/**
- * Press the welcome button and drain scrapeProfile's hash-navigation settle
- * (1500ms) plus the lookup that follows. The label differs between the first
- * and later opens — a stored displayName flips it to 繼續使用 — so match both.
- */
+/** Press the welcome button and drain scrapeProfile's 1500ms hash-navigation settle plus the lookup.
+ *  The label flips to 繼續使用 on later opens (stored displayName), so match both. */
 async function startOnboarding(): Promise<void> {
   const welcome = await screen.findByRole("button", {
     name: /開始使用|繼續使用/,

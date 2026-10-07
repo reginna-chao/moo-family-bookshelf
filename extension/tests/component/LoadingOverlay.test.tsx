@@ -22,10 +22,8 @@ describe("LoadingOverlay", () => {
   });
 
   it("carries the scoped overlay class (fixed/full-screen cover lives in styles.css)", () => {
-    // After the Shadow DOM + scoped-CSS conversion the absolute/full-screen cover
-    // and z-index rules moved out of inline styles into `.moo-loading-overlay` in
-    // styles.css. jsdom does not apply stylesheet rules, so the observable
-    // contract that the overlay covers the Dialog content is now the class.
+    // The absolute/full-screen cover and z-index rules live in `.moo-loading-overlay` (styles.css); jsdom
+    // applies no stylesheet, so that the overlay covers the Dialog is pinned by the class.
     render(<LoadingOverlay message="載入中..." />);
     const overlay = screen.getByTestId("loading-overlay");
     expect(overlay).toHaveClass("moo-loading-overlay");

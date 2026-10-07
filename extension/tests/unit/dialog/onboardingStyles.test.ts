@@ -22,10 +22,8 @@ import { MOBILE_BREAKPOINT_PX } from "@/hooks/breakpoints";
 const STYLES_PATH = resolve(__dirname, "../../../src/dialog/styles.css");
 const css = readFileSync(STYLES_PATH, "utf-8");
 
-/**
- * Return the body (between braces) of the brace-block whose opening `{` is at
- * `openBraceIndex`, respecting nested braces (e.g. rules inside a media query).
- */
+/** The body (between braces) of the block whose `{` is at `openBraceIndex`,
+ *  respecting nested braces (e.g. rules inside a media query). */
 function blockBody(source: string, openBraceIndex: number): string {
   let depth = 0;
   for (let i = openBraceIndex; i < source.length; i += 1) {

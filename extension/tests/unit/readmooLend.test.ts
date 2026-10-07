@@ -1,10 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// openLendDialogForBook drives the library search (readmoo-search) before it
-// touches any DOM. Mock that module so the orchestrator tests control whether a
-// card is "found" (via waitForBookCard) and can assert the restore ordering
-// (restoreLibrarySearch → submitSearch). The DOM-helper tests below do not use
-// readmoo-search, so the mock is inert for them.
+/**
+ * The Readmoo lend flow (`src/content/readmoo-lend.ts`): openLendDialogForBook
+ * and its DOM helpers.
+ *
+ * openLendDialogForBook drives the library search (readmoo-search) before it
+ * touches any DOM, so that module is mocked: the orchestrator tests control
+ * whether a card is "found" (via waitForBookCard) and can assert the restore
+ * ordering (restoreLibrarySearch → submitSearch). The DOM-helper tests do not
+ * use readmoo-search, so the mock is inert for them.
+ *
+ * `stubLocation` replaces window.location with a minimal stub the lend flow can
+ * read. `pathname` matters: the new host only serves the web app under `/read`,
+ * so the library gate reads all three parts. Callers must pass the pathname that
+ * goes with the host they are simulating (`/read/` for next, `/` for legacy).
+ */
+
+// Lets the orchestrator tests control "card found" and the restore ordering.
+// See the file header.
 vi.mock("@/content/readmoo-search", () => ({
   submitSearch: vi.fn(),
   waitForBookCard: vi.fn(),
@@ -33,13 +46,8 @@ import { submitSearch, waitForBookCard } from "@/content/readmoo-search";
 
 const realLocation = window.location;
 
-/**
- * Replace window.location with a minimal stub the lend flow can read.
- *
- * `pathname` matters: the new host only serves the web app under `/read`, so the
- * library gate reads all three parts. Callers must pass the pathname that goes
- * with the host they are simulating (`/read/` for next, `/` for legacy).
- */
+/** Stub window.location; pass the host's own pathname (`/read/` next, `/` legacy).
+ *  See the file header. */
 function stubLocation(hostname: string, pathname: string, hash: string): void {
   Object.defineProperty(window, "location", {
     configurable: true,

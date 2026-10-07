@@ -32,7 +32,14 @@ import {
  *
  * Runs the real hash navigation, the real deriveUserId and jsdom's real cookie
  * jar; the scraper (the host page's DOM) is the only mock. "Navigated" is
- * observed as a scrape.
+ * observed as a scrape. jsdom queues hashchange on a 0ms timer (bumped to 1ms
+ * when armed during a fake tick), so `deliverHashChanges` delivers it before
+ * timers are counted.
+ *
+ * cachedIdentity (issue #284) — onboarding's hand-off to App: it reports the
+ * latest verifyAccountIdentity `mismatch` for that userId only, never
+ * navigates, and is cleared by any later result or reset. A remembered mismatch
+ * never lets checkAccountIdentity skip the navigation.
  */
 
 vi.mock("@/content/scraper", () => ({
@@ -118,10 +125,8 @@ function setHash(hash: string): void {
   );
 }
 
-/**
- * jsdom queues hashchange on a 0ms timer (bumped to 1ms when armed during a fake
- * tick); deliver it before counting timers.
- */
+/** jsdom queues hashchange on a 0ms timer (1ms when armed during a fake tick);
+ *  deliver it before counting timers. */
 function deliverHashChanges(): void {
   vi.advanceTimersByTime(1);
 }
@@ -390,12 +395,8 @@ describe("verifyAccountIdentity", () => {
   });
 });
 
-/**
- * cachedIdentity (issue #284) — onboarding's hand-off to App: it reports the
- * latest verifyAccountIdentity `mismatch` for that userId only, never
- * navigates, and is cleared by any later result or reset. A remembered
- * mismatch never lets checkAccountIdentity skip the navigation.
- */
+// #284: the latest verify `mismatch` for that userId only; never navigates, never
+// lets checkAccountIdentity skip navigating. See the file header.
 describe("cachedIdentity", () => {
   /** Page on account A, stored user B: the latest verify finds a mismatch. */
   async function rememberMismatchForB(): Promise<void> {

@@ -43,11 +43,8 @@ describe("QrCodeLink", () => {
   });
 
   afterEach(() => {
-    // Tripwire, not decoration: the expiry/cleanup tests below install fake
-    // timers and only restore them at the end of their own body, so a mid-body
-    // failure leaks a frozen clock into the rest of the file. RTL cannot detect
-    // Vitest's fake timers, so every later waiter would poll that frozen clock
-    // and hang to the full testTimeout instead of failing where the bug is.
+    // Tripwire: the expiry/cleanup tests restore fake timers only at the end of their body, so a mid-body
+    // failure would leave a frozen clock that RTL's waiters cannot detect — they'd hang to testTimeout.
     vi.useRealTimers();
     vi.restoreAllMocks();
     mockToDataURL.mockReset();
@@ -122,10 +119,8 @@ describe("QrCodeLink", () => {
       <QrCodeLink syncCode="moo-sync" userId="uid123" apiClient={apiClient} />,
     );
 
-    // First reveal in the file, so this click pays useQrLinkState's one-shot
-    // `await import("qrcode")` module resolve on top of the token fetch. act is
-    // the barrier for that work; leaving it to findByAltText's 1s budget is
-    // what makes this test the file's first casualty under CPU contention.
+    // First reveal in the file: this click also pays useQrLinkState's one-shot `await import("qrcode")`.
+    // act is its barrier — findByAltText's 1s budget made this the first casualty under CPU contention.
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "產生 QR Code" }));
     });

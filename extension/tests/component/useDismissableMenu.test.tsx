@@ -9,6 +9,18 @@ import {
 import { useRef, createRef, type RefObject } from "react";
 import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 
+/**
+ * useDismissableMenu (Extension twin): outside-click, Escape, scroll and resize dismissal, focus
+ * return on Escape, and the ShadowRoot handling the PWA twin omits.
+ *
+ * Shadow-root scroll (regression): the dialog is injected into an OPEN shadow root, and `scroll`
+ * events are `composed: false`, so a scroll originating inside the shadow tree never crosses the
+ * shadow boundary to reach `window` — the window-only listener missed those scrolls and the menu stayed
+ * open. The hook now also attaches a capture-phase `scroll` listener on the trigger's ShadowRoot (the
+ * top of the propagation path for those events). These tests drive the hook with real DOM refs so
+ * `triggerRef.current.getRootNode()` genuinely returns a `ShadowRoot`.
+ */
+
 interface HarnessProps {
   isOpen: boolean;
   onClose: () => void;
@@ -113,19 +125,15 @@ describe("useDismissableMenu", () => {
     });
   });
 
-  // The scroll-to-dismiss handler is origin-aware: a scroll whose composedPath
-  // includes the menu (its own overflow-y:auto list) or the trigger must NOT
-  // close the menu, so lower options stay reachable by wheel. Only scrolls of
-  // the page/panels BEHIND the menu dismiss it. Escape/outside-click/resize are
-  // unaffected.
+  // Origin-aware: a scroll whose composedPath includes the menu (its overflow-y:auto list) or trigger
+  // keeps it open; only page/panel scrolls BEHIND it dismiss. Escape/outside-click/resize unaffected.
   describe("scroll-to-dismiss (origin-aware)", () => {
     it("keeps the menu open on a scroll originating inside the menu's list", () => {
       const onClose = vi.fn();
       render(<Harness isOpen onClose={onClose} />);
 
-      // bubbles:true so the capture-phase window listener sees it and the
-      // composedPath climbs through the menu (matching a real wheel-scroll on
-      // an option row inside the scrollable list).
+      // bubbles:true so the capture-phase window listener sees it and composedPath climbs through the
+      // menu, like a real wheel-scroll on an option row inside the scrollable list.
       fireEvent(
         screen.getByTestId("menu-item"),
         new Event("scroll", { bubbles: true }),
@@ -217,9 +225,8 @@ describe("useDismissableMenu", () => {
     });
   });
 
-  // Focus starts on an option inside the menu (where a keyboard user is while
-  // the menu is open). onClose is a mock, so the menu stays mounted and a
-  // focus that was NOT moved remains observable on that option.
+  // Focus starts on an option inside the menu (where a keyboard user is). onClose is a mock, so the
+  // menu stays mounted and focus that was NOT moved remains observable on that option.
   describe("returnFocusOnEscape", () => {
     function focusMenuItem(): HTMLElement {
       const item = screen.getByTestId("menu-item");
@@ -257,9 +264,8 @@ describe("useDismissableMenu", () => {
       expect(screen.getByTestId("trigger")).not.toHaveFocus();
     });
 
-    // Escape reclaims focus the menu owned (an option inside it) or focus that
-    // already fell to the document (the focused option unmounted, or nothing
-    // was focused). Each target is where a real keydown lands in that state.
+    // Escape reclaims focus the menu owned (an option) or focus that already fell to the document (the
+    // option unmounted, or nothing was focused); each target is where a real keydown lands then.
     it.each<{ name: string; target: () => Element; focusFirst: boolean }>([
       {
         name: "an option inside the menu",
@@ -291,9 +297,8 @@ describe("useDismissableMenu", () => {
       },
     );
 
-    // A control the user moved to while the menu stayed open (e.g. Shift+Tab
-    // back to a search box) keeps focus: Escape still closes the menu but must
-    // not pull focus away to the trigger.
+    // A control the user moved to while the menu stayed open (e.g. Shift+Tab back to a search box)
+    // keeps focus: Escape still closes the menu but must not pull focus to the trigger.
     it("closes on an Escape fired at an outside control but leaves focus on that control", () => {
       const onClose = vi.fn();
       render(<Harness isOpen onClose={onClose} />);
@@ -375,14 +380,8 @@ describe("useDismissableMenu", () => {
     });
   });
 
-  // Regression coverage for the shadow-root scroll listener. The dialog is
-  // injected into an OPEN shadow root; `scroll` events are `composed: false`,
-  // so a scroll originating inside the shadow tree never crosses the shadow
-  // boundary to reach `window`. The window-only listener therefore missed those
-  // scrolls and the menu stayed open. The hook now also attaches a capture-phase
-  // `scroll` listener on the trigger's ShadowRoot (the top of the propagation
-  // path for those events). These tests drive the hook with real DOM refs so
-  // that `triggerRef.current.getRootNode()` genuinely returns a `ShadowRoot`.
+  // Regression: `scroll` is `composed: false`, so shadow-tree scrolls never reach `window`; the hook
+  // also listens on the trigger's ShadowRoot. See the file header, "Shadow-root scroll".
   describe("shadow root scroll (composed: false)", () => {
     // Tracks hosts created per test so afterEach can detach them and let the
     // shadow tree (and any listeners the hook attached to it) be released.
@@ -466,9 +465,8 @@ describe("useDismissableMenu", () => {
       expect(document.activeElement).toBe(host);
     });
 
-    // At the document listener e.target is retargeted to the shadow host, so
-    // neither "in the menu" nor "focus fell to the document" may match a
-    // control outside the menu inside the same shadow tree.
+    // At the document listener e.target is retargeted to the shadow host, so neither "in the menu" nor
+    // "focus fell to the document" may match an outside control inside the same shadow tree.
     it("leaves focus on a control outside the menu inside the shadow root on Escape", () => {
       const onClose = vi.fn();
       const { shadowRoot, outsideInput } = mountInShadowRoot(onClose, true);

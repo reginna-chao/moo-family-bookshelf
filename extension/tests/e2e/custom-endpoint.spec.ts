@@ -23,9 +23,7 @@ import {
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 import { API_ENDPOINT_KEY } from "../../src/constants";
 
-/**
- * Helper: go through onboarding and create a family, returning the sync code.
- */
+/** Helper: go through onboarding and create a family, returning the sync code. */
 async function createFamilyAndGetSyncCode(
   page: import("@playwright/test").Page,
   extensionId: string,
@@ -96,9 +94,8 @@ test.describe("Custom API Endpoint", () => {
     expect(syncCode).toBeTruthy();
     expect(syncCode).toMatch(/^moo-/);
 
-    // Since localhost:8787 is NOT the default production endpoint
-    // (DEFAULT_API_ENDPOINT is a Cloudflare Workers URL from env),
-    // the sync code SHOULD contain @host with the localhost URL.
+    // localhost:8787 is NOT the production default (DEFAULT_API_ENDPOINT is a Cloudflare Workers URL from
+    // env), so the sync code SHOULD carry @host with the localhost URL.
     expect(syncCode).toContain("@");
     expect(syncCode).toMatch(/@https?:\/\/localhost/);
 

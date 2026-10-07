@@ -102,12 +102,8 @@ function createMockApiClient(opts: MockOpts = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
-/**
- * Renders inside `act` on purpose: `findBy*` waits with the act environment
- * disabled, so a node appearing does not prove the provider's mount effects
- * (which publish `apiClient`-backed loaders) have committed before the click
- * below (`.claude/rules/test.md` → Anti-Drift).
- */
+/** Renders inside `act`: `findBy*` waits with act disabled, so a node appearing does not prove the provider's
+ *  mount effects committed before the click (`.claude/rules/test.md` → Anti-Drift). */
 async function renderShelf(apiClient: ApiClient) {
   await act(async () => {
     render(
@@ -180,12 +176,8 @@ describe("FamilyShelf — borrow failure notice", () => {
   });
 
   it("re-mounts the alert node when the SAME failure happens a second time", async () => {
-    // The behavioural claim behind the banner's `key`: two presses that fail
-    // identically write the same string, React bails out on it, and a live
-    // region that is never re-mounted never re-announces — the user presses
-    // 申請借閱 again and neither the screen nor the screen reader reacts.
-    // Without `key={borrowFailureKey}` React reuses the element in place and
-    // the identity assertion below fails (verified against this React version).
+    // The banner's `key`: a repeated 申請借閱 failure writes the same string, so a never-remounted live region
+    // stays silent; without `key={borrowFailureKey}` the identity check fails (verified on this React).
     const createBorrowRequest = vi
       .fn()
       .mockRejectedValue(new ApiError("DUPLICATE_REQUEST", "already pending"));

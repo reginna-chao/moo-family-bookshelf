@@ -9,6 +9,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * The scraper is the DOM boundary to the host page, so it is the one mock.
  * Every "restored" assertion is paired with a mid-wait assertion that the hash
  * really was `#/me`, so a restore that never happened cannot pass by accident.
+ *
+ * jsdom queues every hashchange event on a 0ms window.setTimeout, which the fake
+ * clock also counts. `deliverHashChanges` delivers them so getTimerCount() sees
+ * only the settle timer (1ms, not 0: the fake clock bumps a 0ms timer armed
+ * during a tick to 1ms).
  */
 
 vi.mock("@/content/scraper", () => ({
@@ -32,11 +37,8 @@ function setHash(hash: string): void {
   );
 }
 
-/**
- * jsdom queues every hashchange event on a 0ms window.setTimeout, which the fake
- * clock also counts. Deliver them so getTimerCount() sees only the settle timer
- * (1ms, not 0: the fake clock bumps a 0ms timer armed during a tick to 1ms).
- */
+/** Deliver jsdom's queued hashchange timers so getTimerCount() sees only the
+ *  settle timer. See the file header. */
 function deliverHashChanges(): void {
   vi.advanceTimersByTime(1);
 }

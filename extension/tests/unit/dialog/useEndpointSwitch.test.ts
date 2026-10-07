@@ -26,15 +26,64 @@ import {
  * record's `apiEndpoint` is owner-controlled and pushed to every member, so it
  * is NEVER adopted implicitly — a non-null return is the only thing that can
  * lead to a switch, and it only happens after the user confirms.
+ *
+ * Case-table notes:
+ *  - `CREDENTIALS_ENDPOINT` is a family record value whose userinfo LOOKS like
+ *    the host: the browser would fetch evil.com while the string reads as
+ *    family.example. The owner controls this field, so it is exactly the shape a
+ *    malicious owner would plant (the natural attack here). `validateEndpointUrl`
+ *    now refuses credentials, so the switch must fail closed even when the user
+ *    presses 確認切換.
+ *  - `targetValid` omitted means `true` — the validator accepts the record's
+ *    value, the ordinary case. Only a record the client would REFUSE spells it
+ *    out, because that is the flag the panel uses to withhold the address.
+ *  - A record that stores the default URL explicitly resolves to the same target
+ *    as "no endpoint", but is NOT flagged isDefaultTarget — that flag is reserved
+ *    for the record carrying no endpoint at all.
+ *  - ApiClient stores what validateEndpointUrl returns (trailing slashes
+ *    stripped), so a record differing only by a trailing slash is the SAME
+ *    endpoint spelled two ways — prompting would be pure noise.
+ *  - A self-hosted record can hold anything. An unusable value (public-host HTTP,
+ *    a credential-bearing URL) is kept verbatim so confirm's try/catch is what
+ *    refuses it — the user is neither switched silently nor left unasked.
+ *  - Malformed record values: `apiEndpoint` is typed `string | undefined`, but it
+ *    arrives from a KV record that a self-hoster (or an older build) may have
+ *    written anything into. A non-string must read as "the record carries no
+ *    endpoint" — i.e. the official-default direction — and never as a target to
+ *    switch to.
+ *  - `targetValid` exists for one reason: the panel must not print an address
+ *    `confirm` is guaranteed to refuse as though it were a destination. So the
+ *    flag has to agree with `validateEndpointUrl` on every value — anchored on
+ *    production rather than on a hard-coded expectation. The hook still needs the
+ *    raw value: confirm hands it to setEndpoint, whose throw is what produces the
+ *    refusal notice; withholding it from the USER is the panel's job
+ *    (EndpointSwitchPanel.test.tsx).
+ *
+ * useEndpointSwitch wires the pure decision to the real ApiClient and the real
+ * storage helpers. A genuine `ApiClient` is used (not a stub) so `confirm`
+ * exercises the production URL validation: an endpoint the client refuses must
+ * leave the member on the endpoint they already trust. `tests/setup.ts` backs
+ * `browser.storage.local` with an in-memory store, so these tests assert on
+ * stored values rather than on call shapes where possible.
+ *  - `adoptedEndpoint` is the endpoint THIS device actually uses, surfaced as
+ *    React state because `apiClient.setEndpoint()` mutates without re-rendering.
+ *    The sync code / invite / QR are built from it, never from the family
+ *    record's value — otherwise a member who DECLINED a switch would hand out an
+ *    invite pointing at the endpoint they just refused, and a member who
+ *    CONFIRMED one would keep handing out the stale endpoint until the dialog
+ *    was reopened.
+ *  - `confirmError`: a confirmation the client's own URL validation then refuses
+ *    must be told to the user — the panel closing on its own reads as "switched
+ *    successfully", while the member is in fact still on the old endpoint. The
+ *    failed confirm records a decline, which re-runs the recompute effect with
+ *    nothing pending; the notice must outlive that, and every later members
+ *    refresh, until the user acknowledges it.
  */
 
 const CURRENT_CUSTOM = "https://current.example";
 const FAMILY_CUSTOM = "https://family.example";
-/**
- * A family record value whose userinfo LOOKS like the host: the browser would
- * fetch evil.com while the string reads as family.example. The owner controls
- * this field, so it is exactly the shape a malicious owner would plant.
- */
+/** Userinfo that LOOKS like the host (fetches evil.com) — what a malicious owner
+ *  would plant. See the header → "Case-table notes". */
 const CREDENTIALS_ENDPOINT = "https://family.example@evil.com";
 
 interface Case {
@@ -46,11 +95,8 @@ interface Case {
     target: string | null;
     targetEndpoint: string;
     isDefaultTarget: boolean;
-    /**
-     * Omitted means `true` — the validator accepts the record's value, which is
-     * the ordinary case. Only a record the client would REFUSE spells this out,
-     * because that is the flag the panel uses to withhold the address.
-     */
+    /** Omitted means `true`; only a record the client would REFUSE spells it out
+     *  (the panel withholds the address on it). */
     targetValid?: boolean;
   } | null;
 }
@@ -104,9 +150,8 @@ const cases: Case[] = [
     expected: null,
   },
   {
-    // A record that stores the default URL explicitly resolves to the same
-    // target as "no endpoint", but is NOT flagged isDefaultTarget — that flag
-    // is reserved for the record carrying no endpoint at all.
+    // Same target as "no endpoint", but NOT isDefaultTarget — reserved for a
+    // record carrying no endpoint at all.
     name: "record holding the default URL explicitly asks without the default flag",
     current: CURRENT_CUSTOM,
     familyEndpoint: DEFAULT_API_ENDPOINT,
@@ -165,9 +210,8 @@ const cases: Case[] = [
     },
   },
   {
-    // ApiClient stores what validateEndpointUrl returns (trailing slashes
-    // stripped), so the record and the client here are the SAME endpoint spelled
-    // two ways — prompting would be pure noise.
+    // Trailing slashes are stripped by the validator: the SAME endpoint spelled
+    // two ways, so prompting would be noise.
     name: "a record value differing only by a trailing slash is a no-op",
     current: FAMILY_CUSTOM,
     familyEndpoint: `${FAMILY_CUSTOM}/`,
@@ -231,9 +275,8 @@ const cases: Case[] = [
     expected: null,
   },
   {
-    // A self-hosted record can hold anything. An unusable value is kept verbatim
-    // so confirm's try/catch is what refuses it — the user is neither switched
-    // silently nor left unasked.
+    // An unusable value is kept verbatim so confirm's try/catch refuses it — never
+    // a silent switch, never left unasked.
     name: "a value the URL validator refuses (public-host HTTP) is kept verbatim and flagged invalid",
     current: CURRENT_CUSTOM,
     familyEndpoint: "http://evil.example.com",
@@ -258,9 +301,8 @@ const cases: Case[] = [
     },
   },
   {
-    // Same "kept verbatim" rule for a credential-bearing URL, which the
-    // validator now refuses. Confirm's try/catch is what stops it being
-    // adopted — see "cannot be adopted even if the user confirms" below.
+    // Same "kept verbatim" rule for a credential-bearing URL; see "cannot be
+    // adopted even if the user confirms" below.
     name: "a credential-bearing record value is kept verbatim and flagged invalid",
     current: CURRENT_CUSTOM,
     familyEndpoint: CREDENTIALS_ENDPOINT,
@@ -299,12 +341,8 @@ const cases: Case[] = [
   },
 ];
 
-/**
- * `apiEndpoint` is typed `string | undefined`, but it arrives from a KV record
- * that a self-hoster (or an older build) may have written anything into. A
- * non-string must read as "the record carries no endpoint" — i.e. the
- * official-default direction — and never as a target to switch to.
- */
+/** Non-string KV values must read as "no endpoint" (official default), never as a
+ *  switch target. See the header → "Case-table notes". */
 const malformedRecordValues: Array<[string, unknown]> = [
   ["a number", 42],
   ["a boolean", true],
@@ -337,12 +375,8 @@ describe("computePendingSwitch", () => {
     expect(result?.targetEndpoint).toBe(FAMILY_CUSTOM);
   });
 
-  /**
-   * `targetValid` exists for one reason: the panel must not print an address
-   * `confirm` is guaranteed to refuse as though it were a destination. So the
-   * flag has to agree with `validateEndpointUrl` on every value — anchored on
-   * production here rather than on a hard-coded expectation.
-   */
+  // `targetValid` must agree with `validateEndpointUrl` on every value (anchored on
+  // production). See the header → "Case-table notes".
   describe("targetValid", () => {
     it.each([
       "https://family.example",
@@ -384,9 +418,8 @@ describe("computePendingSwitch", () => {
         declined: null,
       });
 
-      // The hook still needs the raw value: confirm hands it to setEndpoint,
-      // whose throw is what produces the refusal notice. Withholding it from
-      // the USER is the panel's job (EndpointSwitchPanel.test.tsx).
+      // The hook keeps the raw value for confirm; hiding it from the USER is the
+      // panel's job (EndpointSwitchPanel.test.tsx).
       expect(result?.targetValid).toBe(false);
       expect(result?.targetEndpoint).toBe(CREDENTIALS_ENDPOINT);
     });
@@ -429,15 +462,8 @@ describe("computePendingSwitch", () => {
   });
 });
 
-/**
- * The hook wires the pure decision above to the real ApiClient and the real
- * storage helpers. A genuine `ApiClient` is used (not a stub) so `confirm`
- * exercises the production URL validation: an endpoint the client refuses must
- * leave the member on the endpoint they already trust.
- *
- * `tests/setup.ts` backs `browser.storage.local` with an in-memory store, so
- * these tests assert on stored values rather than on call shapes where possible.
- */
+// A genuine ApiClient (production validation) over the in-memory storage mock.
+// See the header → "useEndpointSwitch".
 describe("useEndpointSwitch", () => {
   /** Plain HTTP on a public host — rejected by ApiClient.setEndpoint. */
   const UNSAFE_ENDPOINT = "http://evil.example.com";
@@ -728,12 +754,8 @@ describe("useEndpointSwitch", () => {
     warn.mockRestore();
   });
 
-  /**
-   * A family record's `apiEndpoint` is owner-controlled, so a userinfo
-   * masquerade (`https://family.example@evil.com` — fetches evil.com) is the
-   * natural attack here. `validateEndpointUrl` now refuses credentials, so the
-   * switch must fail closed even when the user presses 確認切換.
-   */
+  // A userinfo masquerade must fail closed even after 確認切換.
+  // See the header → "Case-table notes".
   it("a credential-bearing family endpoint cannot be adopted even if the user confirms", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const apiClient = new ApiClient(CURRENT_CUSTOM);
@@ -781,15 +803,8 @@ describe("useEndpointSwitch", () => {
     expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
   });
 
-  /**
-   * `adoptedEndpoint` is the endpoint THIS device actually uses, surfaced as
-   * React state because `apiClient.setEndpoint()` mutates without re-rendering.
-   * The sync code / invite / QR are built from it, never from the family
-   * record's value — otherwise a member who DECLINED a switch would hand out an
-   * invite pointing at the endpoint they just refused, and a member who
-   * CONFIRMED one would keep handing out the stale endpoint until the dialog was
-   * reopened.
-   */
+  // The endpoint THIS device uses; sync code / invite / QR come from it, never the
+  // record. See the header → "useEndpointSwitch".
   describe("adoptedEndpoint", () => {
     it("seeds from the client, not from the family record", async () => {
       const apiClient = new ApiClient(CURRENT_CUSTOM);
@@ -933,11 +948,8 @@ describe("useEndpointSwitch", () => {
     });
   });
 
-  /**
-   * A confirmation the client's own URL validation then refuses must be told to
-   * the user: the panel closing on its own reads as "switched successfully",
-   * while the member is in fact still on the old endpoint.
-   */
+  // A refused confirmation must be told to the user, or the closing panel reads as
+  // "switched successfully".
   describe("confirmError", () => {
     /** Confirm an unusable target and settle the storage write it triggers. */
     async function failedConfirm() {
@@ -976,9 +988,8 @@ describe("useEndpointSwitch", () => {
     it("survives the recompute that filing the refused value as declined triggers", async () => {
       const { result, rerender, warn } = await failedConfirm();
 
-      // The failed confirm records a decline, which re-runs the recompute effect
-      // with nothing pending — the notice must outlive that, and every later
-      // members refresh, until the user acknowledges it.
+      // The notice must outlive the decline-triggered recompute and every later
+      // members refresh, until acknowledged.
       expect(result.current.confirmError).toBe(true);
       expect(result.current.pending).toBeNull();
 

@@ -1,12 +1,111 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 
-// usePersonalBooks no longer scrapes on its own (the self-contained display
-// scrape was removed). It loads the SERVER list only (#236: the local cache is
-// never a source of books) → "ready". Fresh books arrive later via
-// `lastSyncBooks` (from useBookSync's auto full sync), which REPLACES the list.
-// We still mock the scraper so any accidental call would be detectable, and
-// assert it is never invoked.
+/**
+ * usePersonalBooks (`src/dialog/usePersonalBooks.ts`): load, toggle, save and
+ * sync-result handling of the personal shelf.
+ *
+ * The hook no longer scrapes on its own (the self-contained display scrape was
+ * removed). It loads the SERVER list only (#236: the local cache is never a
+ * source of books) → "ready". Fresh books arrive later via `lastSyncBooks` (from
+ * useBookSync's auto full sync), which REPLACES the list. The scraper is still
+ * mocked so any accidental call would be detectable, and asserted never invoked.
+ *
+ * Fixtures: `bookIdOf` builds realistic 15-digit ids. A real Readmoo id is 12+
+ * digits (the scraper refuses shorter ones), and the load path drops a
+ * CACHE-ONLY entry with a short id as a stale legacy record — so fixtures that
+ * seed the cache must use real-shaped ids or the entry vanishes before the test
+ * can observe it. The render helper creates the API client ONCE so its reference
+ * is stable across re-renders — otherwise the load effect (deps: [userId,
+ * apiClient]) would re-run on every state update and re-trigger the load.
+ *
+ * #236 rewrites: several cases were rewritten when the cache stopped being a
+ * source of books — a cached id the server no longer holds would be written
+ * back by the next PUT. The cache-only "new scraped book" no longer exists:
+ * every displayed book comes from the server or from a sync result the sync has
+ * already uploaded, so the sync result IS the server-known set (formerly "falls
+ * back to PUT when a dirty book is not yet on the server"); what remains of
+ * "does not PATCH a new book after a prior PATCH save" is that a PATCH save
+ * followed by a sync result leaves the snapshot equal to that result, so the
+ * next save re-sends nothing already on the server.
+ *
+ * lastSyncBooks effect (#236): a successful sync result is exactly what the
+ * server now holds, so it REPLACES the displayed list (it used to be merged into
+ * `prev`, which kept a book whose Readmoo id changed on screen — and the next
+ * PUT wrote the old id back). Unsaved toggles still win on display
+ * (Invariant 3); the cancel baseline and the server snapshot become the sync
+ * result. In the rename case the sync renames R to "A", so L resolves to R for
+ * the first time; the result is what the server NOW holds — L dropped, R
+ * carrying the server's (promoted, shared) flag, because the sync merged against
+ * the server, which never saw the user's unsaved unshare.
+ *
+ * Save timers: `act(async)` flushes microtasks and pending effects; it never
+ * awaited the 1500ms "saved → ready" setTimeout production schedules, and that
+ * timer is cleared on unmount (src/dialog/useSavePersonalShelf.ts), so it cannot
+ * outlive the test.
+ *
+ * Stale reset-timer supersede: a successful save leaves the 1500ms reset armed.
+ * A SECOND save started inside that window must supersede it: the old timer
+ * belongs to a finished save, so letting it fire would rewrite the status of the
+ * one now in flight — dropping the UI out of "saving" (re-enabling 儲存) while
+ * the request is still on the wire, or out of "error" after it came back
+ * failed. The first save is the no-op branch (nothing dirty): it arms the reset
+ * without spending a request — the state a user is in right after any
+ * successful save, minus the network. Timer discipline: settle the load with
+ * REAL timers first (`waitForReady` is a waiter, and RTL cannot see vi's clock —
+ * it would poll a frozen one), and only then install the fake clock. Past that
+ * point every assertion is synchronous; a `waitFor` / `findBy*` would hang to
+ * the full test timeout.
+ *
+ * Hostile save error envelope: `patchPersonalBooks` / `updatePersonalBooks`
+ * resolve the `{ data, error }` envelope through `readEnvelope`, which
+ * bare-casts `response.json()` (src/api/client.ts), and the endpoint is
+ * user-configurable (BYO backend via the sync code's `@host`), so
+ * `error.message` is `unknown` at runtime. `errorMessage` is rendered as a JSX
+ * child by PersonalShelf; React 19 throws on an object/array and the Dialog
+ * mounts no ErrorBoundary, so a refused save used to blank the overlay instead
+ * of explaining itself. Both save strategies funnel through the SAME
+ * `response.error` branch, so one case covers PATCH and PUT alike. The
+ * exhaustive value-domain proof lives in tests/unit/safeErrorText.test.ts; this
+ * pins the wiring and the copy (literal from src/dialog/useSavePersonalShelf.ts,
+ * asserted with exact equality so the fallback provably REPLACED the hostile
+ * value rather than sitting beside a leaked one).
+ *
+ * Oversized save (413 PAYLOAD_TOO_LARGE): a large shelf saved through PUT can
+ * exceed the Worker's body cap, which answers `413 { code: "PAYLOAD_TOO_LARGE",
+ * message: "Request body exceeds …" }`. The English byte-limit message must
+ * never reach the shelf; the shared too-large copy replaces it. Both strategies
+ * share the one error branch, but PUT is the realistic path (full list), so
+ * both are driven. Adapted for #236 (upstream seeded a server-unknown book
+ * through the cache, which is no longer a source of books, and a book a sync
+ * result brings in is server-known): the PUT is reached through the remaining
+ * fallback — the user toggles B1, then a sync result drops it, and a dirty id
+ * that left the list sends the displayed list whole.
+ *
+ * #236 fix cycle — a book whose Readmoo id changed: X (`OLD_X`) is its old id,
+ * Y (`NEW_Y`) its new one. Both share one title, which is what the sync's
+ * id-change resolution pairs on; the hook itself only sees the result
+ * (`lastSyncBooks`) and the pairs (`lastSyncRenamedBooks`).
+ *  - C1: a sync result applied while a save is in flight used to be overwritten
+ *    by the save's success branch — the cancel baseline, server snapshot and
+ *    cache went back to the PRE-sync list, so Cancel resurrected the replaced X,
+ *    the cache held X, and the next save unshared Y. `startSave` returns the
+ *    in-flight promise wrapped: an async function returning it bare would adopt
+ *    it and wait for the save.
+ *  - S1: an unsaved toggle on a book whose Readmoo id the sync replaced follows
+ *    the book to its new id — and stays unsaved: the sync uploads nothing of it
+ *    (save-before-sync, Invariant 3).
+ *
+ * #250: a share change made while a save is in flight used to lose its unsaved
+ * mark when that save succeeded — the success path cleared the WHOLE dirty set,
+ * so the screen showed the new flag with nothing to save while the server held
+ * the sent one. Only the ids the save really saved may be cleared now. Each case
+ * holds the save's PATCH open with `heldPatch()`, edits mid-flight, then
+ * releases it. The 1500ms saved→ready timer is cleared by RTL's unmount.
+ */
+
+// The hook must never scrape (#236); mocked only so an accidental call is
+// detectable. See the file header.
 vi.mock("@/content/scraper", () => ({
   scrapeBooks: vi.fn().mockResolvedValue([]),
   scrapeArchivedBooks: vi.fn().mockResolvedValue([]),
@@ -21,12 +120,8 @@ import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
 import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/saveErrors";
 import type { RenamedBook } from "@/sync/renamedBooks";
 
-/**
- * Realistic 15-digit book ids. A real Readmoo id is 12+ digits (the scraper
- * refuses shorter ones), and the load path drops a CACHE-ONLY entry with a
- * short id as a stale legacy record — so fixtures that seed the cache must use
- * real-shaped ids or the entry vanishes before the test can observe it.
- */
+/** Realistic 15-digit book ids — a short cache-only id is dropped on load.
+ *  See the header → "Fixtures". */
 const bookIdOf = (n: number): string => `21${String(n).padStart(13, "0")}`;
 const C1 = bookIdOf(1);
 const B1 = bookIdOf(2);
@@ -48,11 +143,8 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
-/**
- * Configure chrome.storage.local.get so the load effect sees a controlled
- * cache + sync setting. `cache` (when provided) is the array stored under
- * PERSONAL_BOOKS_CACHE_KEY as a JSON string.
- */
+/** Make chrome.storage.local.get serve a controlled cache + sync setting; `cache` is
+ *  stored under PERSONAL_BOOKS_CACHE_KEY as a JSON string. */
 function setupStorage(data: Record<string, unknown> = {}) {
   const store: Record<string, unknown> = { ...data };
   vi.mocked(chrome.storage.local.get).mockImplementation(
@@ -91,9 +183,8 @@ function renderUsePersonalBooks(
   client?: ApiClient,
   lastSyncBooks: BookEntry[] = [],
 ) {
-  // Create the client ONCE so the apiClient reference is stable across
-  // re-renders — otherwise the load effect (deps: [userId, apiClient]) would
-  // re-run on every state update and re-trigger the load.
+  // Create the client ONCE: a new reference would re-run the load effect
+  // (deps: [userId, apiClient]) on every state update.
   const apiClient = client ?? createMockApiClient();
   return renderHook(
     ({ lastSyncBooks: syncBooks, lastSyncRenamedBooks }: HookProps) =>
@@ -170,9 +261,8 @@ describe("usePersonalBooks — load flow (server list only, no scrape)", () => {
     expect(scrapeBooks).not.toHaveBeenCalled();
   });
 
-  // Rewritten for #236 (was "shows books from cache when cache is present"):
-  // a cached id the server no longer holds would be written back by the next
-  // PUT, so the cache is no longer a source of books at all.
+  // Rewritten for #236 (was "shows books from cache when cache is present"); see
+  // the header → "#236 rewrites".
   it("never shows a cache-only book — the list is the server's", async () => {
     setupStorage(
       setCache([
@@ -416,9 +506,8 @@ describe("usePersonalBooks — legacy short-id entries in the baseline", () => {
   });
 
   it("never carries a stale cache-only legacy share flag onto the real twin (server FALSE wins)", async () => {
-    // The cache still remembers the legacy entry as SHARED; the server only
-    // knows the real entry, NOT shared. The cache-only legacy entry is stale,
-    // so its flag must not resurrect sharing on the real book.
+    // The stale cache-only legacy entry is SHARED, the server's real entry is
+    // not: the stale flag must not resurrect sharing.
     setupStorage(
       setCache([book(LEGACY_ID, BoolFlag.TRUE), book(REAL_ID, BoolFlag.FALSE)]),
     );
@@ -537,12 +626,8 @@ describe("usePersonalBooks — legacy short-id entries in the baseline", () => {
     });
     expect(result.current.dirtyBookIds.has(REAL_ID)).toBe(true);
 
-    // A sync renames R to "A", so L resolves to R for the first time. The sync
-    // result is what the server NOW holds: L dropped, R carrying the server's
-    // (promoted, shared) flag — the sync merged against the server, which never
-    // saw the user's unsaved unshare.
-    // Rewritten for #236: the result used to be MERGED into the old list (L
-    // dropped by a client-side resolution); it now REPLACES it.
+    // The sync result (L dropped, R shared) REPLACES the list since #236 — it
+    // used to be MERGED. See the header → "lastSyncBooks effect".
     act(() => {
       rerender({
         lastSyncBooks: [{ ...makeBook(REAL_ID, BoolFlag.TRUE), title: "A" }],
@@ -580,13 +665,8 @@ describe("usePersonalBooks — legacy short-id entries in the baseline", () => {
   });
 });
 
-/**
- * #236: a successful sync result is exactly what the server now holds, so it
- * REPLACES the displayed list (it used to be merged into `prev`, which kept a
- * book whose Readmoo id changed on screen — and the next PUT wrote the old id
- * back). Unsaved toggles still win on display (Invariant 3); the cancel
- * baseline and the server snapshot become the sync result.
- */
+// #236: a sync result REPLACES the list; unsaved toggles still win on display.
+// See the header → "lastSyncBooks effect".
 describe("usePersonalBooks — lastSyncBooks effect", () => {
   const OLD = B1;
   const KEEP = B2;
@@ -942,11 +1022,8 @@ describe("usePersonalBooks — dirty Set", () => {
     });
     expect(result.current.dirtyBookIds.size).toBe(2);
 
-    // Same barrier as every other handleSave site in this file. act(async)
-    // flushes microtasks and pending effects; it never awaited the 1500ms
-    // "saved → ready" setTimeout production schedules, so there is nothing to
-    // be held up by — and that timer is now cleared on unmount as well
-    // (src/dialog/useSavePersonalShelf.ts), so it cannot outlive the test either.
+    // Same barrier as every other handleSave site; it never awaits the 1500ms
+    // reset timer. See the header → "Save timers".
     await act(async () => {
       await result.current.handleSave();
     });
@@ -1063,10 +1140,8 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
     expect(ids).not.toContain(B2);
   });
 
-  // Rewritten for #236 (was "falls back to PUT when a dirty book is not yet on
-  // the server"): the cache-only "new scraped book" no longer exists — every
-  // displayed book comes from the server or from a sync result the sync has
-  // already uploaded, so the sync result IS the server-known set.
+  // Rewritten for #236: the sync result IS the server-known set. See the header
+  // → "#236 rewrites".
   it("PATCHes a book that a sync result just added (the sync already uploaded it)", async () => {
     const client = clientWithServerBooks([makeBook(B1)]);
     const { result, rerender } = renderUsePersonalBooks(client);
@@ -1115,10 +1190,8 @@ describe("usePersonalBooks — handleSave PATCH / PUT fallback", () => {
     expect(client.updatePersonalBooks).not.toHaveBeenCalled();
   });
 
-  // Rewritten for #236 (was "does not PATCH a new book after a prior PATCH
-  // save"): that cache-only path is gone; what remains to pin is that a PATCH
-  // save followed by a sync result leaves the snapshot equal to that result,
-  // so the next save re-sends nothing already on the server.
+  // Rewritten for #236: PATCH save + sync result leaves the snapshot equal to the
+  // result. See the header → "#236 rewrites".
   it("re-sends nothing the server already holds after a PATCH save and a sync", async () => {
     const client = clientWithServerBooks([makeBook(B1)]);
     const { result, rerender } = renderUsePersonalBooks(client);
@@ -1219,18 +1292,8 @@ describe("usePersonalBooks — unmount cleanup", () => {
   });
 });
 
-/**
- * A successful save leaves a 1500ms "saved → ready" reset armed. A SECOND save
- * started inside that window must supersede it: the old timer belongs to a
- * finished save, so letting it fire would rewrite the status of the one now in
- * flight — dropping the UI out of "saving" while the request is still on the
- * wire, or out of "error" after it came back failed.
- *
- * Timer discipline: settle the load with REAL timers first (`waitForReady` is a
- * waiter, and RTL cannot see vi's clock — it would poll a frozen one), and only
- * then install the fake clock. Past that point every assertion is synchronous;
- * a `waitFor` / `findBy*` here would hang to the full test timeout.
- */
+// A second save inside the 1500ms window supersedes the old reset timer; real
+// timers until ready, then fake. See the header → "Stale reset-timer supersede".
 describe("usePersonalBooks — stale reset-timer supersede", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1252,9 +1315,8 @@ describe("usePersonalBooks — stale reset-timer supersede", () => {
 
     vi.useFakeTimers();
 
-    // First save: nothing is dirty → the no-op branch arms the 1500ms reset
-    // without spending a request. Same state a user is in right after any
-    // successful save, minus the network.
+    // First save: nothing dirty → the no-op branch arms the 1500ms reset without
+    // a request (a just-saved user's state, minus the network).
     await act(async () => {
       await result.current.handleSave();
     });
@@ -1316,19 +1378,8 @@ describe("usePersonalBooks — stale reset-timer supersede", () => {
   });
 });
 
-/**
- * `patchPersonalBooks` / `updatePersonalBooks` resolve the `{ data, error }`
- * envelope through `readEnvelope`, which bare-casts `response.json()`
- * (src/api/client.ts), and the endpoint is user-configurable (BYO backend via
- * the sync code's `@host`), so `error.message` is `unknown` at runtime.
- * `errorMessage` is rendered as a JSX child by PersonalShelf; React 19 throws
- * on an object/array and the Dialog mounts no ErrorBoundary, so a refused save
- * used to blank the overlay instead of explaining itself.
- *
- * Both save strategies funnel through the SAME `response.error` branch, so one
- * case covers PATCH and PUT alike. The exhaustive value-domain proof lives in
- * tests/unit/safeErrorText.test.ts; this pins the wiring and the copy.
- */
+// A hostile `error.message` must not blank the overlay; one case covers PATCH and
+// PUT. See the header → "Hostile save error envelope".
 describe("usePersonalBooks — hostile save error envelope", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1351,9 +1402,8 @@ describe("usePersonalBooks — hostile save error envelope", () => {
       await result.current.handleSave();
     });
 
-    // Literal from src/dialog/useSavePersonalShelf.ts (the save), read back off
-    // the state the shelf renders. Exact equality proves the fallback REPLACED
-    // the hostile value rather than sitting beside a leaked one.
+    // Literal from src/dialog/useSavePersonalShelf.ts; exact equality proves the
+    // fallback REPLACED the hostile value.
     expect(result.current.errorMessage).toBe("儲存失敗，請稍後再試");
     expect(result.current.status).toBe("error");
     // A refused save keeps the toggle staged (save-before-sync, invariant 3).
@@ -1361,13 +1411,8 @@ describe("usePersonalBooks — hostile save error envelope", () => {
   });
 });
 
-/**
- * A large shelf saved through PUT can exceed the Worker's body cap, which
- * answers `413 { code: "PAYLOAD_TOO_LARGE", message: "Request body exceeds …" }`.
- * The English byte-limit message must never reach the shelf; the shared
- * too-large copy replaces it. Both strategies share the one error branch, but
- * PUT is the realistic path (full list), so both are driven here.
- */
+// The Worker's English 413 message never reaches the shelf; the shared too-large
+// copy replaces it. See the header → "Oversized save".
 describe("usePersonalBooks — oversized save (413 PAYLOAD_TOO_LARGE)", () => {
   const TOO_LARGE = {
     error: {
@@ -1382,11 +1427,8 @@ describe("usePersonalBooks — oversized save (413 PAYLOAD_TOO_LARGE)", () => {
   });
 
   it("shows the too-large copy when the PUT save is refused as too large", async () => {
-    // Adapted for #236 (upstream seeded a server-unknown book through the
-    // cache, which is no longer a source of books, and a book a sync result
-    // brings in is server-known). The PUT is reached through the remaining
-    // fallback: the user toggles B1, then a sync result drops it — a dirty id
-    // that left the list sends the displayed list whole.
+    // Adapted for #236: PUT via the remaining fallback — toggle B1, then a sync
+    // result drops it. See the header → "Oversized save".
     const client = clientWithServerBooks([makeBook(B1, BoolFlag.TRUE)], {
       updatePersonalBooks: vi.fn().mockResolvedValue(TOO_LARGE),
     });
@@ -1434,12 +1476,8 @@ describe("usePersonalBooks — oversized save (413 PAYLOAD_TOO_LARGE)", () => {
   });
 });
 
-/*
- * #236 fix cycle — a book whose Readmoo id changed: X is its old id, Y its new
- * one. Both share one title, which is what the sync's id-change resolution
- * pairs on; the hook itself only sees the result (`lastSyncBooks`) and the
- * pairs (`lastSyncRenamedBooks`).
- */
+// #236 fix cycle: X is the old Readmoo id, Y the new one, one shared title.
+// See the header → "#236 fix cycle".
 const OLD_X = bookIdOf(20);
 const NEW_Y = bookIdOf(21);
 const OTHER_A = bookIdOf(22);
@@ -1491,12 +1529,8 @@ function heldPatch() {
   };
 }
 
-/**
- * C1: a sync result applied while a save is in flight used to be overwritten
- * by the save's success branch — the cancel baseline, server snapshot and
- * cache went back to the PRE-sync list, so Cancel resurrected the replaced X,
- * the cache held X, and the next save unshared Y.
- */
+// C1: the save's success branch must not overwrite a sync result applied
+// mid-flight. See the header → "#236 fix cycle".
 describe("usePersonalBooks — a sync result that lands while a save is in flight (#236)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1509,10 +1543,8 @@ describe("usePersonalBooks — a sync result that lands while a save is in fligh
     makeBook(OTHER_K),
   ];
 
-  /**
-   * Start a save and leave it in flight. The promise is returned wrapped: an
-   * async function returning it bare would adopt it and wait for the save.
-   */
+  /** Start a save and leave it in flight; the promise is returned wrapped, since a
+   *  bare return would adopt it and wait for the save. */
   async function startSave(result: {
     current: { handleSave: () => Promise<void>; status: string };
   }): Promise<{ pending: Promise<void> }> {
@@ -1651,11 +1683,8 @@ describe("usePersonalBooks — a sync result that lands while a save is in fligh
   });
 });
 
-/**
- * S1: an unsaved toggle on a book whose Readmoo id the sync replaced follows
- * the book to its new id — and stays unsaved: the sync uploads nothing of it
- * (save-before-sync, Invariant 3).
- */
+// S1: an unsaved toggle follows a renamed book to its new id and stays unsaved
+// (save-before-sync, Invariant 3).
 describe("usePersonalBooks — an unsaved toggle follows a renamed book (#236)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1733,15 +1762,8 @@ describe("usePersonalBooks — an unsaved toggle follows a renamed book (#236)",
   });
 });
 
-/**
- * #250: a share change made while a save is in flight used to lose its unsaved
- * mark when that save succeeded — the success path cleared the WHOLE dirty set,
- * so the screen showed the new flag with nothing to save while the server held
- * the sent one. Only the ids the save really saved may be cleared now.
- *
- * Each case holds the save's PATCH open with `heldPatch()`, edits mid-flight,
- * then releases it. The 1500ms saved→ready timer is cleared by RTL's unmount.
- */
+// #250: a save may clear only the dirty ids it really saved, never a mid-flight
+// edit's mark. See the file header.
 describe("usePersonalBooks — a share change made while a save is in flight (#250)", () => {
   const MID_A = bookIdOf(40);
   const MID_B = bookIdOf(41);

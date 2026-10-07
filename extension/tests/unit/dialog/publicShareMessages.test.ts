@@ -12,22 +12,39 @@ import {
  * user-facing public-shelf failure strings are asserted. The component test
  * asserts against the imported builders instead of restating the copy, so a
  * wording change fails HERE — loudly and in exactly one place.
+ *
+ * Client-synthesized auth-recovery throttle: `RECOVERY_COPY` stands in for its
+ * message — the real literal is produced by `buildRateLimitMessage` in
+ * `@/api/client` and pinned by the "rate-limited recovery" suite in
+ * `tests/unit/client.test.ts`; this file only pins that whatever that builder
+ * produced reaches the user untouched. `synthesizedRecoveryError` raises it
+ * exactly as `client.ts` does: `synthesized` true, set there by an unforgeable
+ * module-private Symbol on the envelope. Only that shape earns the verbatim
+ * passthrough — the code alone does not, since any backend can put it in a
+ * response body. That is the security half of the rule: `userId`-addressed
+ * endpoints can be answered by any backend the user (or an invite's `@host`
+ * segment) points the client at, so a code alone is never authority to paint
+ * attacker-chosen text into the dialog; see the wire-side pin in
+ * `tests/unit/api/publicShelfClient.test.ts`.
+ *
+ * Prototype-chain keys: `error.code` is backend-controlled — it is a bare cast
+ * of backend JSON, and BYO self-hosted backends are in the threat model — so the
+ * lookup must never resolve a key through `Object.prototype`. The table used to
+ * be an object literal, where `code="__proto__"` returned `Object.prototype`:
+ * truthy, so it slipped past `?? fallback`. On the save path that interpolated
+ * into the copy as「[object Object]」(the old table rendered
+ * 「[object Object]（變更尚未儲存）」); on the four direct paths the object went
+ * straight into JSX as a React child, which React rejects outright — a Dialog
+ * render crash. `"toString"` likewise returned a function. The `Map` has no
+ * inherited keys, so every one of these is simply an unmapped code.
  */
 
-/**
- * Stand-in for the client-synthesized auth-recovery throttle message. Its real
- * literal is produced by `buildRateLimitMessage` in `@/api/client` and pinned by
- * the "rate-limited recovery" suite in `tests/unit/client.test.ts` — this file
- * only pins that whatever that builder produced reaches the user untouched.
- */
+/** Stand-in for `buildRateLimitMessage`'s output (pinned in client.test.ts).
+ *  See the file header. */
 const RECOVERY_COPY = "登入狀態已失效，請約 2 分鐘後重新開啟書櫃";
 
-/**
- * The auth-recovery throttle exactly as `client.ts` raises it: `synthesized`
- * true, set there by an unforgeable module-private Symbol on the envelope.
- * Only this shape earns the verbatim passthrough — the code alone does not,
- * since any backend can put it in a response body.
- */
+/** The throttle as `client.ts` raises it (`synthesized` true) — the only shape that
+ *  earns verbatim passthrough; the code alone does not. */
 const synthesizedRecoveryError = (message: string, retryAfter?: number) =>
   new ApiError(AUTH_REFRESH_RATE_LIMITED, message, retryAfter, true);
 
@@ -95,17 +112,8 @@ describe("publicShelfErrorMessage", () => {
     },
   );
 
-  /**
-   * `error.code` is backend-controlled — it is a bare cast of backend JSON, and
-   * BYO self-hosted backends are in the threat model — so the lookup must never
-   * resolve a key through `Object.prototype`. The table used to be an object
-   * literal, where `code="__proto__"` returned `Object.prototype`: truthy, so it
-   * slipped past `?? fallback`. On the save path that interpolated into the copy
-   * as「[object Object]」; on the four direct paths the object went straight into
-   * JSX as a React child, which React rejects outright — a Dialog render crash.
-   * `"toString"` likewise returned a function. The `Map` has no inherited keys,
-   * so every one of these is simply an unmapped code.
-   */
+  // Backend-controlled codes never resolve through `Object.prototype` (a `Map`).
+  // See the header → "Prototype-chain keys".
   it.each([
     ["__proto__"],
     ["toString"],
@@ -153,13 +161,8 @@ describe("publicShelfErrorMessage", () => {
     ).toBe("關閉失敗");
   });
 
-  /**
-   * The security half of the passthrough rule: `userId`-addressed endpoints can
-   * be answered by any backend the user (or an invite's `@host` segment) points
-   * the client at, so a code alone is never authority to paint attacker-chosen
-   * text into the dialog. Only the client's own unforgeable marker is — see the
-   * wire-side pin in `tests/unit/api/publicShelfClient.test.ts`.
-   */
+  // The security half: a code alone never earns verbatim passthrough; only the
+  // client's own marker does. See the file header.
   it("refuses the verbatim passthrough for an unmarked AUTH_REFRESH_RATE_LIMITED error", () => {
     const message = publicShelfErrorMessage(
       new ApiError(AUTH_REFRESH_RATE_LIMITED, "任意惡意文案"),
@@ -211,8 +214,8 @@ describe("publicShelfSaveErrorMessage", () => {
     ).toBe("儲存失敗（變更尚未儲存）");
   });
 
-  // Pins the interpolation path described by the prototype-chain block above:
-  // the old object-literal table rendered「[object Object]（變更尚未儲存）」here.
+  // Pins the interpolation path from the header's "Prototype-chain keys": the old
+  // table rendered「[object Object]（變更尚未儲存）」here.
   it("uses the 儲存失敗 fallback for __proto__ instead of interpolating Object.prototype", () => {
     expect(
       publicShelfSaveErrorMessage(

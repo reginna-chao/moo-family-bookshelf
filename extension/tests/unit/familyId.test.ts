@@ -16,6 +16,7 @@ import { FAMILY_ID_KEY, USER_ID_KEY } from "@/constants";
  * Helpers below let each case declare exactly what each storage area returns,
  * keyed so the type-guard and precedence rules are unambiguous.
  */
+
 function mockLocal(value: Record<string, unknown>): void {
   vi.mocked(chrome.storage.local.get).mockResolvedValue(value as never);
 }

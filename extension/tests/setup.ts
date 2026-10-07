@@ -1,32 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 
-/**
- * Test environment mock for the WebExtension APIs.
- *
- * Production code was migrated (Wave #34) from the Chrome-only callback APIs
- * (`chrome.*`) to the promise-based `webextension-polyfill` (`browser.*`).
- * `import browser from "webextension-polyfill"` resolves as follows (see
- * node_modules/webextension-polyfill/dist/browser-polyfill.js):
- *
- *   - If `globalThis.browser` already exists AND has `runtime.id`, the polyfill
- *     returns that object verbatim (no wrapping).
- *   - Otherwise it wraps `globalThis.chrome`.
- *
- * We exploit the first branch: by defining `globalThis.browser` here with a
- * valid `runtime.id`, every `import browser from "webextension-polyfill"` in
- * production code resolves to OUR mock.
- *
- * To keep the ~290 existing `chrome.*` assertions working with zero churn,
- * `globalThis.chrome` and `globalThis.browser` are the SAME object: the spies
- * (`vi.fn()`) are shared, so a test that asserts on `chrome.storage.local.get`
- * observes the exact call production made via `browser.storage.local.get`.
- *
- * The mock is promise-style: `get`/`set`/`remove`/`clear` and `sendMessage`
- * return Promises. For back-compat with the few tests that still pass a Chrome
- * callback, the storage methods also invoke a trailing callback if provided.
- * `chrome.runtime.lastError` is retained for back-compat; the promise API never
- * consults it (errors are modeled as rejected promises instead).
- */
+/** WebExtension API mock: `globalThis.chrome` and `globalThis.browser` are ONE promise-style object that
+ *  webextension-polyfill returns verbatim. See .claude/rules/test.md → Mock Policy. */
 
 const localStorageMock: Record<string, unknown> = {};
 const syncStorageMock: Record<string, unknown> = {};
@@ -122,13 +97,8 @@ const extensionApiMock = {
   },
 };
 
-/**
- * jsdom does not implement `window.matchMedia`. Several Dialog components now
- * read it (via `useMediaQuery` / `useIsMobile`) for responsive behaviour, so
- * provide a default desktop-sized stub: every query reports `matches: false`.
- * Tests that need mobile behaviour either mock `useMediaQuery`/`useIsMobile`
- * directly or override `window.matchMedia` themselves.
- */
+/** jsdom lacks `window.matchMedia`: a desktop stub (every query `matches: false`) for useMediaQuery /
+ *  useIsMobile. See .claude/rules/test.md → Mock Policy. */
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: false,
@@ -144,8 +114,6 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).chrome = extensionApiMock as unknown as typeof chrome;
-// `browser` must carry a valid `runtime.id` so webextension-polyfill returns it
-// verbatim instead of re-wrapping `chrome`. Shares the same spy objects as
-// `chrome`, so assertions on either alias observe identical recorded calls.
+// A valid `runtime.id` makes the polyfill return `browser` verbatim (no re-wrap); same spies as `chrome`.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).browser = extensionApiMock;

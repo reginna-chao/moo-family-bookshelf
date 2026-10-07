@@ -45,9 +45,8 @@ describe("useMediaQuery", () => {
   let matchMediaMocks: Map<string, ReturnType<typeof createMockMediaQueryList>>;
   let useMediaQuery: (query: string) => boolean;
 
-  // vi.resetModules() is critical: the hook caches MediaQueryList instances
-  // in a module-level Map. Without a fresh module per test, cache leaks
-  // between tests and causes false passes / flaky failures.
+  // vi.resetModules() is critical: the hook caches MediaQueryList instances in a
+  // module-level Map that would leak between tests (false passes / flakes).
   beforeEach(async () => {
     vi.resetModules();
 

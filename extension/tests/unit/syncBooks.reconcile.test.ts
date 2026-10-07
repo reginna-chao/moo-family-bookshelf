@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+/**
+ * `syncBooks` reconciliation (#236): the order scrape → GET saved → breaker →
+ * borrow list (once) → merge → id-change resolution → PUT → lastSyncAt →
+ * auto-return. A failed read or a tripped breaker must stop BEFORE any upload;
+ * id-change resolution only runs on a complete scrape with a known borrow list.
+ *
+ * Two consecutive syncs — F2 regression (#236): a sync that cannot judge renames
+ * must leave the pair resolvable by the next one. The fake server stores exactly
+ * what each PUT received and serves it to the next GET.
+ */
+
 // Only the DOM scraper is replaced; merge, circuit breaker and id-change
 // resolution all run for real so the whole upload decision is exercised.
 vi.mock("@/content/scraper", () => ({
@@ -23,13 +34,6 @@ import {
   type PersonalBooks,
 } from "@/api/client";
 import { LAST_SYNC_AT_KEY, SYNC_ARCHIVED_KEY } from "@/constants";
-
-/**
- * `syncBooks` reconciliation (#236): the order scrape → GET saved → breaker →
- * borrow list (once) → merge → id-change resolution → PUT → lastSyncAt →
- * auto-return. A failed read or a tripped breaker must stop BEFORE any upload;
- * id-change resolution only runs on a complete scrape with a known borrow list.
- */
 
 const USER_ID = "user-123";
 const FAMILY_ID = "fam-1";
@@ -465,11 +469,8 @@ describe("syncBooks — reconciliation", () => {
     });
   });
 
-  /**
-   * F2 regression (#236): a sync that cannot judge renames must leave the pair
-   * resolvable by the next one. The fake server stores exactly what each PUT
-   * received and serves it to the next GET.
-   */
+  // F2 regression (#236): an unjudged rename stays resolvable by the next sync;
+  // the fake server replays each PUT on the next GET.
   describe("two consecutive syncs", () => {
     const OLD_SHARED = savedBook(OLD_ID, RENAMED_TITLE, {
       isShared: BoolFlag.TRUE,

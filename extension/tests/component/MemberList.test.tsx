@@ -11,11 +11,8 @@ import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import type { ApiClient } from "@/api/client";
 import { REJOIN_WAIT_NOTE } from "moo-family-bookshelf-shared/unkick/messages";
 
-/**
- * The remove confirmation renders the question and the shared rejoin-wait note
- * in one element. The literal pin for the note lives in the "rejoin-wait note"
- * suite below; every other assertion reuses this full string.
- */
+/** The remove confirmation renders the question and the shared rejoin-wait note in one element; the
+ *  note's literal pin lives in the "rejoin-wait note" suite below, every other assertion reuses this. */
 const REMOVE_CONFIRM_TEXT = `確定要移除此成員？${REJOIN_WAIT_NOTE}`;
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
@@ -98,11 +95,8 @@ describe("MemberList", () => {
     ).toBeInTheDocument();
   });
 
-  /**
-   * #270: removing a member blocks their sync-code rejoin for 6 hours, so the
-   * owner's remove confirmation says so before they press 確定. Transferring
-   * ownership has no such block and must not borrow the note.
-   */
+  /** #270: removing a member blocks their sync-code rejoin for 6 hours, so the remove confirmation says so
+   *  before 確定. Transferring ownership has no such block and must not borrow the note. */
   describe("rejoin-wait note", () => {
     it("pins the exact remove question with the 6-hour note at the render site", () => {
       const { container } = renderMemberList();
@@ -218,13 +212,8 @@ describe("MemberList", () => {
     });
   });
 
-  /**
-   * The Worker rate-limits the family write endpoints (429 RATE_LIMITED, with
-   * an optional `retryAfter`). Both envelope-returning actions here render the
-   * localized back-off copy instead of the server's English `error.message` —
-   * asserted against the production builder, whose literals are pinned in
-   * tests/unit/dialog/verificationMessages.test.ts.
-   */
+  /** The Worker rate-limits family writes (429 RATE_LIMITED, optional `retryAfter`); both actions render
+   *  the production builder's localized copy (pinned in verificationMessages.test.ts), not the English. */
   describe("rate-limited actions", () => {
     it("shows the localized countdown copy when removeMember is rate limited", async () => {
       const apiClient = createMockApiClient({
@@ -292,12 +281,8 @@ describe("MemberList", () => {
     expect(screen.getByText("user-mem")).toBeInTheDocument();
   });
 
-  /**
-   * The parent owns the "lift the rejoin block" entry (see UnkickNotice), so a
-   * successful removal must hand it the target's id AND a label resolved from
-   * the list that is about to be refreshed away. A report on a FAILED removal
-   * would offer to un-kick someone who was never kicked.
-   */
+  /** The parent owns the un-kick entry (UnkickNotice): a successful removal reports the id AND a label from
+   *  the list about to be refreshed away; reporting a FAILED removal would un-kick someone never kicked. */
   describe("onMemberRemoved reporting", () => {
     it("reports the removed member's id and display name on success", async () => {
       const apiClient = createMockApiClient();
@@ -360,13 +345,8 @@ describe("MemberList", () => {
       expect(onMemberRemoved).not.toHaveBeenCalled();
     });
 
-    /**
-     * An owner's retried kick after a half-failed first attempt (member list
-     * written, revoke failed) is answered 404 MEMBER_NOT_FOUND by the Worker —
-     * which has by then finished the kick server-side. The client must treat it
-     * as a completed removal. The contrast case — a non-404 refusal still
-     * surfaces its message and reports nothing — is the FORBIDDEN test above.
-     */
+    /** A retried owner kick after a half-failed first attempt gets 404 MEMBER_NOT_FOUND once the Worker
+     *  finished it: a completed removal. Contrast (a non-404 still surfaces): the FORBIDDEN test above. */
     it("treats MEMBER_NOT_FOUND as a completed removal", async () => {
       const apiClient = createMockApiClient({
         removeMember: vi.fn().mockResolvedValue({

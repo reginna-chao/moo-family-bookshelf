@@ -53,14 +53,85 @@ import type {
  *   - `status` / `selectionMode` — enum/literal unions whose render sites
  *     already harden them via `ReadonlyMap` lookups; a plain `string` would
  *     break their types.
+ * `authToken` is the one declared-`string` field left alone on purpose: never
+ * rendered, never handed to a string method — and degrading it to `""` would
+ * swap the 401 the request already produces for a silent re-auth loop the user
+ * cannot diagnose.
+ *
+ * `HOSTILE_SHAPES`: `undefined` is deliberately absent — for a REQUIRED field it
+ * means the same as any other non-string, but for an OPTIONAL one it means
+ * "absent", which has its own dedicated cases. A REAL payload must come back
+ * byte-identical, which also pins that the explicit `undefined` the sanitizer
+ * writes for an absent optional field is harmless on the write paths:
+ * `JSON.stringify` drops it.
+ *
+ * Nested collections are where a hostile payload gets a second shot at the UI:
+ * one bad element is enough to throw out of `.map`, and the guard has to hold
+ * for a list that is not a list at all. Since PR #149 this tier is FAIL-CLOSED
+ * (`sanitizeList` in `shared/src/api/safeText.ts`): a non-array container —
+ * including a MISSING one — becomes `[]`, and an element that cannot carry
+ * fields is DROPPED. That is the container half of the white-screen gap the
+ * review filed: a `members` list stored by `setMembers`
+ * (`extension/src/dialog/useFamilyDataMembers.ts:89`, outside any `try`) only
+ * detonates on the NEXT render — `members.map` + `member.displayName`
+ * (`extension/src/dialog/MemberList.tsx:295` / `:49`) for a `null` element,
+ * `members.length` (`extension/src/dialog/MemberList.tsx:82`) for a non-array —
+ * and a throw from render is unreachable to every caller `try/catch`, with no
+ * ErrorBoundary in either app to catch it.
+ *  - A required LIST field's absence materializes as `[]` — the list-level
+ *    counterpart of a required text field materializing as `""`, and the one
+ *    place `sanitizeList` is deliberately STRICTER than `sanitizeRecord` (which
+ *    lets absence stay absence). It keeps `members.length`
+ *    (`extension/src/dialog/MemberList.tsx:82`) readable when the backend omits
+ *    the key entirely.
+ *  - The nested RECORD keeps `sanitizeRecord`'s asymmetry, unlike the lists:
+ *    absence stays absence so a caller's `if (!result.shelf)` guard still sees
+ *    "the backend sent nothing".
+ *
+ * Empty-entity materialization — what "an empty entity" actually IS.
+ * `sanitizeRecord` answers garbage — a primitive, an array — with
+ * `sanitize({})`, and these rows pin the shape each per-entity sanitizer
+ * materializes from it, because that is exactly what the envelope-level
+ * regression rows in `extension/tests/unit/api/sanitizeEnvelope.test.ts` assert
+ * reaching React state. Every text field is `""`, every required list is `[]`,
+ * and optionals stay absent — a renderable empty state instead of a TypeError.
+ *
+ * Prototype pollution — a tripwire, not a behaviour test. The sanitizers are
+ * safe today because of ONE subtle JS semantic: object spread
+ * (`{ ...record, title: safeText(record.title) }`) copies own keys with
+ * CreateDataProperty, never with `Set`. So a `__proto__` key that arrived as
+ * real DATA — which is what `JSON.parse` produces, unlike an object literal,
+ * where the parser special-cases it into a [[Prototype]] assignment — is copied
+ * onto the result as an inert own data property, and the `__proto__` accessor
+ * inherited from `Object.prototype` is never invoked. Rewrite any sanitizer to
+ * `Object.assign({}, record, …)` or a `for…in` copy and that defence silently
+ * disappears: both assign through `Set`, which DOES find the inherited accessor
+ * and hands it the attacker's object. Every other test in this file stays green
+ * through such a rewrite — these cases are the only ones that go red, which is
+ * the entire reason they exist. Which assertion catches which rewrite, stated
+ * honestly:
+ *   - `Object.getPrototypeOf(result)` and the own-descriptor check catch the
+ *     `Object.assign` / `for…in` rewrite: there the RESULT's prototype becomes
+ *     the attacker's object and the smuggled key stops existing as data, so the
+ *     attacker's fields become readable through the very object the UI renders
+ *     from. The process-wide `Object.prototype` stays clean, so those checks
+ *     alone would NOT notice.
+ *   - The `Object.prototype` checks catch the worse but less likely rewrite — a
+ *     recursive merge, the only shape that reaches the global. They are the
+ *     weaker net; both are kept.
+ * The hostile payloads are kept as RAW JSON text on purpose: they only carry a
+ * genuine own `__proto__` / `constructor` key once `JSON.parse` has run over
+ * them. `parseHostile` pins the two facts that make each hostile — the smuggled
+ * key exists as an OWN property, and parsing it has not already moved the
+ * prototype — so a later "cleanup" of these fixtures into object literals cannot
+ * make every case vacuous while staying green. The `afterEach` cleanup must
+ * survive a RED run: a failing assertion would still leave the marker on
+ * `Object.prototype`, where it would silently corrupt every later test in the
+ * process.
  */
 
-/**
- * Hostile values a real JSON body can carry in a field declared `string`.
- * `undefined` is deliberately absent: for a REQUIRED field it means the same as
- * any other non-string, but for an OPTIONAL one it means "absent", which has its
- * own dedicated cases below.
- */
+/** Hostile values a JSON body can carry in a `string` field; `undefined` is absent
+ *  on purpose (see the header → "`HOSTILE_SHAPES`"). */
 const HOSTILE_SHAPES: readonly { name: string; value: unknown }[] = [
   { name: "a plain object", value: { message: "boom" } },
   { name: "a nested object", value: { i18n: { "zh-TW": "標題" } } },
@@ -139,9 +210,8 @@ function describeEntitySanitizer<T extends object>(
   ];
 
   describe(name, () => {
-    // A REAL payload must come back byte-identical. This is what pins that the
-    // explicit `undefined` the sanitizer writes for an absent optional field is
-    // harmless on the write paths: `JSON.stringify` drops it.
+    // A REAL payload comes back byte-identical (the explicit `undefined` for an
+    // absent optional is dropped by `JSON.stringify`).
     it("round-trips a fully valid record JSON.stringify-identical", () => {
       expect(JSON.stringify(spec.sanitize(spec.valid))).toBe(
         JSON.stringify(spec.valid),
@@ -451,23 +521,8 @@ describeEntitySanitizer<OtpInfo>("sanitizeOtpInfoText", {
 
 // --- Nested collections ---
 
-/**
- * The collection fields are where a hostile payload gets a second shot at the
- * UI: one bad element is enough to throw out of `.map`, and the guard has to
- * hold for a list that is not a list at all.
- *
- * Since PR #149 this tier is FAIL-CLOSED (`sanitizeList` in
- * `shared/src/api/safeText.ts`): a non-array container — including a MISSING
- * one — becomes `[]`, and an element that cannot carry fields is DROPPED. That
- * is the container half of the white-screen gap the review filed: a `members`
- * list stored by `setMembers`
- * (`extension/src/dialog/useFamilyDataMembers.ts:89`, outside any `try`) only
- * detonates on the NEXT render — `members.map` + `member.displayName`
- * (`extension/src/dialog/MemberList.tsx:295` / `:49`) for a `null` element,
- * `members.length` (`extension/src/dialog/MemberList.tsx:82`) for a non-array —
- * and a throw from render is unreachable to every caller `try/catch`, with no
- * ErrorBoundary in either app to catch it.
- */
+// FAIL-CLOSED collections since PR #149: non-array → `[]`, fieldless element
+// dropped. See the header → "Nested collections".
 describe("nested collections", () => {
   it("sanitizes every member of a family group", () => {
     const out = sanitizeFamilyGroupText({
@@ -498,14 +553,8 @@ describe("nested collections", () => {
     expect(out.members).toEqual([]);
   });
 
-  /**
-   * A required LIST field's absence materializes as `[]` — the list-level
-   * counterpart of a required text field materializing as `""`, and the one
-   * place `sanitizeList` is deliberately STRICTER than `sanitizeRecord` (which
-   * lets absence stay absence). It is what keeps `members.length`
-   * (`extension/src/dialog/MemberList.tsx:82`) readable when the backend omits
-   * the key entirely.
-   */
+  // An absent required LIST becomes `[]` — deliberately STRICTER than
+  // `sanitizeRecord`. See the header → "Nested collections".
   it("materializes an omitted members list as an empty array", () => {
     const group = withoutField(VALID_GROUP, "members");
 
@@ -611,11 +660,8 @@ describe("nested collections", () => {
     expect(out.shelf.expiresDays).toBe(30);
   });
 
-  /**
-   * The nested RECORD keeps `sanitizeRecord`'s asymmetry, unlike the lists
-   * above: absence stays absence so a caller's `if (!result.shelf)` guard still
-   * sees "the backend sent nothing".
-   */
+  // The nested RECORD keeps absence as absence, so `if (!result.shelf)` still sees
+  // "the backend sent nothing".
   it.each([
     { name: "null", value: null },
     { name: "undefined", value: undefined },
@@ -650,16 +696,8 @@ describe("nested collections", () => {
   );
 });
 
-/**
- * What "an empty entity" actually IS.
- *
- * `sanitizeRecord` answers garbage — a primitive, an array — with
- * `sanitize({})`, and these rows pin the shape each per-entity sanitizer
- * materializes from it, because that is exactly what the envelope-level
- * regression rows in `extension/tests/unit/api/sanitizeEnvelope.test.ts` assert
- * reaching React state. Every text field is `""`, every required list is `[]`,
- * and optionals stay absent — a renderable empty state instead of a TypeError.
- */
+// What `sanitize({})` materializes: text `""`, required lists `[]`, optionals
+// absent. See the header → "Empty-entity materialization".
 describe("empty-entity materialization", () => {
   it("materializes a family group with empty text fields and no members", () => {
     const out = sanitizeRecord(
@@ -700,12 +738,8 @@ describe("empty-entity materialization", () => {
   });
 });
 
-/**
- * `authToken` is the one declared-`string` field left alone on purpose. It is a
- * credential — never rendered, never handed to a string method — and degrading
- * it to `""` would swap the 401 the request already produces for a silent
- * re-auth loop the user cannot diagnose.
- */
+// `authToken` is left alone on purpose: a credential, never rendered. See the
+// file header.
 describe("authToken exclusion", () => {
   it("keeps a valid authToken byte-identical", () => {
     expect(sanitizeFamilyGroupText(VALID_GROUP).authToken).toBe(
@@ -728,10 +762,8 @@ describe("authToken exclusion", () => {
 /** The marker a successful pollution attempt would leave behind. */
 const POLLUTION_KEY = "polluted";
 
-/**
- * Hostile payloads kept as RAW JSON text on purpose: they only carry a genuine
- * own `__proto__` / `constructor` key once `JSON.parse` has run over them.
- */
+/** Hostile payloads kept as RAW JSON on purpose: only `JSON.parse` yields a genuine
+ *  own `__proto__` / `constructor` key. */
 const PROTO_BOOK_JSON =
   '{"bookId":"b1","title":"t","author":"","isbn":"","readmooUrl":"","category":"","__proto__":{"polluted":1}}';
 const CONSTRUCTOR_MEMBER_JSON =
@@ -739,12 +771,8 @@ const CONSTRUCTOR_MEMBER_JSON =
 const PROTO_MEMBER_JSON =
   '{"userId":"u1","displayName":{"i18n":"boom"},"__proto__":{"polluted":1}}';
 
-/**
- * Parse a hostile payload and pin the two facts that make it hostile: the
- * smuggled key exists as an OWN property, and parsing it has not already moved
- * the prototype. Without this guard, a later "cleanup" of these fixtures into
- * object literals would make every case below vacuous — and still green.
- */
+/** Parse a hostile payload and pin what makes it hostile (OWN smuggled key,
+ *  prototype unmoved). See the header → "Prototype pollution". */
 function parseHostile<T>(json: string, hostileKey: string): T {
   const record = asRecord(JSON.parse(json));
 
@@ -778,38 +806,11 @@ const POLLUTION_ATTEMPTS: readonly {
   },
 ];
 
-/**
- * A tripwire, not a behaviour test.
- *
- * The sanitizers are safe today because of ONE subtle JS semantic: object
- * spread (`{ ...record, title: safeText(record.title) }`) copies own keys with
- * CreateDataProperty, never with `Set`. So a `__proto__` key that arrived as
- * real DATA — which is what `JSON.parse` produces, unlike an object literal,
- * where the parser special-cases it into a [[Prototype]] assignment — is copied
- * onto the result as an inert own data property, and the `__proto__` accessor
- * inherited from `Object.prototype` is never invoked.
- *
- * Rewrite any sanitizer to `Object.assign({}, record, …)` or a `for…in` copy and
- * that defence silently disappears: both assign through `Set`, which DOES find
- * the inherited accessor and hands it the attacker's object. Every other test in
- * this file stays green through such a rewrite — these cases are the only ones
- * that go red, which is the entire reason they exist.
- *
- * Which assertion catches which rewrite, stated honestly:
- *   - `Object.getPrototypeOf(result)` and the own-descriptor check catch the
- *     `Object.assign` / `for…in` rewrite: there the RESULT's prototype becomes
- *     the attacker's object and the smuggled key stops existing as data, so the
- *     attacker's fields become readable through the very object the UI renders
- *     from. The process-wide `Object.prototype` stays clean, so those checks
- *     alone would NOT notice.
- *   - The `Object.prototype` checks catch the worse but less likely rewrite — a
- *     recursive merge, the only shape that reaches the global. They are the
- *     weaker net; both are kept.
- */
+// A tripwire: the only cases that go red if a sanitizer stops using object spread.
+// See the header → "Prototype pollution".
 describe("prototype pollution", () => {
-  // Cleanup must survive a RED run: a failing assertion below would still leave
-  // the marker on `Object.prototype`, where it would silently corrupt every
-  // later test in the process.
+  // Cleanup must survive a RED run, or the marker on `Object.prototype` corrupts
+  // every later test in the process.
   afterEach(() => {
     Reflect.deleteProperty(Object.prototype, POLLUTION_KEY);
   });

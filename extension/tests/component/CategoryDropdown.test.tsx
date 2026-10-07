@@ -149,10 +149,8 @@ describe("CategoryFilter", () => {
   });
 
   describe("responsive sizing", () => {
-    // The 40px (desktop) / 32px (mobile) trigger sizing moved from inline styles
-    // to `.moo-category__trigger` + the `--mobile` modifier in styles.css. jsdom
-    // does not apply stylesheet rules, so the observable contract is the modifier
-    // class presence/absence.
+    // 40px desktop / 32px mobile trigger sizing is `.moo-category__trigger` + `--mobile` in styles.css;
+    // jsdom applies no stylesheet, so the modifier's presence/absence is the contract.
     const books = makeBooks(["奇幻冒險", "韓國耽美", "軍事戰略"]);
 
     it("renders a desktop trigger without the --mobile modifier", () => {
@@ -172,11 +170,8 @@ describe("CategoryFilter", () => {
     });
   });
 
-  // CategoryFilter is controlled (`open` / `onToggle` live in the parent), so a
-  // small stateful parent drives it the way FamilyShelf / PersonalShelf do and
-  // lets the menu genuinely unmount on close. Focus starts on an option — where
-  // a keyboard user is while the menu is open — so a focus that is NOT moved
-  // falls to <body> when that option unmounts.
+  // CategoryFilter is controlled (`open` / `onToggle` in the parent), so a stateful parent lets the menu
+  // really unmount on close; focus starts on an option, so focus NOT moved falls to <body>.
   describe("focus after closing", () => {
     function StatefulFilter({ onChange }: { onChange: (v: string) => void }) {
       const [open, setOpen] = useState(false);

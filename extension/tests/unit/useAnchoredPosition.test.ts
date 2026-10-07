@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { computeAnchoredPosition } from "../../src/hooks/useAnchoredPosition";
 
-/**
- * Build a DOMRect-like object. `computeAnchoredPosition` only reads
- * `top`, `bottom`, `right`, and `width`, so the rest are zero-filled.
- */
+/** Build a DOMRect-like object. `computeAnchoredPosition` only reads
+ *  `top`, `bottom`, `right`, and `width`, so the rest are zero-filled. */
 function rect(partial: {
   top: number;
   bottom: number;
@@ -107,8 +105,7 @@ const cases: Case[] = [
     menuHeight: 400,
     viewportWidth: 300,
     viewportHeight: 300,
-    // maxLeft = 300 - 400 - 8 = -108 → Math.max(8, -108) = 8
-    // maxTop = 300 - 400 - 8 = -108 → Math.max(8, -108) = 8
+    // maxLeft = maxTop = 300 - 400 - 8 = -108 → Math.max(8, -108) = 8
     // rawLeft = -200 → clamp(-200, 8, 8) = 8; rawTop = 74 → clamp(74, 8, 8) = 8
     expected: { top: MARGIN, left: MARGIN },
   },

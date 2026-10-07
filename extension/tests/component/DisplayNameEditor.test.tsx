@@ -262,13 +262,8 @@ describe("DisplayNameEditor", () => {
     expect(handleSave).not.toHaveBeenCalled();
   });
 
-  /**
-   * The editor's controls were re-based on the shared `.moo-form-input` /
-   * `.moo-button` component classes, and the icon colours moved from inline
-   * `style={{ color }}` on the SVG to the button's own `color` (so hover/focus
-   * variants can recolour them). jsdom does not apply the stylesheet, so the
-   * class list — and the *absence* of the inline colour — is the contract.
-   */
+  /** Controls sit on the shared `.moo-form-input` / `.moo-button` classes, and icon colour moved from inline
+   *  SVG `style` to the button's `color` (for hover/focus): the class list and NO inline colour are the contract. */
   describe("shared component class contract", () => {
     it("opts the pencil button into the shared ghost-icon button base", () => {
       render(<DisplayNameEditor {...baseProps} />);

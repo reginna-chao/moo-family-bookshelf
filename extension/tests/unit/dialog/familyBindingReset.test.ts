@@ -72,10 +72,8 @@ async function storedLocal(): Promise<Record<string, unknown>> {
   return chrome.storage.local.get(null);
 }
 
-/**
- * Is `userId` still confirmed for this page load? A cached match answers
- * without navigating; otherwise the pre-aborted check resolves `unknown`.
- */
+/** Is `userId` still confirmed for this page load? A cached match answers without
+ *  navigating; otherwise the pre-aborted check resolves `unknown`. */
 async function isConfirmed(userId: string): Promise<boolean> {
   const aborted = new AbortController();
   aborted.abort();

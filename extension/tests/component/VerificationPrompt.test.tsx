@@ -2,9 +2,8 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { VerificationPrompt } from "@/dialog/VerificationPrompt";
 import type { VerificationPromptProps } from "@/dialog/VerificationPrompt";
-// The prompt renders these formatters, so asserting through them hits the real
-// render site. The literals themselves are pinned in
-// tests/unit/dialog/verificationMessages.test.ts.
+// The prompt renders these formatters, so asserting through them hits the real render site; the
+// literals are pinned in tests/unit/dialog/verificationMessages.test.ts.
 import {
   rateLimitedMessage,
   verificationLockedMessage,
@@ -142,12 +141,8 @@ describe("VerificationPrompt", () => {
     expect(screen.queryByText(rateLimitedMessage(45))).not.toBeInTheDocument();
   });
 
-  /**
-   * While an (unlocked) rate-limit countdown ticks the server window has not
-   * cleared yet, so any submit is a guaranteed 429. The widget must therefore be
-   * inert for the whole wait — and become usable again on its own once the hook
-   * resets countdownSeconds to null, with no extra state to unwind.
-   */
+  /** While an unlocked rate-limit countdown ticks, any submit is a guaranteed 429: the widget stays inert
+   *  for the whole wait and recovers on its own once the hook resets countdownSeconds to null. */
   describe("rate-limit countdown input lockout", () => {
     it("disables the PIN input and 確認 button while the countdown ticks", () => {
       renderPrompt({ method: "pin", countdownSeconds: 45, submitting: false });
@@ -234,10 +229,8 @@ describe("VerificationPrompt", () => {
     });
   });
 
-  // The locked / method-load / "none" branches render an error line as the WHOLE
-  // challenge slot, so they need their own bottom gap before the 返回 button
-  // (the PIN/pattern widgets bring their own spacing). jsdom applies no CSS, so
-  // the class list is the contract.
+  // The locked / method-load / "none" branches render an error line as the WHOLE challenge slot, so it
+  // needs its own bottom gap before 返回 (PIN/pattern widgets bring theirs); jsdom: class list is the contract.
   it.each([
     ["locked", { method: "pin" as const, locked: true }],
     ["method load error", { method: null, methodError: true }],
@@ -346,9 +339,8 @@ describe("VerificationPrompt", () => {
   });
 
   it("renders the moo-onboarding-view wrapper (targeted by the modal zero-padding override)", () => {
-    // The reauth prompt lives inside `.moo-modal`; the `.moo-modal
-    // .moo-onboarding-view { padding: 0 }` override only applies if the prompt's
-    // root actually carries this wrapper class. Pin it so the selector keeps matching.
+    // The reauth prompt lives inside `.moo-modal`; `.moo-modal .moo-onboarding-view { padding: 0 }` only
+    // applies if the root carries this wrapper class, so pin it to keep the selector matching.
     const { container } = render(
       <VerificationPrompt
         method="pin"
@@ -363,10 +355,8 @@ describe("VerificationPrompt", () => {
     expect(container.firstElementChild).toHaveClass("moo-onboarding-view");
   });
 
-  // The 返回 button was re-based on the shared `.moo-button` component class
-  // (full-width outline variant) instead of restating the button chrome in
-  // `.moo-onboarding-view__secondary`. jsdom does not apply the stylesheet, so
-  // the class list is the contract that keeps the shared base from being dropped.
+  // 返回 sits on the shared `.moo-button` full-width outline variant instead of restating chrome in
+  // `.moo-onboarding-view__secondary`; the class list (jsdom) keeps the shared base from being dropped.
   it("opts the 返回 button into the shared full-width outline button base", () => {
     renderPrompt({ method: "pin" });
 

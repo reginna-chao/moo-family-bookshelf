@@ -61,12 +61,8 @@ describe("DialogFooter", () => {
       expect(useMediaQuery).toHaveBeenCalledWith("(min-width: 576px)");
     });
 
-    // The row-vs-column layout, flexShrink, and version marginTop moved from
-    // inline styles to `.moo-footer` (base) + the `.moo-footer--wide` modifier and
-    // `.moo-footer__version` class in styles.css. jsdom does not apply stylesheet
-    // rules, so the modifier/class presence is the observable contract. flexShrink
-    // lives on the base `.moo-footer` (both breakpoints), so its guard is that the
-    // base class is always present.
+    // jsdom applies no stylesheet, so classes are the contract: row layout `.moo-footer--wide`, version
+    // `.moo-footer__version`, flexShrink on base `.moo-footer` (both breakpoints — always present).
     it("uses narrow column layout below 576px (no --wide modifier)", () => {
       vi.mocked(useMediaQuery).mockReturnValue(false);
       render(<DialogFooter />);

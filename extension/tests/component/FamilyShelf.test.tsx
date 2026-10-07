@@ -80,11 +80,8 @@ function makeMemberBooks(
   return books;
 }
 
-/**
- * Drive the custom MemberDropdown (rewritten from a native `<select>`):
- * open the trigger, then click the option matching `optionName`. Replaces the
- * old `fireEvent.change(select, { target: { value } })` interaction.
- */
+/** Drive the custom MemberDropdown (rewritten from a native `<select>`): open the trigger, then click the
+ *  option matching `optionName` — replaces the old `fireEvent.change(select, { target: { value } })`. */
 function selectMemberFilter(optionName: RegExp) {
   fireEvent.click(memberFilterTrigger());
   fireEvent.click(screen.getByRole("option", { name: optionName }));
@@ -907,10 +904,8 @@ describe("FamilyShelf", () => {
       });
     }
 
-    // Inject a small pageSize so the same pagination logic is exercised with
-    // far fewer rendered BookCards, keeping these tests fast and non-flaky.
-    // (v1.5.0 reshape gave every card an always-visible action row — heart +
-    // overflow menu — which made 100–200 rendered cards the dominant cost.)
+    // A small injected pageSize exercises the same pagination with far fewer cards (fast, non-flaky): since
+    // v1.5.0 every card has an always-visible heart + overflow row, so 100–200 cards dominated the cost.
     const PAGE_SIZE = 10;
 
     it("shows Load More button when shared books exceed pageSize", async () => {
