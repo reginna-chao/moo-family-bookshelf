@@ -3,6 +3,7 @@ paths:
   - "**/tests/**"
   - "**/*.test.{ts,tsx}"
   - "**/*.spec.ts"
+  - "extension/scripts/**"
 ---
 
 ## Testing Rules
