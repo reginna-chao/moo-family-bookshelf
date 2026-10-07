@@ -1,34 +1,5 @@
-/**
- * Build the Firefox-flavored manifest from the already-produced Chrome
- * dist/manifest.json, writing it to dist-firefox-<target>/manifest.json.
- *
- * Run AFTER dist/ has been copied to dist-firefox-<target>/ (see build-firefox.ts).
- *
- * Two targets, each with its OWN gecko.id and differing update_url:
- *  - "amo":    AMO-listed build. Uses GECKO_ID_AMO (the AMO-listed id).
- *              MUST NOT carry update_url (AMO rejects it; AMO serves its own
- *              updates for listed add-ons).
- *  - "direct": self-distributed signed .xpi. Uses GECKO_ID_DIRECT (the
- *              self-distributed id). Carries update_url pointing at the
- *              project's updates.json so installs auto-update.
- *
- * The two ids are kept DISTINCT to avoid an AMO same-version dual-channel
- * conflict: a listed and a self-distributed build sharing one id cannot both
- * publish the same version.
- *
- * Transforms applied (both targets):
- *  - version: re-synced from package.json (same source of truth as the
- *    Chrome sync-version.ts) so the Firefox build never drifts.
- *  - browser_specific_settings.gecko: adds the AMO extension id and a
- *    strict_min_version, plus a gecko_android entry for Firefox for Android.
- *  - background: Firefox for Android (Fenix) does NOT reliably support an
- *    MV3 background `service_worker`; an event page (`background.scripts`)
- *    works on both desktop and Android. We therefore replace
- *    `service_worker` + `type:module` with `scripts: ["background.js"]`.
- *
- * Everything else (permissions, content_scripts, host_permissions,
- * web_accessible_resources, action, icons) is left identical to Chrome.
- */
+/** Write dist-firefox-<target>/manifest.json from the Chrome dist/manifest.json (targets amo / direct, distinct ids).
+ *  See docs/architecture.md → Firefox 建置（build-firefox.ts、build-firefox-manifest.ts）. */
 import { readFileSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";

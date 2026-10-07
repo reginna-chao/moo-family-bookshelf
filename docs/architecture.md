@@ -877,6 +877,10 @@ extension/package.json (version: "0.2.0")
          → Chrome Web Store 版本號
 ```
 
+- Build script 是 `extension/scripts/sync-version.ts`，`pnpm build` 與 `pnpm build:dev` 的第一步都會執行：把 `package.json` 的 `version` 寫進 `extension/public/manifest.json`，版本已相同時不改檔。
+- Firefox 版的 manifest（`build-firefox-manifest.ts`）與自行散布版的更新檔 `updates.json`（`build-updates-json.ts`）也直接讀 `extension/package.json` 的版本，不經過 Chrome 的 manifest，所以 Firefox 版號不會跟著分歧（見〈十三、建置與驗證腳本（extension/scripts）〉）。
+- 發版時 CD 的 `release-extension-firefox` job 會先確認 git tag 與 `extension/package.json` 的版本一致，不一致就在任何 AMO 簽署之前失敗。
+
 ### 版本策略
 
 | 階段             | 版本範圍 | 說明                         |
@@ -1084,6 +1088,58 @@ interface PublicShelfSnapshot {
   警告文案刻意不分 variant：它講的是「帶著壞位址的那組同步碼」，與畫面無關。
 
 - **移除成員**（`shared/src/unkick/messages.ts`）：「解除限制」解除的是後端的 kicked tombstone（6 小時內擋住同步碼重新加入），**不會**把對方加回家庭（`.claude/rules/security-ux-invariants.md` 的 Invariant 4），對方仍須自己輸入同步碼，文案必須維持這個區別。解除成功文案括號內「可能需要約一分鐘生效」不是保守說法：tombstone 刪除後，仍持有舊 key 的 colo 最長約一分鐘才看得到，這段期間對方重新加入可能仍被拒（重試即可）。
+
+---
+
+## 十三、建置與驗證腳本（extension/scripts）
+
+`extension/scripts/` 是在 Node（`tsx`）下執行的建置與驗證腳本，由 `extension/tsconfig.scripts.json` 納入 `pnpm typecheck`。腳本的程式碼註解最多兩行，較長的設計理由集中在本節，註解以「`docs/architecture.md → <小節名稱>`」指回這裡。E2E 專用的兩支腳本（`build-e2e.ts`、`verify-selectors.ts`）的規則寫在 `.claude/rules/test.md` → E2E tooling (extension/scripts)。版本號的同步見〈九、版本管理〉的「版本同步機制」。
+
+### Chrome 建置檢查（verify-build.ts）
+
+`pnpm build` 的最後一步（`pnpm build:dev` 不執行）。任何一項失敗就以 exit code 1 結束：
+
+- `dist/` 必須有 `content.js`、`background.js`、`popup.js`、`fiber-bridge.js`、`manifest.json`。
+- `dist/content.js` 必須是 IIFE 而不是 ESM：去掉開頭空白後不能以 `import ` 或 `import{` 開頭。
+- `dist/manifest.json` 的 `host_permissions`、**每一筆** `content_scripts[i].matches`、**每一筆** `web_accessible_resources[i].matches`，都必須**剛好等於** `READMOO_MATCH_PATTERNS`（`shared/src/config/readmoo.ts`，支援的讀墨網域的唯一來源），不能少也不能多：
+  - 少了：在 `READMOO_MATCH_PATTERNS` 加了網域卻沒更新 `extension/public/manifest.json`，出貨的擴充功能在那個網域上永遠不會執行，也沒有任何提示。
+  - 多了：過寬的 pattern（`<all_urls>`、遺留的 `http://localhost` 開發用 pattern、打錯的網域）會在出貨的 manifest 裡無聲擴大安裝時的權限提示與 content script 的範圍。
+  - 陣列欄位逐筆檢查而不是只看 `[0]`：否則第二筆 content script／web-accessible resource 可以帶著錯誤或過寬的清單出貨而沒人發現。陣列不存在或為空也算失敗。
+  - 腳本只宣告它要檢查的欄位，而且全部是 optional：欄位格式錯誤或被改名時回報 FAIL，而不是讓腳本當掉。
+- E2E 建置刻意加入的 `http://localhost:*/*` 不會讓這項檢查失敗：`build-e2e.ts` 是在 `pnpm build`（也就是執行本檢查的指令）**結束之後**才修改 `dist/manifest.json`，檢查當下 manifest 裡還沒有 localhost。
+
+### Firefox 建置（build-firefox.ts、build-firefox-manifest.ts）
+
+- **流程**：`pnpm build:firefox` = `pnpm build` → `build-firefox.ts` → `verify-firefox-build.ts`；`pnpm build:firefox:dev` 改用 `pnpm build:dev`，而且只建置、驗證 `direct`（`--target direct`）。
+- **`build-firefox.ts`**：從已經建好的 Chrome 版產生 Firefox 版。`dist/` 不存在時直接失敗，提示先跑 `pnpm build`。對每個目標先刪掉舊的 `dist-firefox-<target>/`，再整份複製 `dist/`（不留舊檔），然後交給 `buildFirefoxManifest` 改寫 manifest。`--target amo|direct` 只建一種，不帶參數時依序建兩種。只用 Node 的 `fs` API、不用 shell 的 `cp`：開發在 Windows、CI 在 Linux。
+- **兩種目標，各自有自己的 gecko id**：
+  - `amo`：上架 AMO 的版本，使用 `GECKO_ID_AMO`，**不能**帶 `update_url`（AMO 會拒絕；上架的附加元件由 AMO 自己提供更新）。
+  - `direct`：自行散布的已簽署 `.xpi`，使用 `GECKO_ID_DIRECT`，帶 `update_url`（`UPDATE_URL`，指向最新 GitHub Release 附的 `updates.json`），安裝後會自動更新。
+  - 兩個 id 刻意不同：上架版與自行散布版若共用一個 id，就不能用同一個版本號在兩個管道都發布（AMO 的 same-version dual-channel 衝突）。
+- **manifest 轉換**（`toFirefoxManifest`，兩種目標都套用）：
+  - `version`：從 `extension/package.json` 重新讀取（與 Chrome 的 `sync-version.ts` 同一個來源），Firefox 版不會跟著分歧。
+  - `browser_specific_settings.gecko`：該目標的 id、`strict_min_version`、`data_collection_permissions`（只有 `direct` 再加上 `update_url`）；另加 `gecko_android.strict_min_version`，給 Firefox for Android 用。
+  - `background`：Firefox for Android（Fenix）無法可靠支援 MV3 的 background `service_worker`，event page（`background.scripts`）在桌面與 Android 都能用，所以整個 `background` 換成 `scripts: [<原本的 service_worker 檔名，缺省為 background.js>]`，`service_worker` 與 `type: module` 都不保留。
+  - 其他欄位（permissions、content_scripts、host_permissions、web_accessible_resources、action、icons）與 Chrome 版完全相同。
+  - 最低版本與資料同意宣告的理由寫在 `build-firefox-manifest.ts` 匯出常數 `STRICT_MIN_VERSION`、`DATA_COLLECTION_PERMISSIONS` 的 JSDoc。
+
+### Firefox 建置檢查（verify-firefox-build.ts）
+
+`pnpm build:firefox` 的最後一步。對每個目標的 `dist-firefox-<target>/` 檢查下列各項，任何目標有一項失敗就以 exit code 1 結束；`--target amo|direct` 只驗證一種，不帶參數時兩種都驗證：
+
+- bundle 檔案都存在：`content.js`、`background.js`、`popup.js`、`fiber-bridge.js`、`manifest.json`。
+- `browser_specific_settings.gecko.id` 存在，而且符合目標（`amo` → `GECKO_ID_AMO`，`direct` → `GECKO_ID_DIRECT`）。
+- `gecko.strict_min_version` 與 `gecko_android.strict_min_version` 都存在。
+- `gecko.data_collection_permissions.required` 包含 `"websiteContent"`。
+- 使用 event page：有非空的 `background.scripts`，而且沒有 `background.service_worker`（Firefox for Android 無法可靠支援）。
+- `update_url` 依目標而定：`amo` 的 gecko **不能**有 `update_url`；`direct` 的 `gecko.update_url` 必須等於 `UPDATE_URL`。
+
+### 自行散布版的更新檔（build-updates-json.ts）
+
+- Firefox 會定期讀取 direct 版 manifest 的 `browser_specific_settings.gecko.update_url`（`UPDATE_URL`）所指的 `updates.json`；裡面提供較新的版本時，就從 `update_link` 下載已簽署的 `.xpi`。
+- `updates.json` 只服務自行散布版，所以 `addons` 只以 `GECKO_ID_DIRECT` 為 key，不含 AMO 上架版的 id。
+- 版本從 `extension/package.json` 讀取（與 `sync-version.ts` 同一個來源）。`update_link` 是 `https://github.com/reginna-chao/moo-family-bookshelf/releases/download/v<version>/moo-family-bookshelf-firefox-v<version>-direct-install.xpi`，檔名必須和 CD 上傳到 GitHub Release 的 `.xpi` 相同，否則 Firefox 自動更新會 404；CD 的 `release-extension-firefox` job 在上傳前會比對兩者，不一致就失敗。
+- 結構是純函式 `buildUpdatesManifest(version)` 加上一層薄的 CLI：`--out <path>` 指定輸出位置，缺省為 `extension/dist-firefox-updates.json`（已列入 `.gitignore`）。CD 以 `--out "$GITHUB_WORKSPACE/updates.json"` 產生後上傳到 Release。
 
 ---
 

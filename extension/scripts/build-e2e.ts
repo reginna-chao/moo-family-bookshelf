@@ -1,9 +1,5 @@
-/**
- * Build script for E2E testing.
- *
- * Copies the normal build output and modifies manifest.json to allow
- * the Content Script to trigger on localhost pages (for mock fixtures).
- */
+/** E2E build: `pnpm build`, then patch dist/manifest.json in place so the content script runs on localhost.
+ *  Rationale and ordering: .claude/rules/test.md → E2E tooling (extension/scripts). */
 
 import { readFileSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";

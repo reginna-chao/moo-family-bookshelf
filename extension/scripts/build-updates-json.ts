@@ -1,18 +1,5 @@
-/**
- * Generate the Firefox self-distribution update manifest (updates.json).
- *
- * Firefox polls the URL declared in the direct-install manifest's
- * browser_specific_settings.gecko.update_url (see build-firefox-manifest.ts
- * UPDATE_URL) and, if a newer version is offered here, downloads the signed
- * .xpi from update_link. The .xpi name must match the asset uploaded to the
- * GitHub Release by the CD job.
- *
- * Pure builder + thin CLI wrapper. Reads the version from package.json
- * (same source of truth as sync-version.ts).
- *
- * updates.json serves only the self-distributed build, so its `addons` map
- * is keyed by the direct id (GECKO_ID_DIRECT), not the AMO-listed id.
- */
+/** Generate updates.json, the update manifest Firefox polls for the self-distributed (direct) build.
+ *  See docs/architecture.md → 自行散布版的更新檔（build-updates-json.ts）. */
 import { readFileSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";

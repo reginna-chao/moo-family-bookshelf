@@ -1,7 +1,5 @@
-/**
- * Sync version from package.json to manifest.json.
- * Run as part of the build process.
- */
+/** Copy package.json's version into public/manifest.json; first step of `pnpm build` / `pnpm build:dev`.
+ *  See docs/architecture.md → 版本同步機制. */
 import { readFileSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
