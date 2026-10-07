@@ -1,32 +1,5 @@
-/**
- * Data access for the public-shelf key family: the pointer list
- * `publicshelves:{userId}` and the published snapshot `public:{shareToken}`.
- *
- * WHY this module exists (#163): one chokepoint per key family, so route
- * handlers never build a KV key or call `c.env.KV` themselves (lint-enforced by
- * the `src/routes/**` override in `worker/eslint.config.js`). Thin by design —
- * one KV operation per function, `"json"` reads keep their unvalidated cast,
- * puts keep `JSON.stringify`, and the counting Proxy from
- * `middleware/kvOpCounting.ts` flows through as the `kv` parameter, so the
- * per-request `kv_ops` accounting is unchanged.
- *
- * SINGLE-WRITER INVARIANT, and where it now lives. `publicshelves:{userId}` has
- * exactly one writer domain — the four public-shelf write handlers in
- * `routes/publicShelf.ts` (plus the whole-account wipe in `routes/user.ts`,
- * which only ever DELETES it). {@link putPublicShelves} is exported, so that
- * property is no longer guaranteed by "nothing shared offers a put"; it is
- * pinned by a tripwire test that asserts `routes/publicShelf.ts` is the only
- * route module importing it (`worker/tests/unit/kvAccessBoundary.test.ts`).
- * The books / family-prefs hot paths must keep READING this key and never
- * writing it — that is what stops a stale-read books save from rolling a
- * revoked share token back to life.
- *
- * NOTE: `public:{shareToken}` has no `put` here on purpose. Every snapshot
- * write goes through `writePublicSnapshot` in `services/publicShelf.ts`, which
- * owns the `buildSnapshot` URL-whitelist chokepoint and the dynamic TTL
- * (a remaining lifetime under `KV_MIN_TTL_SECONDS` deletes instead of putting).
- * Offering a bare snapshot put here would be a way around both.
- */
+/** Thin data access (#163) for `publicshelves:{userId}` (single writer: `routes/publicShelf.ts`) and
+ *  `public:{shareToken}` (no put). Rationale: .claude/rules/backend.md → KV Key Patterns (public shelves). */
 import {
   kvKeys,
   type PublicShelfSnapshot,
@@ -49,7 +22,7 @@ export async function getPublicShelves(
  * Write the pointer list `publicshelves:{userId}` as JSON. No TTL.
  *
  * Callers: the four public-shelf write handlers in `routes/publicShelf.ts`,
- * and nothing else — see the single-writer note in this module's header.
+ * and nothing else — see .claude/rules/backend.md → KV Key Patterns (public shelves).
  */
 export async function putPublicShelves(
   kv: KVNamespace,

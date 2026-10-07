@@ -114,24 +114,8 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Per-userId write ceiling: 30 verify-domain writes per userId per hour, shared
-  // by PUT verify / OTP / prompted / qr-token under one "verify-write" scope.
-  // Layered on top of the per-IP limit. Honest scope: this BOUNDS THE BURN RATE
-  // of a single AUTHENTICATED account's KV writes (~60 writes/hr = 30 handler
-  // writes + 30 counter writes; ~90/hr once the per-IP counter is counted too),
-  // it does NOT make the daily 1000-write free tier safe by itself — 30/hr
-  // sustained is still ~1,440 KV writes/day from one account, and the per-IP
-  // middleware's own counter write lands BEFORE auth, so spam that ignores 429s
-  // still burns writes outside this ceiling's reach. Since userId is not a
-  // credential, a self-minted account could otherwise drain the daily quota in
-  // minutes; this turns that into hours and forces an attacker to onboard a new
-  // account per 30 writes. A hard global bound needs the edge (Cloudflare WAF
-  // rate limiting, see docs/architecture.md and worker/DEPLOY.md).
-  //
-  // The scope is deliberately DISTINCT from the verification gate's "verify"
-  // wrong-guess attempt ceiling (`VERIFY_ATTEMPT_SCOPE`, 10/hr, in
-  // `services/verification.ts`): sharing one counter would let an attacker's
-  // wrong guesses crowd out the owner's own settings operations, and vice versa.
+  // Shared "verify-write" ceiling (30/hr, the four verify-domain writes), kept apart from the gate's
+  // "verify" counter. See docs/architecture.md → 每帳號寫入上限能擋住什麼.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId,
     ...VERIFY_WRITE_LIMIT,
@@ -195,9 +179,8 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     hash,
     salt,
     prompted: body.prompted === 1 ? 1 : (existing?.prompted ?? 0),
-    // Stamping the change voids failure streaks that began before it, so an
-    // owner who reset a forgotten PIN/pattern can log in without waiting out a
-    // lockout charged against the old secret. See `isFailStreakVoid`.
+    // Voids failure streaks begun before this change (`isFailStreakVoid`), so a reset PIN/pattern
+    // is not locked out by the old secret's lockout.
     secretUpdatedAt: Date.now(),
   };
 

@@ -1,21 +1,5 @@
-/**
- * Data access for the family key family: `family:{familyId}`,
- * `member:{userId}` and `kicked:{familyId}:{userId}`.
- *
- * WHY this module exists (#163): route handlers must not reach into KV
- * directly. One chokepoint per key family means the key spelling, the value
- * encoding and the TTL of each key live in exactly one place, so a route can
- * neither invent a key nor forget a TTL. Routes never import `kvKeys` —
- * lint-enforced by the `src/routes/**` override in `worker/eslint.config.js`.
- *
- * Deliberately a THIN accessor layer, not a repository: every function is one
- * KV operation with the same semantics the handlers had inline. In particular
- * `"json"` reads keep their unvalidated cast (nothing here validates the parsed
- * value) and puts keep `JSON.stringify` exactly as before, so the stored bytes,
- * the operation count and the per-request `kv_ops` log line are unchanged — the
- * same `KVNamespace` (the counting Proxy from `middleware/kvOpCounting.ts`)
- * flows through as the first parameter.
- */
+/** Thin data access (#163) for `family:{familyId}`, `member:{userId}`, `kicked:{familyId}:{userId}`.
+ *  Rationale: .claude/rules/backend.md → Project Structure ("Layering, second rule"). */
 import {
   kvKeys,
   KICKED_TOMBSTONE_TTL_SECONDS,

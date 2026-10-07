@@ -71,10 +71,8 @@ function invalidDisplayNameResponse(c: Context<{ Bindings: Env }>) {
   );
 }
 
-/**
- * The join handler's `403 MEMBER_REMOVED` — one builder so the tombstone gate
- * and the post-write re-checks answer byte-identically.
- */
+/** The join handler's `403 MEMBER_REMOVED` — one builder so the tombstone gate and the post-write
+ *  re-checks answer byte-identically. */
 function memberRemovedResponse(c: Context<{ Bindings: Env }>) {
   return jsonError(
     c,
@@ -319,9 +317,8 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
     return invalidDisplayNameResponse(c);
   }
 
-  // Bound the secret at the boundary, before any lookup: "" means not supplied,
-  // null means present-but-malformed. Same classification in all three entry
-  // points of the gate (see `sanitizeVerifySecret`).
+  // Bound the secret before any lookup: "" = not supplied, null = malformed. Same in all three gate
+  // entry points (see `sanitizeVerifySecret`).
   const sanitizedSecret = sanitizeVerifySecret(body.verifySecret);
   if (sanitizedSecret === null) {
     return verifySecretFormatResponse(c);
@@ -339,33 +336,8 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
     );
   }
 
-  // --- Verification gate ---
-  //
-  // WHY: userId is sha256("moo:" + email) — derived from the user's email, so it
-  // is publicly guessable — while `user:{userId}` (the personal book list,
-  // including books the user never shared) persists across family changes and is
-  // never deleted on leave. Minting an auth token for a userId without any proof
-  // of ownership therefore hands anyone who knows the victim's email full
-  // read/write access to those settings: account takeover. `POST /{id}/join`
-  // already gates on this; create must match.
-  //
-  // Placement: AFTER the ALREADY_IN_FAMILY conflict check and BEFORE any KV
-  // write or token mint — including the orphaned-member-key cleanup below — so a
-  // failed attempt leaves nothing behind.
-  //
-  // The 409 above IS a small disclosure: it tells an unverified caller, as a
-  // boolean, that this email's account currently belongs to some family. Kept
-  // ahead of the gate deliberately, and matching `POST /{id}/join`, which
-  // answers the same conflict the same way: the conflict is cheap and terminal
-  // (no secret can make the request succeed), so gating first would only prompt
-  // the user for a PIN, burn the account's verification attempt ceiling, and
-  // then still refuse. What stays behind the gate is everything of value — the
-  // familyId, the auth token, member data, and any write. Accepted residual
-  // risk, documented in docs/architecture.md.
-  //
-  // Failures are charged to the CALLER's bucket, never to the target account
-  // (see `validateVerification`). Accounts with no verification configured (or
-  // method "none") pass through unchanged.
+  // Verification gate: AFTER the ALREADY_IN_FAMILY 409, BEFORE any KV write or token mint (orphan
+  // cleanup included). See docs/architecture.md → PWA 登入驗證機制 → 安全措施.
   const verification = await validateVerification(
     c.env,
     body.userId,
@@ -394,12 +366,8 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
     createdAt: new Date().toISOString(),
   };
 
-  // Sequential, pointer FIRST. KV has no transactions, so the order decides
-  // which half-state a failure can leave. A failed family put after the pointer
-  // landed leaves only an orphan `member:{uid}` (pointer → absent family), which
-  // `classifyMembershipForCreate` reports as "orphaned" and this handler's retry
-  // cleans up. The reverse order could leave a `family:{id}` nobody points at —
-  // permanently unreachable, because the retry mints a fresh familyId.
+  // Sequential, pointer FIRST: a failure leaves only an orphan pointer the retry cleans up, never an
+  // unreachable `family:{id}`. Rationale: .claude/rules/backend.md → Route handler invariants.
   await putMemberFamilyId(c.env.KV, body.userId, familyId);
   await putFamilyRecord(c.env.KV, familyId, record);
 
@@ -440,10 +408,8 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     return invalidDisplayNameResponse(c);
   }
 
-  // Bound the secret at the boundary, alongside the other format checks and
-  // before the verification gate: a malformed body is a request-format error and
-  // must not reach hashSecret nor be charged against the verify attempt ceiling.
-  // Same classification as create/lookup.
+  // Bound the secret with the other format checks, before the gate: malformed = 400, never hashed or
+  // charged. Same classification as create/lookup.
   const sanitizedSecret = sanitizeVerifySecret(body.verifySecret);
   if (sanitizedSecret === null) {
     return verifySecretFormatResponse(c);
@@ -460,22 +426,8 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     );
   }
 
-  // Cheap, terminal conflict: the user already belongs to a DIFFERENT family, so
-  // no secret can make this request succeed. Answered before the verification
-  // gate (same ordering as `POST /api/family`) rather than after it, at the cost
-  // of disclosing one boolean — "this userId is listed in a live family" — to an
-  // unverified caller; no more than before. Everything of value stays behind the
-  // gate.
-  //
-  // A STALE pointer does not count as membership (`isLiveMembership`, the rule
-  // shared with create and lookup in `services/membership.ts`): one
-  // at a family record that no longer exists (an ORPHAN, left by a create or
-  // dissolve that failed halfway — both order their writes so that this is the
-  // only half-state they can leave), or at a family that no longer lists the
-  // user (a join that raced a kick, a stale read at the removal). The join
-  // continues, and the new-member pointer put overwrites it on success. No
-  // delete here — nothing may be written before the gate. The extra family read
-  // happens on this conflict path only.
+  // Cheap, terminal pre-gate 409 for a LIVE membership elsewhere; a stale pointer is not deleted here (no
+  // pre-gate writes). See docs/architecture.md → PWA 登入驗證機制 → 安全措施 (ALREADY_IN_FAMILY).
   const existingFamily = await getMemberFamilyId(c.env.KV, body.userId);
   if (
     existingFamily &&
@@ -498,11 +450,8 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Existing members are reconnecting from a new device, not joining for the first
-  // time. They still MUST pass the same verification gate as new members: knowing an
-  // email-derived userId + familyId alone must not mint that member's token. The
-  // maxMembers capacity check, by contrast, applies only to new members (an existing
-  // member must never be blocked from reconnecting by a full family).
+  // A listed member is reconnecting: same verification gate as a new member, but the maxMembers
+  // check applies to new members only (a full family never blocks a reconnect).
   const isExistingMember = hasMember(record.members, body.userId);
 
   // --- Verification gate (both existing-member reconnect and new-member join) ---
@@ -515,33 +464,8 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     return gateFailure;
   }
 
-  // --- Kicked tombstone gate ---
-  //
-  // The owner removed this userId from this family within the last
-  // KICKED_TOMBSTONE_TTL_SECONDS. Refuse the (re)join for as long as the
-  // tombstone lives; once it is gone — it expired, or the owner lifted the ban
-  // via DELETE /api/family/:id/kicked/:uid — a sync-code rejoin is legitimate
-  // again.
-  //
-  // Placement AFTER the verification gate is deliberate: backend rules forbid
-  // new pre-gate disclosures. "This userId was recently removed from this
-  // family" is therefore revealed only to a caller who passed the account's own
-  // verification gate — or to an account with no verification configured, where
-  // it discloses nothing the family record would not already.
-  //
-  // The check runs for BOTH the existing-member branch and the new-member
-  // branch on purpose: while the tombstone lives, "still in the member list"
-  // can only mean a removal still in flight (it writes the tombstone first), a
-  // removal that failed after its tombstone, or a stale KV read of the family
-  // record. Denying the reconnect is the correct, fail-closed reading of the
-  // owner's newer intent.
-  //
-  // It also deliberately applies to QR-token-bypass joins (the bypass inside
-  // `passJoinVerificationGate`): a QR token minted minutes before the kick
-  // must not outrank the kick.
-  //
-  // Cost: one extra small KV read per join, post-gate — acceptable on this
-  // rate-limited sensitive-tier route.
+  // Kicked-tombstone gate, AFTER the verification gate, for both branches and QR-bypass joins alike.
+  // See docs/architecture.md → PWA 登入驗證機制 → 安全措施 (MEMBER_REMOVED) and → 家庭成員的授權與移除.
   const kicked = await hasKickedTombstone(c.env.KV, familyId, body.userId);
   if (kicked) {
     return memberRemovedResponse(c);
@@ -571,38 +495,8 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Per-userId write ceiling: 30 family-domain writes per userId per hour,
-  // shared by remove-member / un-kick / displayName / member-settings /
-  // transfer / endpoint under one "family-write" scope. Layered on top of the
-  // per-IP limit.
-  //
-  // Charged to the AUTHENTICATED caller, never to the `:uid` path param: a
-  // counter keyed on someone else's id is a victim-facing DoS lever — the same
-  // defect that got join's standalone per-userId counter removed. Create and
-  // join stay out of this ceiling entirely; they are public sensitive-tier
-  // routes bounded by the per-IP counter (3/min) plus the verification gate's
-  // charge-on-failure attempt ceiling.
-  //
-  // Honest scope: this BOUNDS THE REQUEST RATE of a single authenticated
-  // account's family-domain writes (30 admitted sequential requests + 30
-  // counter writes per hour; parallel bursts overshoot by the caller's
-  // concurrency — the counter is get-then-put, see middleware/rateLimit.ts).
-  // It does NOT bound KV writes 1:1 — one admitted DELETE member fans out to
-  // the family record put, the member key delete, both auth-token deletes, and
-  // at most ONE borrow-index put plus one pointer delete per evicted record —
-  // and it does not make the daily 1000-write free tier safe by itself. The
-  // per-IP middleware's own counter write also lands BEFORE auth, so spam that
-  // ignores 429s still burns writes outside this ceiling's reach. A hard
-  // global bound needs the edge (Cloudflare WAF rate limiting, see
-  // docs/architecture.md and worker/DEPLOY.md).
-  //
-  // Placement rule, uniform across all six handlers: the charge sits AFTER
-  // every zero-I/O guard (path-format validation, the 401, and displayName's
-  // pure self-only 403) and BEFORE the first KV read or body parse. A
-  // permission check that needs a KV read therefore lands AFTER the charge —
-  // that is why a non-owner's transfer / endpoint attempt spends its own slot
-  // (pinned by the "charges the shared window even when the handler then
-  // rejects" test). Same shape as user.ts / publicShelf.ts / verify.ts.
+  // Shared "family-write" ceiling (30/hr, six handlers), charged to the AUTHENTICATED caller, never `:uid`.
+  // Rationale: .claude/rules/backend.md → Route handler invariants; docs/architecture.md → 每帳號寫入上限能擋住什麼.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId: callerId,
     ...FAMILY_WRITE_LIMIT,
@@ -617,17 +511,8 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // The recorded owner may not leave while anyone else is listed. Decided by
-  // `ownerId` + the list ALONE — deliberately no pointer read (INFO-2): gating
-  // it on an ACTIVE owner let a real owner whose pointer read missed (cross-colo
-  // lag, a cached miss) — or a hollow ex-owner — fall through to the ordinary
-  // self-leave and drop off the list while `ownerId` still named them, leaving
-  // a family with no listed owner. The cost is borne by the hollow ex-owner
-  // (see `callerIsOwner` below): in a multi-member family they stay listed but
-  // inert until they rejoin, which is the documented "no active owner" residual.
-  // `hasMember` keeps an UNLISTED caller named by `ownerId` off this refusal:
-  // their leave changes no list, so it takes the MEMBER_NOT_FOUND stray-pointer
-  // cleanup below instead (#213 convergence).
+  // OWNER_CANNOT_LEAVE is decided by `ownerId` + the list ALONE (no pointer read); an unlisted owner
+  // takes the MEMBER_NOT_FOUND cleanup. Rationale: .claude/rules/backend.md → API Design (bidirectional).
   if (
     callerId === record.ownerId &&
     targetUserId === callerId &&
@@ -637,32 +522,16 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     return jsonError(c, 403, "OWNER_CANNOT_LEAVE", "請先轉移管理權後再離開");
   }
 
-  // Every other owner power needs `ownerId` AND an ACTIVE caller (#222): a
-  // stale full-record write that read the record before an ownership transfer
-  // can land after the new owner kicked the ex-owner, setting `ownerId` back to
-  // the ex-owner and re-listing them without a pointer. Such a hollow ex-owner
-  // gets exactly what a non-owner gets below: `403 NOT_OWNER` on a kick, and —
-  // when they are the SOLE listed member — no sole-owner dissolve with its
-  // unconditional pointer delete; their self-leave instead reaches the
-  // empty-list dissolve below (see `remainingMembers`), whose pointer delete is
-  // conditional. An unlisted caller still reaches the MEMBER_NOT_FOUND
-  // stray-pointer cleanup. The `&&` keeps the pointer read (one) off every call
-  // whose caller is not the recorded owner, and the refusal above already
-  // answered the owner's multi-member self-leave without it; `isActiveMember`
-  // also skips it when the caller is not listed.
+  // Every other owner power needs `ownerId` AND an ACTIVE caller (#222); `&&` keeps the one pointer read
+  // off non-owners. Rationale: .claude/rules/backend.md → API Design (bidirectional authorization).
   const callerIsOwner =
     callerId === record.ownerId &&
     (await isActiveMember(c.env.KV, familyId, callerId, record.members));
 
   // Active sole owner leaving (the multi-member case was refused above)
   if (callerIsOwner && targetUserId === callerId) {
-    // Single-member owner: delete entire family, borrow index included
-    // (`dissolveFamily`: fail-open index delete, then the family record).
-    //
-    // Family record FIRST, then the caller's pointer and token. A failure after
-    // the family delete leaves only an orphan pointer, which create cleans up
-    // ("orphaned") and join treats as no membership. The reverse order could
-    // leave a `family:{id}` that nobody points at, permanently.
+    // Single-member owner: `dissolveFamily` (borrow index, family record) FIRST, then pointer + token —
+    // a failure leaves only an orphan pointer. See .claude/rules/backend.md → Route handler invariants.
     await dissolveFamily(c.env.KV, familyId);
     await Promise.all([
       deleteMemberFamilyId(c.env.KV, callerId),
@@ -679,40 +548,14 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
 
   // Finding #6: Check if target is actually a member
   if (!hasMember(record.members, targetUserId)) {
-    // Idempotent re-kick path, tombstone FIRST — before the stray-pointer
-    // delete below, for the same reason the removal below writes it before its
-    // pointer read: a join that observes the deleted pointer must also observe
-    // the tombstone, so it answers 403 MEMBER_REMOVED instead of healing the
-    // pointer back. The member is already gone from the record, but that does
-    // NOT mean a tombstone exists: a previous removal's tombstone put may have
-    // failed open while its member-list put (and revoke) landed, or the
-    // tombstone has expired. Without this write the owner's retry would 404
-    // here — ahead of the removal's tombstone write — and the ban could never
-    // be applied.
-    //
-    // Yes, this permits an owner to pre-tombstone a userId that never joined
-    // their family. Scoped to their own familyId and squarely within their
-    // authority (they may remove anyone from it at will), so harmless by design.
-    //
-    // Same discriminator as the removal: the NOT_OWNER guard above already
-    // proved the caller is the owner whenever targetUserId !== callerId, and a
-    // self-targeted call is never a kick (stray cleanup only, no tombstone).
+    // Idempotent re-kick (owner targeting another user), tombstone BEFORE the stray-pointer delete; can
+    // pre-tombstone a never-member. See docs/architecture.md → 家庭成員的授權與移除.
     if (targetUserId !== callerId) {
       await writeKickedTombstone(c.env.KV, familyId, targetUserId, callerId);
     }
 
-    // Stray-pointer cleanup. The record no longer lists the target, yet
-    // `member:{uid}` may still name this family: a removal whose revoke failed
-    // after its member-list put landed, a stale pointer read at the removal's
-    // revoke (KV ~60s propagation), a join that healed the pointer during a
-    // removal whose tombstone put failed open, or a pre-#213 removal that
-    // half-failed. The read-side list checks already deny that pointer any
-    // bookshelf / members / borrow read; deleting it (and the token beside it)
-    // here is what makes the owner's re-kick — or the target's own retried
-    // leave — converge. Runs for BOTH
-    // callers: the NOT_OWNER guard above already proved the caller is the owner
-    // or the target is themself. One extra read, on this rare branch only; a
-    // pointer naming another family is left alone.
+    // Stray-pointer cleanup for both callers (owner re-kick or retried self-leave): delete pointer + token
+    // only when the pointer names THIS family. Rationale: .claude/rules/backend.md → API Design (removal).
     const strayPointer = await getMemberFamilyId(c.env.KV, targetUserId);
     if (strayPointer === familyId) {
       await Promise.all([
@@ -727,20 +570,8 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     (m) => m.userId !== targetUserId,
   );
 
-  // A removal NEVER writes an empty member list — it dissolves instead (#222).
-  // `normalizeFamilyRecord` throws on `members: []`, so such a record would
-  // answer 500 on every later read (join with the sync code, members,
-  // bookshelf, borrow) with no way back. Reachable only by a SELF-leave: an
-  // active owner is listed, so a kick always leaves them behind. The case this
-  // branch exists for is a hollow ex-owner — `ownerId` restored by a stale
-  // full-record write — leaving as the last listed member: they are not
-  // `callerIsOwner`, so they skip the sole-owner dissolve above and would
-  // otherwise land on the list put below. Same steps and order as that
-  // dissolve (borrow index fail-open, family record, then pointer + token), so
-  // no borrow settlement and no tombstone (a self-leave is never a kick). The
-  // one difference: the pointer is read first and the deletes run only when it
-  // names THIS family, as in the revoke below — a hollow leaver's pointer is
-  // by definition not this family's, and may be another family's session.
+  // A removal NEVER writes an empty member list — it dissolves (#222), deleting pointer + token only when
+  // the pointer names THIS family. Rationale: .claude/rules/backend.md → API Design (removal bullet).
   if (remainingMembers.length === 0) {
     await dissolveFamily(c.env.KV, familyId);
     const leaverPointer = await getMemberFamilyId(c.env.KV, targetUserId);
@@ -753,11 +584,8 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     return c.json({ data: { ok: true } });
   }
 
-  // Settle the departing member's borrow records FIRST, before mutating the
-  // family record: cancel the PENDING requests they are a party to, then drop
-  // their own finished ones from the index (see settleDepartingBorrower). If
-  // this throws, the family record is untouched and the caller can retry safely
-  // without leaving partial state.
+  // Borrow settlement FIRST: if it throws (500), nothing has been written and the caller can retry.
+  // See `settleDepartingBorrower` and .claude/rules/backend.md → KV Key Patterns (borrow index).
   try {
     await settleDepartingBorrower(c.env.KV, familyId, targetUserId);
   } catch (err) {
@@ -772,102 +600,18 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
 
   record.members = remainingMembers;
 
-  // Owner kick: tombstone FIRST — after the borrow settlement (whose 500 must
-  // leave nothing written) and BEFORE the member-list put and the revoke.
-  // Discriminator: this branch is shared by "voluntary self-leave" and "owner
-  // removes another member"; the NOT_OWNER guard above already proved that when
-  // `targetUserId !== callerId` the caller IS the owner. A voluntary self-leave
-  // is never tombstoned (leave-then-rejoin is legitimate), and both dissolve
-  // paths (sole-member owner, last listed member) early-return above and never
-  // reach here.
-  //
-  // Why first: the join handler reads `member:{uid}` BEFORE it checks the
-  // tombstone. With the tombstone landed before the pointer delete, any join
-  // that observes the deleted pointer — the only kind that would HEAL it —
-  // also observes the tombstone and answers 403 MEMBER_REMOVED. Tombstone-last
-  // left a window (pointer gone, no tombstone) in which a join that still saw
-  // itself listed healed the pointer, and any concurrent full-record write
-  // carrying the stale list (a displayName reconnect, the displayName /
-  // member-settings endpoints) could then re-list the target: listed + pointer
-  // + token = a full re-admission. Ordering alone does not cover a target who
-  // was ALREADY pointerless (a join can pass its gate before our tombstone, our
-  // pointer read below sees null, and its heal lands after that read), so the
-  // join handler mirrors this order — it re-reads the tombstone AFTER writing
-  // the pointer and retracts it (`retractPointerIfKicked`); the pair
-  // (tombstone put → pointer read here, pointer put → tombstone read there)
-  // means one side always sees the other. The member-list put sitting between
-  // our two steps does not disturb that pair. This holds under same-colo
-  // read-your-writes; across colos KV propagates each key independently, which
-  // is the ~60s propagation residual documented in docs/architecture.md.
-  //
-  // Trade-off, deliberately accepted: this reverses the former "tombstone only
-  // after the removal writes succeed" rule. If the member-list put below throws
-  // (500), the target is still listed but cannot reconnect for up to
-  // KICKED_TOMBSTONE_TTL_SECONDS. That protected a still-live member, but a
-  // member the owner is actively kicking is not one the owner wants
-  // reconnecting — the owner still sees them listed, and either a retried
-  // removal converges or `DELETE /api/family/:id/kicked/:uid` lifts the ban.
-  // The helper stays fail-open: a failed tombstone put must not stop the
-  // removal itself (Inv-4), at the cost of reopening the heal window for that
-  // one removal; the owner's re-kick re-attempts the write.
+  // Owner kick only (never a self-leave): tombstone after the settlement, BEFORE the list put and revoke.
+  // Rationale: .claude/rules/backend.md → API Design (kicked tombstone bullet).
   if (targetUserId !== callerId) {
     await writeKickedTombstone(c.env.KV, familyId, targetUserId, callerId);
   }
 
-  // Member-list put FIRST, then the revoke. The list is what every family
-  // read now authorizes against: the bookshelf / members GETs and the borrow
-  // routes require the caller to be LISTED, the bookshelf aggregation only
-  // gathers listed members' books, and create / join / lookup treat a pointer
-  // at a family that no longer lists the user as stale (`isLiveMembership`).
-  // So once this put lands the removal has taken effect (Inv-4), and what a
-  // failed revoke after it leaves behind — a stray `member:{uid}` pointer, and
-  // the target's token — reads nothing family-scoped and blocks nothing.
-  // (`POST /api/auth/refresh` still checks the pointer only, so it can renew
-  // that token; the renewed token reads nothing family-scoped either.) A
-  // retry converges: the target is no longer listed, so the owner's re-kick —
-  // and the target's own retried leave while their token is still alive —
-  // land on the MEMBER_NOT_FOUND branch above, which deletes a stray pointer
-  // naming this family together with its token. If the token delete landed
-  // and the pointer delete did not (`Promise.all` does not cancel the
-  // sibling), the target's next request answers 401, not 404, so the client's
-  // own recovery join runs first. A client that flags it `recovery: 1` is
-  // refused with 409 RECOVERY_NOT_MEMBER — the user is no longer listed — and
-  // the stray pointer stays inert; an older, unflagged client's join is
-  // admitted on a self-leave (no tombstone, and the stray pointer names THIS
-  // family, so no ALREADY_IN_FAMILY) and re-lists them — a retried leave then
-  // succeeds through that transient rejoin, and one who does not retry stays
-  // listed, consistent with the 500 they were shown. Either way the stray
-  // pointer reads nothing until it is cleared.
-  //
-  // The reverse order (revoke, then list put) left a worse half-state when the
-  // put failed: the target still listed — their shared books still in the
-  // others' bookshelf aggregation until someone retried — and, on a
-  // self-leave, their own token already gone, so even retrying the leave had
-  // to wait on the client's recovery rejoin for a new session.
-  //
-  // What this ordering does NOT close: `family:{id}` is a read-modify-write
-  // with no CAS, so a concurrent full-record write that read the list before
-  // our put (a non-healing reconnect carrying a new displayName, the
-  // displayName / member-settings endpoints — started before the tombstone
-  // landed) can still re-list the target after it. Once the revoke below lands
-  // that member has no pointer, and a reconnect that read the pointer before
-  // the revoke still mints a fresh token — but since #222 such a hollow member
-  // is inert: every family-scoped check requires an ACTIVE member (listed AND
-  // pointed, `isActiveMember`), owner-only checks included, so they read no
-  // bookshelf / borrow data, their books leave the aggregation, and a re-listed
-  // ex-owner holds no owner power. The owner still sees them in the members
-  // GET and removes them again — except when that write also restored
-  // `ownerId` to the kicked ex-owner, which leaves the family with no active
-  // owner at all. This race predates #213; see docs/architecture.md →
-  // 已接受的殘餘風險.
+  // Member-list put FIRST, then the revoke: once the list lands the removal has taken effect (Inv-4).
+  // Rationale: .claude/rules/backend.md → API Design; residuals: docs/architecture.md → 已接受的殘餘風險.
   await putFamilyRecord(c.env.KV, familyId, record);
 
-  // Revoke: the pointer is read first and the deletes run only when it names
-  // THIS family. Anything else (null, or another family) means the target's
-  // session belongs elsewhere — e.g. they were left listed-but-pointerless by
-  // an earlier half-failed join and have since created or joined another
-  // family — and must not be clobbered. The tombstone (owner kick) was written
-  // before this read, which is the removal's half of the kick pairing above.
+  // Revoke only a pointer naming THIS family (another family's session is left alone); this read is
+  // the removal's half of the tombstone/pointer pairing.
   const targetPointer = await getMemberFamilyId(c.env.KV, targetUserId);
   if (targetPointer === familyId) {
     await Promise.all([
@@ -891,11 +635,8 @@ familyRoutes.openapi(clearKickedRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Shared "family-write" per-userId write ceiling (30/hr across the six family
-  // write handlers) — see the DELETE member handler for rationale. Charged to
-  // the AUTHENTICATED caller, never to the `:uid` path param: a counter keyed
-  // on someone else's id would be a victim-facing DoS lever. Same placement as
-  // its siblings — after every zero-I/O guard, before the first KV read.
+  // Shared "family-write" ceiling, charged to the AUTHENTICATED caller (never `:uid`) — see the DELETE
+  // member handler.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId: callerId,
     ...FAMILY_WRITE_LIMIT,
@@ -910,10 +651,8 @@ familyRoutes.openapi(clearKickedRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Owner = `ownerId` AND an ACTIVE caller (#222) — a hollow ex-owner whose
-  // `ownerId` a stale full-record write restored gets the non-owner 403, same
-  // as in the DELETE member handler. One pointer read, only for the recorded
-  // owner.
+  // Owner = `ownerId` AND an ACTIVE caller (#222), as in the DELETE member handler; one pointer read,
+  // only for the recorded owner.
   if (
     callerId !== record.ownerId ||
     !(await isActiveMember(c.env.KV, familyId, callerId, record.members))
@@ -921,17 +660,8 @@ familyRoutes.openapi(clearKickedRoute, async (c) => {
     return jsonError(c, 403, "NOT_OWNER", "只有管理者可以解除移除限制");
   }
 
-  // Idempotent by design: the tombstone is never read first, and deleting an
-  // absent key is a no-op, so a retry after a failed call — or a call for a
-  // userId that was never removed — behaves identically and answers 200. That
-  // also means the response discloses nothing about whether the target was
-  // kicked, to an owner who is by definition entitled to know anyway.
-  //
-  // Cross-family safety: the key is built from the path `id` the caller was
-  // just proven to own, so this can only ever clear a tombstone of THIS family.
-  //
-  // Not a re-add: the user is merely allowed to join again, which they must do
-  // themselves with the sync code (Invariant 4 stays intact).
+  // Idempotent, read-free delete scoped to the owned `:id`; lifts the ban only, never re-adds (Inv-4).
+  // See docs/architecture.md → 家庭群組 API.
   await deleteKickedTombstone(c.env.KV, familyId, targetUserId);
 
   return c.json({ data: { cleared: BoolFlag.TRUE } });
@@ -961,17 +691,12 @@ familyRoutes.openapi(listMembersRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Same re-check as the bookshelf read: a pointer naming this family is not
-  // enough once the record no longer lists the caller (a join racing a kick, a
-  // stale pointer read at the removal). Zero extra reads; byte-identical to the
-  // pointer-mismatch 404 above.
+  // Same re-check as the bookshelf read (pointer alone is not proof); zero extra reads, same 404.
   if (!hasMember(record.members, userId)) {
     return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
 
-  // The list is returned UNFILTERED on purpose — a hollow member (#222) stays
-  // visible so the owner can re-kick it; see `isActiveMember` in
-  // services/membership.ts.
+  // UNFILTERED on purpose: a hollow member (#222) stays visible so the owner can re-kick it.
   return c.json({ data: record });
 });
 
@@ -1023,11 +748,8 @@ familyRoutes.openapi(updateDisplayNameRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // The caller IS the target here (checked above), so this one check covers
-  // both. ACTIVE, not merely listed (#222): a kicked member re-listed by a
-  // stale full-record write has no pointer, and letting them write the whole
-  // record back would make them one more re-listing writer. Same 404 as an
-  // unlisted caller. One pointer read.
+  // Caller IS the target; ACTIVE, not merely listed (#222) — a hollow member must not write the record
+  // back. Same 404 as an unlisted caller, one pointer read.
   const member = findMember(record.members, targetUserId);
   if (
     !member ||
@@ -1093,11 +815,8 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
     }
   }
 
-  // Validate readmooName if present. Three accepted shapes:
-  //   undefined → no change
-  //   null      → delete field (clear readmooName)
-  //   string    → set value (must pass sanitizeShortString: non-empty, ≤ 50 chars after cleaning)
-  // Anything else (empty string, numbers, booleans, objects, …) → 400 INVALID_FIELDS.
+  // readmooName: undefined = no change, null = clear, string = set (sanitizeShortString: non-empty,
+  // ≤ 50 chars after cleaning); anything else (incl. "") → 400 INVALID_FIELDS.
   let readmooNameAction:
     { type: "set"; value: string } | { type: "delete" } | null = null;
   if (body.readmooName === null) {
@@ -1122,15 +841,8 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Verify caller is an ACTIVE member — listed AND pointed at this family
-  // (#222): a kicked member re-listed by a stale full-record write must not
-  // write the whole record back. One pointer read.
-  //
-  // The TARGET only has to be listed, as before: the owner editing a hollow
-  // member's canLend / readmooName is harmless — the hollow member is inert on
-  // every read and borrow path anyway — and the re-listing risk comes from the
-  // WRITER's stale read, not from whom it edits. Requiring an active target
-  // would cost a second read for nothing.
+  // The caller must be ACTIVE (#222; one pointer read); the TARGET need only be listed.
+  // Rationale: .claude/rules/backend.md → API Design (bidirectional authorization).
   if (!(await isActiveMember(c.env.KV, familyId, callerId, record.members))) {
     return jsonError(
       c,
@@ -1150,10 +862,8 @@ familyRoutes.openapi(updateMemberSettingsRoute, async (c) => {
     );
   }
 
-  // Permission checks. The caller was proven ACTIVE above, so
-  // `callerId === record.ownerId` below already means an active owner (#222) —
-  // no further pointer read is needed for the owner-only branches.
-  // canLend: only owner can change
+  // Caller proven ACTIVE above, so `callerId === record.ownerId` means an active owner (#222).
+  // canLend: only the owner can change it.
   if (body.canLend !== undefined && callerId !== record.ownerId) {
     return jsonError(
       c,
@@ -1239,10 +949,8 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // Owner = `ownerId` AND an ACTIVE caller (#222), as in the DELETE member
-  // handler: a hollow ex-owner must not hand the family on. One pointer read,
-  // only for the recorded owner — so a successful transfer costs two (caller
-  // here, `newOwnerId` below).
+  // Owner = `ownerId` AND an ACTIVE caller (#222); a successful transfer costs two pointer reads
+  // (caller here, `newOwnerId` below).
   if (
     callerUserId !== record.ownerId ||
     !(await isActiveMember(c.env.KV, familyId, callerUserId, record.members))
@@ -1255,9 +963,7 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
     return jsonError(c, 400, "SAME_OWNER", "不能轉移給自己");
   }
 
-  // The new owner must be ACTIVE (#222): handing ownership to a kicked member
-  // re-listed by a stale full-record write would give the family to someone
-  // who can no longer read it. One pointer read.
+  // The new owner must be ACTIVE (#222): a hollow member can no longer read the family. One read.
   if (
     !(await isActiveMember(c.env.KV, familyId, body.newOwnerId, record.members))
   ) {
@@ -1273,11 +979,8 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
   return c.json({ data: record });
 });
 
-/**
- * Validate the `apiEndpoint` field of PUT /api/family/:id/endpoint and return
- * the value to persist (`null` clears the endpoint). Pure: no I/O and no
- * response building — the caller maps a failure onto `jsonError(c, 400, ...)`.
- */
+/** Validate `apiEndpoint` for PUT /api/family/:id/endpoint; returns the value to persist (`null`
+ *  clears it). Pure: the caller maps a failure onto a 400. */
 function validateApiEndpoint(
   value: unknown,
 ):
@@ -1324,20 +1027,11 @@ function validateApiEndpoint(
     };
   }
 
-  // The Worker itself never fetches this URL. The endpoint is redistributed
-  // to every family member, so the threat is a family owner steering OTHER
-  // members' clients at an address inside their own network. Reject the
-  // literal address forms that make that attack cheap. Not a complete
-  // defence, by design: a DNS name that resolves to an internal host is
-  // indistinguishable from a legitimate one here, and IPv4 literals outside
-  // the ranges below (e.g. 100.64.0.0/10 CGNAT / Tailscale, 224.0.0.0/4)
-  // are not classified either. Both stay allowed.
+  // Reject the cheap internal-address literals an owner could steer members at; deliberately not a
+  // complete defence. See docs/architecture.md → 家庭 API 位址的驗證.
   const hostname = url.hostname;
   if (hostname !== "localhost" && hostname !== "127.0.0.1") {
-    // The WHATWG URL parser keeps the brackets on an IPv6 host ("[::1]"), so
-    // a leading "[" is a reliable marker. All IPv6 literals are rejected
-    // rather than range-classified — that also covers IPv4-mapped forms such
-    // as [::ffff:10.0.0.1], which would otherwise slip past the IPv4 check.
+    // Every IPv6 literal (kept bracketed by WHATWG URL) is rejected, IPv4-mapped forms included.
     if (hostname.startsWith("[")) {
       return {
         ok: false,
@@ -1423,10 +1117,8 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
 
   const record = normalizeFamilyRecord(raw);
 
-  // The pointer check above is only half of an ACTIVE member (#222): a stray
-  // pointer can outlive its listing (#213), so the caller must also be listed.
-  // Zero extra reads — the record is already in hand. Same answer as the
-  // pointer miss: to an unlisted caller this family does not exist.
+  // The pointer is half of ACTIVE (#222): the caller must also be listed. Zero extra reads, same 404 as
+  // the pointer miss.
   if (!hasMember(record.members, callerId)) {
     return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
@@ -1446,41 +1138,8 @@ familyRoutes.openapi(updateEndpointRoute, async (c) => {
   return c.json({ data: record });
 });
 
-/**
- * Write the owner-initiated removal tombstone `kicked:{familyId}:{userId}`.
- *
- * WHY: without it the removal does not stick — the removed member's client
- * rejoins automatically with just `{ userId }` and is back in the family
- * seconds later. While the tombstone lives (`KICKED_TOMBSTONE_TTL_SECONDS`, 6h)
- * `POST /api/family/:id/join` refuses that userId with 403 MEMBER_REMOVED, in
- * the new-member branch, the existing-member reconnect branch, and
- * QR-token-bypass joins alike.
- *
- * Only ever called for `targetUserId !== callerId` — an owner removing ANOTHER
- * member. A voluntary self-leave must NOT be tombstoned (leave-then-rejoin is a
- * legitimate flow), and neither dissolve path (sole-member owner, last listed
- * member) reaches a call site. Enforcing that discriminator is the CALLER's job; this helper writes
- * unconditionally.
- *
- * Reversible before its TTL: the owner-only `DELETE /api/family/:id/kicked/:uid`
- * handler deletes the same key, so a removal made by mistake is undone on demand
- * instead of being waited out.
- *
- * Both call sites write it BEFORE reading and revoking the target's pointer
- * (see the removal handler for why); the removal also writes it before its
- * member-list put, so a kick whose list put fails can leave a tombstone for a
- * member who is still listed — accepted: the owner retries or lifts it via the
- * un-kick route.
- *
- * FAIL-OPEN by design: a failed put is logged and swallowed, never surfaced as a
- * 500. On the removal call site a failed tombstone must not stop the removal
- * itself (Invariant 4 requires it to happen immediately); on the
- * MEMBER_NOT_FOUND call site the response is already an error. A missing
- * tombstone only degrades to the previous, weaker behaviour, and the owner's
- * next DELETE retry re-attempts the write via the idempotent re-kick path.
- *
- * Side effect: exactly one KV put. Never throws.
- */
+/** Put the kick tombstone (one KV put, FAIL-OPEN: logs, never throws); callers pass only an owner kick
+ *  of ANOTHER member. Rationale: .claude/rules/backend.md → API Design (kicked tombstone bullet). */
 async function writeKickedTombstone(
   kv: KVNamespace,
   familyId: string,
@@ -1510,15 +1169,8 @@ interface JoinStepInput {
   record: FamilyRecord;
 }
 
-/**
- * The join handler's verification step: the one-time QR-token bypass, else the
- * shared verification gate. Returns the gate's error Response when the caller
- * failed it, `null` when they passed.
- *
- * Side effects: when `qrToken` is a non-empty string, one KV get (QR token),
- * plus one KV delete only for a token issued to `userId` (which skips the
- * gate); in every other case, whatever `validateVerification` reads and charges.
- */
+/** Join's verification step: a one-time QR token issued to `userId` (one get + delete) skips the gate,
+ *  else `validateVerification`. Returns the gate's error Response, or `null` when passed. */
 async function passJoinVerificationGate(
   c: Context<{ Bindings: Env }>,
   input: {
@@ -1544,19 +1196,8 @@ async function passJoinVerificationGate(
   // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
   // Users with no verification record (method: "none") pass automatically.
   if (!skipVerification) {
-    // Failure accounting / lockout is charged to the CALLER (client IP, IPv6
-    // bucketed per /64), never to the target account. This endpoint is public
-    // and userId is derived from the user's email with a fixed salt, so a
-    // LOCKOUT keyed on the victim would let any stranger lock them out of PWA
-    // login on demand (DoS). Membership is NOT a usable trust signal here for
-    // the same reason. Brute force from a SINGLE source stays bounded by the
-    // per-IP sensitive-route limit (3/min); an attacker rotating source prefixes
-    // is bounded by the "verify" attempt ceiling inside `validateVerification`
-    // (10/hour, keyed on userId, shared with create and lookup). Unlike the
-    // former standalone per-userId "join" counter — now removed — that ceiling is
-    // charge-on-failure (the secret is compared first, only wrong guesses are
-    // charged), so it never blocks the owner's own correct-secret reconnect.
-    // No bound holds under DEV_MODE=1.
+    // Lockout charged to the CALLER (IP, IPv6 per /64), never the target; wrong guesses also hit the
+    // charge-on-failure "verify" ceiling. See docs/architecture.md → PWA 登入驗證機制 → 安全措施.
     const verification = await validateVerification(
       c.env,
       userId,
@@ -1571,56 +1212,16 @@ async function passJoinVerificationGate(
   return null;
 }
 
-/**
- * The join handler's existing-member branch: a listed member reconnecting from
- * a new device. Heals a missing or stale pointer (then re-checks the kicked
- * tombstone), or — on a non-healing reconnect — writes back a changed
- * displayName, and returns the member's (reused or fresh) auth token.
- *
- * Side effects: a healing reconnect puts `member:{userId}` and re-reads the
- * tombstone, possibly retracting the pointer (403 MEMBER_REMOVED, no token);
- * a non-healing one may put `family:{familyId}`. Then `getOrGenerateAuthToken`.
- */
+/** Join's existing-member branch: heals the pointer (+ tombstone re-check, may 403) or, when not healing,
+ *  may put a changed displayName; then `getOrGenerateAuthToken`. */
 async function reconnectExistingMember(
   c: Context<{ Bindings: Env }>,
   input: JoinStepInput & { existingFamily: string | null },
 ) {
   const { familyId, userId, displayName, record, existingFamily } = input;
 
-  // Heal a missing or stale pointer: the record lists this user but
-  // `member:{uid}` does not name this family. The handler's pre-gate check let
-  // only three shapes through to here — no pointer, an orphan (record gone),
-  // or one at a family that no longer lists the user — and overwriting is
-  // right for all three. The usual source is a new-member join whose pointer
-  // put failed after the record put (see below). `member:{uid}` is checked
-  // first by bookshelf / members / auth refresh, so without this write the
-  // reconnect would mint a token that cannot read the family.
-  //
-  // A heal must not land for a member whose removal is in flight — combined
-  // with any concurrent stale-list write re-listing them, it would be a full
-  // re-admission. The handler's tombstone gate cannot guarantee that alone:
-  // when the target was ALREADY listed-but-pointerless (an earlier half-failed
-  // join), this handler can pass the gate before the owner's tombstone lands,
-  // the owner's pointer read then sees null and deletes nothing, and the heal
-  // put lands after it. So the guarantee is a PAIR of mirrored orders: the
-  // removal writes the tombstone, THEN reads the pointer; the heal writes the
-  // pointer, THEN re-reads the tombstone (`retractPointerIfKicked`). Under
-  // same-colo read-your-writes at least one side observes the other — the
-  // removal's pointer read sees the healed pointer and deletes it, or the
-  // re-check sees the tombstone and this handler retracts its own pointer
-  // and answers 403 MEMBER_REMOVED before any token is minted. Cross-colo
-  // propagation is the documented ~60s residual, as is a tombstone put that
-  // failed open. Cost: one extra read, on this rare heal path only.
-  //
-  // Defence in depth: a healing reconnect still NEVER writes the family
-  // record back — not even for a changed displayName — since `record` may
-  // predate a concurrent removal's put, and with no CAS a stale-record put
-  // would re-list the target together with the pointer healed here. The
-  // displayName catches up on the next, non-healing reconnect or via the
-  // displayName endpoint.
-  //
-  // Reuses the pointer read from the top of the handler to decide whether to
-  // heal, and runs only after the verification and kicked-tombstone gates.
+  // Heal a pointer not naming this family, then re-read the tombstone (mirrored kick pairing); a heal
+  // never writes the record back. See docs/architecture.md → 家庭成員的授權與移除.
   const healsPointer = existingFamily !== familyId;
   if (healsPointer) {
     await putMemberFamilyId(c.env.KV, userId, familyId);
@@ -1646,15 +1247,8 @@ async function reconnectExistingMember(
   return c.json({ data: { ...record, authToken, expiresAt } }, 200);
 }
 
-/**
- * The join handler's new-member branch: refuses a full family (409
- * FAMILY_FULL), otherwise adds the user to the member list, re-checks the
- * kicked tombstone and mints a fresh auth token.
- *
- * Side effects: mutates `record.members`; puts `family:{familyId}` then
- * `member:{userId}`; may retract that pointer (403 MEMBER_REMOVED, no token);
- * otherwise `generateAuthToken` (fresh token, any previous one revoked).
- */
+/** Join's new-member branch: 409 FAMILY_FULL, else puts `family:{id}` then `member:{uid}`, re-checks the
+ *  tombstone (may retract + 403) and mints a fresh token via `generateAuthToken`. */
 async function admitNewMember(
   c: Context<{ Bindings: Env }>,
   input: JoinStepInput,
@@ -1674,22 +1268,13 @@ async function admitNewMember(
     canLend: BoolFlag.TRUE,
   });
 
-  // Sequential, family record FIRST. If the pointer put then fails, the user is
-  // listed without a pointer; the retry finds them in the member list, takes
-  // `reconnectExistingMember` and heals the pointer there. The reverse order
-  // could leave a pointer at a family that does not list the user; if that
-  // family then filled up, this join answers FAMILY_FULL while the live pointer
-  // makes create and every other join answer ALREADY_IN_FAMILY — stuck for good.
+  // Sequential, family record FIRST: a failed pointer put is healed by the retry's reconnect branch.
+  // See docs/architecture.md → 家庭成員的授權與移除.
   await putFamilyRecord(c.env.KV, familyId, record);
   await putMemberFamilyId(c.env.KV, userId, familyId);
 
-  // Same mirrored-order re-check as the heal above: an owner who saw this
-  // record put and kicked writes the tombstone before reading the pointer, so
-  // either that read deletes the pointer just written or this re-check sees
-  // the tombstone. On retraction the member-list entry stays — the in-flight
-  // kick's own list put removes it (or, after a pre-emptive 404 re-kick, the
-  // owner sees them listed and removes them again); no token is minted. Cost:
-  // one extra small read per new-member join, a rare sensitive-tier request.
+  // Mirrored-order tombstone re-check, as in the heal; on retraction the list entry stays and no token
+  // is minted. See docs/architecture.md → 家庭成員的授權與移除.
   if (await retractPointerIfKicked(c.env.KV, familyId, userId)) {
     return memberRemovedResponse(c);
   }
@@ -1700,32 +1285,8 @@ async function admitNewMember(
   return c.json({ data: { ...record, authToken, expiresAt } }, 200);
 }
 
-/**
- * Join-side half of the kick ordering: called right AFTER the join handler has
- * put `member:{userId}` → familyId (heal or new member). Re-reads the kicked
- * tombstone; if one has landed since the join's tombstone gate, retracts the
- * pointer this request just wrote and returns `true` so the caller answers
- * 403 MEMBER_REMOVED without minting a token.
- *
- * Mirrors the removal's "tombstone put → pointer read": the join writes the
- * pointer, then reads the tombstone. Under same-colo read-your-writes at least
- * one of the two reads observes the other side's write, so a pointer can no
- * longer be healed back past an in-flight kick unnoticed.
- *
- * The retraction only deletes a pointer that STILL names `familyId`. Between
- * this request's pointer put and its tombstone re-read, the owner's kick can
- * complete (deleting that pointer and the token) and the same user can join
- * ANOTHER family, whose pointer then occupies the key — an unconditional delete
- * would strand that other family's session (404 on members / bookshelf). The
- * `true` return does not depend on the pointer: the tombstone alone is what
- * refuses this join. This is read-then-delete, not an atomic compare-and-delete
- * — KV has no CAS, so a pointer write landing between the read and the delete
- * can still be clobbered (same class as the documented no-CAS / ~60s
- * residuals in `docs/architecture.md` → 已接受的殘餘風險).
- *
- * Side effects: one KV get (tombstone); when it exists, one more KV get
- * (pointer) and at most one KV delete.
- */
+/** Join half of the kick pairing: after the pointer put, re-read the tombstone; if present, delete the
+ *  pointer only while it still names `familyId`; `true` → 403. .claude/rules/backend.md → API Design. */
 async function retractPointerIfKicked(
   kv: KVNamespace,
   familyId: string,
@@ -1740,23 +1301,8 @@ async function retractPointerIfKicked(
   return true;
 }
 
-/**
- * Classify a user's current membership state for the family-create flow.
- *
- * - `"in-family"` — `member:{userId}` points at a live family record that lists
- *   the user ⇒ creation must be rejected with ALREADY_IN_FAMILY.
- * - `"orphaned"` — the member key is stale (see `isLiveMembership` in
- *   `services/membership.ts`) ⇒ it must
- *   be deleted before creating. Two shapes: the pointed family record no longer
- *   exists — exactly the half-state a create (pointer put, then family put) or
- *   a sole-owner dissolve (family delete, then pointer delete) leaves when it
- *   fails between its two writes; or the record exists but no longer lists the
- *   user — a join that raced a kick, or a stale pointer read at the removal.
- * - `"none"` — no membership key at all.
- *
- * Read-only on purpose: the orphan cleanup write is left to the caller so it can
- * run AFTER the verification gate, keeping failed attempts side-effect free.
- */
+/** Create-flow membership: "in-family" (live, `isLiveMembership`) / "orphaned" (stale pointer to delete) /
+ *  "none". Read-only: cleanup runs after the gate (.claude/rules/backend.md → Route handler invariants). */
 async function classifyMembershipForCreate(
   kv: KVNamespace,
   userId: string,

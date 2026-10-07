@@ -246,6 +246,7 @@ Extension 的書單同步（讀取 → 合併 → 整份 PUT）會帶上它讀�
 - **家庭人數上限**：`max_members` 預設為 2（配合讀墨官方限制）
 - **管理者**：`owner_id` 記錄家庭建立者，擁有移除成員與轉移管理權的權限
 - **存取層**：上表中 route 會觸及的 key family 都有對應的存取模組（`worker/src/kv/families.ts`、`users.ts`、`publicShelves.ts`、`verify.ts`；函式第一個參數為 `kv: KVNamespace`，一個函式一次 KV 操作並註明 key 與 TTL）。只在 `services/`、`middleware/` 內部使用的 key 刻意沒有存取模組：`verifyfail:{user_id}:{caller}` 與驗證閘對 `otp:{user_id}` 的讀取只存在於 `worker/src/services/verification.ts`，`public:{share_token}` 的寫入只走 `worker/src/services/publicShelf.ts`（該處同時負責網址白名單過濾與動態 TTL）。route 模組一律不直接呼叫 `c.env.KV`、不 import `kvKeys`，改為呼叫這些存取函式或 `worker/src/services/*`；此界線由 `worker/eslint.config.js` 中 `src/routes/**` 的 lint 規則（僅涵蓋靜態寫法）與 `worker/tests/unit/kvAccessBoundary.test.ts` 的原始碼掃描共同把關
+- **驗證相關 key 的存取範圍**：`worker/src/kv/verify.ts` 只給 route handler 使用——`routes/verify.ts` 讀寫 `verify:{userId}`，並寫入 `otp:{userId}` 與 `qr:{token}`；`routes/family.ts` 的加入家庭 handler 在 QR Token 略過驗證的路徑上，先讀取再刪除 `qr:{token}`（`getQrTokenRecord`／`deleteQrToken`）。驗證閘門（`worker/src/services/verification.ts`）不經過這個模組，自己直接存取 KV：讀取 `verify:{userId}`；讀取 `otp:{userId}`，比對成功且 `consumeOtp` 未關閉時刪除它；讀取、寫入與刪除 `verifyfail:{userId}:{caller}`。OTP 的讀取與「要不要消耗」是閘門邏輯的一部分，不屬於存取層；`verifyfail:*` 只在閘門內寫入，因此也沒有存取函式
 
 ---
 
@@ -680,7 +681,7 @@ PWA **不會**自動套用家庭記錄的端點，也沒有這個確認面板—
 - 同一家庭的所有成員必須使用相同的 API 端點
 - 同步碼中的 `@host` 段可解決此問題：發起者設定一次，受邀者在加入時跟隨（加入畫面會先顯示該位址；位址驗不過則中止加入，加入未成功則不保存）
 - 管理者事後變更家庭端點時，成員端不會自動跟隨，必須各自確認
-- 用戶端與 Worker 允許的位址範圍**刻意不同**：用戶端為了讓區網自架仍然可用，放行整個私有網段（含 `*.local`）的 HTTP，HTTPS 下也不對 IP literal 做分類；Worker 則為了避免管理者把其他成員的用戶端指向他們自己的內網，擋掉全部私有 IPv4 網段（10/8、172.16/12、192.168/16、127/8，僅保留 `127.0.0.1`）與所有 IPv6 literal，HTTP 只放行 `localhost` 與 `127.0.0.1`
+- 用戶端與 Worker 允許的位址範圍**刻意不同**：用戶端為了讓區網自架仍然可用，放行整個私有網段（含 `*.local`）的 HTTP，HTTPS 下也不對 IP literal 做分類；Worker 則為了避免管理者把其他成員的用戶端指向他們自己的內網，擋掉全部私有 IPv4 網段（10/8、172.16/12、192.168/16、169.254/16、127/8、0/8，僅保留 `127.0.0.1`）與所有 IPv6 literal，HTTP 只放行 `localhost` 與 `127.0.0.1`
 - 因此區網位址**可以被用戶端套用（同步碼 `@host`），卻永遠寫不進家庭記錄**——`PUT /api/family/:id/endpoint` 一律回 400，而建立家庭時那次寫入是 fire-and-forget，失敗不會有任何提示；家庭記錄就此長期停在「沒有端點」，確認面板把它讀成「回復官方預設」的方向，對每台裝置各問一次（拒絕會被記住，是一次提示而非重複迴圈），選「暫不切換」即可，區網自架本身並沒有壞掉（面板在這個方向的標題寫「家庭未指定 API 端點」而非宣稱端點已變更，正是為了這個情形）
 - 想完全避開這個提示，請讓自建 Worker 使用公開的 HTTPS 網域：這類位址 Worker 會接受並寫入家庭記錄，家庭記錄驅動的端點流程對每位成員都能正常運作
 
@@ -1283,6 +1284,68 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 - **還原使用者原本的搜尋**：`previousQuery` 讓呼叫端在整個流程結束後把書櫃還原成使用者原本的搜尋狀態（有關鍵字就重新套用，沒有就送出空查詢清掉篩選）。**時機**：成功路徑上不能在中途還原——還原會重新渲染書櫃、讓這張卡片的節點脫離 DOM，而之後開啟詳情視窗的點擊必須打在仍掛著的卡片上；呼叫端只在整個流程結束後還原。搜尋成功之後的任何失敗則由這裡負責還原，使用者不會被留在篩選過的書櫃；**順序**：先關掉殘留的視窗再還原（`clickLendButton` 可能已經開了詳情視窗，還原會重新渲染書櫃，仍開著的視窗會疊在上面）。還原是盡力而為，絕不蓋掉原本要重新拋出的錯誤。
 - **書櫃網址跟著目前的主機**：每次呼叫才解析（不是模組常數），新舊兩個主機都讓使用者留在原本的網站，兩者的路徑前綴不同（`/read/#/library` 與 `/#/library`）。
 - 每個函式都沒有狀態，可以各自測試；逾時可以注入，失敗一律拋出 `ReadmooLendError`。`readmoo-dom.ts` 是兩者共用的底層，`readmoo-lend.ts` 再匯出其中的 DOM 基本函式，打破 `readmoo-lend` ↔ `readmoo-search` 的模組循環。
+
+---
+
+## 十五、Worker 後端的設計理由
+
+`worker/src/` 的程式碼註解最多兩行，較長的設計理由集中在本節、本文件其他已有的小節（「2.4 Cloudflare Workers (API)」、「三、資料流程」、「已接受的殘餘風險」、「PWA 登入驗證機制」、「十一、個人公開書櫃分享」），以及 `.claude/rules/backend.md`（API Design、KV Key Patterns、Route handler invariants），註解以「`docs/architecture.md → <小節名稱>`」或「`.claude/rules/backend.md → <小節名稱>`」指回這裡。
+
+### 路由層（routes/）的設計理由
+
+#### 每帳號寫入上限能擋住什麼
+
+以 userId 計數、每小時一個窗口的寫入上限共有五組，都疊在 per-IP 限制之上：`verify-write`（`worker/src/routes/verify.ts` 的 `VERIFY_WRITE_LIMIT`，每小時 30 次，PUT verify／OTP／prompted／qr-token 四個寫入端點共用）、`family-write`（`worker/src/routes/family.ts` 的 `FAMILY_WRITE_LIMIT`，每小時 30 次，六個家庭寫入端點共用）、`public-shelf`（`worker/src/routes/publicShelf.ts` 的 `PUBLIC_SHELF_WRITE_LIMIT`，每小時 30 次，建立／更新／重設網址／關閉四個端點共用）、`put-books`（`PUT` 與 `PATCH /api/user/:id/books` 共用，每小時 30 次），以及 `family-prefs`（`PUT /api/user/:id/family-prefs`，每小時 60 次）。
+
+- **它們限制的是單一已驗證帳號的消耗速度，不是硬上限**。userId 由 email 推導、不是憑證，自己產生一個帳號幾乎沒有成本；這些上限把「一個帳號幾分鐘內燒光免費方案每日 1,000 次 KV 寫入額度」拉長成數小時，並逼攻擊者每用完一份額度就得再建立（加入）一個帳號，但不能單獨讓額度變得安全。真正的全域上限要靠邊緣層（Cloudflare WAF Rate Limiting，見「運維層的補強」與 `worker/DEPLOY.md` →「免費方案額度與濫用防護」）。
+- **計數器本身也寫 KV**：每小時的計數器記在 KV，每放行一個請求寫一次（被 429 擋下的請求不寫）。per-IP 計數器在正常部署下由原生 Rate Limiting binding 計數、不寫 KV；只有缺少 binding、退回 KV 計數時，它才在驗證身分之前每個請求寫一次，這時無視 429 持續送出的未驗證流量仍在這些上限管不到的地方消耗額度（每分鐘最多 60 次，約 17 分鐘耗盡當日額度）。
+- **量級**：`verify-write` 的四個端點各只寫一次 KV，連同計數器每小時約 60 次寫入，持續一整天約 1,440 次（退回 KV 計數 per-IP 時每小時約 90 次）。`public-shelf` 以建立／更新（清單與快照各寫一次）計，連同每帳號計數器約每小時 90 次寫入、一天約 2,160 次（退回 KV 計數 per-IP 時約每小時 120 次、一天約 2,880 次）；沒有這道上限時，單一已驗證帳號約 8 分鐘（退回 KV 計數時約 6 分鐘）就能燒光當日額度，有了它約需 11 小時（退回時約 8 小時）。
+- **`family-write` 的 30 次是請求數，不是 KV 寫入數**：一次放行的 Owner 移除成員會寫墓碑、寫家庭紀錄、刪除目標的 `member:{uid}` 與兩把 auth token key，借閱結算再加最多一次借閱索引寫入，外加每筆移出索引的紀錄各刪一次 `borrow:{requestId}` 指標。計數器是先讀後寫、非原子操作，平行送出的一批請求會依呼叫方的並行數超出上限（見「已接受的殘餘風險」→ 速率限制不是硬上限）。
+- **`verify-write` 與驗證閘門的 `verify` 猜錯上限刻意分開計數**：共用一個計數器的話，攻擊者的猜錯次數會擠掉帳號本人調整驗證設定的額度，反之亦然。
+- 收費位置與「以已驗證的呼叫者計數、絕不以路徑上的 `:uid` 計數」的規則，見 `.claude/rules/backend.md` → Route handler invariants 與 API Design。
+
+#### 家庭成員的授權與移除
+
+- **加入家庭的寫入順序**：新成員先寫 `family:{id}`，再寫 `member:{uid}`。歸屬紀錄寫入失敗時，使用者已在名單上，重試會走既有成員重連分支把歸屬紀錄補回。反過來的順序會留下一筆指向「名單上沒有他」之家庭的歸屬紀錄；這種歸屬紀錄在現行的有效歸屬規則（`worker/src/services/membership.ts` 的 `isLiveMembership`）下視為失效，不會擋住建立或其他加入，但先寫名單能讓重試直接補回，不必依賴這條規則。
+- **重連補回歸屬紀錄是必要的**：家庭書櫃、成員清單與 `POST /api/auth/refresh`（請求帶 `familyId` 時）都先檢查 `member:{uid}`，名單上有他、歸屬紀錄卻不指向本家庭時若不補回，重連拿到的 token 讀不到這個家庭。能走到補回的只有三種歸屬紀錄：不存在、指向已不存在的家庭、指向名單上已沒有他的家庭；三種都該覆寫。補回只發生在這條少見的分支，多出的墓碑複查讀取也只在這裡付。補回之後為何要再查一次墓碑（與踢除對稱的寫入順序），以及補回時為何一律不寫回成員名單，見「已接受的殘餘風險」中家庭多鍵寫入那一列。
+- **墓碑檢查的成本**：加入家庭在驗證閘門之後多讀一次 `kicked:{family_id}:{user_id}`；這是有速率限制的敏感端點，成本可以接受。檢查的位置與涵蓋範圍見「PWA 登入驗證機制」→ 安全措施（`MEMBER_REMOVED` 那一點）。
+- **新成員加入後的墓碑複查只撤回歸屬紀錄**：寫入歸屬紀錄後若查到墓碑，撤回剛寫的歸屬紀錄、回 `403 MEMBER_REMOVED`、不發 token，但名單上新加的那一項保留：進行中的移除會自己寫入名單把他拿掉；若 Owner 是在他加入之前就經 `404 MEMBER_NOT_FOUND` 分支預先補寫了墓碑，Owner 會在成員清單上看到他，再移除一次即可。成本是每次新成員加入多一次小讀取。
+- **Owner 可以預先寫墓碑**：`404 MEMBER_NOT_FOUND` 分支在 Owner 指定他人時會等冪補寫墓碑，因此 Owner 也能替從未加入的 userId 預先寫入墓碑。影響只限他自己的 familyId，也本來就在他的權限內（他可以隨時移除任何成員），所以無害。
+- **成員上限沒有原子檢查**：KV 沒有 compare-and-swap，同時送出的兩個加入請求可能一起超過 `maxMembers`；以 2 人家庭、低並行的實際使用情境而言可以接受。
+
+#### 家庭 API 位址的驗證
+
+`PUT /api/family/:id/endpoint` 由 `validateApiEndpoint`（`worker/src/routes/family.ts`）檢查 `apiEndpoint`。Worker 自己從不連線到這個位址；它會分送給所有成員，所以要防的是 Owner 把其他成員的用戶端指向他們自己網路內的位址。Worker 擋掉的是最廉價的字面位址形式：
+
+- 超過 2,048 字元；`null` 以外的非字串；無法解析的 URL。
+- 非 HTTPS 的位址，只有 `localhost` 與 `127.0.0.1` 可以用 HTTP。
+- 所有 IPv6 字面位址：WHATWG URL 解析器會保留主機的方括號（`[::1]`），所以以開頭的 `[` 判斷；整類拒絕而不分網段，也一併擋下 `[::ffff:10.0.0.1]` 這種 IPv4-mapped 寫法，否則它會繞過下面的 IPv4 檢查。
+- IPv4 字面位址落在 10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16（link-local）、127.0.0.0/8（`127.0.0.1` 本身除外）或 0.0.0.0/8。
+
+這刻意不是完整的防護：解析到內網的網域名稱在 Worker 這裡與正常網域無從區分，上列以外的 IPv4 字面位址（例如 100.64.0.0/10 的 CGNAT／Tailscale、224.0.0.0/4）也不分類，兩者都放行，缺口由用戶端補上（見「端點切換確認」）。通過檢查的位址會去掉路徑結尾的斜線再儲存。
+
+#### 借閱請求的狀態與結算
+
+- **列表只回傳呼叫者是當事人的紀錄**（理由見「已接受的殘餘風險」中 borrow 紀錄無 TTL 那一列）。兩端用戶端都不需要第三方的紀錄：借閱分頁以 `ownerId === userId`／`borrowerId === userId` 分組（`extension/src/dialog/BorrowTab.tsx`、`pwa/src/pages/BorrowPage.tsx`），標示「已申請」的 `pendingBookIds` 只收集呼叫者自己 PENDING 的申請（`extension/src/dialog/useBorrowAction.ts`、`pwa/src/hooks/useBorrowAction.ts`）；建立借閱的 `DUPLICATE_REQUEST` 檢查直接讀借閱索引，不依賴列表的回應。
+- **PATCH 只寫一次**：紀錄就在索引裡，`borrow:{requestId}` 指標只存 `familyId`，狀態變更改不到它。改寫索引可能淘汰同一借方較舊的終態紀錄，但剛更新的那筆 `updatedAt` 最新，不會是被淘汰的那一筆。
+- **PATCH 找不到紀錄一律回 `404 REQUEST_NOT_FOUND`**：紀錄可能已超出借方的歷史上限被修剪，也可能是孤兒指標（修剪的 fail-open 刪除沒有成功，或建立時寫了指標卻沒寫成索引）。回應與未知的 requestId 完全相同，不多揭露任何事。
+- **家庭紀錄不存在時跳過成員檢查**：這是孤兒路徑，來自任何一次解散（`worker/src/services/familyDissolve.ts` 的 `dissolveFamily`：單人管理者解散、名單上最後一人離開家庭，或最後一人刪除帳號）中 fail-open 的借閱索引刪除沒有成功（`BORROW_INDEX_DELETE_FAILED`）。沒有名單可比對，交易雙方仍可收尾，非當事人仍由當事人檢查擋下。家庭仍存在時為何要重驗成員資格（#159），以及剩下約 60 秒的傳播窗口，見「已接受的殘餘風險」中 borrow 當事人 PATCH 那一列。
+- **索引成長的驗收標準**：`worker/tests/integration/budget/borrow-index-growth.test.ts` 釘住列表讀取維持 O(1)。修剪與離開時的清除讓索引有界，但同一家庭的並發寫入仍會互相覆蓋；要嚴格正確，得把索引改成每位借方各一把，或改用 Durable Objects。
+
+#### 公開書櫃的寫入與撤銷
+
+- **重設網址的順序**：先寫新 token 的快照，再寫清單，最後刪舊快照。讀者在清單寫入之後讀到新清單時，新快照必定已經在位；但讀取端會以清單驗證每一份快照，所以清單寫入也必須傳播到讀者所在的資料中心，在那之前新 token 最多約 60 秒會讀到 404（fail-closed，會自行恢復）。舊快照的刪除排在最後，失敗只會留下一份讀取端本來就拒絕提供的孤兒。
+- **關閉公開書櫃的順序：先寫清單，最後刪快照**。有了讀取端的比對，寫入清單本身就是撤銷，所以它必須最先落地。兩種半途失敗都是 fail-closed：清單寫入失敗等於什麼都沒發生（書櫃仍在清單上、快照也還在，使用者看到 5xx 會重試）；快照刪除失敗只留下讀取端拒絕提供的孤兒。先刪快照的舊順序有第三種、開放的失敗：快照已刪但書櫃仍在清單上，下一次一般的書單同步會替仍帶著那個 token 的書櫃重建快照，已撤銷的連結重新可讀，永久書櫃則是無限期。寫入的空 `shelves` 陣列代表「已遷移、沒有書櫃」，優先於 `user:{userId}` 上殘留的舊欄位，之後的書單儲存因此不會把刪掉的書櫃列回來。
+- **關閉不需要書單紀錄**：撤銷從不讀 `record.books`，若要求書單紀錄存在，`user:{userId}` 不見時（例如刪除帳號半途失敗、留下清單 key）書櫃就撤銷不了，已遷移的使用者也得白付一次書單讀取。因此公開讀取、列表與關閉只讀清單（`readPublicShelves`：先讀 `publicshelves:{userId}`，只有它不存在、使用者尚未遷移時才讀 `user:{userId}`）；建立、更新與重設網址要重建快照，才平行讀取清單與書單紀錄（`findShelf`），書單紀錄不存在時對它們而言就是找不到。
+- **公開讀取不刪除孤兒**：`GET /api/public/:shareToken` 的 handler 不做任何 KV 寫入，陌生人因此永遠無法選擇要寫入或刪除哪一把 key。孤兒以讀不到的死資料留在 KV、不會被回收（刪除帳號只清掉清單上還認得的 token）；它的數量受「清理寫入失敗的次數」限制（每次失敗使用者都會看到 5xx），而不是受 `MAX_PUBLIC_SHELVES` 限制，後者只限制現行的書櫃。
+- **公開讀取的成本與限制**：持有效 token 的每次讀取，對已遷移的使用者多讀一次小的清單 key，對尚未遷移的使用者多讀兩次（清單 key 未命中，加上一次完整的 `user:{userId}` 書單紀錄，並不小），後者在他第一次寫入公開書櫃後消失；格式正確但不存在的 token 停在快照未命中，只花一次讀取。公開端點的 per-IP 上限（每分鐘 10 次）只限制單一來源，擋不住分散的流量，那需要邊緣層（Cloudflare WAF）。其餘殘餘風險見 `.claude/rules/backend.md` → KV Key Patterns 中讀取端比對的段落。
+
+#### 個人書單的寫入路徑
+
+- **`PUT /api/user/:id/books` 帶 `familyShelfPrefs` 時**（Extension 同步會原樣帶回已儲存的紀錄），必須通過與 `PUT /api/user/:id/family-prefs` 相同的格式、去重與數量上限檢查；沒帶就保留 KV 上的值。空物件 `{}`（`hidden` 與 `favorites` 都沒有）會讓 `parseFamilyPrefs` 回 `400 INVALID_PAYLOAD`、整個 PUT 失敗，這是刻意的：真正的 Extension 與 PWA 一律帶回完整的 `{ hidden, favorites }`。
+- **顯示名稱以家庭紀錄為準**：使用者在家庭中、且家庭紀錄的名單上有他時，PUT 一律採用家庭紀錄裡的顯示名稱（包括空字串，代表刻意清除），避免用戶端的舊快取蓋掉伺服器上的值；只有沒有歸屬紀錄、家庭紀錄不存在或名單上沒有他時，才採用用戶端送來的值，經 `sanitizeDisplayName` 檢查，不合格就存空字串。PATCH 只在 body 帶了 `displayName` 時才走同一套解析，否則沿用既有的值。
+- **PATCH 的清單 key 讀取刻意與另兩個讀取平行發出**：只有通過「沒有任何變更」的短路之後才需要它，但延後讀取會讓一般路徑多一次循序往返，而無變更的 PATCH 只浪費一次平行的小讀取。沒有符合的書、也沒帶 `displayName` 的 PATCH 不寫 KV，也不刷新快照。
+- **`PUT /family-prefs` 不寫快照**：它照樣重新過濾每本書的封面與書籍連結（三條書單寫入路徑共用的懶惰清除），所以 KV 上的紀錄可能暫時比既有的公開快照乾淨，下一次書單寫入時兩者就會一致。
 
 ---
 

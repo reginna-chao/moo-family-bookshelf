@@ -1,25 +1,5 @@
-/**
- * Data access for the verification key family: `verify:{userId}`,
- * `otp:{userId}` and `qr:{token}`.
- *
- * WHY this module exists (#163): one chokepoint per key family, so route
- * handlers never build a KV key or call `c.env.KV` themselves (lint-enforced by
- * the `src/routes/**` override in `worker/eslint.config.js`). Thin by design —
- * one KV operation per function, `"json"` reads keep their unvalidated cast
- * (`VerifyRecord.secretUpdatedAt` is optional precisely because nothing
- * validates these casts), puts keep `JSON.stringify` and their fixed TTLs, and
- * the counting Proxy from `middleware/kvOpCounting.ts` flows through as the
- * `kv` parameter, so the per-request `kv_ops` accounting is unchanged.
- *
- * SCOPE: route handlers — `routes/verify.ts` for all three key families, plus
- * `routes/family.ts`, whose join handler reads and then consumes a QR token
- * (`getQrTokenRecord` / `deleteQrToken`) on the QR-bypass path. The verification
- * GATE (`services/verification.ts`) keeps its own reads of `verify:{userId}`,
- * `otp:{userId}` and `verifyfail:{userId}:{caller}` — a service may touch KV
- * directly, and its OTP read is paired with a conditional consume that is part
- * of the gate's logic, not of this accessor layer. `verifyfail:*` has no
- * accessor here for the same reason: it is written only inside the gate.
- */
+/** Thin data access (#163) for `verify:{userId}`, `otp:{userId}`, `qr:{token}` — route handlers only;
+ *  the verification gate keeps its own KV calls. See docs/architecture.md → 2.5 Cloudflare KV Store. */
 import {
   kvKeys,
   OTP_TTL_SECONDS,

@@ -128,9 +128,8 @@ export async function getOrGenerateAuthToken(
     // Verify the reverse lookup still exists (KV TTL may have expired it)
     const reverseUserId = await kv.get(kvKeys.authToken(existingAuth.token));
     if (reverseUserId === userId) {
-      // Sliding TTL: refresh both KV entries so their expiry matches the
-      // expiresAt the routes report to the client. Keep the original token
-      // and createdAt — only the TTL is renewed.
+      // Sliding TTL: renew both entries so expiry matches the expiresAt the routes report;
+      // the token and createdAt are kept.
       await Promise.all([
         kv.put(kvKeys.auth(userId), JSON.stringify(existingAuth), {
           expirationTtl: TOKEN_TTL_SECONDS,
@@ -142,9 +141,8 @@ export async function getOrGenerateAuthToken(
       return existingAuth.token;
     }
   }
-  // No valid token found — generate a fresh one, reusing the record we
-  // already read (existingAuth is AuthRecord | null, never undefined) so
-  // generateAuthToken does not re-read auth:{userId}.
+  // No valid token: mint one, passing the record already read (AuthRecord | null, never
+  // undefined) so generateAuthToken does not re-read auth:{userId}.
   return generateAuthToken(kv, userId, existingAuth);
 }
 

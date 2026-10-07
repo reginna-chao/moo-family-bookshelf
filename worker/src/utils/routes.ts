@@ -1,7 +1,4 @@
-/**
- * Shared route classification utilities.
- * Used by both auth and rate-limit middleware to identify public routes.
- */
+/** Route classification shared by the auth and rate-limit middleware. */
 
 /** Routes that don't require authentication and have stricter rate limits. */
 export function isPublicRoute(method: string, path: string): boolean {

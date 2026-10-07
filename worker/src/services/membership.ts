@@ -1,17 +1,5 @@
-/**
- * Membership rules. Live membership (pointer-first) is shared by
- * `routes/family.ts` (create's `classifyMembershipForCreate` and join's
- * pre-gate ALREADY_IN_FAMILY check) and `routes/auth.ts`
- * (`POST /api/auth/lookup`); active membership (list-first, #222) by
- * `routes/bookshelf.ts`, `routes/borrow.ts` and `routes/family.ts`. Both live
- * here because a route module must never import logic from a SIBLING route
- * module (lint-enforced); logic needed by two or more routes belongs in
- * `services/`.
- *
- * Like `services/borrowIndex.ts` this module is HTTP-agnostic: it takes a
- * `KVNamespace` and returns plain data, so the handlers keep every status code
- * and response-shape decision.
- */
+/** Membership rules, HTTP-agnostic: live (pointer-first; family create / join, auth lookup) and active (#222,
+ *  list-first; bookshelf / borrow / family). See .claude/rules/backend.md → API Design (listed AND pointed). */
 import {
   type FamilyMember,
   hasMember,

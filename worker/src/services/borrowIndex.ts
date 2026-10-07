@@ -1,46 +1,5 @@
-/**
- * The family borrow index — read, trim and write helpers shared by the
- * `borrow` and `family` route modules. It lives here rather than in
- * `routes/borrow.ts` because a route module must never import business logic
- * from a SIBLING route module (lint-enforced); logic needed by two or more
- * routes belongs in `services/`.
- *
- * Unlike `services/verification.ts`, this module is HTTP-agnostic: it takes a
- * `KVNamespace` and returns plain data, so the handlers keep every status code
- * and error envelope decision.
- *
- * SHAPE. `borrows:family:{familyId}` holds the full `BorrowRequest[]` and is
- * the SINGLE SOURCE OF TRUTH for a family's borrow requests.
- * `borrow:{requestId}` is only a `BorrowPointer` (`{ familyId }`), whose one
- * job is to let `PATCH /api/borrow/:requestId` find the owning family from a
- * bare requestId. Previously the records lived under `borrow:{requestId}` and
- * the index held only ids, so listing (and the create handler's duplicate
- * check) fanned out one KV read per historical entry — O(index) reads on a hot
- * path.
- *
- * LEGACY DATA, and why it is never rewritten. A pre-migration index is a
- * `string[]` of requestIds; a pre-migration `borrow:{requestId}` is a FULL
- * `BorrowRequest`. Both are readable here: `readBorrowIndex` fans a `string[]`
- * index out ONE last time, and `readBorrowPointer` reads `.familyId` — a field
- * BOTH shapes carry — and nothing else. After the family's next write the
- * index carries the records, so the legacy `borrow:{id}` VALUE becomes a stale
- * copy that no reader ever consults; only its existence still matters, as the
- * pointer. Rewriting it would cost a KV write per record for data nobody
- * reads.
- *
- * MIGRATION IS LAZY AND WRITE-PATH ONLY: create, `PATCH`, and the departure
- * settlement (`settleDepartingBorrower`, called from member removal in
- * `routes/family.ts` and from account deletion in `routes/user.ts`) rewrite
- * the index in the new shape. `GET /api/family/:id/borrow` serves BOTH shapes
- * and performs no KV write at all. `deleteBorrowIndex` is the one write path
- * that never migrates: it removes the key outright, and reads the stored value
- * only to learn which pointers to delete alongside it.
- *
- * NO CAS. Every write below is a read-modify-write of one key and KV has no
- * compare-and-set, so two concurrent writers on the SAME family can lose one
- * another's update (last put wins). Accepted residual — see
- * `docs/architecture.md` → 已接受的殘餘風險.
- */
+/** Family borrow index read / trim / write, shared by the borrow, family and user routes; HTTP-agnostic.
+ *  Shape, lazy migration, no-CAS residual: .claude/rules/backend.md → KV Key Patterns (borrow index). */
 import {
   kvKeys,
   BORROW_HISTORY_KEEP,
@@ -55,11 +14,8 @@ import { isValidFamilyId } from "../utils/validation";
 export interface BorrowIndexRead {
   /** Every live request, in index order. Empty when the family has none. */
   requests: BorrowRequest[];
-  /**
-   * `true` when the stored index was still the legacy `string[]` and the
-   * records had to be fanned out. Diagnostic only: every write path rewrites
-   * the new shape regardless, so no caller branches on it.
-   */
+  /** `true` when the stored index was the legacy `string[]` and was fanned out. Diagnostic only:
+   *  every write path rewrites the new shape, so no caller branches on it. */
   legacy: boolean;
 }
 
@@ -129,12 +85,8 @@ export async function readBorrowIndex(
   return { requests: stored, legacy: false };
 }
 
-/**
- * Newest first: `updatedAt`, then `createdAt`. Both are ISO-8601 UTC strings
- * produced by `toISOString()`, so lexical order IS chronological order.
- * Returning 0 on a full tie leaves the sort stable, which is what preserves
- * the index's own order as the final tie-break.
- */
+/** Newest first by `updatedAt`, then `createdAt` (`toISOString()` UTC, so lexical = chronological).
+ *  A full tie returns 0, so the stable sort keeps the index's own order as the final tie-break. */
 function compareByRecency(a: BorrowRequest, b: BorrowRequest): number {
   if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt ? 1 : -1;
   if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
@@ -176,9 +128,8 @@ export function trimBorrowIndex(requests: BorrowRequest[]): BorrowIndexTrim {
     }
   }
 
-  // Collect what is EVICTED rather than what survives: a borrower under the cap
-  // contributes nothing, so no group has to be enumerated (or sorted) just to
-  // be kept. `group` is a local array, so sorting it does not reorder `kept`.
+  // Collect the EVICTED ids: a group under the cap is never sorted. `group` is a
+  // local array, so sorting it does not reorder `kept`.
   const evictedIds = new Set<string>();
   for (const group of terminalByBorrower.values()) {
     if (group.length <= BORROW_HISTORY_KEEP) continue;
@@ -205,19 +156,8 @@ export function trimBorrowIndex(requests: BorrowRequest[]): BorrowIndexTrim {
   return { kept, dropped };
 }
 
-/**
- * Delete the `borrow:{requestId}` pointers of records that just left the index,
- * FAIL-OPEN — the single site for that cleanup, shared by the trim eviction,
- * the departure settlement and the whole-index delete.
- *
- * Fail-open follows `writeKickedTombstone` in `routes/family.ts`: each delete
- * swallows its own rejection into a `console.error`. Every caller runs this
- * AFTER the index write that removed the records has already landed, so a
- * failed delete costs exactly one orphan key — invisible to every reader, and
- * a PATCH naming it gets the same `404 REQUEST_NOT_FOUND` an unknown id gets.
- * Letting it reject would instead turn a persisted, successful write into a
- * 500 and tell the caller their operation failed when it did not.
- */
+/** The single FAIL-OPEN delete of pointers whose records left the index (trim, departure, whole-index
+ *  delete). Rationale: .claude/rules/backend.md → KV Key Patterns (borrow index). */
 async function deleteBorrowPointers(
   kv: KVNamespace,
   requestIds: string[],
@@ -407,13 +347,8 @@ export async function deleteBorrowIndex(
   await kv.delete(kvKeys.borrowsByFamily(familyId));
 }
 
-/**
- * The requestIds a stored index names, in EITHER shape.
- *
- * Takes `unknown` because a `kv.get(…, "json")` value is unvalidated: a
- * corrupted container yields no ids instead of throwing, and its key is deleted
- * anyway — the family that owned it is being dissolved.
- */
+/** The requestIds a stored index names, in EITHER shape. Takes the unvalidated `unknown`: a corrupted
+ *  container yields no ids instead of throwing — its key is deleted anyway, the family is dissolving. */
 function enumerateRequestIds(stored: unknown): string[] {
   if (isLegacyBorrowIndex(stored)) return stored;
   if (!Array.isArray(stored)) return [];

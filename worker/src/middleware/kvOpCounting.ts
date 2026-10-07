@@ -1,9 +1,5 @@
-/**
- * Per-request KV operation telemetry: a counting Proxy around the KV binding,
- * plus ONE `kv_ops` log line per /api/* request. Registered in index.ts on
- * `/api/*` ahead of `rateLimit` and `authMiddleware`, so their KV operations
- * are counted together with the handler's own.
- */
+/** Per-request KV op telemetry: a counting Proxy + ONE `kv_ops` line per /api/* request, registered ahead of
+ *  `rateLimit` and `authMiddleware`. See docs/architecture.md → KV 操作數觀測（per-request kv_ops log）. */
 import { createMiddleware } from "hono/factory";
 import { routePath } from "hono/route";
 import type { Env } from "../utils/env";
@@ -11,14 +7,8 @@ import type { Env } from "../utils/env";
 /** Per-request KV operation tally, one field per Cloudflare billing class. */
 export type KvOpCounts = { reads: number; writes: number; deletes: number };
 
-/**
- * Maps a KVNamespace method to its counter, null for anything else. A null
- * kind means the method is still forwarded, just UNCOUNTED — `list` is the
- * only such method today and nothing calls it; giving it a tally is one extra
- * case here plus a field on KvOpCounts. A switch, not a lookup object: an
- * object literal answers inherited keys ("toString") too and would mis-count a
- * property read as an operation.
- */
+/** KVNamespace method → counter; null = forwarded UNCOUNTED (only `list`, which nothing calls). A switch,
+ *  not a lookup object: an object literal answers inherited keys ("toString") and would mis-count them. */
 function kvOpKindFor(prop: string | symbol): keyof KvOpCounts | null {
   switch (prop) {
     case "get":
@@ -49,11 +39,8 @@ export function createCountingKv(
   return new Proxy(kv, {
     get(target, prop) {
       const value: unknown = Reflect.get(target, prop);
-      // EVERY method is re-applied to the ORIGINAL namespace, counted or not:
-      // a real KV binding is a host object that rejects the proxy as `this`
-      // ("Illegal invocation"), so handing back a bare function breaks the
-      // UNCOUNTED methods too (`list` today). Non-function properties pass
-      // through untouched.
+      // EVERY method, counted or not, runs on the ORIGINAL namespace: a real binding rejects the
+      // proxy as `this` ("Illegal invocation"). Non-function properties pass through untouched.
       if (typeof value !== "function") return value;
       const kind = kvOpKindFor(prop);
       return (...args: unknown[]): unknown => {
@@ -114,15 +101,11 @@ export const withKvOpCounting = createMiddleware<{ Bindings: Env }>(
         console.log({
           event: "kv_ops",
           method: c.req.method,
-          // Route PATTERN, never c.req.path: the raw path carries secrets and
-          // identifiers (:shareToken IS the public shelf's secret; :id is an
-          // email-derived userId). routePath(c, -1) is the last matched route —
-          // the handler's pattern, or "/api/*" when nothing matched (404).
+          // Route PATTERN, never c.req.path (it carries :shareToken / userIds); routePath(c, -1) is
+          // the matched handler's pattern, or "/api/*" when nothing matched (404).
           route: routePath(c, -1),
-          // c.finalized reports whether a response exists; reading c.res
-          // without it fabricates an empty placeholder (context.js:109-113). A
-          // handler's Error is already the onError 500 here; only the
-          // non-Error throw above reaches this with no response, logging 0.
+          // Unfinalized c.res is a fabricated placeholder (context.js:109-113); a handler Error is
+          // already the onError 500 here, so only the non-Error throw above logs 0.
           status: c.finalized ? c.res.status : 0,
           reads: counts.reads,
           writes: counts.writes,

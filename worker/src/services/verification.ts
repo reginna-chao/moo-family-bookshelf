@@ -20,12 +20,8 @@ import {
 import { jsonError, type ErrorBody } from "../utils/errors";
 import { hashSecret, timingSafeEqual } from "../utils/crypto";
 
-/**
- * Check if the CALLER is currently locked out. Returns true if locked.
- * Lockout is caller-scoped (`verifyfail:{userId}:{callerKey}`), never charged
- * to the target account. Narrows `lockedUntil` to a number so callers can
- * derive the remaining back-off without re-checking for null.
- */
+/** True while the CALLER is locked out (caller-scoped `verifyfail:{userId}:{callerKey}`, never the target
+ *  account). Narrows `lockedUntil` to a number so callers derive the back-off without a null check. */
 function isLockedOut(
   record: VerifyFailRecord | null,
 ): record is VerifyFailRecord & { lockedUntil: number } {
@@ -41,13 +37,8 @@ function lockoutRetryAfterSeconds(lockedUntil: number): number {
 /** Error descriptor returned by {@link validateVerification} on failure. */
 export type VerificationError =
   | {
-      /**
-       * `VERIFICATION_LOCKED` — this caller burned its failure budget.
-       * `RATE_LIMITED` — a WRONG guess arrived while the target account's global
-       * attempt ceiling was already spent (same code/shape as the rate-limit
-       * middleware, so clients that already handle 429 RATE_LIMITED need no
-       * change). A correct secret is never answered this way.
-       */
+      /** `VERIFICATION_LOCKED`: this caller burned its failure budget. `RATE_LIMITED`: a WRONG guess with the account's
+       *  ceiling spent — same shape as the rate-limit middleware's 429; never a correct secret. */
       code: "VERIFICATION_LOCKED" | "RATE_LIMITED";
       message: string;
       status: 429;
@@ -126,15 +117,8 @@ export async function isVerificationConfigured(
   return record !== null && record.method !== "none";
 }
 
-/**
- * Compare a submitted secret against the stored verify record.
- *
- * Returns null when a pin/pattern record is corrupted (missing hash/salt);
- * callers treat that as "no verification configured".
- *
- * `consumeOtp` decides whether a successful `code` match deletes the OTP
- * (one-time use). Read-only checks pass `false` — see {@link validateVerification}.
- */
+/** Compare a secret with the verify record; `null` = corrupted pin/pattern (no hash/salt) ⇒ "not configured".
+ *  `consumeOtp` decides whether a `code` match deletes the OTP; read-only checks pass `false`. */
 async function matchesSecret(
   kv: KVNamespace,
   userId: string,
@@ -168,11 +152,8 @@ async function matchesSecret(
   return false;
 }
 
-/**
- * Charge one failed attempt against the caller-scoped record, locking that
- * caller out once VERIFY_MAX_FAILURES is reached. Side effect: writes
- * `verifyfail:{userId}:{callerKey}` with a TTL; never touches `verify:{userId}`.
- */
+/** Charge one failure to the caller-scoped record, locking out at VERIFY_MAX_FAILURES. Side effect:
+ *  writes `verifyfail:{userId}:{callerKey}` with a TTL; never touches `verify:{userId}`. */
 async function chargeFailure(
   kv: KVNamespace,
   failKey: string,
@@ -181,9 +162,8 @@ async function chargeFailure(
   const next: VerifyFailRecord = {
     failCount: (existing?.failCount ?? 0) + 1,
     lockedUntil: null,
-    // Continuing an existing streak keeps its original start; a fresh streak
-    // starts now. Kept as-is through the lockout reset below — the entry remains
-    // the same streak until its TTL expires or it is cleared/voided.
+    // An existing streak keeps its start, a fresh one starts now; kept through the lockout reset
+    // below (same streak until TTL expiry or clear/void — see VERIFY_LOCKOUT_MS).
     startedAt: existing?.startedAt ?? Date.now(),
   };
   if (next.failCount >= VERIFY_MAX_FAILURES) {
@@ -195,25 +175,8 @@ async function chargeFailure(
   });
 }
 
-/**
- * Whether a caller's failure streak is void because the account owner changed
- * the verification secret/method after the streak began. A void streak must not
- * lock anyone out and must not carry its `failCount` forward: it accumulated
- * against a secret that no longer exists, so holding it would only punish the
- * owner who just reset a forgotten PIN/pattern.
- *
- * Missing-field default is the SAFE side: legacy records written before either
- * timestamp existed lack one or both values, and those keep the lockout in
- * force (current behaviour). Absence never unlocks.
- *
- * Threat model — this is not a DoS lever. `secretUpdatedAt` can only be advanced
- * through `PUT /:id/verify`, which requires a valid auth token AND
- * `callerId === userId`. So only the account owner can void failure records, and
- * only on their own account.
- *
- * Pure predicate: re-derived on every read, so a void record that has not been
- * deleted yet is still inert. Deletion is cleanup, never correctness.
- */
+/** Void = the streak began before the owner's last secret change: no lockout, no carried `failCount`. A missing
+ *  field never voids; pure, re-derived per read. Owner-only lever: docs/architecture.md → 安全措施. */
 function isFailStreakVoid(
   verifyRecord: VerifyRecord,
   failRecord: VerifyFailRecord | null,
@@ -231,20 +194,8 @@ export const VERIFY_ATTEMPT_MAX = 10;
 /** Window for {@link VERIFY_ATTEMPT_MAX}: 1 hour, in seconds. */
 export const VERIFY_ATTEMPT_WINDOW_SECONDS = 3600;
 
-/**
- * Read the target account's global attempt ceiling WITHOUT charging it.
- * Returns `null` under DEV_MODE, where the ceiling does not apply and nothing
- * was read — matching every other limiter.
- *
- * Called only from {@link chargeWrongGuess}, i.e. AFTER the secret has been
- * compared and found wrong. A correct secret is neither refused by the ceiling
- * nor charged to it, so the legitimate path never touches this counter at all —
- * one KV read fewer on the hot path, and, crucially, no way for a spent window
- * to keep the account owner out.
- *
- * The counter derivation is delegated to `peekPerUserRateLimit`, the same
- * implementation the rate-limit middleware uses, so the two cannot drift.
- */
+/** Read the account's attempt ceiling without charging (`null` under DEV_MODE) via the shared `peekPerUserRateLimit`.
+ *  Only {@link chargeWrongGuess} calls it, AFTER a wrong comparison: docs/architecture.md → 安全措施. */
 async function peekAttemptCeiling(
   env: Env,
   userId: string,
@@ -259,14 +210,8 @@ async function peekAttemptCeiling(
   });
 }
 
-/**
- * Charge one WRONG guess against the ceiling read by {@link peekAttemptCeiling}.
- *
- * Side effect: writes `ratelimit:user:verify:{userId}:{bucket}`. No-op under
- * DEV_MODE (no reading was taken) and when the window is already spent — a
- * refused attempt must not extend it. Touches only the counter key — this
- * caller's failure streak is a different key, charged by {@link chargeFailure}.
- */
+/** Writes `ratelimit:user:verify:{userId}:{bucket}` only — no-op under DEV_MODE or with the window spent (a refused
+ *  attempt must not extend it). The caller's streak is a different key ({@link chargeFailure}). */
 async function chargeFailedAttempt(
   kv: KVNamespace,
   reading: PerUserRateLimitReading | null,
@@ -275,16 +220,8 @@ async function chargeFailedAttempt(
   await chargePerUserRateLimit(kv, reading);
 }
 
-/**
- * Charge one wrong guess against both brakes, and report the ceiling state that
- * decides which refusal it earns (`limited` ⇒ 429 `RATE_LIMITED`, otherwise 403
- * `VERIFICATION_FAILED`).
- *
- * The ceiling is read here — after the comparison — so that only a wrong guess
- * is ever measured against it. Two writes happen, but to two DIFFERENT keys (the
- * account-wide attempt counter and this caller's failure streak), so the "at
- * most one write per KV key per request" rule still holds.
- */
+/** Charge a wrong guess to both brakes; `limited` ⇒ 429 `RATE_LIMITED`, else 403 `VERIFICATION_FAILED`. Two
+ *  DIFFERENT keys, so one write per key holds: .claude/rules/backend.md → Service, middleware and KV invariants. */
 async function chargeWrongGuess(
   env: Env,
   userId: string,
@@ -412,9 +349,8 @@ export async function validateVerification(
   const failKey = kvKeys.verifyFail(userId, opts.callerKey);
   const storedFail = await kv.get<VerifyFailRecord>(failKey, "json");
 
-  // Streak predating the current secret — treat this request as a clean slate.
-  // Decided in memory only; whether the stale entry is deleted depends on which
-  // path we exit through (a path that writes the same key must not delete first).
+  // A streak predating the current secret is a clean slate, decided in memory only: a path that
+  // writes the same key must not delete it first.
   const voided = isFailStreakVoid(record, storedFail);
   const failRecord = voided ? null : storedFail;
 
@@ -431,9 +367,8 @@ export async function validateVerification(
     };
   }
 
-  // Secret required but not provided — no attempt was made, so nothing to
-  // charge. This path performs no KV write at all: a void leftover is inert and
-  // simply waits for its TTL or for the next request to overwrite/clear it.
+  // No secret: no attempt, nothing charged, no KV write — a void leftover stays inert until its
+  // TTL or the next request overwrites / clears it.
   if (!secret || typeof secret !== "string") {
     return {
       valid: false,
@@ -445,11 +380,8 @@ export async function validateVerification(
     };
   }
 
-  // Compare FIRST. The account-wide attempt ceiling is deliberately not
-  // consulted before this point: it is keyed on the target userId, so refusing a
-  // correct secret because the window is spent would let any third party lock
-  // the owner out of their own onboarding. Correctness of the secret is decided
-  // before the ceiling has any say.
+  // Compare FIRST: the target-keyed ceiling must never refuse a correct secret, or any third party
+  // could lock the owner out (Inv-6). See docs/architecture.md → 安全措施.
   const matched = await matchesSecret(
     kv,
     userId,
@@ -464,15 +396,11 @@ export async function validateVerification(
   }
 
   if (!matched) {
-    // The only path that touches the target account's attempt ceiling. Reading
-    // it here (rather than up front) is what keeps a spent window from ever
-    // refusing the owner. `chargeFailure` overwrites the whole entry, so a void
-    // leftover is replaced here rather than deleted first.
+    // The only path touching the attempt ceiling. `chargeFailure` overwrites the whole entry, so
+    // a void leftover is replaced here, not deleted first.
     const ceiling = await chargeWrongGuess(env, userId, failKey, failRecord);
     if (ceiling.limited) {
-      // Wrong guess AND the account's hourly guessing budget is already spent:
-      // report the ceiling rather than a plain verification failure, so the
-      // caller learns that waiting — not another guess — is the way forward.
+      // Hourly guessing budget spent: report the ceiling, so the caller learns to wait, not guess.
       return {
         valid: false,
         error: {

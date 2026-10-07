@@ -22,9 +22,7 @@ export function isValidFamilyId(id: string): boolean {
 
 export const DISPLAY_NAME_MAX_LENGTH = 20;
 
-// Strip zero-width, control, and directional override characters. Prettier
-// breaks this declaration across two lines, so an `eslint-disable-next-line`
-// would land on the `const` instead of the literal — hence the block form.
+// Zero-width / control / bidi-override chars. Block disable: Prettier splits this, so next-line misses the literal.
 /* eslint-disable no-control-regex */
 const UNSAFE_UNICODE_RE =
   /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF]/g;

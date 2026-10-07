@@ -7,21 +7,15 @@ export interface ErrorBody {
   error: {
     code: string;
     message: string;
-    /**
-     * Optional back-off hint (seconds) for retryable errors such as 429
-     * RATE_LIMITED. Mirrors the `Retry-After` header so clients that only parse
-     * the JSON envelope can still schedule an auto-retry.
-     */
+    /** Optional back-off hint (seconds) for retryable errors such as 429 RATE_LIMITED; mirrors
+     *  `Retry-After` so envelope-only clients can still schedule an auto-retry. */
     retryAfter?: number;
   };
 }
 
 /** Optional extras for {@link jsonError}. */
 export interface JsonErrorOptions {
-  /**
-   * Back-off hint in whole seconds. When provided it is emitted both as
-   * `error.retryAfter` in the body and as the `Retry-After` response header.
-   */
+  /** Back-off hint in whole seconds, emitted as both `error.retryAfter` and the `Retry-After` header. */
   retryAfter?: number;
 }
 
@@ -58,11 +52,8 @@ export interface ClientErrorCopy {
   message: string;
 }
 
-/**
- * The exact message `hono/validator` throws with when a declared `json` body
- * does not parse (hono 4.x). Matched verbatim, so a hono upgrade that rewords
- * it degrades that case to the generic REQUEST_REJECTED 400 — still a 400.
- */
+/** `hono/validator`'s message for an unparsable declared `json` body (hono 4.x), matched verbatim: a
+ *  rewording upgrade degrades that case to the generic REQUEST_REJECTED 400 — still a 400. */
 const HONO_MALFORMED_JSON_MESSAGE = "Malformed JSON in request body";
 
 /**

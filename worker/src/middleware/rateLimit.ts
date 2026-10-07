@@ -11,11 +11,7 @@ const RATE_LIMIT_STANDARD = 60;
 /** Strict rate limit for public routes: 10 req/min/IP */
 const RATE_LIMIT_PUBLIC = 10;
 
-/**
- * Extra-strict rate limit for sensitive public routes: 3 req/min/IP.
- *
- * One value, two counters — see {@link rateLimitBucketFor}.
- */
+/** Sensitive public routes: 3 req/min/IP — one value, two counters (see {@link rateLimitBucketFor}). */
 const RATE_LIMIT_SENSITIVE = 3;
 
 const TTL_SECONDS = 120;
@@ -55,7 +51,7 @@ export interface RateLimitBucket {
  * shorter prefix's key into a longer prefix's space, nor stand in for the extra
  * non-empty segment the longer prefix always appends. The same closed range is
  * what keeps these keys clear of the per-userId ones — see
- * {@link BINDING_BY_LIMIT}.
+ * .claude/rules/backend.md → Service, middleware and KV invariants.
  */
 export function rateLimitBucketFor(
   method: string,
@@ -77,41 +73,12 @@ export function rateLimitBucketFor(
   return { prefix: PREFIX_STANDARD, limit: RATE_LIMIT_STANDARD };
 }
 
-/**
- * Period (seconds) every native Rate Limiting binding is configured with.
- *
- * The platform accepts only 10 or 60; all limits in this codebase are per
- * minute, so 60 is the single value used. Counters on longer windows (the
- * hourly per-userId scopes) have no binding and stay on KV.
- */
+/** Period of every native binding: the platform accepts only 10 or 60, and every limit here is per
+ *  minute. Longer windows (the hourly per-userId scopes) have no binding and stay on KV. */
 const BINDING_PERIOD_SECONDS = 60;
 
-/**
- * Requests-per-minute -> binding name. ONE table: never resolve a binding by
- * name anywhere else.
- *
- * A binding is shared by every counter carrying the same limit (e.g. the per-IP
- * standard tier and the per-userId `borrow-list` scope both sit at 60/min);
- * isolation comes from the KEY passed to `limit()`, which keeps the same prefix
- * shape the KV counters used. Per-IP keys are `{tierPrefix}:{ip}` and per-userId
- * keys are `ratelimit:user:{scope}:{userId}`, so the two spaces cannot alias:
- * no value {@link normalizeCallerIp} can return begins with `user:` — its full
- * range is enumerated in {@link rateLimitBucketFor}.
- *
- * A Map, not an object literal: `Map.get` is typed `| undefined`, so an
- * unmapped limit cannot be read as a binding name under this tsconfig (no
- * `noUncheckedIndexedAccess`).
- *
- * Keys are written as literals, deliberately, even where a named constant
- * exists (`RATE_LIMIT_STANDARD` and friends): the binding NAME already encodes
- * its configured limit, so a key/name mismatch is visible on one line. Raising
- * a tier's limit without adding the matching binding leaves that limit unmapped
- * here; the request then falls through to the KV counter — never to the
- * binding's old number — and {@link warnMissingRateLimitBinding} reports it as
- * loudly as a binding missing from `env`, naming it `<unmapped:{max}/min>`.
- * Adding or changing any per-minute limit therefore means editing this table
- * and `wrangler.toml` in the same change.
- */
+/** Per-minute limit → binding name: the ONE place a binding is resolved by name (edit with wrangler.toml).
+ *  Map + literal keys + key isolation: .claude/rules/backend.md → Service, middleware and KV invariants. */
 const BINDING_BY_LIMIT: ReadonlyMap<number, RateLimitBindingName> = new Map([
   // 60/min — per-IP standard tier, per-userId `borrow-list`
   [60, "RATE_LIMIT_60_PER_MIN"],
@@ -159,26 +126,11 @@ export function bindingForWindow(
   return env[name] ?? null;
 }
 
-/**
- * Report a per-minute limit that reached the KV counter instead of a binding.
- *
- * Loud for EVERY 60s window, whichever way {@link bindingForWindow} came back
- * null: a binding {@link BINDING_BY_LIMIT} names but `env` does not carry
- * (reason 2 there, logged under its name), or a per-minute limit that table
- * does not name at all (reason 3, logged as `<unmapped:{max}/min>`). Silent
- * only for reason 1, the hourly scopes — those are KV counters by design, and
- * logging them would drown the signal this line exists for: "this deployment is
- * not counting per-minute traffic on the platform".
- *
- * One line per rate-limit CHECK, not per request: a route guarded by both the
- * per-IP middleware and a per-minute per-userId ceiling (`bookshelf`,
- * `borrow-create`, `borrow-list`, `borrow-update`) emits TWO lines per request
- * on a binding-less deployment.
- */
+/** Log `RATE_LIMIT_BINDING_MISSING` once per CHECK when a per-minute limit lands on KV (binding missing or
+ *  unmapped); hourly scopes stay silent. .claude/rules/backend.md → API Design (`bindingForWindow` null). */
 function warnMissingRateLimitBinding(max: number, windowSec: number): void {
-  // Hourly scopes are KV by design — stay silent. A 60s window with no entry in
-  // BINDING_BY_LIMIT is NOT by design: someone changed a limit without adding
-  // the binding, and it must be as loud as a binding missing from the env.
+  // Hourly is KV by design (silent); an unmapped 60s limit is a config mistake and must be as loud
+  // as a binding missing from the env.
   if (windowSec !== BINDING_PERIOD_SECONDS) return;
   const name = bindingNameForWindow(max, windowSec);
   console.error("RATE_LIMIT_BINDING_MISSING", {
@@ -321,21 +273,8 @@ export function getCallerIp(c: Context<{ Bindings: Env }>): string {
 type IpCounterVerdict =
   { limited: false; remaining: number } | { limited: true; retryAfter: number };
 
-/**
- * Charge one request against the KV per-IP counter `{prefix}:{ip}:{bucket}`.
- *
- * The FALLBACK path: reached only when the deployment carries no native
- * binding for this tier's limit. Side effect on the admitted branch — one
- * `put` with a 2-minute TTL; a rejected request does not extend the window.
- *
- * Known limitation of this path (and of every KV counter that remains: the
- * hourly per-userId scopes and the verification attempt ceiling in
- * `services/verification.ts`): get-then-put is not atomic and nothing
- * serializes concurrent requests. Every request that reads before the first
- * write lands sees the same count and is admitted, so the overshoot in a burst
- * is bounded by the CALLER'S CONCURRENCY, not by any fixed factor. The limit
- * bounds sequential traffic only.
- */
+/** KV per-IP counter `{prefix}:{ip}:{bucket}` — the missing-binding FALLBACK: one put (TTL 120s) when admitted,
+ *  none when refused. Non-atomic, sequential traffic only: .claude/rules/backend.md → API Design. */
 async function chargeIpCounterInKv(
   kv: KVNamespace,
   prefix: string,
@@ -361,11 +300,8 @@ async function chargeIpCounterInKv(
   return { limited: false, remaining: limit - count - 1 };
 }
 
-/**
- * The 429 emitted by both per-IP paths, so their bodies and headers cannot
- * drift. `extraHeaders` carries `X-RateLimit-Remaining`, which only the KV path
- * can report.
- */
+/** The 429 of both per-IP paths, so body and headers cannot drift. `extraHeaders` carries
+ *  `X-RateLimit-Remaining`, which only the KV path can report. */
 function ipRateLimitedResponse(
   c: Context<{ Bindings: Env }>,
   limit: number,
@@ -602,9 +538,8 @@ export async function enforcePerUserRateLimit(
 
   const binding = bindingForWindow(c.env, opts.max, opts.windowSec);
   if (binding) {
-    // Same key shape the KV counter used, minus the window bucket the binding
-    // owns. Scope keeps counters independent even when two scopes share a
-    // binding because they share a limit.
+    // The KV counter's key minus the window bucket the binding owns; the scope keeps counters
+    // independent when two scopes share a binding (same limit).
     const { success } = await binding.limit({
       key: `ratelimit:user:${opts.scope}:${opts.userId}`,
     });
