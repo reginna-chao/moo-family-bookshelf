@@ -1,24 +1,11 @@
-/**
- * 繁體中文 copy for the public-shelf dialog's failure paths.
- *
- * Mirrors `extension/src/dialog/publicShareMessages.ts` — the two apps talk to
- * the same endpoints and must report the same failures the same way.
- *
- * The API layer throws `ApiError`, whose `message` is the machine-readable
- * `"CODE: english text"` — never show that to a user. Everything the dialog
- * renders goes through `publicShelfErrorMessage`, so a newly surfaced error
- * (see the delete / update paths that used to swallow theirs) cannot leak raw
- * server English into the UI.
- */
+/** 繁體中文 copy for the public-shelf dialog's failures; twin of extension/src/dialog/publicShareMessages.ts.
+ *  `ApiError.message` is raw "CODE: english text", so all dialog copy goes through `publicShelfErrorMessage`. */
 
 import { ApiError } from "@/api/client";
 import { buildRetryMessage } from "@/utils/retryMessage";
 
-/**
- * Codes the public-shelf endpoints return that a user can act on. A `Map`
- * because `code` is backend-controlled: an object lookup would resolve
- * `"__proto__"` / `"toString"` through the prototype chain.
- */
+/** Codes the public-shelf endpoints return that a user can act on. A `Map` because `code` is
+ *  backend-controlled: an object lookup would resolve `"__proto__"` / `"toString"`. */
 const CODE_MESSAGES: ReadonlyMap<string, string> = new Map([
   ["INVALID_TITLE", "標題需為 1 至 60 個字"],
   ["INVALID_EXPIRES_DAYS", "過期時間選項無效，請重新選擇"],

@@ -88,14 +88,12 @@ export function LandingPage({
     completeJoin,
   });
 
-  // Back-off copy wins over the per-attempt error: it carries the live
-  // countdown. `generalError` is last so non-verification failures (a 429 with
-  // no retryAfter, NOT_FOUND, …) stay visible while the challenge UI is open.
+  // Back-off copy first (it carries the live countdown); `generalError` last, so a non-verification
+  // failure (429 without retryAfter, NOT_FOUND, …) stays visible on the challenge screen.
   const promptError = retryMessage || verifyError || generalError;
 
-  // Ordered ahead of the verification screen on purpose: consent is what
-  // unblocks the request that could produce a challenge, so the two can never
-  // legitimately be pending at once.
+  // Ahead of the verification screen on purpose: consent unblocks the request that could raise a
+  // challenge, so the two are never legitimately pending at once.
   if (hostConsent) {
     return (
       <CustomHostConsent
@@ -126,11 +124,8 @@ export function LandingPage({
     );
   }
 
-  // A QR arrival is auto-advanced past the form, so while its join runs there is
-  // no submit button to carry a "處理中..." label — showing the form here would
-  // ask a user who just scanned (or just pressed 確認並加入) to type an email.
-  // The whole screen becomes the progress indicator instead. Ordered AFTER
-  // `pendingAuth` on purpose: a challenge raised mid-join must stay on screen.
+  // A running QR join has no form button to say "處理中...", so the whole screen does; AFTER
+  // `pendingAuth` so a mid-join challenge stays visible (docs/architecture.md → 登入頁的加入流程).
   if (joinOrigin === "qr") {
     return (
       <div

@@ -13,7 +13,7 @@ interface SettingsPersonalSectionProps {
 }
 
 /**
- * 設定頁「個人設定」: display name and the show-archived switch. Its state
+ * Settings-page 「個人設定」: display name and the show-archived switch. Its state
  * lives here, not in the collapsible body, so collapsing keeps it.
  */
 export function SettingsPersonalSection({

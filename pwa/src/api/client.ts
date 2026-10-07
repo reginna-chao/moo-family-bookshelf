@@ -1,7 +1,5 @@
-/**
- * API client for communicating with Cloudflare Worker backend.
- * Supports configurable endpoint for self-hosted backends.
- */
+/** API client for the Cloudflare Worker backend, with a configurable endpoint for self-hosted ones.
+ *  Response-handling rationale: docs/architecture.md → API client 的回應處理. */
 
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
@@ -93,26 +91,12 @@ export type {
   CreateBorrowPayload,
 } from "moo-family-bookshelf-shared/borrow/types";
 
-/**
- * The one status this API answers with no body (RFC 9110 §15.3.5):
- * `DELETE /api/user/:id/public-shelf/:shelfId`.
- *
- * Kept to exactly this status. 205 is never returned by the API, and widening
- * the allowance only buys a rogue backend a way to have an empty body read as
- * a confirmed success; 304 is `!response.ok`, so it already belongs to the
- * error path rather than here.
- */
+/** The one bodyless status this API answers (`DELETE /api/user/:id/public-shelf/:shelfId`); keep it
+ *  to exactly this one (docs/architecture.md → API client 的回應處理). */
 const NO_CONTENT_STATUS = 204;
 
-/**
- * Read the `{ data, error }` envelope out of a response.
- *
- * A bodyless success is still a success: `response.json()` throws a SyntaxError
- * on an empty body, which the caller cannot tell apart from a genuine network
- * failure — that is how a refused revocation used to read as "deleted". A 204
- * resolves to an empty envelope instead; every other response is parsed exactly
- * as before (a malformed one still throws, as it should).
- */
+/** Read the `{ data, error }` envelope; a 204 is an empty envelope (`response.json()` would throw
+ *  on it), every other response still parses — or throws — as JSON. */
 async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
   if (response.status === NO_CONTENT_STATUS) return {};
   return (await response.json()) as ApiResponse<T>;
@@ -201,21 +185,14 @@ export class ApiClient {
     return res.data;
   }
 
-  /**
-   * `unwrap` for endpoints whose success carries no payload (HTTP 204).
-   * Only the `error` branch throws — demanding `data` here would turn every
-   * successful 204 into a bogus EMPTY_RESPONSE failure.
-   */
+  /** `unwrap` for bodyless (204) successes: only `error` throws — demanding `data` would turn every
+   *  successful 204 into a bogus EMPTY_RESPONSE. */
   private unwrapVoid(res: ApiResponse<unknown>): void {
     this.throwOnError(res);
   }
 
-  /**
-   * Coerce a success payload's backend TEXT fields before it leaves the client,
-   * so no consumer ever holds a `string`-typed field that is not one (see
-   * `shared/src/api/safeText.ts`). Error envelopes and bodyless successes pass
-   * through untouched.
-   */
+  /** Coerce a success payload's backend TEXT fields so no consumer holds a non-string `string` field
+   *  (`shared/src/api/safeText.ts`); error envelopes and bodyless successes pass untouched. */
   private sanitizeEnvelope<T>(
     res: ApiResponse<T>,
     sanitize: (data: T) => T,
@@ -224,22 +201,8 @@ export class ApiClient {
     return { ...res, data: sanitizeRecord(res.data, sanitize) };
   }
 
-  /**
-   * The single chokepoint through which every thrown `ApiError` passes, so the
-   * envelope text is sanitized once here rather than at each call site.
-   *
-   * `code` / `message` are typed `string` but reach us through a bare cast of
-   * `response.json()`, and the backend is self-hostable. A payload such as
-   * `{"toString":null,"valueOf":null}` — which `JSON.parse` really can produce
-   * — makes the constructor's `super(\`${code}: ${message}\`)` throw a
-   * TypeError, so no `ApiError` is ever constructed: `err instanceof ApiError`
-   * turns false and the localized 429 back-off branch (which needs `code` and
-   * `retryAfter`) is skipped in favour of an English TypeError. Sanitizing the
-   * two interpolated fields keeps the error's identity, not just its wording.
-   *
-   * `retryAfter` is passed through untouched — the constructor already
-   * validates it.
-   */
+  /** Single chokepoint for every thrown `ApiError`: sanitizes `code` / `message` so a hostile value
+   *  cannot make the constructor itself throw (docs/architecture.md → API client 的回應處理). */
   private throwOnError(res: ApiResponse<unknown>): void {
     if (res.error) {
       throw new ApiError(
@@ -252,17 +215,8 @@ export class ApiClient {
 
   // --- Auth ---
 
-  /**
-   * Look up family membership for a pre-hashed userId. Server never sees the email.
-   *
-   * `verifySecret` unlocks the payload for accounts with PWA login verification
-   * configured; without it the response carries `requiresVerification: TRUE`.
-   * A wrong secret is a 403 `VERIFICATION_FAILED` (or 429 `VERIFICATION_LOCKED`
-   * with `error.retryAfter`), never a silent empty result.
-   *
-   * NOTE: unused by the PWA today (login goes through the sync code) — kept in
-   * sync with the Extension client so the two contracts cannot drift.
-   */
+  /** Family lookup by pre-hashed userId (server never sees the email). Unused by the PWA today, kept
+   *  in sync with the Extension client; `verifySecret`: docs/architecture.md → PWA 登入驗證機制. */
   async lookupUser(
     userId: string,
     opts?: { verifySecret?: string },
@@ -291,11 +245,8 @@ export class ApiClient {
     return this.put(`/api/user/${userId}/books`, data);
   }
 
-  /**
-   * Partial update — send only the changed books (diff). Used by the manual
-   * "save" flow to cut upload traffic vs the full-payload PUT. Unknown bookIds
-   * are silently skipped server-side; new (un-synced) books must go via PUT.
-   */
+  /** Partial save of only the changed books, cutting upload vs the full PUT. Unknown bookIds are
+   *  skipped server-side without error; new (un-synced) books must go via PUT. */
   async patchPersonalBooks(
     userId: string,
     changes: Array<{ bookId: BookEntry["bookId"]; isShared: BoolFlag }>,
@@ -304,12 +255,8 @@ export class ApiClient {
     return this.patch(`/api/user/${userId}/books`, { changes });
   }
 
-  /**
-   * Update viewer-private family-shelf preferences (v1.5.0). Each provided list
-   * (`hidden` / `favorites`) full-replaces its server-side counterpart; absent
-   * lists are preserved. Refs are copy-scoped `{ownerId}:{bookId}`. Stored
-   * server-side so the views stay consistent across Extension and PWA.
-   */
+  /** Viewer-private family-shelf prefs (v1.5.0), server-side for Extension/PWA parity. A sent list
+   *  (`hidden` / `favorites`) full-replaces its counterpart, an absent one is kept; refs: `{ownerId}:{bookId}`. */
   async updateFamilyPrefs(
     userId: string,
     prefs: { hidden?: string[]; favorites?: string[] },
@@ -322,10 +269,8 @@ export class ApiClient {
 
   // --- Family Group ---
 
-  /**
-   * Create a new family.
-   * NOTE: PWA MUST NOT call this — PWA can only join families (Phase 1 Q2).
-   */
+  /** Create a new family. NOTE: the PWA MUST NOT call this — it can only join families
+   *  (Phase 1 Q2). */
   async createFamily(
     userId: string,
     displayName?: string,
@@ -371,15 +316,8 @@ export class ApiClient {
     return this.del(`/api/family/${familyId}/member/${targetUserId}`);
   }
 
-  /**
-   * Lift the "kicked" tombstone `removeMember` leaves behind, so the removed
-   * member can use the sync code again before it expires on its own.
-   *
-   * This does NOT put anyone back in the family: the member stays out and must
-   * join again themselves — the copy in `components/UnkickNotice.tsx` says so,
-   * and must keep saying so. Owner-only server-side (403 `NOT_OWNER` otherwise)
-   * and idempotent: no live tombstone still answers 200.
-   */
+  /** Lift `removeMember`'s kicked tombstone early. Does NOT re-add anyone (UnkickNotice's copy must
+   *  keep saying so). Owner-only (403 `NOT_OWNER`); idempotent: no live tombstone still answers 200. */
   async unkickMember(
     familyId: string,
     targetUserId: string,
@@ -398,20 +336,12 @@ export class ApiClient {
     return this.put(`/api/family/${familyId}/transfer`, { userId, newOwnerId });
   }
 
-  /**
-   * `unknown`, not `FamilyGroup`: the wire shape is only a claim until
-   * `sanitizeFamilyMembersResponse` has checked it. The envelope is sanitized
-   * whole — callers of this method read `{ data, error }` themselves instead of
-   * going through `unwrap`, so an `error` envelope must reach them unchanged
-   * while `data.members` is rebuilt.
-   */
+  /** Read as `unknown` until `sanitizeFamilyMembersResponse` checks it; the whole envelope is checked
+   *  so an `error` one reaches the caller unchanged. See docs/architecture.md → API client 的回應處理. */
   async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
     const res = await this.get<unknown>(`/api/family/${familyId}/members`);
-    // Two deliberate layers, in this order: `memberValidation` rebuilds
-    // `data.members` structurally (drops unaddressable elements, strips hostile
-    // extras) and normalizes `apiEndpoint`; the shared text layer then coerces
-    // the remaining declared-string fields (`familyId` / `ownerId` /
-    // `createdAt`) that memberValidation documents as out of its scope.
+    // Structure layer first (rebuilds `data.members`, normalizes `apiEndpoint`), then the text layer
+    // (`familyId` / `ownerId` / `createdAt`): docs/architecture.md → 伺服器回傳資料的檢查.
     return this.sanitizeEnvelope(
       sanitizeFamilyMembersResponse(res),
       sanitizeFamilyGroupText,
@@ -438,16 +368,8 @@ export class ApiClient {
 
   // --- Family Bookshelf ---
 
-  /**
-   * `unknown`, not `FamilyBookshelf`: the wire shape is only a claim until
-   * `sanitizeFamilyBookshelfResponse` has checked it. Two deliberate layers, in
-   * this order — the structural pass drops members without a usable `userId`
-   * and books without a usable `bookId` (identities the text layer would
-   * normalize to a COLLIDING `""`), then the shared text layer coerces the
-   * declared-string fields it leaves alone. The envelope is sanitized whole:
-   * callers read `{ data, error }` themselves, so an `error` envelope must
-   * reach them unchanged.
-   */
+  /** Read as `unknown`; structure layer (drops unusable `userId` / `bookId`) then text layer, on the
+   *  whole envelope. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getFamilyBookshelf(
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
@@ -471,12 +393,8 @@ export class ApiClient {
     return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
-  /**
-   * `unknown`, not `BorrowRequest[]`: the wire shape is only a claim until
-   * `sanitizeBorrowRequests` has checked it. `unwrap` still runs first — it owns
-   * the `{ data, error }` envelope contract (throws `ApiError` on `error`,
-   * `EMPTY_RESPONSE` on missing data).
-   */
+  /** Read as `unknown` until `sanitizeBorrowRequests` checks it; `unwrap` runs first, owning the
+   *  envelope contract (`ApiError` on `error`, `EMPTY_RESPONSE` on missing data). */
   async listBorrowRequests(familyId: string): Promise<BorrowRequest[]> {
     const res = await this.get<unknown>(`/api/family/${familyId}/borrow`);
     return sanitizeBorrowRequests(this.unwrap(res));
@@ -575,11 +493,8 @@ export class ApiClient {
     return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
-  /**
-   * Revoke a public shelf. Throws `ApiError` when the server refused — the
-   * caller MUST NOT report the link as closed on a rejected request (the
-   * snapshot stays readable until this succeeds).
-   */
+  /** Revoke a public shelf; throws `ApiError` on refusal, and the caller MUST NOT then report the link
+   *  closed (the snapshot stays readable until this succeeds). */
   async deletePublicShelf(userId: string, shelfId: string): Promise<void> {
     this.validateHexId(userId, "userId");
     const res = await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
@@ -593,10 +508,8 @@ export class ApiClient {
     });
     const json = (await response.json()) as ApiResponse<PublicShelfData>;
     if (json.error) {
-      // Sanitize before interpolation: a hostile `{"toString":null}` field makes
-      // `new Error(...)` throw before `status` is attached, and PublicShelfPage
-      // switches on that `status` — a 404 would lose its「此公開書櫃不存在或已過期」
-      // screen and fall back to the generic load error.
+      // Sanitize before interpolation, or a hostile field throws before `status` is attached and a
+      // 404 loses its own screen (docs/architecture.md → API client 的回應處理).
       const code = safeErrorText(json.error.code, "UNKNOWN_ERROR");
       const message = safeErrorText(json.error.message, "請稍後再試");
       const err = new Error(`${code}: ${message}`);
@@ -606,10 +519,8 @@ export class ApiClient {
     if (!json.data) {
       throw new Error("EMPTY_RESPONSE: response body missing data");
     }
-    // This method bypasses `readEnvelope` with its own bare cast (:699), so the
-    // sanitizer is the ONLY thing standing between a hostile public snapshot and
-    // `PublicShelfPage`, which renders `title` / `book.title` / `book.author`
-    // straight into JSX and calls `.toLowerCase()` on them while searching.
+    // Own bare cast above, so this sanitizer is the ONLY guard before `PublicShelfPage` renders and
+    // `.toLowerCase()`s these fields (docs/architecture.md → API client 的回應處理).
     return sanitizeRecord(json.data, sanitizePublicShelfDataText);
   }
 

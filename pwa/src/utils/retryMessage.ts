@@ -1,8 +1,5 @@
-/**
- * Localized copy for back-off errors (HTTP 429). The Worker may include an
- * `error.retryAfter` hint (seconds); when it does, the UI shows a live
- * countdown, otherwise it falls back to the static "稍後再試" copy.
- */
+/** Localized copy for back-off errors (HTTP 429): a live countdown when the Worker sent an
+ *  `error.retryAfter` hint (seconds), otherwise the static "稍後再試" copy. */
 
 /** Error codes that can carry a `retryAfter` back-off hint. */
 export type RetryErrorCode = "VERIFICATION_LOCKED" | "RATE_LIMITED";

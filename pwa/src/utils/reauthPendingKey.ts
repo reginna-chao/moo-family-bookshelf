@@ -1,11 +1,5 @@
-/**
- * The re-verification marker's storage key and its CLEAR, with NO imports (#266).
- *
- * Split out of `reauthPending.ts` because `useAuth.ts` needs `clearReauthPending`
- * and the Node-side Playwright helpers import `useAuth`: reaching `constants.ts`
- * would evaluate `import.meta.env`, which is undefined under plain Node (see the
- * trailing comment in `constants.ts`). Keep this file dependency-free.
- */
+/** The re-verification marker's key and its CLEAR (#266). Keep this file import-free so `useAuth.ts`
+ *  never reaches `constants.ts`: .claude/rules/frontend.md → PWA import chain. */
 
 /** Truncated digests (`,`-joined) of the identities a forced re-verification signed out. */
 export const REAUTH_PENDING_KEY = "moo:reauthPending";

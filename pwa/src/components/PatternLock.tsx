@@ -9,9 +9,8 @@ interface PatternLockProps {
    *  latter ticks (e.g. a back-off countdown). Defaults to `error`. */
   errorAnnouncement?: string;
   onCancel?: () => void;
-  /** When true, block confirmation and drawing, and dim the grid (e.g. while a
-   *  back-off countdown is running or a submit is in flight). Cancel stays
-   *  available. Defaults to false. */
+  /** Block confirmation and drawing and dim the grid (e.g. during a back-off countdown or an
+   *  in-flight submit); Cancel stays available. Defaults to false. */
   disabled?: boolean;
 }
 

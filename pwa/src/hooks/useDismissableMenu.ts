@@ -5,32 +5,16 @@ export interface DismissableMenuOptions {
   onClose: () => void;
   triggerRef: RefObject<HTMLElement | null>;
   menuRef: RefObject<HTMLElement | null>;
-  /**
-   * Also close on page scroll (capture phase) and window resize. For portaled /
-   * `position: fixed` menus that would detach from their trigger. Default false.
-   */
+  /** Also close on page scroll (capture phase) and window resize, for portaled / `position: fixed`
+   *  menus that would detach from their trigger. Default false. */
   dismissOnScroll?: boolean;
-  /**
-   * On Escape, move focus back to the trigger after closing, so keyboard and
-   * screen-reader users land on it (and hear its current name) instead of on
-   * `<body>` when the focused option unmounts. Focus is returned only when
-   * Escape is pressed with focus in the menu or on its trigger, or when focus
-   * has already fallen to the document (the focused option unmounted); a
-   * control the user moved to while the menu stayed open keeps focus. Outside
-   * click, scroll and resize never move focus — the user went elsewhere.
-   * Default true (the ARIA APG button-popup convention); pass false only for a
-   * special case. Keep the name and semantics identical to
-   * `extension/src/hooks/useDismissableMenu.ts`.
-   */
+  /** On Escape, refocus the trigger if focus was in the menu / trigger or fell to the document; never on
+   *  outside click / scroll / resize. Default true (ARIA APG). Twin: .claude/rules/frontend.md. */
   returnFocusOnEscape?: boolean;
 }
 
-/**
- * Returns true when the event's propagation path starts inside the trigger or
- * the menu — interactions that belong to the menu itself and must not dismiss
- * it. The PWA has no shadow DOM, so composedPath() behaves like a plain
- * ancestor walk here; it is used to stay in step with the Extension hook.
- */
+/** True when the event's path starts inside the trigger or the menu (must not dismiss). No shadow DOM
+ *  here, so composedPath() is a plain ancestor walk, kept to match the Extension hook. */
 function eventStartedInMenu(
   e: Event,
   trigger: HTMLElement | null,
@@ -42,11 +26,8 @@ function eventStartedInMenu(
   );
 }
 
-/**
- * Returns true when a document-level key event has no focused element behind
- * it — the focused option already unmounted, or nothing was focused — so focus
- * has fallen to the document itself rather than to a control the user chose.
- */
+/** True when a document-level key event has no focused element behind it (the focused option
+ *  unmounted, or nothing was focused): focus fell to the document, not to a chosen control. */
 function focusIsNowhere(target: EventTarget | null): boolean {
   return (
     target === document ||
@@ -96,9 +77,8 @@ export function useDismissableMenu({
     }
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      // Reclaim only focus the menu owned, or focus that already fell to the
-      // document; a control the user Tabbed to while the menu stayed open
-      // keeps it. Decided before onClose, which may unmount the menu.
+      // Reclaim only focus the menu owned or that fell to the document, never a control the user
+      // Tabbed to. Decided before onClose, which may unmount the menu.
       const reclaim =
         returnFocusRef.current &&
         (eventStartedInMenu(e, triggerRef.current, menuRef.current) ||
@@ -124,8 +104,7 @@ export function useDismissableMenu({
         window.removeEventListener("resize", handleResize);
       }
     };
-    // Refs are stable and onClose is read via onCloseRef; only isOpen /
-    // dismissOnScroll should re-subscribe the listeners.
+    // Refs are stable and onClose is read via a ref: only isOpen / dismissOnScroll re-subscribe.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, dismissOnScroll]);
 }

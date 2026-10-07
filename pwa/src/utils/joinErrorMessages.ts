@@ -1,11 +1,5 @@
-/**
- * 繁體中文 copy for join failures that must be EXPLAINED to the user instead of
- * leaving them at a bare login form with no reason given.
- *
- * Shared by the two paths that can hit them so the wording cannot drift: the
- * token-recovery join in `pwa/src/App.tsx` (`acquireNewToken`) and the manual
- * join in `pwa/src/hooks/useLandingCompleteJoin.ts` (`completeJoin`).
- */
+/** 繁體中文 copy for join failures that must be EXPLAINED, shared by `acquireNewToken` (App.tsx) and
+ *  `completeJoin` so the wording cannot drift. See docs/architecture.md → 背景自動復原的防護. */
 
 import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
 

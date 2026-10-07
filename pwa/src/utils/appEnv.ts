@@ -1,11 +1,5 @@
-/**
- * App environment detection based on Vite build mode.
- *
- * - pnpm dev          → MODE = "development" → "local"
- * - pnpm dev:remote   → MODE = "remote"      → "dev"
- * - pnpm build:dev    → MODE = "remote"      → "dev"
- * - pnpm build        → MODE = "production"  → "prod"
- */
+/** App environment from the Vite build mode: `pnpm dev` → "local"; `pnpm dev:remote` and
+ *  `pnpm build:dev` (MODE "remote") → "dev"; `pnpm build` → "prod". */
 
 export type AppEnv = "local" | "dev" | "prod";
 

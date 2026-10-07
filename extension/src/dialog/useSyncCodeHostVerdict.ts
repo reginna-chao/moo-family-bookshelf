@@ -1,20 +1,5 @@
-/**
- * Renderable `@host` verdict for a live sync-code field: `valid` shows at once,
- * `invalid` only once the value has SETTLED, so the security warning cannot
- * flicker through every intermediate keystroke and train the user to ignore it.
- *
- * Twin of pwa/src/hooks/useSyncCodeHostVerdict.ts — same API, same triggers.
- * The policy (what may be rendered, and the delay) lives in shared/ so the two
- * apps cannot drift apart on a security-facing disclosure.
- *
- * Settle triggers, any one of which is enough:
- *   1. the value stayed unchanged for SYNC_CODE_HOST_SETTLE_DELAY_MS — the
- *      safety net no input method can bypass (typing, IME, autofill, drop);
- *   2. paste (`settleOnNextChange`);
- *   3. blur, and submit / join press (`settleNow`);
- *   4. a non-empty value at first render — an invite-link prefill the user
- *      never typed, so there is no typing to flicker through.
- */
+/** Renderable `@host` verdict: `valid` at once, `invalid` only once SETTLED (delay, paste, blur/submit,
+ *  prefill). Twin of pwa/src/hooks/useSyncCodeHostVerdict.ts; docs/architecture.md → 同步碼位址的驗證與揭露. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -61,16 +46,14 @@ export function useSyncCodeHostVerdict(
   }, [code, settledCode]);
 
   const settleNow = useCallback(() => {
-    // Also disarms an unconsumed paste flag (e.g. pasting text identical to
-    // what was already in the field never produced a change to consume it);
-    // otherwise the next keystroke would settle instantly and flicker.
+    // Also disarms an unconsumed paste flag (a paste identical to the field's value causes no
+    // change to consume it), or the next keystroke would settle instantly and flicker.
     forceNextRef.current = false;
     setSettledCode(codeRef.current);
   }, []);
 
-  // Paste needs its own trigger because React's onPaste fires BEFORE the input
-  // value updates: `settleNow` here would settle the PRE-paste value and leave
-  // the pasted one waiting out the full delay.
+  // React's onPaste fires BEFORE the value updates: `settleNow` would settle the PRE-paste value
+  // and leave the pasted one waiting out the full delay.
   const settleOnNextChange = useCallback(() => {
     forceNextRef.current = true;
   }, []);

@@ -1,15 +1,8 @@
 interface ErrorAlertProps {
   /** Visible error copy. Renders nothing when empty. */
   message: string;
-  /**
-   * Stable sentence to announce to assistive tech. Defaults to `message`.
-   *
-   * Pass a countdown-free variant whenever `message` re-renders on a timer: a
-   * live region whose text changes every second interrupts a screen-reader user
-   * on every tick (up to 15 minutes for a verification lockout). When this
-   * differs from `message`, only this sentence reaches the live region and the
-   * ticking copy is hidden from assistive tech.
-   */
+  /** Stable sentence for assistive tech (default `message`). Pass a countdown-free one when `message`
+   *  ticks: only it reaches the live region, so a screen reader is not interrupted every second. */
   announcement?: string;
   /** Extra layout classes (spacing only); colour and size are fixed. */
   className?: string;

@@ -93,9 +93,8 @@ export function useLandingJoin({
     setCodeInput("");
   }
 
-  // The QR arrival's own machinery: consent gate + one-shot auto-trigger. It
-  // keeps its distance from the state the form path shares (`joinOrigin`,
-  // `pendingAuth`, `generalError`), which is why the raw setters go in.
+  // The QR arrival's consent gate + one-shot auto-trigger; it gets raw setters because it does
+  // not own the state the form path shares (`joinOrigin`, `pendingAuth`, `generalError`).
   const { hostConsent, handleHostConsentConfirm, handleHostConsentCancel } =
     useQrJoin({
       qrUserId,

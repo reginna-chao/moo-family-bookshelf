@@ -40,11 +40,8 @@ export function namespacedKey(userId: string, suffix: string): string {
   return `moo:${userId}:${suffix}`;
 }
 
-/**
- * Canonical, adoptable form of an API host, or `null` when the client refuses
- * it. Same verdict the join paths use, so neither storage nor the in-memory
- * session can hold an endpoint the ApiClient would reject.
- */
+/** Canonical form of an API host, or `null` when the client refuses it — the join paths' verdict,
+ *  so neither storage nor the in-memory session can hold an endpoint ApiClient would reject. */
 function safeApiHost(apiHost: string | undefined): string | null {
   const result = classifySyncCodeApiHost(apiHost);
   return result.kind === "valid" ? result.endpoint : null;
@@ -53,10 +50,8 @@ function safeApiHost(apiHost: string | undefined): string | null {
 function saveToStorage(data: AuthState): void {
   localStorage.setItem(USER_ID_KEY, data.userId);
   localStorage.setItem(namespacedKey(data.userId, "familyId"), data.familyId);
-  // Last line of defence for "never persist a refused host": the join paths
-  // already stop one, and what does get written is the canonical form, so the
-  // remembered sync code rebuilt from it carries the same value the Extension
-  // would store.
+  // Last line of defence for "never persist a refused host"; writing the canonical form makes the
+  // remembered sync code rebuilt from it carry the same value the Extension would store.
   const apiHost = safeApiHost(data.apiHost);
   if (apiHost) {
     localStorage.setItem(namespacedKey(data.userId, "apiHost"), apiHost);
@@ -86,10 +81,8 @@ function loadFromStorage(): AuthState | null {
     return null;
   }
 
-  // A stored endpoint the client now refuses (written by a build predating the
-  // credentials check) must not be restored: `new ApiClient(apiHost)` throws,
-  // which would take the whole app down rather than just the session. Drop the
-  // session instead and let the user re-enter a sync code.
+  // A stored endpoint the client now refuses would make `new ApiClient` throw and take the app down:
+  // drop the session instead (docs/architecture.md → 同步碼位址的驗證與揭露, 本機既有值也會複檢).
   const apiHost = safeApiHost(storedApiHost);
   if (storedApiHost && apiHost === null) {
     return null;
@@ -192,10 +185,8 @@ function tryParseQrParams(): QrParams | null {
   return { syncCode: code, userId: uid, qrToken: qrt || undefined };
 }
 
-/**
- * Parse #invite={syncCode} from URL hash (invite link flow).
- * Returns the full sync code string if found and valid, null otherwise.
- */
+/** Parse #invite={syncCode} from the URL hash (invite link flow): the full sync code when present
+ *  and decodable, null otherwise. */
 function tryParseInviteParam(): string | null {
   const hash = window.location.hash.slice(1);
   const params = new URLSearchParams(hash);
@@ -232,9 +223,8 @@ export function useAuth(): UseAuthReturn {
       forceClearStorage();
     }
 
-    // 1. Parse QR params BEFORE clearing — clearUrlParams removes the hash.
-    //    QR codes include a pre-hashed userId, so we route through LandingPage
-    //    verification flow instead of auto-logging in.
+    // 1. Parse QR params BEFORE clearUrlParams removes the hash. A QR's pre-hashed userId goes
+    //    through LandingPage's verification flow instead of auto-logging in.
     const qrParams = tryParseQrParams();
 
     // 2. Parse #invite={syncCode} invite link (separate from QR flow)

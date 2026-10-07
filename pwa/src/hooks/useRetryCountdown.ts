@@ -2,23 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const MS_PER_SECOND = 1000;
 
-/**
- * Upper bound for a backend-supplied wait, in seconds (1 hour).
- *
- * `retryAfter` is attacker- / misconfiguration-influenced input: the API host is
- * user-configurable (BYO backend), so a hostile or buggy deployment could answer
- * a 429 with an absurd value and freeze the UI for days. The official Worker
- * never exceeds 900s, so clamping here costs nothing in normal operation.
- */
+/** Upper bound (1 hour) for a backend-supplied wait: a hostile or buggy BYO backend could otherwise
+ *  freeze the UI for days. The official Worker never exceeds 900s, so this costs nothing. */
 const MAX_RETRY_AFTER_SECONDS = 3600;
 
 export interface RetryCountdown {
   /** Whole seconds left before a retry is allowed; 0 when idle. */
   remaining: number;
-  /**
-   * Arm (or re-arm) the countdown. A non-positive input only clears it, and a
-   * value above one hour is clamped (see `MAX_RETRY_AFTER_SECONDS`).
-   */
+  /** Arm (or re-arm) the countdown. A non-positive input only clears it; a value above one hour
+   *  is clamped (see `MAX_RETRY_AFTER_SECONDS`). */
   start: (seconds: number) => void;
   /** Stop the countdown without firing `onExpire`. */
   clear: () => void;

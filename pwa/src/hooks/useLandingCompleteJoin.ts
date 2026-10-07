@@ -59,9 +59,8 @@ export function useLandingCompleteJoin({
     verifySecret?: string,
     tokenFromQr?: string,
   ) {
-    // Single choke point for every join path (form, verification prompt, QR):
-    // an address the client would refuse never gets a request, a token, or a
-    // localStorage entry.
+    // Choke point for every join path: a refused address never gets a request, a token or a
+    // localStorage entry (docs/architecture.md → 登入頁的加入流程).
     if (isUnsafeApiHost(apiHost)) {
       setPendingAuth(null);
       setGeneralError(UNSAFE_API_HOST_ERROR);
@@ -69,9 +68,8 @@ export function useLandingCompleteJoin({
       return;
     }
 
-    // An attempt already in flight keeps the origin it started with (the QR
-    // path sets "qr" before calling in); a fresh entry from the verification
-    // prompt is user-driven, so it counts as form-shaped.
+    // An in-flight attempt keeps its origin (the QR path sets "qr" first); a fresh entry from the
+    // verification prompt is user-driven, so it counts as "form".
     setJoinOrigin((prev) => prev ?? "form");
     try {
       const joinClient = getJoinClient(apiHost);
@@ -97,9 +95,8 @@ export function useLandingCompleteJoin({
           setCodeInput("");
           setGeneralError(RECOVERY_NOT_MEMBER_LANDING_MESSAGE);
         } else if (code === "FAMILY_FULL") {
-          // Same entry the token-recovery path shows (App.tsx reads it out of
-          // JOIN_BLOCKED_MESSAGES, which is built from this constant), so the
-          // two join paths cannot report a full family differently.
+          // App.tsx's JOIN_BLOCKED_MESSAGES is built from this same constant, so the two join paths
+          // cannot report a full family differently.
           setGeneralError(FAMILY_FULL_MESSAGE);
         } else if (code === "MEMBER_REMOVED") {
           // Shared with the Extension so both say how long the rejoin is refused.
@@ -153,11 +150,8 @@ export function useLandingCompleteJoin({
         return;
       }
 
-      // Deliberately no `setJoinOrigin(null)` on this exit: the parent swaps
-      // this page out on `onAuth`, and "still working" is the honest screen
-      // until it does. Every exit that stays on this page clears the origin.
-      // Only the join that used the marker spends it, and only its own: other
-      // identities' markers stay (#266). Awaited first so both setters batch.
+      // No `setJoinOrigin(null)` here: `onAuth` swaps the page out. Only the join that used the
+      // marker spends it, its own only (#266); awaited first so both setters batch.
       if (recovery) await clearReauthPendingFor(identity);
       setPendingAuth(null);
       onAuth({

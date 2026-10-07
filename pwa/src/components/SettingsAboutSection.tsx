@@ -2,7 +2,7 @@ import { getReportLinks } from "moo-family-bookshelf-shared/config/links";
 
 const reportLinks = getReportLinks({ appVersion: __APP_VERSION__ });
 
-/** 設定頁 footer: version, third-party disclaimer and report links. */
+/** Settings-page footer: version, third-party disclaimer and report links. */
 export function SettingsAboutSection() {
   return (
     <section className="pt-6 mt-6 border-t border-gray-200 text-center">

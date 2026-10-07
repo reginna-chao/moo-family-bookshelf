@@ -214,9 +214,8 @@ function AuthenticatedApp() {
       <LandingPage
         onAuth={(data) => {
           setLandingError("");
-          // A successful manual join proves the credentials work, so a leftover
-          // cooldown must not throttle the next silent refresh (mirrors
-          // `extension/src/dialog/useReauth.ts`).
+          // A manual join proves the credentials work: clear any leftover recovery cooldown
+          // (mirrors `extension/src/dialog/useReauth.ts`).
           clearRecoveryCooldown();
           login(data);
         }}

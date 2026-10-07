@@ -1,25 +1,5 @@
-/**
- * Surfaces the `@host` a sync code carries, so joining a self-hosted backend is
- * visible before the user commits to it. PWA twin of the Extension's
- * `SyncCodeHostNote` — same copy, same three outcomes, Tailwind instead of the
- * Dialog's `.moo-*` classes.
- *
- * Presentational only: the caller decides where the verdict comes from (the
- * typed sync code on the form, `pendingAuth.apiHost` on the verification
- * screen), which is what lets one component cover both the code-entry path and
- * the invite-link / QR path where the user never typed the host.
- *
- * `variant` follows the same boundary, and ONLY changes the valid branch's
- * lead-in: a sync code is on screen → "此同步碼…" (`join`, the default); none is
- * → drop it (`verify`), which is the case on the verification screen a QR /
- * invite arrival lands on. The invalid branch's warning is deliberately
- * variant-independent — it is about the sync code that carried the bad host.
- * (`onboarding` comes with the shared copy map and is currently used only by the
- * Extension's onboarding container; the PWA has no equivalent screen yet.)
- *
- * Every string here lives in shared/src/hostNote/messages.ts, imported by BOTH
- * twins — that module, not a comment, is what keeps the two byte-identical.
- */
+/** Presentational note disclosing a sync code's `@host` before the user commits; PWA twin of the
+ *  Extension's, copy from shared/src/hostNote/messages.ts. See docs/architecture.md → 登入頁的加入流程. */
 
 import {
   SYNC_CODE_HOST_NOTE_INVALID,
@@ -31,7 +11,7 @@ import type { SyncCodeApiHostResult } from "@/crypto/syncCode";
 export interface SyncCodeHostNoteProps {
   /** Verdict from `parseSyncCodeApiHost` / `classifySyncCodeApiHost`. */
   result: SyncCodeApiHostResult;
-  /** 決定 valid 分支的引導語；join 提「此同步碼」，verify／onboarding 不提（畫面上沒有同步碼）。 */
+  /** Picks the valid branch's lead-in: `join` names 「此同步碼」; `verify` / `onboarding` do not (no sync code on screen). */
   variant?: SyncCodeHostNoteVariant;
   /** Extra layout classes (spacing only); colour and size are fixed. */
   className?: string;

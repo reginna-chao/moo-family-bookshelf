@@ -13,7 +13,7 @@ interface SettingsFamilySectionProps {
 }
 
 /**
- * 設定頁「家庭設定」: the sync code with its share actions, and the member
+ * Settings-page 「家庭設定」: the sync code with its share actions, and the member
  * list. Its state lives here, not in the collapsible body, so collapsing
  * keeps it.
  */
@@ -24,13 +24,8 @@ export function SettingsFamilySection({
 }: SettingsFamilySectionProps) {
   const [familyOpen, setFamilyOpen] = useState(true);
   const share = useSyncCodeShare(familyId, apiClient);
-  /**
-   * The member removed most recently in THIS page session, kept only to offer
-   * the "lift the rejoin block" entry (see `UnkickNotice`). Deliberately local:
-   * leaving the page forgets it, and a second removal replaces the first.
-   * Held here rather than inside `MemberList` so a failed member-list refresh —
-   * which unmounts `MemberList` — cannot swallow the entry.
-   */
+  /** Latest removal this page session, for the `UnkickNotice` entry (leaving forgets it; a second
+   *  replaces it). Held here: a failed list refresh unmounts `MemberList` and would swallow it. */
   const [recentlyRemoved, setRecentlyRemoved] =
     useState<RemovedMemberInfo | null>(null);
 

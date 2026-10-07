@@ -24,9 +24,8 @@ export function useLandingRetryLock(): UseLandingRetryLockResult {
     retryCode === null
       ? ""
       : buildRetryMessage(retryCode, retryCountdown.remaining);
-  /** Countdown-free twin of `retryMessage`, announced once instead of per tick.
-   *  Undefined when no back-off notice is showing, so any other error copy —
-   *  which never ticks — keeps announcing itself. */
+  /** Countdown-free twin of `retryMessage`, announced once instead of per tick. Undefined with no
+   *  back-off notice, so any other (non-ticking) error copy keeps announcing itself. */
   const retryAnnouncement =
     retryCode === null ? undefined : buildStaticRetryMessage(retryCode);
   /** True only while a countdown is running — blocks submit/verify actions. */

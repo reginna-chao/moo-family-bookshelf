@@ -7,7 +7,7 @@ interface SettingsDeleteAccountSectionProps {
   onForceLogout: () => void;
 }
 
-/** 設定頁「移除帳戶」: idle → confirming (with the consequences) → deleting. */
+/** Settings-page 「移除帳戶」: idle → confirming (with the consequences) → deleting. */
 export function SettingsDeleteAccountSection({
   userId,
   apiClient,

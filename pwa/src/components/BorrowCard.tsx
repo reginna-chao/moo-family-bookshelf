@@ -7,12 +7,8 @@ interface StatusStyle {
   className: string;
 }
 
-/**
- * Runtime-reachable fallback with a compile-time exhaustiveness tripwire:
- * `status` narrows to `never` here only while every BorrowStatus member has a
- * case above, so adding a 6th member fails the build instead of silently
- * shipping 「狀態未知」.
- */
+/** Runtime fallback and compile-time exhaustiveness tripwire: `status` is `never` only while every
+ *  BorrowStatus member has a case, so a 6th member fails the build instead of shipping 「狀態未知」. */
 function unknownStatusStyle(_status: never): StatusStyle {
   return { label: "狀態未知", className: "bg-gray-200 text-gray-600" };
 }

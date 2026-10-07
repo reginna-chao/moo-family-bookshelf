@@ -44,8 +44,7 @@ export function useSessionApiClient(
     const client = new ApiClient(apiHost);
     client.setTokenRefresher(tokenRefresher);
     return client;
-    // userId / familyId are unread on purpose: they key the session, so a new
-    // login (or logout) gets a new client instead of nulling the old one's token.
+    // userId / familyId only key the session: a new login gets a new client, the old keeps its token.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiHost, userId, familyId, tokenRefresher]);
 

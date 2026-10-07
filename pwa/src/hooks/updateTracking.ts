@@ -1,8 +1,5 @@
-/**
- * PWA-side persistence for family-shelf update tracking (`localStorage`). The
- * tracking rules themselves are shared with the Extension in
- * `moo-family-bookshelf-shared/familyShelf/updateTracking`.
- */
+/** PWA-side `localStorage` persistence for family-shelf update tracking; the tracking rules are
+ *  shared with the Extension in `moo-family-bookshelf-shared/familyShelf/updateTracking`. */
 
 export function seenKey(userId: string): string {
   return `familyBookshelfSeen:${userId}`;
