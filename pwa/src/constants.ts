@@ -1,10 +1,5 @@
-/**
- * Shared constants for the PWA.
- * Centralised so that values like the API endpoint only need
- * to be changed in one place.
- *
- * VITE_PWA_API_ENDPOINT is set via root .env files
- */
+/** PWA-wide constants, kept in one place. VITE_PWA_API_ENDPOINT comes from the root .env files;
+ *  this module reads `import.meta.env`, so Node-side code must not import it (see the bottom). */
 
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 

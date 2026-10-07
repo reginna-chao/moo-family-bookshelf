@@ -1,23 +1,5 @@
-/**
- * "This user's own leave / delete-account request is in flight" mark (#263).
- *
- * The server can revoke the user's token before it answers their own "leave
- * family" or "delete account" request, so another request of theirs may 401
- * meanwhile — and the silent recovery join (`acquireNewToken` in
- * `pwa/src/App.tsx`) would then re-add them to the family they are leaving.
- * `useLeaveFamily` / `useDeleteAccount` send through `runGuardedDeparture`,
- * which holds the mark until the request settles; the recovery join is skipped
- * while it is active.
- *
- * Kept in `localStorage` so every tab of the PWA sees it. The value is an
- * expiry (epoch ms), not a flag: a tab that dies mid-request blocks recovery
- * for at most `SELF_DEPARTURE_TTL_MS`. Mirrors
- * `extension/src/storage/selfDeparture.ts`.
- *
- * Every access is wrapped like `recoveryCooldown.ts`: a refused write costs the
- * guard, never the leave itself, and an unreadable store reads as "not
- * departing" so recovery keeps working.
- */
+/** "Own leave / delete-account request in flight" mark (#263): blocks the silent recovery join
+ *  meanwhile. See docs/architecture.md → 背景自動復原的防護. */
 
 import type { ApiResponse } from "moo-family-bookshelf-shared/api/types";
 

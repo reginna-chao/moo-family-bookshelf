@@ -62,9 +62,8 @@ export function useSyncCodeShare(
     const message = buildLinkInviteMessage(inviteUrl);
     if (navigator.share) {
       try {
-        // Pass `url` alongside the message so share targets can render a link
-        // preview / "open in browser" affordance. The URL also appears inline
-        // in `text` for targets that ignore the `url` field.
+        // `url` lets share targets render a link preview / "open in browser"; the URL is also
+        // inline in `text` for targets that ignore the `url` field.
         await navigator.share({
           title: "加入墨家書櫃",
           text: message,

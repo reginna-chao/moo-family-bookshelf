@@ -64,11 +64,8 @@ interface FamilyDataState {
   borrowRequestsState: BorrowLoadState;
   borrowRequestsError: string | null;
   refreshBorrowRequests: () => Promise<void>;
-  /**
-   * Optimistically set a borrow request's status locally after a successful
-   * PATCH, without re-fetching. Avoids KV eventual-consistency read-after-write
-   * clobbering the confirmed state back to stale data.
-   */
+  /** Set a request's status locally after a successful PATCH instead of re-fetching, so a stale
+   *  KV read-after-write cannot roll the confirmed state back. */
   applyBorrowStatus: (requestId: string, status: BorrowStatus) => void;
   /** Count of incoming PENDING requests for the current user (drives borrow tab badge). */
   incomingPendingCount: number;

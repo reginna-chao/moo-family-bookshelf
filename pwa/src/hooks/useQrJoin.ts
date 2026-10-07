@@ -67,17 +67,8 @@ export function useQrJoin({
     null,
   );
 
-  /**
-   * Runs a QR arrival's join, picking the exit that fits the credentials it
-   * carries. Shared by the default-endpoint fast path and the custom-host
-   * consent handler so the branch logic exists exactly once — the two differ
-   * only in WHEN they may start, never in what they do.
-   *
-   * With a qrToken, verification is skipped and the token is sent straight to
-   * the join. If the server rejects it (expired/invalid) it answers
-   * VERIFICATION_REQUIRED/FAILED and `completeJoin` falls back to the normal
-   * verification UI.
-   */
+  /** Runs a QR arrival's join via the exit its credentials fit (a qrToken skips verification);
+   *  shared by the fast path and the consent handler. See docs/architecture.md → 登入頁的加入流程. */
   function startQrJoin(
     familyId: string,
     userId: string,
@@ -87,17 +78,14 @@ export function useQrJoin({
     setJoinOrigin("qr");
 
     if (tokenFromQr) {
-      // No `.catch` on purpose: `completeJoin` wraps its whole body in
-      // try/catch and reports failures itself, so it never rejects — a handler
-      // here would be dead code, and both call sites in this function stay
-      // identical about that.
+      // No `.catch` on either `completeJoin` call in this function: it catches and reports its own
+      // failures, so it never rejects.
       void completeJoin(familyId, userId, apiHost, undefined, tokenFromQr);
       return;
     }
 
-    // The probe is the first request to reach this host, so it gets the same
-    // refusal `completeJoin` applies — the guard is this function's own
-    // invariant, not a promise its callers happen to keep.
+    // The probe is the first request to this host, so it gets `completeJoin`'s refusal too — this
+    // function's own invariant, not a promise its callers happen to keep.
     if (isUnsafeApiHost(apiHost)) {
       setGeneralError(UNSAFE_API_HOST_ERROR);
       setJoinOrigin(null);
@@ -135,12 +123,8 @@ export function useQrJoin({
     );
   }
 
-  /**
-   * Drop back to the manual form. The sync code stays pre-filled (its own
-   * `SyncCodeHostNote` keeps the address on screen), so the user can edit it or
-   * simply walk away — the same shape as the invalid-host refusal. `qrTriggered`
-   * is already latched, so the effect cannot re-fire behind this decision.
-   */
+  /** Drop back to the manual form, sync code still pre-filled (its `SyncCodeHostNote` keeps the
+   *  address on screen). `qrTriggered` is latched, so the effect cannot re-fire behind this. */
   function handleHostConsentCancel() {
     setHostConsent(null);
   }
@@ -166,11 +150,8 @@ export function useQrJoin({
       return;
     }
 
-    // Past that refusal, a present `@host` is exactly the `valid` case: a
-    // usable address the user has still never seen. Disclose it and hold EVERY
-    // request behind the answer — the verify-method probe alone would hand this
-    // server the arriving device's IP / UA, which is precisely what an
-    // unconsented address must not get.
+    // A present `@host` is now `valid` but never seen: hold EVERY request (the probe alone leaks
+    // IP / UA) behind consent — docs/architecture.md → 同步碼位址的驗證與揭露.
     const { apiHost } = decoded;
     if (apiHost) {
       setHostConsent({

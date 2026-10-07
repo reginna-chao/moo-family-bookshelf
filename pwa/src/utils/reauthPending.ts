@@ -1,56 +1,5 @@
-/**
- * "This session was ended by a forced re-verification" markers (#266).
- *
- * When the silent recovery join (`acquireNewToken` in `pwa/src/App.tsx`) is
- * answered with a verification code, the PWA logs out and asks the user to sign
- * in again. If that happened because the user left the family on another
- * device, an ordinary landing-page join would re-add them as a new member. So:
- *
- *  - WRITE: `acquireNewToken`'s verification branch, and only there — a
- *    voluntary logout, `forceLogout` and the blocked-code branch never write it.
- *    Written right AFTER that branch's `logout()` (an await before it would
- *    reopen #258); `clearStorage` leaves this key alone, so it survives. The key
- *    holds a SET — one marker per identity still awaiting re-verification — so
- *    another account's forced logout on a shared device ADDS its own marker
- *    instead of overwriting this one.
- *  - READ: `completeJoin` (`pwa/src/hooks/useLandingCompleteJoin.ts`). A join
- *    for the SAME family, server and user sends `recovery: 1`, so the server
- *    refuses it (409 RECOVERY_NOT_MEMBER) when the user is no longer listed.
- *  - CLEAR: `clearReauthPendingFor` removes ONLY one identity's marker, on a
- *    successful landing join that itself carried `recovery` (matched it) or on
- *    that 409 (the next submit is then the user's explicit re-join). Another
- *    identity's login leaves every other marker alone (shared device); a
- *    leftover marker is harmless — it only adds `recovery: 1` to a matching
- *    join. `forceClearStorage` in `useAuth.ts` removes the whole key through
- *    `clearReauthPending`, which lives with the key in the import-free
- *    `reauthPendingKey.ts` (re-exported here) so `useAuth.ts` never pulls in
- *    `constants.ts`.
- *
- * Stored value: the markers joined by `,`, oldest first, capped at
- * `MAX_PENDING_MARKERS` (the oldest are dropped beyond it; an evicted identity
- * falls back to an ordinary join — residual). An empty set removes the key.
- * Entries that are not exactly `MARKER_HEX_CHARS` lowercase hex chars (legacy
- * or garbage values) are ignored, so they read as "no marker".
- *
- * Only the first 16 bits of a SHA-256 digest of the identity are stored, never
- * the raw familyId or server: the user may have turned "remember sync code" off.
- * The full digest would not hide it — familyId spans only ~2.8e12 values, the
- * default server is public and the userId sits in other key names, so it could
- * be brute-forced back offline. The price of truncating: an unrelated identity
- * matches one marker 1 time in 65,536 (at most 16 in 65,536 with a full set),
- * and that join carries `recovery: 1` — a listed member logs in normally; a new
- * member gets one 409 RECOVERY_NOT_MEMBER, the matched marker is cleared, and
- * the next submit joins. The digest input goes through `sha256Hex`, which
- * lowercases it — harmless for an equality test.
- * The server is canonicalized exactly as `ApiClient` resolves it (absent →
- * `DEFAULT_API_ENDPOINT`), so a default-host or trailing-slash difference
- * between the stored session and a decoded sync code cannot make a match miss.
- *
- * Every access is wrapped like `recoveryCooldown.ts`: an unreadable store reads
- * as "no marker" (an ordinary join), and a refused write costs only the guard.
- * Read-modify-write is not atomic across tabs and is deliberately unlocked: a
- * lost update costs at most one marker (an ordinary join), never a lock-out.
- */
+/** Forced re-verification markers (#266): a `,`-joined set of truncated identity digests.
+ *  Rules: docs/architecture.md → 家庭解綁流程; implementation notes: → 背景自動復原的防護. */
 
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { sha256Hex } from "moo-family-bookshelf-shared/crypto/hash";

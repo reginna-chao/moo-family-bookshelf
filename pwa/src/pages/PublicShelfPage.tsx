@@ -127,10 +127,8 @@ export function PublicShelfPage({ shareToken }: PublicShelfPageProps) {
 
 function BookCard({ book }: { book: BookEntry }) {
   const [imgError, setImgError] = useState(false);
-  // A public shelf is someone else's server data, and this page is reachable
-  // without login — drop covers outside the Readmoo whitelist. Omitting the
-  // `<img>` entirely (rather than passing src="") means the browser issues no
-  // request at all and the existing title placeholder shows immediately.
+  // Someone else's server data on a no-login page: drop off-whitelist covers, and omit the `<img>`
+  // (not src="") so no request is issued and the title placeholder shows at once.
   const coverUrl = safeCoverUrl(book.coverUrl);
   const showCover = coverUrl !== "" && !imgError;
 

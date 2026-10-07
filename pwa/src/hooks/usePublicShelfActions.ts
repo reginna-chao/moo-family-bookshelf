@@ -72,18 +72,14 @@ export function usePublicShelfActions({
   const [titleQueued, setTitleQueued] = useState(false);
   /** Title/expiry writes currently on the wire. */
   const [inFlight, setInFlight] = useState(0);
-  // Queue and wire are independent: one boolean cannot represent both, and
-  // clearing it at the end of an expiry write used to mark a still-queued title
-  // edit as unsaved (and invite a duplicate PUT via 重試儲存).
+  // Queue and wire are independent states; one boolean cannot represent both
+  // (docs/architecture.md → 公開書櫃設定的寫入).
   const syncPending = titleQueued || inFlight > 0;
 
   /** shelfId the UI is bound to right now; null once the shelf is revoked. */
   const activeShelfIdRef = useRef<string | null>(null);
-  // Published on COMMIT, deliberately: the guard then means "the UI is bound
-  // to this shelfId". Cost: a write issued between that commit and this
-  // passive flush is dropped silently — sub-frame, unreachable by a real
-  // interaction, so accepted rather than fixed. Do NOT assign the ref during
-  // render: a discarded concurrent render would leave an uncommitted shelfId.
+  // Published on COMMIT ("the UI is bound to this shelfId"); never assign it during render.
+  // Accepted sub-frame cost: docs/architecture.md → 公開書櫃設定的寫入.
   useEffect(() => {
     activeShelfIdRef.current = shelf?.shelfId ?? null;
   }, [shelf]);
@@ -116,10 +112,8 @@ export function usePublicShelfActions({
   /** Single writer for the title / expiry / retry paths. */
   const runUpdate = useCallback(
     async (shelfId: string, body: PublicShelfUpdate): Promise<void> => {
-      // The shelf was revoked while this write sat in the debounce queue: the
-      // shelfId no longer exists, so firing it would only paint a red
-      // SHELF_NOT_FOUND right after a confirmed revocation. Reset-token keeps
-      // the shelfId, so a legitimate queued title write still goes through.
+      // Revoked while queued: firing would only paint SHELF_NOT_FOUND after a confirmed revocation.
+      // Reset-token keeps the shelfId, so a queued title write still goes through.
       if (activeShelfIdRef.current !== shelfId) {
         setTitleQueued(false);
         return;
@@ -150,9 +144,7 @@ export function usePublicShelfActions({
         );
         setErrorMsg("");
       } catch (e) {
-        // Same reasoning as the pre-flight guard: a write whose shelf was
-        // revoked mid-flight has no field left to reconcile, and the user just
-        // confirmed the revocation. A write merely SUPERSEDED by a later one
+        // Revoked mid-flight: nothing left to reconcile, so stay quiet. A write merely SUPERSEDED
         // still reports — its own field may remain diverged.
         if (activeShelfIdRef.current !== shelfId) return;
         setErrorMsg(publicShelfSaveErrorMessage(e));

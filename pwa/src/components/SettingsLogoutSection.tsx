@@ -5,7 +5,7 @@ interface SettingsLogoutSectionProps {
   onLogout: () => void;
 }
 
-/** 設定頁「登出」: a first press asks for confirmation, a second logs out. */
+/** Settings-page 「登出」: a first press asks for confirmation, a second logs out. */
 export function SettingsLogoutSection({
   onLogout,
 }: SettingsLogoutSectionProps) {

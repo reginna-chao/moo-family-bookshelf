@@ -1,23 +1,5 @@
-/**
- * Consent gate for a QR arrival whose sync code carries a custom `@host`.
- *
- * The QR auto-join path has two zero-interaction exits (a valid QR token, or an
- * account with no verification configured), so without this screen a scanned
- * code could adopt someone else's server — and persist it — with the user never
- * seeing the address. This is the disclosure point for those exits.
- *
- * Presentational only: the caller decides when to mount it and what happens on
- * either answer. The caller mounts it exclusively for a `valid` verdict; the
- * `invalid` one is refused outright upstream and never reaches a screen that
- * asks the user to agree to it.
- *
- * The address itself is rendered by `SyncCodeHostNote`, the same component the
- * form and the verification screen use — one source for what gets shown, so the
- * disclosed value cannot drift from the address the client would actually call.
- * It gets `variant="verify"` per that component's rule: no sync code is on
- * screen here (a QR arrival never typed one), so the `join` lead-in would point
- * at something the user cannot see.
- */
+/** Presentational consent gate for a QR arrival whose sync code carries a `valid` custom `@host`.
+ *  Why it exists and why `variant="verify"`: docs/architecture.md → 登入頁的加入流程. */
 
 import type { SyncCodeApiHostResult } from "@/crypto/syncCode";
 import { SyncCodeHostNote } from "@/components/SyncCodeHostNote";

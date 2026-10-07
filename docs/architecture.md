@@ -756,6 +756,71 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 - 部署於 Cloudflare Pages（與 Worker 同帳號，零額外成本）
 - 或任何靜態網站託管服務（Vercel、Netlify 等）
 
+### PWA 用戶端的設計理由
+
+`pwa/src/` 的程式碼註解最多兩行，較長的設計理由集中在下列各小節，註解以「`docs/architecture.md → <小節名稱>`」指回這裡。Extension 與 PWA 必須保持一致的成對檔案，以及刻意不一致之處，列在 `.claude/rules/frontend.md` → Extension ↔ PWA twins。
+
+#### 背景自動復原的防護
+
+背景自動復原指 401 時的 token refresher（`pwa/src/App.tsx` 的 `acquireNewToken`）在背景帶 `recovery: 1` 重新加入家庭。要不要送出由 `pwa/src/hooks/recoveryJoinGate.ts` 判斷：429 冷卻中、使用者自己的離開／刪除帳號請求仍在進行、或工作階段已結束時都不送。
+
+- **429 冷卻**（`pwa/src/utils/recoveryCooldown.ts`，對應 Extension `extension/src/api/auth-refresh.ts` 的冷卻函式；Extension 存在 `browser.storage.local`，PWA 只在瀏覽器執行，等價的儲存是 `localStorage`）：
+  - key `moo:recoveryCooldownUntil` 是全域的、不分使用者：它節流的是 Worker 的 per-IP 敏感端點額度（每分鐘 3 次），同一台裝置上所有帳號共用這份額度。
+  - 只有自動復原會查看冷卻；使用者手動發起的加入絕不能被它擋下。手動加入成功（`App.tsx` 傳給 `LandingPage` 的 `onAuth`）會清除殘留的冷卻：這次成功證明憑證可用，下一次背景復原不該被舊冷卻擋住（與 Extension `extension/src/dialog/useReauth.ts` 相同）。
+  - 每次存取都包在 try/catch：storage 拋錯（私密模式、配額）一律當作「沒有冷卻」，而不是讓整個 App 掛掉。
+- **自己的離開請求進行中**（#263，`pwa/src/utils/selfDeparture.ts`，對應 `extension/src/storage/selfDeparture.ts`）：伺服器可能在回覆使用者自己的「離開家庭」或「刪除帳號」請求之前就撤銷 token，這段期間他的其他請求可能拿到 401，背景自動復原就會把他加回正在離開的家庭。`useLeaveFamily`／`useDeleteAccount` 透過 `runGuardedDeparture` 送出請求，在請求結束前持有標記，期間不送自動復原。
+  - 標記存在 `localStorage`（`moo:selfDepartureUntil`），PWA 的每個分頁都看得到。值是到期時間（epoch ms）而不是旗標：請求途中分頁被關掉，最多擋住復原 `SELF_DEPARTURE_TTL_MS`（60 秒）。
+  - 每次存取都像 `recoveryCooldown.ts` 一樣包住：寫入被拒只失去這道保護、不影響離開本身；讀不到時視為「沒有在離開」，讓復原照常運作。
+- **強制重新驗證標記**（#266，`pwa/src/utils/reauthPending.ts`）：規則見〈家庭解綁流程〉的「PWA 的重新驗證標記」。實作補充：
+  - 只有 `acquireNewToken` 的驗證分支會寫入，而且寫在該分支的 `logout()` 之後；`clearStorage` 不動這個 key，所以標記在登出後仍在。讀取只在 `completeJoin`（`pwa/src/hooks/useLandingCompleteJoin.ts`）。
+  - 清空整個 key 的 `clearReauthPending` 放在不含任何 import 的 `pwa/src/utils/reauthPendingKey.ts`（由 `reauthPending.ts` 再匯出），`useAuth.ts` 的 `forceClearStorage` 才能呼叫它而不牽連 `constants.ts`（見 `.claude/rules/frontend.md` → PWA import chain）。
+  - 為什麼只存截短的摘要：完整摘要也藏不住原值——familyId 只有約 2.8e12 種可能、預設伺服器位址是公開的、userId 又出現在其他 key 的名稱裡，可以離線暴力反推。摘要的輸入經過 `sha256Hex`，它會轉成小寫，對相等比較無害。伺服器位址照 `ApiClient` 的解析方式正規化（缺省 → `DEFAULT_API_ENDPOINT`），所以預設位址或結尾斜線的差異不會讓比對落空。
+  - 每次存取都像 `recoveryCooldown.ts` 一樣包住：讀不到當作「沒有標記」（一般加入），寫入被拒只失去這道保護。讀—改—寫跨分頁不是原子操作，刻意不上鎖：遺失一次更新最多少一個標記（變成一般加入），不會把人鎖在外面。
+- **加入失敗的說明文案**（`pwa/src/utils/joinErrorMessages.ts`）：這些失敗必須向使用者說明原因，不能把人丟回一個什麼都沒說的登入表單。背景復原（`acquireNewToken`）與登入頁的手動加入（`completeJoin`）兩條路徑都會碰到，所以共用同一份文案，措辭不會分歧。
+
+#### 登入頁的加入流程
+
+- **狀態型別**（`pwa/src/hooks/joinState.ts`）放在 hooks 旁邊而不是頁面裡：頁面 import 這些 hooks，依賴只能單向。
+- **唯一入口**：`completeJoin`（`pwa/src/hooks/useLandingCompleteJoin.ts`）是表單、驗證畫面與 QR 三條路徑共用的加入入口。用戶端會拒絕的位址在這裡被擋下，拿不到任何請求、token 或 `localStorage` 項目。
+- **`joinOrigin`**：進行中的嘗試沿用它開始時的來源（QR 路徑會先設成 `"qr"` 再呼叫進來）；從驗證畫面新開始的嘗試是使用者觸發的，算作表單。成功的出口刻意不清除它：上層會在 `onAuth` 時把整個頁面換掉，在那之前「處理中」才是誠實的畫面；所有留在本頁的出口都會清除它。
+- **QR 路徑**（`pwa/src/hooks/useQrJoin.ts`）：
+  - `startQrJoin` 由官方預設端點的快速路徑與自訂位址的同意處理共用，分支邏輯只有一份——兩者只差在「何時可以開始」，做的事完全相同。帶 QR 權杖時略過驗證、直接把權杖送去加入；伺服器拒絕（過期或無效）時回 `VERIFICATION_REQUIRED`／`VERIFICATION_FAILED`，由 `completeJoin` 退回一般驗證畫面。
+  - `completeJoin` 整個函式包在 try/catch 並自行回報失敗，從不 reject，所以兩個呼叫處都刻意不接 `.catch`（接了也是死碼）。
+  - 查詢驗證方式的探詢是送往這個位址的第一個請求，所以 `startQrJoin` 自己也套用 `completeJoin` 那道位址拒絕：這是它本身的不變量，不仰賴呼叫端剛好守住。
+  - 同意畫面按「取消」會落回手動表單：同步碼保留在欄位裡（表單自己的 `SyncCodeHostNote` 繼續顯示位址），使用者可以修改或直接離開，與驗不過位址的拒絕路徑同一形狀。`qrTriggered` 已經鎖住，effect 不會在這個決定之後重新觸發。
+- **畫面順序**（`pwa/src/pages/LandingPage.tsx`）：
+  - 同意畫面排在驗證畫面之前：同意解鎖的正是可能引發驗證挑戰的那個請求，兩者不可能同時合法地等待中。
+  - QR 的全頁「處理中...」畫面排在 `pendingAuth` 之後：加入途中出現的驗證挑戰必須留在畫面上。QR 進來的使用者會被自動推過表單，加入進行時沒有送出按鈕可以顯示「處理中...」；這時若顯示表單，等於要剛掃完碼（或剛按下「確認並加入」）的人輸入 Email，所以改由整個畫面擔任進度提示。
+- **`CustomHostConsent.tsx`**：同意閘門本身見〈同步碼位址的驗證與揭露〉的「QR Code 自動加入的確認閘門」。元件只負責呈現，何時掛載、兩個答案各做什麼都由呼叫端決定；呼叫端只為 `valid` 判定掛載它，`invalid` 在上游就被直接拒絕，永遠不會出現在請使用者同意的畫面上。位址交給表單與驗證畫面共用的 `SyncCodeHostNote` 呈現（揭露的值與用戶端實際連線的位址只有一個來源），並使用 `variant="verify"`：QR 進來的人從沒輸入過同步碼，畫面上也沒有，`join` 的引導語會指向使用者看不到的東西。
+- **`SyncCodeHostNote.tsx`**：只負責呈現，判定從哪裡來由呼叫端決定（表單是輸入中的同步碼，驗證畫面是 `pendingAuth.apiHost`），所以同一個元件涵蓋自己輸入同步碼與邀請連結／QR（使用者從沒打過位址）兩條路徑。`variant` 只改變 valid 分支的引導語，規則見〈共用文案的產品語意〉；`onboarding` 目前只有 Extension 的引導畫面使用，PWA 還沒有對應的畫面。
+
+#### API client 的回應處理
+
+`pwa/src/api/client.ts`：
+
+- **沒有 body 的成功**：`DELETE /api/user/:id/public-shelf/:shelfId` 是這個 API 唯一不帶 body 的回應（204，RFC 9110 §15.3.5）。`response.json()` 遇到空 body 會拋 SyntaxError，呼叫端分不出它和真正的網路失敗——被拒的撤銷曾經因此被讀成「已刪除」。所以 `readEnvelope` 把 204 解析成空信封，其他回應照舊解析（格式錯誤的仍會拋錯）。只放行這一個狀態碼：API 從不回 205，放寬只會讓惡意後端可以把空 body 讀成確認成功；304 屬於 `!response.ok`，本來就走錯誤路徑。`unwrapVoid` 不要求 `data`，否則每個成功的 204 都會變成假的 `EMPTY_RESPONSE`。
+- **`throwOnError` 是所有 `ApiError` 的唯一出口**，錯誤文字在這裡統一處理，而不是在每個呼叫處各做一次。`code`／`message` 宣告為 `string`，實際上來自 `response.json()` 的直接轉型，後端又可以自架。`JSON.parse` 真的能產生 `{"toString":null,"valueOf":null}` 這種值，它會讓建構子的 ``super(`${code}: ${message}`)`` 拋出 TypeError，`ApiError` 根本建不起來：`err instanceof ApiError` 變成 false，需要 `code` 與 `retryAfter` 的在地化 429 退避分支被跳過，畫面改顯示英文的 TypeError。處理這兩個會被插入字串的欄位，保住的是錯誤的身分，而不只是措辭。`retryAfter` 原樣傳入，建構子自己會檢查。
+- **`getPublicShelf`** 不經 `readEnvelope`，自己直接轉型回應：
+  - 錯誤欄位同樣先處理再插入字串，否則惡意的 `{"toString":null}` 會讓 `new Error(...)` 在掛上 `status` 之前就拋錯；`PublicShelfPage` 依 `status` 分流，404 就會失去「此公開書櫃不存在或已過期」畫面，落到一般的載入錯誤。
+  - 成功的 `data` 只靠文字層這一道防護：`PublicShelfPage` 把 `title`／`book.title`／`book.author` 直接放進 JSX，搜尋時還會對它們呼叫 `.toLowerCase()`。
+- **成員清單、家庭書櫃、借閱清單先以 `unknown` 讀入**：結構檢查之前，線上的形狀只是後端的聲稱。成員清單與家庭書櫃整個信封一起檢查（呼叫端自己讀 `{ data, error }`，`error` 信封必須原樣送到），兩層的順序與理由見〈伺服器回傳資料的檢查〉。借閱清單先跑 `unwrap`——它負責信封契約（`error` 拋 `ApiError`、缺 `data` 拋 `EMPTY_RESPONSE`）——再交給 `sanitizeBorrowRequests`。
+- **`lookupUser`**：PWA 目前沒有使用（登入走同步碼），保留是為了與 Extension client 的契約一致，兩者才不會分歧。帶不帶 `verifySecret` 的回應差異見〈PWA 登入驗證機制〉。
+
+#### 公開書櫃設定的寫入
+
+`pwa/src/hooks/usePublicShelfActions.ts`（對應 `extension/src/dialog/usePublicShelfActions.ts`）：
+
+- **排隊與傳送中是兩個獨立狀態**（`titleQueued`、`inFlight`）：一個布林無法同時表示兩者。過去在到期設定寫入結束時清掉那個布林，會把仍在排隊的標題修改標成「未儲存」（還會引來一次經「重試儲存」的重複 PUT）。
+- **`activeShelfIdRef` 在 commit 時才更新**（passive effect），所以它的意思是「畫面目前綁定的 shelfId」。代價：在 commit 與 effect 執行之間送出的寫入會被無聲丟棄——不到一個 frame，真實操作碰不到，因此接受而不修。不要在 render 期間寫這個 ref：被捨棄的 concurrent render 會留下沒有 commit 的 shelfId。
+- **書櫃已撤銷的寫入**：寫入還在 debounce 佇列裡時書櫃就被撤銷，那個 shelfId 已經不存在，送出只會在使用者剛確認撤銷後立刻顯示紅色的 `SHELF_NOT_FOUND`，所以直接放棄。重設網址會保留 shelfId，合法排隊中的標題寫入仍會送出。寫入途中書櫃被撤銷的，失敗也不回報（已經沒有欄位需要對齊，使用者剛確認了撤銷）；只是被後來的寫入取代的，失敗仍會回報，因為它自己的欄位可能仍不一致。
+
+#### 移除成員與離開家庭的重試
+
+兩者都把特定的 404 當成「已經完成」，Extension 對應的處理必須保持相同（`.claude/rules/frontend.md` → Extension ↔ PWA twins）：
+
+- **自己離開**（`pwa/src/hooks/useLeaveFamily.ts` 的 `settleLeave`）：`MEMBER_NOT_FOUND` 只可能代表「已經不是成員」——先前一次離開在伺服器端只完成一半（名單已更新、撤銷 token 失敗），這次重試把它做完了。所以當作成功：顯示錯誤並保留工作階段，會讓下一個請求的自動復原把使用者加回他剛離開的家庭。`FAMILY_NOT_FOUND` 是同一個結果：家庭紀錄已經不在，沒有東西可以離開——唯一 Owner 解散時在刪掉紀錄之後失敗（之後的重試都會回這個 404），或家庭在這段期間被解散——保留工作階段只會把使用者困在一個不存在的家庭裡。
+- **Owner 移除他人**（`pwa/src/components/MemberList.tsx` 的移除分支）：`MEMBER_NOT_FOUND` 只可能代表「已經不在名單上」——先前一次移除在伺服器端只完成一半（名單已更新、撤銷 token 失敗），或對方自己離開了；Worker 的 404 分支這時已重新嘗試寫入重新加入限制，並清掉殘留的歸屬紀錄與 token。所以當作移除完成：顯示錯誤並略過重新整理，會讓被移除的成員一直留在畫面上，直到下次載入名單。
+
 ---
 
 ## 八、搜尋與篩選架構
@@ -975,6 +1040,7 @@ interface PublicShelfSnapshot {
   - `authToken`：憑證，不渲染、也不呼叫字串方法；降為 `""` 只會把壞掉的後端藏在無聲的重新驗證迴圈後面，而不是請求本來就會得到的 401。
   - `error.message`／`error.code`：由錯誤文字的防護負責。
   - 封面網址（`coverUrl`、`bookCoverUrl`）：它們會到的兩個地方都不會因非字串而當掉——`<img src>` 屬性由 DOM 轉成字串；而且先經過讀墨網址白名單（兩端的 `safeCoverUrl` → `shared/src/config/readmoo.ts` 的 `isAllowedCoverUrl`），白名單快速路徑的 `typeof` 防護讓非字串得到 `false`，而不是從 render 拋出 `TypeError`。白名單若拿掉這道防護，這個排除就不再安全，這兩個欄位必須改在文字層轉型；`extension/tests/unit/readmooConfig.test.ts` 的 describe「isAllowedCoverUrl / isAllowedBookUrl on non-string input」會先變紅。
+    - 兩端的 `safeCoverUrl`／`safeBookUrl`（共四個檔案，刻意保持相同）回傳 `String(url)` 而不是 `url`，這不是多餘的：白名單判斷的是 `new URL` 轉成字串**之後**的值，所以 `["https://cdn.readmoo.com/x.jpg"]` 這種陣列會被接受；若原樣回傳 `url`，等於把陣列掛著 `string` 型別交出去，第一個對它呼叫字串方法的消費端就會在 render 中拋出 `TypeError`（`useSearch` 正是這樣對待 `title`）。`coverUrl` 沒經過文字層，執行時其實是 `unknown`；`readmooUrl` 目前有經過文字層轉型，但那是另一個模組的決定，改了也不會有人回頭檢查這一行。目前的消費端只把它放進 `src`／`href` 屬性，或拿來判斷是否為空，所以這是地雷而不是現行的 bug；對真正的字串 `String()` 是恆等函式，判定與回傳值都不變。
   - 數字、`BoolFlag` 與字串字面值聯集（`status`、`selectionMode`、`method`）：轉成 `string` 會破壞型別，它們的渲染處以 `ReadonlyMap` 查表防護。
 
 **結構層**（`shared/src/api/memberValidation.ts` → `GET /api/family/:id/members`；`bookshelfValidation.ts` → `GET /api/family/:id/bookshelf`；`shared/src/borrow/validation.ts` → `GET /api/family/:id/borrow`）：

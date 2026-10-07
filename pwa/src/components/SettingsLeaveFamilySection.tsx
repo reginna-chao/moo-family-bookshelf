@@ -8,7 +8,7 @@ interface SettingsLeaveFamilySectionProps {
   onLogout: () => void;
 }
 
-/** 設定頁「離開家庭」: idle → confirming → leaving. */
+/** Settings-page 「離開家庭」: idle → confirming → leaving. */
 export function SettingsLeaveFamilySection({
   familyId,
   userId,

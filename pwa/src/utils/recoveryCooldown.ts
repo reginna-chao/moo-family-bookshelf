@@ -1,19 +1,5 @@
-/**
- * Cooldown for the PWA's SILENT recovery join (the 401 token refresher).
- *
- * Mirrors the cooldown helpers in `extension/src/api/auth-refresh.ts`; the
- * Extension keeps its deadline in `browser.storage.local`, the PWA is
- * browser-only so plain `localStorage` is the equivalent store.
- *
- * The key is GLOBAL, not namespaced per user: what it throttles is the worker's
- * per-IP sensitive tier (3/min), which every account on the device shares.
- *
- * Only the automatic recovery join consults this — a manual, user-initiated
- * join must never be suppressed by it.
- *
- * Every access is wrapped: storage that throws (private mode, quota) degrades
- * to "no cooldown" instead of taking the app down.
- */
+/** 429 cooldown for the SILENT recovery join only (never a manual join); a GLOBAL key, since the
+ *  per-IP tier it throttles is shared. See docs/architecture.md → 背景自動復原的防護. */
 
 /** Epoch ms until which automatic recovery joins are suppressed after a 429. */
 export const RECOVERY_COOLDOWN_UNTIL_KEY = "moo:recoveryCooldownUntil";

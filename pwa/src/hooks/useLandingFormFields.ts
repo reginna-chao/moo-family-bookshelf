@@ -28,10 +28,8 @@ export interface UseLandingFormFieldsResult {
 export function useLandingFormFields(
   initialSyncCode: string,
 ): UseLandingFormFieldsResult {
-  // Seeded from the prop so an invite-link / QR prefill is already in the field
-  // at FIRST render: the verdict hook counts a never-typed value as settled, so
-  // its `@host` note lands at once instead of waiting out the settle delay. The
-  // effect below still covers a later `initialSyncCode` change.
+  // Seeded so a prefill is in the field at FIRST render, which the verdict hook counts as settled
+  // (trigger 4 — docs/architecture.md → 同步碼位址的驗證與揭露). Later changes: the effect below.
   const [syncCodeInput, setSyncCodeInput] = useState(initialSyncCode);
   // Holds the `@host` warning back until the typed code settles, so it cannot
   // flash on every intermediate keystroke.
