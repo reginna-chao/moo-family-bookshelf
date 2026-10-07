@@ -1,15 +1,5 @@
-/**
- * Family dissolve — deletes a family's storage. Shared by `routes/family.ts`
- * (member removal: the sole-member owner leaving, and the last listed member
- * leaving) and `routes/user.ts` (account deletion: the sole-member owner, and
- * the last listed member). It lives here because a route module must never
- * import logic from a SIBLING route module (lint-enforced); logic needed by two
- * or more routes belongs in `services/`.
- *
- * Like `services/borrowIndex.ts` this module is HTTP-agnostic: it takes a
- * `KVNamespace` and returns nothing, so the handlers keep every status code and
- * response-shape decision.
- */
+/** Family dissolve (sole-member owner or last listed member leaving / deleting their account), shared by
+ *  routes/family.ts and routes/user.ts; HTTP-agnostic. Layering: .claude/rules/backend.md → Project Structure. */
 import { deleteFamilyRecord } from "../kv/families";
 import { deleteBorrowIndex } from "./borrowIndex";
 

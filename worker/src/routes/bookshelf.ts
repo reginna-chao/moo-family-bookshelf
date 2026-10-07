@@ -47,10 +47,8 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Per-userId rate limit: this is the most expensive endpoint (2N - 1 KV
-  // reads: one books read per family member plus one pointer read per member
-  // other than the caller). Layered on top of the per-IP limit to cap fan-out
-  // cost from a single authenticated caller. Mirrors the borrow-list guard.
+  // Per-userId cap on top of the per-IP limit: the costliest route (fan-out of 2N - 1 reads: N books
+  // + one pointer per member but the caller, after the caller pointer + record). Mirrors borrow-list.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId,
     scope: "bookshelf",
@@ -73,21 +71,14 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
 
   const family = normalizeFamilyRecord(raw);
 
-  // The pointer alone is not proof of membership: a join racing a kick (or a
-  // stale pointer read at the removal site) can leave `member:{uid}` naming a
-  // family whose record no longer lists the caller. Re-check against the record
-  // already read above — zero extra reads — and answer byte-identically to the
-  // pointer-mismatch 404, so the response discloses nothing new.
+  // The pointer alone is not proof: re-check the record read above (zero extra reads), answering
+  // byte-identically to the pointer-mismatch 404. Rationale: .claude/rules/backend.md → API Design.
   if (!hasMember(family.members, userId)) {
     return jsonError(c, 404, "NOT_FOUND", "Family not found");
   }
 
-  // Only ACTIVE members are aggregated (#222): a kicked member re-listed by a
-  // stale full-record write has no pointer here, and their shared books must
-  // not reach the rest of the family (Inv-4). The pointer reads run in
-  // PARALLEL with the book reads, so latency is unchanged; the caller's own
-  // pointer was confirmed above and is not read again. A hollow member's book
-  // read is wasted — the price of not serializing the two rounds.
+  // Aggregate ACTIVE members only (#222, Inv-4). Pointer reads run in parallel with the book reads, so
+  // a hollow member's book read is wasted; the caller's pointer is not re-read.
   const [activeMembers, records] = await Promise.all([
     filterActiveMembers(c.env.KV, familyId, family.members, userId),
     Promise.all(
@@ -102,9 +93,8 @@ bookshelfRoutes.openapi(getFamilyBookshelfRoute, async (c) => {
     .map((member, index) => ({ member, record: records[index] }))
     .filter(({ member }) => activeIds.has(member.userId))
     .map(({ member, record }) => {
-      // Read-side twin of the buildSnapshot chokepoint — a dormant pre-whitelist
-      // record must not beacon family members (coverUrl) or hand them a
-      // phishing link (readmooUrl) via the aggregation.
+      // Read-side twin of the buildSnapshot chokepoint (coverUrl + readmooUrl) for dormant records.
+      // Rationale: .claude/rules/backend.md → KV Key Patterns (public-shelf paragraph).
       const sharedBooks = (record?.books ?? [])
         .filter((b) => b.isShared === BoolFlag.TRUE)
         .map((b) => ({

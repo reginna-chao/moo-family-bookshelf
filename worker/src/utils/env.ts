@@ -16,12 +16,9 @@ export interface Env {
   /** Auto-injected by Cloudflare with the Worker's script name. Undefined in local wrangler dev. */
   CF_WORKER?: string;
 
-  // Native Rate Limiting bindings (wrangler.toml). OPTIONAL on purpose: a
-  // self-hoster whose wrangler.toml predates them deploys a Worker without
-  // these fields, and `middleware/rateLimit.ts` falls back to its KV counters
-  // rather than throwing. `RateLimit` is the ambient type from
-  // @cloudflare/workers-types (>= 4.20241230, declared in this repo's
-  // tsconfig `types`), so no import is needed.
+  // Native Rate Limiting bindings, OPTIONAL: an older self-hosted wrangler.toml lacks them and rateLimit.ts
+  // falls back to KV. `RateLimit` is ambient (@cloudflare/workers-types >= 4.20241230, tsconfig `types`).
+
   /** 60 req/min: per-IP standard tier + per-userId `borrow-list`. */
   RATE_LIMIT_60_PER_MIN?: RateLimit;
   /** 30 req/min: per-userId `bookshelf` + `borrow-update`. */
@@ -32,12 +29,8 @@ export interface Env {
   RATE_LIMIT_3_PER_MIN?: RateLimit;
 }
 
-/**
- * Production Worker names — DEV_MODE is forcibly ignored for these.
- *
- * Self-hosters: if you deploy under a custom Worker name and want the same
- * protection, add your production Worker name to this list.
- */
+/** Production Worker names — DEV_MODE is forcibly ignored for these. Self-hosters deploying under a
+ *  custom name: add it here for the same protection. */
 const PRODUCTION_WORKER_NAMES = ["moo-family-bookshelf"];
 
 /**

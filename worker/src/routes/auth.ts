@@ -89,26 +89,16 @@ authRoutes.openapi(lookupRoute, async (c) => {
   }
 
   const userId = body.userId;
-  // Bound and classify the secret at the boundary, exactly as create/join do.
-  // An absent/empty secret counts as "not supplied": no attempt was made, so
-  // nothing may be charged against the caller's failure budget. A present but
-  // malformed value (wrong type, over the length bound) is a request-format
-  // error, not a failed verification — 400 here, in all three entry points.
+  // Classify the secret at the boundary exactly as create/join do: absent/empty = not supplied,
+  // malformed = 400. Rationale: .claude/rules/backend.md → API Design (`verifySecret` bullet).
   const sanitizedSecret = sanitizeVerifySecret(body.verifySecret);
   if (sanitizedSecret === null) {
     return verifySecretFormatResponse(c);
   }
   const verifySecret = sanitizedSecret === "" ? undefined : sanitizedSecret;
 
-  // --- Verification gate, BEFORE any membership read ---
-  //
-  // WHY: familyId is the payload of the sync code, and userId is
-  // sha256("moo:" + email) — publicly guessable. Handing familyId to anyone who
-  // can guess an email lets a stranger join the victim's not-yet-full family and
-  // read the shared shelf. Gating first also means a rejected caller triggers no
-  // membership lookup at all. Exactly ONE verify-record read happens per
-  // request: either the `isVerificationConfigured` probe below, or the one
-  // `validateVerification` performs internally — never both.
+  // Verification gate BEFORE any membership read (familyId is the sync code); exactly ONE verify-record
+  // read per request. See docs/architecture.md → PWA 登入驗證機制 → 安全措施.
   if (verifySecret === undefined) {
     if (await isVerificationConfigured(c.env.KV, userId)) {
       // Informational, not an error: the client uses this to know it must prompt
@@ -125,17 +115,8 @@ authRoutes.openapi(lookupRoute, async (c) => {
       );
     }
   } else {
-    // A supplied secret is a real attempt: failures are charged to the CALLER's
-    // bucket (never the target account) exactly as in the join flow, and the
-    // attempt counts against the target account's global ceiling.
-    //
-    // consumeOtp: false — lookup is a read-only disclosure decision, and the
-    // client's flow is "lookup with the secret, then create/join with the SAME
-    // secret". Spending a one-time `code` secret here would make that second
-    // call fail with VERIFICATION_FAILED — and be charged as a failure, so five
-    // legitimate logins would lock the caller out. The OTP still expires on its
-    // own 300s TTL and the caller already holds it, so leaving it intact for one
-    // read grants no new capability.
+    // A supplied secret is a real attempt; consumeOtp: false because create/join resends the SAME
+    // secret. See docs/architecture.md → PWA 登入驗證機制 → 安全措施 (OTP bullet).
     const verification = await validateVerification(
       c.env,
       userId,
@@ -147,12 +128,8 @@ authRoutes.openapi(lookupRoute, async (c) => {
     }
   }
 
-  // Look up family membership. A `member:{userId}` pointer counts ONLY when the
-  // family record it names exists AND still lists the user — the live-membership
-  // rule create / join also apply (`services/membership.ts`). An orphan or
-  // stale pointer (a half-failed write, a join racing a kick) answers the
-  // no-family shape, so the client does not believe it still has a family and
-  // attempt a reconnect. Two reads: pointer, then record.
+  // Live membership only (pointer → record that still lists the user, `services/membership.ts`); an
+  // orphan or stale pointer answers the no-family shape so the client attempts no reconnect. 2 reads.
   let existingFamilyId: string | null = null;
   let memberCount = 0;
 

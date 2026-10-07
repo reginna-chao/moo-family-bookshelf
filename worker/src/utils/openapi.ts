@@ -15,11 +15,8 @@ interface ValidationErrorCopy {
   message: string;
 }
 
-/**
- * Error code + message for a schema-validation failure, chosen by the part of
- * the request the failing schema was validating. Deliberately generic: zod's
- * issue list is never echoed back, so no caller-supplied value is reflected.
- */
+/** Generic code + message per validation target. zod's issue list is never echoed back, so no
+ *  caller-supplied value is reflected. */
 function validationErrorFor(
   target: keyof ValidationTargets,
 ): ValidationErrorCopy {
@@ -48,12 +45,8 @@ interface ValidationResult {
   error?: { issues: ReadonlyArray<{ message: string }> };
 }
 
-/**
- * The copy for a failed validation. A `param` failure whose FIRST issue carries
- * a registered tag (`taggedParam` in `schemas/common.ts`) answers that tag's
- * route-specific code + message; every other failure — including an untagged
- * param schema — falls back to the generic per-target copy.
- */
+/** A `param` failure whose FIRST issue carries a registered tag (`taggedParam`) answers that tag's copy;
+ *  anything else, an untagged param schema included, gets the generic per-target copy. */
 function errorCopyFor(result: ValidationResult): ValidationErrorCopy {
   if (result.target === "param") {
     const tag = result.error?.issues[0]?.message;

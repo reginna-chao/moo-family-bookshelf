@@ -1,12 +1,5 @@
-/**
- * Per-route request-body size limits for the `/api/*` body guard in `index.ts`.
- *
- * Every route keeps the 256KB default except the full personal-shelf upload,
- * `PUT /api/user/:id/books`, which carries the WHOLE book list (~400–500 bytes
- * of JSON per realistic book) and so needs room for large libraries: 2MB is
- * roughly 4000–5000 realistic books. PATCH on the same path (a change set) and
- * `/family-prefs` stay on the default.
- */
+/** Per-route body limits for the `/api/*` guard in `index.ts`: 256KB default; 2MB only for the WHOLE-list
+ *  `PUT /api/user/:id/books` (~400–500 B JSON per book ⇒ ~4000–5000 books). PATCH / family-prefs: default. */
 
 /** Default max request body size: 256KB. */
 export const DEFAULT_MAX_BODY_SIZE = 256 * 1024;

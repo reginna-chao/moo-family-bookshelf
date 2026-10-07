@@ -46,14 +46,8 @@ import { jsonError } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
 
-/**
- * Refresh the `public:{shareToken}` snapshot of every shelf in `shelves`.
- *
- * The shelf list is passed in explicitly and must come from
- * `resolvePublicShelves` — the authority is `publicshelves:{userId}`, which
- * this module only ever READS. Rebuilding it from the user record here would
- * reopen the lost-update hole the pointer key exists to close.
- */
+/** Refresh the snapshot of every shelf in `shelves`, which must come from `resolvePublicShelves` (this
+ *  module only READS `publicshelves:{userId}`). Rationale: .claude/rules/backend.md → KV Key Patterns. */
 async function updateAllPublicSnapshots(
   kv: KVNamespace,
   userId: string,
@@ -66,13 +60,8 @@ async function updateAllPublicSnapshots(
   );
 }
 
-/**
- * Resolve the authoritative displayName for a user when saving their book list.
- * - In a family: the family record is the source of truth (including empty,
- *   which represents a deliberate clear). Prevents stale client cache from
- *   overwriting the server value.
- * - Not in a family: sanitize the client-supplied value. Returns "" if invalid.
- */
+/** displayName for a books save: the family record's value when listed there (even "" = cleared), else
+ *  the sanitized client value or "". See docs/architecture.md → 個人書單的寫入路徑. */
 async function resolveDisplayName(
   kv: KVNamespace,
   userId: string,
@@ -91,9 +80,7 @@ async function resolveDisplayName(
   return sanitizeDisplayName(clientValue) ?? "";
 }
 
-// ---------------------------------------------------------------------------
-// Pure validation helpers (extracted for testability — keep handler thin)
-// ---------------------------------------------------------------------------
+// --- Pure validation helpers (extracted for testability — keep handler thin) ---
 
 export type ParseChangesOk = { ok: true; changeMap: Map<string, BoolFlag> };
 export type ParseChangesErr = {
@@ -212,11 +199,8 @@ type ParseListResult =
   | { ok: true; values: string[] }
   | { ok: false; code: "INVALID_PAYLOAD"; message: string };
 
-/**
- * Validate a single pref-kind list: each entry must be a string ref in the
- * form `"{ownerId}:{bookId}"`, deduped (first-seen order preserved), capped at
- * `max`. An empty array is valid and means "clear this list".
- */
+/** Validate one pref-kind list: string refs `"{ownerId}:{bookId}"`, deduped (first-seen order kept),
+ *  capped at `max`. An empty array is valid and means "clear this list". */
 function parsePrefList(
   kind: FamilyPrefKind,
   value: unknown[],
@@ -472,9 +456,8 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     return jsonError(c, 403, "FORBIDDEN", "Cannot modify another user's data");
   }
 
-  // Per-userId write rate limit: max 30 saves per userId per hour. Layered on
-  // top of the per-IP limit; slows compromised-account abuse of the daily 1000
-  // KV write quota (bounds the burn rate; cannot fully prevent exhaustion).
+  // "put-books": 30 saves/hr per userId (shared with PATCH) — bounds the KV-write burn rate, cannot
+  // prevent exhaustion. See docs/architecture.md → 每帳號寫入上限能擋住什麼.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId: authUserId,
     scope: "put-books",
@@ -514,12 +497,8 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     return jsonError(c, 400, parsedBooks.code, parsedBooks.message);
   }
 
-  // familyShelfPrefs, when sent via this endpoint (the Extension round-trips the
-  // saved record on sync), MUST pass the same ref-format/dedupe/cap checks as the
-  // dedicated /family-prefs endpoint. Absent → preserve existing KV value.
-  // Validation boundary: an empty `familyShelfPrefs: {}` (both keys absent) makes
-  // parseFamilyPrefs return 400 and fails the whole PUT — deliberate, since real
-  // Extension/PWA clients always round-trip a full `{ hidden, favorites }` object.
+  // familyShelfPrefs gets the /family-prefs checks; absent keeps the stored value, `{}` fails the PUT
+  // with 400 on purpose. See docs/architecture.md → 個人書單的寫入路徑.
   let parsedPrefs: { hidden: string[]; favorites: string[] } | undefined;
   if (body.familyShelfPrefs !== undefined) {
     const prefsResult = parseFamilyPrefs(
@@ -535,10 +514,8 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     };
   }
 
-  // Read user record + family membership + public-shelf pointer in parallel
-  // (independent reads). The pointer key is READ-ONLY here: this path must
-  // never write it, which is what keeps a stale-read books save from rolling a
-  // revoked share token back to life.
+  // Three independent reads in parallel; the pointer key is READ-ONLY on this path (single-writer
+  // domain). Rationale: .claude/rules/backend.md → KV Key Patterns.
   const [existing, memberFamilyId, publicShelvesPointer] = await Promise.all([
     getUserBooksRecord(c.env.KV, userId),
     getMemberFamilyId(c.env.KV, userId),
@@ -569,9 +546,7 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     });
   }
 
-  // Resolve displayName: family record is authoritative when the user is in a family
-  // (even an empty value, which represents a deliberate clear). Only fall back to the
-  // client-supplied value when there is no family membership / family record.
+  // The family record's displayName wins when the user is listed (see `resolveDisplayName`).
   const serverDisplayName = await resolveDisplayName(
     c.env.KV,
     userId,
@@ -591,10 +566,8 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     familyShelfPrefs: parsedPrefs ?? existing?.familyShelfPrefs,
   };
 
-  // Legacy `publicSharing` field: carried over only while the pointer key does
-  // not exist yet (an un-migrated user's links still resolve through it, so
-  // dropping it here would revoke them). Once migrated, the field is omitted
-  // and evaporates on this save — no reader consults it anymore.
+  // Legacy `publicSharing` is carried over only while the pointer key is absent (an un-migrated user's
+  // links resolve through it); once migrated it evaporates. .claude/rules/backend.md → KV Key Patterns.
   if (publicShelves.source !== "pointer" && existing?.publicSharing) {
     record.publicSharing = existing.publicSharing;
   }
@@ -613,9 +586,7 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
   return c.json({ data: record });
 });
 
-// ---------------------------------------------------------------------------
-// PATCH /api/user/:id/books — partial update (only changed books)
-// ---------------------------------------------------------------------------
+// --- PATCH /api/user/:id/books — partial update (only changed books) ---
 
 const MAX_PATCH_CHANGES = 1000;
 
@@ -681,11 +652,8 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
     return jsonError(c, 400, nameCheck.code, nameCheck.message);
   }
 
-  // Read existing record + family membership + public-shelf pointer in
-  // parallel. The pointer read is only NEEDED after the no-op short-circuit
-  // below, but it stays in this batch on purpose: deferring it would cost the
-  // normal path an extra sequential round-trip, and the waste on a no-op PATCH
-  // is one small parallel read. Like PUT, this path never WRITES the pointer.
+  // The pointer read joins this parallel batch although only the post-no-op path needs it; never
+  // written here. See docs/architecture.md → 個人書單的寫入路徑.
   const [existing, memberFamilyId, publicShelvesPointer] = await Promise.all([
     getUserBooksRecord(c.env.KV, userId),
     getMemberFamilyId(c.env.KV, userId),
@@ -699,10 +667,8 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   // Apply changes: update isShared for matching bookIds
   let applied = 0;
   const updatedBooks = existing.books.map((book) => {
-    // Lazy cleanup: records written before the coverUrl / readmooUrl whitelists
-    // may carry a poisoned value; re-sanitize both on every rebuild so the next
-    // real write scrubs them from KV and from the public snapshots refreshed
-    // below.
+    // Lazy cleanup: re-sanitize coverUrl + readmooUrl on every rebuild so a pre-whitelist value leaves
+    // KV and the snapshots refreshed below. Rationale: .claude/rules/backend.md → KV Key Patterns.
     const coverUrl = sanitizeCoverUrl(book.coverUrl);
     const readmooUrl = sanitizeReadmooUrl(book.readmooUrl);
     const newIsShared = changeMap.get(book.bookId);
@@ -730,10 +696,8 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
         )
       : existing.displayName;
 
-  // Strip the legacy `publicSharing` field out of the carried-over record and
-  // put it back only while the pointer key does not exist yet — same rule as
-  // PUT: an un-migrated user still resolves their links through it, a migrated
-  // user has no reader left that would consult it.
+  // Strip legacy `publicSharing` from the carried-over record; put it back only while the pointer key
+  // is absent — same rule as PUT.
   const publicShelves = resolvePublicShelves(publicShelvesPointer, existing);
   const { publicSharing: legacyPublicSharing, ...carried } = existing;
   const record: UserBooksRecord = {
@@ -759,9 +723,7 @@ userRoutes.openapi(patchUserBooksRoute, async (c) => {
   return c.json({ data: { ok: true, applied } });
 });
 
-// ---------------------------------------------------------------------------
-// PUT /api/user/:id/family-prefs — per-viewer private family-shelf prefs (v1.5.0)
-// ---------------------------------------------------------------------------
+// --- PUT /api/user/:id/family-prefs — per-viewer private family-shelf prefs (v1.5.0) ---
 
 const putFamilyPrefsRoute = createRoute({
   method: "put",
@@ -853,11 +815,8 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
 
   const record: UserBooksRecord = {
     ...existing,
-    // Lazy cleanup, same rule as the PATCH rebuild: this handler writes the
-    // record anyway, so scrub any pre-whitelist poisoned coverUrl / readmooUrl
-    // while we are here. No snapshot is written on this path — the KV record may
-    // briefly be cleaner than an existing snapshot, which converges on the next
-    // books write.
+    // Lazy cleanup as in PATCH; no snapshot is written, so KV may briefly be cleaner than a snapshot
+    // until the next books write. See docs/architecture.md → 個人書單的寫入路徑.
     books: existing.books.map((b) => ({
       ...b,
       coverUrl: sanitizeCoverUrl(b.coverUrl),
@@ -918,14 +877,8 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     if (raw) {
       const record = normalizeFamilyRecord(raw);
 
-      // Owner = `ownerId` AND listed. The pointer already names this family,
-      // so "listed" here is the whole ACTIVE-member rule (#222) at zero extra
-      // reads. Without it a caller named by `ownerId` but no longer listed
-      // (`family:{id}` is rewritten whole with no CAS, so `ownerId` and the
-      // list need not agree) would be refused deletion as OWNER_CANNOT_DELETE
-      // of a family they are not in — or, as the "sole owner", dissolve the
-      // family of the one member who IS listed. Such a caller takes the
-      // non-owner branch instead, where the filter below removes nothing.
+      // Owner = `ownerId` AND listed (the pointer names this family, so listed = active, #222); an
+      // unlisted `ownerId` takes the non-owner branch. Rationale: .claude/rules/backend.md → API Design.
       const isListed = hasMember(record.members, userId);
 
       if (record.ownerId === userId && isListed) {
@@ -938,11 +891,8 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
           );
         }
 
-        // Single-member owner: delete entire family record, borrow index
-        // included — nothing is left to visit that index again, so without this
-        // it becomes a permanent orphan. Same `dissolveFamily` as the sole-owner
-        // dissolve in routes/family.ts; its index delete is FAIL-OPEN, because
-        // cleanup must never block the account deletion the user asked for.
+        // Single-member owner: dissolve, borrow index included (else a permanent orphan); the index
+        // delete is fail-open so cleanup never blocks the deletion. Same `dissolveFamily` as family.ts.
         await dissolveFamily(c.env.KV, familyId);
       } else {
         const remainingMembers = record.members.filter(
@@ -950,41 +900,20 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
         );
 
         if (remainingMembers.length === 0) {
-          // Never write an empty member list — dissolve instead (#222 C1'),
-          // the same rule as the removal handler in routes/family.ts.
-          // `normalizeFamilyRecord` throws on `members: []`, so such a record
-          // would answer 500 on every later read (join with the sync code,
-          // members, bookshelf, borrow) with no way back. Reachable only when
-          // `ownerId` names someone who is no longer listed and the caller is
-          // the last listed member. The handlers' own removals do not produce
-          // that record — the listed owner's leave is refused while others are
-          // listed, and their account deletion likewise — so this is the
-          // guard for a record whose `ownerId` and list were written apart
-          // (no CAS on `family:{id}`), not a routine path. No borrow
-          // settlement: the whole index goes with the family. The caller's
-          // pointer (it named this family) and token are deleted by the
-          // teardown below.
+          // Never write an empty member list — dissolve instead (#222), no borrow settlement; the teardown
+          // below deletes pointer + token. Rationale: .claude/rules/backend.md → API Design (removal bullet).
           await dissolveFamily(c.env.KV, familyId);
         } else {
-          // Settle this member's borrow records before dropping them from the
-          // family: cancel the PENDING requests they are a party to and remove
-          // their own finished ones from the index (see settleDepartingBorrower
-          // — records where they were the OWNER stay, as the counterparty's own
-          // history). Same call the member-removal handler in routes/family.ts
-          // makes, but FAIL-OPEN here: that handler can answer 500 and leave
-          // the member in place, whereas an account deletion has no equivalent
-          // "nothing happened" answer — the user's data goes either way, so a
-          // failed borrow cleanup is logged and the deletion continues.
+          // Borrow settlement as in family.ts's removal, but FAIL-OPEN: an account deletion has no
+          // "nothing happened" answer. Rationale: .claude/rules/backend.md → KV Key Patterns (borrow index).
           try {
             await settleDepartingBorrower(c.env.KV, familyId, userId);
           } catch (err) {
             console.error("BORROW_CLEANUP_FAILED", { familyId, userId, err });
           }
 
-          // Remove user from family members — only when they were listed. An
-          // unlisted caller (a stray pointer) filtered nothing out, and writing
-          // the unchanged record back would be a pointless put that can also
-          // clobber a concurrent write to it (no CAS on `family:{id}`).
+          // Write the list back only when the caller was listed: an unchanged put is pointless and can
+          // clobber a concurrent write (no CAS on `family:{id}`).
           if (isListed) {
             record.members = remainingMembers;
             await putFamilyRecord(c.env.KV, familyId, record);
@@ -994,9 +923,8 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     }
   }
 
-  // Collect public shelf tokens for cleanup from the RESOLVED shelf list, so a
-  // migrated account's snapshots are found via the pointer key and an
-  // un-migrated one's via the legacy record field.
+  // Public tokens to clean up come from the RESOLVED shelf list: pointer key when migrated, else the
+  // legacy record field.
   const [publicShelvesPointer, userRecord] = await Promise.all([
     getPublicShelves(c.env.KV, userId),
     getUserBooksRecord(c.env.KV, userId),

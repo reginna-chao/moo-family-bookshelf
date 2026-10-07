@@ -63,18 +63,8 @@ function authGuard(
   return null;
 }
 
-/**
- * Persist the public-shelf list to `publicshelves:{userId}`.
- *
- * A shelf-array-shaped wrapper over `putPublicShelves` (`kv/publicShelves.ts`),
- * and the ONLY call site of it: that key has exactly one writer domain — the
- * four write handlers below. The books / family-prefs paths must keep READING
- * the key and never writing it, or a stale-read books save could roll a revoked
- * share token back to life. Since the accessor is exported from `kv/`, the
- * property is pinned by a tripwire test asserting this module is its only route
- * importer (`worker/tests/unit/kvAccessBoundary.test.ts`) rather than by the
- * put being unreachable.
- */
+/** The single call site of `putPublicShelves`: `publicshelves:{userId}` has one writer domain, the four
+ *  handlers below. Rationale: .claude/rules/backend.md → KV Key Patterns (single-writer domain). */
 async function writePublicShelves(
   kv: KVNamespace,
   userId: string,
@@ -84,15 +74,8 @@ async function writePublicShelves(
   await putPublicShelves(kv, userId, record);
 }
 
-/**
- * Read a user's shelf list the way the list-only paths want it: pointer key
- * first, and `user:{userId}` only when the pointer key is absent (un-migrated
- * owner). A migrated owner therefore pays one small KV read and never touches
- * the books record. Used by the public read path, the list handler, and the
- * DELETE handler — none of which needs `record.books`. The create / update /
- * reset-token handlers must rebuild a snapshot, so they read both in parallel
- * instead (see `findShelf`).
- */
+/** Shelf list for the list-only paths (public read, list, DELETE): pointer key, else `user:{userId}`.
+ *  See docs/architecture.md → 公開書櫃的寫入與撤銷. */
 async function readPublicShelves(
   kv: KVNamespace,
   userId: string,
@@ -109,16 +92,8 @@ interface ShelfLookup {
   idx: number;
 }
 
-/**
- * Locate a shelf for the update / reset-token handlers.
- *
- * Reads the pointer key and the books record in PARALLEL: the shelf list comes
- * from the resolver (pointer wins, legacy field is the migration fallback),
- * while `record.books` is still required to rebuild the snapshot — so a missing
- * books record remains "not found" for these handlers. DELETE deliberately does
- * NOT come through here: revocation never rebuilds a snapshot, so it must not
- * inherit the books-record precondition (see that handler).
- */
+/** Locate a shelf for update / reset-token: pointer key + books record in parallel (a missing record
+ *  is "not found"). DELETE never comes here — docs/architecture.md → 公開書櫃的寫入與撤銷. */
 async function findShelf(
   kv: KVNamespace,
   userId: string,
@@ -135,13 +110,8 @@ async function findShelf(
   return { record, shelves, idx };
 }
 
-/**
- * Does a snapshot promise a LONGER lifetime than the shelf backing it?
- *
- * `null` means permanent, i.e. +∞. A permanent shelf can never be outlived, so
- * it always answers `false`; against a time-limited shelf, a permanent
- * snapshot — or one carrying a later deadline — answers `true`.
- */
+/** Does a snapshot promise a LONGER lifetime than its shelf? `null` = permanent = +∞, so a permanent
+ *  shelf is never outlived; against a time-limited one, a permanent or later snapshot is. */
 function snapshotOutlivesShelf(
   snapshotExpiresAt: number | null,
   shelfExpiresAt: number | null,
@@ -150,34 +120,8 @@ function snapshotOutlivesShelf(
   return snapshotExpiresAt === null || snapshotExpiresAt > shelfExpiresAt;
 }
 
-/**
- * Is a stored snapshot still backed by its shelf?
- *
- * Live means the owner's shelf list still contains `shelfId`, that shelf still
- * carries THIS share token, and the snapshot does not outlive the shelf. A
- * deleted account, a deleted shelf or a rotated token (reset-token) therefore
- * reads as not-live — fail-closed, and self-healing on the owner's next save or
- * shelf operation, which rewrites the snapshot.
- *
- * The expiry half is MONOTONIC, not strict equality, and the asymmetry is the
- * point:
- * - Snapshot promises LONGER than the shelf (including a permanent snapshot of
- *   a now time-limited shelf) ⇒ dead. That is the direction in which an orphan
- *   or a rolled-back snapshot drifts, and the only one that could hand out more
- *   access than the shelf currently grants.
- * - Snapshot promises SHORTER ⇒ still readable, and simply dies at its own
- *   earlier deadline unless a later save refreshes it. A snapshot rewritten
- *   from a stale pointer read right after the owner EXTENDED the deadline looks
- *   exactly like this; strict equality used to 404 it even though the owner had
- *   just granted MORE access, not less.
- *
- * The authority is the POINTER key, falling back to the legacy record field
- * only for owners who have not migrated yet (`readPublicShelves`) — that
- * fallback is what keeps their existing public links working. The pointer key
- * is precisely what the books hot path cannot rewrite, so a snapshot that a
- * stale-read books sync resurrected after a revoke fails this check.
- * Read-only by design — see the call site.
- */
+/** Live = the owner's shelf list still has `shelfId` with THIS token and the snapshot does not outlive it
+ *  (monotonic). Read-only. Rationale: .claude/rules/backend.md → KV Key Patterns (read-side guard). */
 async function isSnapshotLive(
   kv: KVNamespace,
   snapshot: PublicShelfSnapshot,
@@ -326,19 +270,8 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
   const denied = authGuard(c, userId);
   if (denied) return denied;
 
-  // Per-userId write ceiling: 30 public-shelf writes per userId per hour, shared
-  // by create / update / reset-token / delete under one "public-shelf" scope.
-  // Layered on top of the per-IP limit. Honest scope: this BOUNDS THE BURN RATE
-  // of a single account's AUTHENTICATED writes (~120 KV writes/hr incl. both
-  // counters), it does not make the daily 1000-write free tier safe — 30/hr
-  // sustained is still ~2,880 writes/day, and the per-IP middleware's own
-  // counter write lands BEFORE auth, so unauthenticated spam that ignores 429s
-  // still burns ~60 writes/min (free tier drained in ~17 minutes) outside this
-  // ceiling's reach. It turns "one authenticated account drains the quota in ~6
-  // minutes" into "~8 hours", and forces an attacker to onboard a new family
-  // per 30 writes. A hard global bound needs the edge (Cloudflare WAF rate
-  // limiting, see docs/architecture.md and worker/DEPLOY.md) — deliberately not
-  // attempted here.
+  // Shared "public-shelf" ceiling (30/hr across the four write handlers): bounds one account's burn
+  // rate, not a hard bound. See docs/architecture.md → 每帳號寫入上限能擋住什麼.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId,
     ...PUBLIC_SHELF_WRITE_LIMIT,
@@ -351,9 +284,8 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
   } catch {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
-  // A JSON body that is not an object (`null`, a primitive, an array) carries
-  // no fields: read it as `{}` so it gets the missing-title 400 below — a bare
-  // `null` used to throw on `body.title` and answer 500.
+  // A non-object JSON body (`null`, a primitive, an array) reads as `{}`, so it gets the
+  // missing-title 400 below instead of throwing on `body.title` (500).
   const body: Record<string, unknown> = isJsonObject(parsed) ? parsed : {};
 
   const title = sanitizePublicShelfTitle(body.title);
@@ -406,9 +338,8 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
     selectionMode: "all-shared",
   };
 
-  // The pointer key is the only shelf-list write target — `user:{userId}` is
-  // never touched here. When the resolver fell back to the legacy field, THIS
-  // write is the lazy migration: the pointer key from now on outranks it.
+  // Writes the pointer key only (never `user:{userId}`); after a legacy fallback this write IS the
+  // lazy migration. Rationale: .claude/rules/backend.md → KV Key Patterns.
   await writePublicShelves(c.env.KV, userId, [...shelves, shelf]);
   await writePublicSnapshot(c.env.KV, userId, shelf, record.books);
 
@@ -528,14 +459,8 @@ publicShelfRoutes.openapi(resetTokenRoute, async (c) => {
   const newToken = generateShareToken();
   const shelf = { ...shelves[idx], shareToken: newToken };
 
-  // Snapshot before pointer key: a reader who fetches the shelf list after the
-  // pointer write below always finds the new token's snapshot already in place,
-  // so this order still closes the 404 window for them. It no longer closes it
-  // fully for ANY shelf — the liveness guard revalidates every snapshot against
-  // the pointer key, so that pointer write must ALSO have propagated to the
-  // viewer's colo; until then the new token 404s for up to ~60s (fail-closed and
-  // self-healing, see the read handler). Old-snapshot delete stays LAST so a
-  // failure there leaves an orphan the guard already refuses to serve.
+  // New snapshot → shelf list → old-snapshot delete (a failed delete leaves an orphan the guard
+  // refuses). See docs/architecture.md → 公開書櫃的寫入與撤銷.
   await writePublicSnapshot(c.env.KV, userId, shelf, record.books);
 
   shelves[idx] = shelf;
@@ -563,11 +488,8 @@ publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  // Shelf list ONLY — deliberately not `findShelf`. Revocation never reads
-  // `record.books`, so requiring the books record would (a) make a shelf
-  // unrevokable whenever `user:{userId}` is missing, e.g. a partially failed
-  // account deletion that left the pointer key behind, and (b) cost a migrated
-  // owner a books read they do not need.
+  // Shelf list ONLY, not `findShelf`: revocation must work without `user:{userId}` and costs no books
+  // read. See docs/architecture.md → 公開書櫃的寫入與撤銷.
   const shelves = await readPublicShelves(c.env.KV, userId);
   const idx = shelves.findIndex((s) => s.shelfId === shelfId);
   if (idx === -1) {
@@ -576,21 +498,8 @@ publicShelfRoutes.openapi(deletePublicShelfRoute, async (c) => {
 
   const token = shelves[idx].shareToken;
 
-  // Pointer key FIRST, snapshot delete LAST — same ordering rule as reset-token
-  // and for the same reason: with the read-side liveness guard, the POINTER
-  // write IS the revocation, so it must be the step that lands first. Both
-  // partial failures are then fail-closed:
-  //   - pointer write fails ⇒ nothing happened (shelf still listed AND its
-  //     snapshot still there — consistent; the owner sees a 5xx and retries);
-  //   - snapshot delete fails ⇒ an orphan the guard already refuses to serve.
-  // Deleting first had a third, OPEN failure mode: snapshot gone but shelf still
-  // listed, so the owner's next ordinary books sync rebuilt a snapshot for a
-  // shelf that still carries the token — the revoked link came back READABLE,
-  // indefinitely for a permanent shelf.
-  //
-  // An empty `shelves` array is a MIGRATED "no shelves" state and outranks any
-  // legacy field left on `user:{userId}` — that is what stops a later books save
-  // from re-listing the deleted shelf.
+  // Pointer key FIRST (it IS the revocation), snapshot delete LAST: both partial failures fail closed.
+  // An empty `shelves` array means migrated. See docs/architecture.md → 公開書櫃的寫入與撤銷.
   shelves.splice(idx, 1);
   await writePublicShelves(c.env.KV, userId, shelves);
 
@@ -620,45 +529,8 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
     );
   }
 
-  // Three layered guards, in this order — each one only narrows:
-  //   1. KV TTL — primary expiry for a TIME-LIMITED snapshot.
-  //   2. expiresAt backstop (below) — a time-limited snapshot that outlived its
-  //      TTL or its shelf (e.g. reset-token's final delete failed).
-  //   3. Liveness check (below) — runs for EVERY surviving snapshot, permanent
-  //      or time-limited, and validates it against the owner's CURRENT shelf
-  //      list: same shelfId, same shareToken, and an expiry that does not
-  //      OUTLIVE the shelf's (monotonic, see `isSnapshotLive`). Covers
-  //      reset-token / delete orphans, orphans left behind by account deletion
-  //      (which only removes tokens the shelf list still knows about), a
-  //      snapshot promising more lifetime than its shelf now grants, and — the
-  //      reason it is no longer permanent-only — a snapshot RESURRECTED by a
-  //      books save that ran on a stale cross-colo read of a revoked shelf.
-  //
-  // Why the pointer key is what makes guard 3 work: the authority is
-  // `publicshelves:{userId}`, and the books / family-prefs hot paths never
-  // write that key. A stale-read books sync can therefore re-publish snapshot
-  // CONTENT, but it can never re-list the revoked shelf — so the resurrected
-  // snapshot stays unreadable. Validating against `user:{userId}` alone could
-  // not do this: that record is exactly what the racing save rolls back.
-  //
-  // Caveat on that guarantee, stated honestly: it holds once the pointer key is
-  // VISIBLE to the READING colo. For ~60s after the FIRST migration write — the
-  // revoke that creates the pointer key — a colo still holding a negative-cached
-  // miss for it falls back to the legacy field, so a books save racing inside
-  // that same window can leave the link briefly readable. Same order as KV's
-  // inherent revocation-propagation delay, one-time per user (later revokes
-  // overwrite an existing key), and self-healing.
-  //
-  // Cost, honestly: every public hit that holds a valid token now pays ONE
-  // extra small KV read (`publicshelves:{userId}`) for a migrated owner, and
-  // TWO for an un-migrated one — that pointer miss, plus a fallback read of the
-  // FULL `user:{userId}` books record, which is not small. The second read
-  // disappears on their first public-shelf write. A well-formed but unknown
-  // token still stops at the snapshot miss above, costing one read.
-  // The public per-IP tier (10/min) caps ONE source only — it does not bound
-  // distributed load, which needs the edge (Cloudflare WAF).
-  // Every branch answers exactly like the missing-snapshot branch above, so an
-  // orphan is indistinguishable from a token that never existed.
+  // Guards in order: snapshot miss / KV TTL → expiresAt backstop → liveness; each answers like a miss.
+  // Rationale: .claude/rules/backend.md → KV Key Patterns; cost: docs/architecture.md → 公開書櫃的寫入與撤銷.
   if (snapshot.expiresAt !== null && snapshot.expiresAt <= Date.now()) {
     return jsonError(
       c,
@@ -668,22 +540,8 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
     );
   }
 
-  // Strictly side-effect-free: a dead orphan is NOT deleted here — the HANDLER
-  // performs no KV writes, so a stranger can never choose a key to be written or
-  // deleted (the request pipeline's per-IP rate counter is the only fixed write
-  // per request). The orphan stays as unreadable dead data and is never
-  // reclaimed (account deletion only clears tokens the shelf list still knows
-  // about); its volume is bounded by how often cleanup writes fail — each
-  // failure surfaces to the owner as a 5xx — not by MAX_PUBLIC_SHELVES, which
-  // bounds LIVE shelves only.
-  //
-  // Known limitation, stated honestly: KV is eventually consistent and this is
-  // the first read of the owner's shelf list on the public path, so every hit
-  // warms it in the viewer's colo (default 60s read cache). After reset-token —
-  // or delete-then-recreate — a colo holding the stale list will 404 the NEW
-  // token for up to ~60s. That window now applies to time-limited shelves too,
-  // which previously skipped this guard. Fail-closed and self-healing; accepted
-  // as the cost of validating a snapshot against its owner's live shelf list.
+  // Side-effect-free: a dead orphan is never deleted here. A rotated token can 404 for ~60s on a colo
+  // caching the old list. See docs/architecture.md → 公開書櫃的寫入與撤銷.
   const isLive = await isSnapshotLive(c.env.KV, snapshot, shareToken);
   if (!isLive) {
     return jsonError(
@@ -697,14 +555,8 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
   return c.json({
     data: {
       title: snapshot.title,
-      // Read-side twin of the aggregation scrub: a snapshot minted BEFORE the
-      // whitelist existed keeps its foreign cover / book URL until the shelf is
-      // refreshed — for a permanent shelf, indefinitely. Scrubbing on the way
-      // out keeps the mitigation independent of whether the PWA CSP is
-      // actually delivered (a self-hosted PWA on a host that ignores
-      // `_headers` has none) — and the book link needs it regardless, since
-      // `img-src` never constrained a navigation. Response transform only —
-      // no KV write.
+      // Read-side twin of the scrub for pre-whitelist snapshots; response transform only, no KV write.
+      // Rationale: .claude/rules/backend.md → KV Key Patterns (public-shelf paragraph).
       books: snapshot.books.map((b) => ({
         ...b,
         coverUrl: sanitizeCoverUrl(b.coverUrl),

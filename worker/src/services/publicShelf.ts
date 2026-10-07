@@ -1,10 +1,5 @@
-/**
- * Public-shelf snapshot writes + the public-shelf list resolver — shared by the
- * `user` and `publicShelf` route modules. Both live here rather than in
- * `routes/publicShelf.ts` because a route module must never import business
- * logic from a SIBLING route module (lint-enforced); logic needed by two or
- * more routes belongs in `services/`.
- */
+/** Public-shelf snapshot writes + list resolver, shared by the `user` and `publicShelf` routes.
+ *  Rationale: .claude/rules/backend.md → KV Key Patterns (public shelves). */
 import {
   kvKeys,
   BoolFlag,
@@ -68,29 +63,16 @@ function sharedBooks(books: BookEntry[]): BookEntry[] {
   return books.filter((b) => b.isShared === BoolFlag.TRUE);
 }
 
-/**
- * Remaining lifetime in seconds, or `undefined` when the shelf never expires.
- * Cloudflare KV rejects an `expirationTtl` below `KV_MIN_TTL_SECONDS`, so a
- * lifetime shorter than that minimum is treated as already expired (0) — the
- * caller then deletes the snapshot instead of putting one that KV would refuse.
- */
+/** Remaining lifetime in seconds, `undefined` = never expires; under `KV_MIN_TTL_SECONDS` ⇒ 0 (expired),
+ *  so the caller deletes instead of a put KV would refuse. .claude/rules/backend.md → KV Key Patterns. */
 function remainingTtlSeconds(expiresAt: number | null): number | undefined {
   if (expiresAt === null) return undefined;
   const remaining = Math.floor((expiresAt - Date.now()) / 1000);
   return remaining >= KV_MIN_TTL_SECONDS ? remaining : 0;
 }
 
-/**
- * The single chokepoint for `public:{shareToken}` snapshot contents — the
- * books-path refresh in `routes/user.ts` AND the create / update / reset-token
- * handlers in `routes/publicShelf.ts` all funnel through here. That is why both
- * attacker-controlled URL fields, `coverUrl` and `readmooUrl`, are re-sanitized
- * at this point rather than trusted from the `user:{userId}` record: the shelf
- * handlers hand over a raw KV read, so a record poisoned before the Readmoo
- * domain whitelist existed could otherwise mint a fresh snapshot that beacons
- * (cover) or phishes (book link) anonymous visitors, even if its owner never
- * syncs books again.
- */
+/** The single chokepoint for every `public:{shareToken}` snapshot: re-sanitizes `coverUrl` AND `readmooUrl`.
+ *  Do not bypass — .claude/rules/backend.md → KV Key Patterns (public shelves). */
 function buildSnapshot(
   userId: string,
   shelf: PublicShelf,

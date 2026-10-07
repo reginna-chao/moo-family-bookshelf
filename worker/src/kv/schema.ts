@@ -1,21 +1,5 @@
-/**
- * KV key patterns and helpers.
- *
- * Key patterns:
- *   user:{userId}    → personal book list + sharing settings (JSON)
- *   family:{familyId} → family member list (JSON)
- *   member:{userId}  → familyId (reverse lookup)
- *   kicked:{familyId}:{userId} → KickedRecord (owner-initiated removal tombstone, TTL 21600s)
- *   qr:{token}       → QrTokenRecord (one-time QR login bypass, TTL 300s)
- *   verifyfail:{userId}:{callerKey} → VerifyFailRecord (per-caller failure accounting, TTL 900s)
- *   borrow:{requestId} → BorrowPointer { familyId }
- *                        (legacy: full BorrowRequest, read for familyId only)
- *   borrows:family:{familyId} → BorrowRequest[] (all PENDING/LENT + newest
- *                        BORROW_HISTORY_KEEP terminal PER borrowerId; legacy:
- *                        string[] of requestIds, migrated on the next write)
- *   publicshelves:{userId} → PublicShelvesRecord (public-shelf pointer list, persistent)
- *   public:{shareToken} → PublicShelfSnapshot (plaintext public bookshelf, optional TTL)
- */
+/** KV key builders (`kvKeys`), record types and TTL constants. Key → value → TTL: .claude/rules/backend.md
+ *  → KV Key Patterns; `qr:{token}` (QrTokenRecord, 300s): docs/architecture.md → KV Key 設計. */
 
 /** Cloudflare KV rejects any `expirationTtl` below 60 seconds. */
 export const KV_MIN_TTL_SECONDS = 60;
@@ -59,7 +43,7 @@ export interface BorrowRequest {
  * Legacy values are full `BorrowRequest` objects. They are a SUPERSET of this
  * shape — `familyId` is present on both — so the pointer read serves them
  * unchanged, and nothing else on them is ever read. See
- * `services/borrowIndex.ts` for why they are not rewritten.
+ * .claude/rules/backend.md → KV Key Patterns (borrow index) for why they are not rewritten.
  */
 export interface BorrowPointer {
   familyId: string;
@@ -321,26 +305,11 @@ export interface UserBooksRecord {
   displayName: string;
   books: BookEntry[];
   lastUpdated: string;
-  /**
-   * LEGACY location of the public-shelf list, superseded by
-   * `publicshelves:{userId}` (`PublicShelvesRecord`).
-   *
-   * Retained ONLY as the lazy-migration read fallback, consulted when the
-   * pointer key does not exist. No code writes it anymore: the public-shelf
-   * handlers write the pointer key instead, and the PUT books handler drops
-   * this field from the rebuilt record once the pointer key exists (PATCH
-   * likewise strips it from the carried-over record). An un-migrated user
-   * keeps it until their first public-shelf write, after which it is inert —
-   * a non-null pointer record always wins, even when its `shelves` is empty.
-   */
+  /** LEGACY public-shelf list, superseded by `publicshelves:{userId}`: only the lazy-migration read fallback,
+   *  never given a new value. See .claude/rules/backend.md → KV Key Patterns (public shelves). */
   publicSharing?: { shelves: PublicShelf[] };
-  /**
-   * Per-viewer private family-shelf preferences (v1.5.0+).
-   * Both lists hold copy-scoped `"{ownerId}:{bookId}"` refs:
-   * - `hidden`: refs the viewer has hidden from their own family-shelf view.
-   * - `favorites`: refs the viewer has marked as favorites (我的最愛, v1.6.0+).
-   * Each list is capped independently at `MAX_FAMILY_PREF_ENTRIES`.
-   */
+  /** Per-viewer private family-shelf prefs (v1.5.0+), copy-scoped `"{ownerId}:{bookId}"` refs: `hidden` from
+   *  the viewer's own view, `favorites` (我的最愛, v1.6.0+). Each list capped at `MAX_FAMILY_PREF_ENTRIES`. */
   familyShelfPrefs?: { hidden: string[]; favorites: string[] };
 }
 
@@ -403,18 +372,8 @@ export interface VerifyRecord {
   salt: string | null;
   /** Whether user has been prompted to set up verification (0 or 1). */
   prompted: number;
-  /**
-   * Epoch ms of when the verification secret/method was last changed. Failure
-   * records whose streak began before this timestamp are void — the secret they
-   * accumulated against no longer exists. Only `PUT /:id/verify` advances it.
-   *
-   * OPTIONAL on purpose: records already in production KV predate this field,
-   * and `kv.get<VerifyRecord>(key, "json")` casts the parsed JSON without
-   * validating it — there is no migration step that could backfill them. Typing
-   * it as required would be a lie the compiler cannot catch, and would make read
-   * sites skip the `undefined` handling they actually need. Absent value means
-   * "unknown"; consumers must fall back to the safe (still-locked) behaviour.
-   */
+  /** Epoch ms of the last secret/method change (only `PUT /:id/verify` advances it); older failure streaks are
+   *  void. OPTIONAL, absent ⇒ stays locked: .claude/rules/backend.md → Service, middleware and KV invariants. */
   secretUpdatedAt?: number;
 }
 
@@ -433,17 +392,8 @@ export interface VerifyFailRecord {
   failCount: number;
   /** Lockout expiry timestamp (ms) for this caller. null if not locked. */
   lockedUntil: number | null;
-  /**
-   * Epoch ms of when this caller's current failure streak began. Compared
-   * against `VerifyRecord.secretUpdatedAt`: a streak that started before the
-   * secret was last changed is void. Preserved across a lockout (the streak is
-   * the same until the entry expires or is cleared).
-   *
-   * OPTIONAL for the same reason as `VerifyRecord.secretUpdatedAt`: entries
-   * written before this field existed can still be live for up to
-   * `VERIFY_FAIL_TTL_SECONDS` after a deploy, and nothing validates the JSON on
-   * read. Absent value means "unknown" and must NOT void the record.
-   */
+  /** Epoch ms this caller's failure streak began, kept across a lockout; void if before `secretUpdatedAt`.
+   *  OPTIONAL, absent ⇒ never void: .claude/rules/backend.md → Service, middleware and KV invariants. */
   startedAt?: number;
 }
 

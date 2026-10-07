@@ -20,10 +20,8 @@ export { isDevMode } from "./utils/env";
 
 /** Check if the origin is allowed for CORS */
 export function isAllowedOrigin(origin: string, devMode?: boolean): boolean {
-  // Readmoo domains — the content script runs on both bookshelf sites:
-  //   read.readmoo.com = legacy bookshelf, next.readmoo.com = new bookshelf.
-  // Both are listed explicitly so the intent is testable; the subdomain regex
-  // below stays as the catch-all for any other readmoo subdomain.
+  // Readmoo: read. (legacy) and next. (new bookshelf) host the content script — listed explicitly so
+  // the intent is testable; the subdomain regex stays the catch-all for any other readmoo subdomain.
   if (origin === "https://readmoo.com") return true;
   if (origin === "https://read.readmoo.com") return true;
   if (origin === "https://next.readmoo.com") return true;
@@ -117,24 +115,8 @@ app.use("/api/*", authMiddleware);
 // Health check
 app.get("/", (c) => c.json({ status: "ok", service: "moo-family-bookshelf" }));
 
-/**
- * API version endpoint for client compatibility checks.
- * Bump API_VERSION when making breaking API changes.
- *
- * 2 — the verification gate on the public identity endpoints (`POST /api/family`,
- * `POST /api/family/:id/join`, `POST /api/auth/lookup`). Counts as an
- * authentication-mechanism change per docs/architecture.md → 何時遞增
- * API_VERSION: for an account with PWA verification configured, a client that
- * sends no `verifySecret` now gets 403 on create and a `requiresVerification: 1`
- * answer with no membership data on lookup.
- *
- * Note the signal direction: `/api/version` only lets a client detect a server
- * that is TOO OLD (server `apiVersion` < the client's `MIN_API_VERSION`). It
- * cannot warn an outdated client talking to this Worker — that degradation is
- * covered in the CHANGELOG ("請更新擴充功能"). Raising `MIN_API_VERSION` to 2 in
- * the Extension/PWA `VersionWarning.tsx` is the follow-up that makes a stale
- * self-hosted Worker (still missing the gate) visible to its users.
- */
+/** Bump only on a breaking API change (docs/architecture.md → 何時遞增 API_VERSION). 2 = the verification
+ *  gate on the public identity endpoints: docs/architecture.md → `API_VERSION = 2`：公開身分端點加上驗證閘門. */
 const API_VERSION = 2;
 const SERVER_VERSION = "0.1.0";
 
@@ -176,9 +158,8 @@ app.route("/api", publicQueryRoutes);
 // 404 fallback
 app.notFound((c) => jsonError(c, 404, "NOT_FOUND", "Route not found"));
 
-// Error handler. A thrown Hono HTTPException that is the client's fault keeps
-// its 4xx (clientErrorFor in utils/errors.ts); only a genuine server fault is
-// logged and answered 500.
+// Error handler: a client-fault HTTPException keeps its 4xx (clientErrorFor in utils/errors.ts);
+// only a genuine server fault is logged and answered 500.
 app.onError((err, c) => {
   const clientError = clientErrorFor(err);
   if (clientError) {

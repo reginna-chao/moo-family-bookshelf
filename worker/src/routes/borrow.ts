@@ -38,19 +38,8 @@ function isMemberLendingEnabled(member: FamilyMember): boolean {
   return member.canLend !== BoolFlag.FALSE;
 }
 
-/**
- * Classify the OPTIONAL `bookCoverUrl` at the handler boundary, mirroring
- * `sanitizeVerifySecret()` in `utils/validation.ts`:
- *
- * - absent / `null` / `""` ⇒ "no cover", normalized to `""` (a book whose cover
- *   the bookshelf aggregation sanitized away must still be borrowable);
- * - any other non-string ⇒ `null`, i.e. a request-format error (`400
- *   INVALID_FIELDS`) — never a cover-whitelist rejection;
- * - a non-empty string is returned verbatim for the whitelist check.
- *
- * `BorrowRequest.bookCoverUrl` stays a non-optional `string`, so the stored
- * record never carries `undefined` / `null`.
- */
+/** Classify the optional `bookCoverUrl` like `sanitizeVerifySecret()`: absent / null / "" ⇒ "", other
+ *  non-string ⇒ null (400 INVALID_FIELDS), else verbatim. See .claude/rules/backend.md → API Design. */
 function normalizeBookCoverUrl(value: unknown): string | null {
   if (value === undefined || value === null || value === "") return "";
   if (typeof value !== "string") return null;
@@ -152,17 +141,12 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     );
   }
 
-  // `bookCoverUrl` is optional, but a SUPPLIED value of the wrong type is still
-  // a format error — classified in the same guard slot as the required fields
-  // so it keeps its INVALID_FIELDS precedence over INVALID_USER_ID /
-  // INVALID_COVER_URL. `null` here means "wrong type", not "no cover".
+  // A supplied cover of the wrong type is a format error in the same guard slot, so INVALID_FIELDS keeps
+  // precedence over INVALID_USER_ID / INVALID_COVER_URL. `null` here = "wrong type", not "no cover".
   const bookCoverUrl = normalizeBookCoverUrl(body.bookCoverUrl);
 
-  // Type AND length in one guard slot. The length half is not cosmetic: every
-  // record of a family now lives inside ONE KV value (borrows:family:{id})
-  // that every member reads on every list, so an unbounded field is a way for
-  // one member to inflate what the whole family pays for. Both halves run
-  // BEFORE the rate-limit charge — a malformed request must not burn quota.
+  // Type AND length in one guard slot, before the charge: every record sits in ONE index value the whole
+  // family reads. Rationale: .claude/rules/backend.md → KV Key Patterns (borrow index).
   if (
     typeof body.bookId !== "string" ||
     typeof body.bookTitle !== "string" ||
@@ -186,17 +170,8 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     return jsonError(c, 400, "INVALID_USER_ID", "ownerId format is invalid");
   }
 
-  // The cover URL is stored verbatim and later rendered into an <img src> by
-  // the PWA / Extension, so an arbitrary URL from a family member would be a
-  // privacy tracking beacon (it leaks the viewer's IP + UA to the attacker on
-  // every render). Restrict it to Readmoo-served https covers at the boundary.
-  // Runs before the rate-limit charge: a malformed request is a format error
-  // and must not burn the caller's quota (same rule as `verifySecret`).
-  // Only the EMPTY case is exempt, and it does not weaken the control: the
-  // family-bookshelf aggregation sanitizes every off-whitelist cover to "", so
-  // "" reaching this handler means "this book has no renderable cover" — a
-  // legitimate signal, not an attack. Every NON-EMPTY value still runs the
-  // whitelist.
+  // Anti-tracking-beacon whitelist for every NON-EMPTY cover, before the charge ("" = no renderable
+  // cover). Rationale: .claude/rules/backend.md → API Design (`bookCoverUrl` bullet).
   if (bookCoverUrl !== "" && !isAllowedCoverUrl(bookCoverUrl)) {
     return jsonError(
       c,
@@ -227,12 +202,8 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
 
   const family = normalizeFamilyRecord(raw);
 
-  // Both parties must be ACTIVE members — listed AND pointed at this family
-  // (#222: a kicked member re-listed by a stale full-record write is listed
-  // but pointerless, and must neither borrow nor be borrowed from). The two
-  // pointer reads run in parallel; the verdicts are checked in the original
-  // order below, so every rejection keeps its precedence. No owner read when
-  // the caller names themselves — that request is refused either way.
+  // Both parties must be ACTIVE (#222); parallel pointer reads, verdicts checked in the original order.
+  // No owner read when the caller names themselves (refused either way).
   const [callerActive, ownerActive] = await Promise.all([
     isActiveMember(c.env.KV, familyId, userId, family.members),
     ownerId === userId
@@ -250,10 +221,8 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     );
   }
 
-  // Verify ownerId is a different family member. The two rejections below carry
-  // DISTINCT codes on purpose: clients see only the `code` and map each to its
-  // own copy. The self branch is unreachable today only because both UIs hide
-  // the borrow button for one's own books — do NOT re-merge the two codes.
+  // DISTINCT codes for the two owner rejections — never re-merge them.
+  // Rationale: .claude/rules/backend.md → API Design (`INVALID_OWNER_SELF` bullet).
   if (ownerId === userId) {
     return jsonError(
       c,
@@ -291,9 +260,8 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     );
   }
 
-  // The family's borrow index carries the full records, so the duplicate check
-  // reads ONE key. A legacy string[] index still fans out here, one last time
-  // — the write below rewrites it in the new shape.
+  // The index carries full records, so the duplicate check reads ONE key (a legacy string[] index fans
+  // out one last time; the write below rewrites it).
   const { requests } = await readBorrowIndex(c.env.KV, familyId);
 
   // Check for duplicate PENDING request (same borrowerId + bookId)
@@ -313,15 +281,8 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     );
   }
 
-  // Per-borrower ceiling on OPEN requests. PENDING records are exempt from the
-  // history trim (evicting one would strand a request the owner still has to
-  // answer), so without this they are the one part of the index a single member
-  // can grow without bound — and the index is one KV value the whole family
-  // reads on every list. Counted from the caller's OWN records only, so no one
-  // else's traffic can spend it (Inv-6), and the caller clears it themselves by
-  // cancelling or by the owner answering. Placed after the membership and
-  // duplicate checks: it needs the index that was just read, and it must not
-  // pre-empt the more specific errors above.
+  // Per-borrower cap on PENDING (exempt from the trim), from the caller's own records (Inv-6), after the
+  // more specific checks. Rationale: .claude/rules/backend.md → KV Key Patterns (borrow index).
   const openByCaller = requests.filter(
     (req) => req.status === BorrowStatus.PENDING && req.borrowerId === userId,
   ).length;
@@ -355,50 +316,8 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     updatedAt: now,
   };
 
-  // NOTE: No atomic CAS in KV. The index is a read-modify-write of ONE key on
-  // every write path — create (here), PATCH, and the departure settlement
-  // (`settleDepartingBorrower`, from member removal in family.ts and account
-  // deletion in user.ts) — so two concurrent writers on the SAME family can
-  // both read the same index and the second put overwrites the first, losing
-  // the earlier update. That lost update is the remaining residual and it is
-  // ACCEPTED: see docs/architecture.md → 已接受的殘餘風險.
-  //
-  // What is NO LONGER a residual: an index that grows with history. The old
-  // form of this note called the tradeoff "acceptable only while the index
-  // stays under 20 entries" and left that bound to a reviewer's judgement.
-  // `trimBorrowIndex` (services/borrowIndex.ts) now enforces it on every write
-  // — the index holds the live requests plus at most BORROW_HISTORY_KEEP
-  // terminal ones PER BORROWER. Live requests are deliberately NOT trimmed
-  // (evicting one would strand a lent book), so the bound is "live +
-  // BORROW_HISTORY_KEEP per borrower", not a constant; the PENDING half of
-  // "live" is bounded instead at the boundary above, by
-  // BORROW_MAX_PENDING_PER_BORROWER.
-  //
-  // The cap is not the only thing that shrinks the index, and it could not be:
-  // it is keyed on `borrowerId`, and a sync-code holder can mint fresh
-  // borrowerIds indefinitely (join → open requests → leave → repeat), each
-  // leaving a group under the cap that no later write would ever trim. So
-  // BORROWER COUNT is bounded too, at both exits: `settleDepartingBorrower`
-  // removes a departing member's own terminal records (not LENT — see its
-  // JSDoc tripwire), and `deleteBorrowIndex` drops the key on dissolve.
-  // tests/integration/budget/borrow-index-growth.test.ts remains the
-  // acceptance criterion for the O(1) list read.
-  //
-  // For strict correctness, scope index per-borrower or use Durable Objects.
-  //
-  // Write order is SEQUENTIAL and deliberate, and the POINTER goes FIRST —
-  // the two half-failures are NOT symmetric:
-  //   - index entry without pointer: a PENDING ghost. Both parties SEE it in
-  //     the list, but PATCH cannot resolve its family, so every attempt to
-  //     approve / reject / cancel it answers 404. PENDING is never trimmed, so
-  //     it stays forever, and it permanently blocks re-requesting the same book
-  //     (DUPLICATE_REQUEST matches on borrowerId + bookId + PENDING).
-  //   - pointer without index entry: invisible to every reader and harmless.
-  //     The requestId is a freshly minted UUID nothing else names, a PATCH on
-  //     it gets the same 404 an unknown id gets, and the caller's retry creates
-  //     a clean record under a new id.
-  // So the recoverable half is written first: whichever write fails, no ghost
-  // can exist.
+  // No CAS: concurrent index writers lose updates (accepted). POINTER FIRST, so a failure can leave an
+  // orphan pointer, never a PENDING ghost. Rationale: .claude/rules/backend.md → KV Key Patterns.
   await writeBorrowPointer(c.env.KV, requestId, familyId);
 
   await writeBorrowIndex(c.env.KV, familyId, [...requests, borrowRequest]);
@@ -442,27 +361,11 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
     );
   }
 
-  // Load the borrow index. READ-ONLY on purpose, including for a family still
-  // on the legacy string[] index (which fans out here exactly as before):
-  // migration is write-path only, so a listing never writes — see
-  // services/borrowIndex.ts.
+  // READ-ONLY, legacy string[] index included: migration is write-path only (services/borrowIndex.ts).
   const { requests } = await readBorrowIndex(c.env.KV, familyId);
 
-  // API-layer least privilege: only records the caller is a party to are
-  // returned. A family member who is neither borrower nor owner has no claim to
-  // someone else's transaction, and this is what keeps FORMER members' data
-  // (userId, borrowerName, bookTitle, bookAuthor, bookCoverUrl) out of
-  // uninvolved members' responses — a departure does not empty the index of
-  // that member: `settleDepartingBorrower` removes only the terminal records
-  // they BORROWED, leaving their LENT ones (still out on loan) and every record
-  // where they were the OWNER, which is the remaining member's own history.
-  //
-  // Nothing downstream needs third-party records: both clients already bucket
-  // exclusively by `ownerId === userId || borrowerId === userId` (extension
-  // BorrowTab.tsx, PWA BorrowPage.tsx; the `pendingBookIds` sets in both
-  // FamilyShelf pages collect only the caller's own PENDING requests), and the
-  // create handler's DUPLICATE_REQUEST check reads KV directly rather than this
-  // response.
+  // Least privilege: only records the caller is a party to (keeps former members' data from others).
+  // See docs/architecture.md → 借閱請求的狀態與結算.
   const visibleRequests = requests.filter(
     (r) => r.borrowerId === userId || r.ownerId === userId,
   );
@@ -470,9 +373,8 @@ borrowRoutes.openapi(listBorrowRoute, async (c) => {
   return c.json({ data: visibleRequests });
 });
 
-// PATCH /api/borrow/:requestId — update borrow status. Authorization is
-// two-fold: the caller must be a CURRENT member of the record's family (when
-// that family still exists) AND a party to the record (borrower or owner).
+// PATCH /api/borrow/:requestId — update borrow status. Caller must be an ACTIVE member of the record's
+// family (while it exists) AND a party to the record (borrower or owner).
 borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   // Format already enforced by RequestIdParam (400 INVALID_REQUEST_ID).
   const { requestId } = c.req.valid("param");
@@ -508,64 +410,34 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  // A bare requestId cannot name its family, so resolve the pointer first.
-  // It reads a legacy full record for its `familyId` too, and NEVER rewrites
-  // one — the index is the truth for the record's contents.
+  // A bare requestId cannot name its family: resolve the pointer first (a legacy full record is read
+  // for its `familyId` only, never rewritten).
   const familyId = await readBorrowPointer(c.env.KV, requestId);
   if (!familyId) {
     return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
   }
 
-  // Family record and borrow index are independent keys resolved from the same
-  // familyId, so they are read in PARALLEL: the membership re-check below costs
-  // one extra KV read, not one extra round trip. The entry inside the index IS
-  // the record; `borrowRequest` is a reference into `requests`, so mutating it
-  // below updates what gets written back.
+  // Family record + index in PARALLEL (the re-check costs a read, not a round trip). `borrowRequest` is a
+  // reference into `requests`, so mutating it below updates what gets written back.
   const [rawFamily, { requests }] = await Promise.all([
     getFamilyRecord(c.env.KV, familyId),
     readBorrowIndex(c.env.KV, familyId),
   ]);
   const borrowRequest = requests.find((r) => r.requestId === requestId);
   if (!borrowRequest) {
-    // The record aged out of its borrower's history cap, or this is an orphan
-    // pointer: either the trim's fail-open delete did not land, or a create
-    // wrote the pointer and then failed to write the index. All of them mean
-    // "no such request" — same 404 as an unknown requestId, so the response
-    // discloses nothing extra.
+    // Trimmed, or an orphan pointer: same 404 as an unknown requestId.
+    // See docs/architecture.md → 借閱請求的狀態與結算.
     return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
   }
 
-  // Defence in depth: the pointer and the record must name the SAME family.
-  // They disagree only if one of the two is corrupt, and acting on that would
-  // rewrite this family's whole index from a record that claims to belong to
-  // another one. Refuse with the same 404 an unknown requestId gets — it
-  // discloses nothing extra — and write nothing.
+  // Defence in depth: pointer and record must name the SAME family (else one is corrupt); same 404 as an
+  // unknown requestId, nothing written.
   if (borrowRequest.familyId !== familyId) {
     return jsonError(c, 404, "REQUEST_NOT_FOUND", "Borrow request not found");
   }
 
-  // Party identity must not outlive membership (issue #159). The record's
-  // borrowerId / ownerId are frozen at create time, while the auth token binds
-  // only a userId — not a familyId — so a member who was kicked or left could
-  // create a NEW family, mint a fresh valid token, and still flip an old LENT
-  // record to RETURNED, a terminal state nothing can leave. Re-checking
-  // `family:{id}` here (read above, in parallel with the index) closes that:
-  // while the family exists, a non-member is refused before the party check,
-  // with the same code the create / list handlers use.
-  //
-  // A MISSING family record is the orphan path, and it deliberately falls
-  // through: the family dissolved but the fail-open `deleteBorrowIndex` in the
-  // sole-owner branch of family.ts did not land (BORROW_INDEX_DELETE_FAILED),
-  // so there is no member list to check against. Either party may still settle
-  // such a record; a non-party is still refused by the party check below.
-  //
-  // "Member" means ACTIVE (#222): listed AND pointed at this family. A kicked
-  // member re-listed by a stale full-record write is listed but pointerless,
-  // and is refused here like any non-member. One pointer read, only on this
-  // branch — the orphan path below still reads nothing extra.
-  //
-  // Accepted residual: KV cross-colo propagation (~60s). A PATCH racing the
-  // kick on a colo that still holds the pre-kick family record can land once.
+  // Party identity must not outlive membership (#159): ACTIVE members only while the family exists; a
+  // missing family is the orphan path. See docs/architecture.md → 借閱請求的狀態與結算.
   if (rawFamily !== null) {
     const family = normalizeFamilyRecord(rawFamily);
     if (!(await isActiveMember(c.env.KV, familyId, userId, family.members))) {
@@ -609,11 +481,8 @@ borrowRoutes.openapi(updateBorrowRoute, async (c) => {
   borrowRequest.status = targetStatus as BorrowStatus;
   borrowRequest.updatedAt = new Date().toISOString();
 
-  // ONE write: the index carries the record. The pointer is untouched — it
-  // holds only `familyId`, which a status change cannot alter. Rewriting the
-  // index may evict OLDER terminal records of the SAME borrower past the
-  // history cap; the record just updated carries the newest `updatedAt` in that
-  // group, so it is never the one evicted.
+  // ONE write (the index; the pointer holds only `familyId`). The trim may evict this borrower's older
+  // terminal records, never this one (newest `updatedAt`).
   await writeBorrowIndex(c.env.KV, familyId, requests);
 
   return c.json({ data: borrowRequest });
