@@ -1,37 +1,5 @@
-/**
- * Runtime boundary validation for `GET /api/family/:id/members` payloads, and —
- * through the exported `sanitizeFamilyMember` — for the single member object
- * returned by `PATCH /api/family/:id/member/:uid`, which only the Extension end
- * consumes today. Applied at the API-client boundary of BOTH apps
- * (`extension/src/api/client.ts`, `pwa/src/api/client.ts`); it lives here so the
- * two ends cannot enforce different rules on the same payload.
- *
- * Self-hosted (BYO) backends are inside this project's threat model, so the
- * member list arrives unvalidated: a non-string `userId` crashes `.slice(0, 8)`
- * in the parent-level `useMemo` each app builds its name lookup with
- * (`buildOwnerNameLookup` in `extension/src/dialog/BorrowTab.tsx`,
- * `buildMemberNameMap` in `pwa/src/pages/BorrowPage.tsx`), which runs before any
- * card mounts, and React throws outright when an object-valued `displayName` is
- * rendered as a child (both ends' `MemberList.tsx`). Neither end has an
- * ErrorBoundary, so a single malformed element takes the whole Dialog / page
- * down.
- *
- * Two failure modes, deliberately handled differently:
- * - DROP the element when it cannot be addressed at all (not a plain object, or
- *   no usable `userId` — it could serve neither as a React key, nor as the key
- *   of either name lookup, nor as the `:uid` target of `updateMemberSettings` /
- *   `removeMember`).
- * - NORMALIZE what survives: `displayName` becomes `""` when it is not a string,
- *   because every consumer already has a `|| userId.slice(0, 8)` fallback; the
- *   two optional fields are OMITTED unless they carry their declared type, so
- *   the documented "missing `canLend` means TRUE" and the "尚未記錄" hint keep
- *   their backward-compatible meaning.
- *
- * The check runs INSIDE the `{ data, error }` envelope rather than on unwrapped
- * data, because every `getFamilyMembers` caller reads the envelope itself. An
- * `error` (or data-less) envelope passes through untouched — an auth failure
- * must never be laundered into an empty member list (Invariant 2).
- */
+/** Structure layer for `GET /api/family/:id/members` (and, via `sanitizeFamilyMember`, the PATCH member
+ *  response): drop unaddressable, normalize the rest. Why: docs/architecture.md → 伺服器回傳資料的檢查. */
 
 import { BoolFlag } from "./types";
 import type { ApiResponse, FamilyGroup, FamilyMember } from "./types";
@@ -46,14 +14,8 @@ function toStringField(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/**
- * Keep a value only when it is exactly one of the two `BoolFlag` members;
- * anything else (missing, `true`, `2`, `"1"`) becomes `undefined`.
- *
- * `undefined` loses nothing: downstream already reads missing as TRUE
- * (`canLend !== BoolFlag.FALSE`, in both ends' `MemberList.tsx`), which is the
- * backward-compat semantics for Workers predating the field.
- */
+/** Keep only an exact `BoolFlag` member; anything else (missing, `true`, `2`, `"1"`) → `undefined`, which
+ *  downstream reads as TRUE (`canLend !== BoolFlag.FALSE`) — the compat for Workers predating the field. */
 function toBoolFlagField(value: unknown): BoolFlag | undefined {
   if (value === BoolFlag.TRUE) return BoolFlag.TRUE;
   if (value === BoolFlag.FALSE) return BoolFlag.FALSE;
@@ -100,13 +62,8 @@ export function sanitizeFamilyMember(element: unknown): FamilyMember | null {
   };
 }
 
-/**
- * Validate the member list itself.
- *
- * A malformed container degrades to "no members" rather than throwing: there is
- * no new error code here, because an unusable list is not something the UI can
- * ask the user to act on.
- */
+/** Validate the member list; a malformed container degrades to "no members" with no new error
+ *  code, because an unusable list is not something the UI can ask the user to act on. */
 function sanitizeFamilyMembers(claimed: unknown): FamilyMember[] {
   if (!Array.isArray(claimed)) {
     console.warn(
@@ -151,19 +108,14 @@ function sanitizeFamilyMembers(claimed: unknown): FamilyMember[] {
 export function sanitizeFamilyMembersResponse(
   res: ApiResponse<unknown>,
 ): ApiResponse<FamilyGroup> {
-  // Truthiness for `error`, deliberately not `!== undefined`: a BYO backend can
-  // send `error: null`, which both callers' own `if (response.error)` reads as
-  // success before consuming `data` — waving that envelope through would leave
-  // exactly the payload this module exists to check unvalidated. `data` is
-  // nullish-checked for the mirror-image reason: nothing downstream reads it.
+  // Truthiness, not `!== undefined`: a BYO `error: null` would otherwise skip validation;
+  // see docs/architecture.md → 伺服器回傳資料的檢查.
   if (res.error || res.data === undefined || res.data === null) {
     return res as ApiResponse<FamilyGroup>;
   }
 
-  // A non-object `data` carries no `FamilyGroup` field at all, so there is
-  // nothing to pass through — it degrades to a members-only group, and its
-  // missing `members` is reported by the array check like any other
-  // malformation.
+  // A non-object `data` has no `FamilyGroup` field to pass through: it degrades to a
+  // members-only group, whose missing `members` the array check reports.
   const claimed: Record<string, unknown> = isRecord(res.data) ? res.data : {};
   const claimedEndpoint = claimed.apiEndpoint;
 
@@ -172,15 +124,8 @@ export function sanitizeFamilyMembersResponse(
     data: {
       ...(claimed as unknown as FamilyGroup),
       members: sanitizeFamilyMembers(claimed.members),
-      // The one pass-through field that reaches a React child: the Extension's
-      // transfer-owner confirm screen prints it verbatim
-      // (`extension/src/dialog/MemberList.tsx`, `.moo-member-list__endpoint`),
-      // and the PWA publishes the same value through `hooks/useFamilyData.tsx`
-      // for any screen to render — so an object-valued claim throws there,
-      // exactly the crash class the other fields' `===` / `??` consumers are
-      // immune to. Any string survives verbatim; everything else collapses to
-      // `null`, which is what `apiEndpoint ?? undefined` already reads as "no
-      // custom endpoint".
+      // The one pass-through field rendered as a React child: any string survives, anything else
+      // becomes `null` ("no custom endpoint"). See docs/architecture.md → 伺服器回傳資料的檢查.
       apiEndpoint: typeof claimedEndpoint === "string" ? claimedEndpoint : null,
     },
   };

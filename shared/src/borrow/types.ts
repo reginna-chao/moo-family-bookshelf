@@ -1,16 +1,5 @@
-/**
- * Borrow wire-contract types — the shape of `/api/family/:id/borrow` and
- * `/api/borrow/:id` payloads as the Extension and the PWA agree to read them.
- *
- * Single-sourced here because both apps consume the same endpoints from the same
- * 「申請借閱」 flow, so a field that exists on one end and not the other is a
- * contract break rather than a local style choice. Each app re-exports these from
- * its own API module, so existing importers are unaffected.
- *
- * These types are a CLAIM about the payload, never a guarantee: the backend is
- * user-configurable (BYO / a sync code's `@host`), so the actual wire values are
- * checked at each app's API boundary by `./validation`.
- */
+/** Borrow wire types both apps re-export (a field on one end only is a contract break). A CLAIM, not
+ *  a guarantee: `./validation` checks the wire values at each app's API boundary. */
 
 export enum BorrowStatus {
   PENDING = 0,

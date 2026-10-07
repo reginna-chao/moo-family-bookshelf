@@ -10,11 +10,8 @@ const CANONICAL_MODES: readonly BookSortMode[] = [
   "author-desc",
 ];
 
-/**
- * Legacy stored values (pre-direction) mapped to their ascending canonical
- * equivalent. Persisted preferences must survive this schema change without a
- * migration — old `"title"` / `"author"` values are read as `-asc`.
- */
+/** Pre-direction stored values read as their `-asc` form, so persisted preferences survive the
+ *  schema change without a migration. */
 const LEGACY_ALIASES: Record<string, BookSortMode> = {
   title: "title-asc",
   author: "author-asc",

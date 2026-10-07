@@ -1,10 +1,7 @@
 import type { ApiResponse, PersonalBooks } from "../api/types";
 
-/**
- * Types and pure set helpers behind `FamilyPrefsSync` (`./prefsSync.ts`).
- * Split out so the controller file stays about lifecycle only; import these
- * through `./prefsSync`, which re-exports every public name.
- */
+/** Types and pure set helpers behind `FamilyPrefsSync`, split out so `./prefsSync.ts` stays about
+ *  lifecycle only; import them through `./prefsSync`, which re-exports every public name. */
 
 /** Independent viewer-private preference kinds sharing one KV record. */
 export type FamilyPrefKind = "hidden" | "favorites";
@@ -35,11 +32,8 @@ export interface FamilyPrefsIo {
 }
 
 export interface FamilyPrefsSyncOptions {
-  /**
-   * Read at call time, never cached: a flush — including the one `detach()`
-   * fires on unmount — must use the CURRENT userId/client, not the values
-   * the controller was created with.
-   */
+  /** Read at call time, never cached: a flush — including `detach()`'s on unmount — must use
+   *  the CURRENT userId/client, not the values the controller was created with. */
   getIo: () => FamilyPrefsIo;
   /** Publishes a kind's current ref set (after a load, after each toggle). */
   onRefs: (kind: FamilyPrefKind, refs: Set<string>) => void;

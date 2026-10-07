@@ -1,85 +1,5 @@
-/**
- * Runtime boundary validation for `GET /api/family/:id/bookshelf` payloads,
- * applied at the API-client boundary of BOTH apps
- * (`extension/src/api/client.ts`, `pwa/src/api/client.ts`). Sibling of
- * `./memberValidation.ts`, which does the same job for
- * `GET /api/family/:id/members`; the rules live here rather than in either
- * client so the two ends cannot enforce different ones on the same payload.
- *
- * Self-hosted (BYO) backends are inside this project's threat model — a sync
- * code's `@host` segment repoints the whole app at one — so the aggregated
- * bookshelf arrives unvalidated. The TEXT layer (`./entityText.ts` →
- * `sanitizeFamilyBookshelfText`, built on `./safeText.ts`) already coerces every
- * declared-string field to a string, which is what keeps a non-string out of a
- * JSX child or a `.slice(0, 8)` call. This module owns the half coercion cannot
- * fix: a member's `userId` and a book's `bookId` are IDENTITIES, and normalizing
- * an unusable one to `""` KEEPS the element, so two such elements then collide
- * on the empty string. Four observable consequences today, none of them a crash:
- *
- *  1. Duplicate React keys — both member filter dropdowns key each option on
- *     `m.userId` (`extension/src/dialog/memberFilterOptions.tsx:62`, rendered
- *     as `key={opt.value}`; `pwa/src/components/memberFilterOptions.tsx:60`),
- *     and the card key `` `${memberName}-${bookId}` `` on the book half
- *     (`extension/src/dialog/FamilyShelfBookList.tsx:45`,
- *     `pwa/src/components/FamilyBookList.tsx:66`).
- *  2. An empty member label: both halves of `displayName || userId.slice(0, 8)`
- *     degrade to `""` (`memberFilterOptions.tsx:63` / `:62`).
- *  3. Collapsed viewer-private family-shelf preferences — `familyPrefRef` builds
- *     `` `${ownerId}:${bookId}` `` (`shared/src/familyShelf/prefRefs.ts:13`,
- *     used by both apps), so hiding or favouriting one degraded card hits
- *     every degraded card — and that collapsed ref is PERSISTED to the server
- *     through `updateFamilyPrefs`.
- *  4. A corrupted update-tracking baseline — `baseline[member.userId]`
- *     (`shared/src/familyShelf/updateTracking.ts:93`, used by both apps)
- *     collapses every degraded member onto one `""` key, persisted to
- *     `chrome.storage.local` / `localStorage`.
- *
- * Hence DROP rather than normalize, for those two identity fields only — the
- * same verdict `sanitizeFamilyMember` reaches for an element that cannot be
- * addressed at all. Every other field is left to the text layer, which runs
- * SECOND (see the composition comment in each client's `getFamilyBookshelf`).
- *
- * Known residual, deliberately NOT closed here: the rule is "usable", not
- * "unique". Two members sharing one non-empty `userId` reproduce consequences
- * 1 and 4 outright, and 3 as soon as those members also share a `bookId`; one
- * member carrying two books with the same `bookId` reproduces 1 and 3. Only
- * consequence 2 is closed outright — an empty label needs `userId === ""`,
- * which no surviving member can carry any more. `./memberValidation.ts`
- * carries the identical residual for the member list, and the official Worker
- * does not deduplicate `bookId` either (`parseBooks` in
- * `worker/src/routes/user.ts`), so a dedup rule would be a policy change on
- * both ends rather than a boundary check; none of these collisions can crash
- * the UI.
- *
- * Parameter and return types are STRUCTURAL and generic, the convention
- * `./entityText.ts` documents for itself: the single `FamilyBookshelf`
- * declaration both apps now share (`./types.ts`) is deliberately NOT imported
- * here. The validator checks the wire shape on its own terms, so it never
- * depends on the declared type and an edit to that declaration can never
- * silently weaken what this module enforces.
- *
- * Two deliberate differences from `./memberValidation.ts`:
- *
- *  - A surviving MEMBER is kept by SPREAD (`{ ...element, books }`) instead of
- *    rebuilt as a fresh literal. A rebuild has to enumerate the fields, so a
- *    field added to the wire shape (e.g. `lastUpdated`, a meaningful tri-state
- *    for update tracking) could be silently dropped by a fixed field list. The
- *    hostile-extras risk the rebuild exists to close is already absent here:
- *    both consumers rebuild the member as a fresh 3-field literal before it
- *    reaches React state (`parsedMembers` in
- *    `extension/src/dialog/useFamilyDataBookshelf.ts`, `memberBooks` in
- *    `pwa/src/hooks/useFamilyData.tsx`). Field COERCION stays with the text
- *    layer, which runs second.
- *  - A surviving BOOK passes through completely unchanged. `isShared`,
- *    `isArchived` and `coverUrl` sit outside the text layer's `BookTextFields`
- *    and are load-bearing — `isShared === BoolFlag.TRUE` is the family-shelf
- *    filter itself — so a rebuild here would delete them.
- *
- * The check runs INSIDE the `{ data, error }` envelope, like
- * `sanitizeFamilyMembersResponse`, because both callers read the envelope
- * themselves. An `error` (or data-less) envelope passes through untouched — an
- * auth failure must never be laundered into an empty bookshelf (Invariant 2).
- */
+/** Structure layer for `GET /api/family/:id/bookshelf` (runs before the text layer): drops members and
+ *  books without a usable id. Why, and the known residuals: docs/architecture.md → 伺服器回傳資料的檢查. */
 
 import type { ApiResponse } from "./types";
 
@@ -88,21 +8,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * An identity field is usable only as a NON-EMPTY string: `""` is exactly the
- * degraded value the text layer would hand back, and it is what collides.
- */
+/** An identity field is usable only as a NON-EMPTY string: `""` is exactly the degraded
+ *  value the text layer would hand back, and it is what collides. */
 function hasUsableId(record: Record<string, unknown>, field: string): boolean {
   const value = record[field];
   return typeof value === "string" && value !== "";
 }
 
-/**
- * Book losses, accumulated across every member so one response emits at most
- * ONE aggregate warning for them — never one per element, or a hostile payload
- * becomes log spam. The two counts stay separate because an unusable container
- * hides an unknowable number of books.
- */
+/** Book losses tallied across ALL members, so one response logs at most one aggregate warning; the
+ *  counts stay apart because an unusable container hides an unknowable number of books. */
 interface BookLossTally {
   /** Elements dropped for not being a plain object, or lacking a usable `bookId`. */
   dropped: number;
@@ -110,13 +24,8 @@ interface BookLossTally {
   unusableLists: number;
 }
 
-/**
- * Validate one member's `books`.
- *
- * A malformed container degrades to "no books" rather than throwing, the same
- * policy `sanitizeList` in `./safeText.ts` applies one layer down: an empty
- * shelf is a state the UI already renders.
- */
+/** Validate one member's `books`; a malformed container degrades to "no books" (the policy of
+ *  `sanitizeList` in `./safeText.ts`) — an empty shelf is a state the UI already renders. */
 function sanitizeBooks(claimed: unknown, tally: BookLossTally): unknown[] {
   if (!Array.isArray(claimed)) {
     tally.unusableLists += 1;
@@ -133,13 +42,8 @@ function sanitizeBooks(claimed: unknown, tally: BookLossTally): unknown[] {
   return books;
 }
 
-/**
- * Keep one bookshelf member with its `books` replaced, or `null` to drop it.
- *
- * Dropping is the only honest verdict for a member with no usable `userId`: it
- * could serve neither as a React key, nor as the member-name lookup key, nor as
- * the owner half of a family-shelf preference ref.
- */
+/** Keep one member with its `books` replaced, or `null` to drop it: without a usable `userId` it is
+ *  neither a React key, the member-name lookup key, nor the owner half of a pref ref. */
 function sanitizeBookshelfMember(
   element: unknown,
   tally: BookLossTally,
@@ -149,13 +53,8 @@ function sanitizeBookshelfMember(
   return { ...element, books: sanitizeBooks(element.books, tally) };
 }
 
-/**
- * Validate the member list itself.
- *
- * A malformed container degrades to "no members" rather than throwing: there is
- * no new error code here, because an unusable bookshelf is not something the UI
- * can ask the user to act on.
- */
+/** Validate the member list; a malformed container degrades to "no members" with no new error
+ *  code, because an unusable bookshelf is not something the UI can ask the user to act on. */
 function sanitizeBookshelfMembers(
   claimed: unknown,
   tally: BookLossTally,
@@ -203,24 +102,20 @@ function warnBookLosses(tally: BookLossTally): void {
  * only. The return type is a claim for the caller's convenience, exactly as in
  * `sanitizeFamilyMembersResponse`; what it actually guarantees is that every
  * surviving member has a non-empty string `userId` and an array `books` whose
- * every element has a non-empty string `bookId` — usable, not unique (see the
- * "Known residual" note in the module JSDoc).
+ * every element has a non-empty string `bookId` — usable, not unique (see
+ * docs/architecture.md → 伺服器回傳資料的檢查).
  */
 export function sanitizeFamilyBookshelfResponse<T>(
   res: ApiResponse<unknown>,
 ): ApiResponse<T> {
-  // Truthiness for `error`, deliberately not `!== undefined`: a BYO backend can
-  // send `error: null`, which both callers' own `if (response.error)` reads as
-  // success before consuming `data` — waving that envelope through would leave
-  // exactly the payload this module exists to check unvalidated. `data` is
-  // nullish-checked for the mirror-image reason: nothing downstream reads it.
+  // Truthiness, not `!== undefined`: a BYO `error: null` would otherwise skip validation;
+  // see docs/architecture.md → 伺服器回傳資料的檢查.
   if (res.error || res.data === undefined || res.data === null) {
     return res as ApiResponse<T>;
   }
 
-  // A non-object `data` carries no bookshelf field at all, so there is nothing
-  // to pass through — it degrades to a members-only payload, and its missing
-  // `members` is reported by the array check like any other malformation.
+  // A non-object `data` has nothing to pass through: it degrades to a members-only
+  // payload, whose missing `members` the array check reports.
   const claimed: Record<string, unknown> = isRecord(res.data) ? res.data : {};
   const tally: BookLossTally = { dropped: 0, unusableLists: 0 };
   const members = sanitizeBookshelfMembers(claimed.members, tally);

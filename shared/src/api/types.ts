@@ -1,23 +1,5 @@
-/**
- * Wire types both apps must agree on: the `{ data, error }` envelope, the
- * family-group and family-bookshelf records, the `POST /api/auth/lookup`
- * payload, the `ApiError` each client throws when an envelope carries `error`,
- * the personal-books record, the `GET /api/version` payload, the
- * `/api/user/:id/verify*` shapes, the member-settings payload, the un-kick
- * result, and the public-shelf records.
- *
- * Every response of this API travels in the same envelope, and the endpoints
- * answer the Extension and the PWA with the same records — so a divergent copy
- * of these declarations on one end is a contract break, not a local style
- * choice. They used to be written once per app (`extension/src/api/types.ts`
- * and `pwa/src/api/client.ts`); both now re-export from here, so existing
- * importers are unaffected.
- *
- * Declarations only (plus the one thrown class) — a declared `string` is what
- * the backend CLAIMS, not what it sent. The endpoint is user-configurable (BYO /
- * a sync code's `@host`), so the runtime checks live at each app's API boundary
- * (`./memberValidation`, `./bookshelfValidation`, `./safeText`).
- */
+/** Wire types both apps re-export (envelope + records): a divergent copy is a contract break. Declarations
+ *  only — a `string` is what the backend CLAIMS; see docs/architecture.md → 伺服器回傳資料的檢查. */
 
 /**
  * The project's Boolean Convention (AGENTS.md): every boolean-like field that
@@ -119,11 +101,8 @@ export interface FamilyBookshelf {
 export interface LookupResult {
   existingFamilyId: string | null;
   memberCount: number;
-  /**
-   * Optional on the wire: Workers predating the verification gate never send
-   * this field, and self-hosted (BYO) backends can lag the client by any
-   * number of releases. Absent means "no verification gate on this account".
-   */
+  /** Optional: pre-gate Workers never send it and BYO backends can lag any number of releases.
+   *  Absent means "no verification gate on this account". */
   requiresVerification?: BoolFlag;
 }
 
@@ -137,30 +116,13 @@ export interface LookupResult {
  */
 export class ApiError extends Error {
   readonly code: string;
-  /**
-   * The message exactly as the envelope carried it, without the `"CODE: "`
-   * prefix `message` prepends. Codes whose server copy is already user-facing
-   * render this instead of string-parsing `message`.
-   */
+  /** The envelope's message without the `"CODE: "` prefix `message` adds; codes whose server copy
+   *  is already user-facing render this instead of string-parsing `message`. */
   readonly rawMessage: string;
   /** Seconds to wait before retrying; only sent on 429 responses. */
   readonly retryAfter?: number;
-  /**
-   * True only when the client built the envelope itself instead of parsing it
-   * out of a response — proven in the Extension by the symbol marker in
-   * `extension/src/api/client.ts` that `JSON.parse` cannot produce. Any UI that
-   * renders `rawMessage` verbatim MUST require this: without it, a self-hosted
-   * (BYO) or hostile backend could return a client-only code and get arbitrary
-   * text painted into the dialog.
-   *
-   * Always `false` in the PWA today: it has no envelope-synthesizing path (the
-   * Extension's auth-recovery throttle is the only one). A future PWA synthesis
-   * site inherits the check instead of re-inventing it.
-   *
-   * Deliberately a plain `boolean` rather than `BoolFlag` — this is in-memory
-   * provenance, never an API payload or KV field, and keeping it outside the
-   * wire-serializable vocabulary is the whole point.
-   */
+  /** True only for a client-built envelope; any UI rendering `rawMessage` verbatim MUST require it. A
+   *  plain `boolean` on purpose (never on the wire). See docs/architecture.md → 伺服器回傳資料的檢查. */
   readonly synthesized: boolean;
 
   constructor(
@@ -174,10 +136,8 @@ export class ApiError extends Error {
     this.code = code;
     this.rawMessage = message;
     this.synthesized = synthesized;
-    // Validated at the boundary: a self-hosted (BYO) backend can send anything,
-    // and a NaN / negative / fractional wait would surface as「NaN 秒」in the
-    // back-off copy. Anything unusable is dropped so the UI falls back to its
-    // static wording.
+    // A BYO backend can send anything; an unusable wait would read「NaN 秒」, so it is dropped
+    // (the UI falls back to static wording) and a fractional one is floored.
     this.retryAfter =
       typeof retryAfter === "number" &&
       Number.isFinite(retryAfter) &&
@@ -187,10 +147,8 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Personal-books record — the `user:{id}` payload of
- * `GET` / `PUT` / `PATCH /api/user/:id/books`.
- */
+/** Personal-books record — the `user:{id}` payload of
+ *  `GET` / `PUT` / `PATCH /api/user/:id/books`. */
 
 export interface PersonalBooks {
   schemaVersion: number;
@@ -214,10 +172,8 @@ export interface VersionInfo {
   serverVersion: string;
 }
 
-/**
- * PWA login verification shapes — `GET` / `PUT /api/user/:id/verify` and
- * `POST /api/user/:id/verify/otp`.
- */
+/** PWA login verification shapes — `GET` / `PUT /api/user/:id/verify` and
+ *  `POST /api/user/:id/verify/otp`. */
 
 export type VerifyMethod = "pin" | "pattern" | "code" | "none";
 
@@ -242,12 +198,8 @@ export interface OtpInfo {
 /** Settings updatable on a family member via PATCH /api/family/:id/member/:uid. */
 export interface MemberSettingsPayload {
   canLend?: BoolFlag;
-  /**
-   * Readmoo display name for lending automation.
-   *  - `string`: set the value
-   *  - `null`: delete the field server-side (NOT `""` — empty string is rejected by the API)
-   *  - omitted: no change
-   */
+  /** Readmoo display name for lending automation: a string sets it, `null` deletes it server-side
+   *  (NOT `""` — the API rejects an empty string), omitted means no change. */
   readmooName?: string | null;
 }
 
@@ -267,10 +219,8 @@ export interface UnkickResult {
   cleared: BoolFlag;
 }
 
-/**
- * Public-shelf records — `/api/user/:id/public-shelf*` (owner side) and the
- * `GET /api/public/:shareToken` snapshot a link viewer reads.
- */
+/** Public-shelf records — `/api/user/:id/public-shelf*` (owner side) and the
+ *  `GET /api/public/:shareToken` snapshot a link viewer reads. */
 
 export type SelectionMode = "all-shared";
 

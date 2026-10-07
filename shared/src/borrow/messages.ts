@@ -1,48 +1,8 @@
-/**
- * Copy for a FAILED borrow request created from the family shelf
- * (`POST /api/family/:id/borrow`).
- *
- * The Extension dialog and the PWA page fire the same endpoint from the same
- * 「申請借閱」 button, so a failure must read identically on both sides; the
- * table lives here rather than once per app, where the two copies would drift.
- *
- * SECURITY — code in, LOCAL string out. This module accepts ONLY the
- * machine-readable `code` and returns a fixed 繁體中文 sentence. It must never
- * accept, interpolate, or return server-supplied message text. The API
- * endpoint is user-configurable (BYO backend, and a sync code's `@host` lets
- * whoever wrote the invite pick it), so an envelope's `message` is
- * attacker-controlled text: rendering it verbatim would let a hostile backend
- * paint arbitrary content into the dialog. Only an `ApiError` the client
- * SYNTHESIZED itself is allowed that passthrough — see the
- * `ApiError.synthesized` JSDoc in `shared/src/api/types.ts`. Do not
- * "improve" this by adding a `message` / `rawMessage` parameter and falling
- * back to it.
- *
- * Pure and runtime-agnostic: no globals, no side effects.
- */
+/** Copy for a FAILED `POST /api/family/:id/borrow`, shared so both apps read alike. SECURITY: code in,
+ *  LOCAL string out — never server text. See docs/architecture.md → 借閱失敗文案只接受錯誤代碼. */
 
-/**
- * Every failure code `POST /api/family/:id/borrow` can answer with that a user
- * can act on — `DUPLICATE_REQUEST`, `TOO_MANY_PENDING_REQUESTS`,
- * `RATE_LIMITED`, `LENDING_DISABLED`, `NOT_FAMILY_MEMBER`, `INVALID_OWNER`,
- * `INVALID_OWNER_SELF`, `FAMILY_NOT_FOUND`, `UNAUTHORIZED`,
- * `INVALID_COVER_URL` — plus the API clients' own `NETWORK_ERROR` (fetch
- * rejected, no envelope). Codes that only a malformed client request can
- * trigger (`INVALID_FAMILY_ID` / `INVALID_JSON` / `MISSING_FIELDS` /
- * `INVALID_FIELDS` / `INVALID_USER_ID`) and `INTERNAL_ERROR` are deliberately
- * absent — they carry no user-actionable advice and fall back to the generic
- * sentence.
- *
- * A `Map`, not an object literal: `code` is backend-controlled, and an object
- * lookup would resolve `"__proto__"` / `"toString"` through the prototype
- * chain.
- *
- * `RATE_LIMITED` states no wait in seconds on purpose. The envelope's
- * `retryAfter` is formatted by helpers the two apps deliberately keep separate
- * (they disagree on `retryAfter === 0` — see the `rateLimitedEnvelopeMessage`
- * JSDoc in `extension/src/dialog/verificationMessages.ts`), so interpolating it
- * here would reintroduce exactly the drift this module exists to prevent.
- */
+/** User-actionable failure codes plus the clients' `NETWORK_ERROR`; a `Map` so a backend `"__proto__"`
+ *  misses. Omitted codes, no wait in RATE_LIMITED: docs/architecture.md → 借閱失敗文案只接受錯誤代碼. */
 const BORROW_FAILURE_TEXTS: ReadonlyMap<string, string> = new Map([
   ["DUPLICATE_REQUEST", "這本書已有待處理的借閱申請，請到「借閱」查看"],
   [

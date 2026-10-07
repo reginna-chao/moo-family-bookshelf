@@ -72,21 +72,15 @@ export class FamilyPrefsSync {
     this.attached = true;
   }
 
-  /**
-   * A toggle still inside the debounce window is flushed now rather than lost
-   * — once a load has succeeded; before that nothing is safe to send.
-   */
+  /** A toggle still inside the debounce window is flushed now rather than lost — once a
+   *  load has succeeded; before that nothing is safe to send. */
   detach(): void {
     this.attached = false;
     if (this.cancelFlushTimer() && this.didLoad) this.sendFlush();
   }
 
-  /**
-   * Load the viewer's own refs (single GET). A load that rejects OR resolves
-   * `{ error }` changes nothing, publishes the sync failure, and is retried by
-   * a later call. At most one in flight; once one has succeeded this is a
-   * no-op, so an API-client identity change never clobbers optimistic edits.
-   */
+  /** Single GET of the viewer's refs; a rejected or `{ error }` load changes nothing, reports the failure
+   *  and is retried later. One in flight; a no-op after success, so a client change never clobbers edits. */
   load(): void {
     if (this.didLoad || this.loading) return;
     this.loading = true;
@@ -171,14 +165,8 @@ export class FamilyPrefsSync {
     if (this.attached) this.load();
   }
 
-  /**
-   * Fire-and-forget full-replace flush; callers ensure `didLoad` is true.
-   * `updateFamilyPrefs` never throws for HTTP/network errors — it resolves with
-   * an `{ error }` envelope — but we also catch defensively. Either signal marks
-   * the sync as failed; a later successful flush clears it. Nothing is
-   * published once detached, so the unmount flush cannot set state after
-   * unmount.
-   */
+  /** Fire-and-forget full-replace flush (callers ensure `didLoad`). An `{ error }` or a throw marks the
+   *  sync failed, a later success clears it; nothing is published once detached (no post-unmount set). */
   private sendFlush(): void {
     const { userId, api } = this.options.getIo();
     void api

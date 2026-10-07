@@ -1,69 +1,5 @@
-/**
- * Runtime coercion primitives for backend-supplied TEXT fields, applied at the
- * API-client boundary of BOTH apps. The per-entity sanitizers built on top of
- * these live in `./entityText.ts`.
- *
- * Why this exists: both clients read their envelope through a bare cast
- * (`(await response.json()) as ApiResponse<T>`), and the endpoint is
- * user-configurable — a sync code's `@host` segment repoints the whole app at a
- * self-hosted (BYO) backend. So every field the app types call `string` is
- * really `unknown` at runtime, and a hostile or merely buggy backend has two
- * ways to kill the UI outright. Neither app can recover from either: there is
- * no ErrorBoundary in the Extension dialog or in the PWA, so both are a
- * PERMANENT white screen until the user reloads.
- *
- *  1. An object reaching a JSX child — React 19 throws "Objects are not valid
- *     as a React child" and unmounts the tree.
- *  2. A string method called on a non-string — `title.toLowerCase()` in
- *     `useSearch`, `createdAt.localeCompare()` in the borrow buckets,
- *     `title.trim()` in the public-share dialog and in `publicShelf/diff.ts`.
- *     TypeError thrown from render / useMemo, same outcome.
- *
- * The degraded value is `""`, deliberately, and there is NO fallback parameter:
- * fallback copy belongs at the call sites that already carry it (`displayName ||
- * userId.slice(0, 8)`, `{book.author && …}`), and `""` is falsy, so those
- * existing `||` chains and truthy gates keep supplying it. A real string —
- * including `""` itself, which IS the degraded form — passes through
- * byte-identical: this layer coerces TYPES, it never trims, normalizes or
- * rewrites content.
- *
- * The two CONTAINER helpers both degrade rather than pass garbage on, and the
- * one asymmetry between them is deliberate:
- *  - `sanitizeRecord` passes `null` / `undefined` straight through — a missing
- *    payload must STAY missing, and every caller already guards for it — while
- *    any other non-object (a primitive, an array) degrades to an EMPTY entity,
- *    because those slip past the very same guards (`[]` and `"x"` are truthy)
- *    and then crash the first field read.
- *  - `sanitizeList` degrades a malformed container to `[]` and drops an element
- *    that cannot carry fields.
- * Both land on the principle already used for text: renderable emptiness beats a
- * throw. A bad container or element detonates one render later — inside `.map`
- * or a field read — where no caller `try` can reach it, and with no
- * ErrorBoundary in either app that is a permanent white screen.
- * `shared/src/borrow/validation.ts` already applies this strictness to the
- * borrow list; this layer now matches it.
- *
- * Not covered here, deliberately:
- *  - `error.message` / `error.code` — owned by the error-text hardening.
- *  - Cover URLs (`coverUrl`, `bookCoverUrl`) — excluded because neither of the
- *    two places they reach can be crashed by a non-string, which is a two-part
- *    claim and both parts are load-bearing. They render into an `<img src>`
- *    attribute, which the DOM string-coerces; and they run through the Readmoo
- *    URL whitelist first (`safeCoverUrl` in `extension/src/dialog/` and
- *    `pwa/src/utils/` → `isAllowedCoverUrl` in
- *    `shared/src/config/readmoo.ts`), which guards its OWN input type — its
- *    fast path is `typeof`-guarded so a non-string degrades to `false` instead
- *    of throwing `TypeError` from render. That whitelist is a separate concern
- *    (domain allowlisting, not type coercion) and stays where it is; if it ever
- *    drops that guard, this exclusion stops being safe and these fields must be
- *    coerced here instead. The `describe` block "isAllowedCoverUrl /
- *    isAllowedBookUrl on non-string input" in
- *    `extension/tests/unit/readmooConfig.test.ts` is what turns red if that
- *    guard goes; this note only records why the loss would reach here.
- *  - Numbers, `BoolFlag` flags and string-literal unions (`status`,
- *    `selectionMode`, `method`) — a plain `string` would break their types, and
- *    their render sites harden them with `ReadonlyMap` lookups instead.
- */
+/** Text-layer coercion primitives for backend TEXT fields (per-entity sanitizers: `./entityText.ts`).
+ *  Threat model, `""` degradation, excluded fields: docs/architecture.md → 伺服器回傳資料的檢查. */
 
 /** A backend text field, guaranteed to be a string. */
 export function safeText(value: unknown): string {
@@ -83,13 +19,8 @@ export function safeNullableText(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-/**
- * Can this value carry the fields a sanitizer is about to rewrite?
- *
- * Arrays are excluded on purpose, so this is the same predicate as `isRecord` in
- * `shared/src/borrow/validation.ts` — one definition of "addressable record"
- * across both hardening layers.
- */
+/** Can this value carry the fields a sanitizer rewrites? Arrays excluded on purpose — the same
+ *  predicate as `isRecord` in `shared/src/borrow/validation.ts`, one definition for both layers. */
 function isRecordLike(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
