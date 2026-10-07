@@ -40,9 +40,8 @@ export const LazyCover = React.memo(function LazyCover({
     .filter(Boolean)
     .join(" ");
 
-  // When a className is provided, that class owns sizing (responsive/aspect-ratio);
-  // emitting inline width/height would beat the class and lock the size. Without a
-  // className, keep inline width/height as a CLS placeholder before the image loads.
+  // A className owns sizing (inline width/height would beat it and lock the size); without one,
+  // inline width/height is the CLS placeholder before the image loads.
   const sizeStyle: CSSProperties = className ? {} : { width, height };
 
   return (

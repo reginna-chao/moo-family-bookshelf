@@ -72,11 +72,8 @@ export function FamilySettingsMembersBlock({
           familyEndpoint={familyEndpoint}
         />
       )}
-      {/* Outside the loading/error guard on purpose: the removal already
-          succeeded, so the entry must survive a failed member refresh.
-          `key` resets the notice's own request state per REMOVAL, not per
-          target: removing the same member again (after an un-kick and a
-          rejoin) must not leave the card stuck in its "cleared" state. */}
+      {/* Outside the loading/error guard: the entry must survive a failed refresh. `key` resets per
+          REMOVAL, so removing the same member again never leaves the card stuck "cleared". */}
       {recentlyRemoved && userId === ownerId && (
         <UnkickNotice
           key={`${recentlyRemoved.userId}:${recentlyRemoved.removedAt}`}

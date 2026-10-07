@@ -1,10 +1,5 @@
-/**
- * Sync circuit breaker: refuse to upload a scrape that looks like Readmoo
- * changed its page (new ids, broken selectors) rather than like the user's
- * library. Applies to every upload path that writes a scrape
- * (`sync/syncBooks.ts`, `dialog/useAutoSetup.ts`), whether or not the scrape
- * is complete.
- */
+/** Sync circuit breaker: refuse to upload a scrape that looks like a Readmoo redesign rather than the
+ *  user's library, on every scrape-upload path. See docs/architecture.md → 書單同步. */
 
 import { BoolFlag, type BookEntry } from "../api/client";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
@@ -20,10 +15,8 @@ export const SYNC_PAUSED_MESSAGE = "讀墨可能改版了，已暫停同步書�
 
 export interface SyncBreakerVerdict {
   paused: boolean;
-  /**
-   * Server entries whose bookId is a real Readmoo book id — archived ones
-   * excluded when the scrape did not cover the archive.
-   */
+  /** Server entries whose bookId is a real Readmoo book id — archived ones excluded when the scrape
+   *  did not cover the archive. */
   serverValid: number;
   /** How many of those the scrape found again. */
   overlap: number;

@@ -1,8 +1,5 @@
-/**
- * Sync error badge helper for the extension toolbar icon.
- * Guards against `chrome.action` being undefined (when the manifest
- * does not declare `"action"`) so callers never crash the service worker.
- */
+/** Sync-error badge on the toolbar icon; tolerates an undefined `chrome.action` (manifest without
+ *  `"action"`) so callers never crash the service worker. */
 
 import browser from "webextension-polyfill";
 

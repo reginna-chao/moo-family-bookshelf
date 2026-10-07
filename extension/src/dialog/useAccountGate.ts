@@ -1,8 +1,5 @@
-/**
- * App's half of the account check (issue #271): holds whether the page's
- * Readmoo account is confirmed to be `userId`, and builds the AccountCheck
- * value App provides to the main view (dialog/AccountCheckContext.ts).
- */
+// App's half of the account check (issue #271): whether the page's Readmoo account is confirmed to be
+// `userId`, plus the AccountCheck value App provides to the main view (AccountCheckContext.ts).
 
 import { useState, useCallback, useMemo, useRef } from "react";
 import type { AccountIdentity } from "../content/accountIdentity";
@@ -14,10 +11,8 @@ import {
 
 export interface UseAccountGateReturn {
   accountCheck: AccountCheck;
-  /**
-   * Record a known result for `checkedUserId`: the boot check's, or
-   * onboarding's `cachedIdentity(newUserId)` after its pre-upload check (#281).
-   */
+  /** Record a known result for `checkedUserId`: the boot check's, or onboarding's
+   *  `cachedIdentity(newUserId)` after its pre-upload check (#281). */
   settleAccount: (identity: AccountIdentity, checkedUserId: string) => void;
 }
 

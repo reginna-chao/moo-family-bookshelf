@@ -39,9 +39,8 @@ export function useFamilyShelfViewMode(): UseFamilyShelfViewModeReturn {
     (mode: FamilyShelfViewMode) => {
       if (viewMode === mode) return;
       setViewModeState(mode);
-      // Fire-and-forget: direct storage.local writes in the dialog context are
-      // reliable, so we do NOT roll the UI back on a storage hiccup — a lost
-      // persistence is better UX than snapping the view back under the user.
+      // Fire-and-forget, no rollback: direct storage.local writes are reliable here, and losing the
+      // persistence beats snapping the view back under the user.
       void writeFamilyShelfViewMode(mode).catch(() => {
         // Ignore write failures; UI state remains authoritative.
       });

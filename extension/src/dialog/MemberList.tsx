@@ -18,7 +18,7 @@ export interface RemovedMemberInfo {
   userId: string;
   /** Resolved via `getMemberLabel` — never empty. */
   displayName: string;
-  /** 每次移除唯一，使父層的 key 能區分「同一人的第二次移除」。 */
+  /** Unique per removal, so the parent's key tells a second removal of the same person apart. */
   removedAt: number;
 }
 
@@ -29,13 +29,8 @@ export interface MemberListProps {
   familyId: string;
   apiClient: ApiClient;
   onMembersChanged: () => void;
-  /**
-   * Called once a removal succeeds, so the parent can offer to lift the
-   * server's 6-hour rejoin block (see `UnkickNotice`). Optional: the removal
-   * itself does not depend on it. Reported from here rather than owned here
-   * because the notice must outlive a failed member-list refresh, which
-   * unmounts this component.
-   */
+  /** Optional; fires after a successful removal so the parent can offer to lift the 6-hour rejoin
+   *  block (`UnkickNotice`), which must outlive a failed list refresh that unmounts this. */
   onMemberRemoved?: (removed: RemovedMemberInfo) => void;
   familyEndpoint?: string;
 }
@@ -51,7 +46,7 @@ function getMemberLabel(member: FamilyMember): string {
   return member.displayName || member.userId.slice(0, 8);
 }
 
-/** readmooName 對應功能僅在家庭 ≥ 3 人時顯示（家庭 ≤ 2 人時讀墨借出不需要選擇成員）。 */
+/** The readmooName mapping only shows for families of 3+ (with ≤ 2, a Readmoo loan needs no member pick). */
 const MIN_MEMBERS_FOR_READMOO_NAME = 3;
 
 export function MemberList({
@@ -116,15 +111,8 @@ export function MemberList({
     setActionError("");
     try {
       const response = await apiClient.removeMember(familyId, targetId);
-      // Owner kick, so MEMBER_NOT_FOUND can only mean "already off the list":
-      // an earlier kick half-failed server-side (member list updated, revoke
-      // failed) — or the target left on their own — and the Worker's 404
-      // branch has now re-attempted the rejoin block and cleared the leftover
-      // pointer and token. Treat it as a completed removal: showing the error
-      // and skipping the refresh keeps a removed member on screen until the
-      // list is next loaded. Mirrored in pwa/src/components/MemberList.tsx
-      // handleConfirm; keep the two identical. Self-leave twin:
-      // useFamilySettingsLeave.ts settleLeave.
+      // MEMBER_NOT_FOUND on an owner kick means "already off the list": a completed removal. Why:
+      // docs/architecture.md → 移除成員與離開家庭的重試; PWA twin in .claude/rules/frontend.md.
       const alreadyRemoved = response.error?.code === "MEMBER_NOT_FOUND";
       if (response.error && !alreadyRemoved) {
         setActionError(

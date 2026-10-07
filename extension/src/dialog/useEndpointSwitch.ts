@@ -1,21 +1,5 @@
-/**
- * useEndpointSwitch — gates adoption of the family record's `apiEndpoint`
- * behind an explicit user confirmation.
- *
- * The family owner controls that value and it is pushed to every member, so
- * adopting it silently hands the owner the ability to redirect another member's
- * auth token and full book list to an arbitrary host. Server-side URL filtering
- * is deliberately incomplete (worker/src/routes/family.ts) — this client-side
- * confirmation is its intended complement.
- *
- * BOTH directions are gated: adopting a custom endpoint, and reverting to the
- * official default. A refusal is remembered (storage/familyEndpointChoice.ts)
- * and only re-prompts once the family record moves to a different value.
- *
- * A confirmation the client's own URL validation then refuses is not silent:
- * the switch is abandoned, the value is filed as declined, and `confirmError`
- * drives a notice — otherwise the panel just closes and reads as success.
- */
+// Gates adopting the family record's owner-controlled `apiEndpoint` behind explicit confirmation, in
+// both directions; a refused confirm fails closed. See docs/architecture.md → 端點切換確認.
 
 import { useCallback, useEffect, useState } from "react";
 import { ApiClient, validateEndpointUrl } from "../api/client";
@@ -36,11 +20,8 @@ export interface PendingEndpointSwitch {
   targetEndpoint: string;
   /** True when the switch reverts to the official default endpoint. */
   isDefaultTarget: boolean;
-  /**
-   * False when the record's value fails the client's URL validation, i.e.
-   * `confirm` is guaranteed to refuse it. The panel must not print such an
-   * address as if it were a legitimate destination — see EndpointSwitchPanel.
-   */
+  /** False when the record's value fails the client's URL validation (`confirm` will refuse it); the
+   *  panel must not print it as a legitimate destination. */
   targetValid: boolean;
 }
 
@@ -55,20 +36,11 @@ export interface UseEndpointSwitchOptions {
 export interface UseEndpointSwitchResult {
   /** The switch awaiting a decision, or `null` when there is nothing to ask. */
   pending: PendingEndpointSwitch | null;
-  /**
-   * True when the last `confirm` was refused by the client's URL validation:
-   * nothing was switched and the user has not been told yet.
-   */
+  /** True when the last `confirm` was refused by the client's URL validation: nothing switched, and
+   *  the user has not been told yet. */
   confirmError: boolean;
-  /**
-   * The endpoint THIS device is actually using. The sync code / invite / QR must
-   * be built from this — never from the family record's value — so a member who
-   * declined a switch cannot redistribute the endpoint they refused.
-   *
-   * Surfaced as state because `apiClient.setEndpoint()` mutates without a React
-   * re-render: initialized from the client, then updated the moment `confirm`
-   * succeeds, so the sync code reflects a confirmed switch without a reopen.
-   */
+  /** The endpoint THIS device uses; sync code / invite / QR come from it, never the record. State, as
+   *  setEndpoint() does not re-render. See docs/architecture.md → 端點切換確認. */
   adoptedEndpoint: string;
   /** Apply the switch and persist it. */
   confirm: () => void;
@@ -78,11 +50,8 @@ export interface UseEndpointSwitchResult {
   dismissConfirmError: () => void;
 }
 
-/**
- * Boundary guard for the family record's `apiEndpoint`: it is server data, so a
- * non-string or blank value means "the record carries no endpoint" (i.e. the
- * official-default direction), never a target to switch to.
- */
+/** Boundary guard: a non-string or blank record value means "no endpoint" (the official-default
+ *  direction), never a target to switch to. */
 function normalizeFamilyEndpoint(raw: string | undefined): string | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
@@ -95,14 +64,8 @@ interface CanonicalTarget {
   valid: boolean;
 }
 
-/**
- * Put the record's value in the same space as the client's own endpoint before
- * comparing (ApiClient stores what validateEndpointUrl returns), so a trailing
- * slash cannot make an identical endpoint look like a switch. A value the
- * validator refuses is kept verbatim and flagged `valid: false` — confirm's
- * try/catch still handles the failure; the flag is what stops the panel from
- * rendering the refused address as a legitimate destination.
- */
+/** Canonicalize the record's value like the client's endpoint (no trailing-slash false switch); a
+ *  refused value stays verbatim with `valid: false`, which keeps the panel from printing it. */
 function canonicalizeTarget(raw: string | null): CanonicalTarget {
   if (raw === null) return { value: null, valid: true };
   try {
@@ -178,10 +141,8 @@ export function useEndpointSwitch({
       declined,
     });
     setPending(next);
-    // A fresh question supersedes a stale refusal notice. Only when there IS
-    // one: the failed confirm files its target as declined, which re-runs this
-    // effect with `next === null` — clearing unconditionally would wipe the
-    // notice before the user ever sees it.
+    // Only a fresh question clears a stale refusal notice: a failed confirm's decline re-runs this
+    // with `next === null`, and clearing then would wipe the notice unseen.
     if (next) setConfirmError(false);
   }, [apiClient, declined, declinedLoaded, familyEndpoint, membersReady]);
 
@@ -202,11 +163,8 @@ export function useEndpointSwitch({
     try {
       apiClient.setEndpoint(pending.targetEndpoint);
     } catch (err) {
-      // validateEndpointUrl throws on a malformed or unsafe URL, and a
-      // self-hosted family record can hold anything. Nothing changed: keep the
-      // current endpoint, file the value as declined so an unusable record
-      // cannot re-open this panel on every members refresh, and surface the
-      // failure — a silently closing panel reads as "switched successfully".
+      // A malformed/unsafe value (a self-hosted record can hold anything): keep the endpoint, file it
+      // as declined (no re-ask per refresh) and surface the failure, or the close reads as success.
       console.warn("[useEndpointSwitch] Family endpoint rejected", err);
       setConfirmError(true);
       rememberDecline(pending.target);
@@ -214,9 +172,8 @@ export function useEndpointSwitch({
     }
     setDeclined(null);
     setPending(null);
-    // setEndpoint above already mutated the client; mirror its ACTUAL value —
-    // not the requested one — so the sync code (built from adoptedEndpoint)
-    // always shows what the client will really call, canonicalisation included.
+    // Mirror the client's ACTUAL value (canonicalised), not the requested one, so the sync code
+    // shows what the client will really call.
     setAdoptedEndpoint(apiClient.getEndpoint());
     void persistAcceptedFamilyEndpoint(pending.target);
   }, [apiClient, pending, rememberDecline]);

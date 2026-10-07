@@ -12,14 +12,8 @@ export interface UseDisplayNameOptions {
   apiClient?: ApiClient;
   familyId?: string;
   userId?: string;
-  /**
-   * Authoritative display name from the server (typically sourced from
-   * `useFamilyData().members`). When provided, this is the source of truth —
-   * it overrides chrome.storage.local and is preferred on re-renders.
-   *
-   * Pass `undefined` while still loading; the hook falls back to
-   * chrome.storage.local for an optimistic display.
-   */
+  /** The server's display name (usually `useFamilyData().members`): when given it overrides
+   *  chrome.storage.local. Pass `undefined` while loading to show the stored one optimistically. */
   initialDisplayName?: string;
 }
 
@@ -53,18 +47,16 @@ export function useDisplayName(
     const initial = options?.initialDisplayName;
 
     if (typeof initial === "string") {
-      // Server value (from FamilyDataContext) is the source of truth.
-      // Update savedDisplayName always; only update displayName when the user
-      // is NOT editing (heuristic: displayName still tracks savedDisplayName).
+      // The server value wins: always update savedDisplayName, but displayName only when the user
+      // is not editing (heuristic: it still tracks savedDisplayName).
       const prevSaved = savedDisplayNameRef.current;
       setSavedDisplayName(initial);
       setDisplayName((prev) => (prev === prevSaved ? initial : prev));
       return;
     }
 
-    // Fallback: read chrome.storage.local for an optimistic display while
-    // context is still loading. Cancel on unmount so the deferred callback
-    // can't setState on a dead component.
+    // While context loads, show chrome.storage.local's value optimistically; cancelled on unmount so
+    // the deferred callback cannot setState on a dead component.
     let cancelled = false;
     void (async () => {
       const result = await safeStorageGet([DISPLAY_NAME_KEY]);
@@ -90,9 +82,8 @@ export function useDisplayName(
 
   const handleSaveDisplayName = useCallback(async (): Promise<boolean> => {
     if (inFlightRef.current) return false;
-    // A new save supersedes the pending saved→idle reset: letting the old timer
-    // fire mid-save would flip nameSaveState back to "idle" and drop the
-    // in-progress "saving" feedback.
+    // Cancel the pending saved→idle reset: firing mid-save would flip nameSaveState to "idle" and
+    // drop the "saving" feedback.
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     inFlightRef.current = true;
 
@@ -119,9 +110,8 @@ export function useDisplayName(
       }
 
       await browser.storage.local.set({ [DISPLAY_NAME_KEY]: trimmed });
-      // sync write is best-effort: it can reject in Firefox (no signed-in
-      // account, Android limits, pref disabled) and must not surface as a
-      // save failure once the local write has already succeeded.
+      // Best-effort: storage.sync can reject in Firefox (no signed-in account, Android limits, pref
+      // disabled), which must not read as a save failure after the local write.
       try {
         await browser.storage.sync.set({ [DISPLAY_NAME_KEY]: trimmed });
       } catch {

@@ -100,6 +100,7 @@
 - 開啟 Dialog、讀到 familyId 與 userId 後，先導航到 `#/me` 抓 email，算出 `deriveUserId(email)` 與存好的 userId 比對，再回到原頁；比對期間維持「載入中」。邏輯在 `extension/src/dialog/accountIdentityCheck.ts`，純比對在 `extension/src/content/accountIdentity.ts`。
 - **相同**：進主畫面。結果記在模組層級，只用來省下開啟 Dialog 時的導航：同一次頁面載入重開 Dialog 不再導航；不寫進 storage，重新載入頁面就重新確認。透過引導畫面建立／加入家庭時，沿用上傳書單前重新確認的結果（issue #281）：相同就記為相同；不同就顯示帳號不符畫面（issue #284）；無法確認就照常進主畫面，但不自動同步。
 - **每次同步前都重新確認**（issue #277）：自動同步與手動同步上傳書單前，都會先導航到 `#/me` 重新比對（`verifyAccountIdentity`），不採用模組層級的結果，因為同一個瀏覽器的另一個分頁可能已經換了帳號。比對到不同帳號就切到帳號不符畫面，並丟掉模組層級的結果，下次開啟 Dialog 會重新確認。`#/me` 比對相同後，還會再看讀墨的登入 cookie（`ReadmooNext.email`），以防讀墨的單頁程式把舊帳號的個人資料留在記憶體、`#/me` 仍顯示舊帳號：cookie 解得出 email 且算出的 userId 跟存好的不同時，這次當作「無法確認」、不上傳。cookie 只能擋、不能確認：沒有 cookie 或解不開時，仍只看 `#/me`。開啟 Dialog 時第一次的確認走同一個函式，也會被 cookie 擋成「無法確認」。
+- **兩個入口與模組層級的結果**（`extension/src/dialog/accountIdentityCheck.ts`）：`checkAccountIdentity` 是開啟 Dialog 時的確認，只有它會用模組層級記住的「相同」省下導航；`verifyAccountIdentity` 一律導航、不看快取，每次同步上傳書單前都呼叫它，引導畫面第一次上傳書單也在爬完書單後立刻呼叫它（issue #281）。記住的「相同」以它確認過的 userId 為 key，不可能替另一個存好的使用者擔保；什麼都不寫進 storage。最近一次 `verifyAccountIdentity` 比對到的「不同」也會記住，但只給 `cachedIdentity` 用（引導畫面交給 App 的結果，issue #284），從不用來省略導航。
 - **不同**：顯示帳號不符畫面（`AccountMismatchScreen`），不掛載 `FamilyDataProvider` / `MainContent`，因此不讀書櫃資料、不自動同步，也碰不到任何寫入動作。「改用這個帳號重新設定」只清除本機的身分與家庭綁定（`familyBindingReset.ts` 的 `forgetStoredAccount`），不呼叫任何 API，原帳號仍留在家庭裡、伺服器資料不動，然後回到引導畫面。
 - **無法確認**（沒登入、頁面改版、載入太慢、任何錯誤）：照常進主畫面，但這次頁面載入不做個人書櫃的自動同步。同步前的重新確認若無法確認，自動同步直接略過、不顯示任何訊息；手動同步不上傳，並顯示原本的提示。
 - **尚未在真實的讀墨上驗證**（issue #277）：另一個分頁換了帳號後，沒有重新載入的讀墨分頁實際上會不會抓到新帳號的書、`#/me` 會不會顯示新帳號，都沒有實測過。同步前的重新確認是防禦性的保護；若 `#/me` 仍顯示舊帳號，登入 cookie 的否決就是針對這個未驗證情況的第二道防線。
@@ -598,7 +599,7 @@ Workers Logs 在本專案採用的方案上也無法對自訂欄位設定警示�
 
 ### chrome.storage.sync 多裝置同步
 
-**儲存於 `chrome.storage.sync` 的資料**：`familyId`（其他非敏感偏好如 `displayName` 亦同步）。
+**儲存於 `chrome.storage.sync` 的資料**：`familyId`（`displayName` 儲存時也會盡力寫一份到 `chrome.storage.sync`，但沒有任何地方從那裡讀回，所以不會帶到其他裝置）。
 
 **目的**：同一 Chrome 個人檔案（profile）下的多台裝置或重新安裝後，Extension 可從 `chrome.storage.sync` 取得 familyId，執行靜默自動恢復（`tryAutoRecovery`），無需手動輸入同步碼。
 
@@ -652,6 +653,12 @@ Extension 的行為：
 - 使用者選擇「確認切換」時，端點直接寫入 `storage.local`（並非只靠背景訊息，以免 Firefox 休眠中的事件頁遺失這次寫入），同時清除拒絕記錄。
 - 若家庭記錄裡的值無法通過用戶端 URL 驗證（格式錯誤、帶有帳密、或非 HTTPS／私網 HTTP），確認面板**不會把該位址印出來**——印出來等於替一個偽造位址背書；面板改在「將切換至」的位置顯示警告文字，並提示向家庭管理者確認。按下「確認切換」仍然一律失敗（fail-closed）：端點維持不變，該值同時記為「已拒絕」以免每次重新整理都重複詢問，並在原面板位置顯示錯誤提示，不會讓使用者誤以為已經切換成功。
 - **離開家庭時一併清除**：本機已保存的端點與「暫不切換」記錄都會在離開家庭（含刪除帳號）時清空，端點回到官方預設。端點是**家庭範圍**的設定，不應比成員資格活得久：已無家庭卻仍指向前一個家庭伺服器的裝置，下一次建立／加入會把登入憑證與完整書單（含未開放的書籍）送往該處，並把該位址烙進它接著發出的同步碼；殘留的拒絕記錄則會讓下一個家庭的確認提示被誤判為「已問過」而不再出現。
+- **實作細節**（`extension/src/dialog/useEndpointSwitch.ts`，面板是 `EndpointSwitchPanel.tsx`）：
+  - 家庭記錄的 `apiEndpoint` 是伺服器資料：不是字串或空白都視為「記錄沒有端點」（回復官方預設的方向），絕不當成要切換的目標。比較前先把它轉進 client 自己的比較空間（`ApiClient` 存的是 `validateEndpointUrl` 的回傳值），結尾斜線不會讓相同的端點看起來像要切換；驗不過的值原樣保留並標為無效，面板靠這個旗標不把它印出來。判斷結果裡的目標是正規化後的值，也就是確認／拒絕時保存的值，與同步碼加入路徑對同一個端點保存的值一致。
+  - 每次掛載只讀一次拒絕記錄，讀到之前什麼都不問，曾經拒絕的值不會先閃出面板再被壓下。
+  - 新的詢問會清掉過時的錯誤提示，但只在真的有新詢問時：失敗的確認會把目標記為已拒絕，這會以「沒有要問的」重新跑一次判斷，若無條件清除，提示會在使用者看到之前就被抹掉。
+  - 同步碼、邀請與 QR Code 一律用**這台裝置實際採用**的端點產生（`FamilySettings.tsx`），不用家庭記錄的值：拒絕切換的成員不能再把他拒絕的端點散布出去（或掃進第二台裝置）。`apiClient.setEndpoint()` 改動 client 不會觸發 React 重新 render，所以採用中的端點以 state 呈現：初始值取自 client（啟動時已套用存好的端點），只在確認成功時更新，而且鏡射 client **實際**的值（含正規化）而不是要求的值；確認後不必重開，同步碼就反映切換結果。
+- Extension 的這些讀寫集中在 `extension/src/storage/familyEndpointChoice.ts`（確認、拒絕、讀取、重設四種），全部直接存取 `storage.local`：確認時直接寫入（與背景的 `handleSetApiEndpoint` 寫法相同），之後的 `SET_API_ENDPOINT` 背景訊息只是盡力而為的第二條路徑；開啟 Dialog 時讀取已接受的端點（`readStoredApiEndpoint`）也直接讀，因為 `GET_API_ENDPOINT` 往返有同樣的 Firefox 失敗模式，會讓 Dialog 沒有任何提示就以預設端點啟動。直接存取的理由與 `extension/src/dialog/onboardingFlow.ts` 的 `persistJoinCredentials` 相同。
 
 PWA **不會**自動套用家庭記錄的端點，也沒有這個確認面板——PWA 只認同步碼帶進來的端點。這是刻意的：少一條可被管理者操控的通道，攻擊面就小一分。
 
@@ -664,7 +671,7 @@ PWA **不會**自動套用家庭記錄的端點，也沒有這個確認面板—
 - **驗不過就不揭露、也不連線**：位址無法通過驗證時，畫面顯示警告而非那句令人安心的「將連線至自訂伺服器」，加入動作直接中止並回報錯誤——不會發出任何請求到該位址（PWA 連查詢驗證方式的探詢請求都不會送出），也不會寫入本機設定。
 - **警告等輸入靜止才顯示，正面揭露不延遲**：手打 `@host` 的過程中幾乎每個中間狀態都驗不過（`…@http://192.168.`；只是「幾乎」——URL 解析器會展開簡寫 IPv4，再多打一個字元的 `…@http://192.168.1` 會解析成主機 `192.168.0.1`，落在放行的私有網段內，反而驗得過），若每一次按鍵都閃一次警告，使用者很快就學會忽略它——而這正是對抗偽造位址的最後一道人工防線。因此**只有 `invalid` 的警告會等目前的值「靜止」才顯示**，`valid` 那句「將連線至自訂伺服器」是對當前值的正面資訊，一律即時。靜止有四個觸發點，任一成立即可：值維持不變達 `SYNC_CODE_HOST_SETTLE_DELAY_MS`（600 ms，定義於 `shared/src/api/syncCodeHost.ts`，是任何輸入方式都繞不過的安全網）、貼上、離開欄位或按下加入／送出、以及**首次渲染時就非空的值**（邀請連結／QR Code 帶進來，使用者從沒打過字，沒有可閃爍的輸入過程）。**不變量：等待期間該處一律什麼都不顯示（`kind: "none"`），絕不沿用上一次的判定**——把先前的「將連線至 api.example」留在畫面上，等於在使用者剛把 `@evil.com` 接到後面的那一刻替偽造位址背書；我們只延後警告，永遠不顯示與當前輸入矛盾的內容。可顯示什麼的政策（`displayedSyncCodeApiHost()`）與延遲常數同樣只有一份放在 `shared/`，兩端各自的 `useSyncCodeHostVerdict` hook 只負責觸發時機；兩份 hook 的一致性不靠註解自律，而是由 parity 測試（`extension/tests/unit/useSyncCodeHostVerdict.parity.test.ts` 與 PWA 對應的一份，兩個套件各有一份，只動單邊的 PR 也跑得到）把兩個檔案讀進來、正規化 import 路徑與空白後逐字比對，任一側新增、移除或改寫觸發點都會讓測試變紅。不過這道保護只涵蓋 hook 的檔案級一致性，不涵蓋呼叫端：觸發點 4（首次渲染就非空的值）有一半取決於呼叫端是否把值帶進第一次渲染（PWA 是 `pwa/src/hooks/useLandingFormFields.ts` 的 `useState(initialSyncCode)`，Extension 是由上層以 prop 傳入），單邊在這裡改壞時 parity 測試仍會是綠的。因此 Extension 與 PWA「同時示警」在 hook 層有測試釘住，呼叫端那一段則仍要靠審查把關。
 - **QR Code 自動加入的確認閘門**：PWA 的 QR Code 自動加入原有兩條零互動出口——帶 QR 權杖時直接加入、以及帳號沒設驗證時探詢完直接加入——兩條都會在使用者毫無察覺的情況下採用同步碼帶來的位址並寫進本機。因此同步碼帶有 `@host` 時，PWA 會先停在確認畫面（`pwa/src/components/CustomHostConsent.tsx`，位址一律交給同一個 `SyncCodeHostNote` 呈現，與表單、驗證畫面同一份文案與同一份分類結果），使用者按下「確認並加入」之後才接上原本的出口邏輯。**確認之前不會發出任何請求**——連查詢驗證方式的探詢都不送，因為那個請求本身就會把裝置的 IP／UA 交給尚未經過同意的位址。按「取消」則落回手動輸入表單（同步碼已預填，表單上的揭露照常顯示），不寫入任何本機設定，語意與上一條的拒絕路徑一致。沒有 `@host` 的同步碼（官方預設端點）維持零互動，這是 PWA 的主要入門路徑；位址驗不過時仍走上一條的拒絕路徑，不會進到確認畫面——確認畫面只出現在「有效但陌生」的位址上，不替一個驗不過的位址提供任何「同意」的機會。同意結果**刻意不做持久化**（PWA 沒有 Extension `moo:declinedFamilyEndpoint` 的等價機制），每一次 QR Code 進來都重新詢問。
-- **加入成功才保存**：`@host` 會立刻套用到記憶體中的用戶端（加入請求本來就得送往該處），但**唯有後端接受加入之後才寫入本機**。同步碼過期／輸入錯誤、或該伺服器刻意回覆「找不到家庭」時，用戶端還原成這次嘗試之前的端點，本機則自始沒有被寫入——一個什麼都沒證明的位址若留在裝置上，使用者接著按「建立家庭」就會把登入憑證與完整書單送往該處，並把它烙進之後發出的同步碼。唯一的例外是驗證挑戰：它是同一次嘗試的延續（要向同一台伺服器問驗證方式再重試），因此端點保留到該次嘗試真正結束（加入成功、失敗或使用者放棄）為止。
+- **加入成功才保存**：`@host` 會立刻套用到記憶體中的用戶端（加入請求本來就得送往該處），但**唯有後端接受加入之後才寫入本機**。同步碼過期／輸入錯誤、或該伺服器刻意回覆「找不到家庭」時，用戶端還原成這次嘗試之前的端點，本機則自始沒有被寫入——一個什麼都沒證明的位址若留在裝置上，使用者接著按「建立家庭」就會把登入憑證與完整書單送往該處，並把它烙進之後發出的同步碼。唯一的例外是驗證挑戰：它是同一次嘗試的延續（要向同一台伺服器問驗證方式再重試），因此端點保留到該次嘗試真正結束（加入成功、失敗或使用者放棄）為止。Extension 的 `performJoin`（`extension/src/dialog/onboardingFlow.ts`）在加入成功後，經 `persistAcceptedFamilyEndpoint` 寫入——與「確認切換」同一個 helper：直接寫入 `storage.local`（以它為準），再送一則 best-effort 的 `SET_API_ENDPOINT` 背景訊息（Firefox 休眠中的事件頁可能遺失這則訊息，只靠它曾讓成員沒有任何提示就回到預設端點），並清除殘留的「暫不切換」記錄——透過帶 `@host` 的同步碼加入，本身就是明確選擇了這個端點。`performJoin` 失敗時刻意讓 `@host` 維持套用（驗證挑戰要向同一台伺服器查詢驗證方式再重試），交還端點是呼叫端 `handleJoin`（`extension/src/dialog/useOnboardingJoinFlow.ts`）的責任：每個沒有加入成功就結束嘗試的出口——一般失敗、放棄驗證挑戰、通過驗證後家庭仍拒絕、例外——都以 `restoreApiEndpoint` 把 client 放回嘗試前的端點，否則使用者接著按下的「建立家庭」會把 userId、它發出的 token 與完整書單送往那台拒絕過的伺服器。
 - **本機既有值也會複檢**：PWA 從 `localStorage` 還原工作階段時會重新驗證存下來的 `apiHost`；舊版存下、如今已不被接受的位址會被視為沒有工作階段（要求重新輸入同步碼），而不是讓 `new ApiClient()` 拋錯把整個 App 打掛。
 - **預設端點同樣走驗證**：`DEFAULT_API_ENDPOINT`（兩端的 `constants.ts`）在定義時就套用 `validateEndpointUrl()`，讓它與 `ApiClient.getEndpoint()` 落在同一個比較空間；建置時給了無效的環境變數會在載入當下直接拋錯，而不是等到第一次請求才以難以歸因的形式爆開。
 
@@ -777,6 +784,7 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
   - 為什麼只存截短的摘要：完整摘要也藏不住原值——familyId 只有約 2.8e12 種可能、預設伺服器位址是公開的、userId 又出現在其他 key 的名稱裡，可以離線暴力反推。摘要的輸入經過 `sha256Hex`，它會轉成小寫，對相等比較無害。伺服器位址照 `ApiClient` 的解析方式正規化（缺省 → `DEFAULT_API_ENDPOINT`），所以預設位址或結尾斜線的差異不會讓比對落空。
   - 每次存取都像 `recoveryCooldown.ts` 一樣包住：讀不到當作「沒有標記」（一般加入），寫入被拒只失去這道保護。讀—改—寫跨分頁不是原子操作，刻意不上鎖：遺失一次更新最多少一個標記（變成一般加入），不會把人鎖在外面。
 - **加入失敗的說明文案**（`pwa/src/utils/joinErrorMessages.ts`）：這些失敗必須向使用者說明原因，不能把人丟回一個什麼都沒說的登入表單。背景復原（`acquireNewToken`）與登入頁的手動加入（`completeJoin`）兩條路徑都會碰到，所以共用同一份文案，措辭不會分歧。
+- **Extension 的「自己的離開請求進行中」標記**（`extension/src/storage/selfDeparture.ts`，#263）：本機的 familyId 要等「離開家庭」／「刪除帳號」的回應回來才清除，伺服器卻可能先撤銷 token，這段期間別的請求拿到 401 時，背景加入（`extension/src/api/auth-refresh.ts` 的 `attemptJoinRecovery`）就會把使用者加回正在離開的家庭。`extension/src/dialog/useFamilySettingsLeave.ts`／`useFamilySettingsDelete.ts` 透過 `runGuardedDeparture` 送出請求，請求結束前持有標記，`doRefreshToken` 在標記有效時跳過加入。標記直接讀寫 `browser.storage.local`，絕不經背景訊息（Firefox 休眠中的事件頁可能遺失訊息），所以擴充功能的每個 context（包括每個分頁的 Dialog）都看得到。值是到期時間（epoch ms）而不是旗標，與 PWA 相同：請求途中 context 結束，最多擋住復原 `SELF_DEPARTURE_TTL_MS`（60 秒）。失敗時往不擋住使用者的方向吞掉：寫入被拒只失去這道保護、不影響離開本身；讀不到時視為「沒有在離開」，復原照常運作。
 
 #### 登入頁的加入流程
 
@@ -792,7 +800,7 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
   - 同意畫面排在驗證畫面之前：同意解鎖的正是可能引發驗證挑戰的那個請求，兩者不可能同時合法地等待中。
   - QR 的全頁「處理中...」畫面排在 `pendingAuth` 之後：加入途中出現的驗證挑戰必須留在畫面上。QR 進來的使用者會被自動推過表單，加入進行時沒有送出按鈕可以顯示「處理中...」；這時若顯示表單，等於要剛掃完碼（或剛按下「確認並加入」）的人輸入 Email，所以改由整個畫面擔任進度提示。
 - **`CustomHostConsent.tsx`**：同意閘門本身見〈同步碼位址的驗證與揭露〉的「QR Code 自動加入的確認閘門」。元件只負責呈現，何時掛載、兩個答案各做什麼都由呼叫端決定；呼叫端只為 `valid` 判定掛載它，`invalid` 在上游就被直接拒絕，永遠不會出現在請使用者同意的畫面上。位址交給表單與驗證畫面共用的 `SyncCodeHostNote` 呈現（揭露的值與用戶端實際連線的位址只有一個來源），並使用 `variant="verify"`：QR 進來的人從沒輸入過同步碼，畫面上也沒有，`join` 的引導語會指向使用者看不到的東西。
-- **`SyncCodeHostNote.tsx`**：只負責呈現，判定從哪裡來由呼叫端決定（表單是輸入中的同步碼，驗證畫面是 `pendingAuth.apiHost`），所以同一個元件涵蓋自己輸入同步碼與邀請連結／QR（使用者從沒打過位址）兩條路徑。`variant` 只改變 valid 分支的引導語，規則見〈共用文案的產品語意〉；`onboarding` 目前只有 Extension 的引導畫面使用，PWA 還沒有對應的畫面。
+- **`SyncCodeHostNote.tsx`**：只負責呈現，判定從哪裡來由呼叫端決定（表單是輸入中的同步碼，驗證畫面是 `pendingAuth.apiHost`），所以同一個元件涵蓋自己輸入同步碼與邀請連結／QR（使用者從沒打過位址）兩條路徑。`variant` 只改變 valid 分支的引導語，規則見〈共用文案的產品語意〉；`onboarding` 目前只有 Extension 的引導畫面使用，PWA 還沒有對應的畫面。Extension 的對應元件（`extension/src/dialog/SyncCodeHostNote.tsx`）同樣只負責呈現：加入畫面用輸入中的同步碼；驗證挑戰、重新驗證視窗與引導畫面容器的提示用 client 已採用的端點（見〈揭露採用中的伺服器位址〉）——這些畫面上沒有同步碼，使用者卻即將把密鑰（或整個家庭設定）交給那台伺服器。三種結果：預設端點或還不是有效的同步碼時什麼都不顯示；會被採用的 `@host` 顯示正規化端點（`origin + pathname`：homograph 顯示成 `xn--…`、內嵌帳密的網址無法偽裝、HTTP 區網位址與同名的 HTTPS 位址分得出來）；採用時會被拒絕的 `@host` 顯示警告而不是那句令人安心的說明。警告不分 variant；採用的端點已通過同一套驗證，所以 `verify`／`onboarding` 的呼叫端實際上到不了警告分支。兩端所有文字都 import 自 `shared/src/hostNote/messages.ts`——讓兩端逐字相同的是這個模組，不是註解。
 
 #### API client 的回應處理
 
@@ -805,6 +813,8 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
   - 成功的 `data` 只靠文字層這一道防護：`PublicShelfPage` 把 `title`／`book.title`／`book.author` 直接放進 JSX，搜尋時還會對它們呼叫 `.toLowerCase()`。
 - **成員清單、家庭書櫃、借閱清單先以 `unknown` 讀入**：結構檢查之前，線上的形狀只是後端的聲稱。成員清單與家庭書櫃整個信封一起檢查（呼叫端自己讀 `{ data, error }`，`error` 信封必須原樣送到），兩層的順序與理由見〈伺服器回傳資料的檢查〉。借閱清單先跑 `unwrap`——它負責信封契約（`error` 拋 `ApiError`、缺 `data` 拋 `EMPTY_RESPONSE`）——再交給 `sanitizeBorrowRequests`。
 - **`lookupUser`**：PWA 目前沒有使用（登入走同步碼），保留是為了與 Extension client 的契約一致，兩者才不會分歧。帶不帶 `verifySecret` 的回應差異見〈PWA 登入驗證機制〉。
+- **Extension 的 `extension/src/api/client.ts`**：`readEnvelope`（只放行 204）、`unwrapVoid`、`throwOnError` 與上面的規則相同。差別在 `throwOnError` 另外把 `isClientSynthesized` 套在**原始**的錯誤物件上，而不是處理過的文字：symbol 標記本身就是來源證明，不能從處理過的文字推斷（見〈伺服器回傳資料的檢查〉的「錯誤物件」）。
+- **`updateMemberSettings`**（Extension）：回應先以 `unknown` 讀入，`unwrap` 先跑（負責信封契約），再交給 `sanitizeFamilyMember` 做結構檢查，最後是文字層（與 `getFamilyMembers` 同順序）。結構檢查不過時拋出 `INVALID_RESPONSE`，這對每個呼叫端都安全：三個呼叫處（`extension/src/dialog/BorrowTab.tsx` 的借出對象寫回、`extension/src/dialog/MemberList.tsx` 的 canLend 開關與刪除 readmooName）都會接住，交給 `memberSettingsErrorMessage`，格式錯誤的回應因此顯示成可重試的錯誤，而不會汙染 `members` 狀態。
 
 #### 公開書櫃設定的寫入
 
@@ -1074,6 +1084,7 @@ interface PublicShelfSnapshot {
 `shared/src/borrow/messages.ts` 把 `POST /api/family/:id/borrow` 的失敗轉成文案。Extension 對話框與 PWA 頁面從同一個「申請借閱」按鈕打同一個端點，失敗訊息兩邊必須一致，所以對照表只有這一份。
 
 - **只進代碼、只出本機字串**：只接受機器可讀的 `code`，回傳固定的繁體中文句子；絕不接受、插入或回傳伺服器提供的訊息文字。API 位址可由使用者設定（BYO，以及同步碼的 `@host` 讓寫邀請的人決定位址），信封的 `message` 等於攻擊者可控的文字，原樣渲染會讓惡意後端把任意內容畫進對話框。只有用戶端自己合成的 `ApiError` 可以原樣顯示（見上一節的 `synthesized`）。不要「改良」成多收一個 `message`／`rawMessage` 參數當備援。
+- **Extension 的合成例外**：Extension 的 `borrowFailureText`（`extension/src/dialog/useBorrowAction.ts`）、`memberSettingsErrorMessage`（`memberSettingsMessages.ts`）與 `publicShelfErrorMessage`（`publicShareMessages.ts`）對用戶端合成的驗證復原節流（`AUTH_REFRESH_RATE_LIMITED`）原樣顯示 `rawMessage`：它本來就是給使用者看的繁體中文，寫著只看代碼的對照表重建不出來的冷卻時間與該做的動作。放行的依據是 `synthesized` 而不是代碼——只有這個用戶端自己的 symbol 標記會設它，自架或惡意後端回傳這個代碼也畫不出任意文字。PWA 刻意沒有這條（`.claude/rules/frontend.md` → Extension ↔ PWA twins）。
 - **對照表收錄的代碼**：使用者能採取行動的失敗——`DUPLICATE_REQUEST`、`TOO_MANY_PENDING_REQUESTS`、`RATE_LIMITED`、`LENDING_DISABLED`、`NOT_FAMILY_MEMBER`、`INVALID_OWNER`、`INVALID_OWNER_SELF`、`FAMILY_NOT_FOUND`、`UNAUTHORIZED`、`INVALID_COVER_URL`——加上 API client 自己的 `NETWORK_ERROR`（fetch 失敗、沒有信封）。只有格式錯誤的用戶端請求才會觸發的代碼（`INVALID_FAMILY_ID`／`INVALID_JSON`／`MISSING_FIELDS`／`INVALID_FIELDS`／`INVALID_USER_ID`）與 `INTERNAL_ERROR` 刻意不收：它們沒有使用者能照做的建議，落到通用句即可。
 - **用 `Map` 而不是物件字面值**：`code` 由後端控制，物件查表會經原型鏈解析到 `"__proto__"`／`"toString"`。
 - **`RATE_LIMITED` 刻意不寫秒數**：信封的 `retryAfter` 由兩端刻意分開的函式格式化（兩者對 `retryAfter === 0` 的處理不同，見 `extension/src/dialog/verificationMessages.ts` 的 `rateLimitedEnvelopeMessage`），在這裡插入秒數會把這個模組要防的兩端分歧帶回來。
@@ -1140,6 +1151,138 @@ interface PublicShelfSnapshot {
 - `updates.json` 只服務自行散布版，所以 `addons` 只以 `GECKO_ID_DIRECT` 為 key，不含 AMO 上架版的 id。
 - 版本從 `extension/package.json` 讀取（與 `sync-version.ts` 同一個來源）。`update_link` 是 `https://github.com/reginna-chao/moo-family-bookshelf/releases/download/v<version>/moo-family-bookshelf-firefox-v<version>-direct-install.xpi`，檔名必須和 CD 上傳到 GitHub Release 的 `.xpi` 相同，否則 Firefox 自動更新會 404；CD 的 `release-extension-firefox` job 在上傳前會比對兩者，不一致就失敗。
 - 結構是純函式 `buildUpdatesManifest(version)` 加上一層薄的 CLI：`--out <path>` 指定輸出位置，缺省為 `extension/dist-firefox-updates.json`（已列入 `.gitignore`）。CD 以 `--out "$GITHUB_WORKSPACE/updates.json"` 產生後上傳到 Release。
+
+---
+
+## 十四、Extension 用戶端的設計理由
+
+`extension/src/` 的程式碼註解最多兩行，較長的設計理由集中在本節（或本文件其他已有的小節），註解以「`docs/architecture.md → <小節名稱>`」指回這裡。Extension 與 PWA 必須保持一致的成對檔案，以及刻意不一致之處，列在 `.claude/rules/frontend.md` → Extension ↔ PWA twins。
+
+### Extension Dialog 的設計理由
+
+#### 揭露採用中的伺服器位址
+
+`extension/src/dialog/adoptedEndpoint.ts` 的 `classifyAdoptedEndpoint` 是「告訴使用者用戶端正在連哪台伺服器」這條規則唯一的來源。三個呼叫端：收集驗證密鑰的兩個畫面（引導畫面的驗證挑戰、重新驗證視窗），以及引導畫面容器的伺服器提示——它不收密鑰，只告訴自架者下方的建立／加入／復原按鈕會連到哪台伺服器，但問的是同一個問題、受同樣兩條不變量約束，所以也呼叫這裡，而不自己讀端點。三者都不自行推導，答案就不會對同一個問題分歧。
+
+- **判定取自用戶端「實際採用」的端點，絕不取自輸入文字**（PR #116 立下的規則）：同步碼的 `@host` 是攻擊者可控的文字，要等使用者確認後才會採用；若對輸入文字分類，畫面就會替使用者還沒接受的位址背書——正是偽造位址想要的那份安心。採用的端點在進入 `ApiClient` 時已通過 `validateEndpointUrl`，不可能與密鑰實際要送去的地方不一致。
+- **官方預設端點什麼都不揭露**（`kind: "none"`）：每一次驗證挑戰都掛一條提示，會讓使用者習慣跳過真正有意義的那一次；只有目的地不是本專案自己的 Worker 時才值得注意。
+- 參數刻意是 `ApiClient` 而不是 `string`：呼叫端在結構上不可能把使用者輸入傳進來還通過型別檢查，第一條不變量由編譯器把關，而不是靠審查者注意到。
+- **引導畫面的兩則提示**（`extension/src/dialog/Onboarding.tsx`）：每次 render 只算一次判定，容器提示與驗證挑戰自己的提示共用，兩者不可能揭露不同的伺服器。刻意不以 `apiClient` 做 memo：加入時會就地採用同步碼的 `@host`，端點變了、client 的身分沒變，而過時的揭露正是這則提示要防的失敗。
+  - 容器提示：自架者的建立／加入／復原動作都打向採用的端點，所以在任何動作之前先說是哪台伺服器。官方預設時 `classifyAdoptedEndpoint` 回 `none`、提示不顯示（第二條不變量），這份安靜是刻意的，不是漏掉的情況。驗證挑戰畫面不顯示容器提示，因為它自己以 `verify` 引導語顯示同一則提示。
+  - 驗證挑戰取代加入畫面，連帶取代它的位址揭露——偏偏是在使用者被要求把 PIN／圖形交給伺服器的時候。此時同步碼加入已經把 `@host` 套用到 client（`performJoin` 讓它維持套用，挑戰才會打向那台伺服器），建立／查詢的挑戰則仍在官方預設端點，所以採用的端點對兩者都是正確答案。
+- **重複時隱藏容器提示**（`Onboarding.tsx` 的 `isAdoptedNoteRedundant`）：畫面上的 view 已經顯示同一個位址時，容器提示只是重複——同一畫面兩行琥珀色文字說同一件事，正是教會使用者略過整類提示的原因；同步碼殘留的預填路徑（`useOnboardingFlowState.ts`）一定會發生，預填同步碼的 `@host` 就是採用的端點。只有兩個 view 會顯示輸入中同步碼自己的提示：`RecoveryJoinView` 與 `IdleView`（`renderContent` 最後的 fallback 分支）。`DEDICATED_VIEW_STATES` 列的是有自己 view 的狀態，刻意寫成補集而不是 fallback 狀態的清單，日後新增卻沒加分支的狀態也會落到 `IdleView`；它必須與 `renderContent` 保持一致。
+  - 只在兩個**都已驗證**的正規化端點逐字相同時隱藏（`kind: "valid"` 代表兩邊的字串都出自 `validateEndpointUrl`）。這是輸入文字唯一不能替任何東西背書的方向：它只能隱藏一則內容與它完全相同的提示，不能改變提示內容，也不能讓提示出現，所以第一條不變量不受影響。`invalid` 或沒有 `@host` 時從不隱藏——偽造警告與狀態提示回答的是不同問題，必須並存；兩個不同的位址也一樣。
+  - 沒有空窗：`displayedSyncCodeApiHost`（`shared/src/api/syncCodeHost.ts`）只延後 `invalid` 的判定，所以 view 對 `valid` 位址的提示與隱藏容器提示發生在同一次 commit。這點不可或缺：若共用的顯示政策日後連 `valid` 也延後，等待期間會一則提示都沒有（雖然只限同一個位址，仍是缺口）。
+
+#### 重新驗證視窗
+
+token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時，`extension/src/dialog/useReauth.ts` 就地顯示重新驗證提示（`.claude/rules/security-ux-invariants.md` 的 Invariant 2：token 過期必須提示重新驗證，不得無聲丟掉資料）。它沿用既有的驗證提示機制（`useVerificationPrompt` + `VerificationPrompt`），接上 `apiClient.onReauthRequired`；`ReauthModal.tsx` 是提示外面的遮罩與卡片，疊在仍掛著的主畫面上，使用者不會失去原本的位置。
+
+- **重新加入**（`runReauthJoin`）：以輸入的密鑰重新加入家庭，帶 `recovery: 1`，伺服器會以 `409 RECOVERY_NOT_MEMBER` 拒絕已不在名單上的人。成功時保存新 token、設進記憶體中的 client，清除殘留的復原冷卻（`RECOVERY_COOLDOWN_UNTIL_KEY`：這次成功證明憑證可用，下一次背景 refresh 不該被它節流），再呼叫 `onSuccess`，讓 App 重新載入家庭資料、取代過時的 401 畫面，不必手動重試；失敗時回傳代碼，讓提示重試或顯示鎖定訊息。
+- **初始畫面**：提示一開始就帶入實際擋下背景復原的代碼，被鎖定的使用者立刻看到倒數，而不是可輸入的欄位；其他意外的值退回 `VERIFICATION_REQUIRED`，去查詢驗證方式並顯示對應的挑戰（PIN／圖形／OTP）。
+- **latch**：client 在呼叫 `onReauthRequired` 之前設好 latch，設著時之後每個 401 都跳過背景復原。所以每個不顯示提示或提示結束的出口都要以 `clearReauthPending` 釋放它，否則之後再也不會出現重新驗證提示：storage 缺少重新加入所需的身分（無法顯示提示）、使用者放棄提示（只關閉提示、留在主畫面，之後的動作可以再觸發挑戰），以及下面的拆除。
+- **家庭已不存在時的拆除**（`tearDownGoneFamily`）：重新加入回的是家庭已不存在的代碼（家庭被刪、已滿、被移除或已不在名單上）時，清除本機家庭資料、Dialog 退回引導畫面。這條分支並非假設：伺服器的驗證閘門排在 kicked 墓碑檢查之前，設有驗證的被移除成員要先輸入正確的密鑰，才會知道自己被移除；沒有這道拆除，提示會一直要求同樣的輸入，使用者會在「密鑰正確 → 錯誤」之間打轉，直到墓碑過期（6 小時）。錯誤代碼轉交給 `onFamilyRemoved`，引導畫面才能說明原因（見〈家庭綁定被解除時的說明〉）。
+  - `clearFamilyStorageAndBroadcast` 裡的 `storage.local.remove` 沒有防護、可能 reject，這裡吞掉它：storage 失敗不能讓 latch 卡住，殘留的 latch 會讓這次工作階段之後每個 401 都沒有反應，畫面永遠不會切換。失敗時另外呼叫 `resetFamilyEndpointChoice()`（它自己吞掉 storage 失敗，不會 reject）：App 的處理只把**記憶體中**的 client 放回預設端點，存起來的選擇才是**下次啟動**會還原的值，到時使用者可能已經用不帶 `@host` 的同步碼加入別的家庭，而那不會覆寫它，所以它不能是唯一還指向前一個家庭伺服器的東西。
+  - `finally` 的順序：先清 token（401 路徑已清過，這裡再清一次，因為這個 hook 擁有 client 的狀態，而且 `onFamilyRemoved` 是選填的）；再釋放 latch，然後才交棒；最後呼叫 `onFamilyRemoved`，Dialog 只在 storage 與 client 都已是「沒有家庭」時才切到引導畫面。
+- **位址揭露**：重新驗證視窗與引導畫面的驗證挑戰遵守同一條規則（見〈揭露採用中的伺服器位址〉）：輸入 PIN／圖形之前，先說出它會送往哪台伺服器。這裡的端點已經證實過——只有加入成功或使用者在確認面板接受，它才會成為 client 的端點——所以這不是在防攻擊，而是補完規則中「挑戰」的那一半；畫面上也沒有任何輸入欄位能提供另一個來源，端點早在 token 失效前就採用了。
+- **範圍**：這條規則只涵蓋**挑戰**畫面，也就是使用者交出**既有**密鑰換取存取權的畫面。**設定**畫面（建立新密鑰：只用來設定的 `VerificationSettings`，以及 PWA 的 `VerifySetupPrompt`）刻意不在範圍內：密鑰還沒有拿去換任何東西，使用者此時也已在 App 內（Extension 的分頁需要已加入家庭；PWA 的提示在登入後才出現）。這兩處收密鑰時不揭露位址，是決定，不是沒注意到的缺口。
+
+#### 家庭綁定被解除時的說明
+
+`extension/src/dialog/familyGoneNotice.ts` 是本機家庭綁定被解除、Dialog 退回引導畫面時的說明文案。兩個解除入口——`extension/src/api/auth-refresh.ts` 的 `clearFamilyAndNotify`（背景自動復原加入失敗後，不經任何提示）與 `extension/src/dialog/useReauth.ts` 的 `tearDownGoneFamily`（重新驗證時）——都把觸發的錯誤代碼交給 `onFamilyRemoved`，`extension/src/dialog/App.tsx` 再把文字顯示成引導畫面上方的橫幅。少了它，畫面只會沒頭沒尾地切換，看起來像程式錯誤，而不是家庭 Owner 造成的狀態變化。PWA 在 `pwa/src/utils/joinErrorMessages.ts` 說明同樣的拒絕。文案放在這個模組而不是元件裡，測試才能釘住正式的字串，而不是比對測試自己抄的一份。
+
+#### 驗證碼的產生
+
+`extension/src/dialog/VerificationSettings.tsx` 的 `handleGenerateOtp` 讀 `POST /api/user/:id/verify/otp` 的回應。信封是直接轉型讀入的，`code`／`expiresAt` 只在型別上是 `string`／`number`：
+
+- 不是字串的 `code` 會被當成 JSX child 渲染，React 19 遇到物件會拋錯，而這裡沒有 ErrorBoundary。
+- 非有限值的 `expiresAt` 會以兩種方式弄壞倒數 effect：`Infinity`——或剩餘時間算成 NaN 的字串——是 truthy，effect 會掛上每秒一次的 interval，但 `remaining <= 0` 永遠不成立，interval 永遠不會自己清掉；NaN 本身是 falsy，effect 直接 return，倒數永遠不會開始。
+- 兩種情況這個值都不能用，所以空字串、非字串的 `code` 或非有限值的 `expiresAt` 都讓整個回應當成產生失敗。這個分支也會接到欄位格式錯誤的成功信封，此時可能根本沒有 `error`。`generateOtp` 受伺服器的驗證設定寫入上限約束（見〈PWA 登入驗證機制〉的 KV Key 設計），真正的 429 會走到這裡，顯示共用的退避文案（含 `retryAfter`），而不是伺服器原始的訊息。
+
+### Extension 背景程式、儲存與 Content Script 的設計理由
+
+`extension/src/` 除了 `dialog/` 之外的部分：API client、背景程式、本機儲存、書單同步與 content script。
+
+#### 認證更新與冷卻
+
+`extension/src/api/auth-refresh.ts` 與 `extension/src/api/client.ts` 的 401 路徑。冷卻與「自己的離開請求進行中」兩道防護的共通規則見〈背景自動復原的防護〉（PWA 的對應實作）。
+
+- **重新驗證的閂鎖**（`ApiClient` 的 `reauthPending`）：`doRefreshToken` 一呼叫 `onReauthRequired` 跳出重新驗證提示就設為 true（由 `ApiClient` 包住這個 callback 的那層設定；`auth-refresh.ts` 只透過 `isReauthPending` 讀它）。閂鎖期間，之後的 401 波次都跳過背景加入，所以一次開啟 Dialog 最多花掉一個次數額度，進行中的驗證提示也不會被重新初始化（那會清掉使用者輸到一半的 PIN／圖形）。設定非 null 的 token 或呼叫 `clearReauthPending` 時解除；`doRefreshToken` 失敗途中設成 null 不會解除。
+- **何時不送背景加入**：重新驗證提示待處理中（理由同上：會重花 per-IP 的加入額度、清掉輸入），或使用者自己的離開家庭／刪除帳號請求仍在進行（#263，可能把他加回正在離開的家庭）。這兩種情況下前面那次 `/api/auth/refresh` 的 POST 仍照送：token 若已在別處修好並存進 storage，不需要加入就能恢復。
+- **收到 429 時**：沒帶驗證密碼的背景加入只可能撞到 Worker per-IP 敏感端點的 429（驗證嘗試上限只對猜錯計次，沒有密碼時不會觸發）。所以收到 `RATE_LIMITED` 就設定冷卻，讓之後每次開啟 Dialog 不再消耗共用的額度；而且**不**提示重新驗證：同一個 IP 帶著密碼重試，仍會被同一個 per-IP 時間窗擋下。
+- **冷卻上限**：後端給的任何 `retryAfter` 都截到 `MAX_RECOVERY_COOLDOWN_SECONDS`（1 小時）。官方 Worker 最多只要求 900 秒，所以這道上限只防惡意或有 bug 的自架後端把自動復原幾乎永久鎖住。它與 `extension/src/dialog/useRetryCountdown.ts` 的上限相同，但刻意各自定義：api 層不依賴 dialog 層（`VERIFICATION_ERROR_CODES` 與 `extension/src/dialog/useVerificationPrompt.ts` 的集合也是同樣的理由）。
+- **限流時回給畫面的錯誤**：背景復原被限流（剛收到 429 或冷卻中）時，`ApiClient` 不回傳原本的英文 401，而是自己合成一個 `AUTH_REFRESH_RATE_LIMITED` 錯誤，附上在地化文案（`buildRateLimitMessage`；知道冷卻期限時，附上無條件進位到分鐘的剩餘時間）。代碼刻意與伺服器的 `RATE_LIMITED` 不同，UI 才認得出這段專屬文案並原樣顯示，而不是換成通用的退避句子；`synthesizeError` 蓋上的 symbol 標記就是允許原樣顯示的憑據（見〈伺服器回傳資料的檢查〉的「錯誤物件」）。
+
+#### 背景 Service Worker 與訊息
+
+`extension/src/background/`：跨瀏覽器的背景程式（Chrome 是 service worker，Firefox 是 event page），負責 content script／Dialog 與擴充功能內部之間的訊息。
+
+- **訊息機制**（webextension-polyfill）：`onMessage` 對已知的訊息類型回傳一個 Promise，resolve 成回應物件，polyfill 再把它交給發送端 `await` 的 `browser.runtime.sendMessage`；沒有 `sendResponse` + `return true` 那套 Chrome 專屬寫法。未知類型回傳 `undefined`。每個 handler（`messageHandlers.ts`）只負責一種訊息類型，只做那則訊息的 storage 存取與驗證；分派在 `index.ts`。
+- **訊息內容一律當成不可信的輸入**：`BackgroundMessage` 各欄位刻意宣告成寬鬆的輸入型別（`string`、`number`、`string | null`），而不是驗證後的字面值聯集，handler 在執行時檢查；在型別上先收窄，執行時的檢查就會變成死碼。
+- **儲存位置**：familyId 同時寫入 `storage.local` 與 `storage.sync`，以 `storage.local` 為準（讀取規則見〈本機儲存與同步〉）；API 端點只存 `storage.local`（不同裝置可能用不同端點）。
+- **`SET_API_ENDPOINT`** 使用與 `ApiClient`、Dialog 相同的 `validateEndpointUrl`（`shared/src/api/endpointUrl.ts`），整個擴充功能只有這一套規則，背景不得另留一份：先前背景裡的本機版本是更嚴格的「第三種意見」，擋掉了其餘用戶端都接受的私有網段／區網位址，自架者的背景副本因此沒有任何提示就與正式的 storage 寫入分歧。存的是正規化後的值，這條路徑與 Dialog 的直接寫入才不會留下同一個端點的兩種寫法。
+- **工具列圖示的同步錯誤標記**（`badge.ts`）：manifest 沒宣告 `"action"` 時 `chrome.action` 是 undefined，標記函式會直接略過，呼叫端不會讓 service worker 當掉。
+- **沒有背景排程同步**：以 `chrome.alarms` 排程的背景同步已移除，`alarms` 權限也拿掉了；升級上來的裝置若殘留排程，沒有任何 listener 會處理，等於無效。書單同步只在 Dialog 裡進行：開啟個人書櫃時的自動同步（依 `autoSyncInterval` 節流）與手動同步按鈕（`extension/src/sync/syncBooks.ts`），以及引導畫面建立／加入家庭時（`extension/src/dialog/useAutoSetup.ts`）。
+- **storage key 遷移**（`extension/src/storage/migrate.ts`）在每次 service worker 啟動時嘗試一次（`STORAGE_MIGRATED_KEY` 旗標設好後就是不花成本的 no-op）；`onInstalled` 會 `await` 它，讓 service worker 撐到遷移完成；`onStartup` 再試一次，以防先前 `onInstalled` 的遷移失敗。
+
+#### 本機儲存與同步
+
+`extension/src/storage/` 與擴充功能的 `storage.local`／`storage.sync`。多裝置同步的目的與限制見〈chrome.storage.sync 多裝置同步〉。
+
+- **Dialog 直接存取 storage，不經背景訊息**：Firefox MV3 的背景是會休眠的非常駐 event page，休眠時 `browser.runtime.sendMessage` 往返可能 reject 或 resolve 成 `undefined`，`browser.storage.*` 在 Dialog 裡則一直可靠。familyId（`familyId.ts`）、家庭書櫃檢視模式（`viewMode.ts`）、家庭端點的選擇（`familyEndpointChoice.ts`）、自己的離開標記（`selfDeparture.ts`）都因此直接讀寫 storage，避開同一類只在 Firefox 出現的 bug。
+- **familyId 以 `storage.local` 為準**（`familyId.ts` 的 `readFamilyId`）：每次寫入都寫到 `storage.local`，它也是 Firefox 上可靠的區域（`storage.sync` 可能是空的或無法使用）。`storage.sync` 只是跨裝置的初次設定提示，只有從未完成引導的裝置（本機沒有 `USER_ID_KEY`）才會讀它。不能改成先讀 sync：背景復原失敗會清掉本機的 familyId，但過期的 familyId 可能還留在 `storage.sync`（Android 版 Firefox 的 `storage.sync.remove` 也可能不聲不響地什麼都沒做），先讀 sync 會在每次開啟 Dialog 時讓這個「殭屍」familyId 復活，把使用者困在壞掉的主畫面、回不到引導畫面。所以裝置一旦完成引導，本機沒有 familyId 就代表「沒有家庭」，絕不從 sync 復活。殘留在 sync 的值只會由 `readSyncFamilyIdRemnant` 拿去預填引導畫面的同步碼欄位（絕不自動送出）。
+- **寫入與清除都是本機優先**（背景的 `SET_FAMILY_ID`／`CLEAR_FAMILY_ID`）：先寫或先清 `storage.local`，持久化就不依賴 `storage.sync`——它在 Firefox 可能 reject（沒登入帳號、Android 的限制、或偏好設定關閉）。sync 的寫入／移除是盡力而為，而且獨立包起來，失敗也擋不住本機那一步；所以解除綁定一定會清掉本機的 familyId 與認證資訊（auth token 與到期時間）。
+- **只存本機的偏好**：家庭書櫃的檢視模式只是本機的介面偏好，不該跟著使用者換裝置，所以不鏡像到 `storage.sync`。只有剛好存成 `"row"` 才讀成 `"row"`，其他值（包括沒設定、舊資料）一律讀成 `"grid"`。
+- **`safeStorageGet`**（`safeStorage.ts`）：擴充功能重新載入／更新／停用後，留在頁面上的 content script 變成孤兒，`browser.storage.local` 的參照斷掉，任何 `.get(...)` 都會拋出 `Extension context invalidated`，沒被接住的 `await` 就變成 uncaught promise rejection。`safeStorageGet` 先檢查 context，再吞掉任何讀取錯誤，回傳空物件，呼叫端就落回各自的預設值。刻意吞掉錯誤，所以它只用於盡力而為的**讀取**：讀取失敗必須讓使用者知道的地方不要用它，而且呼叫端拿到 `{}` 時必須仍然正確。
+- **storage key 遷移**（`migrate.ts`）：擴充功能的 storage key 以前沒有前綴（例如 `userId`、`familyId`），現在與 PWA 一致加上 `moo:` 前綴。遷移把舊 key 改名成 `moo:` 版本，`storage.local` 與 `storage.sync` 都做，既有使用者更新後仍保有 auth token、家庭綁定與偏好設定。
+  - 可重複執行：已經以 `moo:` 開頭的 key 會跳過。
+  - 中斷安全：先寫新 key 再刪舊 key，中斷時資料留在舊 key 上（無害），不會遺失；`moo:` key 已經有值時（前一次只完成一半，之後 App 又寫了新資料）絕不用舊值覆蓋，只刪掉舊 key。
+  - 盡力而為：任何失敗都吞掉，背景程式不會當掉；旗標沒設上，下次啟動會再試。
+  - **待清理**：v1.3.0 為了這次一次性改名加入，等幾乎所有安裝都更新到 v1.3.0 之後就可以移除（目標約 v1.6.0，即 3 個發布週期）。遷移在自動更新觸發的 `onInstalled` 裡執行，不是等使用者再次造訪，所以長尾是幾天到幾週而不是幾個月。移除時一併拿掉 `STORAGE_MIGRATED_KEY` 的寫入；殘留的舊 key 是無害的孤兒，不值得再寫一次遷移去清。
+
+#### 書單同步
+
+`extension/src/sync/`：把讀墨書櫃的爬取結果上傳成個人書單。
+
+- **觸發時機**：(A) 個人書櫃掛載時的自動完整同步，依使用者設定的 `autoSyncInterval`（每天／每週／每月／永不，`never` 等於關閉）對照 `LAST_SYNC_AT_KEY` 節流；(B) 手動同步按鈕，不節流。兩者都只做一次完整的爬取加上傳。以 `chrome.alarms` 排程的背景同步已移除（見〈背景 Service Worker 與訊息〉）。
+- **爬取警告每次同步重置**：讀墨書櫃是可以開好幾天的單頁程式，綁在頁面載入的「只警告一次」狀態一輩子最多只會出現一次。所以 `syncBooks` 每次同步都呼叫 `resetScrapeWarnings`：只要還在走降級路徑（舊版 selector、被拒絕的 bookId），每次同步都要在 console 看得到，而不是只有第一次。
+- **斷路器**（`syncBreaker.ts`）：爬取結果看起來像讀墨改版（新的 id、selector 壞掉），而不像使用者的書櫃時，拒絕上傳。適用於每一條上傳爬取結果的路徑——`sync/syncUpload.ts`（`syncBooks` 使用）與 `dialog/onboardingBooksUpload.ts`（`useAutoSetup` 使用）——不論這次爬取完不完整。伺服器上 bookId 是真正讀墨書籍 id 的書至少 50 本（`SYNC_BREAKER_MIN_SERVER_BOOKS`）才會啟用；這次爬取找回的比例低於一半（`SYNC_BREAKER_MIN_OVERLAP_RATIO` = 0.5）就暫停，顯示「讀墨可能改版了，已暫停同步書櫃」。這次爬取沒涵蓋封存書時，已封存的書不列入計算。
+- **書的 id 變了**（#236，`renamedBooks.ts`）：讀墨替一本書換了新 id 時，累加式的合併會讓舊 id 永遠留在新 id 旁邊。這一步把這種舊項目換成新 id 的那一筆，條件是沒有其他原因能解釋舊 id 為什麼不在完整的爬取結果裡。完整爬取裡少了某本已存的書，也可能是封存了（而這時封存書不同步）、借出去了、或退款／刪除了；這幾種情況彼此分不出來，一律**保留**。只有書名一對一對上一個全新 id 的才算換 id。它是 `dropResolvedLegacyBooks`（短的舊 id，#234）的一般化版本；後者仍在 `mergeBooks` 裡執行，這一步在它之後、對合併後的清單執行。有家庭時，同步前先抓一次借閱清單，借出中的書不參與換 id 的判斷。
+- **自動偵測已歸還的書**（`autoReturn.ts`）：讀墨的書借出後會從擁有者的書櫃頁整個消失，歸還或收回後再出現。`mergeBooks` 會保留只存在於伺服器的書，借出的書不會從分享清單被移除，所以「重新出現在新的爬取結果裡」是可靠的「書回來了」訊號：目前使用者擁有、而且有進行中 LENT 申請的書再次出現，就把該申請標成 RETURNED。防單頁程式殘留：剛借出的書可能還留在沒重新整理的頁面 DOM 裡，所以更新時間不到 `minLentAgeMs`（預設 30 分鐘）的 LENT 申請會略過，`updatedAt` 解析不了的也略過（保守處理）。這一步在上傳之後、盡力而為，不影響同步結果；它沿用上傳前抓的借閱清單，那次抓取失敗就略過。
+
+#### Content Script 的擷取與注入
+
+`extension/src/content/` 的書櫃擷取（`scraper*.ts`、`scrapeResult.ts`、`fiber-bridge.ts`、`fiber-data.ts`、`readmoo-dom.ts`）。只讀頁面上看得到的書單資訊，見〈2.1 Content Script〉。
+
+- **fiber bridge**：content script 跑在瀏覽器的 isolated world，看不到 DOM 元素上的 React fiber 屬性（`__reactFiber*`）。`fiber-bridge.js` 以 `<script>` 標籤注入頁面的 main world，與頁面共用 JS context，才讀得到 fiber 內部。兩邊透過共用的 DOM 溝通：bridge 直接把資料蓋成 `.library-item` 上的屬性——`data-moo-book-id`（`libraryItem.book.id`）、`data-moo-cover-url`（中尺寸封面，沒有就用小尺寸）、`data-moo-author`、`data-moo-category`（`main_subject`，把讀墨的 `\\` 分隔字元換成單一 `\`，與讀墨書籍頁一致，最多 50 字）——content script 直接讀屬性，不需要用 CustomEvent 傳資料或比對快取。請求與完成只用 `moo-request-fiber-data`／`moo-fiber-data` 兩個事件通知，bridge 絕不把錯誤拋進頁面；讀不到的卡片改走 hover 路徑。bridge 也在 `<html>` 上公布 `data-moo-list-total`：書櫃在目前篩選下的項目數（書櫃元件的 `filteredItemList.length`），讀不到時就移除，過時的值不會留下；`fiber-data.ts` 的 `ATTR_LIST_TOTAL` 必須與 bridge 的值相同（兩者在不同的 bundle）。注入 bridge 與請求蓋屬性的程式（`fiber-data.ts`）由書櫃擷取（同步）與借出流程的搜尋共用，蓋屬性的邏輯只有一份，不要複製。
+- **書的 id 從哪裡來**（`scraper-ids.ts`）：依序試 fiber bridge 的 `data-moo-book-id`、（hover 之後的）閱讀器連結 href、`.privacy` 元素。每個來源都必須給出真正的讀墨書籍 id（`isRealBookId`，12 位數以上，規則在 `shared/src/api/bookId.ts`，Worker 的 PUT books 邊界也用同一份）：其他命名空間的 id 會上傳一筆永遠對不上那本書的幽靈項目。來源若拿到不是真正 id 的值，就以 null 結束搜尋、略過這本書。卡片要觸發 hover 才會出現 `.openbook-overlay` 動作層（舊主機上叫 `.openbook`）；在兩個主機之間搬過位置的 selector 經 `queryWithLegacyFallback` 處理。「借入」的卡片不是使用者自己的書，直接忽略；自己的書讀不出來時，這次擷取就算不完整。
+- **擷取完整的定義**（`scrapeResult.ts`）：只有**確定**看過使用者擁有的每一本書，擷取才算完整：讀墨自己在目前檢視下的項目數讀得到，而且等於讀到的卡片數；沒有略過任何一本自己的書；分頁沒有停在硬上限；（同步封存書時）封存書的擷取也完整。「捲動不再出現新卡片」**不算**確認——下一頁載入慢的時候看起來一模一樣。只有完整的擷取才能用來斷定某本已存的書不在讀墨上了（見〈書單同步〉的「書的 id 變了」）；不完整的擷取仍會上傳，只是以累加方式。
+- **分頁**（`scraper-pagination.ts`）：讀墨用 window 層級的無限捲動，捲到頁面底部才載入下一批（約 200 本）。迴圈一直捲到不再出現新卡片為止，並回報進度，以 100 次捲動的硬上限當安全閥；等待新卡片時，`scrollHeight` 的變化（讀墨載入時的 loader 或 spacer）也算「還在載入」，會重設閒置計時。
+- **只警告一次的狀態**（`readmoo-dom.ts`）：`readmoo-dom.ts` 是所有擷取讀墨頁面的程式共用的底層，本身不依賴其中任何一個：借出流程（`readmoo-lend.ts`／`readmoo-search.ts`）用它找卡片（`findBookCardInLibrary`）與等待 DOM（`waitForElement`）；擷取程式（`scraper.ts`）用它做舊 selector 的備援（`queryWithLegacyFallback`）與降級警告（`warnOnce`）；同步的入口（`sync/syncBooks.ts`、`dialog/useAutoSetup.ts`）每次擷取呼叫一次 `resetScrapeWarnings()`。它最初是為了打破 `readmoo-lend` ↔ `readmoo-search` 的模組循環而抽出來的。警告的去重狀態是模組層級的，所有使用者共用；`resetScrapeWarnings` 是唯一的重置點，而且必須由擷取的**入口**呼叫，不能放進 `scrapeBooks`——同一次擷取裡它可能執行不只一次（例如書櫃加封存書），會在中途重新啟用去重，印出重複的警告。去重以 label 為單位而不是逐元素：一頁書櫃有 25 張以上的 `.library-item` 卡片，逐張警告會在 console 洗出 25 行相同的訊息、淹沒真正的錯誤；每次同步每個 label 一行，就足以回答這些警告存在的唯一問題——「這條降級路徑是否仍在被使用」。
+
+#### 浮動按鈕與 Dialog 外殼
+
+`extension/src/content/index.ts`、`mobileLayout.ts`、`shellStyles.ts`、`pendingBorrowBadge.ts`：content script 在讀墨頁面上注入「家庭書櫃」浮動按鈕，點擊後掛載 Dialog。
+
+- **兩種 bundle**：content script 本身是輕量的 IIFE；Dialog 是 code-split 的模組（`content-dialog.js`），isolated world 的 content script 無法照常解析 ES module import，所以透過 `runtime.getURL()`（web-accessible resource）動態載入。爬蟲模組刻意同時打包進 content script（經 `profileCache.ts`）與 ESM 的 content-sync 模組（經 `syncBooks.ts`）：它沒有狀態，只讀 DOM、回傳資料，沒有共用的可變狀態，所以重複打包是安全的。
+- **Shadow Root 外殼**：light DOM 上的 host（`moo-family-bookshelf-host`）擁有一個 open Shadow Root，backdrop、Dialog、手機版關閉圖示與 React 掛載點都在裡面，與讀墨的 CSS 隔離。host 是普通的 div，不建立 stacking context、沒有 transform，所以裡面 `position: fixed` 的 backdrop／Dialog 仍然蓋住整個 viewport。「Dialog 是否已開啟」看的是這個 host：Dialog 在它的 shadow tree 裡，`document.getElementById` 找不到。
+- **拆除順序**（`disposeDialogShell`）：先卸載 React root（effect 的 cleanup 在 DOM 還掛著時執行），再釋放 Dialog 的斷點 watcher，最後移除 host。切換關閉、點 backdrop、手機版關閉圖示都走這同一個函式，三步的順序只存在一處；浮動按鈕與它的數字標記是另一個 light DOM 元素，不受影響，按鈕自己的斷點 watcher 也必須保留，按鈕才會在之後的斷點變化時重新定位。只移除 host 會讓 React root 洩漏（它的 effect 繼續執行）；卸載失敗也絕不能擋住其餘的 DOM 拆除。開啟新的 Dialog 前會先保險地卸載殘留的 root handle；動態 import 完成前 Dialog 若已被關掉（掛載點已不在 DOM 上），就跳過掛載，否則會留下一個沒人持有的 root。擴充功能 context 失效時改走 `teardownMooFamilyUI`：先卸載 React root，再停掉所有斷點 watcher 並移除全部 UI；content script 一律用它而不是直接呼叫 `cleanupMooFamilyUI`，matchMedia listener 才不會殘留。
+- **外殼的起始樣式**（`shellStyles.ts`）：一份很小、自成一體的樣式表，不是完整的 `styles.css`。Shadow Root 一建立就注入（`index.ts` 的 `toggleDialog`），早於 backdrop／Dialog 加入，外殼一出現就有樣式；完整的 scoped 樣式表要等 `mountDialog` 動態 import `styles.css` 後才注入，這些結構規則若只放在那裡，外殼會先閃一下沒有樣式的畫面。它只放四個外殼元素的**靜態**結構屬性：`applyDialogLayout`／`applyBackdropLayout` 依斷點設定的屬性（位置、尺寸、圓角、高度）與關閉圖示的 `display` 一律由 JS 以 inline style 設定，刻意不寫進這裡——inline 雖然會贏，但留著過時的靜態值只會讓人困惑。這個模組必須不 import 任何東西（不含 `styles.css`、不含共用模組），打包進 content script 的 IIFE 時才不會把 Dialog bundle 或完整樣式表一起帶進來；注入時以標記屬性保證同一個 root 不會注入兩次。元素的 id 保留給 `getElementById` 與 E2E selector 使用。
+- **桌面與手機版面**（`mobileLayout.ts`）：content script 不在 React 裡，所以以 `window.matchMedia(MOBILE_MEDIA_QUERY)`（767px，`extension/src/hooks/breakpoints.ts`）而不是 `useMediaQuery` 驅動；這裡註冊的每個 listener 都有記錄，Dialog 關閉、按鈕移除或 context 失效時都能拆掉（`stopAllMobileWatchers`）。桌面維持原本的置中卡片，只有主畫面固定 `height: 80vh`（等於卡片的 max-height 上限，切換分頁時高度不跳動），引導／載入畫面依內容決定高度（上限 max-height、下限容器的 min-height），短內容下方不會留一大片空白。手機版 Dialog 全螢幕，backdrop 隱藏（它只會被不透明的 Dialog 蓋住）。
+- **浮動按鈕的位置**：桌面在 viewport 右下角；手機版同樣在右下，但抬高到讀墨底部分頁列之上、間隔 12px。底部列的高度在執行時量測：先試讀墨真正的 `.main-menu`，再試同一個元素上的 `.nav.nav-justified`，最後是幾個通用的猜測，每個候選都必須寬度至少占 viewport 的 60%、底邊距 viewport 底部不超過 4px，才當成底部列；都不符合時改用依寬度決定的固定高度（寬度 ≤ 370px 的雙行列 76px，否則單行列 55px）。
+- **按鈕樣式**：hover 樣式在所有環境都注入，包在 `@media (hover: hover)` 裡，觸控裝置點一下後 hover 樣式才不會卡住；`cleanupMooFamilyUI` 只移除按鈕、不移除這個 `<style>`，所以靠模組層級的旗標避免重複注入。開發環境另有環境標示樣式（`injectEnvStyle`）。浮動圖示大小的設定改變時直接更新現有按鈕，不重新注入，以免失去數字標記的狀態。
+- **待處理借閱數字的請求**（`pendingBorrowBadge.ts`；何時查詢見〈讀墨帳號確認（已加入家庭時）〉）：刻意用裸的 `fetch`，因為 content script 是輕量的 IIFE bundle，不能把 `ApiClient`（認證更新、端點驗證、去重）拉進來——它在 code-split 的 Dialog 模組裡。回應的信任因此交給 `sanitizeBorrowRequests`，與 `ApiClient.listBorrowRequests` 同一道邊界，這個端點的兩個用戶端對不可信（BYO）後端回應的處理不會分歧。信封本身也不可信：只從真正的物件上讀 `.data`，陣列與元素的驗證交給 sanitizer；任何不可用的內容都降為空清單（不顯示數字），不拋錯。
+
+#### 讀墨借出自動化
+
+`extension/src/content/readmoo-lend.ts`、`readmoo-search.ts`（借出流程的 Scope B）：書主核准 MooFamily 的借閱申請時，替他依序點過讀墨原生的借出流程。
+
+- **步驟**：1. 在讀墨書櫃頁（`next.readmoo.com/read/#/library` 或 `read.readmoo.com/#/library`）找到那本書的卡片；2. 開啟書籍詳情視窗；3. 點「借出」打開借出對話框；4. 選擇與 `readmooName` 相符的家庭成員；5. 使用者**自己**按下讀墨原生 `window.confirm` 的確定；6. 等借出對話框關閉（代表借出完成）。
+- **絕不攔截原生的確認視窗**：全域覆寫 `window.confirm` 會弄壞讀墨其他無關的功能，讓使用者自己按確定，整合才安全。
+- **找書靠讀墨自己的搜尋**：讀墨書櫃是無限捲動，要借出的書可能根本不在目前渲染的 DOM 裡。`readmoo-search.ts` 操作讀墨內建的搜尋視窗，用書名把書櫃篩到目標書，再重新蓋上 fiber id，以 `bookId` 精確比對卡片。嚴格模式：就算搜尋只回一張卡，也要求 `data-moo-book-id` 完全相符，不以書名退而求其次（產品決定）。輸入框是 React 受控元件，所以用原生的 value setter 設值再送出 `input` 事件，直接指定 `input.value` 會被 React 忽略。
+- **還原使用者原本的搜尋**：`previousQuery` 讓呼叫端在整個流程結束後把書櫃還原成使用者原本的搜尋狀態（有關鍵字就重新套用，沒有就送出空查詢清掉篩選）。**時機**：成功路徑上不能在中途還原——還原會重新渲染書櫃、讓這張卡片的節點脫離 DOM，而之後開啟詳情視窗的點擊必須打在仍掛著的卡片上；呼叫端只在整個流程結束後還原。搜尋成功之後的任何失敗則由這裡負責還原，使用者不會被留在篩選過的書櫃；**順序**：先關掉殘留的視窗再還原（`clickLendButton` 可能已經開了詳情視窗，還原會重新渲染書櫃，仍開著的視窗會疊在上面）。還原是盡力而為，絕不蓋掉原本要重新拋出的錯誤。
+- **書櫃網址跟著目前的主機**：每次呼叫才解析（不是模組常數），新舊兩個主機都讓使用者留在原本的網站，兩者的路徑前綴不同（`/read/#/library` 與 `/#/library`）。
+- 每個函式都沒有狀態，可以各自測試；逾時可以注入，失敗一律拋出 `ReadmooLendError`。`readmoo-dom.ts` 是兩者共用的底層，`readmoo-lend.ts` 再匯出其中的 DOM 基本函式，打破 `readmoo-lend` ↔ `readmoo-search` 的模組循環。
 
 ---
 

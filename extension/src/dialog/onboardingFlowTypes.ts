@@ -2,9 +2,8 @@
 
 import type { ApiClient } from "../api/client";
 import type { useAutoSetup } from "./useAutoSetup";
-// Type-only, and must stay so: OnboardingViews re-exports IdleView, which
-// type-imports OnboardingState from useOnboardingFlow. A value import here
-// would close that loop into a runtime cycle.
+// Must stay type-only: OnboardingViews re-exports IdleView, which type-imports OnboardingState from
+// useOnboardingFlow, so a value import would close that loop into a runtime cycle.
 import type { ErrorAction } from "./OnboardingViews";
 import type { UseVerificationPromptResult } from "./useVerificationPrompt";
 

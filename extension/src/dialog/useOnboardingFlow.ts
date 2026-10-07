@@ -1,14 +1,5 @@
-/**
- * useOnboardingFlow — owns the state machine, handlers, and business state
- * for the Onboarding dialog. Keeps Onboarding.tsx focused on rendering and
- * lightweight UI chrome state (copied flag, hasUsedBefore).
- *
- * This module only wires the pieces together. The sub-hooks are called
- * unconditionally and in a fixed order that reproduces the original single
- * hook's call sequence: state + refs + effects, navigation, the verification
- * bridge, the single attempts, then the start / create / join flows and the
- * recovery-view handlers.
- */
+// Wires Onboarding's state machine, handlers and business state. Sub-hooks run unconditionally in a fixed
+// order: state/refs/effects, navigation, verification bridge, attempts, start/create/join, recovery views.
 
 import { useVerificationPrompt } from "./useVerificationPrompt";
 import type {

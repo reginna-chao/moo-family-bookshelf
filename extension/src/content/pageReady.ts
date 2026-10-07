@@ -1,8 +1,4 @@
-/**
- * Page ready detection for Readmoo SPA.
- * Waits for #full-page-spinner to gain the `hide` class,
- * indicating the page has finished loading.
- */
+/** Readmoo SPA page-ready detection: the page has loaded once #full-page-spinner gains `hide`. */
 
 export const PAGE_READY_TIMEOUT_MS = 5000;
 

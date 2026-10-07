@@ -31,10 +31,8 @@ export interface OnboardingProps {
   apiClient: ApiClient;
 }
 
-/** States `renderContent` answers with a view of their OWN. Every other state
- *  falls through to its final `<IdleView>` branch — including a future state
- *  added without a branch, which is why this is the complement rather than a
- *  list of the fallback states. Keep in step with `renderContent` below. */
+/** States `renderContent` gives a view of their OWN; every other one (a future state too) falls
+ *  through to `<IdleView>`, hence a complement. Keep in step with `renderContent` below. */
 const DEDICATED_VIEW_STATES = new Set<OnboardingState>([
   "welcome",
   "error",
@@ -51,28 +49,8 @@ function rendersTypedSyncCodeNote(state: OnboardingState): boolean {
   return state === "recovery-join" || !DEDICATED_VIEW_STATES.has(state);
 }
 
-/**
- * Whether the container's adopted-endpoint note would merely repeat the note
- * the view below is already showing: same screen, same address. Two amber lines
- * about one fact is what teaches a user to skim past the whole note family —
- * guaranteed in the sync-remnant prefill path, where the prefilled code's
- * `@host` IS the adopted endpoint (useOnboardingFlowState.ts).
- *
- * Suppression fires ONLY on byte-equality of two ALREADY-VALIDATED canonical
- * endpoints — `kind: "valid"` means the string came out of `validateEndpointUrl`
- * on both sides. That is the one direction in which typed text cannot vouch for
- * anything: it may HIDE a note whose content it exactly reproduces, never change
- * what a note says nor make one appear, so adoptedEndpoint.ts invariant 1 stays
- * intact. An `invalid` or absent `@host` never suppresses — there the spoof
- * warning and the status note answer different questions and must coexist, as
- * must two DIFFERENT addresses.
- *
- * No blind window: `displayedSyncCodeApiHost` (shared/api/syncCodeHost.ts)
- * delays only the `invalid` verdict, so the view's note for a `valid` host is in
- * the same commit that suppresses this one. That is load-bearing — were the
- * shared display policy ever to delay `valid` too, this would leave the settle
- * delay showing no note at all (same address only, but still a gap).
- */
+/** Whether the container note would repeat the view's note (same validated address); hides only on
+ *  equal `valid` endpoints. See docs/architecture.md → 揭露採用中的伺服器位址. */
 function isAdoptedNoteRedundant(
   state: OnboardingState,
   syncCodeInput: string,
@@ -134,11 +112,8 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
     effectiveState === "syncing-books" ||
     effectiveState === "recovering";
 
-  // One verdict per render, shared by the container note and the challenge's
-  // own note, so the two can never disclose different servers. Deliberately NOT
-  // memoized on `apiClient`: a join adopts a sync code's `@host` in place, which
-  // changes the endpoint without changing the client's identity, and a stale
-  // disclosure is the exact failure this note exists to prevent.
+  // One verdict per render for both notes; NOT memoized on `apiClient` (a join adopts `@host` in
+  // place). See docs/architecture.md → 揭露採用中的伺服器位址.
   const adoptedHost = classifyAdoptedEndpoint(apiClient);
 
   // When autoSetup owns the error state, provide an explicit retry action
@@ -208,13 +183,8 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
       );
     }
     if (effectiveState === "verify-prompt") {
-      // The challenge replaces the join screen, taking its host disclosure with
-      // it — exactly when the user is asked to hand a PIN/pattern to a server.
-      // By this point a sync-code join has already applied its `@host` to the
-      // client (performJoin leaves it applied so the challenge talks to that
-      // server), while a create/lookup challenge is still on the official
-      // default — so the adopted endpoint is the accurate answer for both. See
-      // adoptedEndpoint.ts for why the typed sync code is never the source.
+      // The challenge replaces the join screen's disclosure, so it names the ADOPTED endpoint (right
+      // for join and create/lookup alike). See docs/architecture.md → 揭露採用中的伺服器位址.
       return (
         <>
           <SyncCodeHostNote
@@ -254,15 +224,8 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
         flow.state === "recovering" ||
         flow.state === "joining") &&
         overlayMessage && <LoadingOverlay message={overlayMessage} />}
-      {/* A self-hoster's create / join / recovery actions all hit the ADOPTED
-          endpoint, so say which server that is before any of them happen. On
-          the official default classifyAdoptedEndpoint returns `none` and the
-          note renders nothing (adoptedEndpoint.ts invariant 2) — that silence
-          is the point, not a missing case. verify-prompt is excluded because it
-          renders the same note itself, with its own `verify` lead-in. The join
-          screens are excluded only when their typed-code note already names the
-          very same address — see isAdoptedNoteRedundant above for why matching
-          typed text may hide this note without ever shaping it. */}
+      {/* Names the ADOPTED server before any create/join/recovery (silent on the default); skipped on
+          verify-prompt and when redundant. See docs/architecture.md → 揭露採用中的伺服器位址. */}
       {effectiveState !== "verify-prompt" &&
         !isAdoptedNoteRedundant(
           effectiveState,

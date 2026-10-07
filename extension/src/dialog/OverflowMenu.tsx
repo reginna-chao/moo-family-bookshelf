@@ -77,11 +77,8 @@ export function OverflowMenu({
   const restoreTriggerFocus = () =>
     triggerRef.current?.focus({ preventScroll: true });
 
-  /**
-   * Shared close path (outside click, Escape, scroll, resize). Focus is handed
-   * back to the trigger ONLY when it is still inside the panel — otherwise the
-   * element the user just clicked would be robbed of focus.
-   */
+  /** Shared close path (outside click, Escape, scroll, resize). Focus returns to the trigger ONLY
+   *  if still inside the panel, or the element the user just clicked would lose it. */
   const close = () => {
     const focusWasInside = isFocusInsideMenu();
     setOpenState(false);
@@ -103,9 +100,8 @@ export function OverflowMenu({
       ) ?? [],
     );
 
-  // The panel is portaled to the end of the DOM, so keyboard Tab never lands on
-  // it. Move focus to the first item once the menu is positioned (visible), then
-  // keyboard nav below keeps focus inside until close.
+  // The portaled panel sits at the DOM's end where Tab never lands: focus its first item once
+  // positioned (visible); the keyboard nav below keeps focus inside until close.
   useEffect(() => {
     if (!open) {
       didFocusRef.current = false;
@@ -140,9 +136,8 @@ export function OverflowMenu({
       moveFocus(-1);
     } else if (e.key === "Escape") {
       e.preventDefault();
-      // Escape belongs to the menu: stop it from reaching an enclosing modal
-      // (which would otherwise close two layers at once). close() restores the
-      // trigger focus because focus is still inside the panel here.
+      // Escape belongs to the menu, not an enclosing modal (two layers would close). close()
+      // restores trigger focus, since focus is still inside the panel here.
       e.stopPropagation();
       close();
     }
@@ -157,11 +152,8 @@ export function OverflowMenu({
   const handleItemClick = (e: React.MouseEvent, item: OverflowMenuItem) => {
     e.preventDefault();
     e.stopPropagation();
-    // detail === 0 marks a keyboard-activated click (Enter/Space); restore focus
-    // to the trigger so keyboard users are not stranded after the menu unmounts.
-    // Restore BEFORE onSelect: a destructive option (e.g. 隱藏書籍) can unmount
-    // the trigger, and focusing an about-to-be-removed node strands focus on
-    // <body>.
+    // detail === 0 is a keyboard click: restore trigger focus BEFORE onSelect, since a destructive
+    // option (e.g. 隱藏書籍) can unmount the trigger and strand focus on <body>.
     const viaKeyboard = e.detail === 0;
     if (viaKeyboard) restoreTriggerFocus();
     item.onSelect();

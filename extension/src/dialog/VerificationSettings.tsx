@@ -13,13 +13,8 @@ export interface VerificationSettingsProps {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-/**
- * Per-method label, in the order the selection buttons render (Map preserves
- * insertion order). A Map, not an object literal: `method` arrives unvalidated
- * from a user-configurable backend, and a Map lookup never walks the prototype
- * chain, so a hostile `"__proto__"` / `"toString"` resolves to nothing instead
- * of an Object.prototype member React would refuse to render.
- */
+/** Per-method label in button order (a Map keeps insertion order). A Map, not an object literal: the
+ *  unvalidated `method` must not resolve `"__proto__"` / `"toString"` to a member React cannot render. */
 const METHOD_LABELS: ReadonlyMap<VerifyMethod, string> = new Map([
   ["pin", "PIN 碼"],
   ["pattern", "圖形驗證"],
@@ -159,15 +154,8 @@ export function VerificationSettings({
     setSaveState("idle");
     setSaveError("");
     const result = await apiClient.generateOtp(userId);
-    // The envelope is a bare cast, so these are `string` / `number` by type
-    // only. A non-string code is rendered as a JSX child below (React 19 throws
-    // on an object, and there is no ErrorBoundary). A non-finite expiry breaks
-    // the countdown effect above in two different ways: `Infinity` — or a
-    // string whose remaining-time arithmetic yields NaN — is truthy, so the
-    // effect mounts the 1s interval but `remaining <= 0` never becomes true
-    // and the interval never clears itself; NaN itself is falsy, so the effect
-    // early-returns and no countdown ever starts. Either way the value is
-    // unusable, so the whole response is treated as a failed generation.
+    // Bare-cast envelope: a non-string code crashes render, a non-finite expiry breaks the countdown,
+    // so either fails the generation. See docs/architecture.md → 驗證碼的產生.
     const code: unknown = result.data?.code;
     const expiresAt: unknown = result.data?.expiresAt;
     if (
@@ -177,10 +165,8 @@ export function VerificationSettings({
       !Number.isFinite(expiresAt)
     ) {
       setSaveState("error");
-      // `generateOtp` sits on the server's verify-write ceiling, so a genuine
-      // 429 is reachable here and gets the shared back-off copy (+ retryAfter)
-      // instead of the raw server message. There may be no envelope at all —
-      // this branch also catches a success envelope with malformed fields.
+      // A real 429 (verify-write ceiling) gets the shared back-off copy; there may be no error at
+      // all, since this branch also catches a success envelope with malformed fields.
       setSaveError(
         (result.error ? rateLimitedEnvelopeMessage(result.error) : null) ??
           safeErrorText(result.error?.message, "驗證碼產生失敗，請重試"),

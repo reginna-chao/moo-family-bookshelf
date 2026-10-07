@@ -37,17 +37,11 @@ export type View = "loading" | "onboarding" | "main" | "account-mismatch";
 type Tab = "family-shelf" | "personal-shelf" | "borrow" | "settings";
 
 interface AppProps {
-  /**
-   * Notifies the host (content script) of the current top-level view so it can
-   * adjust the dialog container's layout — e.g. only the "main" view uses a
-   * fixed desktop height; "loading"/"onboarding" size to their content.
-   */
+  /** Tells the host (content script) the top-level view to adapt the container layout: only
+   *  "main" uses a fixed desktop height; "loading"/"onboarding" size to their content. */
   onViewChange?: (view: View) => void;
-  /**
-   * Notifies the host of the incoming PENDING borrow count so it can keep the
-   * floating button badge live. Only fires while the main view (and its
-   * FamilyDataProvider) is mounted.
-   */
+  /** Tells the host the incoming PENDING borrow count to keep the floating-button badge live.
+   *  Fires only while the main view (and its FamilyDataProvider) is mounted. */
   onPendingBorrowCountChange?: (count: number) => void;
 }
 
@@ -63,9 +57,8 @@ export function App({
   // Why the family binding was torn down (removed / family gone / full), shown
   // above Onboarding so the forced flip doesn't look like a spontaneous reset.
   const [familyGoneNotice, setFamilyGoneNotice] = useState<string | null>(null);
-  // Bumped after a successful re-verification so FamilyDataProvider re-runs its
-  // initial load (members → bookshelf → borrow) and the stale 401 view clears
-  // automatically, without a manual "重試" tap.
+  // Bumped after a successful re-verification: FamilyDataProvider re-runs its initial load
+  // (members → bookshelf → borrow), so the stale 401 view clears without a manual "重試" tap.
   const [reloadSignal, setReloadSignal] = useState(0);
   const apiClientRef = useRef(new ApiClient());
   // A teardown or join landing during the boot account check beats its result.
@@ -82,9 +75,8 @@ export function App({
     setReloadSignal((n) => n + 1);
   }, []);
 
-  // Re-verification prompt: shown when a dead token can only be recovered by
-  // re-supplying the user's PWA-login verification secret (Invariant 2). Wires
-  // apiClient.onReauthRequired; the overlay renders on top of the main view.
+  // Re-verification prompt for a dead token only the PWA-login secret can recover (Invariant 2).
+  // Wires apiClient.onReauthRequired; the overlay renders on top of the main view.
   const reauth = useReauth(apiClientRef.current, {
     onSuccess: handleReauthSuccess,
   });
@@ -153,9 +145,8 @@ export function App({
           setView("onboarding");
         }
       } catch {
-        // Background asleep/unavailable or storage read failed after the
-        // context-valid guard passed. Don't leave `view` stuck on "loading";
-        // fall back to onboarding so the UI stays interactive.
+        // Background asleep or storage read failed past the context-valid guard: fall back to
+        // onboarding so the UI stays interactive instead of stuck on "loading".
         if (cancelled || bootSupersededRef.current) return;
         setView("onboarding");
       }
@@ -343,13 +334,11 @@ function MainContent({
     (r) => r.ownerId === userId && r.status === BorrowStatus.PENDING,
   ).length;
 
-  // Report the incoming-pending count to the host so it can keep the floating
-  // button badge live (including clearing it at 0). Never after unmount (effects
-  // don't run post-unmount), so no cleanup is required.
+  // Report the incoming-pending count (0 clears it) for the floating-button badge. Effects never
+  // run after unmount, so no cleanup is required.
   useEffect(() => {
-    // Skip the initial load window: borrowRequests is [] until the fetch lands,
-    // so reporting here would flash a transient 0 that clobbers the already-
-    // correct badge (injected at mount) if the user opens+closes quickly.
+    // Skip the initial load: borrowRequests is [] until the fetch lands, and a transient 0 would
+    // clobber the correct badge (injected at mount) if the user opens and closes quickly.
     if (borrowRequestsState !== "loaded") return;
     onPendingBorrowCountChange?.(incomingPendingCount);
   }, [borrowRequestsState, incomingPendingCount, onPendingBorrowCountChange]);

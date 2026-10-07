@@ -32,17 +32,8 @@ export function useFamilySettingsLeave({
   const [leaveError, setLeaveError] = useState("");
 
   const settleLeave = (response: ApiResponse<{ ok: boolean }>) => {
-    // Self-leave, so MEMBER_NOT_FOUND can only mean "already not a member":
-    // an earlier leave half-failed server-side (member list updated, revoke
-    // failed) and this retry has now finished it. Treat it as success —
-    // showing an error and keeping the local family lets silent recovery
-    // re-join the family the user just left. FAMILY_NOT_FOUND is the same
-    // outcome: with the family record gone there is nothing left to leave —
-    // a sole-owner dissolve that half-failed after deleting the record (its
-    // retries keep answering this 404), or a family dissolved meanwhile —
-    // and keeping the local family would strand the user on a family that
-    // no longer exists. Mirrored in pwa/src/hooks/useLeaveFamily.ts
-    // settleLeave; keep the two identical.
+    // MEMBER_NOT_FOUND / FAMILY_NOT_FOUND on a self-leave mean "already left": treat as success.
+    // Why: docs/architecture.md → 移除成員與離開家庭的重試; PWA twin in .claude/rules/frontend.md.
     const code = response.error?.code;
     const alreadyLeft =
       code === "MEMBER_NOT_FOUND" || code === "FAMILY_NOT_FOUND";

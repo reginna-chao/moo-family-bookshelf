@@ -1,11 +1,5 @@
-/**
- * 繁體中文 copy for the member-settings write (PATCH
- * /api/family/:id/member/:uid), which is rate limited server-side.
- *
- * Extracted from `MemberList` because that endpoint has more than one caller:
- * `BorrowTab`'s readmoo member picker PATCHes `readmooName` too, and a 429 must
- * read the same in both places.
- */
+// 繁體中文 copy for the rate-limited member-settings PATCH (/api/family/:id/member/:uid), shared by
+// MemberList and BorrowTab's Readmoo member picker (it PATCHes readmooName) so a 429 reads the same.
 
 import { ApiError, AUTH_REFRESH_RATE_LIMITED } from "../api/types";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";

@@ -25,10 +25,8 @@ export function useFamilyShelfPrefs(
   const [hiddenRefs, setHiddenRefs] = useState<Set<string>>(new Set());
   const [favoriteRefs, setFavoriteRefs] = useState<Set<string>>(new Set());
   const [syncFailed, setSyncFailed] = useState(false);
-  /**
-   * Latest userId/apiClient, refreshed every render so any flush — including
-   * the unmount one — reads current values, not those captured at mount.
-   */
+  /** Latest userId/apiClient, refreshed every render so any flush (the unmount one too) reads
+   *  current values, not those captured at mount. */
   const ioRef = useRef<FamilyPrefsIo>({ userId, api: apiClient });
   ioRef.current = { userId, api: apiClient };
   const [sync] = useState(
@@ -48,9 +46,8 @@ export function useFamilyShelfPrefs(
     return () => sync.detach();
   }, [sync]);
 
-  // `[userId, apiClient]` is the retry trigger: until a load succeeds a change
-  // re-attempts it; afterwards the controller skips the body, so an identity
-  // change never clobbers unsaved optimistic edits.
+  // `[userId, apiClient]` retries the load until one succeeds; after that the controller skips it,
+  // so an identity change never clobbers unsaved optimistic edits.
   useEffect(() => {
     sync.load();
   }, [sync, userId, apiClient]);

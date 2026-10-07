@@ -1,14 +1,5 @@
-/**
- * Mobile-only layout helpers for the content-script-injected MooFamily UI.
- *
- * The content script runs outside React, so responsive behaviour is driven by
- * `window.matchMedia(MOBILE_MEDIA_QUERY)` rather than `useMediaQuery`. Every
- * listener registered here is tracked so it can be torn down on dialog close,
- * button removal, or extension-context invalidation (see `stopAllMobileWatchers`).
- *
- * Desktop layout (> 600px) is intentionally left untouched: each `apply*`
- * helper writes the original desktop values in its non-mobile branch.
- */
+/** Mobile layout for the content-script UI (outside React, so `matchMedia`); every listener is tracked
+ *  for teardown, desktop keeps its originals. See docs/architecture.md → 浮動按鈕與 Dialog 外殼. */
 
 import {
   MOBILE_MEDIA_QUERY,
@@ -25,10 +16,8 @@ const BOTTOM_NAV_HEIGHT_PX = 55;
 /** Fallback height of Readmoo's two-line bottom nav (phones ≤ 370px). */
 const BOTTOM_NAV_HEIGHT_SMALL_PX = 76;
 
-/**
- * A measured nav candidate is only trusted as the bottom tab bar when it spans
- * most of the viewport width and sits near the very bottom of the viewport.
- */
+/** A measured nav candidate is trusted as the bottom tab bar only when it spans most of the viewport
+ *  width and sits near its very bottom. */
 const BOTTOM_NAV_MIN_WIDTH_RATIO = 0.6;
 const BOTTOM_NAV_MAX_BOTTOM_GAP_PX = 4;
 
@@ -73,13 +62,8 @@ export function stopAllMobileWatchers(): void {
 /** Desktop card height ceiling; the main view's fixed height equals this cap. */
 const DESKTOP_MAX_HEIGHT = "80vh";
 
-/**
- * Desktop card geometry, excluding `height`. The fixed `height: 80vh` is applied
- * separately and only for the "main" view (see `applyDialogLayout`) so the
- * onboarding/loading screens size to their content (capped by `maxHeight` and
- * floored by the container's `min-height`) instead of leaving a tall blank gap
- * below short content.
- */
+/** Desktop card geometry minus `height`: the fixed 80vh goes on the main view only, so onboarding /
+ *  loading fit their content (capped by maxHeight, floored by min-height) with no tall blank gap. */
 const DESKTOP_DIALOG_BASE_STYLE: Record<string, string> = {
   top: "50%",
   left: "50%",
@@ -90,10 +74,7 @@ const DESKTOP_DIALOG_BASE_STYLE: Record<string, string> = {
   borderRadius: "12px",
 };
 
-/**
- * Fixed desktop height for the main view, so switching tabs never jumps height.
- * Equals the card's max-height ceiling, so the main view fills exactly to the cap.
- */
+/** Fixed desktop main-view height (no jump between tabs), equal to the card's max-height cap. */
 const DESKTOP_MAIN_HEIGHT = DESKTOP_MAX_HEIGHT;
 
 const MOBILE_DIALOG_STYLE: Record<string, string> = {
@@ -169,12 +150,8 @@ export function createCloseIcon(
   button.setAttribute("aria-label", "關閉");
   button.title = "關閉";
   button.innerHTML = CLOSE_ICON_SVG;
-  // Static structural styles live in SHELL_BOOTSTRAP_CSS (class `.moo-shell-close`),
-  // injected into the shadow root before this button is appended so it never
-  // flashes unstyled ahead of the full styles.css (loaded later by mountDialog).
-  // The id is retained for getElementById / E2E selectors. Only the mobile/
-  // desktop `display` toggle stays inline (dynamic) — the class omits `display`
-  // so it never fights this per-breakpoint value.
+  // Static styles: SHELL_BOOTSTRAP_CSS (`.moo-shell-close`, injected first; id kept for E2E). Only the
+  // per-breakpoint `display` stays inline — the class omits it so the two never fight.
   button.className = "moo-shell-close";
   button.style.display = isMobile ? "inline-flex" : "none";
   button.addEventListener("click", onClose);
@@ -229,21 +206,12 @@ function fallbackNavHeight(): number {
     : BOTTOM_NAV_HEIGHT_PX;
 }
 
-/**
- * Measure the rendered height of the Readmoo bottom tab bar.
- *
- * Readmoo's actual bottom bar (`.main-menu`) is tried first, ahead of a small
- * allowlist of generic guesses kept as a fallback in case the class names
- * change. Each candidate is validated to actually look like a bottom bar (spans
- * most of the viewport width, sits at the viewport bottom) before being
- * trusted. Returns the height in CSS pixels, or null when no candidate
- * qualifies so the caller can fall back to a hardcoded height.
- */
+/** Rendered height (CSS px) of Readmoo's bottom tab bar — the first candidate `isBottomBar` accepts —
+ *  or null so the caller uses the hardcoded fallback height. */
 function findBottomNavHeight(): number | null {
   const selectors = [
-    // `.main-menu` is Readmoo's actual bottom tab bar; `.nav.nav-justified` is a
-    // defensive secondary class on the SAME element (kept in case `main-menu`
-    // changes). The rest are generic fallbacks; all are validated by `isBottomBar`.
+    // `.main-menu` is Readmoo's real bar, `.nav.nav-justified` a second class on the SAME element (in
+    // case `main-menu` changes); the rest are generic guesses in case the class names change.
     ".main-menu",
     ".nav.nav-justified",
     "nav[class*='bottom']",
@@ -262,11 +230,8 @@ function findBottomNavHeight(): number | null {
   return null;
 }
 
-/**
- * A candidate qualifies as the bottom tab bar when it has a non-zero size,
- * spans most of the viewport width, and its bottom edge sits at (or just above)
- * the viewport bottom.
- */
+/** A candidate is the bottom tab bar when it has a non-zero size, spans most of the viewport width, and
+ *  its bottom edge sits at (or just above) the viewport bottom. */
 function isBottomBar(el: HTMLElement): boolean {
   const rect = el.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return false;

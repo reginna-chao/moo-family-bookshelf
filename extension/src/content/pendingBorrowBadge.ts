@@ -59,20 +59,15 @@ export async function updatePendingBorrowBadge(
     }
 
     const url = `${apiEndpoint.replace(/\/+$/, "")}/api/family/${encodeURIComponent(familyId)}/borrow`;
-    // The bare fetch is deliberate: this content script is a light IIFE bundle
-    // and must not pull in ApiClient (auth-refresh, endpoint validation, dedup),
-    // which lives in the code-split dialog module. Payload trust is therefore
-    // delegated to `sanitizeBorrowRequests` — the same boundary
-    // `ApiClient.listBorrowRequests` uses — so the two clients of this endpoint
-    // cannot diverge on how they treat an untrusted (BYO) backend response.
+    // Bare fetch on purpose (this light IIFE must not pull in ApiClient); trust goes through the same
+    // `sanitizeBorrowRequests` boundary. See docs/architecture.md → 浮動按鈕與 Dialog 外殼.
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
     if (!res.ok) return;
     const json: unknown = await res.json();
-    // The envelope is untrusted too: read `.data` only off a real object, then
-    // let the sanitizer own array/element validation. Anything unusable degrades
-    // to an empty list (badge simply absent), never a throw.
+    // The envelope is untrusted too: `.data` is read only off a real object, the sanitizer owns the
+    // rest; anything unusable degrades to an empty list (no badge), never a throw.
     const data =
       typeof json === "object" && json !== null && "data" in json
         ? json.data

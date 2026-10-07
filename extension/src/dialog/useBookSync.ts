@@ -1,13 +1,5 @@
-/**
- * Hook for book sync in the dialog UI.
- * Provides:
- * - Auto-sync on personal-shelf mount (a full sync, rate limited by autoSyncInterval)
- * - Manual sync button handler (no rate limiting)
- *
- * Reads the account check from AccountCheckContext (issues #271, #277): every
- * sync re-reads `#/me` and compares right before uploading. Unconfirmed at
- * mount → no auto-sync; a sync that cannot confirm the account uploads nothing.
- */
+// Book sync: auto full sync on personal-shelf mount (throttled by autoSyncInterval) and unthrottled
+// manual sync, each re-checking the account (#271/#277) — .claude/rules/frontend.md → Dialog State Machine.
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ApiClient, BookEntry } from "../api/client";
@@ -35,10 +27,8 @@ export interface UseBookSyncReturn {
   syncStatus: SyncStatus;
   syncError: string;
   lastSyncBooks: BookEntry[];
-  /**
-   * Books the last SUCCESSFUL sync moved to their new Readmoo id. Always from
-   * the same sync as `lastSyncBooks` (both change in the same render).
-   */
+  /** Books the last SUCCESSFUL sync moved to their new Readmoo id; always from the same sync as
+   *  `lastSyncBooks` (both change in the same render). */
   lastSyncRenamedBooks: RenamedBook[];
   /** The `lastUpdated` that same sync's PUT stored; undefined before a sync or when its PUT response carries none. */
   lastSyncLastUpdated: string | undefined;
@@ -65,9 +55,8 @@ export function useBookSync({
   const [progressMessage, setProgressMessage] = useState("");
   const autoSyncTriggered = useRef(false);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Latest familyId + auto-return callback held in refs so the sync effect /
-  // manual-sync callback can read them without widening their dependency arrays
-  // (and without re-triggering the once-per-session auto sync).
+  // familyId and the auto-return callback live in refs: reading them must not widen dependency
+  // arrays or re-trigger the once-per-session auto sync.
   const familyIdRef = useRef(familyId);
   familyIdRef.current = familyId;
   const onAutoReturnedRef = useRef(onAutoReturned);
@@ -84,10 +73,8 @@ export function useBookSync({
     };
   }, []);
 
-  // Mechanism A: Auto full sync when the personal shelf mounts.
-  // Throttled by canAutoSync() (LAST_SYNC_AT_KEY + autoSyncInterval); `never`
-  // disables it. Uses navigate:true so it works regardless of the current hash
-  // (syncBooks restores the original hash afterwards), matching manual sync.
+  // Mechanism A: auto full sync on mount, throttled by canAutoSync() (LAST_SYNC_AT_KEY +
+  // autoSyncInterval; `never` disables). navigate:true, like manual sync: syncBooks restores the hash.
   useEffect(() => {
     if (autoSyncTriggered.current) return;
     // Unconfirmed account: never upload without a click this page load.
@@ -145,9 +132,8 @@ export function useBookSync({
 
   // Mechanism B: Manual sync (no rate limiting)
   const triggerManualSync = useCallback(async () => {
-    // A manual sync supersedes the pending done→idle reset: letting the old
-    // timer fire mid-sync flips syncStatus to "idle" and re-enables the sync
-    // button, which is the only guard against a second concurrent syncBooks().
+    // Cancel the pending done→idle reset: firing mid-sync would re-enable the button, the only
+    // guard against a second concurrent syncBooks().
     if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
     setSyncStatus("syncing");
     setSyncError("");

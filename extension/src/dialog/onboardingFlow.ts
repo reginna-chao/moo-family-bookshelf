@@ -1,11 +1,5 @@
-/**
- * Onboarding business flow helpers — pure logic extracted from Onboarding.tsx
- * so the component stays focused on UI state and rendering.
- *
- * Each exported function is a single side-effectful operation against the
- * API client, chrome storage, and (best-effort) the in-page cache.
- * Callers are expected to map errors into UI state.
- */
+// Onboarding flow helpers out of Onboarding.tsx: each export is one side-effectful operation on the
+// API client, chrome storage and (best-effort) the in-page cache; callers map errors to UI state.
 
 import browser from "webextension-polyfill";
 import { ApiClient, FamilyGroup } from "../api/client";
@@ -26,13 +20,8 @@ import { migratePersonalBooksCache } from "./personalBooksCacheMigration";
 // Re-exported so existing `./onboardingFlow` importers keep working.
 export { migratePersonalBooksCache };
 
-/**
- * Persist auth/family credentials to chrome.storage.local.
- *
- * familyId is written DIRECTLY to local here (not only via the background
- * SET_FAMILY_ID message) so persistence survives Firefox's sleeping background
- * event page, where the message round-trip can fail.
- */
+/** Persist auth/family credentials to chrome.storage.local — familyId DIRECTLY, not only via the
+ *  background SET_FAMILY_ID message, which Firefox's sleeping event page can lose. */
 async function persistJoinCredentials(opts: {
   userId: string;
   familyId?: string;
@@ -325,9 +314,8 @@ export function restoreApiEndpoint(
   try {
     apiClient.setEndpoint(endpoint);
   } catch (err) {
-    // `endpoint` came from getEndpoint(), so it already passed validation.
-    // Guarded anyway: this runs on error paths, where a throw would replace the
-    // failure the caller is in the middle of reporting.
+    // Already validated (from getEndpoint()), but guarded: on an error path a throw would replace
+    // the failure the caller is reporting.
     console.warn("[Onboarding] Failed to restore previous API endpoint", err);
   }
 }
@@ -368,13 +356,8 @@ export async function performJoin(opts: {
   let adoptedEndpoint: string | null = null;
 
   if (decoded.apiHost) {
-    // setEndpoint validates the @host with the same rules the settings/confirm
-    // paths use — it now rejects embedded credentials and unsafe schemes, so a
-    // sync code carrying `https://real.example@evil.com` throws here. Abort the
-    // join with a clear message rather than letting it bubble up as a raw
-    // English error; nothing is persisted and no join is attempted, and the
-    // client stays on its previous endpoint (setEndpoint throws before it
-    // assigns).
+    // setEndpoint's shared validation throws (before assigning) on embedded credentials or unsafe
+    // schemes: abort with clear copy — no join, nothing persisted, client on its old endpoint.
     try {
       opts.apiClient.setEndpoint(decoded.apiHost);
     } catch (err) {
@@ -409,14 +392,8 @@ export async function performJoin(opts: {
     };
   }
 
-  // Joined: only now has this endpoint earned the right to stick. Persisted
-  // through the same helper the settings path uses — a direct storage.local
-  // write (authoritative) plus a best-effort SET_API_ENDPOINT message, because
-  // on Firefox's sleeping background event page the message alone can be
-  // dropped, which used to leave the member silently back on the default
-  // endpoint. The helper also clears any stale "declined family endpoint"
-  // marker, which is right here: joining through an @host sync code IS an
-  // explicit choice of that endpoint.
+  // Joined: only now does the endpoint stick, via the confirm path's helper (direct storage.local
+  // write; clears a stale decline). See docs/architecture.md → 同步碼位址的驗證與揭露.
   if (adoptedEndpoint !== null) {
     await persistAcceptedFamilyEndpoint(adoptedEndpoint);
   }

@@ -20,9 +20,8 @@ export type CreateAttempt =
       retryAfter?: number;
     };
 
-// The store's setters and refs appear in the dependency arrays below only
-// because they arrive as arguments; they are identity-stable, so every
-// callback is memoised exactly as when it lived in useOnboardingFlow.
+// Store setters/refs sit in the deps only because they arrive as arguments; being identity-stable,
+// every callback memoises exactly as it did inside useOnboardingFlow.
 export function useOnboardingAttempts(
   store: OnboardingFlowStore,
   { apiClient, autoSetup, onFamilyJoined }: UseOnboardingFlowOptions,
@@ -85,9 +84,8 @@ export function useOnboardingAttempts(
             retryAfter: err.retryAfter,
           };
         }
-        // Unexpected failure (network / storage). Reported as a value rather
-        // than rethrown: this also runs inside the verification prompt's retry
-        // closure, where a rejection would leave the prompt stuck submitting.
+        // Unexpected failure (network / storage), returned rather than rethrown: inside the prompt's
+        // retry closure a rejection would leave it stuck submitting.
         return {
           ok: false,
           errorCode: "UNEXPECTED_ERROR",

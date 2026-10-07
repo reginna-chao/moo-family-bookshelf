@@ -42,11 +42,8 @@ interface FamilyDataProviderProps {
   familyId: string;
   userId: string;
   apiClient: ApiClient;
-  /**
-   * Monotonic counter; each change re-runs the initial load (members →
-   * bookshelf → borrow) in place, preserving mounted component state. App bumps
-   * it after a successful re-verification so a stale 401 view reloads itself.
-   */
+  /** Monotonic counter: each change re-runs the initial load (members → bookshelf → borrow) in place,
+   *  keeping mounted state. App bumps it after a re-verification so a stale 401 view reloads. */
   reloadSignal?: number;
   children: React.ReactNode;
 }

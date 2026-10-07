@@ -1,15 +1,5 @@
-/**
- * Fiber bridge script — runs in the page's MAIN WORLD.
- *
- * The Content Script runs in Chrome's isolated world and cannot see
- * React fiber properties (`__reactFiber*`) on DOM elements. This script
- * is injected as a `<script>` tag so it shares the page's JS context
- * and can read fiber internals.
- *
- * Communication uses the shared DOM: this script writes `data-moo-book-id`
- * attributes directly onto `.library-item` elements so the Content Script
- * can read them without CustomEvents or cache matching.
- */
+/** Fiber bridge — runs in the page's MAIN WORLD to read React fiber props the isolated content script
+ *  cannot, stamping them onto the shared DOM. See docs/architecture.md → Content Script 的擷取與注入. */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 
@@ -19,16 +9,8 @@ const ATTR_AUTHOR = "data-moo-author";
 const ATTR_CATEGORY = "data-moo-category";
 const MAX_CATEGORY_LEN = 50;
 
-/**
- * For each `.library-item`, find any child element with a React fiber,
- * walk up the fiber tree to find `libraryItem`, and stamp book metadata
- * as data attributes on the library item element.
- *
- * Attributes stamped:
- * - `data-moo-book-id`   — real bookId from `libraryItem.book.id`
- * - `data-moo-cover-url` — medium cover from `book.attributes.cover`
- * - `data-moo-author`    — author from `book.attributes.author`
- */
+/** For each `.library-item`, walk a child's React fiber up to `libraryItem` and stamp `book.id`, the
+ *  cover (medium, else small), author and category (`main_subject`) as `data-moo-*` attributes. */
 function stampBookData(): void {
   const items = document.querySelectorAll(READMOO_SELECTORS.libraryItem);
 
@@ -77,12 +59,8 @@ function stampBookData(): void {
   }
 }
 
-/**
- * Published on `<html>`: how many items the library grid holds for the
- * current filter (`filteredItemList.length` of the library host component).
- * Removed whenever it cannot be read, so a stale value never survives.
- * Must equal `ATTR_LIST_TOTAL` in `fiber-data.ts` (separate bundle).
- */
+/** On `<html>`: the grid's item count for the current filter (`filteredItemList.length`), removed when
+ *  unreadable so no stale value survives. Must equal `ATTR_LIST_TOTAL` in `fiber-data.ts`. */
 const ATTR_LIST_TOTAL = "data-moo-list-total";
 /** Parent row of the library cards — the host lookup start when no card renders. */
 const LIBRARY_ROW_SELECTOR = ".books .row";

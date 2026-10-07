@@ -40,22 +40,16 @@ export function FamilySettings({
   const [personalOpen, setPersonalOpen] = useState(true);
   const [familyOpen, setFamilyOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(true);
-  /**
-   * The member removed most recently in THIS dialog session, kept only to offer
-   * the "lift the rejoin block" entry (see `UnkickNotice`). Deliberately local:
-   * closing the dialog forgets it, and a second removal replaces the first.
-   * Held here rather than inside `MemberList` so a failed member-list refresh —
-   * which unmounts `MemberList` — cannot swallow the entry.
-   */
+  /** Latest member removed in THIS dialog session, only for `UnkickNotice`'s entry (closing forgets
+   *  it; a new removal replaces it). Held here so a failed refresh unmounting MemberList keeps it. */
   const [recentlyRemoved, setRecentlyRemoved] =
     useState<RemovedMemberInfo | null>(null);
   const { size: iconSize, setSize: setIconSize } = useFloatingIconSize();
   const { interval: autoSyncInterval, setInterval: setAutoSyncInterval } =
     useAutoSyncInterval();
   const selfMember = members.find((m) => m.userId === userId);
-  // Pass the server's authoritative displayName from context. While members is
-  // still loading, selfMember is undefined → useDisplayName falls back to
-  // chrome.storage.local for an optimistic display.
+  // The server's displayName from context; while members load it is undefined and useDisplayName
+  // shows chrome.storage.local's value optimistically.
   const initialDisplayName = selfMember?.displayName;
   const displayNameState = useDisplayName({
     apiClient,
@@ -64,9 +58,8 @@ export function FamilySettings({
     initialDisplayName,
   });
 
-  // Hook call order below is load-bearing: it keeps the effects in their
-  // original order (copy-timer cleanup → GET_SYNC_ARCHIVED → endpoint switch
-  // → sync code).
+  // Hook call order is load-bearing: effects run copy-timer cleanup → GET_SYNC_ARCHIVED →
+  // endpoint switch → sync code.
   const { copied, inviteCopied, handleCopy, handleInviteCopy } =
     useFamilySettingsCopy(syncCode);
   const { syncArchived, handleToggleSyncArchived } =
@@ -81,10 +74,8 @@ export function FamilySettings({
   });
   const { adoptedEndpoint } = endpointSwitch;
 
-  // Build the sync code / invite / QR from the endpoint THIS device has ADOPTED,
-  // never from the family record's value: a member who declined a switch must
-  // not distribute (or re-scan into a second device) the endpoint they refused.
-  // adoptedEndpoint is state, so a confirmed switch refreshes the code in place.
+  // Sync code / invite / QR use the endpoint THIS device ADOPTED, never the record's: a member must
+  // not hand out the endpoint they declined. Being state, a confirmed switch refreshes it in place.
   useEffect(() => {
     const apiHost =
       adoptedEndpoint === DEFAULT_API_ENDPOINT ? undefined : adoptedEndpoint;

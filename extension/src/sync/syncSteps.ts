@@ -1,8 +1,5 @@
-/**
- * Steps of `syncBooks` (sync/syncBooks.ts) that write nothing: the scrape,
- * the borrow-list fetch and the id-change resolution of the merged list. Kept
- * apart so the orchestrator stays short.
- */
+/** The steps of `syncBooks` (sync/syncBooks.ts) that write nothing — scrape, borrow-list fetch,
+ *  id-change resolution of the merged list — kept apart so the orchestrator stays short. */
 
 import browser from "webextension-polyfill";
 import { ApiClient, BookEntry, BoolFlag, BorrowRequest } from "../api/client";
@@ -25,10 +22,8 @@ import {
 export interface SyncScrape extends ScrapeResult {
   /** The 同步封存書 setting this scrape ran with. */
   syncArchived: BoolFlag;
-  /**
-   * The archive was fully scraped this time (同步封存書 on AND the archive
-   * scrape complete) — unlike `complete`, false whenever the archive was skipped.
-   */
+  /** The archive was fully scraped this time (同步封存書 on AND the archive scrape complete); unlike
+   *  `complete`, false whenever the archive was skipped. */
   archiveCovered: boolean;
 }
 

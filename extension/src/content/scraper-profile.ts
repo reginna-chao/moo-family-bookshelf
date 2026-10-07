@@ -1,7 +1,4 @@
-/**
- * Profile scraping for the Readmoo `#/me` page. Re-exported by `./scraper`,
- * which stays the single import entry point for callers.
- */
+/** Profile scraping for the Readmoo `#/me` page; re-exported by `./scraper`, the single import entry. */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 

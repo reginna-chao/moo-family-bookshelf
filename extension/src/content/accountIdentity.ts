@@ -1,13 +1,5 @@
-/**
- * Does the Readmoo account logged in on the page own the stored userId?
- * (issue #271). The extension's identity lives in chrome.storage, i.e. in the
- * browser profile, so a second Readmoo account in the same profile would
- * otherwise act as the first one.
- *
- * Pure: no navigation, no storage. Callers obtain the email (content/
- * hashNavigation.ts → readMePageProfile, a scrape already on `#/me`, or
- * Readmoo's login cookie via content/pageAccountCookie.ts).
- */
+/** Does the page's Readmoo account own the stored userId (#271)? Pure — no navigation, no storage; the
+ *  caller supplies the email. See docs/architecture.md → 讀墨帳號確認（已加入家庭時）. */
 
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 

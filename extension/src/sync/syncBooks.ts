@@ -1,12 +1,5 @@
-/**
- * Shared book sync infrastructure used by:
- * A) Auto full sync on personal-shelf mount (throttled by autoSyncInterval)
- * B) Manual sync button (no throttle)
- *
- * Both run a single complete scrape + upload. Background scheduled sync
- * (chrome.alarms) was removed — sync only happens when the user opens their
- * personal shelf.
- */
+/** Book sync shared by (A) the auto full sync on personal-shelf mount (throttled by autoSyncInterval)
+ *  and (B) the manual sync button (no throttle). See docs/architecture.md → 書單同步. */
 
 import browser from "webextension-polyfill";
 import { ApiClient, BookEntry } from "../api/client";
@@ -48,10 +41,8 @@ export function isAutoSyncInterval(v: unknown): v is AutoSyncInterval {
   return v === "daily" || v === "weekly" || v === "monthly" || v === "never";
 }
 
-/**
- * Shared interval gate: enough time has passed since the timestamp at `timestampKey`,
- * relative to the user-configured `autoSyncInterval`.
- */
+/** Interval gate: enough time has passed since the timestamp at `timestampKey` for the
+ *  user-configured `autoSyncInterval` (`never` → always false). */
 async function canSyncByInterval(timestampKey: string): Promise<boolean> {
   const result = await browser.storage.local.get([
     timestampKey,
@@ -81,11 +72,8 @@ export interface SyncBooksOptions {
   apiClient: ApiClient;
   /** Optional progress callback for the paginated scrape (Wave G) */
   onProgress?: ScrapeProgressCallback;
-  /**
-   * When present, the family's borrow list is fetched once before upload: lent
-   * books are protected from id-change resolution, and after upload books
-   * that reappeared in the scrape get their LENT requests marked RETURNED.
-   */
+  /** When present, the borrow list is fetched once before upload: lent books are shielded from
+   *  id-change resolution, and reappeared books get their LENT requests marked RETURNED after it. */
   familyId?: string;
 }
 
@@ -93,10 +81,8 @@ export interface SyncBooksResult {
   success: boolean;
   books: BookEntry[];
   error?: string;
-  /**
-   * RequestIds of LENT requests auto-marked RETURNED this sync (best-effort).
-   * Callers can derive the count via `.length` and apply the local status change.
-   */
+  /** RequestIds of LENT requests auto-marked RETURNED this sync (best-effort); callers derive the
+   *  count via `.length` and apply the local status change. */
   autoReturnedRequestIds?: string[];
   /** Saved books replaced by their new Readmoo id this sync (`sync/renamedBooks.ts`). */
   renamedBooks?: RenamedBook[];
@@ -131,10 +117,8 @@ export async function syncBooks(
   const originalHash = window.location.hash;
   const isOnLibrary = originalHash.includes("#/library");
 
-  // Readmoo's library is a SPA that can stay open for days, so warn-once state
-  // bound to page load would fire at most once ever. Reset it per sync instead:
-  // if a degraded path (legacy selector, rejected bookId) is still being hit,
-  // it must show up in the console on every sync, not only the first.
+  // Reset warn-once state per sync, not per page load (the SPA stays open for days): a degraded path
+  // (legacy selector, rejected bookId) must warn on every sync, not only the first.
   resetScrapeWarnings();
 
   try {
@@ -178,9 +162,8 @@ export async function syncBooks(
     // honours the user's configured interval before syncing again.
     await browser.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now() });
 
-    // Step 8 (best-effort, does NOT block/affect the sync result): auto-detect
-    // returned books and mark their LENT requests RETURNED, reusing the borrow
-    // list fetched before upload (skipped when that fetch failed).
+    // Step 8 (best-effort, never affects the sync result): mark returned books' LENT requests
+    // RETURNED, reusing the pre-upload borrow list (skipped when that fetch failed).
     let autoReturnedRequestIds: string[] | undefined;
     if (familyId) {
       autoReturnedRequestIds = requests

@@ -1,14 +1,8 @@
-/**
- * Content Script — injected into Readmoo pages.
- * Responsibilities:
- * 1. Inject the "家庭書櫃" button into the page
- * 2. Mount the Dialog UI when button is clicked
- */
+/** Content Script on Readmoo pages: injects the "家庭書櫃" button and mounts the Dialog on click.
+ *  Shell lifecycle: docs/architecture.md → 浮動按鈕與 Dialog 外殼. */
 
-// The scraper module is statically imported (via ./profileCache, bundled into the
-// content script IIFE) and also by syncBooks.ts (bundled into the ESM content-sync
-// module). This intentional duplication is safe because the scraper is stateless —
-// it only reads DOM elements and returns data, with no shared mutable state.
+// The scraper is bundled twice on purpose (this IIFE via ./profileCache, the ESM content-sync module
+// via syncBooks.ts): it is stateless — reads the DOM, holds no shared mutable state.
 import browser from "webextension-polyfill";
 import { tryScrapeAndCacheEmail } from "./profileCache";
 import {
@@ -37,10 +31,8 @@ import { isReadmooAppPath } from "moo-family-bookshelf-shared/config/readmoo";
 
 const APP_ENV = getAppEnv();
 
-/**
- * Shape of the code-split dialog module loaded at runtime via getURL().
- * `mountDialog` returns an unmount handle we must retain and call on close.
- */
+/** The code-split dialog module loaded via getURL(); `mountDialog` returns an unmount handle that
+ *  must be kept and called on close. */
 type DialogModule = typeof import("../dialog/main");
 
 /** Disposer for the floating button's breakpoint watcher (see injection). */
@@ -49,18 +41,12 @@ let disposeButtonWatcher: (() => void) | null = null;
 /** Disposer for the open dialog's breakpoint watcher (see toggleDialog). */
 let disposeDialogWatcher: (() => void) | null = null;
 
-/**
- * Unmount handle for the dialog's React root, returned by mountDialog. Held at
- * module scope because mount (inside a dynamic import) and the teardown paths
- * are separate calls that must share it across the open/close lifecycle.
- */
+/** The dialog React root's unmount handle (from mountDialog), module-scoped because the mount and the
+ *  teardown paths are separate calls sharing it across the open/close lifecycle. */
 let unmountDialogApp: (() => void) | null = null;
 
-/**
- * Unmount the dialog's React root if one is mounted, then clear the handle.
- * Guarded: an unmount failure must never block the surrounding DOM teardown.
- * Removing the host DOM alone would leak the root (its effects keep running).
- */
+/** Unmount the dialog's React root if mounted, then clear the handle; guarded so a failure never blocks
+ *  DOM teardown. Removing the host alone would leak the root (its effects keep running). */
 function unmountDialogRoot(): void {
   try {
     unmountDialogApp?.();
@@ -70,13 +56,8 @@ function unmountDialogRoot(): void {
   unmountDialogApp = null;
 }
 
-/**
- * Full dialog teardown: unmount the React root FIRST (so effects/cleanups run
- * while the DOM is still attached), dispose the dialog breakpoint watcher, then
- * remove the host. Shared by the toggle-off and close (backdrop / mobile icon)
- * paths so the three-step order lives in exactly one place. The floating button
- * and its badge are untouched (separate light-DOM element).
- */
+/** Full dialog teardown — React root first (cleanups run while attached), dialog watcher, then the
+ *  host; the button is untouched. See docs/architecture.md → 浮動按鈕與 Dialog 外殼. */
 function disposeDialogShell(): void {
   unmountDialogRoot();
   disposeDialogWatcher?.();
@@ -84,11 +65,8 @@ function disposeDialogShell(): void {
   document.getElementById(MOO_ELEMENT_IDS.host)?.remove();
 }
 
-/**
- * Remove all MooFamily UI and stop every breakpoint watcher. Use this instead
- * of `cleanupMooFamilyUI` from the content script so matchMedia listeners are
- * never left dangling after teardown.
- */
+/** Remove all MooFamily UI and stop every breakpoint watcher; the content script uses this, never bare
+ *  `cleanupMooFamilyUI`, so no matchMedia listener is left dangling. */
 function teardownMooFamilyUI(): void {
   // Unmount the React root before cleanupMooFamilyUI rips its host out of the DOM.
   unmountDialogRoot();
@@ -163,11 +141,8 @@ function injectEnvStyle(): void {
 }
 
 let baseButtonStyleInjected = false;
-// Injected in ALL environments (unlike injectEnvStyle, which is dev-only). The
-// `@media (hover: hover)` wrapper limits the hover effect to devices with a real
-// pointer, avoiding sticky-hover (the style getting stuck after a tap) on touch
-// devices. cleanupMooFamilyUI removes the button but not this <style>, so the
-// module-level guard flag prevents duplicate injection across re-injections.
+// All environments (injectEnvStyle is dev-only); `@media (hover: hover)` avoids sticky hover on touch.
+// cleanupMooFamilyUI leaves this <style> behind, so the module flag blocks duplicate injection.
 function injectBaseButtonStyle(): void {
   if (baseButtonStyleInjected) return;
   baseButtonStyleInjected = true;
@@ -235,9 +210,8 @@ async function injectFamilyBookshelfButton(): Promise<void> {
   button.addEventListener("click", toggleDialog);
   document.body.appendChild(button);
 
-  // Reposition the button on mobile (next to Readmoo's header overflow button)
-  // and keep it bottom-right on desktop. The disposer is stored at module level
-  // so re-injection / cleanup can tear the watcher down (no leaked listener).
+  // Bottom-right; on mobile lifted above Readmoo's bottom tab bar (placeFloatingButton). The module-level
+  // disposer lets re-injection / cleanup tear the watcher down (no leaked listener).
   disposeButtonWatcher?.();
   disposeButtonWatcher = watchMobile((isMobile) => {
     placeFloatingButton(button, isMobile);
@@ -248,12 +222,8 @@ async function injectFamilyBookshelfButton(): Promise<void> {
   void updatePendingBorrowBadge(button);
 }
 
-/**
- * Inject the shell bootstrap stylesheet into the dialog's shadow root.
- * Idempotent: a marked <style> is skipped, mirroring mountDialog's scoped-style
- * injection. Kept separate from the full styles.css so the content-script IIFE
- * never bundles the dialog stylesheet.
- */
+/** Inject the shell bootstrap stylesheet into the shadow root (idempotent via its marker, like
+ *  mountDialog's); kept apart from styles.css so the content-script IIFE never bundles that. */
 function injectShellStyles(shadowRoot: ShadowRoot): void {
   if (shadowRoot.querySelector(`style[${SHELL_STYLE_MARKER}]`)) return;
   const style = document.createElement("style");
@@ -268,14 +238,12 @@ function toggleDialog(): void {
     return;
   }
 
-  // "Already open?" is detected via the light-DOM host: the dialog/backdrop now
-  // live inside the host's shadow tree, so document.getElementById cannot see
-  // them directly.
+  // "Already open?" checks the light-DOM host: the dialog/backdrop live in its shadow tree, out of
+  // document.getElementById's reach.
   const existingHost = document.getElementById(MOO_ELEMENT_IDS.host);
   if (existingHost) {
-    // Toggle off: unmount the React root + dispose ONLY the dialog's breakpoint
-    // watcher, then remove the host. The floating button's watcher must survive
-    // so the button keeps repositioning on later breakpoint changes.
+    // Toggle off disposes ONLY the dialog's watcher; the floating button's must survive so the
+    // button keeps repositioning on later breakpoint changes.
     disposeDialogShell();
     return;
   }
@@ -286,11 +254,8 @@ function toggleDialog(): void {
 
   const dialog = document.createElement("div");
   dialog.id = MOO_ELEMENT_IDS.dialog;
-  // Static structural styles live in SHELL_BOOTSTRAP_CSS (class `.moo-shell-dialog`),
-  // injected into the shadow root before this element is appended so it never
-  // flashes unstyled ahead of the full styles.css (loaded later by mountDialog).
-  // The id is retained for getElementById / E2E selectors. Per-breakpoint
-  // position/size/border-radius/height stay JS-driven via applyDialogLayout.
+  // Static styles: SHELL_BOOTSTRAP_CSS (`.moo-shell-dialog`), injected first so no unstyled flash; the
+  // id stays for getElementById / E2E; per-breakpoint geometry is JS-driven (applyDialogLayout).
   dialog.className = "moo-shell-dialog";
 
   // Backdrop — static full-viewport overlay via `.moo-shell-backdrop`; its
@@ -299,10 +264,8 @@ function toggleDialog(): void {
   backdrop.id = MOO_ELEMENT_IDS.backdrop;
   backdrop.className = "moo-shell-backdrop";
 
-  // Light-DOM host owning the Shadow Root. A plain div creates no stacking
-  // context or transform, so the fixed-positioned backdrop/dialog inside still
-  // cover the viewport relative to it. The host is what the toggle-off /
-  // context-invalidation paths remove.
+  // Light-DOM host owning the Shadow Root: a plain div (no stacking context / transform), so the fixed
+  // backdrop/dialog inside still cover the viewport. Toggle-off / invalidation paths remove it.
   const host = document.createElement("div");
   host.id = MOO_ELEMENT_IDS.host;
   const shadowRoot = host.attachShadow({ mode: "open" });
@@ -310,10 +273,8 @@ function toggleDialog(): void {
   // Must run before backdrop/dialog are appended, so they never flash unstyled.
   injectShellStyles(shadowRoot);
 
-  // Single close path reused by backdrop click and the mobile close icon.
-  // Unmounts the React root, disposes only the dialog's breakpoint watcher
-  // (module-level, so the toggle-off branch shares it; the button watcher is
-  // separate), then removes the host (backdrop + dialog live in its shadow tree).
+  // Single close path (backdrop click + mobile close icon): the same disposeDialogShell teardown as
+  // toggle-off; the button watcher is separate.
   const closeDialog = (): void => {
     disposeDialogShell();
   };
@@ -329,16 +290,14 @@ function toggleDialog(): void {
   mountPoint.className = "moo-shell-mount";
   dialog.appendChild(mountPoint);
 
-  // Attach backdrop + dialog INTO the shadow root (isolated from Readmoo CSS),
-  // then attach the host to the page. The scoped stylesheet is injected into
-  // this same shadow root by mountDialog (via container.getRootNode()).
+  // Backdrop + dialog go INTO the shadow root (isolated from Readmoo CSS), then the host onto the
+  // page; mountDialog injects the scoped stylesheet into this root (container.getRootNode()).
   shadowRoot.appendChild(backdrop);
   shadowRoot.appendChild(dialog);
   document.body.appendChild(host);
 
-  // Track the latest breakpoint + view so a change to either re-applies the full
-  // layout. View starts non-main (loading); React reports changes via onViewChange.
-  // Only the desktop main view uses a fixed 80vh height (see applyDialogLayout).
+  // Latest breakpoint + view (starts non-main, then onViewChange); a change to either re-applies the
+  // layout. Only the desktop main view uses the fixed 80vh height (applyDialogLayout).
   let currentIsMobile = false;
   let currentIsMainView = false;
 
@@ -348,23 +307,20 @@ function toggleDialog(): void {
     closeIcon.style.display = currentIsMobile ? "inline-flex" : "none";
   };
 
-  // Drive full-screen (mobile) vs centred-card (desktop) layout. The disposer
-  // is invoked by closeDialog / the toggle-off branch so the listener is
-  // cleaned up on every close. Dispose any stale one first (defensive).
+  // Full-screen (mobile) vs centred card (desktop); disposed on every close (closeDialog / toggle-off),
+  // and any stale watcher is disposed first.
   disposeDialogWatcher?.();
   disposeDialogWatcher = watchMobile((isMobile) => {
     currentIsMobile = isMobile;
     relayout();
   });
 
-  // Content scripts run in Chrome's isolated world — standard ES module
-  // imports don't resolve correctly, so we load code-split modules via
-  // chrome.runtime.getURL() which points to web-accessible extension resources.
+  // Isolated-world content scripts cannot resolve standard ES module imports, so code-split modules
+  // load via runtime.getURL() (web-accessible resources).
   import(/* @vite-ignore */ browser.runtime.getURL("content-dialog.js"))
     .then((mod: DialogModule) => {
-      // Race guard: the user may have closed the dialog before this dynamic
-      // import resolved. If the mount point is no longer in the DOM, mounting
-      // would leak a root nobody holds — so skip entirely.
+      // Race guard: the dialog may have closed before this import resolved; mounting into a detached
+      // point would leak a root nobody holds.
       if (!mountPoint.isConnected) return;
       // Retain the unmount handle so the close/teardown paths can release the root.
       unmountDialogApp = mod.mountDialog(mountPoint, {
@@ -372,9 +328,8 @@ function toggleDialog(): void {
           currentIsMainView = view === "main";
           relayout();
         },
-        // Keep the floating button badge in sync with live borrow-request
-        // changes while the dialog is open. The button element still exists in
-        // the light DOM while the dialog host is mounted, so look it up by id.
+        // Keep the button badge in step with live borrow changes while open (the button stays in the
+        // light DOM, so look it up by id).
         onPendingBorrowCountChange: (count) => {
           const button = document.getElementById(MOO_ELEMENT_IDS.button);
           if (button) updateBadge(button, count);
@@ -411,10 +366,8 @@ function waitAndInjectButton(): void {
     });
 }
 
-/**
- * Listen for floatingIconSize changes and update the existing button in
- * place — avoids re-injection (which would lose the badge state).
- */
+/** Apply floatingIconSize changes to the existing button in place — re-injection would lose the
+ *  badge state. */
 function listenForIconSizeChanges(): void {
   if (!isExtensionContextValid()) return;
   browser.storage.onChanged.addListener((changes, areaName) => {

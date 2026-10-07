@@ -1,8 +1,5 @@
-/**
- * Local (this device only) teardown of the family binding. Shared by leaving a
- * family (App.handleLeaveFamily) and by switching to the Readmoo account now
- * logged in (AccountMismatchScreen, issue #271). Neither function calls the API.
- */
+// Local (this device only) teardown of the family binding, for leaving a family (App) and for
+// switching to the logged-in Readmoo account (AccountMismatchScreen, #271). Neither calls the API.
 
 import browser from "webextension-polyfill";
 import type { ApiClient } from "../api/client";
@@ -20,11 +17,8 @@ import {
 import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
 import { forgetAccountConfirmation } from "./accountIdentityCheck";
 
-/**
- * Keys tied to the Readmoo account itself, dropped on top of the family binding.
- * The books cache holds that account's share flags; onboarding would upload it
- * as the NEXT account's books (personalBooksCacheMigration.ts).
- */
+/** Account keys dropped on top of the family binding. The books cache holds that account's share
+ *  flags, which onboarding would upload as the NEXT account's books (personalBooksCacheMigration.ts). */
 const ACCOUNT_LOCAL_KEYS = [
   USER_ID_KEY,
   LAST_SYNC_AT_KEY,

@@ -1,14 +1,5 @@
-/**
- * Per-message handlers for the background service worker.
- *
- * Each handler is an async function that RETURNS the response object (the
- * webextension-polyfill convention for async message responses — the listener
- * returns a Promise that resolves to the response, instead of the Chrome-only
- * `sendResponse` + `return true` pattern).
- *
- * Handlers own a single message type and contain only the storage access +
- * validation for that message; the dispatch wiring lives in index.ts.
- */
+/** Background message handlers: one per type, only that message's storage access + validation,
+ *  RETURNING the response (polyfill convention); dispatch wiring lives in index.ts. */
 
 import browser from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
@@ -82,10 +73,8 @@ async function handleGetFamilyId(): Promise<unknown> {
 async function handleSetFamilyId(
   message: Extract<BackgroundMessage, { type: "SET_FAMILY_ID" }>,
 ): Promise<unknown> {
-  // Local is the reliable source of truth — write it first so persistence
-  // never depends on storage.sync, which can reject in Firefox (no signed-in
-  // account, Android limits, or the pref disabled). The sync write is
-  // best-effort and isolated so its failure cannot prevent the local write.
+  // Local first (source of truth); the storage.sync write is best-effort and isolated, since it can
+  // reject in Firefox. See docs/architecture.md → 本機儲存與同步.
   await browser.storage.local.set({ [FAMILY_ID_KEY]: message.familyId });
   try {
     await browser.storage.sync.set({ [FAMILY_ID_KEY]: message.familyId });
@@ -98,9 +87,8 @@ async function handleSetFamilyId(
 }
 
 async function handleClearFamilyId(): Promise<unknown> {
-  // Local is authoritative — remove it first so unbind always clears the local
-  // familyId + auth credentials even if storage.sync rejects in Firefox. The
-  // sync removal is best-effort and isolated so it cannot abort the local clear.
+  // Local first, so unbind always clears familyId + auth credentials even if storage.sync rejects;
+  // the sync removal is best-effort and cannot abort the local clear.
   await browser.storage.local.remove([
     ...SYNCED_KEYS,
     AUTH_TOKEN_KEY,
@@ -220,10 +208,8 @@ async function handleSetBookSort(
   if (shelf !== "family" && shelf !== "personal") {
     return { ok: false, error: "shelf must be 'family' or 'personal'" };
   }
-  // Normalize accepts canonical values and legacy aliases; a value that is
-  // neither maps to "default". Only an explicit "default" is a valid reason to
-  // store "default" — reject any other unrecognized value rather than silently
-  // downgrading a genuinely intended sort mode.
+  // normalizeSortMode maps anything unrecognized to "default"; reject that instead of silently
+  // downgrading an intended sort — only an explicit "default" stores "default".
   const normalized = normalizeSortMode(value);
   if (normalized === "default" && value !== "default") {
     return { ok: false, error: "invalid sort mode" };
@@ -259,11 +245,8 @@ async function handleSetApiEndpoint(
     return { ok: 1 };
   }
   if (typeof endpoint === "string") {
-    // One rule set for the whole extension: the shared validator the ApiClient
-    // and the Dialog already use. A local copy here was a third opinion on what
-    // a safe endpoint is — a stricter one, which rejected the private/LAN
-    // addresses the rest of the client happily adopts, so a self-hoster's
-    // background copy silently drifted from the authoritative storage write.
+    // The shared validator the ApiClient and Dialog use — never a local copy (a stricter one here once
+    // rejected LAN hosts the rest adopts). docs/architecture.md → 背景 Service Worker 與訊息.
     let normalized: string;
     try {
       normalized = validateEndpointUrl(endpoint);

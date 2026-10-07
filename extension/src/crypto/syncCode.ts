@@ -1,10 +1,5 @@
-/**
- * Sync code encode/decode.
- *
- * Format:
- *   moo-{familyId}          (default API)
- *   moo-{familyId}@{host}   (custom API endpoint)
- */
+/** Sync code encode/decode: `moo-{familyId}` (default API) or `moo-{familyId}@{host}` (custom API
+ *  endpoint). See docs/architecture.md → 四、同步碼設計. */
 
 import {
   classifySyncCodeApiHost,
@@ -46,10 +41,8 @@ export function decodeSyncCode(code: string): SyncCodeData {
     main = trimmed;
   }
 
-  // Format: moo-{xxxx}-{xxxx}
-  // familyId contains a dash (xxxx-xxxx), so we parse positionally:
-  // prefix = parts[0], familyId = parts[1]-parts[2]
-  // Backward compat: old format had parts[3..] as encryptionKey — ignored
+  // moo-{xxxx}-{xxxx}: familyId has its own dash, so parse positionally (prefix = parts[0], familyId =
+  // parts[1]-parts[2]); the old format's parts[3..] encryptionKey is ignored (backward compat).
   const parts = main.split("-");
   if (parts.length < 3) {
     throw new SyncCodeError(

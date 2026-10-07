@@ -112,10 +112,8 @@ function renderChallenge({
   if (method === null) {
     return <div className="moo-verify__loading">載入中...</div>;
   }
-  // While an (unlocked) rate-limit countdown ticks, the server window has not
-  // cleared yet, so any submit is a guaranteed 429 — keep the widget inert until
-  // it elapses. The hook then resets countdownSeconds to null, which re-enables
-  // the widget automatically without any extra state.
+  // A ticking (unlocked) rate-limit countdown makes any submit a sure 429, so the widget stays inert
+  // until the hook resets countdownSeconds to null, which re-enables it with no extra state.
   const inputDisabled = submitting || countdownSeconds !== null;
   if (method === "pin") {
     return renderWidgetChallenge(
@@ -147,11 +145,8 @@ function renderChallenge({
   return <div className={MESSAGE_CHALLENGE_CLASS}>{METHOD_LOAD_ERROR}</div>;
 }
 
-/**
- * Wraps a PIN/pattern widget in a relatively-positioned container so an
- * in-progress overlay can be centered over the (dimmed, disabled) widget while
- * a verification submit is in flight.
- */
+/** Wraps a PIN/pattern widget in a relatively-positioned box so the in-progress overlay can center
+ *  over the dimmed, disabled widget while a submit is in flight. */
 function renderWidgetChallenge(
   widget: React.JSX.Element,
   submitting: boolean,

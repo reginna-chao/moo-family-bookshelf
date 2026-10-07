@@ -1,22 +1,5 @@
-/**
- * Readmoo lending automation (Scope B).
- *
- * Orchestrates clicks through Readmoo's native lending flow when the book
- * owner approves a MooFamily borrow request:
- *   1. Locate the book card on the Readmoo library page — either
- *      `next.readmoo.com/read/#/library` or `read.readmoo.com/#/library`
- *   2. Open the book detail modal
- *   3. Click the 「借出」 button to open the lending dialog
- *   4. Select the family member matching `readmooName`
- *   5. The user manually confirms Readmoo's native window.confirm
- *   6. Wait for the lending dialog to close (signals lending completed)
- *
- * Each function is stateless to keep them independently testable.
- *
- * The native confirm alert is intentionally NOT intercepted — overriding
- * window.confirm globally would break unrelated Readmoo functionality.
- * Letting the user click OK manually keeps the integration safe.
- */
+/** Readmoo lending automation (Scope B): clicks through Readmoo's native lending flow on an approved
+ *  borrow; never intercepts window.confirm. See docs/architecture.md → 讀墨借出自動化. */
 
 import {
   LIBRARY_HASH,
@@ -31,21 +14,16 @@ import {
   waitForElement,
 } from "./readmoo-dom";
 
-// Re-export shared DOM primitives so existing importers (tests, BorrowTab) keep
-// importing them from "./readmoo-lend" unchanged. Definitions live in readmoo-dom
-// to break the readmoo-lend ↔ readmoo-search module cycle.
+// Re-exported so importers (tests, BorrowTab) keep using "./readmoo-lend"; defined in readmoo-dom to
+// break the readmoo-lend ↔ readmoo-search module cycle.
 export {
   ReadmooLendError,
   findBookCardInLibrary,
   waitForElement,
 } from "./readmoo-dom";
 
-/**
- * Absolute URL of the library page on the host the user is currently on.
- * Resolved per call (not a module constant) so the new and legacy hosts each
- * keep the user on the site they started from — the two use different path
- * prefixes (`/read/#/library` vs `/#/library`).
- */
+/** Library URL on the CURRENT host, resolved per call so new and legacy hosts keep the user where they
+ *  started (`/read/#/library` vs `/#/library`). */
 function libraryUrlForCurrentHost(): string {
   return readmooAppUrl(window.location.hostname, LIBRARY_HASH);
 }
@@ -78,9 +56,8 @@ function isOnLibraryPage(): boolean {
  */
 export function ensureOnLibraryPage(): boolean {
   if (isOnLibraryPage()) return true;
-  // Cross-page navigation; caller flow needs a different strategy
-  // (e.g. open a new tab, or instruct user). We do NOT auto-navigate
-  // here because it would unmount the Dialog UI immediately.
+  // Cross-page navigation unmounts the Dialog, so the caller flow needs a different strategy (e.g. a
+  // new tab, or instructing the user).
   window.location.href = libraryUrlForCurrentHost();
   return false;
 }
@@ -363,10 +340,8 @@ export async function openLendDialogForBook(
       "請先切換到讀墨的「書櫃」頁面後再試一次",
     );
   }
-  // Readmoo's library grid is infinite-scroll, so the target book may not be in
-  // the rendered DOM. Filter the library by title via Readmoo's own search, then
-  // match the resulting card by exact bookId. `previousQuery` lets the caller
-  // restore the user's prior search state once the whole flow finishes.
+  // The infinite-scroll grid may not render the book: filter by title via Readmoo's search, then match
+  // by exact bookId; `previousQuery` lets the caller restore the user's search afterwards.
   const previousQuery = await submitSearch(bookTitle);
   try {
     const bookCard = await waitForBookCard(bookId);
@@ -378,21 +353,15 @@ export async function openLendDialogForBook(
         `在書庫中搜尋不到《${bookTitle}》，請改用「手動借出」`,
       );
     }
-    // TIMING: do NOT restore the search on the success path here. Restoring
-    // re-renders the grid and detaches this card node; the detail-modal click
-    // below must run against the still-attached card. The caller restores only
-    // after the full flow completes.
+    // TIMING: no restore on the success path — it re-renders the grid and detaches the card the click
+    // below needs; the caller restores after the full flow. docs/architecture.md → 讀墨借出自動化.
     const detailModal = await openBookDetailModal(bookCard);
     const lendDialog = await clickLendButton(detailModal);
     const members = extractReadmooMembers(lendDialog);
     return { lendDialog, detailModal, members, previousQuery };
   } catch (err) {
-    // Any failure AFTER the search succeeded owns the restore here, so the user
-    // is never left with a filtered library. ORDER MATTERS: clickLendButton may
-    // have already opened the detail modal, so dismiss lingering modals FIRST,
-    // then restore. Restoring re-renders the grid, and a still-open modal would
-    // otherwise stack on top of the re-rendered library. restoreLibrarySearch is
-    // best-effort, so it never masks the original error we rethrow.
+    // A failure after the search owns the restore (no filtered library left behind): dismiss modals
+    // FIRST, then restore (best-effort, never masks the rethrow). docs/architecture.md → 讀墨借出自動化.
     dismissOpenDialogs();
     await restoreLibrarySearch(previousQuery);
     throw err;

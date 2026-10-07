@@ -29,10 +29,8 @@ export function useFamilyDataInitialLoad(
   refreshBorrowRequests: () => Promise<void>,
   reloadSignal: number | undefined,
 ): void {
-  // Fetch on mount (and again whenever reloadSignal changes): members first,
-  // then bookshelf + borrow requests. refreshMembers/refreshBookshelf keep a
-  // "ready" state instead of flashing "loading", so an in-place reload after
-  // re-verification simply replaces the prior error/data.
+  // Fetch on mount and on each reloadSignal change: members, then bookshelf + borrow. The refreshes
+  // keep "ready" instead of flashing "loading", so a post-reverification reload replaces in place.
   useEffect(() => {
     void (async () => {
       await refreshMembers();

@@ -136,14 +136,8 @@ export function useFamilyDataMemberEdits(
     [setMembers, setBookshelfMembers],
   );
 
-  /**
-   * Replace a single member entry from a server PATCH response.
-   *
-   * Used by flows that mutate a member via PATCH (e.g. picker write-back,
-   * delete readmooName) so the UI updates immediately without refetching
-   * the full member list. If the userId is unknown locally (race condition)
-   * we leave state alone — `refreshMembers` is the source of truth.
-   */
+  /** Replace one member from a PATCH response (picker write-back, readmooName delete) without a
+   *  refetch; an unknown userId (race) leaves state alone — `refreshMembers` is the truth. */
   const updateMember = useCallback(
     (next: FamilyMember) => {
       setMembers((prev) => {

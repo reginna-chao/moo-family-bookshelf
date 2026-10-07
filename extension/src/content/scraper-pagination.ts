@@ -1,11 +1,5 @@
-/**
- * Pagination loop for the Readmoo library page (Wave G).
- *
- * Readmoo uses window-level infinite scroll: scrolling to the bottom of
- * the page triggers the next batch (~200 items). This module drives that
- * loop until scrolling stops producing new cards, with progress reporting
- * and a hard cap as a safety valve.
- */
+/** Pagination loop for the library page (Wave G): scroll the window-level infinite scroll (~200 items per
+ *  batch) until no new cards appear, with progress reporting and a hard cap as a safety valve. */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 
@@ -33,13 +27,8 @@ function countLibraryItems(): number {
   return document.querySelectorAll(READMOO_SELECTORS.libraryItem).length;
 }
 
-/**
- * Poll `.library-item` count until it exceeds `baseline`, or exit early when
- * no DOM activity is detected. Uses scrollHeight changes as a secondary
- * "still loading" signal — if Readmoo shows a loader or spacer while fetching
- * the next batch, scrollHeight will fluctuate and reset the inactivity timer.
- * Falls back to `timeoutMs` as the hard ceiling.
- */
+/** Poll the `.library-item` count until it exceeds `baseline`, exiting early on DOM inactivity; a moving
+ *  scrollHeight (loader / spacer) counts as activity. `timeoutMs` is the hard ceiling. */
 async function waitForItemCountIncrease(
   baseline: number,
   timeoutMs: number,

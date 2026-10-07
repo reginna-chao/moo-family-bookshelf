@@ -1,14 +1,5 @@
-/**
- * Auth-lookup helper for the onboarding flow.
- *
- * `POST /api/auth/lookup` answers HTTP 200 with `requiresVerification: TRUE`
- * and withheld family data when the account has PWA login verification
- * configured and the request carried no secret. That is informational rather
- * than an error — but every onboarding caller must react to it exactly as it
- * reacts to the join-side `VERIFICATION_REQUIRED`. This module normalizes both
- * into one outcome so callers can hand the code straight to the verification
- * prompt, and so a withheld payload can never be misread as "no family found".
- */
+// Onboarding's auth lookup: maps lookup's 200 `requiresVerification: TRUE` onto the join-side
+// verification codes, so a withheld payload never reads as "no family" (docs/architecture.md → 認證 API).
 
 import { BoolFlag } from "../api/client";
 import type { ApiClient, LookupResult } from "../api/client";
@@ -50,9 +41,8 @@ export async function lookupFamily(opts: {
     return { ok: false, errorCode: "EMPTY_RESPONSE" };
   }
   if (res.data.requiresVerification === BoolFlag.TRUE) {
-    // A secret was sent and the server still withholds the data: report it as a
-    // failed attempt so the user is told why, instead of reading the withheld
-    // payload as "this account has no family".
+    // Withheld data is never "no family": REQUIRED without a secret; with one, a failed attempt
+    // (VERIFICATION_FAILED) so the user is told why.
     return {
       ok: false,
       errorCode:

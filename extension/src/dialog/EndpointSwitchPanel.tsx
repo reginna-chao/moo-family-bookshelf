@@ -1,18 +1,5 @@
-/**
- * Confirmation panel for a pending family API-endpoint switch.
- *
- * Presentational only — the decision logic lives in useEndpointSwitch. Styled
- * after the MemberList endpoint warning (amber panel + monospace endpoint box)
- * so both endpoint warnings read as one family of UI.
- *
- * Renders nothing when there is neither a pending switch nor a refusal notice,
- * so the caller can mount it unconditionally (same shape as VersionWarning).
- *
- * A target the client's validation would REFUSE is never printed: showing
- * `https://bank.example@evil.com` under 「將切換至」 dresses a spoofed address up
- * as a legitimate destination. The buttons stay live — confirming still fails
- * closed into the refusal notice below — only the address is withheld.
- */
+// Presentational panel for a family endpoint switch (logic: useEndpointSwitch); renders nothing when
+// idle. A refused target is never printed: docs/architecture.md → 端點切換確認.
 
 import type { PendingEndpointSwitch } from "./useEndpointSwitch";
 
@@ -23,15 +10,8 @@ function buildTargetLabel(pending: PendingEndpointSwitch): string {
   return "將切換至";
 }
 
-/**
- * Panel title. 「已變更」 only holds for the adopt-a-custom-endpoint direction:
- * the revert direction also fires when the family record NEVER carried an
- * endpoint — a LAN self-hoster's record cannot hold one at all (the Worker
- * rejects private addresses, see shared/src/api/endpointUrl.ts), so every
- * member would be told something changed when nothing ever did. State the
- * record's condition instead, which is true whether the owner cleared it or it
- * was never populated.
- */
+/** 「已變更」 holds only when adopting a custom endpoint; the revert title states the record's
+ *  condition (a LAN record never holds one). docs/architecture.md → 可設定 API 端點 → 限制. */
 function buildTitle(pending: PendingEndpointSwitch): string {
   if (pending.isDefaultTarget) return "⚠️ 家庭未指定 API 端點";
   return "⚠️ 家庭 API 端點已變更";
@@ -54,9 +34,8 @@ export function EndpointSwitchPanel({
   onDecline,
   onDismissConfirmError,
 }: EndpointSwitchPanelProps) {
-  // Takes precedence over `pending`: the two are mutually exclusive in practice
-  // (a fresh question clears the notice), and an unreported failed switch is
-  // the more urgent thing to say.
+  // Wins over `pending` (exclusive in practice: a fresh question clears the notice); an unreported
+  // failed switch is the more urgent thing to say.
   if (confirmError) {
     return (
       <div

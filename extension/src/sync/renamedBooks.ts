@@ -1,17 +1,5 @@
-/**
- * Id-change resolution (#236): when Readmoo gives a book a new id, the additive
- * merge keeps the saved old id forever next to the scraped new one. This pure
- * step replaces such an OLD entry with its NEW twin — only when nothing else
- * can explain the old id's absence from a complete scrape.
- *
- * A saved book missing from a complete scrape may also be archived (while
- * archived books are not synced), lent out, or refunded / deleted. Those cases
- * are indistinguishable from each other and are always KEPT; only a
- * one-to-one same-title match against a brand-new id counts as a rename.
- *
- * Generalises `dropResolvedLegacyBooks` (short legacy ids, #234), which still
- * runs inside `mergeBooks`; this step runs after it, on the merged list.
- */
+/** Id-change resolution (#236): replace a saved OLD-id entry with its NEW-id twin, only on a one-to-one
+ *  same-title match nothing else explains. See docs/architecture.md → 書單同步. */
 
 import {
   BookEntry,
@@ -123,11 +111,8 @@ export function deferRenameCandidates(
     : { books: kept, deferredCount };
 }
 
-/**
- * Old entry → its new twin. A title carried by anything other than exactly
- * this old entry plus one brand-new entry is skipped, and so is a target
- * claimed by two old entries (ambiguous).
- */
+/** Old entry → its new twin. A title carried by anything but exactly this old entry plus one
+ *  brand-new entry is skipped, as is a target claimed by two old entries (ambiguous). */
 function pairRenamed(
   books: readonly BookEntry[],
   ctx: RenameContext,

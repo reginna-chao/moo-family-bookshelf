@@ -1,7 +1,5 @@
-/**
- * API client for communicating with Cloudflare Worker backend.
- * Supports configurable endpoint for self-hosted backends.
- */
+/** API client for the Cloudflare Worker backend, with a configurable endpoint for self-hosted ones.
+ *  Response-handling rationale: docs/architecture.md → API client 的回應處理. */
 
 import browser from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
@@ -102,39 +100,19 @@ import { DEFAULT_PWA_URL } from "../constants";
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
-/**
- * The one status this API answers with no body (RFC 9110 §15.3.5):
- * `DELETE /api/user/:id/public-shelf/:shelfId`.
- *
- * Kept to exactly this status. 205 is never returned by the API, and widening
- * the allowance only buys a rogue backend a way to have an empty body read as
- * a confirmed success; 304 is `!response.ok`, so it already belongs to the
- * error path rather than here.
- */
+/** The one bodyless status this API answers (`DELETE /api/user/:id/public-shelf/:shelfId`); keep it
+ *  to exactly this one (docs/architecture.md → API client 的回應處理). */
 const NO_CONTENT_STATUS = 204;
 
-/**
- * Read the `{ data, error }` envelope out of a response.
- *
- * A bodyless success is still a success: `response.json()` throws a SyntaxError
- * on an empty body, which the caller cannot tell apart from a genuine network
- * failure — that is how a refused revocation used to read as "deleted". A 204
- * resolves to an empty envelope instead; every other response is parsed exactly
- * as before (a malformed one still throws, as it should).
- */
+/** Read the `{ data, error }` envelope; a 204 is an empty envelope (`response.json()` would throw
+ *  on it), every other response still parses — or throws — as JSON. */
 async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
   if (response.status === NO_CONTENT_STATUS) return {};
   return (await response.json()) as ApiResponse<T>;
 }
 
-/**
- * Provenance marker for an error envelope this client built itself.
- *
- * `JSON.parse` can never produce a symbol-keyed property, so no response body —
- * not even from a self-hosted (BYO) or hostile backend — can forge it. That is
- * what turns "client-synthesized" from a comment into a checkable fact: the UI
- * renders an error's raw message verbatim only for a marked payload.
- */
+/** Provenance marker for a client-built error envelope: `JSON.parse` never yields a symbol key, so no
+ *  backend can forge it. See docs/architecture.md → 伺服器回傳資料的檢查 (`synthesized`). */
 const CLIENT_SYNTHESIZED = Symbol("client-synthesized error payload");
 
 interface SynthesizedErrorPayload extends ApiErrorPayload {
@@ -155,11 +133,8 @@ function isClientSynthesized(payload: ApiErrorPayload): boolean {
   return marked[CLIENT_SYNTHESIZED] === true;
 }
 
-/**
- * Build the user-facing message shown when auto-recovery was rate-limited.
- * Appends an approximate wait (rounded up to whole minutes) when the cooldown
- * deadline is known.
- */
+/** User-facing copy for a rate-limited auto-recovery; appends the wait, rounded up to whole minutes,
+ *  when the cooldown deadline is known and still ahead. */
 function buildRateLimitMessage(cooldownUntil?: number): string {
   const base = "嘗試次數過多，請稍後再重新開啟書櫃";
   if (cooldownUntil === undefined) return base;
@@ -174,23 +149,14 @@ export class ApiClient {
   private authToken: string | null = null;
   /** Guard: holds the in-flight token refresh outcome while one is running */
   private refreshInProgress: Promise<RefreshOutcome> | null = null;
-  /**
-   * Latch: set true once a re-verification prompt has been raised (see
-   * `doRefreshToken`). While latched, further 401 waves skip silent
-   * join-recovery so a single dialog open spends at most one rate-limit unit and
-   * the in-progress verification prompt is never re-initialized. Cleared when a
-   * non-null token is set, or explicitly via `clearReauthPending`.
-   */
+  /** Latch set once a re-verification prompt is raised; cleared by a non-null token or
+   *  `clearReauthPending`. See docs/architecture.md → 認證更新與冷卻. */
   private reauthPending = false;
-  /** Callback invoked when token refresh fails because the family is genuinely
-   *  gone (deleted / user no longer a member) — the caller clears family data.
-   *  Receives the family-gone code that triggered the teardown so the UI can
-   *  explain WHY the dialog fell back to onboarding. */
+  /** Called when refresh finds the family genuinely gone (the caller clears family data), with the
+   *  family-gone code so the UI can explain WHY the dialog fell back to onboarding. */
   onFamilyRemoved: ((info: FamilyRemovedInfo) => void) | null = null;
-  /** Callback invoked when recovery needs a PWA-login verification secret, so
-   *  the caller can prompt re-verification instead of dropping the user's data.
-   *  Receives the blocking error code (+ retryAfter when the backend sent one)
-   *  so the prompt can open already locked with a countdown. */
+  /** Called when recovery needs the PWA-login secret, so the caller re-verifies instead of dropping
+   *  data; gets the blocking code (+ `retryAfter`) so the prompt can open already locked. */
   onReauthRequired: ((info?: ReauthInfo) => void) | null = null;
   /** In-flight GET request deduplication map: URL -> Promise */
   private inflightGets = new Map<string, Promise<ApiResponse<unknown>>>();
@@ -235,10 +201,8 @@ export class ApiClient {
     }
   }
 
-  /**
-   * Proactively refresh the token if it is about to expire.
-   * Returns true if the token is still valid or was refreshed successfully.
-   */
+  /** Refresh the token when it is about to expire (`REFRESH_BUFFER_MS`); true when it is still valid
+   *  or was refreshed. */
   async proactiveRefresh(): Promise<boolean> {
     try {
       const expiryResult =
@@ -296,21 +260,14 @@ export class ApiClient {
     return res.data;
   }
 
-  /**
-   * `unwrap` for endpoints whose success carries no payload (HTTP 204).
-   * Only the `error` branch throws — demanding `data` here would turn every
-   * successful 204 into a bogus EMPTY_RESPONSE failure.
-   */
+  /** `unwrap` for bodyless (204) successes: only `error` throws — demanding `data` would turn every
+   *  successful 204 into a bogus EMPTY_RESPONSE. */
   private unwrapVoid(res: ApiResponse<unknown>): void {
     this.throwOnError(res);
   }
 
-  /**
-   * Coerce a success payload's backend TEXT fields before it leaves the client,
-   * so no consumer ever holds a `string`-typed field that is not one (see
-   * `shared/src/api/safeText.ts`). Error envelopes and bodyless successes pass
-   * through untouched.
-   */
+  /** Coerce a success payload's backend TEXT fields so no consumer holds a non-string `string` field
+   *  (`shared/src/api/safeText.ts`); error envelopes and bodyless successes pass untouched. */
   private sanitizeEnvelope<T>(
     res: ApiResponse<T>,
     sanitize: (data: T) => T,
@@ -319,24 +276,8 @@ export class ApiClient {
     return { ...res, data: sanitizeRecord(res.data, sanitize) };
   }
 
-  /**
-   * The single chokepoint through which every thrown `ApiError` passes, so the
-   * envelope text is sanitized once here rather than at each call site.
-   *
-   * `code` / `message` are typed `string` but reach us through a bare cast of
-   * `response.json()`, and the backend is self-hostable. A payload such as
-   * `{"toString":null,"valueOf":null}` — which `JSON.parse` really can produce
-   * — makes the constructor's `super(\`${code}: ${message}\`)` throw a
-   * TypeError, so no `ApiError` is ever constructed: `err instanceof ApiError`
-   * turns false and the localized 429 back-off branch (which needs `code` and
-   * `retryAfter`) is skipped in favour of an English TypeError. Sanitizing the
-   * two interpolated fields keeps the error's identity, not just its wording.
-   *
-   * `retryAfter` is passed through untouched — the constructor already
-   * validates it — and `isClientSynthesized` deliberately reads the ORIGINAL
-   * payload, since the symbol marker is the provenance proof and must not be
-   * inferred from sanitized text.
-   */
+  /** Single chokepoint for every thrown `ApiError`: sanitizes `code` / `message`, while provenance is
+   *  read off the ORIGINAL payload (docs/architecture.md → API client 的回應處理). */
   private throwOnError(res: ApiResponse<unknown>): void {
     if (res.error) {
       throw new ApiError(
@@ -350,14 +291,8 @@ export class ApiClient {
 
   // --- Auth ---
 
-  /**
-   * Look up family membership for a pre-hashed userId. Server never sees the email.
-   *
-   * `verifySecret` unlocks the payload for accounts with PWA login verification
-   * configured; without it the response carries `requiresVerification: TRUE`.
-   * A wrong secret is a 403 `VERIFICATION_FAILED` (or 429 `VERIFICATION_LOCKED`
-   * with `error.retryAfter`), never a silent empty result.
-   */
+  /** Family lookup by pre-hashed userId (server never sees the email); `verifySecret`, its
+   *  `requiresVerification` answer and error codes: docs/architecture.md → PWA 登入驗證機制. */
   async lookupUser(
     userId: string,
     opts?: { verifySecret?: string },
@@ -384,11 +319,8 @@ export class ApiClient {
     return this.put(`/api/user/${userId}/books`, data);
   }
 
-  /**
-   * Partial update — send only the changed books (diff). Used by the manual
-   * "save" flow to cut upload traffic vs the full-payload PUT. Unknown bookIds
-   * are silently skipped server-side; new (un-synced) books must go via PUT.
-   */
+  /** Partial save of only the changed books (manual save), cutting upload vs the full PUT. Unknown
+   *  bookIds are skipped server-side without error; new (un-synced) books must go via PUT. */
   async patchPersonalBooks(
     userId: string,
     changes: Array<{ bookId: string; isShared: BoolFlag }>,
@@ -396,12 +328,8 @@ export class ApiClient {
     return this.patch(`/api/user/${userId}/books`, { changes });
   }
 
-  /**
-   * Update viewer-private family-shelf preferences (v1.5.0). Each provided list
-   * (`hidden` / `favorites`) full-replaces its server-side counterpart; absent
-   * lists are preserved. Refs are copy-scoped `{ownerId}:{bookId}`. Stored
-   * server-side so the views stay consistent across Extension and PWA.
-   */
+  /** Viewer-private family-shelf prefs (v1.5.0), server-side for Extension/PWA parity. A sent list
+   *  (`hidden` / `favorites`) full-replaces its counterpart, an absent one is kept; refs: `{ownerId}:{bookId}`. */
   async updateFamilyPrefs(
     userId: string,
     prefs: { hidden?: string[]; favorites?: string[] },
@@ -414,12 +342,8 @@ export class ApiClient {
 
   // --- Family Group ---
 
-  /**
-   * Create a new family. Accounts with PWA login verification configured must
-   * supply `verifySecret`; otherwise the server replies 403
-   * `VERIFICATION_REQUIRED` / `VERIFICATION_FAILED`, or 429
-   * `VERIFICATION_LOCKED` with `error.retryAfter`.
-   */
+  /** Create a family; accounts with PWA login verification must send `verifySecret`, else 403
+   *  `VERIFICATION_REQUIRED` / `VERIFICATION_FAILED`, or 429 `VERIFICATION_LOCKED` + `retryAfter`. */
   async createFamily(
     userId: string,
     displayName: string | undefined,
@@ -480,15 +404,8 @@ export class ApiClient {
     return this.del(`/api/family/${familyId}/member/${targetUserId}`);
   }
 
-  /**
-   * Lift the "kicked" tombstone `removeMember` leaves behind, so the removed
-   * member can use the sync code again before it expires on its own.
-   *
-   * This does NOT put anyone back in the family: the member stays out and must
-   * join again themselves — the copy in `dialog/UnkickNotice.tsx` says so, and
-   * must keep saying so. Owner-only server-side (403 `NOT_OWNER` otherwise) and
-   * idempotent: no live tombstone still answers 200.
-   */
+  /** Lift `removeMember`'s kicked tombstone early. Does NOT re-add anyone (UnkickNotice's copy must
+   *  keep saying so). Owner-only (403 `NOT_OWNER`); idempotent: no live tombstone still answers 200. */
   async unkickMember(
     familyId: string,
     targetUserId: string,
@@ -520,20 +437,12 @@ export class ApiClient {
     return this.put(`/api/family/${familyId}/endpoint`, { apiEndpoint });
   }
 
-  /**
-   * `unknown`, not `FamilyGroup`: the wire shape is only a claim until
-   * `sanitizeFamilyMembersResponse` has checked it. The envelope is sanitized
-   * whole — callers of this method read `{ data, error }` themselves instead of
-   * going through `unwrap`, so an `error` envelope must reach them unchanged
-   * while `data.members` is rebuilt.
-   */
+  /** Read as `unknown` until `sanitizeFamilyMembersResponse` checks it; the whole envelope is checked
+   *  so an `error` one reaches the caller unchanged. See docs/architecture.md → API client 的回應處理. */
   async getFamilyMembers(familyId: string): Promise<ApiResponse<FamilyGroup>> {
     const res = await this.get<unknown>(`/api/family/${familyId}/members`);
-    // Two deliberate layers, in this order: `memberValidation` rebuilds
-    // `data.members` structurally (drops unaddressable elements, strips hostile
-    // extras) and normalizes `apiEndpoint`; the shared text layer then coerces
-    // the remaining declared-string fields (`familyId` / `ownerId` /
-    // `createdAt`) that memberValidation documents as out of its scope.
+    // Structure layer first (rebuilds `data.members`, normalizes `apiEndpoint`), then the text layer
+    // (`familyId` / `ownerId` / `createdAt`): docs/architecture.md → 伺服器回傳資料的檢查.
     return this.sanitizeEnvelope(
       sanitizeFamilyMembersResponse(res),
       sanitizeFamilyGroupText,
@@ -548,16 +457,8 @@ export class ApiClient {
 
   // --- Family Bookshelf ---
 
-  /**
-   * `unknown`, not `FamilyBookshelf`: the wire shape is only a claim until
-   * `sanitizeFamilyBookshelfResponse` has checked it. Two deliberate layers, in
-   * this order — the structural pass drops members without a usable `userId`
-   * and books without a usable `bookId` (identities the text layer would
-   * normalize to a COLLIDING `""`), then the shared text layer coerces the
-   * declared-string fields it leaves alone. The envelope is sanitized whole:
-   * callers read `{ data, error }` themselves, so an `error` envelope must
-   * reach them unchanged.
-   */
+  /** Read as `unknown`; structure layer (drops unusable `userId` / `bookId`) then text layer, on the
+   *  whole envelope. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getFamilyBookshelf(
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
@@ -581,12 +482,8 @@ export class ApiClient {
     return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
-  /**
-   * `unknown`, not `BorrowRequest[]`: the wire shape is only a claim until
-   * `sanitizeBorrowRequests` has checked it. `unwrap` still runs first — it owns
-   * the `{ data, error }` envelope contract (throws `ApiError` on `error`,
-   * `EMPTY_RESPONSE` on missing data).
-   */
+  /** Read as `unknown` until `sanitizeBorrowRequests` checks it; `unwrap` runs first, owning the
+   *  envelope contract (`ApiError` on `error`, `EMPTY_RESPONSE` on missing data). */
   async listBorrowRequests(familyId: string): Promise<BorrowRequest[]> {
     const res = await this.get<unknown>(`/api/family/${familyId}/borrow`);
     return sanitizeBorrowRequests(this.unwrap(res));
@@ -602,18 +499,8 @@ export class ApiClient {
     return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
-  /**
-   * `unknown`, not `FamilyMember`: the wire shape is only a claim until
-   * `sanitizeFamilyMember` has checked it. `unwrap` still runs first — it owns
-   * the `{ data, error }` envelope contract (throws `ApiError` on `error`,
-   * `EMPTY_RESPONSE` on missing data).
-   *
-   * Throwing on an unusable payload is safe for every caller: all three call
-   * sites (`dialog/BorrowTab.tsx`'s picker write-back, `dialog/MemberList.tsx`'s
-   * canLend toggle and readmooName delete) already catch and route through
-   * `memberSettingsErrorMessage`, so a malformed response surfaces as a
-   * retryable error instead of poisoning `members` state.
-   */
+  /** Read as `unknown` until `sanitizeFamilyMember` checks it (`unwrap` first); an unusable payload
+   *  throws, which every caller catches. See docs/architecture.md → API client 的回應處理. */
   async updateMemberSettings(
     familyId: string,
     uid: string,
@@ -630,9 +517,8 @@ export class ApiClient {
         "response is not a valid family member",
       );
     }
-    // Two deliberate layers, same order as `getFamilyMembers`: the structural
-    // rebuild above, then the shared text layer coercing the surviving
-    // record's declared-string fields.
+    // Same two layers, same order as `getFamilyMembers`: the structural rebuild above, then the text
+    // layer on the surviving record's declared-string fields.
     return sanitizeRecord(member, sanitizeMemberText);
   }
 
@@ -713,11 +599,8 @@ export class ApiClient {
     return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
   }
 
-  /**
-   * Revoke a public shelf. Throws `ApiError` when the server refused — the
-   * caller MUST NOT report the link as closed on a rejected request (the
-   * snapshot stays readable until this succeeds).
-   */
+  /** Revoke a public shelf; throws `ApiError` on refusal, and the caller MUST NOT then report the link
+   *  closed (the snapshot stays readable until this succeeds). */
   async deletePublicShelf(userId: string, shelfId: string): Promise<void> {
     const res = await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
     this.unwrapVoid(res);
@@ -779,12 +662,8 @@ export class ApiClient {
           // Retry original request with the new token (skip refresh to avoid loop)
           return this.doRequest<T>(url, init, true);
         }
-        // Rate-limited recovery (fresh 429 or active cooldown) — surface a
-        // friendly localized message instead of the raw English 401. The code is
-        // distinct from the server's RATE_LIMITED so the UI can recognize this
-        // bespoke copy and show it verbatim rather than replacing it with the
-        // generic back-off sentence. `synthesizeError` stamps the unforgeable
-        // marker that authorizes that verbatim rendering.
+        // Rate-limited recovery: a client-synthesized localized error, not the raw English 401 — its
+        // own code + marker let the UI show it verbatim. docs/architecture.md → 認證更新與冷卻.
         if (outcome.rateLimited) {
           return {
             error: synthesizeError(
@@ -822,10 +701,8 @@ export class ApiClient {
     }
   }
 
-  /**
-   * Attempt to refresh the auth token. Returns true on success.
-   * Concurrent callers share a single in-flight refresh request.
-   */
+  /** Refresh the auth token, returning the structured outcome; concurrent callers share a single
+   *  in-flight refresh. */
   private async refreshToken(): Promise<RefreshOutcome> {
     // Deduplicate: if a refresh is already in progress, wait for it
     if (this.refreshInProgress) {

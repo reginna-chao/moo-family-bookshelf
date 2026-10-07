@@ -1,28 +1,5 @@
-/**
- * Check that the Readmoo account on the page is the stored user (issue #271):
- * navigate to `#/me`, scrape the email, compare its userId.
- *
- * Two entry points (issue #277):
- * - `checkAccountIdentity` — the Dialog-open check. A `match` is remembered at
- *   MODULE level for the rest of this page load, so re-opening the Dialog on
- *   the same page does not navigate again. The cache serves this ONLY.
- * - `verifyAccountIdentity` — always navigates, never trusts the cache. Every
- *   book sync calls it right before uploading, because another tab sharing the
- *   cookies may have switched accounts since the cached `match`. Onboarding's
- *   first book upload calls it too, right after the scrape (issue #281).
- *
- * After a `#/me` match, Readmoo's login cookie (`content/pageAccountCookie.ts`)
- * may VETO it down to `unknown` — it never confirms the stored user and never
- * yields `mismatch` (docs/architecture.md → 讀墨帳號確認（已加入家庭時）).
- *
- * Nothing is persisted — the next page load checks afresh. The cache is keyed
- * on the userId it confirmed, so it can never vouch for a different stored user.
- *
- * The most recent `verifyAccountIdentity` `mismatch` is remembered too, but
- * ONLY for `cachedIdentity` — onboarding's hand-off to App (issue #284). It is
- * never used to skip a navigation: `checkAccountIdentity` short-circuits on a
- * cached `match` alone.
- */
+// Checks the page's Readmoo account is the stored user (issues #271 / #277) via `#/me` and the
+// login-cookie veto. See docs/architecture.md → 讀墨帳號確認（已加入家庭時）.
 
 import {
   compareAccountIdentity,

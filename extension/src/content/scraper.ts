@@ -1,11 +1,5 @@
-/**
- * Book scraping logic for Readmoo library page.
- * `.library-item` divs require a hover event to reveal the `.openbook-overlay`
- * action layer (named `.openbook` on the legacy host).
- *
- * Works on both `next.readmoo.com` and `read.readmoo.com`; selectors that moved
- * between the two go through `queryWithLegacyFallback`.
- */
+/** Library-page book scraping on `next.readmoo.com` and `read.readmoo.com` (moved selectors go through
+ *  `queryWithLegacyFallback`); a card needs a hover to reveal `.openbook-overlay` (legacy: `.openbook`). */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BoolFlag } from "../api/client";
@@ -43,11 +37,8 @@ const ATTR_CATEGORY = "data-moo-category";
 export type { ScrapeProgressCallback, ScrapeBooksOptions, ScrapeResult };
 export { formatScrapeProgress } from "./scraper-pagination";
 
-/**
- * One card's outcome: a scraped book, `"borrowed"` (a 借入 card — not the
- * user's own book, ignored), or `null` (an own book that could not be read,
- * which makes the scrape incomplete).
- */
+/** One card's outcome: a scraped book, `"borrowed"` (a 借入 card, not the user's own — ignored), or
+ *  `null` (an own book that could not be read, which makes the scrape incomplete). */
 type ItemOutcome = ScrapedBook | "borrowed" | null;
 
 /** Dispatch synthetic hover events so Readmoo renders the `.openbook-overlay` layer. */
@@ -82,11 +73,8 @@ function isBorrowed(item: Element): boolean {
   return item.querySelector(READMOO_SELECTORS.borrowedBadge) !== null;
 }
 
-/**
- * Primary id source is the fiber bridge; when it holds none, hover the card and
- * fall back to the reader-link href, then `.privacy`. A source holding a
- * non-real id ends the search with null (skip the book) — see `BookIdLookup`.
- */
+/** Fiber bridge first; when it holds none, hover and fall back to the reader-link href, then `.privacy`.
+ *  A source holding a non-real id ends the search with null (skip the book) — see `BookIdLookup`. */
 async function resolveBookId(item: Element): Promise<string | null> {
   const fiberId = bookIdFromFiber(item);
   if (fiberId !== undefined) return fiberId;

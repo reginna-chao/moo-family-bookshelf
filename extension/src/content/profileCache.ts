@@ -1,9 +1,5 @@
-/**
- * Opportunistic profile caching on Readmoo's `#/me` page (moved out of
- * content/index.ts). USER_EMAIL_KEY / DISPLAY_NAME_KEY describe the STORED
- * user — DISPLAY_NAME_KEY is uploaded with that user's books — so a visit by a
- * different Readmoo account in the same browser profile writes nothing (#271).
- */
+/** Opportunistic profile caching on `#/me`: the keys describe the STORED user, so another Readmoo
+ *  account's visit writes nothing (#271). See docs/architecture.md → 讀墨帳號確認（已加入家庭時）. */
 
 import browser from "webextension-polyfill";
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";

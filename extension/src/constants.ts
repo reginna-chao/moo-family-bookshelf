@@ -1,10 +1,5 @@
-/**
- * Shared constants for the extension.
- * Centralised so that values like the API endpoint only need
- * to be changed in one place.
- *
- * VITE_EXTENSION_API_ENDPOINT / VITE_EXTENSION_PWA_URL are set via root .env files
- */
+/** Shared extension constants, centralised so values like the API endpoint change in one place.
+ *  VITE_EXTENSION_API_ENDPOINT / VITE_EXTENSION_PWA_URL are set via root .env files. */
 
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 
@@ -30,9 +25,8 @@ export const DEFAULT_PWA_URL: string =
 
 export const PERSONAL_BOOKS_CACHE_KEY = "moo:personalBooksCache";
 
-// --- Storage Keys ---
-// All keys are prefixed with `moo:` to namespace them (consistent with the PWA).
-// Legacy unprefixed keys are migrated on extension update — see storage/migrate.ts.
+// --- Storage Keys --- all `moo:`-prefixed (consistent with the PWA); legacy unprefixed keys are
+// migrated on extension update — see storage/migrate.ts.
 
 // Auth
 export const USER_ID_KEY = "moo:userId";

@@ -46,11 +46,8 @@ export function moveRenamedDirtyIds<S extends ReadonlySet<string>>(
   return next;
 }
 
-/**
- * The local list with every dirty, renamed entry re-keyed to its new id, so
- * the unsaved flag of the old id lands on the new one. A new id carrying its
- * own unsaved toggle keeps that toggle instead.
- */
+/** The local list with each dirty renamed entry re-keyed to its new id (the old id's unsaved flag
+ *  moves over); a new id with its own unsaved toggle keeps that toggle. */
 function rekeyRenamedLocal(
   local: readonly BookEntry[],
   dirtyIds: ReadonlySet<string>,

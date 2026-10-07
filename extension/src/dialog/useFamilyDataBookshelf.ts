@@ -112,10 +112,8 @@ export function useFamilyDataRefreshBookshelf({
         books: (member.books ?? []).filter((b) => b.isShared === BoolFlag.TRUE),
       }));
 
-      // --- Update tracking ---
-      // `data.members` carries each member's `lastUpdated` straight from the
-      // wire; the tracker compares it against the seen baseline, so a
-      // synthesized `null` here would read every existing member as unchanged.
+      // Update tracking: each member's `lastUpdated` comes straight off the wire, since a synthesized
+      // `null` would read every existing member as unchanged against the seen baseline.
       const sk = seenKey(userId);
       const ck = chipsKey(userId);
       let storageData: Record<string, unknown> = {};

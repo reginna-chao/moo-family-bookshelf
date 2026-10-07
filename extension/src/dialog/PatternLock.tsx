@@ -160,10 +160,8 @@ export function PatternLock({
 
   return (
     <div className="moo-secret-entry">
-      {/* The dim only covers the interactive cluster. The error line below stays
-          at full opacity: during a rate-limit countdown it is the only text
-          explaining why input is locked, so dimming it would leave the sole
-          explanation unreadable for the whole wait. */}
+      {/* Only the interactive cluster dims: the error line below is the sole explanation of a
+          rate-limit lock, so it stays at full opacity for the whole wait. */}
       <div
         style={disabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
       >

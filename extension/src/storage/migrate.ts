@@ -1,27 +1,5 @@
-/**
- * One-time storage key migration.
- *
- * TODO(cleanup): introduced in v1.3.0 for the one-off unprefixed → `moo:` key
- * rename. Safe to remove once nearly all installs have updated past v1.3.0
- * (target: ~v1.6.0 / 3 release cycles). Because the migration runs in
- * `onInstalled` on auto-update — not on user revisit — the tail is days/weeks,
- * not months. On removal, also drop the STORAGE_MIGRATED_KEY write; any leftover
- * legacy keys are harmless orphans not worth a second migration to clean.
- *
- * Historically, Extension storage keys were unprefixed (e.g. `userId`,
- * `familyId`). They are now namespaced with a `moo:` prefix to stay consistent
- * with the PWA. This migration renames any legacy (unprefixed) keys to their
- * new `moo:`-prefixed form in BOTH chrome.storage.local and chrome.storage.sync,
- * so existing users keep their auth token, family binding, and preferences
- * after the extension updates.
- *
- * Properties:
- * - Idempotent: keys already starting with `moo:` are skipped; safe to re-run.
- * - Crash-safe ordering: new keys are written BEFORE old keys are removed, so an
- *   interruption leaves data under the old keys (harmless) rather than losing it.
- * - Best-effort: any failure is swallowed so the background worker never crashes;
- *   the migration retries on the next startup because the flag stays unset.
- */
+/** One-time rename of legacy unprefixed storage keys to `moo:` (local + sync); idempotent, crash-safe,
+ *  best-effort. TODO(cleanup): removal plan in docs/architecture.md → 本機儲存與同步. */
 
 import browser from "webextension-polyfill";
 import { STORAGE_MIGRATED_KEY } from "../constants";
@@ -64,10 +42,7 @@ function isLegacyKey(key: string): boolean {
   return LEGACY_DYNAMIC_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
-/**
- * Migrate legacy keys within a single storage area.
- * Writes new keys first, then removes the old ones.
- */
+/** Migrate legacy keys within one storage area: new keys are written first, then old ones removed. */
 async function migrateArea(area: browser.Storage.StorageArea): Promise<void> {
   const all = await area.get(null);
 
@@ -77,10 +52,8 @@ async function migrateArea(area: browser.Storage.StorageArea): Promise<void> {
   for (const [key, value] of Object.entries(all)) {
     if (!isLegacyKey(key)) continue;
     const newKey = `${NEW_PREFIX}${key}`;
-    // Never clobber an existing new-namespace value with a stale legacy one.
-    // This can happen on a retry after a partial run (set succeeded, remove
-    // failed) where the app has since written fresh data under the moo: key.
-    // Only adopt the legacy value when the new key is absent; always drop legacy.
+    // Never clobber a moo: value with a stale legacy one (a retry after a partial run may find fresh
+    // data there): adopt legacy only when the new key is absent; always drop legacy.
     if (!(newKey in all)) {
       toSet[newKey] = value;
     }

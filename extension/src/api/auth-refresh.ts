@@ -1,6 +1,4 @@
-/**
- * Token refresh and recovery logic, extracted from ApiClient.
- */
+/** Token refresh and recovery logic, extracted from ApiClient. */
 
 import browser from "webextension-polyfill";
 import { BoolFlag, type ApiResponse } from "./types";
@@ -17,21 +15,12 @@ import { isSelfDepartureActive } from "../storage/selfDeparture";
 /** Fallback cooldown (seconds) when a 429 body omits `retryAfter`. */
 const DEFAULT_RECOVERY_COOLDOWN_SECONDS = 300;
 
-/**
- * Upper bound (1 hour) applied to any backend-supplied `retryAfter`. The official
- * worker never asks for more than 900s, so this only guards against a hostile or
- * buggy self-hosted (BYO) backend locking recovery out effectively forever.
- * Mirrors the cap in `dialog/useRetryCountdown.ts`; kept local so the api layer
- * does not depend on the dialog layer.
- */
+/** 1 h cap on a backend `retryAfter` (the official worker asks ≤ 900 s; this stops a BYO backend
+ *  locking recovery out). Mirrors `dialog/useRetryCountdown.ts`, kept local: api never imports dialog. */
 const MAX_RECOVERY_COOLDOWN_SECONDS = 3600;
 
-/**
- * Backend join error codes that mean the member exists but must supply their
- * PWA-login verification secret (PIN/pattern/OTP). Mirrors the set in
- * `dialog/useVerificationPrompt.ts`; kept local so the api layer does not
- * depend on the dialog layer.
- */
+/** Join codes meaning "member exists, supply the PWA-login secret (PIN/pattern/OTP)". Mirrors
+ *  `dialog/useVerificationPrompt.ts`, kept local so the api layer never imports the dialog layer. */
 const VERIFICATION_ERROR_CODES = new Set([
   "VERIFICATION_REQUIRED",
   "VERIFICATION_FAILED",
@@ -123,13 +112,8 @@ interface RefreshDeps {
   onFamilyRemoved: ((info: FamilyRemovedInfo) => void) | null;
   /** Invoked when recovery needs a PWA-login verification secret (re-verify). */
   onReauthRequired: ((info?: ReauthInfo) => void) | null;
-  /**
-   * Returns true when a re-verification prompt is already pending from an
-   * earlier 401 wave. When latched, silent join-recovery is skipped so the
-   * dialog's second data wave does not re-spend the join rate-limit budget nor
-   * re-initialize the verification prompt (which would wipe in-progress
-   * pattern/PIN input).
-   */
+  /** True while an earlier 401 wave's re-verification prompt is pending, so the silent join is
+   *  skipped. See docs/architecture.md → 認證更新與冷卻. */
   isReauthPending: () => boolean;
 }
 
@@ -219,18 +203,14 @@ export async function doRefreshToken(
     deps.setAuthToken(null);
     await browser.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
 
-    // No silent join while a verification prompt from an earlier 401 wave is
-    // pending (it would re-spend the per-IP join budget and wipe the user's
-    // in-progress PIN/pattern input), nor while the user's own leave / account
-    // deletion is in flight (#263) — it could re-add them. The refresh POST
-    // above still ran: a token fixed in storage elsewhere recovers without one.
+    // No silent join while a re-verification prompt is pending, nor during the user's own leave /
+    // deletion (#263). See docs/architecture.md → 背景自動復原的防護 and → 認證更新與冷卻.
     if (deps.isReauthPending() || (await isSelfDepartureActive())) {
       return { refreshed: false };
     }
 
-    // The join is quota-sensitive. If a cooldown from a prior 429 is still active,
-    // skip the auto-join entirely (treat like a transient failure, keep data) and
-    // surface the rate-limit state so the UI can show a friendly message.
+    // An active 429 cooldown skips the auto-join (data kept) and reports the rate-limit state for a
+    // friendly message. See docs/architecture.md → 背景自動復原的防護.
     const activeCooldownUntil = await getActiveRecoveryCooldown();
     if (activeCooldownUntil !== undefined) {
       return {
@@ -246,12 +226,8 @@ export async function doRefreshToken(
       return { refreshed: true };
     }
 
-    // Rate-limited by the worker. A no-secret recovery can only hit the per-IP
-    // sensitive tier's 429 (the verify attempt ceiling charges wrong guesses
-    // only, and never fires without a secret). Set a cooldown so subsequent
-    // dialog opens stop burning the shared quota, and do NOT prompt
-    // verification — a verified retry from the same IP would still be blocked
-    // by the same per-IP window.
+    // 429 (only the per-IP tier can fire without a secret): set a cooldown and do NOT prompt
+    // verification — a verified retry hits the same window. docs/architecture.md → 認證更新與冷卻.
     if (recovery.errorCode === "RATE_LIMITED") {
       const cooldownUntil = await setRecoveryCooldown(recovery.retryAfter);
       return { refreshed: false, rateLimited: true, cooldownUntil };
@@ -299,11 +275,8 @@ async function getActiveRecoveryCooldown(): Promise<number | undefined> {
   return now < bounded ? bounded : undefined;
 }
 
-/**
- * Persist a fresh recovery cooldown; returns the epoch-ms deadline written.
- * The requested wait is clamped to `MAX_RECOVERY_COOLDOWN_SECONDS` so an
- * untrusted backend cannot suppress auto-recovery indefinitely.
- */
+/** Persist a fresh recovery cooldown and return its epoch-ms deadline; the wait is clamped to
+ *  `MAX_RECOVERY_COOLDOWN_SECONDS` so an untrusted backend cannot suppress auto-recovery forever. */
 async function setRecoveryCooldown(
   retryAfterSeconds?: number,
 ): Promise<number> {
