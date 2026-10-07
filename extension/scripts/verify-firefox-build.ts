@@ -1,21 +1,5 @@
-/**
- * Verify the Firefox build output(s) are correct.
- *
- * For each target (dist-firefox-<target>/) checks:
- *  - all expected bundle files exist;
- *  - the manifest declares browser_specific_settings.gecko.id, and it matches
- *    the expected id for the variant (amo -> GECKO_ID_AMO,
- *    direct -> GECKO_ID_DIRECT);
- *  - gecko.strict_min_version and gecko_android.strict_min_version present;
- *  - the manifest uses an event page (background.scripts) and NOT a
- *    service_worker (which Firefox for Android does not reliably support);
- *  - update_url policy per target:
- *      amo    -> gecko MUST NOT carry update_url;
- *      direct -> gecko.update_url MUST equal UPDATE_URL.
- *
- * Pass `--target amo|direct` to verify a single variant; with no flag both
- * variants are verified.
- */
+/** Verify each dist-firefox-<target>/ (files, gecko ids, event page, update_url policy); `--target amo|direct`, default both.
+ *  Full check list: docs/architecture.md → Firefox 建置檢查（verify-firefox-build.ts）. */
 import { existsSync, readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -57,9 +41,7 @@ function parseTargets(): FirefoxTarget[] {
   return [targetArg];
 }
 
-/**
- * Run all checks for a single target. Returns true when every check passed.
- */
+/** Run all checks for a single target. Returns true when every check passed. */
 function verifyTarget(target: FirefoxTarget): boolean {
   const dist = resolve(root, `dist-firefox-${target}`);
   let failed = false;

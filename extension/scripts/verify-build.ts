@@ -1,8 +1,5 @@
-/**
- * Verify build output is correct.
- * Checks that all expected files exist, content.js is in IIFE format, and the
- * shipped manifest still grants every Readmoo host the code targets.
- */
+/** Verify dist/: expected files exist, content.js is IIFE, the manifest grants exactly the Readmoo hosts.
+ *  See docs/architecture.md → Chrome 建置檢查（verify-build.ts）. */
 import { existsSync, readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -45,33 +42,16 @@ if (existsSync(contentPath)) {
   }
 }
 
-/**
- * Only the fields this script asserts on — the manifest has many more.
- * Everything is optional so a malformed/renamed field surfaces as a FAIL
- * instead of a crash.
- */
+/** Only the fields this script asserts on, all optional, so a malformed or
+ *  renamed field surfaces as a FAIL instead of a crash. */
 interface DistManifest {
   host_permissions?: string[];
   content_scripts?: { matches?: string[] }[];
   web_accessible_resources?: { matches?: string[] }[];
 }
 
-/**
- * Assert that `patterns` (the manifest field under test) is EXACTLY the set of
- * hosts the code targets — neither missing nor extra. `READMOO_MATCH_PATTERNS`
- * is the single source of truth for supported Readmoo hosts.
- *
- * Missing entry → adding a host to `READMOO_MATCH_PATTERNS` without updating
- *   `public/manifest.json` ships an extension that silently never runs on it.
- * Extra entry → an over-broad pattern (`<all_urls>`, a leftover `http://localhost`
- *   dev pattern, a typo'd host) silently widens the install-time permission
- *   prompt and the content script's reach in the SHIPPED manifest.
- *
- * The E2E build deliberately appends `http://localhost:*` — that is safe here
- * because `scripts/build-e2e.ts` patches `dist/manifest.json` AFTER running
- * `pnpm build` (which is what invokes this script), so the localhost pattern is
- * never present at verification time.
- */
+/** FAIL unless `patterns` equals READMOO_MATCH_PATTERNS exactly — nothing missing, nothing extra.
+ *  Why exact, and why build-e2e's localhost is safe: docs/architecture.md → Chrome 建置檢查（verify-build.ts）. */
 function checkMatchPatterns(
   patterns: string[] | undefined,
   label: string,
@@ -100,11 +80,8 @@ function checkMatchPatterns(
   console.log(`OK: ${label} matches the Readmoo match patterns exactly`);
 }
 
-/**
- * Run `checkMatchPatterns` over EVERY entry of a manifest array field.
- * Checking only `[0]` would let a second content script / web-accessible
- * resource entry ship with a wrong or over-broad match list unnoticed.
- */
+/** Run `checkMatchPatterns` over EVERY entry: checking only `[0]` would let a second
+ *  entry ship a wrong or over-broad match list unnoticed. */
 function checkEntryMatches(
   entries: { matches?: string[] }[] | undefined,
   label: string,

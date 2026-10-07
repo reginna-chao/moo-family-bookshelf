@@ -1,34 +1,5 @@
-/**
- * Verify that scraper.ts selectors still match Readmoo's live DOM.
- *
- * Readmoo runs TWO bookshelf front-ends (new `next.readmoo.com/read/#/library`
- * and legacy `read.readmoo.com/#/library`) and the extension supports both, so
- * this script runs the whole selector sweep once per site and reports them
- * separately. Selectors that only exist on one side are tagged with the site
- * they apply to, so a single run shows the state of both.
- *
- * Uses your local Chrome profile (already logged into Readmoo) to:
- * 1. Check all selectors used by scraper.ts against the real page
- * 2. Optionally generate an updated mock-readmoo.html from live DOM (new site)
- *
- * The generated fixture is git-tracked, so `--update-mock` SANITIZES everything
- * personal out of the capture (see `sanitizeLibraryHtml`) and re-appends the two
- * hand-written guard cards (`SHORT_ID_GUARD_CARD`, `LEGACY_GUARD_CARD`) that the
- * new-site capture can never produce on its own.
- *
- * Exit code: driven by the PRIMARY (new) site only — the legacy site is on its
- * way out and a logged-out / empty legacy account must not fail the run. See
- * `printFinalSummary`.
- *
- * Usage:
- *   pnpm verify:selectors                  # check only
- *   pnpm verify:selectors -- --update-mock # check + regenerate mock HTML
- *
- * Prerequisites:
- *   - Close all Chrome windows before running (Chrome locks the profile)
- *   - Be logged into Readmoo in your default Chrome profile
- *   - Have at least 1 book in your library
- */
+/** Check the scraper's selectors against live Readmoo (new + legacy site); `--update-mock` regenerates the fixture.
+ *  Usage, exit code, sanitizing, guard cards: .claude/rules/test.md → E2E tooling (extension/scripts). */
 
 import { chromium, type Locator, type Page } from "@playwright/test";
 import { writeFileSync } from "fs";
@@ -91,7 +62,8 @@ interface SelectorSpec {
 
 const ITEM = READMOO_SELECTORS.libraryItem;
 
-// All selectors used by scraper.ts / readmoo-lend.ts, grouped by page.
+// Library + #/me selectors checked pass/fail, grouped by page. Not checked: readmoo-lend.ts's
+// detailTrigger* selectors; borrowedBadge is only counted during capture.
 const LIBRARY_SELECTORS: readonly SelectorSpec[] = [
   {
     selector: ITEM,
@@ -258,11 +230,8 @@ async function checkSelectors(
   return results;
 }
 
-/**
- * Wait for the library grid to render. On the primary site we also allow a long
- * manual-login window; on the legacy site we give up quickly so a logged-out
- * legacy account cannot stall (or fail) the run.
- */
+/** Wait for the library grid; the primary site also allows a 5-min manual login, the legacy site
+ *  gives up quickly so a logged-out legacy account cannot stall (or fail) the run. */
 async function waitForLibrary(page: Page, site: Site): Promise<boolean> {
   const libraryItem = page.locator(ITEM).first();
   const quick = await libraryItem
@@ -458,15 +427,8 @@ function printSiteSummary(report: SiteReport): void {
   }
 }
 
-/**
- * Print the cross-site verdict and return the process exit code.
- *
- * Exit code rules:
- *   1 — the PRIMARY (new) site is unreachable, or has a failing required selector.
- *   0 — otherwise. Legacy-site problems are reported as warnings only: the
- *       legacy host is being retired and a logged-out/empty legacy account is
- *       not a regression in our code.
- */
+/** Print the cross-site verdict; exit code 1 only when the PRIMARY site is unreachable or fails a required
+ *  selector, legacy problems are warnings. Why: .claude/rules/test.md → E2E tooling (extension/scripts). */
 function printFinalSummary(reports: readonly SiteReport[]): number {
   console.log("\n=== 總結 ===\n");
 
@@ -574,18 +536,8 @@ function writeMockHtml(reports: readonly SiteReport[]): void {
   );
 }
 
-/**
- * Hand-written legacy (`read.readmoo.com`) book card, appended to EVERY
- * generated fixture.
- *
- * The capture above only ever runs against the new site, so a regenerated
- * fixture would otherwise contain nothing but `.openbook-overlay` markup and
- * silently drop the only coverage of `queryWithLegacyFallback`'s legacy branch.
- * Kept in sync with 書籍 5 of the committed fixture (刻意練習 /
- * 210439468000105) — fixed title and bookId so assertions can rely on them.
- *
- * 這是「舊站結構迴歸守衛」，自動產生時永遠保留，請勿改成新站結構。
- */
+/** Hand-written legacy `.openbook` card (書籍 5) appended to EVERY generated fixture; never convert it to
+ *  the new-site structure. Why: .claude/rules/test.md → E2E tooling (extension/scripts). */
 const LEGACY_GUARD_CARD = `    <!--
       書籍 5：legacy 結構迴歸守衛。
       刻意保留舊站 read.readmoo.com 的 .openbook 結構（reader-link 在 .openbook 內），
@@ -605,19 +557,8 @@ const LEGACY_GUARD_CARD = `    <!--
       <div class="privacy" id="privacy-210439468000105"></div>
     </div>`;
 
-/**
- * Hand-written new-site card whose ONLY bookId source is a short (8-digit)
- * `privacy-*` id, appended to EVERY generated fixture.
- *
- * `sanitizeLibraryIds` below rewrites every captured id to a synthetic 15-digit
- * one, so a regenerated fixture would otherwise lose the only card that exercises
- * `extractFallbackId`'s length guard. Kept byte-identical to 書籍 4 of the
- * committed fixture (薩提爾的對話練習 / privacy-18548672) — fixed title and id so
- * assertions can rely on them.
- *
- * 這是「短 id 守衛卡」，自動產生時永遠保留：spec 斷言這本書會被跳過（不進個人書櫃），
- * 請勿把 id 改長，也請勿補上 a.reader-link。
- */
+/** Hand-written new-site card (書籍 4) whose only id is a short 8-digit `privacy-*` one, appended to EVERY
+ *  fixture; never lengthen the id or add a reader-link. Why: .claude/rules/test.md → E2E tooling (extension/scripts). */
 const SHORT_ID_GUARD_CARD = `    <!--
       書籍 4：短 id 守衛卡。新站結構但沒有 a.reader-link → 只剩 .privacy fallback。
       新站的 privacy id 是 8 碼「內部 id」，不是 15 碼書籍 id（真實抓包確認），
@@ -654,41 +595,25 @@ const SHORT_ID_GUARD_CARD = `    <!--
 /** Synthetic bookId shape reused from the committed fixture: `2104394680001NN`. */
 const SYNTHETIC_ID_PREFIX = "2104394680001";
 
-/**
- * First suffix handed out to captured cards.
- *
- * `01`–`05` are RESERVED for the hand-written guard cards above (the legacy
- * guard pins `210439468000105`). Captured cards therefore start at `11`, so a
- * regenerated fixture can never mint an id that collides with a guard card —
- * a collision would give two cards the same bookId and let the scraper's
- * de-duplication silently swallow the guard.
- */
+/** First suffix for captured cards: `01`–`05` are reserved for the guard cards (the legacy guard pins
+ *  `210439468000105`), so a regenerated fixture never mints a colliding id (see .claude/rules/test.md). */
 const SYNTHETIC_ID_START = 11;
 
-/**
- * Matches the id segment of a reader-link href, a `privacy-{id}` element id, or
- * a `data-moo-book-id` attribute (stamped by our own fiber-bridge — only present
- * if the capture ever runs with the extension loaded, but cheap to cover).
- */
+/** Id segment of a reader-link href, a `privacy-{id}` element id, or a `data-moo-book-id` attribute
+ *  (stamped by our fiber bridge; present only if the capture ran with the extension loaded). */
 const REAL_ID_PATTERN =
   /(?:reader\/|privacy-|data-moo-book-id=")([A-Za-z0-9_-]+)/g;
 
-/**
- * Any 12+ digit run left after sanitizing is a bookId-shaped value we failed to
- * recognise. Used only to warn the operator — see `reportResidualIds`.
- */
+/** Any 12+ digit run left after sanitizing is a bookId-shaped value we failed to recognise;
+ *  used only to warn the operator (see `reportResidualIds`). */
 const LONG_DIGIT_RUN_PATTERN = /\d{12,}/g;
 
 /** Matches a `.title`-classed element together with its text node. */
 const TITLE_ELEMENT_PATTERN =
   /<(\w+)([^>]*\bclass="[^"]*\btitle\b[^"]*"[^>]*)>([^<]*)<\/\1>/g;
 
-/**
- * Rewrite every real Readmoo id in the captured markup to a synthetic 15-digit
- * one, numbered in first-appearance order. The same real id always maps to the
- * same synthetic id, so a card's reader-link href and its `privacy-*` id stay
- * consistent with each other.
- */
+/** Rewrite every real Readmoo id to a synthetic 15-digit one in first-appearance order; the same real id
+ *  always maps to the same synthetic one, so a card's reader-link href and `privacy-*` id stay consistent. */
 function sanitizeLibraryIds(html: string): string {
   const idMap = new Map<string, string>();
   return html.replace(REAL_ID_PATTERN, (match, realId: string) => {
@@ -702,14 +627,8 @@ function sanitizeLibraryIds(html: string): string {
   });
 }
 
-/**
- * Matches the standalone `title` attribute only.
- *
- * `\btitle=` would also match the tail of `data-title=` / `aria-title=` (a word
- * boundary holds after `-`), so the first replacement would land on the wrong
- * attribute and leave the real `title="…"` untouched. The lookbehind rejects any
- * hyphen/word character before `title`, leaving only a true attribute start.
- */
+/** The standalone `title` attribute only: `\btitle=` also matches the tail of `data-title=` / `aria-title=`
+ *  (a word boundary holds after `-`), so the lookbehind rejects a hyphen or word character before it. */
 const TITLE_ATTRIBUTE_PATTERN = /(?<![-\w])title="[^"]*"/;
 
 /** Replace every `.title` element's `title` attribute AND text with a fake name. */
@@ -729,11 +648,8 @@ function sanitizeLibraryTitles(html: string): string {
   );
 }
 
-/**
- * Replace every `<img>`'s cover URL (`src` / `data-src` / `srcset`) with a
- * placeholder and its `alt` with a fixed literal, so no Readmoo CDN path and no
- * real book title (Readmoo puts the title in `alt`) reaches the fixture.
- */
+/** Replace every `<img>`'s `src` / `data-src` / `srcset` with a placeholder and `alt` with a fixed literal,
+ *  so no Readmoo CDN path and no real title (Readmoo puts it in `alt`) reaches the fixture. */
 function sanitizeLibraryImages(html: string): string {
   let index = 0;
   return html.replace(/<img\b[^>]*>/g, (tag) => {
@@ -755,30 +671,16 @@ function sanitizeProgressBars(html: string): string {
   );
 }
 
-/**
- * Strip personal data from the captured library markup before it lands in the
- * git-tracked fixture. Everything here is tied to a specific purchaser's
- * account: real book titles (`.title` attribute/text and `img alt`), real
- * 15-digit bookIds (reader-link hrefs and `privacy-*` ids), Readmoo CDN cover
- * URLs, and reading progress.
- *
- * NOTE: ids are sanitized FIRST, so the id map is built from the original
- * markup before titles/images rewrite anything around it.
- */
+/** Strip titles, real bookIds, CDN cover URLs and reading progress before the git-tracked fixture; ids go
+ *  FIRST so the id map is built from the original markup. See .claude/rules/test.md → E2E tooling (extension/scripts). */
 function sanitizeLibraryHtml(html: string): string {
   return sanitizeProgressBars(
     sanitizeLibraryImages(sanitizeLibraryTitles(sanitizeLibraryIds(html))),
   );
 }
 
-/**
- * Last line of defence: warn when a bookId-shaped value survived sanitizing.
- *
- * `sanitizeLibraryIds` only knows the id carriers we have seen (reader-link
- * href, `privacy-*`, `data-moo-book-id`). If Readmoo starts emitting the id
- * somewhere else, the fixture would silently ship a real bookId — so scan the
- * output and tell the operator to check before committing.
- */
+/** Last line of defence: warn when a bookId-shaped value survived sanitizing — Readmoo may now carry
+ *  the id somewhere `sanitizeLibraryIds` does not know, which would ship a real bookId in the fixture. */
 function reportResidualIds(mockHtml: string): void {
   const residual = (mockHtml.match(LONG_DIGIT_RUN_PATTERN) ?? []).filter(
     (run) => !run.startsWith(SYNTHETIC_ID_PREFIX),

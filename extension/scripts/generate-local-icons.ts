@@ -1,9 +1,5 @@
-/**
- * Generate icons-local/ PNG files from assets/brand/local/favicon.svg.
- * Produces icon-16.png, icon-48.png, icon-128.png with a light red (#FEDBDB) background.
- *
- * Run: pnpm tsx scripts/generate-local-icons.ts
- */
+/** Render assets/brand/local/favicon.svg (light red #FEDBDB background) to public/icons-local/icon-{16,48,128}.png.
+ *  Run from extension/: `pnpm tsx scripts/generate-local-icons.ts`. */
 import { readFileSync, mkdirSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
